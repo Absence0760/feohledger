@@ -199,9 +199,13 @@ despite the same per-org framing are tenant-local. This line used to cite
   `Organization.settings.assistant.monthly_token_budget` beats the platform
   default. (A single turn is still bounded by `max_tokens ×
   FEOH_ASSISTANT_MAX_TOOL_HOPS`, bounding how large that overshoot can get.)
-- **Refusal contract** — `AssistantBudgetExceeded` → **HTTP 429** with
-  `{"detail": "...", "code": "assistant_budget_exceeded", "used", "budget",
-  "period"}`. No tool runs, no model call, nothing persisted.
+- **Refusal contract** — `AssistantBudgetExceeded` → **HTTP 429** whose
+  `detail` is `{"detail": "...", "code": "assistant_budget_exceeded", "used",
+  "budget", "period"}` (an `HTTPException` with a dict detail, so the wire body
+  nests it under `detail`). No tool runs, no model call, nothing persisted. The
+  frontend reads a 429 as the budget only when that detail carries a numeric
+  `budget` (`frontend/src/lib/api/assistantBudget.ts`); any other 429 — the
+  shared limiter's coded `rate_limited` — is rendered as that refusal.
 - **Recording** — `usage.record` upserts the meter (atomic
   `INSERT … ON CONFLICT DO UPDATE` increment) but **does not commit**: it flushes
   onto the request's `control_db` and rides the request commit boundary
@@ -259,7 +263,9 @@ conversation_id?}`), auth, tenant resolution, RBAC (`_ASSISTANT_ROLES`), and
 entity scoping. The response is a `StreamingResponse(media_type=
 "text/event-stream")` with `Cache-Control: no-cache`, `X-Accel-Buffering: no`,
 and `Connection: keep-alive`. The frontend treats the terminal `done` event as
-the source of truth and falls back to the same handling as `/chat` on a 429.
+the source of truth. A pre-stream 429 is a refusal, not an unavailable stream:
+the page shows it (the budget notice, or the localized `rate_limited` sentence)
+and does **not** retry on `/chat`, which would refuse the same turn.
 
 ### Event protocol
 

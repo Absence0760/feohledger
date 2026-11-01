@@ -45,6 +45,21 @@ export const EXCEPTION_BLOCKS_ERP_EXPORT = 'exception_blocks_erp_export';
  *  send doors answer with. */
 export const PAYMENT_BLOCKS_ERP_EXPORT = 'payment_blocks_erp_export';
 
+/** The invoice's vendor is one the payment path will not pay — blocked,
+ *  sanctions-held or rejected — so the push was refused before any adapter ran
+ *  (same module). `params.hold` names which, and `possibly_posted: true`
+ *  appears as on the other two. Also a 409 the send doors answer with. */
+export const VENDOR_BLOCKS_ERP_EXPORT = 'vendor_blocks_erp_export';
+
+/** The sentence per vendor `hold`. A possibly-posted refusal appends one more. */
+const HOLD_KEYS: Record<string, MessageKey> = {
+	payments_blocked: 'erpRefusal.vendorBlocked',
+	sanctions_match: 'erpRefusal.vendorSanctionsMatch',
+	sanctions_review: 'erpRefusal.vendorSanctionsReview',
+	vendor_rejected: 'erpRefusal.vendorRejected',
+	vendor_status_unknown: 'erpRefusal.vendorStatusUnknown'
+};
+
 /** The ERP's shared API quota stopped the call before it was made
  *  (`backend/app/services/erp_call_budget.py`, decisions §322): a push's
  *  `invoice.erp_failed` refusal, and the 429 a chart / vendor / PO sync answers
@@ -124,6 +139,7 @@ const KEYS: Record<string, MessageKey> = {
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
 	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',
+	[VENDOR_BLOCKS_ERP_EXPORT]: 'erpRefusal.vendorBlocked',
 	// A FeohLedger payment written back to the ERP (decisions §295)
 	payment_account_not_mapped: 'erpRefusal.paymentAccountNotMapped',
 	bill_not_in_erp: 'erpRefusal.billNotInErp',
@@ -176,6 +192,14 @@ export function erpRefusalText(value: unknown, t: Translate): string | null {
 		const keys = typeof claim === 'string' ? CLAIM_KEYS[claim] : undefined;
 		if (!keys) return null;
 		return t(refusal.params.possibly_posted === true ? keys.posted : keys.plain);
+	}
+	if (refusal.code === VENDOR_BLOCKS_ERP_EXPORT) {
+		const hold = refusal.params.hold;
+		const plain = typeof hold === 'string' ? HOLD_KEYS[hold] : undefined;
+		if (!plain) return null;
+		// What to do stays first; a possibly-posted refusal adds where to look.
+		if (refusal.params.possibly_posted !== true) return t(plain);
+		return `${t(plain)} ${t('erpRefusal.vendorHoldPossiblyPosted')}`;
 	}
 	// The adapter's fixed literal ("QuickBooks Online"). Every other sentence
 	// names it, so a refusal recorded without one is stated by the server.

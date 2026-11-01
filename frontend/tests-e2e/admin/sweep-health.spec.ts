@@ -111,8 +111,9 @@ test.describe('/admin/health (admin)', () => {
 	test('surfaces a load failure with a retry rather than a blank page', async ({ page }) => {
 		await page.route('**/api/health/sweeps', (route) => route.fulfill({ status: 500, body: '{}' }));
 		await page.goto('/admin/health');
-		await expect(page.getByTestId('sweep-health-error')).toBeVisible({ timeout: 10_000 });
-		await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+		const error = page.getByTestId('sweep-health-error');
+		await expect(error).toBeVisible({ timeout: 10_000 });
+		await expect(error.getByRole('button', { name: 'Retry' })).toBeVisible();
 	});
 });
 

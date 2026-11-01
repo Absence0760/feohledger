@@ -3,8 +3,23 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
-	// Clicking a prompt fills + sends it (the page wires `onpick`).
-	let { onpick }: { onpick: (prompt: string) => void } = $props();
+	// Clicking a prompt fills + sends it (the page wires `onpick`). The defaults
+	// are the AP assistant's; the cash-flow copilot passes its own prompts and
+	// copy so both chat surfaces share one empty state.
+	let {
+		onpick,
+		prompts = EXAMPLE_PROMPTS,
+		heading,
+		sub
+	}: {
+		onpick: (prompt: string) => void;
+		/** Starter prompts, one button each. */
+		prompts?: readonly string[];
+		/** Already-localized heading; defaults to `assistant.empty.heading`. */
+		heading?: string;
+		/** Already-localized sub-line; defaults to `assistant.empty.sub`. */
+		sub?: string;
+	} = $props();
 </script>
 
 <div class="empty-state">
@@ -14,14 +29,14 @@
 		</svg>
 	</div>
 	<div class="help-row">
-		<h2>{m('assistant.empty.heading')}</h2>
+		<h2>{heading ?? m('assistant.empty.heading')}</h2>
 		<HelpTip term="ai-assistant" />
 	</div>
 	<p class="empty-sub">
-		{m('assistant.empty.sub')}
+		{sub ?? m('assistant.empty.sub')}
 	</p>
 	<div class="prompt-list">
-		{#each EXAMPLE_PROMPTS as prompt (prompt)}
+		{#each prompts as prompt (prompt)}
 			<button type="button" class="prompt-btn" onclick={() => onpick(prompt)}>
 				{prompt}
 			</button>

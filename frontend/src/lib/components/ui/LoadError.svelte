@@ -22,7 +22,10 @@
 	 *   and focus would fall to `<body>`, putting a keyboard user back at the top
 	 *   of the document. Focus moves to the enclosing `<main>` first (the
 	 *   layout's skip-link target, already `tabindex="-1"`), so the next Tab
-	 *   lands in the page content that replaces this (WCAG 2.4.3).
+	 *   lands in the page content that replaces this (WCAG 2.4.3). Inside a
+	 *   dialog (`ui/Modal`, also `tabindex="-1"`) it is the dialog that takes
+	 *   focus instead: `<main>` is outside the focus trap, and focusing it would
+	 *   strand a keyboard user behind the open modal.
 	 * - **Replacing the whole screen** (`heading` given): a titled region whose
 	 *   heading the caller focuses through {@link focusHeading}, which is what a
 	 *   screen reader announces — so no `role="alert"` on top of it, which would
@@ -72,7 +75,7 @@
 
 	function retry(e: MouseEvent) {
 		if (retrying) return;
-		if (!heading) (e.currentTarget as HTMLElement).closest('main')?.focus();
+		if (!heading) (e.currentTarget as HTMLElement).closest<HTMLElement>('[role="dialog"], main')?.focus();
 		onretry();
 	}
 </script>

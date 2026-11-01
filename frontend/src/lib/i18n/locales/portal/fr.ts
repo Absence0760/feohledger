@@ -286,7 +286,6 @@ export const messages = {
 	'portal.home.heading': 'Aperçu',
 	'portal.home.subtitle': 'Ce qui vous attend, et où en sont vos autres factures.',
 	'portal.home.loadFailed': 'Impossible de charger votre aperçu',
-	'portal.home.retry': 'Réessayer',
 	'portal.home.kpi.actionRequired': 'Nécessite votre attention',
 	'portal.home.kpi.inProgress': 'Chez votre client',
 	'portal.home.kpi.paid': 'Payées',

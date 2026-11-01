@@ -691,7 +691,9 @@ async def _call_erp(
     # payment or virtual card, decisions §309): posted now, the bill would be
     # payable from the ERP as well. Asked here as well as at the HTTP doors, so
     # a push queued before the run was staged is stopped at the last moment.
-    refused = await erp_export_refusal(db, invoice.id, possibly_posted=possibly_posted(state))
+    # Last, a vendor the payment path will not pay (blocked, sanctions-held,
+    # rejected) is not booked where it could be paid past our screening.
+    refused = await erp_export_refusal(db, invoice, possibly_posted=possibly_posted(state))
     if refused is not None:
         raise ErpPostRefusedError(refused.error, refusal=refused.refusal)
     # A bill due before it is dated is invalid in the ERP, whichever path made

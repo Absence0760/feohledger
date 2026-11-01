@@ -32,6 +32,10 @@ from jose import jwt
 from app.config import settings
 from tests.test_session_management import FakeRedis
 
+# Mock-DB tests: session revocation writes an auth audit row through its own control-plane/tenant
+# sessions (tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_auth_audit_write")
+
 ORG_ID = uuid.uuid4()
 
 

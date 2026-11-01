@@ -57,6 +57,11 @@ from app.services.tenant_provisioning import (
     _parse_maintenance_dsn,
 )
 
+# Every test here builds its own engines against scratch databases it
+# creates and drops (the `scratch` fixture), so all are exempt from the
+# mock-DB engine guard (tests/conftest.py).
+pytestmark = pytest.mark.real_db_engine
+
 BACKEND = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "pre_0001_schema"
 

@@ -552,6 +552,64 @@ async def test_internal_sso_url_is_allowed_outside_a_deployed_environment():
     )
 
 
+class _Dialled(Exception):
+    """Raised by the stub socket layer, carrying the address it was asked for."""
+
+
+def _stub_socket_layer(monkeypatch, answer: str):
+    """Script the pinned client's one lookup and record (by raising) the dial."""
+    import httpcore
+
+    from app.utils import url_safety
+
+    class _Backend(httpcore.AsyncNetworkBackend):
+        async def connect_tcp(self, host, port, **_kw):
+            raise _Dialled(host)
+
+        async def connect_unix_socket(self, *_a, **_kw):
+            raise AssertionError("never a unix socket")
+
+        async def sleep(self, seconds):
+            pass
+
+    async def lookup(host, port):
+        return [answer]
+
+    monkeypatch.setattr(url_safety.httpcore, "AnyIOBackend", _Backend)
+    monkeypatch.setattr(url_safety, "_lookup_async", lookup)
+
+
+@pytest.mark.asyncio
+async def test_idp_fetch_refuses_a_rebound_address_at_connect_when_deployed(deployed, monkeypatch):
+    """DNS rebinding: `_assert_sso_url_public` saw a public answer, the connect's
+    own lookup gets the metadata address. The pinned client refuses with the
+    caller's error type and dials nothing (this POST carries the client secret
+    and the authorization code)."""
+    from app.services import sso
+
+    _stub_socket_layer(monkeypatch, "169.254.169.254")
+    async with sso._sso_http_client(
+        what="token_endpoint", error=sso.SSOValidationError, timeout=5
+    ) as client:
+        with pytest.raises(sso.SSOValidationError):
+            await client.post("https://idp.example/oauth2/token")
+
+
+@pytest.mark.asyncio
+async def test_idp_fetch_reaches_a_local_idp_outside_a_deployed_environment(monkeypatch):
+    """Local Keycloak still works (guard rail 7), and through the pin: the dial
+    is the address the one lookup returned."""
+    from app.services import sso
+
+    _stub_socket_layer(monkeypatch, "127.0.0.1")
+    async with sso._sso_http_client(
+        what="discovery_url", error=sso.SSOConfigError, timeout=5
+    ) as client:
+        with pytest.raises(_Dialled) as dialled:
+            await client.get("http://keycloak.localhost:8088/realms/x")
+    assert dialled.value.args == ("127.0.0.1",)
+
+
 def test_pinned_endpoint_accepts_an_endpoint_on_the_issuer_host():
     from app.services import sso
 

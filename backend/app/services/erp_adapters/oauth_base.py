@@ -167,7 +167,12 @@ class OAuthErpAdapter(ErpAdapter):
 
     @classmethod
     async def resolve_external_tenant_id(
-        cls, *, access_token: str, token_response: dict, callback_params: dict[str, str]
+        cls,
+        *,
+        access_token: str,
+        token_response: dict,
+        callback_params: dict[str, str],
+        erp_settings: dict | None = None,
     ) -> str | None:
         """The provider-side company id for a fresh consent, or None.
 
@@ -177,8 +182,13 @@ class OAuthErpAdapter(ErpAdapter):
         then the token-response field ``external_tenant_id_token_field``
         (Blackbaud's ``environment_id``).
         A provider that only reveals it through an API call (Xero's
-        ``GET /connections``, Sage's ``/businesses``) overrides this. None
-        refuses the connection (``erp_error=no_external_tenant``).
+        ``GET /connections``, Sage's ``/businesses``) overrides this, and so
+        does one whose callback parameter is unsigned and must be confirmed
+        under the new token (QuickBooks). None refuses the connection
+        (``erp_error=no_external_tenant``).
+
+        ``erp_settings`` is the org's resolved ``settings.erp`` as saved before
+        the consent (QuickBooks reads its ``environment`` to pick the API host).
         """
         spec = cls.oauth_provider
         if spec.external_tenant_id_param:

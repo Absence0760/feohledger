@@ -24,7 +24,7 @@ import time
 import types
 import uuid
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -98,6 +98,27 @@ class _ScriptedProvider:
             ),
         )
         return self
+
+
+@pytest.fixture(autouse=True)
+def _api_on_the_test_host(monkeypatch):
+    """The ASGI test client talks to host ``test``; the API's public URL names
+    that host, so ``/authorize`` sees a request on the API host (the browser
+    binding's precondition, ``api/erp_oauth._browser_cookie_refusal``)."""
+    monkeypatch.setattr(settings, "api_public_url", "http://test")
+
+
+@pytest.fixture(autouse=True)
+def realm_confirmation(monkeypatch):
+    """QuickBooks' realm is confirmed by one API call under the new token
+    (``quickbooks_online.confirm_realm``). The callback tests here stub that
+    call — yes by default; a test sets ``return_value = False`` for no. The call
+    itself is covered in ``test_erp_quickbooks_online_adapter.py``."""
+    from app.services.erp_adapters import quickbooks_online
+
+    confirm = AsyncMock(return_value=True)
+    monkeypatch.setattr(quickbooks_online, "confirm_realm", confirm)
+    return confirm
 
 
 @pytest.fixture
@@ -201,20 +222,37 @@ async def _audit_actions(realdb, key: str = "a") -> list[AuditLog]:
         )
 
 
+#: The browser-binding cookie each ``_authorize`` call was answered with, by the
+#: state it pairs with — what the admin's browser would carry to the callback.
+_BROWSER_COOKIES: dict[str, str] = {}
+#: ``_callback``'s default: send the cookie ``_authorize`` set for this state.
+_SAME_BROWSER = object()
+
+
 async def _authorize(realdb, key: str = "a") -> str:
     async with realdb.client(key=key, role="admin") as c:
         resp = await c.get(f"/api/organization/erp/oauth/{PROVIDER}/authorize")
     assert resp.status_code == 200, resp.text
-    return resp.json()["authorize_url"]
+    url = resp.json()["authorize_url"]
+    _BROWSER_COOKIES[_state_of(url)] = resp.cookies[erp_oauth.BROWSER_COOKIE]
+    return url
 
 
 def _state_of(url: str) -> str:
     return parse_qs(urlsplit(url).query)["state"][0]
 
 
-async def _callback(realdb, params: dict, key: str = "a") -> httpx.Response:
+async def _callback(
+    realdb, params: dict, key: str = "a", *, cookie: object = _SAME_BROWSER
+) -> httpx.Response:
+    """The provider's redirect, from the admin's browser by default (the cookie
+    ``_authorize`` set). ``cookie=None`` is a browser without one; a string is
+    a browser carrying that value."""
+    if cookie is _SAME_BROWSER:
+        cookie = _BROWSER_COOKIES.get(params.get("state", ""))
+    headers = {"Cookie": f"{erp_oauth.BROWSER_COOKIE}={cookie}"} if cookie else {}
     async with realdb.client(key=key, role=None) as c:
-        return await c.get("/api/erp/oauth/callback", params=params)
+        return await c.get("/api/erp/oauth/callback", params=params, headers=headers)
 
 
 def _connected_block(org_id: uuid.UUID, *, expires_in: int = 3600, n: int = 1) -> dict:
@@ -242,6 +280,7 @@ async def _mint(**overrides) -> str:
         user_id=uuid.uuid4(),
         provider=PROVIDER,
         client_source="platform",
+        browser_nonce="browser-nonce",
     )
     kwargs.update(overrides)
     return await erp_oauth.create_state(**kwargs)
@@ -638,6 +677,251 @@ async def test_callback_with_forged_state_changes_nothing(realdb, platform_app, 
     assert "location" not in resp.headers
     assert provider.calls == []
     assert "oauth" not in ((await _org_settings(realdb, "b")).get("erp") or {})
+
+
+# ---------------------------------------------------------------------------
+# browser binding (login-CSRF): the callback must come from the browser that
+# called /authorize
+# ---------------------------------------------------------------------------
+
+
+def _set_cookie_header(resp: httpx.Response) -> str:
+    (header,) = [
+        v
+        for v in resp.headers.get_list("set-cookie")
+        if v.startswith(f"{erp_oauth.BROWSER_COOKIE}=")
+    ]
+    return header
+
+
+@pytest.mark.plan("scale")
+async def test_authorize_sets_an_httponly_lax_nonce_cookie_whose_hash_the_state_carries(
+    realdb, platform_app
+):
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(f"/api/organization/erp/oauth/{PROVIDER}/authorize")
+    assert resp.status_code == 200, resp.text
+    header = _set_cookie_header(resp).lower()
+    assert "httponly" in header
+    assert "secure" in header
+    assert "samesite=lax" in header
+    assert "path=/;" in header or header.endswith("path=/")
+    assert f"max-age={settings.erp_oauth_state_ttl_seconds}" in header
+    assert "domain=" not in header  # host-only, on the API host
+
+    nonce = resp.cookies[erp_oauth.BROWSER_COOKIE]
+    state = _state_of(resp.json()["authorize_url"])
+    # The state names the cookie's hash, never the cookie itself.
+    assert nonce not in resp.json()["authorize_url"]
+    payload = json.loads(erp_oauth._unb64(state.split(".")[0]))
+    assert payload["b"] == erp_oauth.browser_binding(nonce)
+
+
+def test_a_loopback_api_sets_samesite_none_but_keeps_secure(monkeypatch):
+    """Local dev: ``acme.localhost`` → ``localhost`` is cross-site, and a browser
+    drops a Lax cookie set by a cross-site fetch. Only None crosses; it still
+    needs Secure, which browsers accept from http://localhost."""
+    for url in ("http://localhost:8000", "http://127.0.0.1:8000", "http://api.localhost:8001"):
+        monkeypatch.setattr(settings, "api_public_url", url)
+        attrs = erp_oauth.browser_cookie_attributes()
+        assert attrs["samesite"] == "none", url
+        assert attrs["secure"] is True
+        assert attrs["httponly"] is True
+    for url in ("https://api.feohledger.com", "https://localhost.example.com"):
+        monkeypatch.setattr(settings, "api_public_url", url)
+        assert erp_oauth.browser_cookie_attributes()["samesite"] == "lax", url
+    # A deployed environment never loosens it, whatever the URL says.
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "api_public_url", "http://localhost:8000")
+    assert erp_oauth.browser_cookie_attributes()["samesite"] == "lax"
+
+
+def test_browser_match_is_false_without_a_cookie_or_a_binding():
+    binding = erp_oauth.browser_binding("nonce-1")
+    assert erp_oauth.browser_matches("nonce-1", binding)
+    assert not erp_oauth.browser_matches("nonce-2", binding)
+    assert not erp_oauth.browser_matches(None, binding)
+    assert not erp_oauth.browser_matches("", binding)
+    assert not erp_oauth.browser_matches("nonce-1", "")
+
+
+async def test_state_cannot_be_minted_without_a_browser_nonce():
+    with pytest.raises(ValueError):
+        await _mint(browser_nonce="")
+
+
+@pytest.mark.plan("scale")
+@pytest.mark.parametrize(
+    "cookie",
+    [None, "a-value-this-browser-made-up"],
+    ids=["no-cookie", "wrong-cookie"],
+)
+async def test_callback_from_another_browser_links_nothing(realdb, platform_app, provider, cookie):
+    """The login-CSRF: the rogue admin starts a connect and hands the consent
+    URL to a victim, whose browser carries no cookie (or its own) for it."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM}, cookie=cookie)
+
+    assert resp.status_code == 302
+    assert resp.headers["location"].endswith("erp_error=browser_mismatch")
+    assert provider.calls == []  # the code was never exchanged
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    actions = await _audit_actions(realdb)
+    assert not [a for a in actions if a.action == "organization.erp_connected"]
+    (refused,) = [a for a in actions if a.action == "organization.erp_connect_refused"]
+    assert refused.details == {"provider": PROVIDER, "reason": "browser_mismatch"}
+    # Not this browser's cookie to spend: a stray callback must not break the
+    # admin's own connect in flight.
+    assert erp_oauth.BROWSER_COOKIE not in resp.headers.get("set-cookie", "")
+    # The state is spent: the admin's own browser cannot reuse it either.
+    again = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    assert again.headers["location"].endswith("erp_error=state_expired")
+    assert provider.calls == []
+
+
+@pytest.mark.plan("scale")
+async def test_callback_with_the_cookie_of_another_connect_is_refused(
+    realdb, platform_app, provider
+):
+    """The victim is an admin who started a connect of their own: their cookie
+    is real, but it is not the one the attacker's state names."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    attacker_state = _state_of(await _authorize(realdb, "a"))
+    victim_state = _state_of(await _authorize(realdb, "b"))
+
+    resp = await _callback(
+        realdb,
+        {"code": "c", "state": attacker_state, "realmId": REALM},
+        cookie=_BROWSER_COOKIES[victim_state],
+    )
+
+    assert resp.headers["location"].endswith("erp_error=browser_mismatch")
+    assert provider.calls == []
+    for key in ("a", "b"):
+        assert "oauth" not in ((await _org_settings(realdb, key)).get("erp") or {})
+
+
+@pytest.mark.plan("scale")
+async def test_the_nonce_cookie_is_spent_only_once_it_matched(realdb, platform_app, provider):
+    """Cleared on every answer after the cookie matched (success or a later
+    refusal); left alone on a forged / replayed state, which proves nothing
+    about whose cookie it is — clearing there would let a junk-state link
+    break an admin's connect in flight."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    connected = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    assert "erp_connected" in connected.headers["location"]
+    declined_state = _state_of(await _authorize(realdb))
+    declined = await _callback(realdb, {"error": "access_denied", "state": declined_state})
+    assert declined.headers["location"].endswith("erp_error=access_denied")
+    for resp in (connected, declined):
+        header = _set_cookie_header(resp).lower()
+        assert "max-age=0" in header
+        assert "path=/;" in header or header.endswith("path=/")
+
+    replayed = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    forged = await _callback(realdb, {"code": "c", "state": "not.a-state"})
+    for resp in (replayed, forged):
+        assert erp_oauth.BROWSER_COOKIE not in resp.headers.get("set-cookie", "")
+
+
+@pytest.mark.plan("scale")
+async def test_callback_returns_to_the_platform_address_not_a_vanity_one(
+    realdb, platform_app, provider
+):
+    """A connect starts only from ``<slug>.<app domain>`` — that is where the
+    admin's session is, so it is where the callback sends them back."""
+    await _set_settings(realdb, {"brand": {"tenant_url_template": "https://ap.acme-vanity.test"}})
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    slug = realdb.info("a").slug
+    platform = settings.tenant_url_template.replace("{slug}", slug).rstrip("/")
+    assert resp.headers["location"].startswith(f"{platform}/organization?")
+
+
+@pytest.mark.plan("scale")
+async def test_authorize_on_a_vanity_host_points_the_admin_at_the_platform_address(
+    realdb, platform_app
+):
+    """A vanity domain proxies ``/api`` same-origin, so a cookie set there never
+    reaches the callback on the API host. Refused before the consent screen,
+    with where to go instead; no state is minted and no cookie set."""
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(
+            f"/api/organization/erp/oauth/{PROVIDER}/authorize",
+            headers={"Host": "ap.acme-vanity.test", "Origin": "https://ap.acme-vanity.test"},
+        )
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "erp_connect_platform_host"
+    slug = realdb.info("a").slug
+    platform = settings.tenant_url_template.replace("{slug}", slug).rstrip("/")
+    assert detail["params"] == {"url": f"{platform}/organization?section=erp"}
+    assert erp_oauth.BROWSER_COOKIE not in resp.headers.get("set-cookie", "")
+
+
+@pytest.mark.plan("scale")
+async def test_authorize_from_a_cross_site_origin_is_refused(realdb, platform_app, monkeypatch):
+    monkeypatch.setattr(settings, "cors_production_domain", "feohledger.test")
+    monkeypatch.setattr(settings, "api_public_url", "https://api.feohledger.test")
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.feohledger.test")
+    path = f"/api/organization/erp/oauth/{PROVIDER}/authorize"
+    slug = realdb.info("a").slug
+    async with realdb.client(key="a", role="admin") as c:
+        same_site = await c.get(
+            path,
+            headers={"Host": "api.feohledger.test", "Origin": f"https://{slug}.feohledger.test"},
+        )
+        cross_site = await c.get(
+            path,
+            headers={"Host": "api.feohledger.test", "Origin": "https://evil.example"},
+        )
+    assert same_site.status_code == 200, same_site.text
+    assert erp_oauth.BROWSER_COOKIE in same_site.cookies
+    assert cross_site.status_code == 409
+    assert cross_site.json()["detail"]["params"] == {
+        "url": f"https://{slug}.feohledger.test/organization?section=erp"
+    }
+
+
+@pytest.mark.plan("scale")
+async def test_authorize_from_the_platform_host_that_is_not_same_site_offers_no_loop(
+    realdb, platform_app, monkeypatch
+):
+    """The platform address itself is cross-site with the API (a deployment
+    this flow cannot serve): say so, rather than link the page the admin is on."""
+    monkeypatch.setattr(settings, "cors_production_domain", "app.test,api.test")
+    monkeypatch.setattr(settings, "api_public_url", "https://api.test")
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.app.test")
+    slug = realdb.info("a").slug
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(
+            f"/api/organization/erp/oauth/{PROVIDER}/authorize",
+            headers={"Host": "api.test", "Origin": f"https://{slug}.app.test"},
+        )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "erp_connect_platform_host"
+    assert resp.json()["detail"]["params"] == {}
+
+
+@pytest.mark.plan("scale")
+async def test_callback_refuses_a_qbo_realm_the_new_token_cannot_reach(
+    realdb, platform_app, provider, realm_confirmation
+):
+    """QuickBooks' ``realmId`` is unsigned: an admin who consents to their own
+    company while naming another's realm links nothing (and squats nothing)."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    realm_confirmation.return_value = False
+    state = _state_of(await _authorize(realdb))
+
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": "someone-elses"})
+
+    assert resp.headers["location"].endswith("erp_error=no_external_tenant")
+    assert realm_confirmation.await_args.args[:2] == ("ACCESS-SECRET-1", "someone-elses")
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
 
 
 @pytest.mark.plan("scale")
@@ -1483,13 +1767,28 @@ async def test_tenant_id_from_the_token_response():
     assert none is None
 
 
-async def test_tenant_id_from_the_callback_param_for_qbo():
+async def test_tenant_id_from_the_callback_param_for_qbo(realm_confirmation):
     from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
 
     got = await QuickBooksOnlineAdapter.resolve_external_tenant_id(
-        access_token="t", token_response={}, callback_params={"realmId": " 123 "}
+        access_token="t",
+        token_response={},
+        callback_params={"realmId": " 123 "},
+        erp_settings={"environment": "sandbox"},
     )
     assert got == "123"
+    # Confirmed under the new token, against the org's saved environment.
+    realm_confirmation.assert_awaited_once_with("t", "123", {"environment": "sandbox"})
+
+
+async def test_qbo_realm_the_new_token_cannot_reach_is_no_tenant(realm_confirmation):
+    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+
+    realm_confirmation.return_value = False
+    got = await QuickBooksOnlineAdapter.resolve_external_tenant_id(
+        access_token="t", token_response={}, callback_params={"realmId": "someone-elses"}
+    )
+    assert got is None
 
 
 async def test_extra_token_headers_reach_the_token_endpoint(platform_app, provider):

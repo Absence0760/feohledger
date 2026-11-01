@@ -175,6 +175,16 @@ class Payment(Base, EntityMixin, TimestampMixin):
     # ops dashboards without parsing audit logs.
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # A dispatch attempt that may have reached the processor and whose outcome
+    # was never recorded (migration 0124). `_dispatch_payment_guarded` stamps it
+    # and COMMITS before the attempt starts, and clears it in the transaction
+    # that records the attempt's outcome — unless the row already carried a
+    # stamp when the attempt began, i.e. an earlier pass crashed between its
+    # stamp and its commit, possibly after `adapter.create_payment`. A row that
+    # still holds one is in doubt whatever its `failure_reason` says
+    # (`payment_runs.classify_payment_failure`): a later pre-adapter refusal on
+    # `/resume` proves nothing about what the crashed pass sent.
+    dispatch_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # What the PROCESSOR said it actually settled, as reported on its webhook
     # (or re-fetched via `PaymentAdapter.fetch_settlement` for a rail whose

@@ -58,10 +58,9 @@ from app.utils.json_money import dumps_exact_json, loads_exact_json
 
 logger = logging.getLogger(__name__)
 
-#: SuiteQL pages at 100 rows. The PO list stops after 10 pages; the chart and
-#: vendor listings read up to ``SYNC_LISTING_MAX_ROWS`` and raise past it.
+#: SuiteQL pages at 100 rows. Every listing (chart, vendors, POs) reads up to
+#: ``SYNC_LISTING_MAX_ROWS`` and raises past it.
 _PAGE_SIZE = 100
-_MAX_PAGES = 10
 
 #: Vendor sync. The REST record collection (``GET /vendor``) returns only ids
 #: and links — no names — so it would cost one more request per vendor.
@@ -694,47 +693,43 @@ class NetSuiteAdapter(ErpAdapter):
         """SuiteQL lives beside the record API: ``.../services/rest/query/v1``."""
         return f"{self._rest_root()}/query/v1/suiteql"
 
-    async def _suiteql(self, query: str, *, complete: str | None = None) -> list[dict]:
-        """Run one SuiteQL query, paged by ``offset`` + ``hasMore``.
+    async def _suiteql(self, query: str, *, collection: str) -> list[dict]:
+        """Every row of one SuiteQL query, paged by ``offset`` + ``hasMore``.
 
-        Best-effort for the PO list: a non-200, a network error or an
-        unparseable page ends the pull with what it has, bounded at
-        ``_MAX_PAGES`` x ``_PAGE_SIZE`` rows. ``complete`` (the collection's
-        name) asks for every row instead — the chart and vendor listings, whose
-        sync reads absence as evidence: any of those failures, or more rows
-        than ``SYNC_LISTING_MAX_ROWS``, raises :class:`ErpListingIncomplete`.
-        Bodies are parsed with ``loads_exact_json`` so a money column is never
-        a float.
+        Read whole or not at all: a non-200, a network error, an unparseable
+        page, or more rows than ``SYNC_LISTING_MAX_ROWS`` raises
+        :class:`ErpListingIncomplete` naming ``collection``. The rows read so
+        far are never returned. The chart and vendor syncs read absence as
+        evidence (§284), and the PO sync reads the listing's ``skipped`` report,
+        which a partial read would silently shorten (§323). Bodies are parsed
+        with ``loads_exact_json`` so a money column is never a float.
         """
-
-        def incomplete(gap: ListingGap) -> list[dict]:
-            if complete is not None:
-                raise ErpListingIncomplete("NetSuite", complete, gap)
-            return rows
-
         rows: list[dict] = []
         offset = 0
         body_text = dumps_exact_json({"q": query})
-        max_pages = _MAX_PAGES if complete is None else sync_listing_pages(_PAGE_SIZE)
         async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(max_pages):
+            for _ in range(sync_listing_pages(_PAGE_SIZE)):
                 url = f"{self._suiteql_url()}?limit={_PAGE_SIZE}&offset={offset}"
                 headers = {"Content-Type": "application/json", "Prefer": "transient"}
                 try:
                     resp = await self._send(client, "POST", url, content=body_text, headers=headers)
                 except httpx.HTTPError:
-                    return incomplete(ListingGap.fetch_failed)
+                    raise ErpListingIncomplete(
+                        "NetSuite", collection, ListingGap.fetch_failed
+                    ) from None
                 if resp.status_code != 200:
-                    return incomplete(ListingGap.fetch_failed)
+                    raise ErpListingIncomplete("NetSuite", collection, ListingGap.fetch_failed)
                 try:
                     body = loads_exact_json(resp.content)
                 except ValueError:
-                    return incomplete(ListingGap.fetch_failed)
+                    raise ErpListingIncomplete(
+                        "NetSuite", collection, ListingGap.fetch_failed
+                    ) from None
                 rows.extend(r for r in body.get("items") or [] if isinstance(r, dict))
                 if not body.get("hasMore"):
                     return rows
                 offset += _PAGE_SIZE
-        return incomplete(ListingGap.truncated)
+        raise ErpListingIncomplete("NetSuite", collection, ListingGap.truncated)
 
     async def list_vendors(self) -> list[VendorPayload]:
         """Pull vendors through SuiteQL (``_VENDOR_QUERY``).
@@ -745,7 +740,7 @@ class NetSuiteAdapter(ErpAdapter):
         still exists.
         """
         out: list[VendorPayload] = []
-        for raw in await self._suiteql(_VENDOR_QUERY, complete="vendors"):
+        for raw in await self._suiteql(_VENDOR_QUERY, collection="vendors"):
             vendor = _netsuite_vendor_to_payload(raw)
             if vendor is not None:
                 out.append(vendor)
@@ -761,7 +756,7 @@ class NetSuiteAdapter(ErpAdapter):
         columns we need.
         """
         out: list[GLAccountPayload] = []
-        for raw in await self._suiteql(_ACCOUNT_QUERY, complete="accounts"):
+        for raw in await self._suiteql(_ACCOUNT_QUERY, collection="accounts"):
             acct = _netsuite_account_to_payload(raw)
             if acct is not None:
                 out.append(acct)
@@ -779,10 +774,14 @@ class NetSuiteAdapter(ErpAdapter):
         total is skipped, never synced at 0, and named in ``skipped`` as
         ``unpriceable``, so a total an earlier sync stored for it stops being
         matched against (decisions §323).
+
+        Read whole or not at all (:meth:`_suiteql`): a failed or truncated
+        read raises :class:`ErpListingIncomplete`, never the POs read so far,
+        which would hide every skip in the part it did not read.
         """
         pos: list[PoPayload] = []
         skipped: list[SkippedPo] = []
-        for raw in await self._suiteql(_PO_QUERY):
+        for raw in await self._suiteql(_PO_QUERY, collection="purchase orders"):
             po = _netsuite_po_to_payload(raw)
             if po is not None:
                 pos.append(po)

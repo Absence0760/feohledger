@@ -616,11 +616,19 @@ enforced, not just documented: `app/main.py::lifespan` **refuses to boot** with
 the flag on when `FEOH_DEBUG=false` (same fail-fast block as the secret-key /
 billing-webhook guards).
 
-**Residual risk:** the actual connection is opened by `httpx`, which performs
-its own DNS lookup — a narrow rebinding window remains between the send-time
-check and the socket connect. Pinning the checked IP for the connection itself
-would close it; re-resolving immediately before send is the accepted fix per
-issue #171, and the window is bounded to a single race per attempt.
+**The send is pinned to a vetted address.** A check alone left a window:
+`httpx` makes its own DNS lookup when it opens the socket, so a record with a
+short TTL could pass the send-time check and then answer the connect with
+`127.0.0.1`. `delivery._post` therefore sends through
+`utils/url_safety.pinned_async_client` with `url_guard.resolve_pinned_addresses`
+as its resolver. The host is resolved once per connection, every address is
+judged by the rule above, and the socket opens to one of those IP literals, so
+no second lookup exists to rebind. The URL is unchanged, so the `Host` header,
+TLS SNI and certificate verification still name the hostname. A refusal at
+connect raises `WebhookTargetNotAllowed` and is the same failed attempt as a
+refusal at the check. The escape hatch skips the address judgement here too,
+but the connection is still pinned to what resolved. Proxies from the
+environment are ignored by the pinned client (a proxy would do its own lookup).
 
 ### Management API (`/api/webhooks`)
 

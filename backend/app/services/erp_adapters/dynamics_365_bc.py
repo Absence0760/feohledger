@@ -38,12 +38,11 @@ from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.payment_adapters.base import exponent_for
 from app.utils.json_money import dumps_exact_json, loads_exact_json
 
-#: List syncs page at 100 rows (``Prefer: odata.maxpagesize``). The PO list
-#: stops after 10 pages; the chart and vendor listings read up to
-#: ``SYNC_LISTING_MAX_ROWS`` and raise past it. BC's own server page is 20,000
-#: rows, so without the preference one page could already be far past a bound.
+#: List syncs page at 100 rows (``Prefer: odata.maxpagesize``). Every listing
+#: (chart, vendors, POs) reads up to ``SYNC_LISTING_MAX_ROWS`` and raises past
+#: it. BC's own server page is 20,000 rows, so without the preference one page
+#: could already be far past a bound.
 _PAGE_SIZE = 100
-_MAX_PAGES = 10
 
 #: BC renders an empty date field as this literal rather than null.
 _BC_BLANK_DATE = "0001-01-01"
@@ -432,54 +431,17 @@ class BusinessCentralAdapter(ErpAdapter):
             resp = await client.delete(url, headers={**headers, "If-Match": etag})
         return resp.status_code in (200, 204)
 
-    async def _list_collection(self, path: str, *, complete: str | None = None) -> list[dict]:
-        """GET an API v2.0 collection, following ``@odata.nextLink``.
+    async def _list_collection(self, path: str, collection: str) -> list[dict]:
+        """Every row of an API v2.0 collection, following ``@odata.nextLink``.
 
-        Best-effort for the PO list: a failed token exchange, a non-200 or a
-        network error ends the pull with what it has read (an empty list when
-        nothing was), bounded at ``_MAX_PAGES`` x ``_PAGE_SIZE`` rows.
-        ``complete`` (the collection's name) asks for every row instead — the
-        chart and vendor listings, whose sync reads absence as evidence: any of
-        those failures, or more than ``SYNC_LISTING_MAX_ROWS`` rows, raises
-        :class:`ErpListingIncomplete`. Bodies are parsed with
-        ``loads_exact_json`` so money is never a float.
+        Read whole or not at all: a non-200, a network error, an unparseable
+        page, or more than ``SYNC_LISTING_MAX_ROWS`` rows raises
+        :class:`ErpListingIncomplete` naming ``collection``; the rows read so
+        far are never returned. The chart and vendor syncs read absence as
+        evidence (§284), and the PO sync reads the listing's ``skipped``
+        report, which a partial read would silently shorten (§323). Bodies are
+        parsed with ``loads_exact_json`` so money is never a float.
         """
-        if complete is not None:
-            return await self._list_complete(path, complete)
-        try:
-            token = await self._get_token()
-        except Exception:
-            return []
-
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Prefer": f"odata.maxpagesize={_PAGE_SIZE}",
-        }
-        rows: list[dict] = []
-        url = await self._api_url(path)
-        cap = _PAGE_SIZE * _MAX_PAGES
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(_MAX_PAGES):
-                try:
-                    resp = await client.get(url, headers=headers)
-                except httpx.HTTPError:
-                    break
-                if resp.status_code != 200:
-                    break
-                try:
-                    body = loads_exact_json(resp.content)
-                except ValueError:
-                    break
-                rows.extend(r for r in body.get("value") or [] if isinstance(r, dict))
-                next_link = body.get("@odata.nextLink")
-                if not next_link or len(rows) >= cap:
-                    break
-                url = next_link
-
-        return rows[:cap]
-
-    async def _list_complete(self, path: str, collection: str) -> list[dict]:
         token = await self._get_token()
         headers = {
             "Authorization": f"Bearer {token}",
@@ -513,7 +475,7 @@ class BusinessCentralAdapter(ErpAdapter):
     async def list_vendors(self) -> list[VendorPayload]:
         """Every vendor via BC's ``vendors`` entity, or :class:`ErpListingIncomplete`."""
         out: list[VendorPayload] = []
-        for raw in await self._list_collection("vendors", complete="vendors"):
+        for raw in await self._list_collection("vendors", "vendors"):
             vendor = _d365_vendor_to_payload(raw)
             if vendor is not None:
                 out.append(vendor)
@@ -528,7 +490,7 @@ class BusinessCentralAdapter(ErpAdapter):
         refuses a line on one); blocked accounts are emitted ``active=False``.
         """
         out: list[GLAccountPayload] = []
-        for raw in await self._list_collection("accounts", complete="accounts"):
+        for raw in await self._list_collection("accounts", "accounts"):
             acct = _bc_account_to_payload(raw)
             if acct is not None:
                 out.append(acct)
@@ -544,10 +506,17 @@ class BusinessCentralAdapter(ErpAdapter):
         One with a number but no stated total is skipped, never synced at 0,
         and named in ``skipped`` as ``unpriceable``, so a total an earlier sync
         stored for it stops being matched against (decisions §323).
+
+        Read whole or not at all (:meth:`_list_collection`): a failed or
+        truncated read raises :class:`ErpListingIncomplete`, never the POs read
+        so far, which would hide every skip in the part it did not read.
         """
         pos: list[PoPayload] = []
         skipped: list[SkippedPo] = []
-        for raw in await self._list_collection("purchaseOrders?$expand=purchaseOrderLines"):
+        rows = await self._list_collection(
+            "purchaseOrders?$expand=purchaseOrderLines", "purchase orders"
+        )
+        for raw in rows:
             po = _bc_po_to_payload(raw)
             if po is not None:
                 pos.append(po)

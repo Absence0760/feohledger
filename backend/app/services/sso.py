@@ -39,7 +39,12 @@ from app.config import settings
 from app.redis import get_redis
 from app.schemas.organization import looks_like_http_url
 from app.tenant import resolve_tenant_slug_by_custom_domain
-from app.utils.url_safety import UnsafeUrlError, assert_public_url_async
+from app.utils.url_safety import (
+    UnsafeUrlError,
+    assert_public_url_async,
+    pinned_async_client,
+    resolve_public_addresses,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -329,6 +334,28 @@ async def _assert_sso_url_public(url: str, *, what: str, error: type[ValueError]
         )
 
 
+def _sso_http_client(*, what: str, error: type[ValueError], timeout: float) -> httpx.AsyncClient:
+    """The client for an IdP fetch: pinned to the address it vets at connect.
+
+    `_assert_sso_url_public` alone checks one lookup and httpx then makes its
+    own, so a rebinding record could pass the check and still hand the token
+    exchange (client secret + authorization code) to an internal host. The
+    pinned client re-vets in the connect and dials the vetted IP. Same
+    environment rule as the check: outside a deployed environment loopback is
+    allowed (local Keycloak), though the connection is still pinned.
+    """
+    allow_private = not settings.is_deployed
+
+    async def resolve(host: str, port: int) -> list[str]:
+        try:
+            return await resolve_public_addresses(host, port, allow_private=allow_private)
+        except UnsafeUrlError as exc:
+            logger.warning("SSO %s resolved to a non-public address at connect; refusing", what)
+            raise error(f"SSO {what} must be a publicly routable http(s) URL.") from exc
+
+    return pinned_async_client(resolve=resolve, timeout=timeout)
+
+
 def _pinned_endpoint(discovery_doc: dict, key: str) -> str:
     """Return `discovery_doc[key]`, pinned to the document's own issuer host.
 
@@ -599,7 +626,7 @@ async def fetch_discovery(discovery_url: str) -> dict[str, Any]:
     if cached:
         return json.loads(cached)
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with _sso_http_client(what="discovery_url", error=SSOConfigError, timeout=10.0) as client:
         resp = await client.get(discovery_url)
         resp.raise_for_status()
         doc = resp.json()
@@ -623,7 +650,7 @@ async def fetch_jwks(jwks_uri: str) -> dict[str, Any]:
     if cached:
         return json.loads(cached)
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with _sso_http_client(what="jwks_uri", error=SSOValidationError, timeout=10.0) as client:
         resp = await client.get(jwks_uri)
         resp.raise_for_status()
         jwks = resp.json()
@@ -792,7 +819,9 @@ async def exchange_code_for_tokens(
     """
     token_endpoint = _pinned_endpoint(discovery_doc, "token_endpoint")
     await _assert_sso_url_public(token_endpoint, what="token_endpoint", error=SSOValidationError)
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with _sso_http_client(
+        what="token_endpoint", error=SSOValidationError, timeout=15.0
+    ) as client:
         resp = await client.post(
             token_endpoint,
             data={

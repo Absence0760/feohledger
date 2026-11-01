@@ -44,6 +44,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import {
@@ -461,12 +462,11 @@
 			</div>
 
 			{#if suggestionsError}
-				<div class="state error" role="alert" data-testid="adaptive-suggestions-error">
-					<p>{suggestionsError}</p>
-					<button type="button" class="btn-cancel" onclick={loadSuggestions}
-						>{m('adaptive.retry')}</button
-					>
-				</div>
+				<LoadError
+					message={suggestionsError}
+					onretry={loadSuggestions}
+					testId="adaptive-suggestions-error"
+				/>
 			{:else}
 				<DataTable
 					columns={SUGGESTION_COLUMNS}
@@ -589,12 +589,11 @@
 			</div>
 
 			{#if thresholdError}
-				<div class="state error" role="alert" data-testid="adaptive-threshold-error">
-					<p>{thresholdError}</p>
-					<button type="button" class="btn-cancel" onclick={loadThreshold}
-						>{m('adaptive.retry')}</button
-					>
-				</div>
+				<LoadError
+					message={thresholdError}
+					onretry={loadThreshold}
+					testId="adaptive-threshold-error"
+				/>
 			{:else if thresholdLoading && !threshold}
 				<p class="state">{m('common.loading')}</p>
 			{:else if threshold}
@@ -679,9 +678,11 @@
 			{/if}
 
 			{#if routingError}
-				<div class="state error" role="alert" data-testid="adaptive-routing-error">
-					<p>{routingError}</p>
-				</div>
+				<LoadError
+					message={routingError}
+					onretry={loadRouting}
+					testId="adaptive-routing-error"
+				/>
 			{:else if routingLoading}
 				<p class="state">{m('common.loading')}</p>
 			{:else if routing}
@@ -743,12 +744,11 @@
 			<p class="hint">{m('adaptive.patterns.intro')}</p>
 
 			{#if patternsError}
-				<div class="state error" role="alert" data-testid="adaptive-patterns-error">
-					<p>{patternsError}</p>
-					<button type="button" class="btn-cancel" onclick={loadPatterns}
-						>{m('adaptive.retry')}</button
-					>
-				</div>
+				<LoadError
+					message={patternsError}
+					onretry={loadPatterns}
+					testId="adaptive-patterns-error"
+				/>
 			{:else}
 				<h3>{m('adaptive.patterns.approvers')}</h3>
 				<DataTable
@@ -826,12 +826,11 @@
 			<p class="hint">{m('adaptive.anomalies.intro')}</p>
 
 			{#if anomaliesError}
-				<div class="state error" role="alert" data-testid="adaptive-anomalies-error">
-					<p>{anomaliesError}</p>
-					<button type="button" class="btn-cancel" onclick={loadAnomalies}
-						>{m('adaptive.retry')}</button
-					>
-				</div>
+				<LoadError
+					message={anomaliesError}
+					onretry={loadAnomalies}
+					testId="adaptive-anomalies-error"
+				/>
 			{:else}
 				{#if anomalies}
 					<p class="hint">{m('adaptive.anomalies.scanned', { n: anomalies.total_scanned })}</p>
@@ -943,12 +942,11 @@
 			</div>
 
 			{#if feedbackError}
-				<div class="state error" role="alert" data-testid="adaptive-feedback-error">
-					<p>{feedbackError}</p>
-					<button type="button" class="btn-cancel" onclick={loadFeedback}
-						>{m('adaptive.retry')}</button
-					>
-				</div>
+				<LoadError
+					message={feedbackError}
+					onretry={loadFeedback}
+					testId="adaptive-feedback-error"
+				/>
 			{:else if feedbackLoading}
 				<p class="state">{m('common.loading')}</p>
 			{:else if feedback}
@@ -1093,13 +1091,6 @@
 		padding: 0.75rem 0;
 	}
 
-	.state.error {
-		color: var(--danger);
-	}
-
-	.state.error p {
-		margin: 0 0 8px;
-	}
 	/* The stale-value guard reads as a *changed* state, not a failure — same
 	   amber "a human needs to look" register the rest of the app uses. */
 	.state.changed {

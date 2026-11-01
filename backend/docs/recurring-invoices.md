@@ -146,6 +146,13 @@ Periods that fell between an old `end_date` and an extension are **not**
 back-filled — the same rule `resume` follows for the time a template slept.
 `tests/test_recurring_invoices.py` pins each row.
 
+Every re-seed "from today" — resume, a schedule edit, an end-date extension —
+skips a period that has **already been generated** (`last_period_key`). Without
+that, on a run day the cursor landed on today's period right after
+`generate-now` had raised it, and the template showed a next run it would never
+honour (`api/recurring._seed_next_run_on`; the `*_on_the_run_day_*` tests pin
+the clock to a run day so the boundary is exercised on every run).
+
 ### Who counts as the generated invoice's creator
 
 Segregation of duties keys on a **set** of actors, not one column

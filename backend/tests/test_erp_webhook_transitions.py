@@ -251,6 +251,10 @@ async def test_forbidden_void_while_advanced_opens_reconciliation_exception(fake
     # raw ERP `details` payload (no bank/tax/address).
     assert "voided or cancelled" in exc.description
     assert "/api/" not in exc.description and "doc_1" not in exc.description
+    # "generic" has no product name, so the `_unnamed` twin ("Your ERP").
+    assert exc.description_code == "exception.erp_voided_after_post_unnamed"
+    assert exc.description_params == {}
+    assert exc.description.startswith("Your ERP reports")
     assert exc.erp_report == {
         "kind": "voided_after_post",
         "erp_type": "generic",
@@ -538,6 +542,7 @@ async def test_scheduled_to_paid_is_held_when_the_rail_settled_short(fake_redis)
     # are data on `erp_report` (decisions §319).
     assert "accept the settled amount or void the payment" in exc.description
     assert "/api/" not in exc.description
+    assert exc.description_code.startswith("exception.erp_settled_short")
     assert exc.erp_report["kind"] == "settled_short"
     assert exc.erp_report["payment_id"] == str(settling.id)
     assert exc.erp_report["shortfall"] == "750.00"

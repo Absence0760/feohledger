@@ -31,6 +31,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
+# Mock-DB tests: login writes an auth audit row through its own control-plane/tenant sessions
+# (tests/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_auth_audit_write")
+
 # ---------------------------------------------------------------------------
 # Redis fake (sorted-set semantics + DEL), mirroring test_rate_limit_security
 # ---------------------------------------------------------------------------

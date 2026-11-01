@@ -7,16 +7,43 @@ import type { Invoice } from '#lib/types/invoice.ts';
 import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 
 /**
- * The server's verdict on the caller's two review decisions for this invoice
- * (`GET /api/invoices/{id}/review-actions`, computed by
- * `review.review_refusals` from the gates `POST /approve` / `POST /reject`
- * enforce). Each is `null` when the endpoint would accept the caller, else the
- * coded refusal it would answer with. The modal offers Approve / Reject from
- * this and nothing else — see `#lib/api/actionVerdicts.ts`.
+ * The invoice modal's workflow actions, each the server's verdict for the
+ * caller: `null` when the endpoint would accept them, else the coded refusal it
+ * would answer with.
  */
-export function getReviewActions(
-	invoiceId: string
-): Promise<{ approve: ActionRefusal; reject: ActionRefusal }> {
+export type InvoiceActionVerdicts = {
+	/** `POST /approve` — `review.review_refusals`. */
+	approve: ActionRefusal;
+	/** `POST /reject` — `review.review_refusals`. */
+	reject: ActionRefusal;
+	/** `POST /complete` (Submit / Send to ERP / Mark Complete) —
+	 *  `api/workflow.workflow_action_refusals`, incl. the ERP export gate on an
+	 *  approved invoice. Not covered: the required-fields check, which judges
+	 *  what the reader has typed. */
+	complete: ActionRefusal;
+	/** `POST /send-to-erp` — the same push gates. */
+	send_to_erp: ActionRefusal;
+	/** `POST /retry-erp` — the same push gates, from `failed`. */
+	retry_erp: ActionRefusal;
+};
+
+/** `invoice_not_completable` — `/complete` from a status it does not advance
+ *  (anything but `new` / `approved`). About the status, not something the
+ *  reader can act on, so the modal hides Submit rather than explaining it. */
+export const INVOICE_NOT_COMPLETABLE = 'invoice_not_completable';
+/** `invoice_not_erp_sendable` — `/send-to-erp` on an invoice not `approved`. */
+export const INVOICE_NOT_ERP_SENDABLE = 'invoice_not_erp_sendable';
+/** `invoice_not_erp_retryable` — `/retry-erp` on anything but an approved
+ *  invoice's failed push. Hidden, like {@link INVOICE_NOT_COMPLETABLE}. */
+export const INVOICE_NOT_ERP_RETRYABLE = 'invoice_not_erp_retryable';
+
+/**
+ * The server's verdicts on the caller's workflow actions for this invoice
+ * (`GET /api/invoices/{id}/review-actions`), computed from the gates each
+ * endpoint enforces. The modal offers Approve / Reject / Submit / Retry ERP
+ * from this and nothing else — see `#lib/api/actionVerdicts.ts`.
+ */
+export function getReviewActions(invoiceId: string): Promise<InvoiceActionVerdicts> {
 	return api.get(`/api/invoices/${invoiceId}/review-actions`);
 }
 

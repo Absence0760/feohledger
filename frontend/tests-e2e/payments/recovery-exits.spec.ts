@@ -5,6 +5,7 @@ import {
 	signInAndWait,
 	test
 } from '../fixtures/helpers';
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 
 /**
  * /payments — the two money-path RECOVERY exits.
@@ -53,8 +54,11 @@ const RUN_ID = '33333333-3333-3333-3333-333333333333';
  * all before this change, so the authorized figure fell back to the org default
  * and rendered `$500.00` directly above the real `€450.00`.
  */
-function heldPayment() {
+function heldPayment(acceptRefusal: ActionRefusal = null) {
 	return {
+		// The server's verdict on Accept for this reader
+		// (`payment_controls.settlement_accept_refusal`): `null` offers it.
+		accept_settlement_refusal: acceptRefusal,
 		id: HELD_PAYMENT_ID,
 		correlation_id: null,
 		invoice_id: HELD_INVOICE_ID,
@@ -77,8 +81,11 @@ function heldPayment() {
 	};
 }
 
-function runRow(status = 'completed') {
+function runRow(status = 'completed', syncRefusal: ActionRefusal = null) {
 	return {
+		// The server's verdict on Retry ERP sync for this reader
+		// (`payment_controls.run_sync_erp_refusal`): `null` offers it.
+		actions: { sync_erp: syncRefusal },
 		id: RUN_ID,
 		status,
 		total_amount: 500,
@@ -90,14 +97,22 @@ function runRow(status = 'completed') {
 	};
 }
 
-/** Pin the History tab to one under-settled payment, and the invoice behind it
- *  to `status` (the backend's own release guard is `payment_scheduled`). */
-async function mockHistory(page: import('@playwright/test').Page, invoiceStatus: string) {
+/** Pin the History tab to one under-settled payment, carrying the server's
+ *  verdict on accepting it (`null` = offered). */
+async function mockHistory(
+	page: import('@playwright/test').Page,
+	acceptRefusal: ActionRefusal = null
+) {
 	await page.route(/\/api\/payments\?/, (r) =>
 		r.fulfill({
 			status: 200,
 			contentType: 'application/json',
-			body: JSON.stringify({ items: [heldPayment()], total: 1, page: 1, page_size: 20 })
+			body: JSON.stringify({
+				items: [heldPayment(acceptRefusal)],
+				total: 1,
+				page: 1,
+				page_size: 20
+			})
 		})
 	);
 	await page.route('**/api/payments/counts**', (r) =>
@@ -107,23 +122,25 @@ async function mockHistory(page: import('@playwright/test').Page, invoiceStatus:
 			body: JSON.stringify({ total: 1, by_status: { completed: 1 } })
 		})
 	);
-	await page.route(`**/api/invoices/${HELD_INVOICE_ID}`, (r) =>
-		r.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ id: HELD_INVOICE_ID, status: invoiceStatus })
-		})
-	);
 }
 
-async function mockRuns(page: import('@playwright/test').Page, status = 'completed') {
+async function mockRuns(
+	page: import('@playwright/test').Page,
+	status = 'completed',
+	syncRefusal: ActionRefusal = null
+) {
 	await page.route('**/api/payments/runs/**', async (route) => {
 		// Only the LIST call; the sync-erp POST is routed separately per test.
 		if (route.request().method() !== 'GET') return route.fallback();
 		await route.fulfill({
 			status: 200,
 			contentType: 'application/json',
-			body: JSON.stringify({ items: [runRow(status)], total: 1, page: 1, page_size: 100 })
+			body: JSON.stringify({
+				items: [runRow(status, syncRefusal)],
+				total: 1,
+				page: 1,
+				page_size: 100
+			})
 		});
 	});
 }
@@ -152,7 +169,7 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 	test('the settled figure renders beside the authorized one, and the exit is offered', async ({
 		page
 	}) => {
-		await mockHistory(page, 'payment_scheduled');
+		await mockHistory(page);
 		await openHistory(page);
 
 		// The hold was invisible before this: both figures now render, and
@@ -165,7 +182,7 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 	test('the confirm names the payment, states the consequence, and refuses an empty reason', async ({
 		page
 	}) => {
-		await mockHistory(page, 'payment_scheduled');
+		await mockHistory(page);
 		await openHistory(page);
 		await acceptAction(page).click();
 
@@ -214,7 +231,7 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 		let accepted = false;
 		// After `mockHistory`: the most recently registered route wins, so this
 		// list handler overrides its always-200 one.
-		await mockHistory(page, 'payment_scheduled');
+		await mockHistory(page);
 		await page.route(/\/api\/payments\?/, (r) =>
 			accepted
 				? r.fulfill({
@@ -264,7 +281,7 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 		// Before the fix `PaymentResponse` carried no `currency`, the authorized
 		// half fell back to `orgCurrency` (USD on the e2e tenant), and this test
 		// fails on the `$` exclusion below while the settled half already passed.
-		await mockHistory(page, 'payment_scheduled');
+		await mockHistory(page);
 		await openHistory(page);
 		await acceptAction(page).click();
 
@@ -283,7 +300,7 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 		// The same fabrication one screen earlier: the row's authorized amount
 		// used to borrow the org default while the settled sub-line beneath it
 		// rendered `settled_currency`.
-		await mockHistory(page, 'payment_scheduled');
+		await mockHistory(page);
 		await openHistory(page);
 
 		const row = page.locator('table tbody tr', { hasText: 'E2E-SETTLE-001' });
@@ -292,7 +309,7 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 	});
 
 	test('confirming posts the reason to the accept endpoint', async ({ page }) => {
-		await mockHistory(page, 'payment_scheduled');
+		await mockHistory(page);
 		let posted: { reason?: string } | null = null;
 		await page.route(`**/api/payments/${HELD_PAYMENT_ID}/settlement/accept`, async (route) => {
 			posted = route.request().postDataJSON() as { reason?: string };
@@ -312,7 +329,7 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 	});
 
 	test('a backend refusal stays on screen instead of fading in a toast', async ({ page }) => {
-		await mockHistory(page, 'payment_scheduled');
+		await mockHistory(page);
 		await page.route(`**/api/payments/${HELD_PAYMENT_ID}/settlement/accept`, (r) =>
 			r.fulfill({
 				status: 409,
@@ -332,23 +349,30 @@ test.describe('/payments — settlement acceptance (the under-settlement hold ex
 		await expect(page.getByTestId('settlement-error')).toContainText('already covers');
 	});
 
-	test('an invoice that is no longer held gets an explanation, not a confirm that can only 409', async ({
-		page
-	}) => {
-		await mockHistory(page, 'paid');
-		await openHistory(page);
-		await acceptAction(page).click();
+	for (const [code, what] of [
+		['payment_settlement_not_held', 'an invoice no longer held'],
+		['payment_settlement_covered', 'a settlement that already covers the invoice']
+	]) {
+		test(`the server refusing ${code} (${what}) offers no exit at all`, async ({ page }) => {
+			// The row used to offer Accept wherever any figure was reported, and the
+			// dialog then fetched the invoice to find out there was nothing to
+			// accept. The server's verdict now decides before the click.
+			await mockHistory(page, { code, message: 'server English' });
+			await openHistory(page);
 
-		await expect(page.getByTestId('settlement-not-held')).toBeVisible();
-		await expect(page.getByTestId('settlement-confirm')).toHaveCount(0);
-	});
+			// Positive first: the row (and its settled figure) rendered.
+			await expect(page.getByTestId('payment-settled-amount')).toBeVisible();
+			await expect(acceptAction(page)).toHaveCount(0);
+		});
+	}
 
 	test('a role without payment.execute sees the figures but not the exit', async ({
 		page,
 		tenantClerk
 	}) => {
 		await signInAndWait(page, tenantClerk);
-		await mockHistory(page, 'payment_scheduled');
+		// The verdict the server computes for a reader without the permission.
+		await mockHistory(page, { code: 'role_not_permitted', message: 'server English' });
 		await openHistory(page);
 
 		// Reading what the rail settled is not a privilege; accepting it is.
@@ -422,17 +446,26 @@ test.describe('/payments — run-level ERP sync retry (the stranded-invoice exit
 		await expect(page.getByTestId('erp-sync-synced')).toHaveText('2');
 	});
 
-	test('a draft run is not offered the action at all', async ({ page }) => {
-		await mockRuns(page, 'draft');
-		await openRuns(page);
-		// A draft run has never been dispatched, so the action is not offered at
-		// all rather than being a button that can only 409.
-		await expect(syncAction(page)).toHaveCount(0);
-	});
+	for (const status of ['draft', 'failed', 'executing']) {
+		test(`a ${status} run with no settled payment is not offered the action at all`, async ({
+			page
+		}) => {
+			// The server's verdict (`payment_run_nothing_settled`), not a status
+			// list restated in the page: it used to offer this on a failed or
+			// executing run, a button that could only 409.
+			await mockRuns(page, status, {
+				code: 'payment_run_nothing_settled',
+				message: 'server English'
+			});
+			await openRuns(page);
+			await expect(page.getByText(RUN_ID.slice(0, 8)).first()).toBeVisible();
+			await expect(syncAction(page)).toHaveCount(0);
+		});
+	}
 
 	test('a role without payment.execute does not get the action', async ({ page, tenantClerk }) => {
 		await signInAndWait(page, tenantClerk);
-		await mockRuns(page);
+		await mockRuns(page, 'completed', { code: 'role_not_permitted', message: 'server English' });
 		await openRuns(page);
 
 		// Wait for the mocked run row before asserting an absence.
@@ -450,7 +483,11 @@ test.describe('/payments — dismissing a compliance hold', () => {
 			settled_amount: null,
 			settled_currency: null,
 			release_refusal: { code: 'e2e_not_offered' },
-			dismiss_refusal: null
+			dismiss_refusal: null,
+			accept_settlement_refusal: {
+				code: 'payment_settlement_not_completed',
+				message: 'server English'
+			}
 		};
 	}
 

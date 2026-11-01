@@ -20,6 +20,7 @@ from app.api.file_proxy import serve_owned_file
 from app.api.invoice_entry import (
     INVOICE_ENTRY_ROLES,
     INVOICE_ENTRY_WINDOW_CLOSED,
+    INVOICE_MANAGE_ROLES,
     in_entry_window,
     is_entry_only,
     missing_required_fields,
@@ -76,6 +77,111 @@ router = APIRouter(prefix="/invoices", tags=["workflow"])
 #: `POST /invoices/{id}/complete` refused for blank required fields; `fields`
 #: names them (`vendor` / `invoice_number` / `amount`).
 INVOICE_REQUIRED_FIELDS_MISSING = "invoice_required_fields_missing"
+
+#: `POST /invoices/{id}/complete` on an invoice that is neither `new` nor
+#: `approved` — the only two statuses it advances. ``params.status``.
+INVOICE_NOT_COMPLETABLE = "invoice_not_completable"
+
+_COMPLETABLE_STATUSES = frozenset({InvoiceStatus.new, InvoiceStatus.approved})
+
+
+def complete_status_refusal(invoice: Invoice) -> dict | None:
+    """The coded 409 for `/complete` from a status it does not advance.
+
+    `/complete` is the modal's Submit / Send to ERP / Mark Complete, and its
+    four outcomes start from `new` or `approved`. Every other status used to
+    fall through to `→ done`, so `sent_to_erp`, `posted_in_erp` and `paid`
+    could be closed by this door although the modal never offered it there —
+    `posted_in_erp → done` skipping the payment. `POST /bulk/status` can still
+    set `done` from them, as a deliberate manager action with its own audit
+    row; whether it should gate the source status too is an open follow-up.
+    """
+    if invoice.status in _COMPLETABLE_STATUSES:
+        return None
+    return coded_refusal(
+        INVOICE_NOT_COMPLETABLE,
+        "Only a new or approved invoice can be submitted or completed.",
+        status=invoice.status.value,
+    )
+
+
+def complete_entry_refusal(user: User, invoice: Invoice, *, approval_enabled: bool) -> dict | None:
+    """The coded 403 for an entry-only caller past submit-for-review.
+
+    An entry-only caller (an AP clerk) may take only one of `/complete`'s
+    outcomes: submitting a `new` invoice, inside the entry window, where the
+    workflow has an approval step.
+    """
+    if not is_entry_only(user):
+        return None
+    if invoice.status == InvoiceStatus.new and approval_enabled and in_entry_window(invoice):
+        return None
+    return coded_refusal(
+        INVOICE_ENTRY_WINDOW_CLOSED,
+        "AP clerks can submit a new invoice for review; completing it is an AP manager's step.",
+        status=invoice.status.value,
+    )
+
+
+async def workflow_action_refusals(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    actor: User,
+    org: Organization,
+    control_db: AsyncSession,
+) -> dict[str, dict | None]:
+    """What `POST /complete`, `/send-to-erp` and `/retry-erp` would answer
+    ``actor`` for ``invoice`` right now — each the coded refusal, or None.
+
+    Built from the gates those doors raise from, in their order: the route's
+    role list (``holds_any_role``, the predicate ``require_roles`` enforces),
+    :func:`complete_status_refusal`, :func:`complete_entry_refusal`, and for
+    the pushes ``erp_send.erp_send_refusal`` (plan, status, export gate).
+    Reads only. Not covered: `/complete`'s required-fields check, which judges
+    what the reader types into the form before the pre-save, and the
+    ``refresh_warnings`` it runs, which can open a duplicate the POST then
+    refuses on.
+    """
+    from app.api.deps import holds_any_role
+    from app.api.refusals import role_not_permitted
+    from app.services.erp_send import erp_send_refusal
+
+    async def push(retry: bool) -> dict | None:
+        # `/send-to-erp` and `/retry-erp`: `require_roles(admin, ap_manager, cfo)`.
+        if not holds_any_role(actor, INVOICE_MANAGE_ROLES):
+            return role_not_permitted()
+        return await erp_send_refusal(
+            db,
+            invoice,
+            org_id=org.id,
+            org_settings=org.settings,
+            control_db=control_db,
+            retry=retry,
+        )
+
+    send_to_erp = await push(retry=False)
+    retry_erp = await push(retry=True)
+
+    complete: dict | None
+    if not holds_any_role(actor, INVOICE_ENTRY_ROLES):
+        complete = role_not_permitted()
+    else:
+        complete = complete_status_refusal(invoice)
+        if complete is None:
+            approval_enabled = await is_step_enabled(db, org.id, "approval", invoice_id=invoice.id)
+            complete = complete_entry_refusal(actor, invoice, approval_enabled=approval_enabled)
+        if (
+            complete is None
+            and invoice.status == InvoiceStatus.approved
+            and await is_step_enabled(db, org.id, "erp_export", invoice_id=invoice.id)
+        ):
+            # `/complete` on an approved invoice with the ERP step IS the send,
+            # through the same `start_erp_send`; the entry gate above has
+            # already refused anyone without a manage role, so the send's
+            # verdict is this one.
+            complete = send_to_erp
+    return {"complete": complete, "send_to_erp": send_to_erp, "retry_erp": retry_erp}
 
 
 # ---------- Stage 1: Upload ----------
@@ -370,23 +476,30 @@ async def review_actions(
     org: Organization = Depends(get_tenant),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
 ):
-    """Would ``POST /approve`` / ``POST /reject`` accept the CALLER on this
-    invoice right now? ``{"approve": refusal | null, "reject": refusal |
-    null}`` — each refusal the coded ``{code, message, params}`` the endpoint
-    would answer with (``review.review_refusals`` runs the endpoint's own
-    gates). The invoice modal offers a decision exactly when its verdict is
+    """Would each of the invoice modal's workflow actions accept the CALLER
+    on this invoice right now? ``{"approve", "reject", "complete",
+    "send_to_erp", "retry_erp"}`` — each ``null`` or the coded ``{code,
+    message, params}`` refusal its endpoint would answer with:
+    ``review.review_refusals`` runs `/approve` and `/reject`'s gates and
+    :func:`workflow_action_refusals` runs `/complete`, `/send-to-erp` and
+    `/retry-erp`'s. The modal offers an action exactly when its verdict is
     ``null`` and states the refusal otherwise, so it never restates a rule.
 
     Any signed-in reader of the invoice may ask: the answer is about the caller
-    and names nobody else, and a caller who may not approve gets
+    and names nobody else, and a caller whose role the endpoint turns away gets
     ``role_not_permitted``.
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await db.get(Invoice, invoice_id)
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    return await review_svc.review_refusals(db, invoice, actor=user, org_settings=org.settings)
+    review = await review_svc.review_refusals(db, invoice, actor=user, org_settings=org.settings)
+    workflow = await workflow_action_refusals(
+        db, invoice, actor=user, org=org, control_db=control_db
+    )
+    return {**review, **workflow}
 
 
 @router.post("/{invoice_id}/approve", response_model=InvoiceResponse)
@@ -578,20 +691,16 @@ async def complete_invoice(
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
+    # The gates `GET /review-actions` reads (`workflow_action_refusals`), in
+    # its order, so the modal's Submit verdict and this door cannot disagree.
+    refused = complete_status_refusal(invoice)
+    if refused is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
     approval_enabled = await is_step_enabled(db, org_id, "approval", invoice_id=invoice.id)
     entry_only = is_entry_only(user)
-    if entry_only and not (
-        invoice.status == InvoiceStatus.new and approval_enabled and in_entry_window(invoice)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=coded_refusal(
-                INVOICE_ENTRY_WINDOW_CLOSED,
-                "AP clerks can submit a new invoice for review; completing it is "
-                "an AP manager's step.",
-                status=invoice.status.value,
-            ),
-        )
+    refused = complete_entry_refusal(user, invoice, approval_enabled=approval_enabled)
+    if refused is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refused)
 
     missing = missing_required_fields(invoice)
     if missing:

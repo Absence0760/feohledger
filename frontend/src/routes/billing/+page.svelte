@@ -20,6 +20,7 @@
 		startBillingSetupIntent
 	} from '#lib/api/billing.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	// The published-address registry, not a literal typed here. All three
 	// `mailto:`s below read `billing@example.com` — the IANA-reserved TLD, which
@@ -318,10 +319,7 @@
 
 <PageHeader title={m('billing.title')}>
 	{#if error}
-		<div class="state error" data-testid="billing-error" role="alert">
-			<p>{error}</p>
-			<button type="button" class="btn" onclick={load}>{m('billing.retry')}</button>
-		</div>
+		<LoadError message={error} onretry={load} testId="billing-error" />
 	{:else}
 		{#if loading}
 			<p class="state" data-testid="billing-loading">{m('billing.loading')}</p>
@@ -521,7 +519,7 @@
 						<a class="link" href="mailto:{CONTACT.support}">{m('billing.card.contactUs')}</a>
 					{:else if cardSetup.state === 'error'}
 						<p>{cardSetup.message}</p>
-						<button type="button" class="btn" onclick={startAddCard}>{m('billing.retry')}</button>
+						<button type="button" class="btn" onclick={startAddCard}>{m('common.retry')}</button>
 					{:else if cardSetup.state === 'ready'}
 						<p>{cardSetup.message}</p>
 						<!-- DEPLOYED-ONLY SEAM: mount the provider's card form (Stripe
@@ -541,10 +539,11 @@
 			{#if pmLoading}
 				<p class="state" data-testid="billing-payment-methods-loading">{m('billing.pm.loading')}</p>
 			{:else if pmError}
-				<div class="state error" data-testid="billing-payment-methods-error" role="alert">
-					<p>{pmError}</p>
-					<button type="button" class="btn" onclick={loadPaymentMethods}>{m('billing.retry')}</button>
-				</div>
+				<LoadError
+					message={pmError}
+					onretry={loadPaymentMethods}
+					testId="billing-payment-methods-error"
+				/>
 			{:else}
 				<DataTable
 					columns={PAYMENT_METHOD_COLUMNS}
@@ -579,10 +578,11 @@
 			{#if invoicesLoading}
 				<p class="state" data-testid="billing-invoices-loading">{m('billing.invoices.loading')}</p>
 			{:else if invoicesError}
-				<div class="state error" data-testid="billing-invoices-error" role="alert">
-					<p>{invoicesError}</p>
-					<button type="button" class="btn" onclick={loadInvoices}>{m('billing.retry')}</button>
-				</div>
+				<LoadError
+					message={invoicesError}
+					onretry={loadInvoices}
+					testId="billing-invoices-error"
+				/>
 			{:else}
 				<DataTable
 					columns={INVOICE_COLUMNS}
@@ -679,12 +679,11 @@
 			{#if plansLoading}
 				<p class="state">{m('billing.plan.changeModal.loading')}</p>
 			{:else if plansError}
-				<div class="state error" role="alert">
-					<p>{plansError}</p>
-					<button type="button" class="btn" onclick={loadAvailablePlans}>
-						{m('billing.retry')}
-					</button>
-				</div>
+				<LoadError
+					message={plansError}
+					onretry={loadAvailablePlans}
+					testId="billing-plans-error"
+				/>
 			{:else if availablePlans.length === 0}
 				<p class="state">{m('billing.plan.changeModal.empty')}</p>
 			{:else}

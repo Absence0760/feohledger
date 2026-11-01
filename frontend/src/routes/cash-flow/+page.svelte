@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { api, streamCashFlowCopilot, AssistantBudgetError } from '#lib/api.ts';
+	import { api, streamCashFlowCopilot, ApiError, budgetErrorOf, type AssistantBudgetError } from '#lib/api.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import UsageMeter from '#lib/components/assistant/UsageMeter.svelte';
+	import ExamplePrompts from '#lib/components/assistant/ExamplePrompts.svelte';
 	import CopilotChatMessage from '#lib/components/cash-flow/CopilotChatMessage.svelte';
 	import SavedPlansPanel from '#lib/components/cash-flow/SavedPlansPanel.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -121,6 +122,15 @@
 		applyFinal(payload, assistantId);
 	}
 
+	/** The over-budget notice, in place of the empty in-progress bubble. */
+	function showBudgetNotice(err: AssistantBudgetError, assistantId: string) {
+		budgetNotice = m('assistant.budget.reached', {
+			used: err.used.toLocaleString(),
+			budget: err.budget.toLocaleString()
+		});
+		dropMessage(assistantId);
+	}
+
 	async function send() {
 		const message = input.trim();
 		if (!message || busy) return;
@@ -182,24 +192,27 @@
 				{ consolidated }
 			);
 		} catch (err) {
-			if (err instanceof AssistantBudgetError) {
-				budgetNotice = m('assistant.budget.reached', {
-					used: err.used.toLocaleString(),
-					budget: err.budget.toLocaleString()
-				});
-				dropMessage(assistantId);
+			const budgetErr = budgetErrorOf(err);
+			if (budgetErr) {
+				showBudgetNotice(budgetErr, assistantId);
+			} else if (err instanceof ApiError) {
+				// A refusal from the stream endpoint itself — the shared rate
+				// limiter's `rate_limited`, already localized. `/copilot` would
+				// refuse the same turn, so state it instead of falling back.
+				const msg = assistantMessage(assistantId);
+				if (msg) {
+					msg.error = err.message;
+					msg.streaming = false;
+				}
 			} else if (!sawContent) {
 				// Stream unavailable / failed before any content → non-streaming
 				// fallback so the page works against `/copilot` alone.
 				try {
 					await fallbackChat(message, assistantId);
 				} catch (fallbackErr) {
-					if (fallbackErr instanceof AssistantBudgetError) {
-						budgetNotice = m('assistant.budget.reached', {
-							used: fallbackErr.used.toLocaleString(),
-							budget: fallbackErr.budget.toLocaleString()
-						});
-						dropMessage(assistantId);
+					const fallbackBudget = budgetErrorOf(fallbackErr);
+					if (fallbackBudget) {
+						showBudgetNotice(fallbackBudget, assistantId);
 					} else {
 						const msg = assistantMessage(assistantId);
 						const detail =
@@ -207,9 +220,7 @@
 								? fallbackErr.message
 								: m('assistant.error.somethingWrong');
 						if (msg) {
-							msg.error = detail.includes('budget')
-								? detail
-								: m('assistant.error.couldNotAnswer', { detail });
+							msg.error = m('assistant.error.couldNotAnswer', { detail });
 							msg.streaming = false;
 						}
 					}
@@ -262,20 +273,12 @@
 		<section class="chat-pane">
 			<div class="chat-scroll" bind:this={scrollEl} role="log" aria-live="polite" aria-busy={busy}>
 				{#if isEmpty}
-					<div class="empty-state">
-						<div class="help-row">
-							<h2>{m('cashFlow.empty.heading')}</h2>
-							<HelpTip term="ai-assistant" />
-						</div>
-						<p class="empty-sub">{m('cashFlow.empty.sub')}</p>
-						<div class="prompt-list">
-							{#each EXAMPLES as prompt (prompt)}
-								<button type="button" class="prompt-btn" onclick={() => pickPrompt(prompt)}>
-									{prompt}
-								</button>
-							{/each}
-						</div>
-					</div>
+					<ExamplePrompts
+						prompts={EXAMPLES}
+						heading={m('cashFlow.empty.heading')}
+						sub={m('cashFlow.empty.sub')}
+						onpick={pickPrompt}
+					/>
 				{:else}
 					<div class="msg-stream">
 						{#each messages as message (message.id)}
@@ -388,55 +391,6 @@
 		gap: 18px;
 	}
 
-	.empty-state {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		text-align: center;
-		gap: 10px;
-		padding: 48px 20px;
-		max-width: 560px;
-		margin: 0 auto;
-	}
-
-	.empty-state h2 {
-		margin: 0;
-		font-size: 1.3rem;
-	}
-	.empty-sub {
-		margin: 0;
-		color: var(--text-muted);
-		font-size: 0.9rem;
-		line-height: 1.5;
-	}
-
-	.prompt-list {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		width: 100%;
-		margin-top: 12px;
-	}
-
-	.prompt-btn {
-		width: 100%;
-		text-align: left;
-		padding: 12px 16px;
-		border-radius: 10px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-family: inherit;
-		font-size: 0.9rem;
-		cursor: pointer;
-		transition: border-color 0.12s;
-	}
-
-	.prompt-btn:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-		background: color-mix(in srgb, var(--accent) 6%, transparent);
-	}
 	.budget-notice {
 		margin: 0 16px;
 		padding: 10px 14px;

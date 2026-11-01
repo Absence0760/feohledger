@@ -13,6 +13,50 @@ with no registered adapter must fail closed, never silently fall back to `mock`.
 To add one: copy `mock_adapter.py`, implement the interface, register with the
 decorator.
 
+## Where an adapter's host comes from
+
+Every outbound host falls in exactly one of three classes, and the class decides
+the client (`utils/url_safety`, decisions §334 / §339):
+
+- **Per-org host** (any tenant admin can write it) — untrusted. Route it through
+  `url_safety.org_host_client`: an up-front SSRF check, then a client pinned to
+  the vetted address. Pass `allow_private=not settings.is_deployed` only when a
+  local emulator exists; otherwise `False`.
+- **Per-org value constrained to the vendor's domain** (an account id spliced
+  into `<id>.vendor.com`, a host allowlist) — validate the interpolated part
+  strictly (one hostname label / exact host: no `.`, `:`, `/`, `@`, `\`,
+  `%`, whitespace or non-ASCII), test an injection corpus, and list the module in
+  `tests/test_url_safety.py::_PLAIN_CLIENT_ALLOWED` with the reason.
+- **Operator config** (`FEOH_*`, or a vendor constant) — trusted; a plain client.
+  A provider's per-org config must **never** repoint a vendor's API base: the
+  sealed credential would follow it.
+
+| Adapter | Host source | Class |
+|---|---|---|
+| PEPPOL `as4_gateway` | `settings.peppol.gateway_url` | per-org → `org_host_client` (dev loopback) |
+| Extraction `ollama` | `settings.extraction.base_url` (BYOK) | per-org → `org_host_client` (dev loopback) |
+| Chat `slack` / `teams` | `settings.chat_notifications.webhook_url` | per-org → `org_host_client` |
+| Enrichment `clearbit` / `dun_bradstreet` | `settings.enrichment.base_url` | per-org → `org_host_client` |
+| ERP `syspro`, SSO, branding logo, outbound webhooks, commerce `woocommerce` | admin URL | per-org → own check + pinned client (`_ORG_HOST_BESPOKE`) |
+| ERP `netsuite` | `account_id` → `<id>.suitetalk.api.netsuite.com` | constrained (`_ACCOUNT_ID_RE`) |
+| ERP `dynamics_365_bc` / `sage_accounting_za` | `base_url` allowlisted to the vendor host | constrained |
+| Commerce `shopify` / `lightspeed` | `<handle>.myshopify.com` / `<prefix>.retail.lightspeed.app` | constrained, and pinned via the commerce client |
+| ERP `quickbooks_online`, commerce `square` | `environment` picks one of two vendor hosts | constrained |
+| ERP Merge.dev / Xero / Sage / Intacct / Blackbaud, payments, cards, sanctions, FX, 1099, TIN, LLMs, billing, SMTP, AWS | vendor constant or `FEOH_*` | operator |
+| QMS `generic`, tax-rate `avalara` / `taxjar`, workflow webhook step | per-org URL, **nothing sent yet** | `_ORG_HOST_NOT_YET_SENT` — fails the day a client is built |
+
+The classification is enforced by discovery, not by review: any module under
+`app/` that imports `httpx`, `aiohttp`, `requests`, `smtplib` or
+`urllib.request` must appear in one of `test_url_safety.py`'s lists
+(`_OPERATOR_HOST_MODULES` with its reason, `_ORG_HOST_MODULES`,
+`_ORG_HOST_BESPOKE` or `_PLAIN_CLIENT_ALLOWED`), so a new adapter that reads
+`cfg["base_url"]` into a plain client fails CI. The four no-emulator
+`org_host_client` adopters are also pinned to a literal `allow_private=False`.
+
+`stripe_treasury` used to accept a per-org `api_base`; it is now
+`FEOH_STRIPE_API_BASE` only (`payments.md` § Local testing). Operator overrides
+that point at fake-erp / fake-commerce / stripe-mock stay unpinned (§334).
+
 
 ### Extraction adapters (`services/extraction_adapters/`)
 

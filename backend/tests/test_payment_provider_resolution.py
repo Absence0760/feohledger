@@ -336,6 +336,7 @@ async def test_void_records_provider_not_supported_and_still_voids_locally(reald
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_store_from_settings")
 async def test_reconciler_counts_unsupported_provider_as_a_tenant_failure():
     """A tenant the sweep cannot poll must show up as a FAILURE, not as a
     clean pass with zero work.

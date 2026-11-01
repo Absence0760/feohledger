@@ -6,6 +6,7 @@
  * Pure (no Svelte runtime, no `$app/*`), so vitest reaches it directly.
  */
 import type { MessageKey } from '#lib/i18n/messages.ts';
+import { erpRefusalText } from '#lib/api/erpRefusals.ts';
 import type { PaymentMethod } from '#lib/types/payment.ts';
 import { EXTERNAL_PAYMENT_METHODS, localToday } from '#lib/types/paymentExecution.ts';
 
@@ -32,7 +33,18 @@ export interface ErpReport {
 	/** `po_rematch_clears`: the PO number matched, and the UTC day seen. */
 	po_number?: string | null;
 	observed_on?: string | null;
+	/** The payment write-back rows (`payment_writeback_failed`,
+	 *  `payment_void_writeback_failed`): the ERP's coded refusal as
+	 *  `{code, params}` (`erp_refusal_record`), or null when the call failed
+	 *  without one. Also `payment_id` / `payment_run_id` there and on
+	 *  `payment_sync_back_failed` — machine detail, never shown as prose. */
+	refusal?: unknown;
+	payment_id?: string | null;
+	payment_run_id?: string | null;
 }
+
+/** `erp_report.kind` of the rows the payment write-back opens with a refusal. */
+const WRITEBACK_REFUSAL_KINDS = new Set(['payment_writeback_failed', 'payment_void_writeback_failed']);
 
 /** The payment-queue row's `erp_reported_payment` (`api/payments.py::
  *  _queue_erp_reported_payments`): the same facts, flattened for the dialog. */
@@ -78,6 +90,21 @@ export function poRematchNote(
 	return po
 		? t('exceptions.poRematch.noteNoDate', { po, erp })
 		: t('exceptions.poRematch.noteNoPo', { erp });
+}
+
+/**
+ * Why the ERP refused a payment write-back, in the reader's language and with
+ * what to do about it (`erpRefusals.ts`), or `null` — for any other row, a
+ * failure the ERP gave no code for, or a code this build cannot state. The
+ * row's own sentence says only that the write-back failed; the cause used to be
+ * a raw reason code spliced into it (decisions §331 follow-up).
+ */
+export function erpRefusalNote(
+	report: ErpReport | null | undefined,
+	t: Translate
+): string | null {
+	if (!report || !WRITEBACK_REFUSAL_KINDS.has(report.kind ?? '')) return null;
+	return erpRefusalText(report.refusal, t);
 }
 
 /** What a "record this payment" form starts from. `method` is `''` when the ERP

@@ -316,7 +316,6 @@ export const messages = {
 	'portal.home.heading': 'Visão geral',
 	'portal.home.subtitle': 'O que precisa de você e onde estão as demais notas fiscais.',
 	'portal.home.loadFailed': 'Não foi possível carregar sua visão geral',
-	'portal.home.retry': 'Tentar novamente',
 	'portal.home.kpi.actionRequired': 'Precisa da sua atenção',
 	'portal.home.kpi.inProgress': 'Com seu cliente',
 	'portal.home.kpi.paid': 'Pagas',

@@ -13,9 +13,24 @@
 		runStatusTone
 	} from '#lib/types/payment.ts';
 	import type { PaymentStatus } from '#lib/types/payment.ts';
-	import { auth } from '#lib/stores/auth.svelte.ts';
-	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
-	import { downloadRunNacha, recordRunOutside, voidRunNachaExport } from '#lib/api/payments.ts';
+	import {
+		downloadRunNacha,
+		recordRunOutside,
+		retryFailedRunPayments,
+		voidRunNachaExport
+	} from '#lib/api/payments.ts';
+	import {
+		isRunRetryOffered,
+		retrySkipReasonKey,
+		type RetryFailedResult
+	} from '#lib/types/runRetry.ts';
+	import {
+		BANK_FILE_DOWNLOAD_HIDDEN,
+		BANK_FILE_REGENERATE_HIDDEN,
+		BANK_FILE_REJECT_HIDDEN,
+		RUN_RECORD_HIDDEN,
+		isRunControlOffered
+	} from '#lib/types/runOutside.ts';
 	import {
 		isAllowed,
 		isOffered,
@@ -138,7 +153,29 @@
 		 *  answer with (`api/payments.py::run_action_refusals`, from the gates
 		 *  `/approve`, `/execute` and `/cancel` raise from). The footer offers a
 		 *  control from this and never restates its rule (issue #575). */
-		actions: { approve: ActionRefusal; execute: ActionRefusal; cancel: ActionRefusal };
+		actions: {
+			approve: ActionRefusal;
+			execute: ActionRefusal;
+			cancel: ActionRefusal;
+			/** `POST /runs/{id}/retry-failed`'s verdict
+			 *  (`payment_controls.run_retry_failed_refusal`). Optional so an older
+			 *  backend parses — and an absent verdict offers nothing. */
+			retry_failed?: ActionRefusal;
+			/** Paying the run outside FeohLedger — `POST /runs/{id}/record-outside`
+			 *  (`payment_controls.run_record_outside_refusal`), the first bank
+			 *  file and a regenerated one (`GET /runs/{id}/nacha`,
+			 *  `.run_nacha_export_refusal`) and "the bank rejected the file"
+			 *  (`POST /runs/{id}/nacha/void`, `.run_nacha_void_refusal`). Optional
+			 *  so an older backend parses; an absent verdict offers nothing. */
+			record_outside?: ActionRefusal;
+			nacha_export?: ActionRefusal;
+			nacha_regenerate?: ActionRefusal;
+			nacha_void?: ActionRefusal;
+		};
+		/** Failures `/retry-failed` would actually send again (retry-safe,
+		 *  latest attempt). Only used to word the armed note — the verdict, not
+		 *  this count, decides whether the control is offered. */
+		retryable_failures?: number;
 		payments: RunPayment[];
 	}
 
@@ -174,11 +211,13 @@
 	// also offered on a processor tenant's draft (Execute stays the primary
 	// there).
 	//
-	// Two permissions, deliberately split by the backend: the file and its void
-	// are `payment.execute` (uploading the file is what moves the money), the
-	// record is `payment.record_external`. Maker-checker and CFO sign-off apply
-	// server-side to all of them exactly as they do to Execute.
-	const canRecord = $derived(auth.can(PERM_PAYMENT_RECORD_EXTERNAL));
+	// Each control is offered from the server's verdict for THIS reader
+	// (`run.actions.{record_outside,nacha_export,nacha_regenerate,nacha_void}`,
+	// from the gates those endpoints raise from), never the run status, a
+	// permission or the CFO state restated here (issue #575). The verdicts carry
+	// the permission split (the file and its void are `payment.execute`, the
+	// record `payment.record_external`), maker-checker and CFO sign-off.
+	const showRecord = $derived(isRunControlOffered(run?.actions?.record_outside, RUN_RECORD_HIDDEN));
 	// Execute: only where FeohLedger sends payments (the server's execution
 	// mode), and only as the server's verdict for THIS reader allows — the
 	// run's creator used to get an enabled Execute that could only 403.
@@ -191,9 +230,71 @@
 			? run.actions.execute
 			: null
 	);
-	const showBankFile = $derived(
-		auth.can(PERM_PAYMENT_EXECUTE) && canDownloadBankFile(executionMode)
+	// Retry failed payments: on a run that finished with failures, only where
+	// FeohLedger sends payments (the endpoint shares /execute's processor
+	// pre-flight), and only as the server's verdict for THIS reader allows. It
+	// re-sends money, so it arms before it commits, like Execute.
+	const showRetry = $derived(
+		canDispatchPayments(executionMode) && isRunRetryOffered(run?.actions?.retry_failed)
 	);
+	let confirmRetry = $state(false);
+	let retrying = $state(false);
+	// What the last retry did, kept on screen after the reload: which payments
+	// went out again and, for the rest, why not — the reasons are the
+	// operator's next step (reconcile, unblock, rebuild the run).
+	let retryResult = $state<RetryFailedResult | null>(null);
+
+	async function retryFailed() {
+		if (!run || !isAllowed(run.actions?.retry_failed)) return;
+		retrying = true;
+		try {
+			const result = await retryFailedRunPayments(run.id);
+			retryResult = result;
+			toast(
+				m('paymentRuns.runDetail.retryResult', {
+					retried: result.payments_retried,
+					skipped: result.payments_skipped
+				}),
+				'success'
+			);
+			await load();
+			onchange?.();
+		} catch (err) {
+			toast(errorMessage(err, m('paymentRuns.runDetail.retryError')), 'error');
+			// The run may have moved under us (someone else retried, a webhook
+			// settled it): re-read so the control reflects the server again.
+			await load();
+		} finally {
+			retrying = false;
+			// Disarm whichever way it went, as Execute does.
+			confirmRetry = false;
+		}
+	}
+
+	function skipLabel(reason: string): string {
+		const key = retrySkipReasonKey(reason);
+		return key ? m(key) : reason;
+	}
+
+	const showDownload = $derived(
+		isRunControlOffered(run?.actions?.nacha_export, BANK_FILE_DOWNLOAD_HIDDEN)
+	);
+	const showRegenerate = $derived(
+		isRunControlOffered(run?.actions?.nacha_regenerate, BANK_FILE_REGENERATE_HIDDEN)
+	);
+	const showReject = $derived(
+		isRunControlOffered(run?.actions?.nacha_void, BANK_FILE_REJECT_HIDDEN)
+	);
+	// The bank-file panel: only on a confirmed record-only tenant (org
+	// configuration, read once from `/execution-mode` — not a row verdict),
+	// and only while one of its controls is offered.
+	const showBankFile = $derived(
+		canDownloadBankFile(executionMode) && (showDownload || showRegenerate || showReject)
+	);
+	// Presentation only: once the run's file is out, recording it is THE next
+	// step, so that control becomes the primary one. Whether anything is
+	// offered is the verdicts above.
+	const fileOut = $derived(run?.status === 'exported');
 
 	// The UTC date bounds the effective date (the server refuses one before
 	// it); the reader's LOCAL date bounds paid-on (the server allows a day of
@@ -214,7 +315,7 @@
 
 	async function downloadBankFile(regenerate: boolean) {
 		if (!run || !nachaDateOk) return;
-		if (regenerate ? run.status !== 'exported' : run.status !== 'draft') return;
+		if (!isAllowed(regenerate ? run.actions?.nacha_regenerate : run.actions?.nacha_export)) return;
 		downloadingNacha = true;
 		nachaError = '';
 		try {
@@ -250,7 +351,7 @@
 	}
 
 	async function rejectExport() {
-		if (!run || run.status !== 'exported') return;
+		if (!run || !isAllowed(run.actions?.nacha_void)) return;
 		const reason = rejectReason.trim();
 		if (!reason) return;
 		rejecting = true;
@@ -290,7 +391,7 @@
 	}
 
 	async function recordRunPaid() {
-		if (!run || (run.status !== 'draft' && run.status !== 'exported')) return;
+		if (!run || !isAllowed(run.actions?.record_outside)) return;
 		const reference = recordReference.trim();
 		if (!reference || !recordPaidOn) return;
 		recordingRun = true;
@@ -550,224 +651,264 @@
 					</tbody>
 				</table>
 
-				{#if run.status === 'draft' || run.status === 'exported'}
-					{@const pendingCfo = run.requires_cfo_approval && !run.cfo_approved_at}
-					{@const exported = run.status === 'exported'}
-					{#if showBankFile}
-						<section class="outside-panel" aria-labelledby="run-nacha-heading" data-testid="run-nacha-panel">
-							<div class="panel-title-row">
-								<h3 id="run-nacha-heading">{m('paymentRuns.runDetail.nachaHeading')}</h3>
-								<HelpTip term="nacha-file" />
+				{#if showBankFile}
+					<section class="outside-panel" aria-labelledby="run-nacha-heading" data-testid="run-nacha-panel">
+						<div class="panel-title-row">
+							<h3 id="run-nacha-heading">{m('paymentRuns.runDetail.nachaHeading')}</h3>
+							<HelpTip term="nacha-file" />
+						</div>
+						<p class="panel-hint">{m('paymentRuns.runDetail.nachaHint')}</p>
+						{#if showDownload}
+							<p class="panel-hint">{m('paymentRuns.runDetail.nachaClaimNote')}</p>
+						{/if}
+						{#if showDownload || confirmRegenerate}
+							<div class="panel-fields">
+								<label>
+									<span>{m('paymentRuns.runDetail.nachaEffectiveDate')}</span>
+									<input
+										type="date"
+										bind:value={nachaEffectiveDate}
+										min={todayUtc}
+										required
+										aria-invalid={!nachaDateOk}
+										aria-describedby={nachaDateOk ? undefined : 'run-nacha-date-error'}
+										data-testid="nacha-effective-date"
+									/>
+								</label>
+								<label>
+									<span>{m('paymentRuns.runDetail.nachaSecCode')}</span>
+									<select bind:value={nachaSecCode} data-testid="nacha-sec-code">
+										{#each NACHA_SEC_CODES as code (code)}
+											<option value={code}>
+												{code === 'CCD'
+													? m('paymentRuns.runDetail.nachaSecCcd')
+													: m('paymentRuns.runDetail.nachaSecPpd')}
+											</option>
+										{/each}
+									</select>
+								</label>
 							</div>
-							<p class="panel-hint">{m('paymentRuns.runDetail.nachaHint')}</p>
-							{#if !exported}
-								<p class="panel-hint">{m('paymentRuns.runDetail.nachaClaimNote')}</p>
-							{/if}
-							{#if !exported || confirmRegenerate}
-								<div class="panel-fields">
-									<label>
-										<span>{m('paymentRuns.runDetail.nachaEffectiveDate')}</span>
-										<input
-											type="date"
-											bind:value={nachaEffectiveDate}
-											min={todayUtc}
-											required
-											aria-invalid={!nachaDateOk}
-											aria-describedby={nachaDateOk ? undefined : 'run-nacha-date-error'}
-											data-testid="nacha-effective-date"
-										/>
-									</label>
-									<label>
-										<span>{m('paymentRuns.runDetail.nachaSecCode')}</span>
-										<select bind:value={nachaSecCode} data-testid="nacha-sec-code">
-											{#each NACHA_SEC_CODES as code (code)}
-												<option value={code}>
-													{code === 'CCD'
-														? m('paymentRuns.runDetail.nachaSecCcd')
-														: m('paymentRuns.runDetail.nachaSecPpd')}
-												</option>
-											{/each}
-										</select>
-									</label>
-								</div>
-								{#if !nachaDateOk}
-									<p class="panel-hint warn" id="run-nacha-date-error">
-										{m('paymentRuns.runDetail.nachaNotBusinessDay')}
-									</p>
-								{/if}
-							{/if}
-							{#if confirmRegenerate}
-								<!-- Announced the moment Regenerate arms: the next click
-								     produces a SECOND file for money already on its way. -->
-								<p class="panel-error" role="alert" data-testid="nacha-regenerate-warning">
-									{m('paymentRuns.runDetail.nachaRegenerateWarning')}
+							{#if !nachaDateOk}
+								<p class="panel-hint warn" id="run-nacha-date-error">
+									{m('paymentRuns.runDetail.nachaNotBusinessDay')}
 								</p>
 							{/if}
-							{#if nachaError}
-								<p class="panel-error" role="alert" data-testid="nacha-error">{nachaError}</p>
-							{/if}
-							{#if rejectOpen}
-								<form class="reject-form" onsubmit={(e) => { e.preventDefault(); rejectExport(); }}>
-									<p class="panel-hint">{m('paymentRuns.runDetail.nachaRejectIntro')}</p>
-									<label>
-										<span>{m('paymentRuns.runDetail.nachaRejectReason')}</span>
-										<input
-											type="text"
-											bind:value={rejectReason}
-											maxlength="500"
-											required
-											data-testid="nacha-reject-reason"
-										/>
-									</label>
-									{#if rejectError}
-										<p class="panel-error" role="alert" data-testid="nacha-reject-error">{rejectError}</p>
-									{/if}
-									<div class="panel-actions">
-										<button type="button" class="btn-cancel" onclick={() => (rejectOpen = false)}>
-											{m('common.cancel')}
-										</button>
-										<button
-											type="submit"
-											class="btn-discard armed"
-											disabled={rejecting || !rejectReason.trim()}
-											data-testid="nacha-reject-confirm"
-										>
-											{rejecting
-												? m('paymentRuns.runDetail.nachaRejecting')
-												: m('paymentRuns.runDetail.nachaRejectConfirm')}
-										</button>
-									</div>
-								</form>
-							{:else}
+						{/if}
+						{#if confirmRegenerate}
+							<!-- Announced the moment Regenerate arms: the next click
+							     produces a SECOND file for money already on its way. -->
+							<p class="panel-error" role="alert" data-testid="nacha-regenerate-warning">
+								{m('paymentRuns.runDetail.nachaRegenerateWarning')}
+							</p>
+						{/if}
+						{#if nachaError}
+							<p class="panel-error" role="alert" data-testid="nacha-error">{nachaError}</p>
+						{/if}
+						{#if rejectOpen}
+							<form class="reject-form" onsubmit={(e) => { e.preventDefault(); rejectExport(); }}>
+								<p class="panel-hint">{m('paymentRuns.runDetail.nachaRejectIntro')}</p>
+								<label>
+									<span>{m('paymentRuns.runDetail.nachaRejectReason')}</span>
+									<input
+										type="text"
+										bind:value={rejectReason}
+										maxlength="500"
+										required
+										data-testid="nacha-reject-reason"
+									/>
+								</label>
+								{#if rejectError}
+									<p class="panel-error" role="alert" data-testid="nacha-reject-error">{rejectError}</p>
+								{/if}
 								<div class="panel-actions">
-									{#if !exported}
+									<button type="button" class="btn-cancel" onclick={() => (rejectOpen = false)}>
+										{m('common.cancel')}
+									</button>
+									<button
+										type="submit"
+										class="btn-discard armed"
+										disabled={rejecting || !rejectReason.trim()}
+										data-testid="nacha-reject-confirm"
+									>
+										{rejecting
+											? m('paymentRuns.runDetail.nachaRejecting')
+											: m('paymentRuns.runDetail.nachaRejectConfirm')}
+									</button>
+								</div>
+							</form>
+						{:else}
+							<div class="panel-actions">
+								{#if showDownload}
+									<button
+										type="button"
+										class="btn-secondary"
+										disabled={downloadingNacha ||
+											!isAllowed(run.actions?.nacha_export) ||
+											!nachaDateOk}
+										aria-describedby={run.actions?.nacha_export
+											? 'run-nacha-export-refusal'
+											: undefined}
+										onclick={() => downloadBankFile(false)}
+									>
+										{downloadingNacha
+											? m('paymentRuns.runDetail.nachaDownloading')
+											: m('paymentRuns.runDetail.nachaDownload')}
+									</button>
+								{/if}
+								{#if showReject}
+									<button
+										type="button"
+										class="btn-discard"
+										disabled={downloadingNacha || !isAllowed(run.actions?.nacha_void)}
+										onclick={openReject}
+									>
+										{m('paymentRuns.runDetail.nachaReject')}
+									</button>
+								{/if}
+								{#if showRegenerate}
+									{#if confirmRegenerate}
 										<button
 											type="button"
-											class="btn-secondary"
-											disabled={downloadingNacha || pendingCfo || !nachaDateOk}
-											title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
-											onclick={() => downloadBankFile(false)}
+											class="btn-discard armed"
+											disabled={downloadingNacha ||
+												!isAllowed(run.actions?.nacha_regenerate) ||
+												!nachaDateOk}
+											onclick={() => downloadBankFile(true)}
 										>
 											{downloadingNacha
 												? m('paymentRuns.runDetail.nachaDownloading')
-												: m('paymentRuns.runDetail.nachaDownload')}
+												: m('paymentRuns.runDetail.nachaConfirmRegenerate')}
 										</button>
 									{:else}
 										<button
 											type="button"
-											class="btn-discard"
-											disabled={downloadingNacha}
-											onclick={openReject}
+											class="btn-secondary"
+											disabled={downloadingNacha || !isAllowed(run.actions?.nacha_regenerate)}
+											aria-describedby={run.actions?.nacha_regenerate
+												? 'run-nacha-regenerate-refusal'
+												: undefined}
+											onclick={() => {
+												recordOpen = false;
+												confirmRegenerate = true;
+											}}
 										>
-											{m('paymentRuns.runDetail.nachaReject')}
+											{m('paymentRuns.runDetail.nachaRegenerate')}
 										</button>
-										{#if confirmRegenerate}
-											<button
-												type="button"
-												class="btn-discard armed"
-												disabled={downloadingNacha || !nachaDateOk}
-												onclick={() => downloadBankFile(true)}
-											>
-												{downloadingNacha
-													? m('paymentRuns.runDetail.nachaDownloading')
-													: m('paymentRuns.runDetail.nachaConfirmRegenerate')}
-											</button>
-										{:else}
-											<button
-												type="button"
-												class="btn-secondary"
-												disabled={downloadingNacha}
-												onclick={() => {
-													recordOpen = false;
-													confirmRegenerate = true;
-												}}
-											>
-												{m('paymentRuns.runDetail.nachaRegenerate')}
-											</button>
-										{/if}
 									{/if}
-								</div>
-							{/if}
-						</section>
-					{/if}
-
-					{#if canRecord}
-						<section class="outside-panel" aria-labelledby="run-record-heading" data-testid="run-record-panel">
-							<div class="panel-title-row">
-								<h3 id="run-record-heading">{m('paymentRuns.runDetail.recordHeading')}</h3>
-								<HelpTip term="record-only" />
+								{/if}
 							</div>
-							{#if recordOpen}
-								<p class="panel-hint">{m('paymentRuns.runDetail.recordIntro')}</p>
-								<form onsubmit={(e) => { e.preventDefault(); recordRunPaid(); }}>
-									<div class="panel-fields">
-										<label>
-											<span>{m('paymentRuns.runDetail.recordReference')}</span>
-											<input
-												type="text"
-												bind:value={recordReference}
-												maxlength="255"
-												required
-												aria-describedby="run-record-reference-hint"
-												data-testid="run-record-reference"
-											/>
-										</label>
-										<label>
-											<span>{m('paymentRuns.runDetail.recordPaidOn')}</span>
-											<input
-												type="date"
-												bind:value={recordPaidOn}
-												max={todayLocal}
-												required
-												data-testid="run-record-paid-on"
-											/>
-										</label>
-									</div>
-									<p class="panel-hint" id="run-record-reference-hint">
-										{m('paymentRuns.runDetail.recordReferenceHint')}
-									</p>
-									{#if recordError}
-										<p class="panel-error" role="alert" data-testid="run-record-error">{recordError}</p>
-									{/if}
-									<div class="panel-actions">
-										<button type="button" class="btn-cancel" onclick={() => (recordOpen = false)}>
-											{m('common.cancel')}
-										</button>
-										<button
-											type="submit"
-											class="btn-approve"
-											disabled={recordingRun ||
-												pendingCfo ||
-												!recordReference.trim() ||
-												!recordPaidOn ||
-												recordPaidOn > todayLocal}
-											title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
-											data-testid="run-record-confirm"
-										>
-											{recordingRun
-												? m('paymentRuns.runDetail.recordSubmitting')
-												: m('paymentRuns.runDetail.recordSubmit', {
-														amount: fmt(run.total_amount, run.currency)
-													})}
-										</button>
-									</div>
-								</form>
-							{:else}
+							<!-- Why a control above is disabled, in the server's words
+							     (localized from its code): a colleague must export it,
+							     the CFO has not signed, the bank file is not set up. -->
+							{#if showDownload && run.actions?.nacha_export}
+								<p
+									class="panel-hint warn"
+									id="run-nacha-export-refusal"
+									data-testid="run-nacha-export-refusal"
+								>
+									{refusalText(run.actions.nacha_export, m)}
+								</p>
+							{/if}
+							{#if showRegenerate && run.actions?.nacha_regenerate}
+								<p
+									class="panel-hint warn"
+									id="run-nacha-regenerate-refusal"
+									data-testid="run-nacha-regenerate-refusal"
+								>
+									{refusalText(run.actions.nacha_regenerate, m)}
+								</p>
+							{/if}
+						{/if}
+					</section>
+				{/if}
+
+				{#if showRecord}
+					<section class="outside-panel" aria-labelledby="run-record-heading" data-testid="run-record-panel">
+						<div class="panel-title-row">
+							<h3 id="run-record-heading">{m('paymentRuns.runDetail.recordHeading')}</h3>
+							<HelpTip term="record-only" />
+						</div>
+						{#if recordOpen}
+							<p class="panel-hint">{m('paymentRuns.runDetail.recordIntro')}</p>
+							<form onsubmit={(e) => { e.preventDefault(); recordRunPaid(); }}>
+								<div class="panel-fields">
+									<label>
+										<span>{m('paymentRuns.runDetail.recordReference')}</span>
+										<input
+											type="text"
+											bind:value={recordReference}
+											maxlength="255"
+											required
+											aria-describedby="run-record-reference-hint"
+											data-testid="run-record-reference"
+										/>
+									</label>
+									<label>
+										<span>{m('paymentRuns.runDetail.recordPaidOn')}</span>
+										<input
+											type="date"
+											bind:value={recordPaidOn}
+											max={todayLocal}
+											required
+											data-testid="run-record-paid-on"
+										/>
+									</label>
+								</div>
+								<p class="panel-hint" id="run-record-reference-hint">
+									{m('paymentRuns.runDetail.recordReferenceHint')}
+								</p>
+								{#if recordError}
+									<p class="panel-error" role="alert" data-testid="run-record-error">{recordError}</p>
+								{/if}
 								<div class="panel-actions">
-									<!-- Once the file is out, recording the run is THE next step,
-									     so it becomes the primary control. -->
+									<button type="button" class="btn-cancel" onclick={() => (recordOpen = false)}>
+										{m('common.cancel')}
+									</button>
 									<button
-										type="button"
-										class={exported ? 'btn-approve' : 'btn-secondary'}
-										disabled={executing || cancelling || downloadingNacha || rejecting}
-										onclick={openRecord}
+										type="submit"
+										class="btn-approve"
+										disabled={recordingRun ||
+											!isAllowed(run.actions?.record_outside) ||
+											!recordReference.trim() ||
+											!recordPaidOn ||
+											recordPaidOn > todayLocal}
+										data-testid="run-record-confirm"
 									>
-										{m('paymentRuns.runDetail.recordOpen')}
+										{recordingRun
+											? m('paymentRuns.runDetail.recordSubmitting')
+											: m('paymentRuns.runDetail.recordSubmit', {
+													amount: fmt(run.total_amount, run.currency)
+												})}
 									</button>
 								</div>
+							</form>
+						{:else}
+							<div class="panel-actions">
+								<!-- Once the file is out, recording the run is THE next step,
+								     so it becomes the primary control. -->
+								<button
+									type="button"
+									class={fileOut ? 'btn-approve' : 'btn-secondary'}
+									disabled={executing ||
+										cancelling ||
+										downloadingNacha ||
+										rejecting ||
+										!isAllowed(run.actions?.record_outside)}
+									aria-describedby={run.actions?.record_outside
+										? 'run-record-refusal'
+										: undefined}
+									onclick={openRecord}
+								>
+									{m('paymentRuns.runDetail.recordOpen')}
+								</button>
+							</div>
+							{#if run.actions?.record_outside}
+								<p class="panel-hint warn" id="run-record-refusal" data-testid="run-record-refusal">
+									{refusalText(run.actions.record_outside, m)}
+								</p>
 							{/if}
-						</section>
-					{/if}
+						{/if}
+					</section>
 				{/if}
 			{/if}
 		</div>
@@ -912,9 +1053,66 @@
 					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
 				</div>
 			{:else}
+				{#if retryResult}
+					<div class="footer-note" role="status" data-testid="run-retry-result">
+						<p>
+							{m('paymentRuns.runDetail.retryResult', {
+								retried: retryResult.payments_retried,
+								skipped: retryResult.payments_skipped
+							})}
+						</p>
+						{#if retryResult.skip_reasons.length > 0}
+							<p>{m('paymentRuns.runDetail.retrySkippedHeading')}</p>
+							<ul class="retry-skips">
+								{#each retryResult.skip_reasons as reason (reason)}
+									<li>{skipLabel(reason)}</li>
+								{/each}
+							</ul>
+						{/if}
+					</div>
+				{/if}
+				{#if showRetry && confirmRetry}
+					<!-- Announced the moment Retry arms: the next click sends money. -->
+					<p class="footer-note armed-note" role="alert" data-testid="retry-armed-note">
+						{m('paymentRuns.runDetail.retryArmedNote', { count: run?.retryable_failures ?? 0 })}
+					</p>
+				{/if}
 				<div class="actions">
 					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
+					<!-- The server's verdict (`actions.retry_failed`), never a status
+					     or role check here. Disabled with the reason when the reader
+					     can act on it (a colleague must retry a run this reader
+					     created; CFO sign-off is pending; every failure must be
+					     reconciled first); hidden for a role refusal or a run that did
+					     not finish with failures. -->
+					{#if showRetry}
+						{#if confirmRetry}
+							<button
+								class="btn-execute armed"
+								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
+								onclick={retryFailed}
+							>
+								{retrying
+									? m('paymentRuns.runDetail.retrying')
+									: m('paymentRuns.runDetail.confirmRetryFailed')}
+							</button>
+						{:else}
+							<button
+								class="btn-execute"
+								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
+								aria-describedby={run?.actions?.retry_failed ? 'run-retry-refusal' : undefined}
+								onclick={() => (confirmRetry = true)}
+							>
+								{m('paymentRuns.runDetail.retryFailed')}
+							</button>
+						{/if}
+					{/if}
 				</div>
+				{#if showRetry && run?.actions?.retry_failed}
+					<p class="footer-note" id="run-retry-refusal" data-testid="run-retry-refusal">
+						{refusalText(run.actions.retry_failed, m)}
+					</p>
+				{/if}
 			{/if}
 		</footer>
 	</div>
@@ -1091,6 +1289,15 @@
 		margin: 0;
 		font-size: 0.8rem;
 		color: var(--text-muted);
+	}
+
+	.footer-note p {
+		margin: 0;
+	}
+
+	.retry-skips {
+		margin: 4px 0 0;
+		padding-left: 18px;
 	}
 
 	.actions {

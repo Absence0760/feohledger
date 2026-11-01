@@ -536,7 +536,10 @@ wait is now bounded: `_lock_payment_invoice` takes the lock through
 `FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS` (default `5000`; `0` = wait forever).
 The direct card mint (`POST /api/cards/generate`) takes the same lock mode under
 the same bound, so a mint and a dispatch on one invoice run one after the other
-(`virtual-cards.md` § The direct mint locks before it checks).
+(`virtual-cards.md` § The direct mint locks before it checks). So does run
+creation (`POST /api/payments/runs` and the copilot's draft-run), through
+`payment_runs.lock_run_invoices`: it locks every invoice in the run, in id
+order, before any check reads one (§ The ERP is a third rail).
 
 - **The bound is scoped to the one locking statement.** It runs in a SAVEPOINT,
   sets `lock_timeout` with `SET LOCAL` semantics and restores the previous value
@@ -555,7 +558,9 @@ the same bound, so a mint and a dispatch on one invoice run one after the other
   - `POST {id}/void`, `POST {id}/settlement/accept` and
     `POST {id}/compliance/release` answer `409` with a detail starting
     `invoice_locked:` and change nothing (the release leaves the payment
-    `pending_compliance`, not `failed`, so the operator just retries).
+    `pending_compliance`, not `failed`, so the operator just retries);
+  - run creation answers the same `409 invoice_locked:` with no run and no
+    payment booked.
 - **What it does not bound.** The *other* invoice writers (send-to-erp,
   approve, `PATCH`, `payment_erp_sync`, `POST /api/payments`) still wait out a
   dispatch holding the lock across a processor call, for as long as that call
@@ -630,6 +635,80 @@ which only some processors honour.
 Pinned by `tests/test_payment_dispatch_db_error.py`, which injects a real
 Postgres error on the dispatch session after the processor call.
 
+### A dispatch attempt is marked, durably, before it starts
+
+The recovery above needs a live process. When the worker dies after
+`adapter.create_payment` returns and before the per-payment commit, nothing
+the attempt wrote survives: the row is still `pending` on an `executing` run,
+with no `provider_payment_id`. `/resume` re-sends it on the same
+`correlation_id`, which the processor dedupes. But if the resume refuses it
+before its own adapter call (`invoice_locked`, `invoice_not_payable`,
+`invoice_blocked:`, any pre-adapter reason), the row used to become `failed`
+with a retry-safe reason, and **Retry failed payments** sent it under a fresh
+idempotency key: a second order for an invoice the crashed pass may already
+have paid.
+
+`Payment.dispatch_attempted_at` (migration 0124) closes it:
+
+- **Stamped and committed before every attempt.** `_dispatch_payment_guarded`
+  (every dispatch path goes through it) writes the stamp and commits it
+  before the invoice lock, the gates and the processor call
+  (`_mark_dispatch_attempt`). A commit is the only durable record that
+  survives the process dying. A second connection can't write the row while
+  this transaction holds its `FOR UPDATE` lock, and a savepoint isn't durable.
+  At that point the attempt holds only the payment's row lock and has written
+  nothing else, so the commit gives nothing away. It does release the row lock,
+  so the row is re-locked and must still read the expected status **and carry
+  this attempt's stamp**. A concurrent dispatcher that got in between has
+  re-stamped it, so exactly one of them goes on to send. Each stamp is forced
+  past the one it replaces, so the comparison holds even when two hosts'
+  clocks disagree.
+- **Cleared in the transaction that records the outcome**, but only when
+  the row had no stamp when the attempt began. Then no earlier pass can have
+  reached the processor without leaving one, and the attempt's own reason and
+  handle tell the whole story, classified exactly as before. An ordinary
+  pre-adapter refusal is therefore still retry-safe.
+- **Kept for good when the row was already stamped.** The stamp then means an
+  earlier pass's outcome was never recorded. `classify_payment_failure`
+  answers IN_DOUBT for a stamped row whatever its reason, so `/retry-failed`
+  skips it (`needs_reconciliation`), `retryable_failures` leaves it out, and
+  a run with nothing else to retry is refused with `payment_run_nothing_to_retry`.
+  The run dialog therefore never offers the retry for it.
+- **A stamped row that leaves the live-payment slot is flagged.** When such a
+  row ends `failed` or `cancelled`, the payment-blocking
+  `payment_reconciliation` exception is opened, because those statuses free
+  the slot and a fresh run would otherwise pay the invoice again. This is one
+  rule (`_flag_if_dispatch_in_doubt`), applied at every writer that can get
+  there: the dispatch outcome, the run loop's `invoice_locked` refusal, and
+  `/compliance/dismiss`. The dismiss case covers a resume that lands on a
+  compliance hold. A human confirms with the processor and voids or re-pays.
+- **`invoice_locked` on `/compliance/release` commits before its 409**, so
+  the stamp it just cleared is not left behind by a rollback.
+
+**Accepted costs.** One extra commit per payment dispatched. Some rows get
+stamped and are reported in doubt even though nothing was ever sent:
+
+- a pass that crashed after stamping but before reaching the processor;
+- two dispatchers racing inside the stamp window, where the loser's stamp
+  makes the winner's row look previously attempted. The same applies when a
+  `/compliance/dismiss` wins the window against a `/compliance/release`: the
+  release backs off without clearing its stamp, and the dismissal flags the
+  row;
+- the migration's backfill.
+
+Each costs a human check. Missing one costs a second payment.
+
+**Backfill.** Migration 0124 stamps every `pending` payment on an `executing`
+run, because that is exactly what a crashed pass leaves behind, and nothing
+records which of them it reached. It stamps nothing else.
+
+Pinned by `tests/test_payment_dispatch_marker.py`. It kills the worker with a
+`BaseException` right after the mock processor accepts the order, then resumes
+it under a not-payable invoice and under a held invoice lock, and checks that
+`/retry-failed`, the run verdict and a fresh run all refuse. It also covers
+the dismissal flag, a release refused on the invoice lock, and a dispatcher
+losing the claim window.
+
 ### Why a payment failed, and retrying it
 
 `Payment.failure_reason` is written on every failure path — compliance refusal,
@@ -653,12 +732,32 @@ Now:
 
 **`/retry-failed` in one paragraph.** Accepted only on a `partial` / `failed`
 run (`draft` → use `/execute`; `executing` → use `/resume`). Same
-`payment.execute` permission, the same maker-checker `check_run_segregation`,
-and the same CFO-threshold gate as `/execute` — skipping any of those would
-make retry a way around all three. It books a second attempt for the failed
-payments it judges safe, then re-drives the run through the same
-`_dispatch_run_payments` loop, so anything already `completed` / `submitted` /
-`processing` / `pending_compliance` is never re-sent to the processor.
+`payment.execute` permission, the same maker-checker gate, and the same
+CFO-threshold gate as `/execute` — skipping any of those would make retry a way
+around all three. It books a second attempt for the failed payments it judges
+safe, then re-drives the run through the same `_dispatch_run_payments` loop, so
+anything already `completed` / `submitted` / `processing` /
+`pending_compliance` is never re-sent to the processor.
+
+**Every up-front refusal is one gate, and the run dialog reads it.**
+`payment_controls.run_retry_failed_refusal` decides, in order: the run's
+DERIVED status is not `partial` / `failed` (409 `payment_run_not_retryable`);
+the caller created the run (403 `payment_run_segregation`); the run is still
+awaiting CFO sign-off (403 `payment_run_awaiting_cfo`); none of its active
+failures is retry-safe (409 `payment_run_nothing_to_retry`). The endpoint
+raises from it, and `GET /runs/{id}` ships the same answer as
+`actions.retry_failed` (beside `approve` / `execute` / `cancel`), so the web run
+dialog's **Retry failed payments** control is offered exactly when the POST
+would accept it (`tests/test_payment_action_verdicts.py` asks both sides for
+every role × run state). The last refusal is new: a run whose every failure is
+in doubt used to be accepted, claimed (`→ executing`), audited
+`payment_run.retried` and dispatched with nothing to send, answering 200 with
+`payments_retried: 0`. Now nothing is claimed or written, and the reader is told
+to reconcile each payment with the processor. A run with at least one safe
+failure is still accepted, and its in-doubt ones are skipped as
+`needs_reconciliation` exactly as before. Processor resolution (record-only
+tenant, unsupported provider) stays a separate pre-flight the page reads from
+`GET /payments/execution-mode`, as for Execute.
 
 #### A retry books a NEW payment; it never re-arms the old one
 
@@ -703,6 +802,7 @@ for a human to void or reconcile — when any of these hold:
 | `adapter_error:*` (card leg) | The card provider may have minted a card we never recorded. |
 | `db_error_after_processor_call:*` | The processor answered, then a database error aborted the dispatch transaction. The reply's handle is restored onto the row (§ A database error mid-dispatch). |
 | `dispatch_db_error:*` | The same abort before the processor call. This pass sent nothing, but the row may be a `/resume` of an earlier pass that did and crashed before its commit. |
+| `dispatch_attempted_at` still set | An earlier dispatch pass may have reached the processor and died before recording it; the reason on the row is from a later pass (§ A dispatch attempt is marked, durably, before it starts). Outranks every reason, like `provider_payment_id`. |
 | blank / unrecognised reason | Fail-closed: a future adapter or a legacy row is not waved through. |
 
 Everything else — our own `compliance_refusal:` / `compliance_dismissed` /
@@ -774,8 +874,9 @@ re-sent.
   a claim on its invoice.
 
 `retryable_failures` on the run detail counts only failures the endpoint will
-actually re-attempt, so the retry button can never offer an action that could
-only be skipped.
+actually re-attempt (`api/payments.count_retryable_failures`), and the
+endpoint's `payment_run_nothing_to_retry` refusal reads the same count, so the
+retry control can never offer an action that could only be skipped.
 
 **Idempotency** comes from the run claim: the row is locked and flipped to
 `executing` before anything is booked, so a double-click blocks on the lock and
@@ -887,7 +988,32 @@ ERP the supported order is push first, then pay: a payment against a
 `posted_in_erp` invoice never meets this gate. See `erp-integration.md`
 § An invoice FeohLedger is already paying refuses the push, and decisions §309.
 
-**Tests:** `tests/test_erp_export_blocking_exceptions.py`.
+**The run and the push serialise on the invoice row.** `/send-to-erp` holds the
+invoice `FOR UPDATE` across its gate and its `approved → sending_to_erp`
+transition. The run builder used to read its invoices with a plain SELECT, so a
+run staged in that window saw `approved` and no live payment and booked a
+`pending` payment beside the push (its payment insert's `FOR KEY SHARE` only
+waited for the send to commit). It now locks the run's invoices
+`FOR NO KEY UPDATE`, in id order, under the bounded wait above
+(`payment_runs.lock_run_invoices`) before any check, and every check after is a
+fresh statement:
+
+- send first: the run waits, then sees `sending_to_erp` and 409s
+  `not approved for payment`;
+- run first: the send waits, then its gate sees the live payment and 409s
+  `payment_blocks_erp_export`.
+
+The ERP side needs no extra predicate in the run builder: an in-flight or
+finished push has already moved the invoice off `PAYABLE_INVOICE_STATUSES` in
+the transaction that passed its gate. The same lock serialises two runs over one
+invoice (the second is refused on the first's live payment, not left to the
+unique index) and a run with a card mint or a dispatch. A copilot replay that
+waited on the lock re-checks `plan_id` after it, so it still returns the first
+request's run instead of 409ing on that run's payments.
+
+**Tests:** `tests/test_erp_export_blocking_exceptions.py` (the concurrency
+cases drive a real `/send-to-erp` and `POST /api/payments/runs` in parallel and
+wait on `pg_stat_activity`, not a sleep).
 
 ### Voiding a settled payment reverses the discount it captured
 
@@ -1096,7 +1222,9 @@ slot, and the void is its only undo.
 
 The History tab offers Void exactly when the row's `void_refusal` is `null` —
 the same function, so the button and the endpoint cannot disagree
-(`docs/decisions.md` §305; `tests/test_payment_action_verdicts.py`).
+(`docs/decisions.md` §305; `tests/test_payment_action_verdicts.py`). The row's
+**Accept settlement** works the same way (`accept_settlement_refusal`, from
+`payment_controls.settlement_accept_refusal` — see § Settlement verification).
 
 ### A void re-flags the invoice if the vendor's bank details changed since
 
@@ -1348,7 +1476,16 @@ audit row carries the evidence.**
 **Both exits are reachable in the app**, not only over the API. `/payments` →
 History renders what the rail settled beside what AP authorized (a `Settled …`
 sub-line under the amount — the hold was previously invisible), and offers an
-**Accept settlement** row action gated on `payment.execute`. Its confirm dialog
+**Accept settlement** row action exactly when the row's
+`accept_settlement_refusal` is `null`. That verdict is `payment.execute` then
+`payment_controls.settlement_accept_refusal`, the one gate
+`/settlement/accept` raises from: the payment is `completed`
+(`payment_settlement_not_completed`), the recorded settlement does NOT cover the
+invoice (`payment_settlement_covered` — an unreported figure reads covered, so a
+payment no rail reported on is never offered it), and the invoice is still held
+at `payment_scheduled` (`payment_settlement_not_held`). The row used to offer
+the action wherever any figure was reported, and the dialog then fetched the
+invoice to discover whether anything was held. Its confirm dialog
 shows both figures, requires the `reason`, states that accepting declares the
 shortfall final and releases the invoice to `paid`, and — because only the
 server can decide coverage — reads the invoice's own status first so an invoice
@@ -1493,8 +1630,11 @@ pnpm stripe:up     # stripe/stripe-mock on :12111
 pnpm stripe:down   # stop it
 ```
 
-`FEOH_STRIPE_API_BASE` (empty = live Stripe) repoints the adapter's API base; a
-per-config `api_base` overrides it. stripe-mock returns canned fixtures from
+`FEOH_STRIPE_API_BASE` (empty = live Stripe) repoints the adapter's API base. It
+is operator config only: an `api_base` key in the org's `settings.payments` block
+is ignored, because any tenant admin writes that block and the sealed secret key
+rides on every request — honouring it sent the key to whatever host the admin
+named. stripe-mock returns canned fixtures from
 Stripe's OpenAPI spec — it validates request shape + response parsing
 (`create_payment`, `get_payment_status`, `test_connection`), not stateful flows
 or real webhooks. The seam is locked by `backend/tests/test_stripe_api_base.py`
@@ -1886,14 +2026,16 @@ exception row, no notification, no persisted marker.
 
 Two things changed:
 
-- **Every failed leg opens a de-duped `erp_reconciliation` exception** naming
-  the payment, the run, and the retry endpoint, so the strand lands in the queue
-  an AP manager already works. `erp_reconciliation` is the type
-  `api/erp_webhook` already raises for "the ERP and our ledger disagree and a
-  human must reconcile" — the same situation, so no new taxonomy entry. The
-  description is PII-free (identifiers, the failure's exception *class*, the
-  invoice's current status) — never the raw error message, which can embed
-  partial account data.
+- **Every failed leg opens a de-duped `erp_reconciliation` exception**, so the
+  strand lands in the queue an AP manager already works. `erp_reconciliation` is
+  the type `api/erp_webhook` already raises for "the ERP and our ledger disagree
+  and a human must reconcile" — the same situation, so no new taxonomy entry.
+  Its description is the catalogue sentence `exception.erp_sync_back_failed`
+  (what happened, and to use **Retry ERP sync** on the run in Payments); the
+  payment and run ids, the failure's exception *class* and the invoice's status
+  ride `erp_report` (`kind: payment_sync_back_failed`) — never the raw error
+  message, which can embed partial account data
+  ([invoice-warnings.md](invoice-warnings.md) § ERP reconciliation sentences).
 - **Each leg commits on its own.** The loop used to run every payment inside one
   transaction with a single commit at the end; a leg that failed with a DB error
   poisoned that transaction, so the final commit raised, the outer handler
@@ -1912,8 +2054,12 @@ money — it only reports money that already moved. 409 when the run has no
 settled payment to sync.
 
 **It is reachable in the app**, not only over the API: `/payments` → Runs
-carries a **Retry ERP sync** row action gated on `payment.execute` (hidden on a
-`draft` / `cancelled` run, which can hold no settled payment), whose confirm
+carries a **Retry ERP sync** row action offered exactly when the row's
+`actions.sync_erp` is `null` — `payment.execute` then
+`payment_controls.run_sync_erp_refusal`, the gate the endpoint raises from (409
+`payment_run_nothing_settled` when the run has no settled ACTIVE payment; the
+page used to restate "not `draft` / `cancelled`", which offered it on a `failed`
+or `executing` run that could only 409), whose confirm
 names the run and says it moves no money, and whose result renders the real
 returned counts — leading with `transitioned`, with an explicit "nothing to
 recover" state when it is zero.
@@ -2095,6 +2241,8 @@ dispatch step:
   re-staging all refuse — so a second file, a cancel-and-restage, or a later
   switch to processor mode can't pay the same suppliers again. A second file for
   an `exported` run needs `regenerate=true` (else 409 `nacha_already_exported`)
+  — and `regenerate=true` on a run with no exported file is refused (409
+  `nacha_nothing_to_regenerate`) rather than quietly exporting a first one —
   and carries the next file-ID modifier (A, B, C… — counted on
   `payment_runs.nacha_export_count`, migration 0106), so the bank's
   duplicate-file check can tell them apart. If the bank rejected the file,
@@ -2123,6 +2271,16 @@ dispatch step:
   Anything else refuses the whole file naming the invoice — never the bank data.
 - Each export writes `payment_run.nacha_exported` with counts, total, SEC code,
   effective date, file-ID modifier and the file's SHA-256 — not the file.
+- **The run-level refusals are one gate**, `payment_controls.run_nacha_export_refusal`,
+  in order: the run's state (`nacha_already_exported`,
+  `nacha_nothing_to_regenerate`, `nacha_run_not_exportable`), record-only,
+  configured, maker-checker (`payment_run_segregation`, `params.step:
+  "nacha_export"`), CFO sign-off, something pending (`nacha_nothing_to_export`). Every
+  one answers with the coded detail. `GET /runs/{id}` ships the same answers as
+  `actions.nacha_export` / `actions.nacha_regenerate` (and the void's
+  `payment_controls.run_nacha_void_refusal` as `actions.nacha_void`), which the
+  run dialog's bank-file panel reads. The per-payment checks above stay in the
+  endpoint, so a `null` verdict can still meet a refusal that names an invoice.
 
 Once the bank has taken the file, `POST /api/payments/runs/{id}/record-outside`
 `{reference, paid_on}` records every pending payment of the `exported` (or
@@ -2134,7 +2292,12 @@ leaves the process at once and a rollback can't recall it), runs the
 per-invoice gates, and refuses `external_payment_amount_changed` if what an
 invoice owes on `paid_on` is no longer the staged figure — booking the staged
 amount over a credit applied since would record both. One refusal refuses the
-whole run, naming the invoice. Locks are taken run → invoices → payments, the
+whole run, naming the invoice. The run-level refusals (status
+`payment_run_not_recordable`, maker-checker with `params.step:
+"record_outside"`, CFO sign-off, `payment_run_nothing_to_record`) are
+`payment_controls.run_record_outside_refusal`, which `GET /runs/{id}` ships as
+`actions.record_outside` for the run dialog's **Record run as paid**; the
+per-invoice ones are not in it. Locks are taken run → invoices → payments, the
 same invoice-before-payment order as the single record.
 
 ### The ERP reports an invoice paid that FeohLedger never paid

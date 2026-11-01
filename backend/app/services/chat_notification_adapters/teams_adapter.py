@@ -168,19 +168,35 @@ class TeamsChatNotificationAdapter(ChatNotificationAdapter):
                 message.event_type,
             )
             return
-        # SSRF guard: refuse an admin-set webhook_url that resolves to an
-        # internal address (posted on every approval event).
-        from app.utils.url_safety import is_public_url_async
+        # SSRF guard: the webhook_url is admin-set and posted on every approval
+        # event — a per-org host, so `org_host_client` checks it up front and
+        # pins the connect (decisions §339). No dev loopback allowance: there is
+        # no local Teams to reach.
+        from app.utils.url_safety import UnsafeUrlError, org_host_client
 
-        if not await is_public_url_async(self.webhook_url):
+        # Built before the client, so nothing can raise between creating it
+        # and entering its `async with`.
+        body = self.build_body(message)
+        try:
+            client = await org_host_client(
+                self.webhook_url, allow_private=False, timeout=TIMEOUT, follow_redirects=False
+            )
+        except UnsafeUrlError:
             logger.warning(
                 "teams chat-notification: webhook_url is not a public URL — skipping event=%s",
                 message.event_type,
             )
             return
-        body = self.build_body(message)
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            response = await client.post(self.webhook_url, json=body)
+        try:
+            async with client:
+                response = await client.post(self.webhook_url, json=body)
+        except UnsafeUrlError:
+            logger.warning(
+                "teams chat-notification: webhook_url resolved to a non-public address at "
+                "connect — skipping event=%s",
+                message.event_type,
+            )
+            return
         response.raise_for_status()
 
     async def test_connection(self) -> bool:

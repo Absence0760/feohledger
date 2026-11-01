@@ -174,6 +174,9 @@ async def test_a_refused_report_keeps_the_erp_payment_as_data(realdb):
     }
     assert row.description.startswith("QuickBooks Online reports this bill paid")
     assert "/api/" not in row.description
+    # The product name is a param; the sentence is localized on the code.
+    assert row.description_code == "exception.erp_paid_unrecorded_blocking_exception"
+    assert row.description_params == {"erp": "QuickBooks Online"}
 
 
 async def test_a_later_report_refreshes_the_row_instead_of_dropping_its_facts(realdb):
@@ -381,6 +384,9 @@ async def test_a_failed_re_attempt_never_undoes_the_clear(realdb, monkeypatch):
     # It no longer promises an automatic record that will not come.
     assert row.erp_report["retry_failed_at"]
     assert "record the ERP's payment from this exception" in row.description
+    # The refreshed sentence moves its code with it, never English alone.
+    assert row.description_code == "exception.erp_paid_retry_failed"
+    assert row.description_params == {"erp": "QuickBooks Online"}
 
 
 async def test_resolving_a_withdrawn_row_records_nothing(realdb):

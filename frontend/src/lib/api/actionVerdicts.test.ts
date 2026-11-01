@@ -48,6 +48,31 @@ describe('refusalText', () => {
 		);
 	});
 
+	it('localizes the invoice modal’s Submit / Retry ERP refusals', () => {
+		// `GET /api/invoices/{id}/review-actions` → `complete` / `send_to_erp` /
+		// `retry_erp` (api/workflow.workflow_action_refusals).
+		const cases: [string, keyof typeof en][] = [
+			['invoice_not_completable', 'refusal.invoiceNotCompletable'],
+			['invoice_entry_window_closed', 'refusal.invoiceEntryWindowClosed'],
+			['invoice_not_erp_sendable', 'refusal.invoiceNotErpSendable'],
+			['invoice_not_erp_retryable', 'refusal.invoiceNotErpRetryable']
+		];
+		for (const [code, key] of cases) {
+			expect(refusalText({ code, message: 'x', params: { status: 'paid' } }, t)).toBe(en[key]);
+		}
+		// The ERP export gate's codes keep the ERP panel's own sentence.
+		expect(
+			refusalText(
+				{
+					code: 'exception_blocks_erp_export',
+					message: 'x',
+					params: { exception_type: 'duplicate' }
+				},
+				t
+			)
+		).not.toBe('x');
+	});
+
 	it('falls back to the server sentence for a code it predates', () => {
 		expect(refusalText({ code: 'some_future_code', message: 'Server says no.' }, t)).toBe(
 			'Server says no.'

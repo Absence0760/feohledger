@@ -197,7 +197,29 @@ async def test_a_refused_write_back_is_coded_flagged_and_keeps_the_invoice_paid(
     assert row.details["refusal"]["code"] == "payment_account_not_mapped"
     [flag] = await _rows(realdb, APException, invoice_id=inv_id)
     assert flag.exception_type == "erp_reconciliation"
-    assert "payment_account_not_mapped" in flag.description
+    # The sentence is for an AP user, in a catalogue code; the refusal, payment,
+    # run and bill are data on erp_report (decisions §319, §331).
+    assert flag.description_code == "exception.erp_payment_writeback_failed"
+    assert flag.description_params == {"erp": "QuickBooks Online"}
+    for leaked in ("payment_account_not_mapped", str(pay_id), str(run_id), "/api/", "501"):
+        assert leaked not in flag.description
+    report = flag.erp_report
+    assert report["kind"] == "payment_writeback_failed"
+    assert (report["payment_id"], report["payment_run_id"]) == (str(pay_id), str(run_id))
+    assert report["erp_document_id"] == "501"
+    assert report["failure"] == "payment_account_not_mapped"
+    assert report["refusal"]["code"] == "payment_account_not_mapped"
+
+
+async def test_a_failed_write_back_with_no_refusal_code_is_still_explained(realdb):
+    await _configure(realdb)
+    run_id, inv_id, pay_id = await _seed(realdb)
+    await _sync(realdb, run_id, FakeQbo(ErpPostResult(success=False, message="x", retryable=True)))
+    [flag] = await _rows(realdb, APException, invoice_id=inv_id)
+    assert flag.description_code == "exception.erp_payment_writeback_failed"
+    assert flag.erp_report["failure"] == "erp_post_failed"
+    assert flag.erp_report["refusal"] is None
+    assert flag.erp_report["retryable"] is True
 
 
 async def test_a_bill_left_partly_open_in_the_erp_is_flagged(realdb):
@@ -207,7 +229,16 @@ async def test_a_bill_left_partly_open_in_the_erp_is_flagged(realdb):
     await _sync(realdb, run_id, FakeQbo(left))
     [flag] = await _rows(realdb, APException, invoice_id=inv_id)
     assert flag.exception_type == "erp_reconciliation"
-    assert "2.00" in flag.description
+    assert flag.description_code == "exception.erp_payment_writeback_balance_open"
+    assert flag.description_params == {
+        "erp": "QuickBooks Online",
+        "amount": "2.00",
+        "currency": "USD",
+    }
+    assert "2.00 USD" in flag.description and "bill=" not in flag.description
+    assert flag.erp_report["kind"] == "payment_writeback_balance_open"
+    assert flag.erp_report["bill_balance_after"] == "2.00"
+    assert flag.erp_report["erp_payment_id"] == "BP-9"
 
 
 async def test_a_bill_in_another_quickbooks_company_is_never_written_to(realdb):
@@ -255,6 +286,12 @@ async def test_voiding_the_payment_voids_what_was_written(realdb, monkeypatch):
     assert outcome == erp_payment_writeback.FAILED
     [flag] = await _rows(realdb, APException, invoice_id=inv_id)
     assert flag.exception_type == "erp_reconciliation"
+    assert flag.description_code == "exception.erp_payment_void_writeback_failed"
+    assert str(pay_id) not in flag.description and "erp_void_failed" not in flag.description
+    assert flag.erp_report["kind"] == "payment_void_writeback_failed"
+    assert flag.erp_report["payment_id"] == str(pay_id)
+    assert flag.erp_report["payment_run_id"] == str(run_id)
+    assert flag.erp_report["failure"] == "erp_void_failed"
 
 
 async def test_a_payment_voided_before_the_write_back_is_not_written(realdb):

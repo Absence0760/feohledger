@@ -369,7 +369,12 @@ _RETRY_SAFE_FAILURE_SUFFIXES = (
 )
 
 
-def classify_payment_failure(*, failure_reason: str | None, provider_payment_id: str | None) -> str:
+def classify_payment_failure(
+    *,
+    failure_reason: str | None,
+    provider_payment_id: str | None,
+    dispatch_attempted: bool = False,
+) -> str:
     """Is this failed payment safe to re-attempt under a fresh idempotency key?
 
     Returns ``RETRY_SAFE`` only when we can prove no order was created at the
@@ -379,8 +384,18 @@ def classify_payment_failure(*, failure_reason: str | None, provider_payment_id:
     adapter here returns a handle only from a create call that SUCCEEDED, so
     holding one means an order exists over there and its true outcome has to be
     reconciled (or the payment voided) by a human before any re-send.
+
+    ``dispatch_attempted`` (the row still carries `Payment.dispatch_attempted_at`)
+    outranks it too: an earlier dispatch pass may have called the processor and
+    crashed before recording what it heard back. The reason on the row is then
+    from a LATER pass — a `/resume` that refused before its own adapter call —
+    and says nothing about the order the crashed pass may have created. The
+    reason classes only the pass that wrote it; the marker covers the one that
+    could not (migration 0124; `backend/docs/payments.md` § A dispatch attempt
+    is marked, durably, before it starts).
+    Production callers go through `is_retry_safe`, which always passes it.
     """
-    if provider_payment_id:
+    if provider_payment_id or dispatch_attempted:
         return IN_DOUBT
     reason = (failure_reason or "").strip()
     if not reason:
@@ -398,6 +413,7 @@ def is_retry_safe(payment: Payment) -> bool:
         classify_payment_failure(
             failure_reason=payment.failure_reason,
             provider_payment_id=payment.provider_payment_id,
+            dispatch_attempted=payment.dispatch_attempted_at is not None,
         )
         == RETRY_SAFE
     )
@@ -482,6 +498,100 @@ async def blocked_invoice_ids(db: AsyncSession, invoice_ids: list[uuid.UUID]) ->
 #: someone decides otherwise (``backend/docs/vendor-management.md``).
 PAYABLE_VENDOR_STATUS = "active"
 
+#: The vendor's LAST STORED screen (``Vendor.screening_status``) that says a
+#: payment would be refused (``match``) or held for review (``review``: a
+#: ``review_required`` verdict, adverse media, or a provider that could not
+#: run). Dispatch does not read this column — ``compliance.check_payment_compliance``
+#: screens afresh and refuses / holds on the same verdicts — so it is the
+#: stored counterpart of that live check, for a gate that must not call the
+#: sanctions adapter (the ERP push). A re-screen (``POST /api/vendors/{id}/screen``,
+#: the periodic sweep) rewrites it. ``clear`` and ``unscreened`` are neither:
+#: the pre-payment screen is the backstop for a vendor never screened.
+SANCTIONS_HELD_SCREENING_STATUSES: frozenset[str] = frozenset({"match", "review"})
+
+#: :attr:`VendorPayability.sanctions_hold` values, PII-free fixed literals.
+HOLD_PAYMENTS_BLOCKED = "payments_blocked"
+HOLD_SANCTIONS_MATCH = "sanctions_match"
+HOLD_SANCTIONS_REVIEW = "sanctions_review"
+
+
+@dataclass(frozen=True)
+class VendorPayability:
+    """What the payment path reads off a vendor to decide whether it may be paid.
+
+    One read, two questions, so every gate that asks either one reads the same
+    columns the same way:
+
+    * :attr:`status_payable` — the lifecycle gate (``status == active``) the run
+      builder, the queue, ``POST /api/payments``, dispatch and ``/retry-failed``
+      enforce through :func:`inactive_vendor_statuses`;
+    * :attr:`sanctions_hold` — the screening gate: the sticky
+      ``payments_blocked`` flag ``check_payment_compliance`` refuses first (set
+      by a sanctions ``match`` or a manual block), then a last STORED screen of
+      ``match`` / ``review`` — the verdicts that live pre-payment screen
+      refuses or holds on, read here without calling the adapter.
+
+    The ERP push reads both (``services/erp_export_gate``, which decides per
+    status what may still be booked).
+    """
+
+    status: str
+    payments_blocked: bool
+    screening_status: str
+
+    @property
+    def status_payable(self) -> bool:
+        return self.status == PAYABLE_VENDOR_STATUS
+
+    @property
+    def sanctions_hold(self) -> str | None:
+        """Why the screening gate stops a payment to this vendor, or None.
+        The sticky block is named first: it is what refuses before any screen."""
+        if self.payments_blocked:
+            return HOLD_PAYMENTS_BLOCKED
+        if self.screening_status == "match":
+            return HOLD_SANCTIONS_MATCH
+        if self.screening_status in SANCTIONS_HELD_SCREENING_STATUSES:
+            return HOLD_SANCTIONS_REVIEW
+        return None
+
+
+async def vendor_payability(
+    db: AsyncSession, invoices: Iterable[Invoice]
+) -> dict[uuid.UUID, VendorPayability]:
+    """Map each invoice with a linked, existing vendor → that vendor's payability.
+
+    One query for the whole batch. An invoice with NO vendor (``vendor_id``
+    NULL, or the row deleted) is absent, for the reason
+    :func:`inactive_vendor_statuses` gives. A NULL status reads ``"unknown"``
+    (never payable) and a NULL screening status ``"unscreened"``.
+    """
+    from app.models.vendor import Vendor
+
+    rows = list(invoices)
+    vendor_ids = {inv.vendor_id for inv in rows if inv.vendor_id is not None}
+    if not vendor_ids:
+        return {}
+    by_vendor = {
+        vid: VendorPayability(
+            status=status or "unknown",
+            payments_blocked=bool(blocked),
+            screening_status=screening or "unscreened",
+        )
+        for vid, status, blocked, screening in (
+            await db.execute(
+                select(
+                    Vendor.id, Vendor.status, Vendor.payments_blocked, Vendor.screening_status
+                ).where(Vendor.id.in_(vendor_ids))
+            )
+        ).all()
+    }
+    return {
+        inv.id: by_vendor[inv.vendor_id]
+        for inv in rows
+        if inv.vendor_id is not None and inv.vendor_id in by_vendor
+    }
+
 
 async def inactive_vendor_statuses(
     db: AsyncSession, invoices: Iterable[Invoice]
@@ -503,25 +613,14 @@ async def inactive_vendor_statuses(
     is the documented path for it and this gate does not second-guess it.
 
     The status string returned is a fixed, PII-free vocabulary — never the
-    vendor's name.
+    vendor's name. Read through :func:`vendor_payability`, the one read every
+    vendor-payability gate shares (the ERP push's included).
     """
-    from app.models.vendor import Vendor
-
-    rows = list(invoices)
-    vendor_ids = {inv.vendor_id for inv in rows if inv.vendor_id is not None}
-    if not vendor_ids:
-        return {}
-    statuses = dict(
-        (await db.execute(select(Vendor.id, Vendor.status).where(Vendor.id.in_(vendor_ids)))).all()
-    )
-    out: dict[uuid.UUID, str] = {}
-    for inv in rows:
-        if inv.vendor_id is None or inv.vendor_id not in statuses:
-            continue
-        status = statuses[inv.vendor_id]
-        if status != PAYABLE_VENDOR_STATUS:
-            out[inv.id] = status or "unknown"
-    return out
+    return {
+        inv_id: payability.status
+        for inv_id, payability in (await vendor_payability(db, invoices)).items()
+        if not payability.status_payable
+    }
 
 
 #: The only rail that can legitimately pay an invoice already holding a live
@@ -1072,6 +1171,71 @@ def _raise_refusal(
     )
 
 
+async def lock_run_invoices(
+    db: AsyncSession,
+    invoice_ids: Iterable[uuid.UUID],
+    *,
+    scope_entity_id: uuid.UUID | None,
+    timeout_ms: int,
+) -> list[Invoice]:
+    """Lock a run's invoices ``FOR NO KEY UPDATE`` in id order, re-read.
+
+    The run builder used to read its invoices with a plain SELECT, so nothing
+    serialised it with the other writers that decide on the same invoice. The
+    case that mattered (the decisions §309 follow-up): ``/send-to-erp`` holds
+    the invoice ``FOR UPDATE`` while its export gate asks whether FeohLedger is
+    already paying it, then moves it to ``sending_to_erp``. A run staged in that
+    window read the invoice as ``approved``, saw no live payment, and booked a
+    ``pending`` one; its FK insert's ``FOR KEY SHARE`` only waited for the
+    send's commit and then went ahead. The bill was then both pushed to the ERP
+    and in a FeohLedger run, which is the double payment §309 refuses.
+
+    With the lock the two serialise in either order:
+
+    - **send first.** The run waits for the send's commit, then its status check
+      (a fresh statement on the re-read row) sees ``sending_to_erp`` and 409s.
+    - **run first.** The send's ``FOR UPDATE`` waits for the run's commit, then
+      its export gate sees the run's live payment and 409s
+      ``payment_blocks_erp_export``.
+
+    The ERP side needs no extra check here: an in-flight or done push has moved
+    the invoice off ``PAYABLE_INVOICE_STATUSES`` (``sending_to_erp``,
+    ``sent_to_erp``, ``failed``) in the same transaction that passed its gate,
+    so the status check under the lock is that check.
+
+    Lock mode and order are the card mint's (``card_issuance.lock_invoices_for_mint``)
+    and dispatch's (``api/payments._lock_payment_invoice``): ``FOR NO KEY UPDATE``
+    conflicts with every status writer and with each other, so a second run, a
+    mint or a dispatch on the same invoice waits and then sees this run's
+    payment; it leaves the ``FOR KEY SHARE`` an FK insert takes alone. Id order
+    means two runs over overlapping invoices cannot deadlock each other, and the
+    run takes no vendor or payment lock, so there is no cycle with the mint
+    (vendor, then invoice) or with dispatch (payment, then invoice).
+
+    The wait is bounded by ``timeout_ms`` in a savepoint (``utils/db_locks``,
+    decisions §233) and raises ``LockWaitTimeout`` with the caller's
+    transaction intact; nothing has been booked at that point, so the refusal
+    is retry-safe. ``populate_existing`` so a row the session already holds is
+    refreshed rather than handed back stale.
+
+    Narrowed to ``scope_entity_id`` (``tenant.apply_entity_scope``); an
+    out-of-scope id is simply absent, which the caller reports as not found.
+    """
+    from app.utils.db_locks import bounded_lock_wait
+
+    ids = sorted(set(invoice_ids))
+    if not ids:
+        return []
+    async with bounded_lock_wait(db, timeout_ms):
+        rows = await db.execute(
+            apply_entity_scope(select(Invoice).where(Invoice.id.in_(ids)), Invoice, scope_entity_id)
+            .order_by(Invoice.id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+        return list(rows.scalars().all())
+
+
 async def create_payment_run_for_invoices(
     db: AsyncSession,
     *,
@@ -1133,12 +1297,33 @@ async def create_payment_run_for_invoices(
             return existing_result
 
     invoice_ids = [item.invoice_id for item in items]
-    result = await db.execute(
-        apply_entity_scope(
-            select(Invoice).where(Invoice.id.in_(invoice_ids)), Invoice, scope_entity_id
+    # Lock before any check reads the invoice (decisions §309's follow-up):
+    # every gate below is a fresh statement that then sees what a concurrent
+    # `/send-to-erp`, card mint, dispatch or second run committed while this
+    # request waited. See `lock_run_invoices`.
+    from app.api.payments import INVOICE_LOCKED_DETAIL
+    from app.config import settings as app_settings
+    from app.utils.db_locks import LockWaitTimeout
+
+    try:
+        locked = await lock_run_invoices(
+            db,
+            invoice_ids,
+            scope_entity_id=scope_entity_id,
+            timeout_ms=app_settings.payment_invoice_lock_timeout_ms,
         )
-    )
-    invoices = {inv.id: inv for inv in result.scalars().all()}
+    except LockWaitTimeout:
+        raise HTTPException(status_code=409, detail=INVOICE_LOCKED_DETAIL) from None
+    invoices = {inv.id: inv for inv in locked}
+
+    # A concurrent request for the same plan may have staged it while this one
+    # waited on the locks. Its payments are now live, so without this re-check
+    # the replay would 409 on the live-payment refusal instead of returning the
+    # run, and the copilot's enact would stop being safe to retry.
+    if plan_id is not None:
+        existing_result = await _existing_run_for_plan(db, plan_id)
+        if existing_result is not None:
+            return existing_result
 
     if len(invoices) != len(invoice_ids):
         raise HTTPException(status_code=404, detail="One or more invoices not found")

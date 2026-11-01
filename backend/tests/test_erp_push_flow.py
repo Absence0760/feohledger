@@ -655,7 +655,8 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None, open_excepti
 
     * the export gate (`erp_export_gate`, decisions §286) — `open_exceptions`,
       `(invoice_id, exception_type)` rows; none by default, so the push goes on,
-      and then its live payment / card reads (§309), always empty here (the
+      and then its live payment / card reads (§309) and its vendor read,
+      always empty here (the
       gate's own SQL is proven against a real tenant in
       `test_erp_export_blocking_exceptions.py`);
     * `_fetch_line_items` — the given rows, in the order given (mirrors the
@@ -687,6 +688,12 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None, open_excepti
         if "FROM virtual_cards" in sql:
             db.calls.append("virtual_cards")
             return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+        # The gate's vendor read (`payment_runs.vendor_payability`): no row,
+        # so nothing holds the push (its SQL and every status are proven
+        # against a real tenant in `test_erp_export_blocking_exceptions.py`).
+        if "FROM vendors" in sql and "payments_blocked" in sql:
+            db.calls.append("vendor_payability")
+            return SimpleNamespace(all=lambda: [])
         if "FROM invoice_line_items" in sql:
             db.calls.append("invoice_line_items")
             return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))

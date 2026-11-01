@@ -316,7 +316,6 @@ export const messages = {
 	'portal.home.heading': 'Resumen',
 	'portal.home.subtitle': 'Lo que necesita tu atención y dónde están el resto de tus facturas.',
 	'portal.home.loadFailed': 'No se pudo cargar tu resumen',
-	'portal.home.retry': 'Reintentar',
 	'portal.home.kpi.actionRequired': 'Necesita tu atención',
 	'portal.home.kpi.inProgress': 'Con tu cliente',
 	'portal.home.kpi.paid': 'Pagadas',

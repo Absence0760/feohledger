@@ -122,7 +122,23 @@ def test_netsuite_base_url_derives_from_account_id_when_override_empty():
 
 
 @pytest.mark.parametrize(
-    "account_id", ["evil.tld/x?", "evil.tld#", "a@evil.tld", "123 456", 'x" , oauth_x="', ""]
+    "account_id",
+    [
+        "evil.tld/x?",
+        "evil.tld#",
+        "a@evil.tld",
+        "123 456",
+        'x" , oauth_x="',
+        "",
+        # The value must stay ONE hostname label: no dot, port, newline,
+        # backslash, percent-escape or non-ASCII digit rides along.
+        "1234567.evil",
+        "1234567:8443",
+        "1234567\n",
+        "evil.tld\\",
+        "１２３４５６７",  # fullwidth digits: `\d` would match them, the alphabet must not
+        "1234567%2eevil",
+    ],
 )
 def test_netsuite_account_id_is_validated_before_it_reaches_the_hostname(account_id):
     """`account_id` is admin-supplied and spliced into the API HOSTNAME: before

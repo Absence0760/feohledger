@@ -14,10 +14,12 @@ HTTP is mocked with `patch("httpx.AsyncClient")` as in
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.config import settings
@@ -26,6 +28,8 @@ from app.services.erp_adapters.base import (
     ErpInvoiceStatus,
     InvoicePayload,
     LineItemPayload,
+    PoSkipReason,
+    SkippedPo,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter
 from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
@@ -864,6 +868,7 @@ def test_list_pos_reads_no_chart_and_never_takes_a_line_account_by_name(token, n
     po = {
         "Id": "130",
         "DocNumber": "PO-1",
+        "TotalAmt": Decimal("10"),
         "VendorRef": {"value": "56", "name": "Acme"},
         "Line": [
             {
@@ -919,21 +924,103 @@ def test_list_pos_is_exact(token, no_override):
     assert line.unit_price == Decimal("83.3666") and line.quantity == Decimal("3")
 
 
-def test_read_failure_raises_instead_of_an_empty_sync(token, no_override):
+def test_a_po_with_no_usable_total_is_reported_unpriceable_never_synced_at_zero(
+    token, no_override, caplog
+):
+    """A PO with no usable ``TotalAmt`` used to sync at 0, so every invoice
+    against it read as over-billed and raised ``po_mismatch``, and a total an
+    earlier sync stored stayed trusted. It is skipped and named ``unpriceable``
+    (decisions §323, §325), never priced from its lines (§325's rule). A
+    stated 0 is the ERP's figure and is kept; a PO with neither a DocNumber
+    nor an Id is dropped, never filed under the literal number "None"."""
+    line = {
+        "Amount": Decimal("40"),
+        "ItemBasedExpenseLineDetail": {"Qty": 4, "UnitPrice": Decimal("10")},
+    }
+    pos = [
+        {"Id": "1", "DocNumber": "PO-PRICED", "TotalAmt": Decimal("40"), "Line": [line]},
+        {"Id": "2", "DocNumber": "PO-MISSING", "Line": [line]},
+        {"Id": "3", "DocNumber": "PO-NULL", "TotalAmt": None},
+        {"Id": "4", "DocNumber": "PO-GARBAGE", "TotalAmt": "n/a"},
+        {"Id": "5", "DocNumber": "PO-NAN", "TotalAmt": "NaN"},
+        {"Id": "6", "DocNumber": "PO-ZERO", "TotalAmt": 0},
+        {"Id": "7", "TotalAmt": None},  # no DocNumber: the Id is its number
+        {"TotalAmt": Decimal("5"), "VendorRef": {"name": "Secret Vendor"}},  # neither: dropped
+    ]
+    qbo = _Qbo()
+    qbo.request, _ = _query_router({"PurchaseOrder": [pos]})
+    with caplog.at_level(logging.WARNING, logger="app.services.erp_adapters.quickbooks_online"):
+        listing = _run_with(qbo, lambda: _adapter().list_pos_report())
+    # A count only, never the record (vendor names, amounts).
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("skipped 1 PO(s) with no number or id" in m for m in messages), messages
+    assert not any("Secret Vendor" in m for m in messages)
+    assert [(p.po_number, p.total) for p in listing.pos] == [
+        ("PO-PRICED", Decimal("40")),
+        ("PO-ZERO", Decimal("0")),
+    ]
+    assert listing.skipped == [
+        SkippedPo(n, PoSkipReason.unpriceable)
+        for n in ("PO-MISSING", "PO-NULL", "PO-GARBAGE", "PO-NAN", "7")
+    ]
+    qbo.request, _ = _query_router({"PurchaseOrder": [pos]})
+    got = _run_with(qbo, lambda: _adapter().list_pos())
+    assert [p.po_number for p in got] == ["PO-PRICED", "PO-ZERO"]
+
+
+@pytest.mark.parametrize("listing", ["list_vendors", "list_gl_accounts", "list_pos"])
+def test_read_failure_raises_instead_of_an_empty_sync(token, no_override, listing):
+    """A failed page is a coded incomplete listing, never "none" or the rows
+    read so far; Intuit's Fault (which echoes submitted fields) never reaches
+    the message (decisions §329)."""
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
+
     async def fail(method, url, **kw):
         return _resp(500, {"Fault": {"Error": [{"Detail": "LEAKY"}]}})
 
     qbo = _Qbo()
     qbo.request = fail
-    with pytest.raises(RuntimeError) as exc:
-        _run_with(qbo, lambda: _adapter().list_vendors())
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run_with(qbo, lambda: getattr(_adapter(), listing)())
+    assert exc.value.gap is ListingGap.fetch_failed
     assert "LEAKY" not in str(exc.value)
 
+    import httpx
 
-@pytest.mark.parametrize("listing", ["list_vendors", "list_gl_accounts"])
+    async def unreachable(method, url, **kw):
+        raise httpx.ConnectError("dns")
+
+    qbo.request = unreachable
+    with pytest.raises(ErpListingIncomplete) as exc:
+        _run_with(qbo, lambda: getattr(_adapter(), listing)())
+    assert exc.value.gap is ListingGap.fetch_failed
+
+
+def test_a_later_po_page_failing_never_returns_the_first(token, no_override):
+    import asyncio
+
+    from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
+    from app.services.erp_adapters.quickbooks_online import QboRequestError
+
+    pages = iter([{"PurchaseOrder": [{"Id": str(i), "TotalAmt": 1} for i in range(1000)]}])
+
+    async def query(self, statement):
+        try:
+            return next(pages)
+        except StopIteration:
+            raise QboRequestError(503) from None
+
+    with patch.object(QuickBooksOnlineAdapter, "_query", query):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            asyncio.run(_adapter().list_pos_report())
+    assert (exc.value.gap, exc.value.collection) == (ListingGap.fetch_failed, "PurchaseOrder")
+
+
+@pytest.mark.parametrize("listing", ["list_vendors", "list_gl_accounts", "list_pos"])
 def test_a_listing_past_the_page_cap_raises_never_truncates(no_override, listing):
     """The first 50 pages of a longer list are not the list: the chart and
-    vendor syncs read absence as evidence (decisions §284)."""
+    vendor syncs read absence as evidence (decisions §284), and the PO sync
+    reads the listing's skips, which a capped read would hide (§329)."""
     import asyncio
 
     from app.services.erp_adapters.base import ErpListingIncomplete, ListingGap
@@ -950,9 +1037,6 @@ def test_a_listing_past_the_page_cap_raises_never_truncates(no_override, listing
             asyncio.run(getattr(_adapter(), listing)())
         assert exc.value.gap is ListingGap.truncated
         assert len(calls) == 50
-        # The PO list keeps its bounded, best-effort read.
-        calls.clear()
-        assert len(asyncio.run(_adapter().list_pos())) == 50_000
 
 
 def test_test_connection_reads_company_info(token, no_override):
@@ -1142,3 +1226,100 @@ def test_a_failed_pre_check_query_400_is_not_retryable(token, no_override):
     result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
     assert result.retryable is False
     assert result.message == "QuickBooks Online post failed: HTTP 400 (invalid_request)"
+
+
+# ---------------------------------------------------------------------------
+# Consent: the realm the unsigned callback names is confirmed under the new
+# token before it is linked (quickbooks_online.confirm_realm)
+# ---------------------------------------------------------------------------
+
+
+class _CompanyInfo:
+    """Records the confirmation call and answers it."""
+
+    def __init__(self, status: int = 200, body: dict | None = None, error: Exception | None = None):
+        self.status = status
+        self.body = {"CompanyInfo": {"Id": "1", "CompanyName": "Co"}} if body is None else body
+        self.error = error
+        self.calls: list[dict] = []
+
+    def client(self, *_a, **_kw):
+        outer = self
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url, params=None, headers=None):
+                outer.calls.append({"url": url, "params": params, "headers": headers})
+                if outer.error is not None:
+                    raise outer.error
+                return _resp(outer.status, outer.body)
+
+        return _Client()
+
+
+async def _resolve(info: _CompanyInfo, realm: str = REALM, erp_settings: dict | None = None):
+    from app.services.erp_adapters import quickbooks_online
+
+    with patch.object(quickbooks_online.httpx, "AsyncClient", new=info.client):
+        return await QuickBooksOnlineAdapter.resolve_external_tenant_id(
+            access_token="new-token",
+            token_response={},
+            callback_params={"realmId": realm},
+            erp_settings={"environment": "sandbox"} if erp_settings is None else erp_settings,
+        )
+
+
+async def test_consent_confirms_the_realm_under_the_new_token(no_override):
+    info = _CompanyInfo()
+    assert await _resolve(info) == REALM
+    (call,) = info.calls
+    assert call["url"] == (
+        f"https://sandbox-quickbooks.api.intuit.com/v3/company/{REALM}/companyinfo/{REALM}"
+    )
+    assert call["headers"]["Authorization"] == "Bearer new-token"
+    assert call["params"] == {"minorversion": "75"}
+
+
+async def test_consent_confirms_against_production_and_the_operator_override(monkeypatch):
+    monkeypatch.setattr(settings, "erp_qbo_api_base", "")
+    info = _CompanyInfo()
+    await _resolve(info, erp_settings={})
+    assert info.calls[0]["url"].startswith("https://quickbooks.api.intuit.com/v3/company/")
+    monkeypatch.setattr(settings, "erp_qbo_api_base", "http://localhost:12112/qbo/")
+    await _resolve(info)
+    assert (
+        info.calls[1]["url"] == f"http://localhost:12112/qbo/v3/company/{REALM}/companyinfo/{REALM}"
+    )
+
+
+@pytest.mark.parametrize(
+    "info",
+    [
+        _CompanyInfo(status=403, body={"Fault": {"Error": [{"code": "3100"}]}}),
+        _CompanyInfo(status=401, body={}),
+        _CompanyInfo(status=500, body={}),
+        _CompanyInfo(status=200, body={"QueryResponse": {}}),
+        _CompanyInfo(error=httpx.ConnectError("down")),
+    ],
+    ids=["another-company", "unauthorized", "outage", "no-company-info", "unreachable"],
+)
+async def test_a_realm_the_new_token_does_not_reach_is_refused(no_override, info):
+    assert await _resolve(info) is None
+
+
+@pytest.mark.parametrize("realm", ["../preferences", "9130/x", "a b", "x" * 65, "9130?q=1"])
+async def test_a_realm_that_is_not_an_id_never_reaches_a_url(no_override, realm):
+    info = _CompanyInfo()
+    assert await _resolve(info, realm=realm) is None
+    assert info.calls == []
+
+
+async def test_no_realm_in_the_callback_makes_no_call(no_override):
+    info = _CompanyInfo()
+    assert await _resolve(info, realm="") is None
+    assert info.calls == []

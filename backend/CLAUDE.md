@@ -451,7 +451,9 @@ Consequences worth knowing:
   even though it's no longer shared with any other slot.
 
 The harness resets tenant tables plus `Organization.settings` / `parent_org_id`,
-and — **on teardown, not setup** — the control-plane billing rows: every
+the orgs' sealed provider credentials and the seeded users' second factors
+(TOTP fields and passkeys — a test that enrols one on the harness admin used to
+leave every later test facing an account that had a factor), and — **on teardown, not setup** — the control-plane billing rows: every
 `Subscription` its own orgs hold, and every `Plan` that is not one of
 `DEFAULT_PLAN_CATALOG`'s tiers (`_reset_control_billing`). Those two tables live
 in the slot's control-plane database, which the per-test TRUNCATE never reaches
@@ -497,6 +499,18 @@ only does real work against a genuinely fresh Postgres (CI, or a from-scratch
 local instance).
 
 `tests/test_realdb_harness.py` guards both properties.
+
+**A test without `realdb` cannot open a real database connection.** The autouse
+`_refuse_real_engine_in_mock_tests` (`tests/conftest.py`) makes every
+`Engine.raw_connection` raise `RealEngineInMockTestError` in such a test, and
+fails it at teardown if the code under test swallowed that. A mock test that
+reached `app.database`'s module-global engines used to pass alone and leave a
+pooled connection bound to its loop, which the next test in the process drew:
+`got Future … attached to a different loop`, reported in an unrelated file
+(`../docs/known-issues.md`). Trip it and the fix is to inject or patch what
+the test reaches (provider credentials: `provider_store_from_settings`; the
+control-plane-originated audit write: `no_auth_audit_write`). The
+`real_db_engine` marker exempts only a test that deliberately connects itself.
 
 ## Date-sensitive tests — run them under a skewed timezone
 

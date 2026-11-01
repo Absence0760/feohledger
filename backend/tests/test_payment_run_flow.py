@@ -32,7 +32,7 @@ from app.services.payment_adapters import PaymentStatus
 # These tests drive the payment money paths over a hand-built `AsyncMock`
 # session, which cannot model the invoice lock's SAVEPOINT-scoped bound — see
 # the `mock_session_lock_wait` fixture in conftest.py.
-pytestmark = pytest.mark.usefixtures("mock_session_lock_wait")
+pytestmark = pytest.mark.usefixtures("mock_session_lock_wait", "provider_store_from_settings")
 
 
 @pytest.fixture(autouse=True)
@@ -77,6 +77,7 @@ def _payment(*, method="ach", amount: Decimal = Decimal("100.00")):
         completed_at=None,
         failure_reason=None,
         retry_of_payment_id=None,
+        dispatch_attempted_at=None,  # migration 0124
         correlation_id=uuid.uuid4(),
         # International fields (migration 0017) — None on domestic
         # same-currency payments, populated by the orchestrator on
@@ -155,7 +156,9 @@ def _mock_db(*, run, payments, invoice_by_id, completing_payment_ids=None):
             # invoice names a vendor).
             if getattr(inv, "vendor_id", None):
                 vendor_status_res = MagicMock()
-                vendor_status_res.all = MagicMock(return_value=[(inv.vendor_id, "active")])
+                vendor_status_res.all = MagicMock(
+                    return_value=[(inv.vendor_id, "active", False, "clear")]
+                )
                 per_pay_results.append(vendor_status_res)
             card_claim_res = MagicMock()
             card_claim_scalars = MagicMock()

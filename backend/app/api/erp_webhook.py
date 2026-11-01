@@ -20,7 +20,7 @@ from app.services.erp_status_sync import (
     ERP_RECONCILIATION_EXCEPTION_TYPE,
     ERP_REPORT_SETTLED_SHORT,
     ERP_REPORT_VOIDED_AFTER_POST,
-    erp_display_name,
+    erp_finding,
     reported_paid_on,
     reported_payment_method,
     withdraw_erp_paid_reports,
@@ -454,13 +454,7 @@ async def erp_webhook(
                             db,
                             invoice,
                             org_id=org.id,
-                            description=(
-                                f"{erp_display_name(erp_type)} reports this bill paid, but "
-                                "FeohLedger's own payment for it settled for less than "
-                                "AP authorized, so the invoice is held at Payment "
-                                "scheduled. Open the payment and either accept the "
-                                "settled amount or void the payment."
-                            ),
+                            finding=erp_finding("erp_settled_short", erp_type),
                             erp_report={
                                 "kind": ERP_REPORT_SETTLED_SHORT,
                                 "erp_type": erp_type,
@@ -548,12 +542,7 @@ async def _raise_erp_reconciliation_exception(
         db,
         invoice,
         org_id=org_id,
-        description=(
-            f"{erp_display_name(erp_type)} reports this bill voided or cancelled, but "
-            "FeohLedger had already sent it on for payment, so it was not cancelled "
-            "here. Check whether a payment is on its way to the supplier, and stop or "
-            "recover it if the bill is really void."
-        ),
+        finding=erp_finding("erp_voided_after_post", erp_type),
         erp_report={
             "kind": ERP_REPORT_VOIDED_AFTER_POST,
             "erp_type": erp_type,

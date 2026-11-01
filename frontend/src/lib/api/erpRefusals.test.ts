@@ -56,6 +56,7 @@ describe('the registry pins the backend', () => {
 					intuit_code: '6000',
 					exception_type: 'duplicate',
 					claim: 'payment',
+					hold: 'payments_blocked',
 					reason: 'tenant_budget'
 				};
 				const text = erpRefusalText({ code, params }, t);
@@ -224,8 +225,47 @@ describe('erpRefusalText', () => {
 		).toBe(en['erpRefusal.paymentBlocksExport']);
 	});
 
+	it('says why the vendor stops the push, per hold, in every locale', () => {
+		const code = 'vendor_blocks_erp_export';
+		const locales = { en, de, es, fr, ja, 'pt-BR': ptBR } as Record<
+			string,
+			Record<string, string>
+		>;
+		const cases: [string, boolean, string][] = [
+			['payments_blocked', false, 'erpRefusal.vendorBlocked'],
+			['sanctions_match', false, 'erpRefusal.vendorSanctionsMatch'],
+			['sanctions_review', false, 'erpRefusal.vendorSanctionsReview'],
+			['vendor_rejected', false, 'erpRefusal.vendorRejected'],
+			['vendor_status_unknown', false, 'erpRefusal.vendorStatusUnknown'],
+			['payments_blocked', true, 'erpRefusal.vendorBlocked'],
+			['sanctions_review', true, 'erpRefusal.vendorSanctionsReview']
+		];
+		const posted = 'erpRefusal.vendorHoldPossiblyPosted';
+		for (const [locale, messages] of Object.entries(locales)) {
+			expect(messages[posted], `${locale} ${posted}`).toBeTruthy();
+			for (const [hold, possiblyPosted, key] of cases) {
+				const params = possiblyPosted ? { hold, possibly_posted: true } : { hold };
+				const text = erpRefusalText({ code, params }, translator(messages, locale));
+				expect(messages[key], `${locale} ${key}`).toBeTruthy();
+				// The hold's own remedy is kept; the possibly-posted note follows it.
+				expect(text, `${locale} ${key}`).toBe(
+					possiblyPosted ? `${messages[key]} ${messages[posted]}` : messages[key]
+				);
+			}
+		}
+		// The sentence names a fixed hold, never a vendor field.
+		expect(erpRefusalText({ code, params: { hold: 'payments_blocked' } }, enT)).toBe(
+			en['erpRefusal.vendorBlocked']
+		);
+	});
+
 	it.each([
 		['no refusal recorded (a row from before coded refusals)', undefined],
+		['a vendor refusal with no hold', { code: 'vendor_blocks_erp_export', params: {} }],
+		[
+			'a vendor refusal with an unknown hold',
+			{ code: 'vendor_blocks_erp_export', params: { hold: 'brand_new' } }
+		],
 		['a paid refusal with no claim', { code: 'payment_blocks_erp_export', params: {} }],
 		[
 			'a paid refusal with an unknown claim',

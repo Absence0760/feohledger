@@ -8,6 +8,7 @@ import re
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import NamedTuple
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1640,22 +1641,62 @@ async def _has_normalized_duplicate(db: AsyncSession, invoice: Invoice, vendor_m
     testable place. No unbounded scan, and no expression index (hence no
     migration) is required.
     """
-    target = normalize_invoice_number(invoice.invoice_number)
+    match = await find_normalized_number_match(
+        db, invoice.invoice_number, vendor_match, exclude_id=invoice.id
+    )
+    return match is not None
+
+
+class NormalizedNumberMatch(NamedTuple):
+    """An invoice whose number normalizes equal to the one looked up."""
+
+    id: uuid.UUID
+    invoice_number: str
+    entity_id: uuid.UUID | None
+
+
+async def find_normalized_number_match(
+    db: AsyncSession,
+    invoice_number: str | None,
+    vendor_match,
+    *,
+    exclude_id: uuid.UUID | None = None,
+) -> NormalizedNumberMatch | None:
+    """The newest invoice in ``vendor_match`` whose number normalizes equal to
+    ``invoice_number`` — its id, its number as stored and its entity — or None.
+    The entity is returned so a caller showing the match to a user can apply
+    the cross-entity rule (decisions §40: existence only, never the id or the
+    number of another entity's invoice).
+
+    The one implementation of the normalized duplicate lookup: the warning
+    gate above (``_has_normalized_duplicate``) and the CSV importer's
+    near-duplicate refusal (``services/csv_import``) both call it, so the two
+    can never disagree about which numbers are the same payable. Bounded the
+    way that docstring describes (letter skeleton in SQL, newest
+    ``MAX_DUPLICATE_CANDIDATES``, the pure ``normalize_invoice_number`` in
+    Python). ``vendor_match`` is the caller's scope; this never widens it.
+    """
+    target = normalize_invoice_number(invoice_number)
     if target is None:
-        return False
-    skeleton = invoice_number_letter_skeleton(invoice.invoice_number)
+        return None
+    skeleton = invoice_number_letter_skeleton(invoice_number)
+    conditions = [
+        vendor_match,
+        Invoice.invoice_number.is_not(None),
+        func.regexp_replace(func.lower(Invoice.invoice_number), "[^a-z]", "", "g") == skeleton,
+    ]
+    if exclude_id is not None:
+        conditions.append(Invoice.id != exclude_id)
     rows = await db.execute(
-        select(Invoice.invoice_number)
-        .where(
-            vendor_match,
-            Invoice.id != invoice.id,
-            Invoice.invoice_number.is_not(None),
-            func.regexp_replace(func.lower(Invoice.invoice_number), "[^a-z]", "", "g") == skeleton,
-        )
+        select(Invoice.id, Invoice.invoice_number, Invoice.entity_id)
+        .where(*conditions)
         .order_by(Invoice.created_at.desc())
         .limit(MAX_DUPLICATE_CANDIDATES)
     )
-    return any(normalize_invoice_number(number) == target for (number,) in rows.all())
+    for inv_id, number, entity_id in rows.all():
+        if normalize_invoice_number(number) == target:
+            return NormalizedNumberMatch(inv_id, number, entity_id)
+    return None
 
 
 #: The invoice fields the `duplicate` and `fraud_flag` rules read: the header

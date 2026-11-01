@@ -374,6 +374,15 @@ DNS for the vanity host are **infra** concerns (CloudFront/ALB + ACM + a CNAME t
 the platform) and out of scope for the app code; the app's job is purely to map
 an inbound request on that host back to the right tenant.
 
+**Connecting an OAuth ERP is the one thing a vanity host cannot do.** The
+connect binds itself to the admin's browser with a cookie set on the API host
+(`backend/docs/erp-integration.md` § Connecting an OAuth ERP), and a vanity
+host's `/api` is a same-origin proxy whose cookies never reach the callback. So
+`GET /api/organization/erp/oauth/{provider}/authorize` on a vanity host answers
+409 `erp_connect_platform_host` with the tenant's `<slug>.<app domain>` settings
+URL, which the ERP panel shows as a link, and the callback returns the admin
+there. Everything else about the connection, once made, works from either host.
+
 ### Storage — no migration
 
 The vanity hostnames live on `Organization.settings.brand.custom_domains`, a JSON

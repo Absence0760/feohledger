@@ -42,6 +42,7 @@
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 
@@ -332,12 +333,11 @@
 								{#if candidatesLoading}
 									<p class="picker-note muted">{m('common.loading')}</p>
 								{:else if candidatesError}
-									<p class="picker-note" role="alert">
-										{m('bankRecon.error.load')}
-										<button class="link-btn" onclick={loadCandidates}>
-											{m('bankRecon.error.retry')}
-										</button>
-									</p>
+									<LoadError
+										message={m('bankRecon.error.load')}
+										onretry={loadCandidates}
+										testId="candidates-error"
+									/>
 								{:else if filteredCandidates.length === 0}
 									<p class="picker-note muted">
 										{candidateFilter.trim()
@@ -483,14 +483,5 @@
 	}
 	.picker-vendor {
 		color: var(--text);
-	}
-	.link-btn {
-		background: none;
-		border: none;
-		padding: 0;
-		color: var(--accent-on-tint);
-		text-decoration: underline;
-		cursor: pointer;
-		font: inherit;
 	}
 </style>

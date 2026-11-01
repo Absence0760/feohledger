@@ -229,7 +229,16 @@ is a **destination key** (changing it drops the sealed secrets, decisions
 §271). It must be `https`, carry a host, and carry no user-info, query or
 fragment; a sub-directory install (`https://example.com/shop`) is fine. Every
 call goes through `api_base`, which runs the SSRF check (the host must resolve
-to a public address). **Redirects are never followed** — a 3xx is a non-retryable
+to a public address), and is sent by `http_client`, which outside the operator
+override is a `url_safety.pinned_async_client`: the host is re-vetted inside the
+connect and the socket opens to the vetted IP, so a DNS-rebinding record cannot
+pass the check and then reach an internal host (a refusal there is the same
+`CommerceConfigError`). That check-plus-pin is the commerce client's own spelling
+of `url_safety.org_host_client` (it needs `CommerceConfigError` as the refusal),
+so `tests/test_url_safety.py` lists `commerce_adapters/base.py` in
+`_ORG_HOST_BESPOKE`; Shopify and Lightspeed build their host from a validated
+handle / prefix and go through the same pinned client (`adapter-patterns.md`
+§ Where an adapter's host comes from). **Redirects are never followed** — a 3xx is a non-retryable
 `rejected`, so the Basic credentials only ever reach the host the admin typed.
 The key and secret ride the `Authorization` header only; WooCommerce's
 query-string auth is never used, because a query string lands in access logs.

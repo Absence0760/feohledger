@@ -305,11 +305,17 @@ def test_merge_dev_vendor_id_is_the_id_a_po_and_a_bill_reference():
 
     # The PO names its vendor by the Contact id — bare, or expanded.
     assert (
-        _merge_po_to_payload({"purchase_order_number": "PO-1", "vendor": contact_id}).vendor_erp_id
+        _merge_po_to_payload(
+            {"purchase_order_number": "PO-1", "total_amount": "1", "vendor": contact_id}
+        ).vendor_erp_id
         == vendor.erp_vendor_id
     )
     expanded = _merge_po_to_payload(
-        {"purchase_order_number": "PO-1", "vendor": {"id": contact_id, "name": "Acme"}}
+        {
+            "purchase_order_number": "PO-1",
+            "total_amount": "1",
+            "vendor": {"id": contact_id, "name": "Acme"},
+        }
     )
     assert expanded.vendor_erp_id == vendor.erp_vendor_id
 

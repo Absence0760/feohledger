@@ -9,6 +9,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import FieldWarning from '#lib/components/ui/FieldWarning.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { accentStrongContrast } from '#lib/stores/brandTheme.ts';
@@ -366,10 +367,7 @@
 	{#if loading}
 		<p class="state" data-testid="partner-loading">{m('admin.partner.loading')}</p>
 	{:else if error}
-		<div class="state error" data-testid="partner-error" role="alert">
-			<p>{error}</p>
-			<button type="button" class="btn-cancel" onclick={load}>{m('admin.partner.retry')}</button>
-		</div>
+		<LoadError message={error} onretry={load} testId="partner-error" />
 	{:else if overview && !overview.is_partner}
 		<div class="state" data-testid="partner-empty">
 			<p>
@@ -427,10 +425,11 @@
 		{#if brandLoading}
 			<p class="state" data-testid="brand-loading">{m('admin.partner.branding.loading')}</p>
 		{:else if brandError}
-			<div class="state error" role="alert">
-				<p>{brandError}</p>
-				<button type="button" class="btn-cancel" onclick={() => openEdit(editingChild!)}>{m('admin.partner.retry')}</button>
-			</div>
+			<LoadError
+				message={brandError}
+				onretry={() => openEdit(editingChild!)}
+				testId="partner-brand-error"
+			/>
 		{:else if brand}
 			<form
 				onsubmit={(e) => {
@@ -611,10 +610,6 @@
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
-	}
-
-	.state.error {
-		color: var(--danger);
 	}
 
 	.mono {

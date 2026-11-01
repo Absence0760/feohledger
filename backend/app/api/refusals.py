@@ -56,18 +56,24 @@ class ActionRefusal:
     :meth:`http` and the verdict a page reads before offering the control is
     :meth:`verdict` — so both come from the one function (issue #575).
     :meth:`http` keeps the plain-string ``detail`` the endpoint always answered
-    with, for the clients (mobile included) that read it as text.
+    with, for the clients (mobile included) that read it as text — unless
+    ``coded`` is set, for an endpoint that already answered with the coded
+    ``{code, message, params}`` detail (the NACHA export's refusals), which it
+    keeps. ``params`` ride both shapes' coded form.
     """
 
     code: str
     message: str
     http_status: int
+    params: dict | None = None
+    coded: bool = False
 
     def http(self) -> HTTPException:
-        return HTTPException(status_code=self.http_status, detail=self.message)
+        detail = self.verdict() if self.coded else self.message
+        return HTTPException(status_code=self.http_status, detail=detail)
 
     def verdict(self) -> dict:
-        return coded_refusal(self.code, self.message)
+        return coded_refusal(self.code, self.message, **(self.params or {}))
 
 
 def role_not_permitted() -> dict:

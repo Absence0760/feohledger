@@ -31,7 +31,7 @@
 	import { onMount, tick, untrack } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
 	import { getProviderCredentials, updateProviderCredentials } from '#lib/api/providerCredentials.ts';
 	import {
 		disconnectErpOAuth,
@@ -49,6 +49,7 @@
 	import { FEATURE_ERP_INTEGRATIONS, FEATURE_ERP_MERGE } from '#lib/types/planFeatures.ts';
 	import {
 		BYO_APP_FIELDS,
+		CONNECT_FROM_PLATFORM_HOST,
 		MERGE_DEV_PROVIDER,
 		buildErpPayload,
 		buildErpSecretUpdate,
@@ -64,6 +65,7 @@
 		oauthAttentionKey,
 		oauthConnectionState,
 		optionLabelKey,
+		platformConnectUrl,
 		readOAuthReturn,
 		secretIsSaved,
 		selectedProviderKey,
@@ -129,6 +131,9 @@
 	/** The one live region's text: test results, validation, connect errors. */
 	let statusMessage = $state('');
 	let statusTone = $state<'success' | 'failure' | null>(null);
+	/** Where to connect from instead, when this host cannot (a custom domain):
+	 *  the refusal's platform address, shown as a link after the status. */
+	let connectElsewhereUrl = $state<string | null>(null);
 	/** The OAuth callback's `?erp_connected=` / `?erp_error=`, read ONCE on
 	 *  mount and shown until the admin does something else. */
 	let oauthReturn = $state<OAuthReturn>(null);
@@ -182,6 +187,7 @@
 	function setStatus(text: string, tone: 'success' | 'failure' | null) {
 		statusMessage = text;
 		statusTone = tone;
+		connectElsewhereUrl = null;
 		// Anything the admin does next replaces the OAuth return message.
 		oauthReturn = null;
 	}
@@ -424,6 +430,20 @@
 			window.location.href = authorize_url;
 		} catch (err) {
 			connecting = false;
+			if (err instanceof ApiError && err.code === CONNECT_FROM_PLATFORM_HOST) {
+				// The browser-binding cookie cannot be set from this host (a
+				// custom domain); say where the connect does work.
+				const url = platformConnectUrl(err.params);
+				const erp = providerLabel(p);
+				setStatus(
+					m(url ? 'org.erp.oauth.connectFromPlatform' : 'org.erp.oauth.connectUnavailableHere', {
+						erp
+					}),
+					'failure'
+				);
+				connectElsewhereUrl = url;
+				return;
+			}
 			setStatus(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'failure');
 		}
 	}
@@ -774,6 +794,16 @@
 	>
 		{shownMessage}
 	</p>
+	{#if connectElsewhereUrl && statusMessage}
+		<!-- Outside the live region: the sentence above is what is announced;
+		     the link is a named control, never a URL read out character by
+		     character. -->
+		<p class="connect-elsewhere">
+			<a href={connectElsewhereUrl} data-testid="erp-connect-elsewhere"
+				>{m('org.erp.oauth.connectFromPlatformLink')}</a
+			>
+		</p>
+	{/if}
 </section>
 
 <style>
@@ -1004,6 +1034,11 @@
 
 	.test-result:empty {
 		margin: 0;
+	}
+
+	.connect-elsewhere {
+		font-size: 0.85rem;
+		margin: 4px 0 0;
 	}
 
 	.test-result.success {

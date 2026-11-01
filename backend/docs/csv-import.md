@@ -21,7 +21,7 @@ payment to an unverified vendor is blocked. See `backend/app/api/invoice_entry.p
 | Endpoint | What it does |
 |---|---|
 | `POST /api/vendors/import-csv` | Bulk-create vendors. Dedup by `code` > case-insensitive `name`. |
-| `POST /api/invoices/import-csv` | Bulk-create invoices. Unknown vendors get auto-created stubs. Dedup by `(vendor, invoice_number)`. |
+| `POST /api/invoices/import-csv` | Bulk-create invoices. Unknown vendors get auto-created stubs. An exact `(vendor, invoice_number)` repeat is skipped; a number that is the same once formatting is ignored is a row error (§ Near-duplicate invoice numbers). |
 
 Both accept `multipart/form-data` with a single `file` field. Response is
 JSON with `imported`, `skipped`, and a per-row `errors` list. Files must
@@ -114,7 +114,9 @@ A row refused for its GL code carries the refusal **structured**, beside its
 on_lines, foreign: [...], retired: [...], unknown: [...]}` — the same body the
 invoice write paths send as their 422 `detail` (`gl_chart.ChartRefusal.body`).
 The web import modal states it in the reader's language from `code` and falls
-back to `message`; every other row error is still just `{row, message}`.
+back to `message`. The near-duplicate refusals (§ Near-duplicate invoice
+numbers) carry `{code, params}` the same way; every other row error is still
+just `{row, message}`.
 
 ## Live rows are checked for warnings on import
 
@@ -137,11 +139,53 @@ queue in findings nobody can act on. They still count as the other side of the
 duplicate check: a `new` row that repeats a `paid` one is flagged.
 
 The import's own dedup on `(vendor, invoice_number)` still runs first and skips
-an exact repeat of a row linked to the same vendor record. What reaches the
-warning check is what that key cannot see — an existing invoice with no linked
-vendor (emailed in or extracted, never matched), a different spelling of the
-number (`INV-001` vs `INV-1`), or the same supplier under a second vendor
-record.
+an exact repeat of a row linked to the same vendor record, and a differently
+formatted number for that vendor is refused as a row error (next section). What
+reaches the warning check is what neither can see — an existing invoice with no
+linked vendor (emailed in or extracted, never matched), or the same supplier
+under a second vendor record.
+
+## Near-duplicate invoice numbers are row errors, not skips
+
+The duplicate gate treats `INV-001`, `INV-1`, `inv 001` and `INV_001` as one
+payable (`invoice_warnings.normalize_invoice_number`, decisions §77). The
+importer used to compare numbers byte-for-byte, so a re-import whose numbers
+were formatted differently created a second row, which the gate then flagged
+as a payment-blocking `duplicate` — caught, but as queue work. Skipping such a
+row silently would be worse: it may be a genuinely different invoice.
+
+So, per row, for the vendor the row resolves to:
+
+1. **Byte-exact repeat** of an invoice already linked to that vendor → skipped
+   silently, counted in `skipped`, no error (unchanged).
+2. **Same number once normalized** as an invoice already linked to that vendor
+   → not imported; a row error naming the existing invoice:
+   `{row, message, code: "csv_invoice_number_matches_existing", params:
+   {invoice_number, existing_invoice_id, existing_invoice_number}}`.
+   If that invoice belongs to **another entity** (the vendor is shared and
+   both invoices carry an entity), the row is refused all the same but stated
+   as existence only — `code: "csv_invoice_number_matches_other_entity"`,
+   `params: {invoice_number}` — never the other entity's invoice id or number
+   (decisions §40). A NULL entity on either side is unstamped, not "another
+   entity".
+3. **Same number once normalized as an earlier row of the same file** (which
+   was imported) → not imported; a row error naming that row:
+   `{row, message, code: "csv_invoice_number_matches_row", params:
+   {invoice_number, other_row, other_invoice_number}}`.
+
+This applies to historical `done` / `paid` rows too, which used to import
+unflagged (history is never warning-refreshed). A supplier whose numbering
+genuinely distinguishes `INV-1` from `INV-001` — the accepted limit of §77 —
+will see such rows refused on a Day-0 history load; enter them by hand.
+
+The lookup is `invoice_warnings.find_normalized_number_match` — the same
+bounded query the warning gate runs, scoped to the org and that vendor id — so
+the importer and the gate cannot disagree about which numbers are the same.
+Both errors are in the coded-refusal shape; the web import modal states them in
+the reader's language through `api/codedRefusals.ts` and falls back to
+`message`. Fix the number in the file, or — if it really is a different
+invoice — enter it by hand, where the duplicate gate will flag it for a person
+to clear.
 
 ## The importer is recorded as the uploader
 
@@ -313,4 +357,5 @@ can correct it. See `api-reference.md` § Money and quantity fields.)
 | `amount invalid: '99999999999999999999'` | The amount exceeds `Numeric(15, 2)`'s 13 integer digits. Check for a misplaced decimal separator or a column shift. |
 | `status invalid: '2026-03-01'` | An amount had an unquoted comma and shifted all columns. Wrap comma-containing values in double quotes. |
 | Many `vendor_name or vendor_code is required` errors | The vendor column name in the CSV doesn't match. Rename it before upload. |
+| `invoice_number 'INV-1' is the same invoice number as existing invoice 'INV-001' …` | The ledger already holds that invoice for this vendor under a differently formatted number. Use the existing number, or enter the row by hand if it is a different invoice. |
 | Duplicate vendors show up twice | Customer export has inconsistent casing. Add a `code` column to dedup cleanly. |

@@ -494,7 +494,7 @@ If the supplier portal is implemented, vendors can:
 |---|---|---|
 | `GET` | `/api/cards` | List virtual cards (filterable by status, vendor, date) |
 | `GET` | `/api/cards/{id}/details` | Get full card number + CVV (admin/ap_manager/cfo, audit logged — see § Security) |
-| `POST` | `/api/cards/generate` | Generate cards for selected invoices |
+| `POST` | `/api/cards/generate` | Generate cards for selected invoices (`payment.execute`). `items` / `total` = cards this request minted; `skipped` names every other invoice and the gate that stopped it — see § Why an invoice got no card. A tenant whose `cards.enabled` is off gets 400 with the coded detail `cards_not_enabled`. The web caller is the payments Cards tab's **Generate card** dialog (`frontend/docs/routes-api-map.md` § `/payments`) |
 | `POST` | `/api/cards/{id}/cancel` | Cancel an unused card (`require_permission(payment.void)` — admin/cfo by default, **not** `ap_manager`; see § Cancel → The gate is `payment.void`) |
 | `POST` | `/api/cards/webhook/{provider}` | Receive charge/settlement webhooks (public-by-design, HMAC-gated) |
 | `GET` | `/api/cards/rebates` | List rebates (paginated `page` / `page_size`, optional `period`) — see § The rebate list is paginated |
@@ -831,7 +831,9 @@ per-invoice commit releases them.
 - **Every check is a fresh statement after the lock.** Under READ COMMITTED, a
   request that waited sees what the winner committed. It skips the invoice,
   because it now has a live card or a live payment, and the provider is never
-  called. The loser's response is an ordinary `201` with `total: 0`.
+  called. The loser's response is an ordinary `201` with `total: 0` and a
+  `card_skip_already_carded` skip naming the winner's card (§ Why an invoice got
+  no card).
 - **A live payment is now refused too.** `payment_scheduled` counts as payable,
   so an invoice whose ACH had settled but was not yet `paid` used to get a card
   on top of the wire. Without this check, waiting out a dispatch's lock would
@@ -861,6 +863,50 @@ run real concurrent sessions against Postgres: two generates, a generate
 against a held invoice (alone and in a batch), a generate that waits out a
 dispatch committing a payment, and a vendor status change attempted
 mid-mint.
+
+#### Why an invoice got no card
+
+The response used to be `total: 0` whether an invoice was ineligible, already
+carded, already being paid or timed out on its lock, and a retry of a mint that
+had already succeeded read exactly like a refusal. It now carries `skipped`
+beside the unchanged `items` / `total` (additive — `CardGenerateResponse`
+extends `CardListResponse`):
+
+```json
+{"items": [], "total": 0, "page": 1, "page_size": 20,
+ "skipped": [{"invoice_id": "…", "code": "card_skip_already_carded",
+              "message": "The invoice already has a live virtual card.",
+              "params": {"card_id": "…"}}]}
+```
+
+Each entry is the coded-refusal shape (`api/refusals.coded_refusal`) plus the
+invoice id, so the web client states it through the shared
+`api/codedRefusals.ts::localizeApiDetail` registry (`api/cards.ts::
+cardGenerateSkipText`) and falls back to `message`. One code per gate, in the
+order the gates run; the catalogue is `card_issuance.CARD_SKIP_MESSAGES`:
+
+| Code | Gate | `params` |
+|---|---|---|
+| `card_skip_lock_timeout` | lock not granted in `FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS`; nothing sent | — |
+| `card_skip_not_found` | not in the caller's entity scope, or no such invoice (one answer for both) | — |
+| `card_skip_not_payable` | status outside `PAYABLE_INVOICE_STATUSES` | `status` |
+| `card_skip_vendor_changed` | vendor changed between the unlocked read and the lock | — |
+| `card_skip_already_carded` | a live card holds the invoice (incl. a lost insert race) | `card_id` |
+| `card_skip_blocked` | unresolved payment-blocking exception | `exception_type` |
+| `card_skip_vendor_not_payable` | vendor not `active` | `vendor_status` |
+| `card_skip_live_payment` | a live payment on another rail | — |
+| `card_skip_credit_conflict` | an applied credit no longer pairs (§214) | — |
+| `card_skip_nothing_owed` | applied credits cover the invoice | — |
+| `card_skip_vendor_unscreenable` | no vendor record to screen | — |
+| `card_skip_compliance_hold` | sanctions / KYC verdict not `allow` | `verdict` |
+| `card_skip_erp_bill` | ERP bill not confirmed open (§296) | `erp_reason` (the family, no suffix) |
+| `card_skip_issue_failed` | provider issued nothing, or the card could not be recorded | — |
+
+Params carry only what the sentence needs: never a vendor name, bank field, PAN
+or the provider's free-form failure text. The `409 invoice_locked` answer for a
+request that minted nothing while at least one lock timed out is unchanged.
+The `/payments` page does not call this endpoint yet (see § User Interface), so
+the localized sentences ship ahead of the web action that will show them.
 
 ### A vendor that stops being payable takes its live cards with it
 

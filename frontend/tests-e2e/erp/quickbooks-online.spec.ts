@@ -57,6 +57,9 @@ import {
  *      the reader's language; so is an invoice number longer than QBO's
  *      21-character DocNumber (refused, never silently truncated).
  *   5. Disconnect — clears the connection, and a later send cannot post.
+ *   6. Connect binding — a callback from a browser that did not call
+ *      authorize (no nonce cookie) links nothing, and a realmId the new token
+ *      cannot reach is refused rather than linked.
  */
 
 const PROVIDER = 'quickbooks_online';
@@ -84,6 +87,18 @@ async function connectQbo(page: Page): Promise<void> {
 	const home = new URL(landed.headers()['location']);
 	expect(home.pathname).toBe('/organization');
 	expect(home.searchParams.get('erp_error')).toBeNull();
+}
+
+/** Start a connect in `page`'s browser and return the callback URL the fake
+ *  sends back — the step a consent link handed to someone else would reach. */
+async function consentCallback(page: Page): Promise<URL> {
+	const start = await page.request.get(`${API_BASE}/api/organization/erp/oauth/${PROVIDER}/authorize`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(start.status(), await start.text()).toBe(200);
+	const consent = await page.request.get((await start.json()).authorize_url, { maxRedirects: 0 });
+	expect(consent.status()).toBe(302);
+	return new URL(consent.headers()['location']);
 }
 
 async function oauthStatus(page: Page) {
@@ -155,6 +170,39 @@ test.describe('/erp quickbooks_online adapter against fake-erp', () => {
 
 		const result = await testErpConnection(page);
 		expect(result.success, result.message).toBe(true);
+	});
+
+	test('a consent link finished in another browser links nothing', async ({ page, request }) => {
+		// The login-CSRF: the admin starts a connect and hands the link on. The
+		// callback reaches the API from a browser (`request` — its own cookie
+		// jar) that never received the authorize call's nonce cookie.
+		const callback = await consentCallback(page);
+		const elsewhere = await request.get(callback.href, { maxRedirects: 0 });
+		expect(elsewhere.status()).toBe(302);
+		expect(new URL(elsewhere.headers()['location']).searchParams.get('erp_error')).toBe(
+			'browser_mismatch'
+		);
+		// The state is spent: not even the starting browser can finish it now.
+		const replay = await page.request.get(callback.href, { maxRedirects: 0 });
+		expect(new URL(replay.headers()['location']).searchParams.get('erp_error')).toBe(
+			'state_expired'
+		);
+		// The existing connection is untouched.
+		expect((await oauthStatus(page)).external_tenant_id).toBe(REALM);
+	});
+
+	test('a realmId the new token cannot reach is refused, not linked', async ({ page }) => {
+		// QuickBooks' realmId arrives unsigned in the redirect; naming another
+		// company's realm must not squat it. The fake answers companyinfo for
+		// any other realm with Intuit's 403 (Fault 3100).
+		const callback = await consentCallback(page);
+		callback.searchParams.set('realmId', 'someone-elses-realm');
+		const landed = await page.request.get(callback.href, { maxRedirects: 0 });
+		expect(landed.status()).toBe(302);
+		expect(new URL(landed.headers()['location']).searchParams.get('erp_error')).toBe(
+			'no_external_tenant'
+		);
+		expect((await oauthStatus(page)).external_tenant_id).toBe(REALM);
 	});
 
 	test('full send: the bill in QuickBooks carries the exact approved amount', async ({

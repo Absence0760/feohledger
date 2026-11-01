@@ -4756,6 +4756,287 @@ abstract class AppLocalizations {
   /// **'{count, plural, one {{count} contract-compliance finding} other {{count} contract-compliance findings}}'**
   String exceptionDescriptionContractNoncompliantFindings(int count);
 
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedBlockingException.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because another exception on this invoice is blocking payment. Clear that exception and FeohLedger records the payment automatically.'**
+  String exceptionDescriptionErpPaidUnrecordedBlockingException(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedBlockingExceptionUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because another exception on this invoice is blocking payment. Clear that exception and FeohLedger records the payment automatically.'**
+  String get exceptionDescriptionErpPaidUnrecordedBlockingExceptionUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedInRun.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is also in a FeohLedger payment run, so the supplier could be paid twice. Take it out of the run or cancel the run, then record the ERP\'s payment from this exception.'**
+  String exceptionDescriptionErpPaidUnrecordedInRun(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedInRunUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is also in a FeohLedger payment run, so the supplier could be paid twice. Take it out of the run or cancel the run, then record the ERP\'s payment from this exception.'**
+  String get exceptionDescriptionErpPaidUnrecordedInRunUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedPaymentLive.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger has its own payment in progress for this invoice, so the supplier could be paid twice. Void that payment if the ERP\'s payment is the real one, then record the ERP\'s payment from this exception.'**
+  String exceptionDescriptionErpPaidUnrecordedPaymentLive(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedPaymentLiveUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger has its own payment in progress for this invoice, so the supplier could be paid twice. Void that payment if the ERP\'s payment is the real one, then record the ERP\'s payment from this exception.'**
+  String get exceptionDescriptionErpPaidUnrecordedPaymentLiveUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedCardLive.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because a virtual card is still live for this invoice, so the supplier could be paid twice. Cancel the card, then record the ERP\'s payment from this exception.'**
+  String exceptionDescriptionErpPaidUnrecordedCardLive(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedCardLiveUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because a virtual card is still live for this invoice, so the supplier could be paid twice. Cancel the card, then record the ERP\'s payment from this exception.'**
+  String get exceptionDescriptionErpPaidUnrecordedCardLiveUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedCreditConflict.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because an applied credit memo no longer matches this invoice\'s supplier or currency, so the amount owed can\'t be stated. Correct the credit memo, then record the ERP\'s payment from this exception.'**
+  String exceptionDescriptionErpPaidUnrecordedCreditConflict(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedCreditConflictUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because an applied credit memo no longer matches this invoice\'s supplier or currency, so the amount owed can\'t be stated. Correct the credit memo, then record the ERP\'s payment from this exception.'**
+  String get exceptionDescriptionErpPaidUnrecordedCreditConflictUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedNothingToPay.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because credit memos already cover the whole invoice, so there is no payment to record. Check the bill in the ERP, then resolve this exception.'**
+  String exceptionDescriptionErpPaidUnrecordedNothingToPay(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedNothingToPayUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because credit memos already cover the whole invoice, so there is no payment to record. Check the bill in the ERP, then resolve this exception.'**
+  String get exceptionDescriptionErpPaidUnrecordedNothingToPayUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedNotPayable.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP\'s payment from this exception or resolve it.'**
+  String exceptionDescriptionErpPaidUnrecordedNotPayable(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP\'s payment from this exception or resolve it.'**
+  String get exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedOther.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP\'s payment from this exception or resolve it.'**
+  String exceptionDescriptionErpPaidUnrecordedOther(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedOtherUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP\'s payment from this exception or resolve it.'**
+  String get exceptionDescriptionErpPaidUnrecordedOtherUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidWithdrawn.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reported this bill paid, but no longer shows it paid. FeohLedger did not record that payment. Check the bill in the ERP: if it is still owed, resolve this exception and pay it as usual.'**
+  String exceptionDescriptionErpPaidWithdrawn(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidWithdrawnUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reported this bill paid, but no longer shows it paid. FeohLedger did not record that payment. Check the bill in the ERP: if it is still owed, resolve this exception and pay it as usual.'**
+  String get exceptionDescriptionErpPaidWithdrawnUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaidRetryFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment automatically. Check the details, then record the ERP\'s payment from this exception.'**
+  String exceptionDescriptionErpPaidRetryFailed(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidRetryFailedUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment automatically. Check the details, then record the ERP\'s payment from this exception.'**
+  String get exceptionDescriptionErpPaidRetryFailedUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpSettledShort.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger\'s own payment for it settled for less than AP authorized, so the invoice is held at Payment scheduled. Open the payment and either accept the settled amount or void the payment.'**
+  String exceptionDescriptionErpSettledShort(String erp);
+
+  /// No description provided for @exceptionDescriptionErpSettledShortUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger\'s own payment for it settled for less than AP authorized, so the invoice is held at Payment scheduled. Open the payment and either accept the settled amount or void the payment.'**
+  String get exceptionDescriptionErpSettledShortUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpVoidedAfterPost.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.'**
+  String exceptionDescriptionErpVoidedAfterPost(String erp);
+
+  /// No description provided for @exceptionDescriptionErpVoidedAfterPostUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill voided or cancelled, but FeohLedger had already sent it on for payment, so it was not cancelled here. Check whether a payment is on its way to the supplier, and stop or recover it if the bill is really void.'**
+  String get exceptionDescriptionErpVoidedAfterPostUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpCreditSettlement.
+  ///
+  /// In en, this message translates to:
+  /// **'The ERP shows this bill settled, at least in part by a vendor credit applied there. FeohLedger will not pay it until someone confirms what is still owed.'**
+  String get exceptionDescriptionErpCreditSettlement;
+
+  /// No description provided for @exceptionDescriptionErpPaidWhileScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'The ERP shows this bill paid by a payment FeohLedger did not make, while a FeohLedger payment is scheduled for it. Stop or void one of them before both reach the supplier.'**
+  String get exceptionDescriptionErpPaidWhileScheduled;
+
+  /// No description provided for @exceptionDescriptionErpPaidTwice.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger paid this invoice, and the ERP shows the bill also paid by a payment FeohLedger did not make — the supplier may have been paid twice. Recover one of the payments.'**
+  String get exceptionDescriptionErpPaidTwice;
+
+  /// No description provided for @exceptionDescriptionErpPartlyPaidOutside.
+  ///
+  /// In en, this message translates to:
+  /// **'The ERP shows part of this bill paid or credited outside FeohLedger; a FeohLedger payment for the full amount would overpay it. Reconcile what is still owed before paying.'**
+  String get exceptionDescriptionErpPartlyPaidOutside;
+
+  /// No description provided for @exceptionDescriptionErpRecordedPaymentWithdrawn.
+  ///
+  /// In en, this message translates to:
+  /// **'The ERP reported this bill paid, and FeohLedger recorded that payment, but the ERP no longer shows it paid (the payment was deleted or voided there). Confirm whether it is still owed.'**
+  String get exceptionDescriptionErpRecordedPaymentWithdrawn;
+
+  /// No description provided for @exceptionDescriptionErpBillDeletedBlocking.
+  ///
+  /// In en, this message translates to:
+  /// **'The bill this invoice was posted as has been deleted or voided in the ERP; FeohLedger will not pay it until someone confirms it is still owed.'**
+  String get exceptionDescriptionErpBillDeletedBlocking;
+
+  /// No description provided for @exceptionDescriptionErpBillDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'The bill this invoice was posted as has been deleted or voided in the ERP. Confirm the books still agree.'**
+  String get exceptionDescriptionErpBillDeleted;
+
+  /// No description provided for @exceptionDescriptionErpBillUnlinkedNoDocument.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger cannot check this invoice\'s bill in the ERP, because the ERP did not say which bill it created when the invoice was posted, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.'**
+  String get exceptionDescriptionErpBillUnlinkedNoDocument;
+
+  /// No description provided for @exceptionDescriptionErpBillUnlinkedNoCompany.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger cannot check this invoice\'s bill in the ERP, because the posting did not record which ERP company it went to, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.'**
+  String get exceptionDescriptionErpBillUnlinkedNoCompany;
+
+  /// No description provided for @exceptionDescriptionErpBillUnlinkedOtherCompany.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger cannot check this invoice\'s bill in the ERP, because it was posted to a different ERP company than the one now connected, so it will not pay it. Confirm in the ERP whether it is still owed, then record it as paid outside FeohLedger or re-post it.'**
+  String get exceptionDescriptionErpBillUnlinkedOtherCompany;
+
+  /// No description provided for @exceptionDescriptionErpDispatchStoppedPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger was about to pay this invoice, but the ERP shows its bill already paid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.'**
+  String get exceptionDescriptionErpDispatchStoppedPaid;
+
+  /// No description provided for @exceptionDescriptionErpDispatchStoppedPartiallyPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger was about to pay this invoice, but the ERP shows its bill partly paid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.'**
+  String get exceptionDescriptionErpDispatchStoppedPartiallyPaid;
+
+  /// No description provided for @exceptionDescriptionErpDispatchStoppedDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger was about to pay this invoice, but the ERP shows its bill deleted or voided. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.'**
+  String get exceptionDescriptionErpDispatchStoppedDeleted;
+
+  /// No description provided for @exceptionDescriptionErpDispatchStoppedUnconfirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger was about to pay this invoice, but the ERP could not confirm its bill is still open and unpaid. It was stopped before any money moved. Confirm what is still owed before paying it; if a virtual card was already issued for this invoice, cancel it.'**
+  String get exceptionDescriptionErpDispatchStoppedUnconfirmed;
+
+  /// No description provided for @exceptionDescriptionErpReportedPaymentVoided.
+  ///
+  /// In en, this message translates to:
+  /// **'A payment the ERP reported was voided in FeohLedger, but the ERP may still show the bill paid. FeohLedger will not pay it again until someone confirms the ERP\'s payment is undone.'**
+  String get exceptionDescriptionErpReportedPaymentVoided;
+
+  /// No description provided for @exceptionDescriptionErpPaymentWritebackFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} did not record this invoice\'s payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment\'s run in Payments.'**
+  String exceptionDescriptionErpPaymentWritebackFailed(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaymentWritebackFailedUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP did not record this invoice\'s payment, so the bill still shows as unpaid there although the money was paid. Resolve what stopped it, then use Retry ERP sync on the payment\'s run in Payments.'**
+  String get exceptionDescriptionErpPaymentWritebackFailedUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpPaymentWritebackBalanceOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} recorded this invoice\'s payment, but the bill still shows {amount} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.'**
+  String exceptionDescriptionErpPaymentWritebackBalanceOpen(
+    String erp,
+    String amount,
+  );
+
+  /// No description provided for @exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP recorded this invoice\'s payment, but the bill still shows {amount} open there (a discount or credit taken in FeohLedger). Close the difference in the ERP.'**
+  String exceptionDescriptionErpPaymentWritebackBalanceOpenUnnamed(
+    String amount,
+  );
+
+  /// No description provided for @exceptionDescriptionErpPaymentVoidWritebackFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.'**
+  String exceptionDescriptionErpPaymentVoidWritebackFailed(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.'**
+  String get exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed;
+
+  /// No description provided for @exceptionDescriptionErpSyncBackFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice\'s payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment\'s run in Payments.'**
+  String get exceptionDescriptionErpSyncBackFailed;
+
   /// No description provided for @warningsPoMatchStatusMatched.
   ///
   /// In en, this message translates to:

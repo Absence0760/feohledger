@@ -34,6 +34,7 @@ from app.models.expense import (
     PreapprovalStatus,
     ReconciliationStatus,
 )
+from app.schemas.action_verdict import CodedRefusal
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
@@ -332,8 +333,35 @@ class ExpenseReportResponse(BaseModel):
     updated_at: str
 
 
+class ExpenseReportActions(BaseModel):
+    """The caller's verdict on a report's four actions, each the coded refusal
+    the endpoint would answer with or ``None`` — computed by the endpoints' own
+    gates (``api/expenses.report_action_refusals``, issue #575). Required, not
+    defaulted: a ``None`` nobody computed would read as "allowed".
+
+    ``compose`` is attach / detach (``POST /{id}/expenses``); the line-level
+    refusals there (an unconvertible currency, a line on someone else's report)
+    depend on the line chosen. ``submit`` covers ownership and state; the
+    blocking policy violations and an unconvertible total are answered by the
+    submit itself (422 with the list)."""
+
+    submit: CodedRefusal | None
+    approve: CodedRefusal | None
+    reject: CodedRefusal | None
+    compose: CodedRefusal | None
+
+
+class ExpenseReportDetail(ExpenseReportResponse):
+    """A report as the list and ``GET /{id}`` read it: plus the caller's
+    verdicts. Mutation responses stay :class:`ExpenseReportResponse` (decisions
+    §305 — a per-caller field is not added to every payload); the page re-reads
+    the detail after a decision."""
+
+    actions: ExpenseReportActions
+
+
 class ExpenseReportListResponse(PageMeta):
-    items: list[ExpenseReportResponse]
+    items: list[ExpenseReportDetail]
     total: int
 
 
@@ -504,8 +532,26 @@ class CorporateCardTransactionResponse(BaseModel):
     updated_at: str
 
 
+class CorporateCardTransactionActions(BaseModel):
+    """The caller's verdict on a card transaction's row actions, from the
+    endpoints' own gates (``api/expense_cards.card_txn_action_refusals``, issue
+    #575). ``match``'s expense-side refusals (already matched, currency
+    mismatch) depend on the expense picked and are answered by the match."""
+
+    match: CodedRefusal | None
+    create_expense: CodedRefusal | None
+    unmatch: CodedRefusal | None
+    ignore: CodedRefusal | None
+
+
+class CorporateCardTransactionListItem(CorporateCardTransactionResponse):
+    """A list row plus the caller's verdicts on its actions."""
+
+    actions: CorporateCardTransactionActions
+
+
 class CorporateCardTransactionListResponse(PageMeta):
-    items: list[CorporateCardTransactionResponse]
+    items: list[CorporateCardTransactionListItem]
     total: int
 
 

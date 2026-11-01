@@ -762,20 +762,37 @@ async def sync_pos_from_erp(
     # same mark it set — marking a wider set would leave marks no sync clears.
     unverifiable = 0
     reasons = {s.po_number: str(s.reason) for s in listing.skipped}
+    legacy_keys = {s.po_number: s.legacy_po_numbers for s in listing.skipped}
     for po_number, reason in reasons.items():
         po = await _sync_target(db, po_number, org_id, entity_id)
+        if po is None:
+            # Stored by an earlier build under another key (Merge: its record
+            # id, §328) and not re-keyed yet, since only a priced PO re-keys:
+            # mark that row where it stands. The priced sync that later
+            # re-keys it also clears the mark. A key the listing reports as a
+            # real number belongs to that PO and is never taken.
+            for legacy in legacy_keys.get(po_number, ()):
+                if legacy in listed_numbers:
+                    continue
+                po = await _sync_target(db, legacy, org_id, entity_id)
+                if po is not None:
+                    break
         if po is None:
             continue
         unverifiable += 1
         if po.total_unverifiable_reason != reason:
             po.total_unverifiable_reason = reason
-            rematch.add(po_number)
+            rematch.add(po.po_number)
 
     # A placeholder an earlier build filed several POs under (Merge's
     # "UNKNOWN") holds a total no single order has: marked, so it is never
     # matched or summed (decisions §328). Counted as `retired` in the audit row.
     retired = 0
     for placeholder in adapter.retired_po_numbers:
+        # A placeholder the listing reports as a real number is that PO's, and
+        # the upsert above just priced it: not the merged row.
+        if placeholder in listed_numbers:
+            continue
         po = await _sync_target(db, placeholder, org_id, entity_id)
         if po is not None and po.total_unverifiable_reason is None:
             po.total_unverifiable_reason = str(PoSkipReason.unpriceable)

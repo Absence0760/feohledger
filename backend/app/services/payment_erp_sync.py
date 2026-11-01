@@ -68,6 +68,7 @@ from app.models.organization import Organization
 from app.models.payment import Payment
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.exception_service import create_exception
+from app.services.invoice_warning_catalog import exception_finding
 from app.services.payment_settlement import settlement_coverage
 from app.services.provider_credentials import provider_config
 
@@ -78,6 +79,9 @@ logger = logging.getLogger(__name__)
 #: disagreement needing human reconciliation — same situation, so no new
 #: taxonomy entry (see ``services/exception_lifecycle.EXCEPTION_TYPES``).
 ERP_SYNC_FAILURE_EXCEPTION_TYPE = "erp_reconciliation"
+
+#: ``erp_report["kind"]`` of that exception.
+ERP_REPORT_SYNC_BACK_FAILED = "payment_sync_back_failed"
 
 #: Per-leg outcomes, in the order they are decided.
 _SYNCED = "synced"
@@ -529,9 +533,10 @@ async def _flag_sync_failure(
     invoice, so a repeated retry doesn't pile up rows (and so an ERP-void
     reconciliation raised by ``api/erp_webhook`` isn't duplicated either).
 
-    **PII-free**: identifiers, the failure's exception class, the invoice's
-    current status, and the retry path. Never the raw error message, which can
-    embed partial account / PAN data.
+    **PII-free**: the sentence is a catalogue code for an AP user
+    (``exception.erp_sync_back_failed``); the payment and run ids, the failure's
+    exception class and the invoice's status ride ``erp_report`` as data. Never
+    the raw error message, which can embed partial account / PAN data.
     """
     try:
         invoice_id = (
@@ -553,17 +558,22 @@ async def _flag_sync_failure(
             return
 
         invoice = await db.get(Invoice, invoice_id)
-        current_status = invoice.status.value if invoice else "?"
+        finding = exception_finding("erp_sync_back_failed")
         await create_exception(
             db,
             exception_type=ERP_SYNC_FAILURE_EXCEPTION_TYPE,
             severity="error",
-            description=(
-                f"Payment {payment_id} settled but its ERP sync-back leg failed "
-                f"({failure}); the invoice is still '{current_status}' although the "
-                f"money moved. Nothing re-runs this automatically — retry with "
-                f"POST /api/payments/runs/{run_id}/sync-erp."
-            ),
+            description=finding["message"],
+            description_code=finding["code"],
+            description_params=finding["params"],
+            # The machine detail the sentence used to carry, as data (§319).
+            erp_report={
+                "kind": ERP_REPORT_SYNC_BACK_FAILED,
+                "payment_id": str(payment_id),
+                "payment_run_id": str(run_id),
+                "failure": failure,
+                "invoice_status": invoice.status.value if invoice else None,
+            },
             status="open",
             organization_id=org_id,
             invoice=invoice,

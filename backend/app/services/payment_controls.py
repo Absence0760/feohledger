@@ -169,6 +169,69 @@ def run_cancel_refusal(run) -> ActionRefusal | None:
     return None
 
 
+RUN_NOT_RETRYABLE = "payment_run_not_retryable"
+RUN_NOTHING_TO_RETRY = "payment_run_nothing_to_retry"
+
+#: The run statuses that can carry a failed payment worth re-attempting. A
+#: `draft` run has never been dispatched (use `/execute`), an `executing` one is
+#: either mid-flight or crashed (use `/resume`), and a `cancelled` one has no
+#: payments left at all.
+RETRYABLE_RUN_STATUSES = ("partial", "failed")
+
+
+def run_retry_failed_refusal(
+    run,
+    effective_status: str,
+    retryable_failures: int,
+    actor_id: uuid.UUID,
+    payment_config: dict | None,
+) -> ActionRefusal | None:
+    """Why ``POST /runs/{id}/retry-failed`` would refuse ``actor_id`` before
+    anything is booked, or ``None`` — the ONE definition the endpoint raises
+    from and the run dialog's ``actions.retry_failed`` is read from
+    (``docs/decisions.md`` §305).
+
+    ``effective_status`` is the run status its ACTIVE payments support
+    (``payment_runs.derive_run_status``), never the stored column, which no
+    webhook or reconciler rewrites. ``retryable_failures`` is the count of
+    active failed payments that are provably retry-safe
+    (``payment_runs.is_retry_safe``): a run whose every failure might have
+    reached the processor has nothing a retry may send, and the endpoint
+    refuses it instead of claiming the run for an empty dispatch pass.
+
+    Re-attempting moves money exactly like ``/execute``, so the same
+    maker-checker and CFO-threshold gates apply, in the same order and with the
+    same sentences. The processor resolution that follows (a record-only
+    tenant, an unsupported provider) is org configuration the page reads from
+    ``GET /api/payments/execution-mode``, as for Execute.
+    """
+    if effective_status not in RETRYABLE_RUN_STATUSES:
+        return ActionRefusal(
+            RUN_NOT_RETRYABLE,
+            "Can only retry a run that finished with failures "
+            f"({' or '.join(RETRYABLE_RUN_STATUSES)}), not '{effective_status}'",
+            status.HTTP_409_CONFLICT,
+        )
+    if run_segregation_violated(run.initiated_by, actor_id, payment_config):
+        return _segregation("execute")
+    if run.requires_cfo_approval and run.cfo_approved_at is None:
+        return ActionRefusal(
+            RUN_AWAITING_CFO,
+            "This run exceeds the org's CFO-approval threshold and is awaiting "
+            "sign-off from a user with the CFO role.",
+            status.HTTP_403_FORBIDDEN,
+        )
+    if retryable_failures <= 0:
+        return ActionRefusal(
+            RUN_NOTHING_TO_RETRY,
+            "None of this run's failed payments can be sent again safely: each may "
+            "have reached the payment processor. Check each one with the processor, "
+            "then void it or record what happened.",
+            status.HTTP_409_CONFLICT,
+        )
+    return None
+
+
 # ── Payment void verdict ─────────────────────────────────────────────────
 
 PAYMENT_VOID_TERMINAL = "payment_void_terminal"
@@ -218,7 +281,10 @@ def payment_void_refusal(payment) -> ActionRefusal | None:
     if payment.status == "pending_compliance":
         return ActionRefusal(
             PAYMENT_VOID_COMPLIANCE_HOLD,
-            "This payment is held for a compliance check and never reached the processor. "
+            # Not "never reached the processor": a row carrying
+            # `dispatch_attempted_at` (decisions §343) may have, and dismissing
+            # such a hold flags it for reconciliation rather than assuming so.
+            "This payment is held for a compliance check, so it cannot be voided. "
             "Release or dismiss the hold instead.",
             status.HTTP_409_CONFLICT,
         )
@@ -260,6 +326,277 @@ def compliance_hold_refusal(payment, verb: str) -> ActionRefusal | None:
         f"Can only {verb} a payment stuck 'pending_compliance', not '{payment.status}'",
         status.HTTP_409_CONFLICT,
     )
+
+
+# ── Settlement-acceptance verdict ────────────────────────────────────────
+
+PAYMENT_SETTLEMENT_NOT_COMPLETED = "payment_settlement_not_completed"
+PAYMENT_SETTLEMENT_COVERED = "payment_settlement_covered"
+PAYMENT_SETTLEMENT_NOT_HELD = "payment_settlement_not_held"
+
+
+def payment_settlement_coverage(payment, invoice):
+    """``payment_settlement.settlement_coverage`` over a payment and the
+    invoice it pays — the one spelling of the arguments, shared by
+    ``POST /{id}/settlement/accept`` (which records the result on its audit
+    row) and :func:`settlement_accept_refusal`."""
+    from app.services.payment_settlement import settlement_coverage
+
+    return settlement_coverage(
+        settled_amount=payment.settled_amount,
+        settled_currency=payment.settled_currency,
+        target_amount=payment.amount,
+        target_currency=(invoice.currency if invoice is not None else None),
+        source_amount=payment.source_amount,
+        source_currency=payment.source_currency,
+        settled_amount_unstorable=payment.settled_amount_unstorable,
+    )
+
+
+def settlement_accept_refusal(payment, invoice) -> ActionRefusal | None:
+    """Why ``POST /api/payments/{id}/settlement/accept`` would refuse, or
+    ``None`` — the ONE definition the endpoint raises from and the History
+    list's ``accept_settlement_refusal`` is read from (issue #575).
+
+    ``invoice`` is the invoice the payment pays (``None`` when it is gone).
+    There is something to accept only when all three hold, checked in the
+    endpoint's order:
+
+    * the payment ``completed`` — a settlement actually happened;
+    * the recorded settlement does NOT discharge the invoice
+      (``settlement_coverage`` is ``short`` or ``uncertain``) — a covered one
+      reaches ``paid`` through the ordinary sync, and accepting it would make
+      this a general "force the invoice to paid" lever. An unreported figure
+      reads ``covered`` too, so a payment no rail reported on is never offered
+      it;
+    * the invoice is still held at ``payment_scheduled`` — the release this
+      performs. A repeat acceptance finds it ``paid`` and is refused, so the
+      immutable trail never carries a second justification.
+
+    The page used to offer Accept on every ``completed`` payment with any
+    reported figure, then fetch the invoice to discover whether it was held.
+    """
+    if payment.status != "completed":
+        return ActionRefusal(
+            PAYMENT_SETTLEMENT_NOT_COMPLETED,
+            f"Can only accept the settlement of a 'completed' payment, not '{payment.status}'",
+            status.HTTP_409_CONFLICT,
+        )
+    if payment_settlement_coverage(payment, invoice).completes_invoice:
+        return ActionRefusal(
+            PAYMENT_SETTLEMENT_COVERED,
+            "This payment's settlement already covers the invoice; there is nothing to accept.",
+            status.HTTP_409_CONFLICT,
+        )
+    invoice_status = getattr(getattr(invoice, "status", None), "value", None)
+    if invoice is None or invoice_status != "payment_scheduled":
+        return ActionRefusal(
+            PAYMENT_SETTLEMENT_NOT_HELD,
+            "No held invoice to release for this payment.",
+            status.HTTP_409_CONFLICT,
+        )
+    return None
+
+
+# ── Run ERP sync-back verdict ────────────────────────────────────────────
+
+RUN_NOTHING_SETTLED = "payment_run_nothing_settled"
+
+
+def run_sync_erp_refusal(settled_payments: int) -> ActionRefusal | None:
+    """Why ``POST /runs/{id}/sync-erp`` would refuse, or ``None`` — the ONE
+    definition the endpoint raises from and the Runs list's
+    ``actions.sync_erp`` is read from (issue #575).
+
+    ``settled_payments`` counts the run's ACTIVE payments (a superseded retry
+    attempt excluded, as everywhere a run is rolled up) that are
+    ``completed``. The sync-back only ever reports money that already moved,
+    so a run with none has nothing to send. The page used to offer the action
+    on every run that was not ``draft`` / ``cancelled`` — a ``failed`` run,
+    or one still ``executing``, got a button that could only 409.
+    """
+    if settled_payments <= 0:
+        return ActionRefusal(
+            RUN_NOTHING_SETTLED,
+            "This run has no settled payments to sync to the ERP.",
+            status.HTTP_409_CONFLICT,
+        )
+    return None
+
+
+# ── Paying a run outside FeohLedger: record / bank file / bank rejected ──
+
+RUN_NOT_RECORDABLE = "payment_run_not_recordable"
+RUN_NOTHING_TO_RECORD = "payment_run_nothing_to_record"
+
+#: The run statuses `/record-outside` closes out: `exported` (the customer
+#: uploaded the run's NACHA file and its bank took it) and `draft` (paid some
+#: other way — the bank's own portal, a file it built itself).
+RECORDABLE_RUN_STATUSES = ("draft", "exported")
+
+
+def _awaiting_cfo() -> ActionRefusal:
+    return ActionRefusal(
+        RUN_AWAITING_CFO,
+        "This run exceeds the org's CFO-approval threshold and is awaiting "
+        "sign-off from a user with the CFO role.",
+        status.HTTP_403_FORBIDDEN,
+    )
+
+
+def _segregation_for(action: str, step: str) -> ActionRefusal:
+    """Maker-checker for a step other than approve / execute: the same code,
+    with the step named by a stable token in ``params.step``
+    (``record_outside`` / ``nacha_export``) so the page can say which —
+    ``action`` is only the English verb for the sentence."""
+    return ActionRefusal(
+        RUN_SEGREGATION,
+        _run_segregation_message(action),
+        status.HTTP_403_FORBIDDEN,
+        params={"step": step},
+    )
+
+
+def run_record_outside_refusal(
+    run,
+    actor_id: uuid.UUID,
+    payment_config: dict | None,
+    pending_payments: int | None,
+) -> ActionRefusal | None:
+    """Why ``POST /runs/{id}/record-outside`` would refuse ``actor_id`` at the
+    run level, or ``None`` — the ONE definition the endpoint raises from and
+    the run dialog's ``actions.record_outside`` is read from (issue #575).
+
+    Recording closes the run out, so the run's own controls hold exactly as
+    for ``/execute``: maker-checker and CFO sign-off above the threshold.
+    ``pending_payments`` is how many of the run's ACTIVE payments are still
+    ``pending``; ``None`` skips that check, which is how the endpoint asks
+    for the cheap refusals before it takes the invoice locks the count needs
+    (it then asks again with the count).
+
+    Each payment's own refusal (segregation against the invoice, a
+    payment-blocking exception — ``external_payment.run_payment_refusal``)
+    is NOT here: it is per invoice, needs the invoice locked, and refuses the
+    whole run naming that invoice. The verdict can therefore be ``None`` and
+    the POST still refuse on one of those, which the page reports beside the
+    form.
+    """
+    if run.status not in RECORDABLE_RUN_STATUSES:
+        return ActionRefusal(
+            RUN_NOT_RECORDABLE,
+            f"Only a 'draft' or 'exported' run can be recorded as paid, not '{run.status}'",
+            status.HTTP_409_CONFLICT,
+        )
+    if run_segregation_violated(run.initiated_by, actor_id, payment_config):
+        return _segregation_for("record as paid", "record_outside")
+    if run.requires_cfo_approval and run.cfo_approved_at is None:
+        return _awaiting_cfo()
+    if pending_payments is not None and pending_payments <= 0:
+        return ActionRefusal(
+            RUN_NOTHING_TO_RECORD,
+            "This run has no payments left to record",
+            status.HTTP_409_CONFLICT,
+        )
+    return None
+
+
+NACHA_REQUIRES_RECORD_ONLY = "nacha_requires_record_only"
+NACHA_NOT_CONFIGURED = "nacha_not_configured"
+NACHA_ALREADY_EXPORTED = "nacha_already_exported"
+NACHA_RUN_NOT_EXPORTABLE = "nacha_run_not_exportable"
+NACHA_NOTHING_TO_REGENERATE = "nacha_nothing_to_regenerate"
+NACHA_NOTHING_TO_EXPORT = "nacha_nothing_to_export"
+NACHA_RUN_NOT_EXPORTED = "nacha_run_not_exported"
+
+
+def _nacha(code: str, message: str, http_status: int = status.HTTP_409_CONFLICT, **params):
+    # The export always answered with a coded detail; it keeps doing so.
+    return ActionRefusal(code, message, http_status, params=params or None, coded=True)
+
+
+def run_nacha_export_refusal(
+    run,
+    actor_id: uuid.UUID,
+    payment_config: dict | None,
+    *,
+    regenerate: bool,
+    record_only: bool,
+    originator_problems: list[str],
+    pending_payments: int,
+) -> ActionRefusal | None:
+    """Why ``GET /runs/{id}/nacha`` would refuse ``actor_id`` before reading a
+    single payment's bank data, or ``None`` — the ONE definition the endpoint
+    raises from and the run dialog's ``actions.nacha_export``
+    (``regenerate=False``) and ``actions.nacha_regenerate``
+    (``regenerate=True``) are read from (issue #575).
+
+    In order: the run's state (a first file needs ``draft``; a second needs
+    ``exported`` AND ``regenerate``); the tenant records rather than sends
+    payments (``record_only``, from ``payment_execution_mode``); the bank file
+    is configured (``originator_problems``, from ``nacha.originator_problems``
+    — names the missing settings); maker-checker; CFO sign-off; and at least
+    one ``pending`` payment to put in the file.
+
+    ``regenerate`` on a run that was never exported is refused
+    (``nacha_nothing_to_regenerate``): it used to export a first file under a
+    flag that says "a second one", so a reader whose run had been released
+    back to ``draft`` (the bank rejected the file) re-claimed it without being
+    told. Each payment's own checks (``dispatch_preflight``, ACH / USD / bank
+    details) stay per payment in the endpoint and refuse the whole file
+    naming the invoice.
+    """
+    if regenerate:
+        if run.status != "exported":
+            return _nacha(
+                NACHA_NOTHING_TO_REGENERATE,
+                "This run has no exported bank file to regenerate.",
+            )
+    elif run.status == "exported":
+        return _nacha(
+            NACHA_ALREADY_EXPORTED,
+            "This run's bank file was already exported. Uploading a second file "
+            "would pay these suppliers twice. Regenerate only if your bank never "
+            "took the first one.",
+        )
+    elif run.status != "draft":
+        return _nacha(
+            NACHA_RUN_NOT_EXPORTABLE,
+            f"Only a 'draft' run can be exported as a bank file, not '{run.status}'",
+        )
+    if not record_only:
+        return _nacha(
+            NACHA_REQUIRES_RECORD_ONLY,
+            "A bank file can only be exported when FeohLedger records payments rather "
+            "than sending them — otherwise the run could be paid twice.",
+        )
+    if originator_problems:
+        return _nacha(
+            NACHA_NOT_CONFIGURED,
+            "Set up the bank file in Settings → Payments first (company name, company "
+            "ID and your bank's routing number).",
+            missing=list(originator_problems),
+        )
+    if run_segregation_violated(run.initiated_by, actor_id, payment_config):
+        return _segregation_for("export", "nacha_export")
+    if run.requires_cfo_approval and run.cfo_approved_at is None:
+        return _awaiting_cfo()
+    if pending_payments <= 0:
+        return _nacha(NACHA_NOTHING_TO_EXPORT, "This run has no payments left to export")
+    return None
+
+
+def run_nacha_void_refusal(run) -> ActionRefusal | None:
+    """Why ``POST /runs/{id}/nacha/void`` ("the bank rejected the file") would
+    refuse, or ``None`` — the ONE definition the endpoint raises from and the
+    run dialog's ``actions.nacha_void`` is read from (issue #575). Only an
+    ``exported`` run has a file to release."""
+    if run.status != "exported":
+        return ActionRefusal(
+            NACHA_RUN_NOT_EXPORTED,
+            f"Only an 'exported' run's bank file can be voided, not '{run.status}'",
+            status.HTTP_409_CONFLICT,
+        )
+    return None
 
 
 # ── CFO-approval threshold ───────────────────────────────────────────────

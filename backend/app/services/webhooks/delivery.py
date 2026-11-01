@@ -31,7 +31,6 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,7 +83,16 @@ async def _post(
         # either header rotates with zero dropped deliveries; one that reads
         # only the primary header simply ignores this.
         headers[PREVIOUS_SIGNATURE_HEADER] = previous_signature
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+    # Pinned: the socket opens to an address `url_guard` vetted in this same
+    # connect, so a DNS record that flips after the pre-send check cannot
+    # steer the signed payload to an internal host. A refusal raises
+    # `WebhookTargetNotAllowed`, which `process_delivery` already handles.
+    from app.services.webhooks.url_guard import resolve_pinned_addresses
+    from app.utils.url_safety import pinned_async_client
+
+    async with pinned_async_client(
+        resolve=resolve_pinned_addresses, timeout=REQUEST_TIMEOUT_SECONDS
+    ) as client:
         resp = await client.post(target_url, content=body, headers=headers)
         return resp.status_code
 

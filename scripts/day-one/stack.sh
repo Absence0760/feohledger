@@ -86,7 +86,9 @@ wait_for() {
 # deploy/prod.sops.yaml.example sets it, pointed at the local stand-ins —
 # LocalStack for KMS, MinIO for S3, Mailpit for SMTP (a deployed environment
 # refuses the `console` email adapter). Keys are generated per run, so nothing
-# here is a committed secret.
+# here is a committed secret. FEOH_CORS_ORIGINS names the browser's origins
+# explicitly: a deployed environment admits no loopback origin by default
+# (backend/app/main.py::_cors_allow_origins), and only an explicit list keeps one.
 write_env() {
 	mkdir -p "$STATE_DIR"
 	chmod 700 "$STATE_DIR"
@@ -113,6 +115,7 @@ FEOH_S3_BUCKET=invoices
 FEOH_PUBLIC_URL=http://localhost:${WEB_PORT}
 FEOH_API_PUBLIC_URL=http://localhost:${API_PORT}
 FEOH_TENANT_URL_TEMPLATE=http://{slug}.localhost:${WEB_PORT}
+FEOH_CORS_ORIGINS=["http://${SLUG}.localhost:${WEB_PORT}","http://localhost:${WEB_PORT}"]
 FEOH_MFA_ENABLED=true
 FEOH_HSTS_ENABLED=true
 FEOH_SIGNUP_ENABLED=false

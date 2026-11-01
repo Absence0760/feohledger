@@ -18,7 +18,10 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     ListingGap,
     PoLinePayload,
+    PoListing,
     PoPayload,
+    PoSkipReason,
+    SkippedPo,
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
@@ -239,59 +242,64 @@ class MergeDevAdapter(ErpAdapter):
         return False
 
     async def list_pos(self) -> list[PoPayload]:
-        """Pull purchase orders via Merge's unified `/purchase-orders`.
+        return (await self.list_pos_report()).pos
 
-        Best-effort: any non-2xx returns an empty list rather than
-        propagating, because the sync endpoint should degrade to
-        "synced 0 POs" instead of 500ing the request. The underlying
-        Merge call is paginated; we follow `next` cursors so the full
-        list comes back, capped at 1000 to bound memory.
+    async def list_pos_report(self) -> PoListing:
+        """Every purchase order via Merge's unified ``/purchase-orders``, and the
+        ones left out for want of a total.
+
+        A record with neither a number nor an id is dropped (no stored row can
+        be found for it, so there is nothing to mark). One with a number but no
+        usable ``total_amount`` is skipped, never synced at 0, and named in
+        ``skipped`` as ``unpriceable``: at 0 every invoice against it read as
+        over-billed, and a total an earlier sync stored for it must stop being
+        matched against (decisions §323, §325). The total is never summed from
+        the lines either, the rule §325 kept for every adapter: a line list can
+        omit tax, charges or discounts the header total carries.
+
+        Read whole or not at all (:meth:`_list_complete`): a non-2xx, a network
+        error, an unreadable page or more than ``SYNC_LISTING_MAX_ROWS`` raises,
+        and the PO sync answers the coded 502 with nothing synced. It used to
+        answer "no POs" on a failure and stop silently at 1,000, which hides
+        whatever the unread part held (decisions §323, §329).
         """
         items: list[PoPayload] = []
+        skipped: list[SkippedPo] = []
         unnumbered = 0
-        cursor: str | None = None
-        params = {"page_size": "100", "expand": "vendor,line_items"}
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(10):  # 10 pages × 100 = 1000 PO cap
-                if cursor:
-                    params["cursor"] = cursor
-                try:
-                    resp = await client.get(
-                        f"{_api_base()}/purchase-orders",
-                        params=params,
-                        headers=self._headers(),
+        records = await self._list_complete(
+            "purchase-orders", {"page_size": "100", "expand": "vendor,line_items"}
+        )
+        for raw in records:
+            number = _merge_po_number(raw)
+            if not number:
+                unnumbered += 1
+                continue
+            payload = _merge_po_to_payload(raw)
+            if payload is None:
+                skipped.append(
+                    SkippedPo(
+                        str(number),
+                        PoSkipReason.unpriceable,
+                        legacy_po_numbers=_merge_legacy_po_numbers(raw, number),
                     )
-                except httpx.HTTPError:
-                    break
-
-                if resp.status_code != 200:
-                    break
-
-                body = resp.json() if resp.content else {}
-                for raw in body.get("results", []) or []:
-                    payload = _merge_po_to_payload(raw)
-                    if payload is None:
-                        unnumbered += 1
-                    else:
-                        items.append(payload)
-
-                cursor = body.get("next")
-                if not cursor:
-                    break
+                )
+            else:
+                items.append(payload)
 
         if unnumbered:
             # A count only: a PO record can carry vendor names and amounts.
             logger.warning("Merge.dev PO sync skipped %d PO(s) with no number or id", unnumbered)
-        return items
+        return PoListing(pos=items, skipped=skipped)
 
     async def _list_complete(self, path: str, params: dict[str, str]) -> list[dict]:
         """Every record of a Merge collection, following ``next`` cursors.
 
-        Any non-2xx or network error raises :class:`ErpListingIncomplete`, as
-        does a collection longer than ``SYNC_LISTING_MAX_ROWS``: the chart and
-        vendor syncs read absence as evidence (base), so they never get the
-        pages read before a failure as if they were the whole collection.
+        Any non-2xx, network error or unreadable body raises
+        :class:`ErpListingIncomplete`, as does a collection longer than
+        ``SYNC_LISTING_MAX_ROWS``: the chart and vendor syncs read absence as
+        evidence (base), and the PO sync reads the listing's skips, so none of
+        them gets the pages read before a failure as if they were the whole
+        collection.
         """
         records: list[dict] = []
         params = dict(params)
@@ -305,7 +313,10 @@ class MergeDevAdapter(ErpAdapter):
                     raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed) from None
                 if resp.status_code != 200:
                     raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed)
-                body = resp.json() if resp.content else {}
+                try:
+                    body = resp.json() if resp.content else {}
+                except ValueError:
+                    raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed) from None
                 records.extend(r for r in body.get("results") or [] if isinstance(r, dict))
                 cursor = body.get("next")
                 if not cursor:
@@ -372,6 +383,27 @@ class MergeDevAdapter(ErpAdapter):
             return False
 
 
+def _merge_po_number(raw: dict) -> object:
+    """The PO's number: Merge's ``purchase_order_number``, else ``number`` /
+    ``transaction_number`` for records shaped the older way, else the record id.
+    Falsy when the record carries none of them."""
+    return (
+        raw.get("purchase_order_number")
+        or raw.get("number")
+        or raw.get("transaction_number")
+        or raw.get("id")
+    )
+
+
+def _merge_legacy_po_numbers(raw: dict, po_number: object) -> tuple[str, ...]:
+    """The key a build before ``purchase_order_number`` stored this PO under
+    (``number``, else ``transaction_number``, else the record id), so the sync
+    can re-key that row rather than create a second one beside it, or mark it
+    where it stands when the PO cannot be priced (§328)."""
+    legacy = raw.get("number") or raw.get("transaction_number") or raw.get("id")
+    return (str(legacy),) if legacy and str(legacy) != str(po_number) else ()
+
+
 def _merge_po_to_payload(raw: dict) -> PoPayload | None:
     """Map a Merge.dev PO record to our normalized PoPayload.
 
@@ -387,21 +419,21 @@ def _merge_po_to_payload(raw: dict) -> PoPayload | None:
     has. Nothing persists or reads a PO line's GL account, so lines carry none
     rather than costing the pull a chart read (the QuickBooks PO sync's rule).
 
+    A record with no usable ``total_amount`` (absent, unparseable, not
+    finite) maps to None too: ``list_pos_report`` names it ``unpriceable``
+    rather than syncing it at 0. A stated ``0`` is a figure and is kept.
+
     A record with neither a number nor a Merge ``id`` maps to None and is
     skipped. The sync upserts by ``po_number``, so a shared placeholder (this
     used to be ``"UNKNOWN"``) would file every such PO into ONE row, each
     overwriting the last one's vendor, total and lines — a PO nobody issued
     for an amount nobody approved, matched against real invoices.
     """
-    po_number = (
-        # Merge's field is `purchase_order_number`; `number` and
-        # `transaction_number` are kept for records shaped the older way.
-        raw.get("purchase_order_number")
-        or raw.get("number")
-        or raw.get("transaction_number")
-        or raw.get("id")
-    )
+    po_number = _merge_po_number(raw)
     if not po_number:
+        return None
+    total = _to_decimal(raw.get("total_amount"))
+    if total is None or not total.is_finite():
         return None
 
     vendor = raw.get("vendor")
@@ -429,8 +461,6 @@ def _merge_po_to_payload(raw: dict) -> PoPayload | None:
             )
         )
 
-    total = _to_decimal(raw.get("total_amount")) or Decimal("0")
-
     # Merge.dev exposes the promised delivery date under a few names depending
     # on the upstream ERP; map the first that's present, else leave it None
     # (no fabrication — the real adapter only carries what the ERP supplied).
@@ -445,11 +475,6 @@ def _merge_po_to_payload(raw: dict) -> PoPayload | None:
     # it and stores NULL for an absent or malformed code — never a default.
     raw_currency = raw.get("currency")
 
-    # The key a build before `purchase_order_number` stored this PO under
-    # (`number`, else `transaction_number`, else the record id), so the sync can
-    # re-key that row rather than create a second one beside it (§328).
-    legacy = raw.get("number") or raw.get("transaction_number") or raw.get("id")
-
     return PoPayload(
         po_number=str(po_number),
         vendor_name=vendor_name,
@@ -459,7 +484,7 @@ def _merge_po_to_payload(raw: dict) -> PoPayload | None:
         expected_delivery_date=expected_delivery_date,
         line_items=line_items,
         currency=raw_currency if isinstance(raw_currency, str) else None,
-        legacy_po_numbers=(str(legacy),) if legacy and str(legacy) != str(po_number) else (),
+        legacy_po_numbers=_merge_legacy_po_numbers(raw, po_number),
     )
 
 

@@ -1060,5 +1060,5 @@ unknown-recorder and cancelled-receipt cases in
 | Exception routing for mismatches (`po_mismatch` exceptions auto-created by severity: error / warning / info) | Done |
 | Currency guard (`compare_currencies`; a currency mismatch is a `mismatch` with no variance, an unrecorded PO currency is compared at face value and reported `unknown`) | Done (migration 0099, decisions §197) |
 | PO management UI (list + detail page) | Done (`/purchase-orders`) |
-| PO sync from ERP (`list_pos()`) | Done — `mock` and `merge_dev` (which maps the record's `currency`); NetSuite / Business Central inherit the empty default |
+| PO sync from ERP (`list_pos()`) | Done — `mock` and every direct adapter with a PO collection (`merge_dev` maps the record's `currency`); each listing is read whole or raises `ErpListingIncomplete` (erp-integration.md § GL accounts and vendors are linked by the ERP's unique key) |
 | Configurable tolerance per org (`Organization.settings.po_matching.tolerance_pct`) | Planned |

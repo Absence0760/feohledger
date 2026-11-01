@@ -144,6 +144,9 @@ class FakeSyspro:
 
 def _run(fake: FakeSyspro, coro_fn):
     def factory(*args, **kwargs):
+        # An admin base_url arrives with the pinned transport; the fake replaces
+        # it (the pin itself is covered in test_url_safety and below).
+        kwargs.pop("transport", None)
         return _RealAsyncClient(*args, transport=httpx.MockTransport(fake.handler), **kwargs)
 
     with patch("httpx.AsyncClient", side_effect=factory):
@@ -607,6 +610,63 @@ def test_admin_base_url_behind_the_ssrf_guard(monkeypatch, base_url):
     with pytest.raises(UnsafeUrlError):
         _run(fake, lambda: adapter.post_invoice(_payload()))
     assert fake.requests == []
+
+
+def test_admin_base_url_uses_the_pinned_client(monkeypatch):
+    """A customer-hosted base_url is dialled through the pinned transport, so a
+    DNS record that rebinds after `_rest_base`'s check cannot reach an internal
+    host; the trusted operator override (fake-erp on localhost) stays plain."""
+    from app.utils.url_safety import PinnedAsyncTransport
+
+    monkeypatch.setattr(settings, "erp_syspro_api_base", "")
+    adapter = SysproAdapter({**CONFIG, "base_url": "https://erp.customer.example:20190"})
+    pinned = adapter._client(timeout=5)
+    assert isinstance(pinned._transport, PinnedAsyncTransport)
+    assert pinned._trust_env is False
+
+    monkeypatch.setattr(settings, "erp_syspro_api_base", FAKE_BASE)
+    plain = adapter._client(timeout=5)
+    assert not isinstance(plain._transport, PinnedAsyncTransport)
+    asyncio.run(pinned.aclose())
+    asyncio.run(plain.aclose())
+
+
+def test_a_rebound_admin_host_fails_the_post_without_dialling(monkeypatch):
+    """DNS rebinding end to end: `_rest_base`'s check gets the public answer,
+    the connect's own lookup gets the metadata address. Nothing is dialled
+    (the logon would carry the operator password) and the post comes back as
+    an ordinary failed, not-posted result, not an exception."""
+    import socket
+
+    import httpcore
+
+    from app.utils import url_safety
+
+    monkeypatch.setattr(settings, "erp_syspro_api_base", "")
+    answers = iter(["93.184.216.34"])
+
+    def rebinding(host, port, *a, **k):
+        ip = next(answers, "169.254.169.254")
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port or 443))]
+
+    class _NoDial(httpcore.AsyncNetworkBackend):
+        async def connect_tcp(self, *a, **k):
+            raise AssertionError("a rebound address must never be dialled")
+
+        async def connect_unix_socket(self, *a, **k):
+            raise AssertionError("never a unix socket")
+
+        async def sleep(self, seconds):
+            pass
+
+    monkeypatch.setattr(url_safety.httpcore, "AnyIOBackend", _NoDial)
+    adapter = SysproAdapter({**CONFIG, "base_url": "https://erp.customer.example:20190"})
+    with patch.object(socket, "getaddrinfo", rebinding):
+        result = asyncio.run(adapter.post_invoice(_payload()))
+    assert result.success is False
+    assert result.not_posted is True
+    assert "erp.customer.example" not in result.message
+    assert "169.254" not in result.message
 
 
 def test_operator_override_skips_the_guard(monkeypatch):

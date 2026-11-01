@@ -309,33 +309,55 @@ def test_every_segregation_shim_states_both_attributes():
     ``test_invoice_uploader_stamping`` exists to prevent: an absent attribute on a
     fraud control reads as an oversight and behaves as an exemption. Every shim
     must answer, even when the answer is ``None``.
+
+    A shim is either built inline at the call or returned by a same-module helper
+    (``expense_controls._segregation_subject``, shared by the raising check and
+    the ``violates_segregation`` verdict) — both are followed, and both entry
+    points are scanned, since the getattr default lives in the predicate.
     """
     import ast
     from pathlib import Path
 
+    def _is_namespace(node: ast.AST) -> bool:
+        return isinstance(node, ast.Call) and getattr(node.func, "id", None) == "SimpleNamespace"
+
     app_root = Path(__file__).resolve().parents[1] / "app"
-    offenders: list[str] = []
-    found = 0
+    offenders: set[str] = set()
+    shims: set[str] = set()
     for path in sorted(app_root.rglob("*.py")):
         tree = ast.parse(path.read_text())
         rel = path.relative_to(app_root.parent).as_posix()
+        # Same-module helpers whose body returns a SimpleNamespace shim.
+        helpers: dict[str, list[ast.Call]] = {}
+        for fn in ast.walk(tree):
+            if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                returned = [
+                    r.value
+                    for r in ast.walk(fn)
+                    if isinstance(r, ast.Return) and r.value is not None and _is_namespace(r.value)
+                ]
+                if returned:
+                    helpers[fn.name] = returned
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
             name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-            if name != "check_segregation" or not node.args:
+            if name not in ("check_segregation", "violates_segregation") or not node.args:
                 continue
             subject = node.args[0]
-            if not (
-                isinstance(subject, ast.Call)
-                and getattr(subject.func, "id", None) == "SimpleNamespace"
-            ):
+            if _is_namespace(subject):
+                candidates = [subject]
+            elif isinstance(subject, ast.Call) and getattr(subject.func, "id", None) in helpers:
+                candidates = helpers[subject.func.id]
+            else:
                 continue  # a real Invoice — the model guarantees the attribute
-            found += 1
-            kwargs = {kw.arg for kw in subject.keywords}
-            if "segregation_actor_ids" not in kwargs:
-                offenders.append(f"{rel}:{subject.lineno}")
+            for shim in candidates:
+                where = f"{rel}:{shim.lineno}"
+                shims.add(where)
+                if "segregation_actor_ids" not in {kw.arg for kw in shim.keywords}:
+                    offenders.add(where)
+    found = len(shims)
 
     assert found >= 3, (
         f"expected the expense-report / requisition / pre-approval shims, found {found} — "
@@ -343,7 +365,7 @@ def test_every_segregation_shim_states_both_attributes():
     )
     assert not offenders, (
         "check_segregation(SimpleNamespace(...)) omits `segregation_actor_ids` at "
-        + ", ".join(offenders)
+        + ", ".join(sorted(offenders))
         + " — state it (None is a fine answer when the table records no editors) so "
         "the exemption is argued rather than inherited from a getattr default."
     )

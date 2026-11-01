@@ -1,4 +1,5 @@
 <script lang="ts">
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	// Custom (ad-hoc) Report Builder. Pick a data source from the catalog, then
 	// choose dimensions / measures / filters — the whole builder is driven by
 	// `GET /api/reports/catalog`, never a hardcoded field list. Run renders a
@@ -355,11 +356,8 @@
 		<!-- The catalog drives the WHOLE builder, so a failure has to replace it —
 		     but it was replaced by a bare paragraph fired from a single-shot,
 		     dependency-free `$effect`, leaving nothing on screen that could
-		     re-run the load. Same error-with-retry block `/admin/api-keys` uses. -->
-		<div class="state error" data-testid="catalog-error" role="alert">
-			<p>{catalogError}</p>
-			<button type="button" class="btn-cancel" onclick={loadCatalog}>Retry</button>
-		</div>
+		     re-run the load. -->
+		<LoadError message={catalogError} onretry={loadCatalog} testId="catalog-error" />
 	{:else if catalog}
 		<div class="builder">
 			<div class="field source-field">
@@ -442,10 +440,7 @@
 			{#if savedError}
 				<!-- Not rendered ALONGSIDE the table: an error banner over "No saved
 				     reports yet." tells the reader two different things at once. -->
-				<div class="state error" data-testid="saved-error" role="alert">
-					<p>{savedError}</p>
-					<button type="button" class="btn-cancel" onclick={loadSaved}>Retry</button>
-				</div>
+				<LoadError message={savedError} onretry={loadSaved} testId="saved-error" />
 			{:else}
 			<DataTable
 				columns={SAVED_COLUMNS}
@@ -503,18 +498,6 @@
 />
 
 <style>
-	/* Error-with-retry block — same shape as `/admin/api-keys`. */
-	.state {
-		color: var(--text-muted);
-		padding: 0.75rem 0;
-	}
-	.state.error {
-		color: var(--danger);
-	}
-	.state.error p {
-		margin: 0 0 8px;
-	}
-
 	.lede {
 		color: var(--text-muted);
 		max-width: 80ch;

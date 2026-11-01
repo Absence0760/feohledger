@@ -319,3 +319,52 @@ test.describe('/adaptive — figures labelled from the org store', () => {
 		await expect(current).toHaveText('€1,000.00');
 	});
 });
+
+test.describe('/adaptive — smart routing', () => {
+	test('a failed recommendation is stated in place with a Retry that reloads it', async ({
+		page
+	}) => {
+		const INVOICE_ID = '66666666-6666-6666-6666-666666666666';
+		await stubPageLoad(page);
+		await page.route(
+			(url) => url.pathname === '/api/invoices',
+			(route) =>
+				json(route, {
+					items: [{ id: INVOICE_ID, invoice_number: 'INV-ROUTE-1', vendor_name: 'Route Vendor' }],
+					total: 1,
+					page: 1,
+					page_size: 50
+				})
+		);
+		let calls = 0;
+		await page.route(
+			(url) => url.pathname === '/api/adaptive/routing-suggestion',
+			(route) => {
+				calls += 1;
+				// The first read fails; the Retry's read succeeds.
+				if (calls === 1) return json(route, { detail: 'boom' }, 500);
+				return json(route, {
+					invoice_id: INVOICE_ID,
+					vendor_id: null,
+					vendor_name: 'Route Vendor',
+					amount: '10.00',
+					insufficient_history: true,
+					candidates: []
+				});
+			}
+		);
+
+		await page.goto('/adaptive');
+		await page.getByRole('tab', { name: 'Smart routing' }).click();
+		await page.getByTestId('adaptive-routing-invoice').selectOption(INVOICE_ID);
+
+		const error = page.getByTestId('adaptive-routing-error');
+		await expect(error).toHaveAttribute('role', 'alert');
+		await expect(error).toContainText('Couldn’t load a routing recommendation for that invoice.');
+		await error.getByRole('button', { name: 'Retry' }).click();
+
+		await expect(page.getByTestId('adaptive-routing-insufficient')).toBeVisible();
+		await expect(error).toHaveCount(0);
+		expect(calls).toBe(2);
+	});
+});

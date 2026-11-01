@@ -50,7 +50,7 @@ from app.services.sanctions_adapters.mock_adapter import MockSanctionsAdapter
 # These tests drive the payment money paths over a hand-built `AsyncMock`
 # session, which cannot model the invoice lock's SAVEPOINT-scoped bound — see
 # the `mock_session_lock_wait` fixture in conftest.py.
-pytestmark = pytest.mark.usefixtures("mock_session_lock_wait")
+pytestmark = pytest.mark.usefixtures("mock_session_lock_wait", "provider_store_from_settings")
 
 
 def _vendor(
@@ -660,6 +660,7 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
         completed_at=None,
         failure_reason=None,
         retry_of_payment_id=None,
+        dispatch_attempted_at=None,  # migration 0124
         correlation_id=uuid.uuid4(),
         source_currency=None,
         source_amount=None,
@@ -724,7 +725,7 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
     # `inactive_vendor_statuses` — the vendor is still `active`, so dispatch
     # carries on to the compliance gate this test is about.
     vendor_status_res = MagicMock()
-    vendor_status_res.all = MagicMock(return_value=[(vendor_id, "active")])
+    vendor_status_res.all = MagicMock(return_value=[(vendor_id, "active", False, "clear")])
     # `payable_amount` → `applicable_discounts`: no accepted offer.
     offers_res = MagicMock()
     offers_res.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -839,6 +840,7 @@ async def test_execute_payment_run_holds_virtual_card_for_null_vendor_invoice():
         completed_at=None,
         failure_reason=None,
         retry_of_payment_id=None,
+        dispatch_attempted_at=None,  # migration 0124
         correlation_id=uuid.uuid4(),
         source_currency=None,
         source_amount=None,
