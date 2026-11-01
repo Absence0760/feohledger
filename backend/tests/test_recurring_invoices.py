@@ -1814,6 +1814,71 @@ async def test_patch_extending_end_date_revives_an_exhausted_schedule(realdb):
     assert resp.json()["next_run_on"] == _month_start(1).isoformat()
 
 
+def _pin_today(day: date):
+    """Pin "today" for both the router and the service — they each bind
+    `utc_today` at import, so one patch would leave the other on the clock."""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(patch("app.api.recurring.utc_today", return_value=day))
+    stack.enter_context(patch.object(svc, "utc_today", return_value=day))
+    return stack
+
+
+async def test_revive_on_the_run_day_skips_the_period_just_generated(realdb):
+    """Re-seeding the cursor from today landed ON today when today was a run
+    day, i.e. on the period `generate-now` had just raised — the template
+    showed a next run it would never honour. Found when CI ran the test above
+    on the 1st of the month; pinned here so the boundary is exercised every
+    run, not one day in thirty."""
+    run_day = _month_start(0)
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+
+    with _pin_today(run_day):
+        async with realdb.client(key="a", role="ap_manager") as c:
+            tid = (
+                await c.post(
+                    "/api/recurring",
+                    json=_create_body(
+                        vendor_id=vendor_id,
+                        start_date=run_day.isoformat(),
+                        end_date=run_day.isoformat(),
+                    ),
+                )
+            ).json()["id"]
+            assert (await c.post(f"/api/recurring/{tid}/generate-now")).status_code == 201
+
+            resp = await c.patch(
+                f"/api/recurring/{tid}",
+                json={"end_date": _month_start(12).isoformat()},
+            )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["next_run_on"] == _month_start(1).isoformat()
+
+
+async def test_resume_on_the_run_day_skips_the_period_just_generated(realdb):
+    """Same re-seed, the resume door: generate today's period, pause, resume
+    the same day — the cursor must point at next month, not back at today."""
+    run_day = _month_start(0)
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+
+    with _pin_today(run_day):
+        async with realdb.client(key="a", role="ap_manager") as c:
+            tid = (
+                await c.post(
+                    "/api/recurring",
+                    json=_create_body(vendor_id=vendor_id, start_date=run_day.isoformat()),
+                )
+            ).json()["id"]
+            assert (await c.post(f"/api/recurring/{tid}/generate-now")).status_code == 201
+            assert (await c.post(f"/api/recurring/{tid}/pause")).status_code == 200
+            resumed = await c.post(f"/api/recurring/{tid}/resume")
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["next_run_on"] == _month_start(1).isoformat()
+
+
 async def test_patch_shortening_end_date_withdraws_a_cursor_past_it(realdb):
     """The other direction: moving `end_date` before an already-scheduled
     cursor left `next_run_on` pointing past the new end, and the sweep — which

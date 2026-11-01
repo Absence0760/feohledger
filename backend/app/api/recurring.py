@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -100,14 +100,36 @@ async def _get_scoped(
 
 
 def _seed_next_run_on(template: RecurringInvoiceTemplate, *, after: date) -> None:
-    """(Re)compute and stamp ``next_run_on`` from the template's own fields."""
-    template.next_run_on = svc.compute_next_run_on(
+    """(Re)compute and stamp ``next_run_on`` from the template's own fields.
+
+    Every re-seed from today (resume, a schedule edit, an end-date extension
+    reviving an exhausted cursor) lands ON today when today is a run day — and
+    that period may already have been generated (by the sweep or
+    `generate-now`). The cursor must point at the first period still owed, so
+    a candidate in the last generated period steps one period forward.
+    Generation only ever covers the current-or-earlier period and the
+    candidate is never before today, so equality is the only overlap.
+    """
+    candidate = svc.compute_next_run_on(
         template.cadence,
         template.day_of_period,
         after=after,
         start_date=template.start_date,
         end_date=template.end_date,
     )
+    if (
+        candidate is not None
+        and template.last_period_key is not None
+        and svc.period_key_for(template.cadence, candidate) == template.last_period_key
+    ):
+        candidate = svc.compute_next_run_on(
+            template.cadence,
+            template.day_of_period,
+            after=candidate + timedelta(days=1),
+            start_date=template.start_date,
+            end_date=template.end_date,
+        )
+    template.next_run_on = candidate
 
 
 # --------------------------------------------------------------------------- #
