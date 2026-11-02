@@ -76,7 +76,7 @@ services:
       retries: 12
 
   redis:
-    image: redis:7.4.11-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+    image: redis:7.4.12-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     restart: unless-stopped
     logging: *default-logging
     # AOF persistence: losing the blocklist would resurrect logged-out JWTs
@@ -231,7 +231,7 @@ services:
   # test_container_supply_chain.py fails when the two part): production must
   # build on the runtime CI tests. No Node or pnpm is installed on the VM.
   frontend-build:
-    image: node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53
+    image: node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
     profiles: [build]
     working_dir: /repo/frontend
     volumes:
