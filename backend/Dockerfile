@@ -4,7 +4,7 @@
 # leave a supply-chain pivot point. Bump the digest alongside the tag
 # when Renovate / Dependabot opens a PR (the trailing comment is what
 # the docker ecosystem reads as the human-version reference).
-FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913
 
 # Pull Debian security backports on top of the pinned base layer. The
 # digest above only changes when the upstream python:3.14-slim manifest
