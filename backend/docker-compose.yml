@@ -36,7 +36,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7.4.11-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+    image: redis:7.4.12-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     ports:
       - "6379:6379"
     healthcheck:
@@ -79,7 +79,7 @@ services:
   # (feohledger-app) and two test users (demo@acme.com, newhire@acme.com),
   # both password `demo`.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
     profiles: ["idp"]
     command: ["start-dev", "--import-realm"]
     environment:
@@ -109,7 +109,7 @@ services:
   # up with `pnpm idp:up`, then `pnpm scim:seed` sets the matching token on the
   # acme tenant. Full walkthrough: ../../docs/local-sso-keycloak.md § Authentik.
   authentik-postgres:
-    image: postgres:16.15-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
+    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     profiles: ["idp"]
     environment:
       POSTGRES_USER: authentik
@@ -124,7 +124,7 @@ services:
       retries: 10
 
   authentik-redis:
-    image: redis:7.4.11-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+    image: redis:7.4.12-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     profiles: ["idp"]
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     healthcheck:
@@ -240,7 +240,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:0.40.10@sha256:4c5b27871a3239a717048f9b93057680a51b60c8119a7016aebb57f938e25e35
+    image: ollama/ollama:0.40.13@sha256:b2f0122c476bc9fe7ce679d8bb4bd555351e25e2554eefb156f61cb0a89cf429
     profiles: ["ai"]
     ports:
       - "11435:11434"
