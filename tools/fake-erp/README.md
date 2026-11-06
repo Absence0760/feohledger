@@ -160,7 +160,7 @@ this directory uses `requirements.txt` rather than the backend's
 `requirements.lock`. To regenerate by hand after editing `requirements.in`:
 
 ```bash
-uv pip compile requirements.in --universal --python-version 3.14 --generate-hashes -o requirements.txt
+uv pip compile requirements.in --universal --python-version 3.15 --generate-hashes -o requirements.txt
 ```
 
 ## Running
