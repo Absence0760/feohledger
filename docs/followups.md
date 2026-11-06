@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**151 open: 126 (c) · 12 (a) · 13 (b)** — re-derived from the file, never carried
+**152 open: 127 (c) · 12 (a) · 13 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -2326,6 +2326,28 @@ user-visible halves still open.
       given. **Durable fix:** resolve httpx client constructors through imports
       in the AST walk, and assert the factory's URL argument traces to the
       settings value. **Trigger:** the next change to `test_url_safety.py`.
+
+### Surfaced by the Python 3.15 Dependabot bumps (2026-11-06)
+
+- [ ] **Move the backend image to Python 3.15 once onnxruntime ships a cp315
+      wheel.** Dependabot's `python:3.14-slim` → `3.15-slim` bump for
+      `backend/Dockerfile` (PR #683, closed 2026-11-06) cannot build:
+      `onnxruntime` (pulled in by `pymupdf`, pinned 1.31.1 in
+      `backend/requirements.lock`) publishes wheels only up to cp314, and the
+      `--require-hashes` install has no sdist to fall back on, so the Trivy
+      and day-one jobs fail at `uv pip install`. fake-erp (#684) and
+      fake-commerce (#687) are already on 3.15; their dependency sets had
+      cp315 wheels.
+      **Why deferred:** it waits on an upstream release we do not control.
+      **Durable fix:** when an onnxruntime release lists cp315 on PyPI,
+      move the backend as one change: bump the `FROM` digest in
+      `backend/Dockerfile`, every `python-version: '3.14'` in
+      `.github/workflows/ci.yml` (so CI tests the interpreter the image
+      runs), and recompile `backend/requirements{,-dev}.lock` with
+      `--python-version 3.15`. Or comment `@dependabot reopen` on #683 for
+      the Dockerfile half.
+      **Trigger:** `curl -s https://pypi.org/pypi/onnxruntime/json` lists a
+      `cp315` wheel for the latest release.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
