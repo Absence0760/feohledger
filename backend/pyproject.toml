@@ -9,7 +9,7 @@ dependencies = [
     # Pinned explicitly (transitive via fastapi) to hold the floor above
     # CVE-2026-54283 / CVE-2026-54282: request.form() limits silently ignored
     # for application/x-www-form-urlencoded (DoS), both fixed in 1.3.1.
-    "starlette>=1.9.0,<2",
+    "starlette>=1.10.0,<2",
     # Pinned explicitly (transitive via starlette / httpx / watchfiles) to hold
     # the floor above CVE-2026-63374 (connect_tcp / TLSStream.wrap validate an
     # IDNA-2003-mapped hostname, so a cert for a different ASCII name passes)
@@ -26,12 +26,12 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.1.6,<3",
     "asyncpg>=0.32.0,<1",
     "alembic>=1.20.1,<2",
-    "pydantic>=2.14.1,<3",
+    "pydantic>=2.14.2,<3",
     # >=2.14.2 fixes GHSA-4xgf-cpjx-pc3j (NestedSecretsSettingsSource follows
     # symlinks outside secrets_dir).
-    "pydantic-settings>=2.16.1,<3",
+    "pydantic-settings>=2.16.2,<3",
     "python-multipart>=0.0.32,<1",
-    "boto3>=1.43.118,<2",
+    "boto3>=1.43.122,<2",
     # Password hashing, called directly — there is no passlib here any more.
     # passlib 1.7.4 (its last release, 2020) held this floor at 4.0.1 for two
     # years: it reads `bcrypt.__about__.__version__`, deleted in bcrypt 5.0, and
@@ -63,7 +63,7 @@ dependencies = [
     # in the hash-locks; both ship cp314 binary wheels (no -devel headers
     # needed). Floor >=1.16 carries the modern xmlsec node-binding XSW fixes.
     "python3-saml>=1.16,<2",
-    "xmlsec>=1.3.17,<2",
+    "xmlsec>=1.3.18,<2",
     "lxml>=6.1.3,<7",
     "pyotp>=2.10.0,<3",
     "qrcode[pil]>=8.2,<9",
@@ -85,13 +85,13 @@ dependencies = [
     # manylinux wheel, so no compiler is added to the slim image. The RIC is
     # imported only by the Lambda runtime, never on the ECS/API path. See
     # docs/production-deployment.md → Lambda workers.
-    "awslambdaric>=4.2.2,<5",
+    "awslambdaric>=4.2.3,<5",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.1.1,<10",
-    "pytest-asyncio>=1.4.0,<2",
+    "pytest>=9.2.0,<10",
+    "pytest-asyncio>=1.4.1,<2",
     # CI shards the backend suite across parallel jobs (ci.yml → backend-test
     # matrix). pytest-split's `--splits N --group G` partitions the suite by
     # the committed `.test_durations` baseline so each shard gets a roughly
@@ -112,7 +112,7 @@ dev = [
     # to a single minor keeps CI's `pip install` from quietly picking
     # up stricter rules than the local venv runs. Bump intentionally
     # via dependabot or a manual upgrade pass.
-    "ruff>=0.17.2,<0.18",
+    "ruff>=0.17.3,<0.18",
 ]
 # Optional: auto-rotation of scanned invoice pages via Tesseract OSD.
 # Install with `pip install -e ".[ocr]"` and ensure the `tesseract` binary
