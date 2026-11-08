@@ -122,9 +122,10 @@ jobs:
       # Exit codes: 0 clean, 1 vulnerabilities found (advisory, so not a
       # failure), 128 no packages found; anything else is a scanner error
       # and fails the job so a broken scan is never read as a clean one.
+      # Each call is `|| rc=$?` because the runner's shell is `bash -e`.
       - name: Scan every lockfile (offline database)
         run: |
-          set -uo pipefail
+          set -euo pipefail
           bin="$RUNNER_TEMP/osv-scanner/osv-scanner"
           export OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY="$RUNNER_TEMP/osv-db"
           args=(scan source --recursive --offline-vulnerabilities --download-offline-databases)
@@ -134,16 +135,23 @@ jobs:
               *) echo "::error::osv-scanner exited $1"; exit "$1" ;;
             esac
           }
-          "$bin" "${args[@]}" --format sarif --output-file osv.sarif ./
-          check $?
+          rc=0
+          "$bin" "${args[@]}" --format sarif --output-file osv.sarif ./ || rc=$?
+          check "$rc"
           {
             echo "## osv-scanner (advisory)"
             echo
             echo "Full detail: Security > Code scanning, tool \`osv-scanner\`."
             echo
-            "$bin" "${args[@]}" --format markdown ./ 2>/dev/null
           } >> "$GITHUB_STEP_SUMMARY"
-          check "${PIPESTATUS[0]}"
+          rc=0
+          "$bin" "${args[@]}" --format markdown --output-file "$RUNNER_TEMP/osv-summary.md" ./ || rc=$?
+          check "$rc"
+          if [ -s "$RUNNER_TEMP/osv-summary.md" ]; then
+            cat "$RUNNER_TEMP/osv-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No vulnerabilities found." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload SARIF to code scanning
         if: ${{ !cancelled() && hashFiles('osv.sarif') != '' && github.event.pull_request.head.repo.fork != true }}
