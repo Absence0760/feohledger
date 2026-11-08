@@ -16080,3 +16080,28 @@ matched or turned into an expense; that is how an ignore is undone. Not in the
 verdicts, because they depend on input the row does not hold: submit's blocking
 policy violations, attach's per-line refusals, and match's checks on the chosen
 expense.
+
+## 349. zizmor and osv-scanner run advisory in their own workflow, outside `CI gate`, until the baseline is fixed (2026-11-08)
+
+**Decision.** `.github/workflows/supply-chain-scan.yml` runs two scanners on
+every pull request, push to `main` and a weekly schedule: zizmor 1.31.1 over
+`.github/workflows` and `dependabot.yml`, and osv-scanner 2.7.0 over every
+tracked lockfile (both `pnpm-lock.yaml`, `mobile/pubspec.lock`, the
+`tools/fake-*` requirements). Both upload SARIF to code scanning (categories
+`zizmor`, `osv-scanner`) and write a job summary, and neither fails on a
+finding: zizmor exits 0 in SARIF mode, and the osv step accepts exit 1
+(vulnerabilities found) and 128 (no packages) and fails on anything else, so a
+broken scan never reads as clean. The workflow is not called from `ci.yml`,
+unlike `security.yml`, because a fold would gate on the scanners completing
+(an OSV database or GitHub API outage) rather than on what they found. zizmor
+comes from zizmor-action pinned by SHA, which installs the wheel by hash;
+osv-scanner is the release binary checked against a pinned sha256, because
+`osv-scanner-action` resolves its Docker image by a mutable tag. osv-scanner
+runs `--offline-vulnerabilities`, so no package list leaves the runner, and
+zizmor's online audits call only the GitHub API. **Gaps:**
+`backend/pyproject.toml` has no lockfile, so the backend's Python dependencies
+are invisible to it (Trivy's image scan covers what is installed in the image);
+Gradle has no lockfiles; Terraform providers are not in OSV. **Making them
+blocking** waits on the current findings being fixed and a CISO / Security
+Analyst sign-off; the change then is calling the workflow from `ci.yml` or a
+code-scanning ruleset naming both tools.

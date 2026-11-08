@@ -1,0 +1,153 @@
+name: supply-chain-scan
+
+# Two advisory supply-chain scanners, kept out of the merge gate on purpose:
+#
+#   zizmor       static analysis of .github/workflows, .github/actions and
+#                dependabot.yml (injection, excessive permissions, unpinned
+#                uses, credential persistence, cache poisoning, ...).
+#   osv-scanner  every lockfile in the repo (npm, pnpm, pub, Go, Cargo,
+#                SwiftPM, PyPI, ...) against the OSV database.
+#
+# Advisory first: findings go to code scanning (SARIF, categories `zizmor`
+# and `osv-scanner`) and to the job summary, and neither job fails on a
+# finding. Neither tool is named in a code-scanning merge ruleset, so their
+# alerts do not block a merge either. Once the current findings are fixed,
+# a follow-up makes these checks blocking.
+#
+# Data flow: osv-scanner runs with --offline-vulnerabilities, so it downloads
+# the public OSV database and sends no package list anywhere. zizmor's online
+# audits call only the GitHub API, with this run's token. No source code
+# leaves GitHub.
+#
+# Versions are pinned and SHA-verified: zizmor-action installs the zizmor
+# wheel named by `version` by hash, and osv-scanner is the official release
+# binary checked against the sha256 below. Bump both together with their
+# release notes; Dependabot bumps the action SHAs.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 06:17 UTC, beside the other weekly security sweeps.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: supply-chain-scan-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  zizmor:
+    name: zizmor (workflow security)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out the tree to scan
+      actions: read # upload-sarif reads the run's metadata
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # In SARIF mode zizmor exits 0 on findings, so this step fails only on
+      # a real error. A fork PR's token cannot upload SARIF; that upload
+      # failure is tolerated there rather than reported as a finding.
+      - name: Run zizmor
+        id: zizmor
+        continue-on-error: ${{ github.event.pull_request.head.repo.fork == true }}
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          version: 1.31.1
+          advanced-security: true
+          color: false
+
+      - name: Summarize findings
+        if: ${{ !cancelled() }}
+        env:
+          SARIF: ${{ runner.temp }}/zizmor
+        run: |
+          set -euo pipefail
+          if [ ! -s "$SARIF" ]; then
+            echo "zizmor produced no SARIF; see the Run zizmor step." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import collections, json, os
+          runs = json.load(open(os.environ["SARIF"]))["runs"]
+          rules = {r["id"]: r for run in runs for r in run["tool"]["driver"].get("rules", [])}
+          results = [r for run in runs for r in run.get("results", [])]
+          def sev(r):
+              props = rules.get(r["ruleId"], {}).get("properties", {})
+              return props.get("problem.severity") or r.get("level", "note")
+          print("## zizmor (advisory)\n")
+          print(f"{len(results)} finding(s). Full detail: Security > Code scanning, tool zizmor.\n")
+          if results:
+              print("| Severity | Audit | Count |\n|---|---|---|")
+              for (s, rule), n in collections.Counter((sev(r), r["ruleId"]) for r in results).most_common():
+                  print(f"| {s} | {rule} | {n} |")
+          PY
+
+  osv-scanner:
+    name: osv-scanner (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the tree to scan
+      actions: read # upload-sarif reads the run's metadata
+      security-events: write # upload SARIF to code scanning
+    env:
+      OSV_SCANNER_VERSION: 2.7.0
+      OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install osv-scanner (pinned release binary, sha256-verified)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/osv-scanner"
+          bin="$RUNNER_TEMP/osv-scanner/osv-scanner"
+          curl -fsSL --retry 3 -o "$bin" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $bin" | sha256sum -c -
+          chmod +x "$bin"
+          "$bin" --version
+
+      # --recursive walks every git-tracked lockfile, not only the JS one.
+      # Exit codes: 0 clean, 1 vulnerabilities found (advisory, so not a
+      # failure), 128 no packages found; anything else is a scanner error
+      # and fails the job so a broken scan is never read as a clean one.
+      - name: Scan every lockfile (offline database)
+        run: |
+          set -uo pipefail
+          bin="$RUNNER_TEMP/osv-scanner/osv-scanner"
+          export OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY="$RUNNER_TEMP/osv-db"
+          args=(scan source --recursive --offline-vulnerabilities --download-offline-databases)
+          check() {
+            case "$1" in
+              0|1|128) ;;
+              *) echo "::error::osv-scanner exited $1"; exit "$1" ;;
+            esac
+          }
+          "$bin" "${args[@]}" --format sarif --output-file osv.sarif ./
+          check $?
+          {
+            echo "## osv-scanner (advisory)"
+            echo
+            echo "Full detail: Security > Code scanning, tool \`osv-scanner\`."
+            echo
+            "$bin" "${args[@]}" --format markdown ./ 2>/dev/null
+          } >> "$GITHUB_STEP_SUMMARY"
+          check "${PIPESTATUS[0]}"
+
+      - name: Upload SARIF to code scanning
+        if: ${{ !cancelled() && hashFiles('osv.sarif') != '' && github.event.pull_request.head.repo.fork != true }}
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
