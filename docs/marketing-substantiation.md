@@ -67,6 +67,16 @@ are qualitative (negotiated terms; help with a security review — answered from
 Qualitative copy ("in minutes, not days", "in minutes") makes no specific
 numeric claim and is not tracked here.
 
+## Landing page behaviour claims
+
+A sentence that says what the product *does* is as checkable as a number, so
+the specific ones get a row too. Line references are to `main` when the row was
+written; re-check them when the code they name moves.
+
+| Claim | Where | Evidence | Limits |
+|---|---|---|---|
+| "A change to a vendor's bank details waits for a second person to approve it, and every change is logged. Once it's approved, that vendor's unpaid approved invoices are held for a check before payment." | `marketing.features.exceptions.body` (Exception queue card), all six locales | **Held, not applied:** every AP entry point stages a pending `VendorChangeRequest` instead of writing the vendor (`_stage_ap_bank_change`, `backend/app/api/vendors.py:184`; create `:1226`, PATCH `:1275`, `POST /{id}/bank-change` `:1347`), and so does the supplier portal (`backend/app/api/portal.py:1503`). The only write of `Vendor.bank_details` is the approve path (`vendors.py:2430`; erasure's null-out aside). **Second person:** approve needs `vendor.bank_change.approve` (`vendors.py:2324`) and refuses the requester (`:2391`) and the AP user who provisioned the portal login that submitted it (`:2399`). **Logged:** `vendor.bank_details_change_requested` (`:261`), `…_approved` (`:2451`), `…_rejected` (`:2533`), masked to last-4. **Held:** on approval a `fraud_flag` exception opens on each approved, unpaid invoice for the vendor (`:2474` → `:329`); `fraud_flag` blocks payment runs and the ERP push until resolved (`backend/app/api/payments.py:262`, `:292`). Tests: `backend/tests/test_vendor_change_request_approval.py` (stages instead of applying, requester can't approve, approval flags payable invoices), `test_vendor_bank_change_provisioner_sod.py`. | Always on: no tenant setting turns the staging off. Which roles may approve is configurable per tenant (admin and `ap_manager` by default, `backend/app/api/permissions.py:145`). While a change is pending, payments still go to the **old** details; nothing is blocked until it is approved. Invoices not yet approved are not flagged, since they need an approval anyway. Never phrase this as "prevents fraud" or "stops BEC": it is a control that puts a second person in the path, and a careless approver can still approve a fraudulent change. |
+
 ## Withdrawn
 
 Kept so the same figure is not reintroduced without a source.

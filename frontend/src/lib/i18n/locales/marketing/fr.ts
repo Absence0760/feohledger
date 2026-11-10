@@ -66,7 +66,7 @@ export const messages = {
 		'Réglez chaque facture avec sa propre carte virtuelle à usage unique, émise via Lithic ou Nium, et obtenez une remise typique de 1–2 % sur les paiements aux fournisseurs qui acceptent la carte.',
 	'marketing.features.exceptions.title': 'File des exceptions',
 	'marketing.features.exceptions.body':
-		'Doublons, soupçons de fraude, dépassements de montant et fournisseurs non vérifiés sont signalés, attribués et traités dans une seule file — sans fouiller vos e-mails.',
+		'Doublons, soupçons de fraude, dépassements de montant et fournisseurs non vérifiés sont signalés, attribués et traités dans une seule file — sans fouiller vos e-mails. Toute modification des coordonnées bancaires d’un fournisseur attend la validation d’une seconde personne, et chaque modification est journalisée. Une fois validée, les factures approuvées et non payées de ce fournisseur sont bloquées pour vérification avant paiement.',
 
 	'marketing.how.eyebrow': 'Fonctionnement',
 	'marketing.how.heading': 'De la facture au grand livre, en trois étapes.',

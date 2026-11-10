@@ -79,7 +79,7 @@ export const enMarketing = {
 		'Pay each invoice with its own single-use virtual card, issued through Lithic or Nium, and earn a typical 1–2% rebate on payments to vendors that accept card.',
 	'marketing.features.exceptions.title': 'Exception queue',
 	'marketing.features.exceptions.body':
-		'Duplicates, fraud flags, amounts over limit and unverified vendors are flagged, assigned and resolved in one queue — no digging through email.',
+		"Duplicates, fraud flags, amounts over limit and unverified vendors are flagged, assigned and resolved in one queue — no digging through email. A change to a vendor's bank details waits for a second person to approve it, and every change is logged. Once it's approved, that vendor's unpaid approved invoices are held for a check before payment.",
 
 	// ── How it works ────────────────────────────────────────────────────
 	'marketing.how.eyebrow': 'How it works',

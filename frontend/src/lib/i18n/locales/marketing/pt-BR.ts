@@ -66,7 +66,7 @@ export const messages = {
 		'Pague cada fatura com um cartão virtual de uso único, emitido pela Lithic ou pela Nium, e ganhe um reembolso típico de 1–2% nos pagamentos a fornecedores que aceitam cartão.',
 	'marketing.features.exceptions.title': 'Fila de exceções',
 	'marketing.features.exceptions.body':
-		'Duplicidades, alertas de fraude, valores acima do limite e fornecedores não verificados são sinalizados, atribuídos e resolvidos em uma única fila — sem garimpar o e-mail.',
+		'Duplicidades, alertas de fraude, valores acima do limite e fornecedores não verificados são sinalizados, atribuídos e resolvidos em uma única fila — sem garimpar o e-mail. Uma alteração nos dados bancários de um fornecedor aguarda a aprovação de uma segunda pessoa, e toda alteração fica registrada. Depois de aprovada, as faturas aprovadas e ainda não pagas desse fornecedor ficam retidas para conferência antes do pagamento.',
 
 	'marketing.how.eyebrow': 'Como funciona',
 	'marketing.how.heading': 'Da fatura ao razão, em três etapas.',
