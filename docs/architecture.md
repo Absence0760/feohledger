@@ -25,7 +25,7 @@ techflow.localhost:7777┘                       └── feohledger DB
 | Database       | PostgreSQL 16                           |
 | Cache/Queue    | Redis 7                                 |
 | Object Storage | MinIO (S3-compatible)                   |
-| Auth           | JWT (python-jose) + bcrypt_sha256       |
+| Auth           | JWT (joserfc, HS256) + bcrypt_sha256    |
 | Migrations     | Alembic                                 |
 | Package Mgrs   | pnpm (frontend), pip (backend)          |
 

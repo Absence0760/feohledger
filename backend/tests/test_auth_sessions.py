@@ -27,9 +27,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from jose import jwt
 
-from app.config import settings
+from app.utils import jwt_hs256
 from tests.test_session_management import FakeRedis
 
 # Mock-DB tests: session revocation writes an auth audit row through its own control-plane/tenant
@@ -122,7 +121,7 @@ async def test_get_current_user_stashes_the_requesting_jti():
     from app.api.deps import get_current_user
 
     jti = str(uuid.uuid4())
-    token = jwt.encode(
+    token = jwt_hs256.encode(
         {
             "sub": str(uuid.uuid4()),
             "org": str(ORG_ID),
@@ -130,8 +129,6 @@ async def test_get_current_user_stashes_the_requesting_jti():
             "jti": jti,
             "exp": datetime.now(UTC) + timedelta(seconds=300),
         },
-        settings.secret_key,
-        algorithm="HS256",
     )
     fake_user = SimpleNamespace(id=uuid.uuid4(), is_active=True, organization_id=ORG_ID, roles=[])
     result = MagicMock()

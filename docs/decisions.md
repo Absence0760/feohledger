@@ -16171,3 +16171,62 @@ drops two of the three ignores; and making the scans blocking, which is adding
 `zizmor` (then `osv-scanner`) to the Code scanning gate ruleset beside CodeQL
 after a CISO / Security Analyst sign-off, not a `needs:` in `ci.yml`. Both are
 in `docs/followups.md`.
+
+## 351. The backend's own tokens move from python-jose to joserfc, byte for byte (2026-11-11)
+
+**Decision.** Closes §350's first "still open" item. Every token the backend
+mints for itself — the employee and supplier-portal access tokens and both MFA
+challenge tokens — is now signed and verified by one module,
+`backend/app/utils/jwt_hs256.py`, over joserfc. `api/deps.py` and
+`services/mfa.py` call its `encode` / `decode`; python-jose is gone from
+`pyproject.toml`, and with it python-jose, ecdsa and rsa from both locks. The
+two `osv-scanner.toml` ignores §350 added for them (GHSA-3qf3-8w2g-rqmx,
+GHSA-wj6h-64fc-37mp) are deleted rather than left to expire. joserfc was
+already a dependency (1.7.7, `services/sso.py` and the NetSuite adapter), so no
+new package enters the image.
+
+**Compatibility is exact, not approximate.** python-jose wrote the header as
+`{"alg":"HS256","typ":"JWT"}` (sorted keys) and the payload as compact JSON with
+`datetime` time claims as integer seconds. joserfc's default header puts its
+own `typ` first, so the module passes the header whole with
+`default_type=None`; its payload encoding already matched. The result is the
+same token for the same claims, byte for byte, so a session minted before the
+deploy verifies after it and nobody is logged out. `tests/test_jwt_hs256.py`
+pins that against literals the pre-migration mint functions produced under
+python-jose (access, vendor access, both challenge types, and an expired
+access token), the way `tests/test_bcrypt_sha256_compat.py` pins passlib's
+hashes (§151): it asserts each literal decodes to its claims, re-encodes to the
+identical string, and passes `decode_token`, `get_current_user` and the MFA
+decoders.
+
+**Verification keeps python-jose's rules.** `algorithms=["HS256"]` only (`none`,
+`HS384`/`HS512`, `RS256` refused before a key is used); the key is an `OctKey`,
+which in joserfc 1.7.7 refuses an asymmetric public key as HMAC material
+outright, the class GHSA-3qf3-8w2g-rqmx is about. `exp` / `nbf` / `iat` are
+checked when present with no leeway. python-jose also refused an `aud` when the
+caller named no audience; joserfc's registry type-checks `sub` and `jti` as
+python-jose did but accepts any `aud`, so the module refuses `aud` itself. It
+also refuses a non-finite `exp` / `nbf` / `iat`: JSON admits `NaN` and
+`Infinity`, joserfc's numeric check accepts any float, and `NaN < now` is
+false, so a signed `"exp": NaN` would never expire (python-jose's `int()`
+refused it). A non-object payload is refused. Every failure is one
+`InvalidTokenError`, mapped exactly as `JWTError` was: a 401 `"Invalid token"`
+in `decode_token`, the same `ValueError` in the MFA decoders. Malformed input
+(bad segments, bad base64, bad JSON) was checked to raise only that exception,
+so no token shape can reach a 500.
+
+**Two differences, both tightening, neither reachable by a token we mint:**
+joserfc rejects an `iat` in the future (python-jose only type-checked it), and
+it rejects a string `exp` that python-jose would have parsed with `int()`. No
+token we issue carries `iat`, and every `exp` is an integer.
+
+**Rejected:** requiring `exp`. Every token we have ever minted carries one, so
+it would cost nothing in production, but python-jose did not require it, a
+handful of tenant-isolation tests mint without it, and an auth-library swap is the
+wrong change to also move a validation rule in. A token without `exp` can only
+be minted with `FEOH_SECRET_KEY`, which already forges anything. Pinned by
+`test_token_without_exp_is_accepted_as_python_jose_did`, so changing it is a
+decision. Also rejected: calling joserfc directly in `deps.py` and `mfa.py` as
+python-jose was, which would duplicate the extra claim checks and the error
+mapping in two places; `security-patterns.sh`'s `bypass-decode-token` rule now
+allows `jwt.decode` only in `utils/jwt_hs256.py` and `services/sso.py`.

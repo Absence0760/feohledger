@@ -1,6 +1,6 @@
 # Authentication
 
-JWT-based authentication using `python-jose` for token handling and `bcrypt_sha256` for password hashing. Tokens are server-side revocable via a Redis blocklist.
+JWT-based authentication using `joserfc` for token handling (`backend/app/utils/jwt_hs256.py`) and `bcrypt_sha256` for password hashing. Tokens are server-side revocable via a Redis blocklist.
 
 **Hash and verify through the awaitable wrappers, never `pwd_context` directly.**
 `backend/app/utils/passwords.py` exposes `verify_password` / `hash_password` /
@@ -137,6 +137,36 @@ What is worth knowing about it:
 
 Covered by `backend/tests/test_password_hash_upgrade.py` (real Postgres, both
 surfaces, through the HTTP login route).
+
+### Tokens — HS256 under `FEOH_SECRET_KEY`, signed and verified in one module
+
+Every token the backend issues for itself — the employee access token
+(`typ=user`), the supplier-portal access token (`typ=vendor`) and both MFA
+challenge tokens (`typ=mfa_challenge` / `vendor_mfa_challenge`) — is signed and
+verified by `backend/app/utils/jwt_hs256.py`, over `joserfc`. `deps.py` and
+`services/mfa.py` call its `encode` / `decode`; nothing else in `app/` decodes a
+JWT except `services/sso.py`, which verifies an IdP's ID token against its JWKS
+with asymmetric algorithms only (`.claude/hooks/security-patterns.sh` rule
+`bypass-decode-token`).
+
+- **Algorithm:** exactly `["HS256"]`. `alg: none`, `HS384` / `HS512`, `RS256`
+  and anything else are refused before a key is used. The key is a joserfc
+  `OctKey`, which refuses an asymmetric public key as HMAC material outright.
+- **Claims:** `exp`, `nbf` and `iat` are checked when present, with no leeway;
+  `exp` is not required (every token we mint carries one), and a non-finite
+  value (`NaN`, `Infinity`) is refused. An `aud` claim is refused, and `sub` /
+  `jti` must be strings. The payload must be a JSON
+  object. These are python-jose's rules, kept; a future `iat` and a
+  numeric-string `exp` are now refused as well.
+- **Failure:** anything wrong is one `InvalidTokenError`. `decode_token` maps it
+  to `401 {"detail": "Invalid token"}`; the MFA decoders to `ValueError("Invalid
+  or expired MFA challenge token")`, which the routes turn into their 401. A
+  malformed token can never surface as a 500.
+- **Wire format:** header `{"alg":"HS256","typ":"JWT"}` in that key order, compact
+  JSON payload, `datetime` time claims as integer seconds — byte-identical to
+  what python-jose wrote before the switch (`docs/decisions.md` §351), so tokens
+  minted before it kept verifying after it. `backend/tests/test_jwt_hs256.py`
+  pins that against python-jose-generated literals; do not regenerate them.
 
 ## Auth Flow
 
