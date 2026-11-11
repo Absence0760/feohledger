@@ -6,13 +6,21 @@ name: supply-chain-scan
 #                dependabot.yml (injection, excessive permissions, unpinned
 #                uses, credential persistence, cache poisoning, ...).
 #   osv-scanner  every lockfile in the repo (npm, pnpm, pub, Go, Cargo,
-#                SwiftPM, PyPI, ...) against the OSV database.
+#                SwiftPM, PyPI, ...) against the OSV database, plus the
+#                backend's `requirements*.lock`, named explicitly below.
 #
 # Advisory first: findings go to code scanning (SARIF, categories `zizmor`
 # and `osv-scanner`) and to the job summary, and neither job fails on a
 # finding. Neither tool is named in a code-scanning merge ruleset, so their
-# alerts do not block a merge either. Once the current findings are fixed,
-# a follow-up makes these checks blocking.
+# alerts do not block a merge either.
+#
+# A zizmor finding that is kept gets an inline `# zizmor: ignore[...]` with a
+# reason; an osv finding with no fixed release gets a reviewed, expiring
+# `[[IgnoredVulns]]` entry in osv-scanner.toml at the repo root (used when
+# present; Scorecard's Vulnerabilities check reads the same file). Making
+# either check blocking is a merge-gate change: add the tool to the
+# code-scanning merge ruleset (not a `needs:` in ci.yml) once the baseline is
+# clean and the change is signed off (decisions §349, §350).
 #
 # Data flow: osv-scanner runs with --offline-vulnerabilities, so it downloads
 # the public OSV database and sends no package list anywhere. zizmor's online
@@ -59,7 +67,7 @@ jobs:
       - name: Run zizmor
         id: zizmor
         continue-on-error: ${{ github.event.pull_request.head.repo.fork == true }}
-        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           version: 1.31.1
           advanced-security: true
@@ -129,6 +137,19 @@ jobs:
           bin="$RUNNER_TEMP/osv-scanner/osv-scanner"
           export OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY="$RUNNER_TEMP/osv-db"
           args=(scan source --recursive --offline-vulnerabilities --download-offline-databases)
+          # osv-scanner.toml, when the project has one, holds the reviewed,
+          # expiring ignores. Passed explicitly so it applies to every
+          # lockfile the recursive scan finds, not only those beside it.
+          if [ -f osv-scanner.toml ]; then
+            args+=(--config=osv-scanner.toml)
+          fi
+          # The backend's locks are uv-compiled, hash-pinned pip requirements
+          # named `*.lock`, which the recursive walk does not recognise, so
+          # each is named with its parser. A renamed lock then fails the scan
+          # instead of silently dropping out of it.
+          for lock in backend/requirements*.lock; do
+            args+=(--lockfile "requirements.txt:$lock")
+          done
           check() {
             case "$1" in
               0|1|128) ;;
