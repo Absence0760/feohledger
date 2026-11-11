@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, Header, HTTPException, Request, status
-from jose import JWTError, jwt
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -18,10 +17,11 @@ from app.models.api_key import ApiKey
 from app.models.organization import Organization
 from app.models.user import User
 from app.redis import is_token_blocked
+from app.utils import jwt_hs256
 
 logger = logging.getLogger(__name__)
 
-ALGORITHM = "HS256"
+ALGORITHM = jwt_hs256.ALGORITHM
 
 # JWT `typ` values that are NOT full employee access tokens and therefore must
 # never resolve through `get_current_user`. These are same-secret JWTs minted by
@@ -66,7 +66,7 @@ def create_access_token_with_jti(user_id: uuid.UUID, org_id: uuid.UUID) -> tuple
         "jti": jti,
         "exp": expire,
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM), jti
+    return jwt_hs256.encode(payload), jti
 
 
 def create_vendor_access_token(vendor_user_id: uuid.UUID, vendor_id: uuid.UUID) -> str:
@@ -81,14 +81,15 @@ def create_vendor_access_token(vendor_user_id: uuid.UUID, vendor_id: uuid.UUID) 
         "jti": jti,
         "exp": expire,
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+    return jwt_hs256.encode(payload)
 
 
 def decode_token(token: str) -> dict:
-    """Decode a JWT and return the payload. Raises on invalid tokens."""
+    """Decode a JWT and return the payload. Raises a 401 on any invalid token
+    (`app.utils.jwt_hs256` pins HS256 and checks the time claims)."""
     try:
-        return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-    except JWTError:
+        return jwt_hs256.decode(token)
+    except jwt_hs256.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 

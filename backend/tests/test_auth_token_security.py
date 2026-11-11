@@ -27,15 +27,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
-from jose import jwt
+from joserfc import jwt
+from joserfc.jwk import OctKey
 
 from app.config import settings
 
 
 def _mint(payload: dict, *, key: str | None = None, algorithm: str = "HS256") -> str:
     """Sign a JWT — defaults to the app's real secret + HS256 so a
-    decoded payload passes the production verify path."""
-    return jwt.encode(payload, key or settings.secret_key, algorithm=algorithm)
+    decoded payload passes the production verify path. Uses joserfc directly
+    (not `app.utils.jwt_hs256`) so a test can pick another key or algorithm."""
+    return jwt.encode(
+        {"alg": algorithm, "typ": "JWT"},
+        payload,
+        OctKey.import_key(key or settings.secret_key),
+        algorithms=[algorithm],
+        default_type=None,
+    )
 
 
 def _employee_payload(*, org_id: uuid.UUID | None = None, exp_offset_s: int = 300) -> dict:
@@ -66,7 +74,7 @@ def test_decode_rejects_alg_none_token():
     """alg=none is the canonical JWT auth-bypass — a token whose
     header sets `alg: none` and provides no signature must not be
     accepted regardless of the payload."""
-    # python-jose refuses to encode `alg=none` from the high-level
+    # JOSE libraries refuse to encode `alg=none` from their high-level
     # api, so we hand-craft the token. Header + payload, no sig.
     import base64
     import json

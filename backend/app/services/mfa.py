@@ -35,13 +35,13 @@ from datetime import UTC, datetime, timedelta
 
 import pyotp
 import qrcode
-from jose import JWTError, jwt
 
 from app.config import settings
 from app.redis import claim_token_block, get_redis, is_token_blocked
+from app.utils import jwt_hs256
 from app.utils.passwords import verify_password
 
-ALGORITHM = "HS256"
+ALGORITHM = jwt_hs256.ALGORITHM
 
 EMAIL_OTP_PREFIX = "mfa:email_otp:"
 # Pending (started-but-not-yet-verified) TOTP enrollment secrets. Separate
@@ -454,15 +454,15 @@ def create_challenge_token(user_id: uuid.UUID) -> str:
         "exp": expire,
         "jti": str(uuid.uuid4()),
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+    return jwt_hs256.encode(payload)
 
 
 async def decode_challenge_token(token: str) -> ChallengeTokenClaims:
     """Verify a challenge token and return its claims. Raises ValueError on a
     bad, expired, wrong-type, or already-consumed (replayed) token."""
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-    except JWTError as exc:
+        payload = jwt_hs256.decode(token)
+    except jwt_hs256.InvalidTokenError as exc:
         raise ValueError("Invalid or expired MFA challenge token") from exc
     if payload.get("typ") != CHALLENGE_TYPE:
         raise ValueError("Wrong token type for MFA challenge")
@@ -492,7 +492,7 @@ def create_vendor_challenge_token(vendor_user_id: uuid.UUID) -> str:
         "exp": expire,
         "jti": str(uuid.uuid4()),
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+    return jwt_hs256.encode(payload)
 
 
 async def decode_vendor_challenge_token(token: str) -> ChallengeTokenClaims:
@@ -500,8 +500,8 @@ async def decode_vendor_challenge_token(token: str) -> ChallengeTokenClaims:
     ValueError on a bad, expired, wrong-type, or already-consumed (replayed)
     token. `subject_id` is the vendor_user_id."""
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-    except JWTError as exc:
+        payload = jwt_hs256.decode(token)
+    except jwt_hs256.InvalidTokenError as exc:
         raise ValueError("Invalid or expired MFA challenge token") from exc
     if payload.get("typ") != VENDOR_CHALLENGE_TYPE:
         raise ValueError("Wrong token type for MFA challenge")
