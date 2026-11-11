@@ -11,7 +11,7 @@ Invoke `repo-security-auditor` against a focused area. Output a structured findi
 - Before merging a PR that touches `app/api/*.py` (HTTP surface), `app/services/webhook_security.py`, `app/tenant.py`, `app/api/deps.py`, or any router that adds a new endpoint.
 - After a customer reports anything that smells like cross-tenant or auth leakage.
 - Periodically (monthly) as a sweep across the trust boundaries.
-- After dependency bumps that touch crypto (bcrypt, jose, cryptography, xmlsec).
+- After dependency bumps that touch crypto (bcrypt, joserfc, cryptography, xmlsec).
 
 **Wrong fit — refuse:**
 
