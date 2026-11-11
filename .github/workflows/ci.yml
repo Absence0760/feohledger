@@ -289,7 +289,7 @@ jobs:
         # Stock postgres:16 doesn't ship the extension; CI without
         # this fails with "extension 'vector' is not available".
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.postgres }}
+        image: ${{ needs.compose-images.outputs.postgres }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -304,7 +304,7 @@ jobs:
 
       redis:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.redis }}
+        image: ${{ needs.compose-images.outputs.redis }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         ports:
           - 6379:6379
         options: >-
@@ -740,7 +740,7 @@ jobs:
         # Stock postgres:16 doesn't ship the extension; CI without
         # this fails with "extension 'vector' is not available".
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.postgres }}
+        image: ${{ needs.compose-images.outputs.postgres }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -772,7 +772,7 @@ jobs:
 
       redis:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.redis }}
+        image: ${{ needs.compose-images.outputs.redis }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         ports:
           - 6379:6379
         options: >-
@@ -1058,7 +1058,7 @@ jobs:
     services:
       postgres:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.postgres }}
+        image: ${{ needs.compose-images.outputs.postgres }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -1074,7 +1074,7 @@ jobs:
           --health-retries=5
       redis:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.redis }}
+        image: ${{ needs.compose-images.outputs.redis }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         ports:
           - 6379:6379
         options: >-
@@ -1299,7 +1299,7 @@ jobs:
     services:
       postgres:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.postgres }}
+        image: ${{ needs.compose-images.outputs.postgres }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -1315,7 +1315,7 @@ jobs:
           --health-retries=5
       redis:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.redis }}
+        image: ${{ needs.compose-images.outputs.redis }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         ports:
           - 6379:6379
         options: >-
