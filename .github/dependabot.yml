@@ -1,4 +1,9 @@
 version: 2
+# Every entry waits out a 7-day `cooldown` before proposing a new version, the
+# same "at least seven days old" rule the hand-made pins follow (docs/
+# decisions.md §349, §350): a release pulled or found malicious in its first
+# week never reaches a PR. Cooldown applies to version updates only; a
+# security update still opens at once.
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -6,6 +11,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns:
@@ -17,6 +24,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
     groups:
       # `patterns` was NOT the operative difference — that hypothesis is
       # refuted. It was added on 2026-09-05; the next scheduled run
@@ -63,6 +72,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
     groups:
       frontend-minor-patch:
         update-types:
@@ -79,6 +90,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     groups:
       mobile-minor-patch:
         update-types:
@@ -91,6 +104,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
 
   # Both Dockerfiles pin their base image by digest so Scorecard's
   # PinnedDependencies check passes and a re-tagged python:3.14-slim can't
@@ -103,6 +118,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
 
   # tools/fake-commerce pins the same base the same way (decisions §273).
   - package-ecosystem: docker
@@ -111,6 +128,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
 
   # Every `image:` in the two compose files is pinned `repo:tag@sha256:…`, and
   # the `docker` entries above do NOT read compose files — they read
@@ -147,6 +166,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     # One group, `patterns: ["*"]`, NOT `update-types: [minor, patch]`. A
     # digest-only refresh (same tag, new sha256) carries no semver update type,
     # so the old filter let it fall out of the group and Dependabot opened one
@@ -181,6 +202,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     groups:
       fake-erp:
         patterns:
@@ -193,6 +216,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     groups:
       fake-commerce:
         patterns:
@@ -204,6 +229,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     groups:
       terraform-minor-patch:
         update-types:
