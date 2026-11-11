@@ -1,0 +1,52 @@
+# osv-scanner configuration. supply-chain-scan.yml passes it with --config,
+# so it applies to every lockfile the scan reads; Scorecard's Vulnerabilities
+# check reads the same file. Each entry is an advisory with no patched
+# release, scoped to one advisory ID and its aliases (a new advisory against
+# the same package still reports) and re-reviewed by `ignoreUntil`, after
+# which the alert returns. Rationale: docs/decisions.md §350.
+
+[[IgnoredVulns]]
+# CVE-2026-85394 (incomplete fix for CVE-2024-33663): python-jose <= 3.5.0
+# accepts a DER-encoded public key as an HMAC secret.
+# Its PYSEC alias is filtered with it.
+id = "GHSA-3qf3-8w2g-rqmx"
+ignoreUntil = 2027-05-11
+reason = """
+No fixed release: 3.5.0 is python-jose's latest and the advisory is last_affected \
+3.5.0. Not reachable here: the backend signs and verifies its own session, MFA \
+and step-up tokens with HS256 and a symmetric FEOH_SECRET_KEY only, and every \
+jwt.decode passes algorithms=["HS256"] (app/api/deps.py, app/services/mfa.py). \
+The attack needs an asymmetric public key fed to HMAC verification with the \
+algorithm list unrestricted. Drop this when the backend moves those call sites \
+to joserfc (already a dependency, used by sso.py and netsuite.py) and removes \
+python-jose, or python-jose ships a fix.\
+"""
+
+[[IgnoredVulns]]
+# CVE-2024-23342: Minerva timing side channel in python-ecdsa signing on P-256.
+# Its PYSEC alias is filtered with it.
+id = "GHSA-wj6h-64fc-37mp"
+ignoreUntil = 2027-05-11
+reason = """
+No fixed release and none planned: python-ecdsa treats side channels as out \
+of scope, and 0.19.2 is its latest. ecdsa is in the locks only as a dependency \
+of python-jose; the backend installs python-jose[cryptography], whose ECDSA \
+backend is cryptography, and it signs only HS256 tokens, so nothing calls \
+ecdsa's SigningKey. Signature verification is unaffected by the advisory. \
+Drop this with python-jose (see GHSA-3qf3-8w2g-rqmx), which removes ecdsa too.\
+"""
+
+[[IgnoredVulns]]
+# CVE-2026-93753: deepmerge <= 4.3.1 mergeObject() prototype poisoning.
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2027-05-11
+reason = """
+No fixed release: 4.3.1 is deepmerge's latest and the advisory lists no \
+patched version. Its only dependent in frontend/pnpm-lock.yaml is \
+@sveltejs/vite-plugin-svelte, already at its latest 7.3.1, which declares \
+deepmerge ^4.3.1 and uses it at build time to merge the plugin's options with \
+svelte.config.js, inputs the repo authors. Nothing from it reaches the shipped \
+bundle or a request path. Drop this once deepmerge publishes a patched \
+release (then pin it in the frontend's pnpm overrides) or vite-plugin-svelte \
+drops it.\
+"""
