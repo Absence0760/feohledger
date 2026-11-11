@@ -78,12 +78,17 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      # Every `${{ }}` reaches a script through `env:`, read as a quoted shell
+      # variable, never expanded into the script text (zizmor
+      # template-injection; docs/decisions.md §350).
       - name: Log in to Amazon ECR
         id: ecr
+        env:
+          REGION: ${{ vars.AWS_REGION }}
         run: |
           account="$(aws sts get-caller-identity --query Account --output text)"
-          registry="$account.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com"
-          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
+          registry="$account.dkr.ecr.${REGION}.amazonaws.com"
+          aws ecr get-login-password --region "$REGION" \
             | docker login --username AWS --password-stdin "$registry"
           echo "registry=$registry" >> "$GITHUB_OUTPUT"
 
@@ -107,13 +112,14 @@ jobs:
         env:
           CONTAINER: ${{ vars.ECS_CONTAINER_NAME }}
           IMAGE: ${{ steps.image.outputs.uri }}
+          TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY }}
         run: |
           # Pull the live task definition, swap the image on the app
           # container, and strip the read-only fields AWS rejects on
           # re-register. Keeps every other setting (cpu/memory, env, secrets,
           # log config) exactly as Terraform last applied it.
           aws ecs describe-task-definition \
-            --task-definition "${{ vars.ECS_TASK_FAMILY }}" \
+            --task-definition "$TASK_FAMILY" \
             --query taskDefinition > taskdef.json
           jq --arg img "$IMAGE" --arg name "$CONTAINER" '
             .containerDefinitions = (
@@ -131,6 +137,10 @@ jobs:
       - name: Run database migrations
         env:
           CONTAINER: ${{ vars.ECS_CONTAINER_NAME }}
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          TASK_DEF_ARN: ${{ steps.taskdef.outputs.arn }}
+          SUBNETS: ${{ vars.ECS_SUBNETS }}
+          SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS }}
         run: |
           # Migrate BEFORE rolling the service so the new code never serves
           # against an un-migrated schema. Runs as a one-off Fargate task on
@@ -141,17 +151,17 @@ jobs:
           # just the control plane. A non-zero container exit fails the job
           # and the service is never rolled.
           task_arn="$(aws ecs run-task \
-            --cluster "${{ vars.ECS_CLUSTER }}" \
-            --task-definition "${{ steps.taskdef.outputs.arn }}" \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF_ARN" \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ vars.ECS_SUBNETS }}],securityGroups=[${{ vars.ECS_SECURITY_GROUPS }}],assignPublicIp=DISABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SECURITY_GROUPS}],assignPublicIp=DISABLED}" \
             --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER\",\"command\":[\"sh\",\"scripts/deploy_migrate.sh\"]}]}" \
             --query 'tasks[0].taskArn' --output text)"
           echo "Migration task: $task_arn"
           aws ecs wait tasks-stopped \
-            --cluster "${{ vars.ECS_CLUSTER }}" --tasks "$task_arn"
+            --cluster "$CLUSTER" --tasks "$task_arn"
           exit_code="$(aws ecs describe-tasks \
-            --cluster "${{ vars.ECS_CLUSTER }}" --tasks "$task_arn" \
+            --cluster "$CLUSTER" --tasks "$task_arn" \
             --query "tasks[0].containers[?name=='$CONTAINER'].exitCode | [0]" \
             --output text)"
           echo "Migration container exit code: $exit_code"
@@ -161,16 +171,20 @@ jobs:
           fi
 
       - name: Deploy to ECS service
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SERVICE: ${{ vars.ECS_SERVICE }}
+          TASK_DEF_ARN: ${{ steps.taskdef.outputs.arn }}
         run: |
           aws ecs update-service \
-            --cluster "${{ vars.ECS_CLUSTER }}" \
-            --service "${{ vars.ECS_SERVICE }}" \
-            --task-definition "${{ steps.taskdef.outputs.arn }}"
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --task-definition "$TASK_DEF_ARN"
           # Block until the new tasks are healthy behind the ALB so the job
           # status reflects the real rollout outcome, not just the API call.
           aws ecs wait services-stable \
-            --cluster "${{ vars.ECS_CLUSTER }}" \
-            --services "${{ vars.ECS_SERVICE }}"
+            --cluster "$CLUSTER" \
+            --services "$SERVICE"
 
   lambdas:
     name: Deploy Lambda workers
