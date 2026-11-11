@@ -107,8 +107,8 @@ Things an auditor expects to see *in code or config*, not just in a policy doc. 
 | Dependabot for Python, npm, Dart/Flutter (pub), Docker, GitHub Actions, Terraform | Done | `.github/dependabot.yml` |
 | SAST in CI | Done | `.github/workflows/security.yml` (CodeQL — Python, TypeScript/JavaScript, GitHub Actions), called from `ci.yml` on every PR and push to `main`, so a red scan fails `CI gate` and blocks the merge; plus a weekly scheduled run |
 | Container image scanning | Done | `.github/workflows/security.yml` (Trivy on backend Dockerfile; same `CI gate` wiring as SAST) |
-| Workflow security scanning | In progress (advisory) | `.github/workflows/supply-chain-scan.yml` (zizmor), on every PR, push to `main` and weekly; SARIF to code scanning, outside `CI gate` until the current findings are fixed and blocking is signed off (decisions §349) |
-| Dependency vulnerability scanning, every lockfile | In progress (advisory) | `.github/workflows/supply-chain-scan.yml` (osv-scanner, offline database) over the pnpm, pub and pip lockfiles; same advisory wiring. `backend/pyproject.toml` has no lockfile, so the backend's Python dependencies are not covered yet (decisions §349) |
+| Workflow security scanning | In progress (advisory) | `.github/workflows/supply-chain-scan.yml` (zizmor), on every PR, push to `main` and weekly; SARIF to code scanning. Baseline fixed: 0 high, 0 medium (decisions §350). Outside the merge gate until blocking is signed off and `zizmor` joins the Code scanning gate ruleset (decisions §349) |
+| Dependency vulnerability scanning, every lockfile | In progress (advisory) | `.github/workflows/supply-chain-scan.yml` (osv-scanner, offline database) over the pnpm, pub and pip lockfiles, the backend's `requirements*.lock` included; same advisory wiring. No open finding: one fixed, three with no patched release ignored by ID in `osv-scanner.toml` with a review date (decisions §349, §350) |
 | Secret scanning in repo | Done | GitHub native (free for public + paid tiers) |
 | Penetration test (annual) | Pending | One-time engagement, ~$8–15K |
 
