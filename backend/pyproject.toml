@@ -16,11 +16,11 @@ dependencies = [
     # and CVE-2026-64847 (undrained stderr hangs process-pool workers), both
     # fixed in 4.14.2.
     "anyio>=4.15.1,<5",
-    # Pinned explicitly (transitive via python-jose / rsa / webauthn /
-    # pyasn1-modules) to hold the floor above CVE-2026-119194..119197: four
-    # denial-of-service bugs in ASN.1 decoding (hash collisions in schemaless
-    # decoding, quadratic fragmented data, constructed bit strings, quadratic
-    # binary REAL), all fixed in 0.6.5. Trivy flagged them in the image.
+    # Pinned explicitly (transitive via webauthn / pyasn1-modules) to hold the
+    # floor above CVE-2026-119194..119197: four denial-of-service bugs in ASN.1
+    # decoding (hash collisions in schemaless decoding, quadratic fragmented
+    # data, constructed bit strings, quadratic binary REAL), all fixed in
+    # 0.6.5. Trivy flagged them in the image.
     "pyasn1>=0.6.5,<0.7",
     "uvicorn[standard]>=0.54.0,<1",
     "sqlalchemy[asyncio]>=2.1.6,<3",
@@ -44,17 +44,18 @@ dependencies = [
     # again. See `docs/decisions.md` §151.
     "bcrypt>=5.0.0,<6",
     "redis>=8.1.0,<9",
-    "python-jose[cryptography]>=3.5.0,<4",
     # AES-256-GCM + HKDF for the provider-credential envelope encryption
-    # (services/credential_crypto). Already transitive via python-jose; declared
+    # (services/credential_crypto). Already transitive via joserfc; declared
     # because that module imports it directly.
     "cryptography>=50.0.2,<51",
     "httpx>=0.28.1,<1",
     "PyMuPDF>=2.0,<3",
     "pgvector>=0.5.1,<1",
-    # OIDC ID-token signature + claims verification in services/sso.py.
-    # (Successor to authlib.jose, which deprecated that module in favour of
-    # joserfc; we use joserfc directly so there's no authlib dependency.)
+    # Every JWT/JWS: the backend's own HS256 session + MFA tokens
+    # (utils/jwt_hs256.py, which replaced python-jose — docs/decisions.md §351),
+    # OIDC ID-token verification (services/sso.py) and NetSuite's client
+    # assertion. >=1.7.7 refuses an asymmetric public key as an HMAC key.
+    # (Successor to authlib.jose; we use joserfc directly, no authlib.)
     "joserfc>=1.7.7,<2",
     # SAML 2.0 Service-Provider: assertion XML-DSig verification (services/
     # auth_saml.py). python3-saml verifies in-process via python-xmlsec (no
