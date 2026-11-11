@@ -72,14 +72,18 @@ jobs:
           persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.0.2
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        # No dependency cache in a release build: a cache is writable by any
+        # default-branch run, and this job's output is what production
+        # serves, so it installs from the lockfile cold. setup-node turns a
+        # package-manager cache on by itself when package.json names one, so
+        # it is switched off explicitly (docs/decisions.md §350).
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          package-manager-cache: false
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

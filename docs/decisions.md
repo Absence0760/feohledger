@@ -16080,3 +16080,94 @@ matched or turned into an expense; that is how an ignore is undone. Not in the
 verdicts, because they depend on input the row does not hold: submit's blocking
 policy violations, attach's per-line refusals, and match's checks on the chosen
 expense.
+
+## 349. zizmor and osv-scanner run advisory in their own workflow, outside `CI gate`, until the baseline is fixed (2026-11-08)
+
+**Decision.** `.github/workflows/supply-chain-scan.yml` runs two scanners on
+every pull request, push to `main` and a weekly schedule: zizmor 1.31.1 over
+`.github/workflows` and `dependabot.yml`, and osv-scanner 2.7.0 over every
+tracked lockfile (both `pnpm-lock.yaml`, `mobile/pubspec.lock`, the
+`tools/fake-*` requirements). Both upload SARIF to code scanning (categories
+`zizmor`, `osv-scanner`) and write a job summary, and neither fails on a
+finding: zizmor exits 0 in SARIF mode, and the osv step accepts exit 1
+(vulnerabilities found) and 128 (no packages) and fails on anything else, so a
+broken scan never reads as clean. The workflow is not called from `ci.yml`,
+unlike `security.yml`, because a fold would gate on the scanners completing
+(an OSV database or GitHub API outage) rather than on what they found. zizmor
+comes from zizmor-action pinned by SHA, which installs the wheel by hash;
+osv-scanner is the release binary checked against a pinned sha256, because
+`osv-scanner-action` resolves its Docker image by a mutable tag. osv-scanner
+runs `--offline-vulnerabilities`, so no package list leaves the runner, and
+zizmor's online audits call only the GitHub API. **Gaps:**
+`backend/pyproject.toml` has no lockfile, so the backend's Python dependencies
+are invisible to it (Trivy's image scan covers what is installed in the image);
+Gradle has no lockfiles; Terraform providers are not in OSV. **Making them
+blocking** waits on the current findings being fixed and a CISO / Security
+Analyst sign-off; the change then is calling the workflow from `ci.yml` or a
+code-scanning ruleset naming both tools.
+
+## 350. The supply-chain baseline is fixed at the root, and the backend's locks are scanned too (2026-11-11)
+
+**Decision.** The fix pass for §349's baseline. zizmor 1.31.1, regular
+persona, `--offline` on the merged tree: **77 findings (19 high, 42 medium,
+2 low, 14 informational) became 2 (0 high, 0 medium, 2 low, 0
+informational).** The online audits §349 also measured add 41
+`ref-version-mismatch` mediums (118 in all); each pin was resolved against its
+repository's tags and all 41 are fixed. Fixed rather than waived wherever a fix
+exists:
+
+- `dependabot-auto-merge.yml` moved from `pull_request_target` to
+  `pull_request`: GitHub runs a Dependabot PR's `pull_request` workflow with the
+  `permissions:` it declares, so the base-branch context bought nothing and
+  handed a write token to a workflow every PR can trigger. It and all three
+  `dependabot-lockfile.yml` jobs gate on `github.event.pull_request.user.login`,
+  not the spoofable `github.actor`, which names whoever caused the event. The
+  cost: a conflicting PR has no merge ref and so no run, and a conflicting PR
+  cannot auto-merge anyway.
+- `vm-deploy.yml`'s SPA build restores no cache (`package-manager-cache:
+  false`): a cache is writable by any default-branch run and that build is what
+  production serves.
+- Every checkout whose job never uses git credentials sets
+  `persist-credentials: false` (31, `claude.yml` included: claude-code-action
+  strips the persisted credential and authenticates with its own token).
+- Every pin comment names the release its SHA is (codeql-action v4.39.3, not
+  `v4`; setup-python v7.1.0, not v6.1.0; and five more Dependabot had bumped
+  under a stale comment). Every Dependabot entry waits out a 7-day `cooldown`,
+  the age rule §349's hand-made pins follow.
+- `aws-deploy.yml` passes `vars.*` and step outputs to its scripts through
+  `env:` instead of expanding them into the script text.
+
+**Waived inline, each with its reason, because there is no fix:**
+`dependabot-lockfile.yml` keeps `pull_request_target` (its push job needs a
+write token without a PAT; the resolver jobs run PR code read-only and name no
+secret, the header's design); `pr-title-lint.yml` keeps it so a conflicting PR
+still gets its title linted, and its workflow-level `read-all` dropped to none;
+`claude.yml`'s `issue_comment` has no alternative trigger and runs only for the
+authorized owner; and the ten `unpinned-images` findings on the CI service
+containers, whose refs come from `compose_image_refs.sh`, which refuses any ref
+that is not `repo:tag@sha256:<digest>` (§203) where zizmor cannot see it.
+**Left:** two low `self-repository` findings on `ci.yml`'s local action
+references, which want GitHub's `$/` syntax that actionlint cannot read yet.
+
+**osv-scanner.** §349 called `backend/pyproject.toml` unlocked. It is not:
+`backend/requirements.lock` and `requirements-dev.lock` are uv-compiled,
+hash-pinned pip requirements, which the recursive walk skips for their `.lock`
+names. The workflow now names each with `--lockfile requirements.txt:<path>`,
+by glob, so a renamed lock fails the scan rather than dropping out of it. That
+surfaced python-jose 3.5.0 (GHSA-3qf3-8w2g-rqmx, critical) and its dependency
+ecdsa 0.19.2 (GHSA-wj6h-64fc-37mp, high). `opentelemetry-api` 1.45.0
+(GHSA-xcq7-p3pf-p88h) is fixed by moving both `tools/fake-*` locks to 1.45.2.
+The other three have no patched release and are ignored by advisory ID in a
+root `osv-scanner.toml`, passed with `--config` so it reaches every lockfile,
+with `ignoreUntil = 2027-05-11` and a drop condition each: python-jose is used
+only for HS256 with a symmetric key and `algorithms=["HS256"]` on every decode,
+which the DER-key confusion needs unrestricted; nothing calls ecdsa's signing
+API; deepmerge 4.3.1 reaches only vite-plugin-svelte's build-time option merge.
+**Rejected:** an ID-less package ignore, which would hide the next advisory, and
+per-directory configs, which `--config` would override anyway.
+
+**Still open:** replacing python-jose with joserfc (already a dependency), which
+drops two of the three ignores; and making the scans blocking, which is adding
+`zizmor` (then `osv-scanner`) to the Code scanning gate ruleset beside CodeQL
+after a CISO / Security Analyst sign-off, not a `needs:` in `ci.yml`. Both are
+in `docs/followups.md`.

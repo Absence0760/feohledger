@@ -28,13 +28,20 @@ name: Dependabot auto-merge
 # returns an error and the workflow no-ops; PRs sit waiting for a
 # human like before, so worst case is degenerate, not destructive.
 
+# `pull_request`, not `pull_request_target`: GitHub runs a Dependabot PR's
+# `pull_request` workflow with the `permissions:` below, so the base-branch
+# context buys nothing here, and `pull_request_target` would hand a write
+# token to a workflow that every pull request, from anyone, can trigger. A
+# PR from a fork gets a read-only token on `pull_request` whatever this file
+# asks for. The cost: a conflicting PR has no merge ref and so no run, which
+# is fine — Dependabot rebases its own PRs, and a conflicting PR cannot
+# auto-merge anyway (docs/decisions.md §350).
 on:
-  pull_request_target:
+  pull_request:
     branches: [main]
 
 permissions:
-  # `pull_request_target` runs in the base-branch context — needs
-  # explicit grants for the few things gh/dependabot do here.
+  # Explicit grants for the few things gh/dependabot do here.
   contents: write
   pull-requests: write
 
@@ -42,11 +49,13 @@ jobs:
   auto-merge:
     name: Auto-merge minor + patch
     runs-on: ubuntu-latest
-    # Pull-request author check guards against any non-dependabot
-    # PR accidentally tripping this. The fetch-metadata action below
-    # is hardened against forged commit messages from compromised
-    # branches, but a belt-and-braces author gate costs nothing.
-    if: github.actor == 'dependabot[bot]'
+    # Gate on the PR's AUTHOR, not `github.actor`: the actor names whoever
+    # caused this one event, not who opened the PR, so it can read
+    # `dependabot[bot]` on a PR someone else opened. The fetch-metadata
+    # step below then refuses a PR whose commits are not verified
+    # Dependabot commits, so a human push onto a Dependabot branch does not
+    # ride the author check through.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     timeout-minutes: 5
     steps:
       - name: Read dependabot metadata
