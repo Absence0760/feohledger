@@ -15,7 +15,7 @@ dependencies = [
     # IDNA-2003-mapped hostname, so a cert for a different ASCII name passes)
     # and CVE-2026-64847 (undrained stderr hangs process-pool workers), both
     # fixed in 4.14.2.
-    "anyio>=4.15.1,<5",
+    "anyio>=4.16.0,<5",
     # Pinned explicitly (transitive via webauthn / pyasn1-modules) to hold the
     # floor above CVE-2026-119194..119197: four denial-of-service bugs in ASN.1
     # decoding (hash collisions in schemaless decoding, quadratic fragmented
@@ -23,15 +23,15 @@ dependencies = [
     # 0.6.5. Trivy flagged them in the image.
     "pyasn1>=0.6.5,<0.7",
     "uvicorn[standard]>=0.54.0,<1",
-    "sqlalchemy[asyncio]>=2.1.6,<3",
+    "sqlalchemy[asyncio]>=2.1.8,<3",
     "asyncpg>=0.32.0,<1",
     "alembic>=1.20.1,<2",
     "pydantic>=2.14.2,<3",
     # >=2.14.2 fixes GHSA-4xgf-cpjx-pc3j (NestedSecretsSettingsSource follows
     # symlinks outside secrets_dir).
     "pydantic-settings>=2.16.2,<3",
-    "python-multipart>=0.0.32,<1",
-    "boto3>=1.43.122,<2",
+    "python-multipart>=0.0.33,<1",
+    "boto3>=1.43.123,<2",
     # Password hashing, called directly — there is no passlib here any more.
     # passlib 1.7.4 (its last release, 2020) held this floor at 4.0.1 for two
     # years: it reads `bcrypt.__about__.__version__`, deleted in bcrypt 5.0, and
@@ -49,14 +49,14 @@ dependencies = [
     # because that module imports it directly.
     "cryptography>=50.0.2,<51",
     "httpx>=0.28.1,<1",
-    "PyMuPDF>=2.0,<3",
+    "PyMuPDF>=2.1,<3",
     "pgvector>=0.5.1,<1",
     # Every JWT/JWS: the backend's own HS256 session + MFA tokens
     # (utils/jwt_hs256.py, which replaced python-jose — docs/decisions.md §351),
     # OIDC ID-token verification (services/sso.py) and NetSuite's client
     # assertion. >=1.7.7 refuses an asymmetric public key as an HMAC key.
     # (Successor to authlib.jose; we use joserfc directly, no authlib.)
-    "joserfc>=1.7.7,<2",
+    "joserfc>=1.8.0,<2",
     # SAML 2.0 Service-Provider: assertion XML-DSig verification (services/
     # auth_saml.py). python3-saml verifies in-process via python-xmlsec (no
     # xmlsec1 binary shell-out), keeping the slim-image / local-first story
@@ -92,7 +92,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=9.2.0,<10",
-    "pytest-asyncio>=1.4.1,<2",
+    "pytest-asyncio>=1.4.1.post1,<2",
     # CI shards the backend suite across parallel jobs (ci.yml → backend-test
     # matrix). pytest-split's `--splits N --group G` partitions the suite by
     # the committed `.test_durations` baseline so each shard gets a roughly
