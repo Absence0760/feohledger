@@ -19019,3 +19019,89 @@ the door and the floor stamp the approver; `receiving_conflicts`,
 reader); `tests/test_migration_0129_invoice_approver_id.py` (literals pinned to
 the app, chain, parity, each backfill case including the two recall cases,
 idempotence, Alembic on a tenant and on the control plane).
+
+## 390. Sage Business Cloud Accounting (UK) reads paid from its allocations and codes a refused create (#655, drafted 2026-10-23, landed 2026-11-13)
+
+**Found by a docs-versus-code audit, before any live test** (the v3.1 Swagger
+Sage publishes, vendored at `github.com/nook-io/python-sage/openapi.json`, since
+developer.sage.com refuses automated reads). The v3.1 adapter
+(`erp_adapters/sage_accounting.py`) had been left out of §303 and §285.
+
+**Paid (§303's table gains a row).** Sage sets a purchase invoice `PAID` when a
+credit note is allocated to it as well as when it is paid, and `total_paid`
+"includes any payments, allocations and discounts", so neither says money left.
+Each `payments_allocations` entry names what it is: a payment carries
+`contact_payment`, a credit note or other contact allocation carries
+`contact_allocation`. So:
+
+| Adapter | `paid` when | Nothing owing otherwise |
+|---|---|---|
+| Sage Business Cloud Accounting (v3.1) | `status == PAID` and an allocation with a `contact_payment` (not a `negative_payment`), read with `show_payments_allocations=true` | `settled_no_payment` |
+
+`PART_PAID` is `partially_paid` on the same test and `open` when only credit has
+reduced it: nothing has been paid and money is still owed.
+
+**This is a read, not status sync, and it records no money.** Sage UK keeps
+`supports_status_sync = False`: the port adds no `bill_report`, no
+`changed_bills` and no write-back, a push still closes at `done`, and nothing
+under `app/` calls `get_invoice_status` to record a payment. So §386's rule
+(record only the ERP's stated cash figure, refuse an amount or currency that
+disagrees with what is owed here) has nothing to apply to yet, and nothing here
+contradicts it. When Sage UK gets status sync (the open `docs/followups.md`
+entry "A bill paid in an ERP other than QuickBooks or Xero"), the report must
+follow Xero's shape: `paid_amount` is the sum of the `contact_payment`
+allocations, in the invoice's `currency`, set only when payments alone settled
+it; a bill settled partly by credit reads `paid` here but states no cash
+figure, so `record_invoice_paid_outside` refuses it rather than book what is
+owed.
+
+**A refused create is coded and marked as having created nothing (§285).** Any
+4xx a re-send cannot change (`base.erp_status_retryable` is False) means Sage
+saved nothing, so the result is non-retryable with `not_posted=True`, and
+`services/erp` no longer flags the attempt possibly posted. Sage's own
+`$dataCode` values are undocumented and its `$message` echoes the submitted
+fields, so neither is read. The adapter instead reads back what the Swagger
+documents, in this order: `financial_settings.year_end_lockdown_date` on or
+after the invoice date → `period_closed`; a foreign currency with
+`multi_currency_enabled: false` → `currency_not_enabled`; the contact 404, or
+carrying `deleted_at` / `gdpr_obfuscated` → `vendor_inactive`; a line's ledger
+404 or `included_in_chart: false` → `account_inactive`, naming our codes;
+anything else → the shared `bill_refused` §385 added. A read that fails is "don't
+know", never "inactive". 5xx, 401, 429 and timeouts stay retryable and unknown.
+The lockdown check runs only after a refusal rather than before every push: it
+would spend one of Sage's per-minute calls on every push to save a create Sage
+refuses anyway.
+
+**Accounting Start cannot create purchase invoices.** The Swagger's Endpoint
+Availability lists `POST` / `DELETE purchase_invoices` for Accounting Plus and
+Standard only (GET works on Start). Nothing in the v3.1 Accounting API reports
+the plan, so it cannot be refused before a push or at test-connection time: a
+Start business connects, syncs and tests green. A 403 from the create is coded
+`purchases_not_permitted`, whose sentence names both causes (the plan, or a
+user without Purchases access), since both answer 403. Which status Sage really
+returns for Start is a sandbox question (#654).
+
+**The chart keeps what it used to drop (§284).** Ledgers out of the chart were
+skipped, so a row linked to one read as a dead link and was unlinked while the
+ledger still existed. They are now emitted `active=False`, as are control
+accounts (`is_control_account`), which Sage reserves for its own postings.
+`show_included_in_chart`'s default is undocumented, so the chart is read once
+with each value and joined by id. A GDPR-obfuscated contact is emitted inactive.
+
+**Also corrected.** v3.1 has no purchase-order resource at all, on any plan (the
+old comment said "not on every plan"), and the purchase `DELETE` takes no
+parameters, so whether `void_reason` is honoured there is a sandbox question too.
+
+Fake-erp now behaves the same way (lockdown, deleted contact, out-of-chart
+ledger and multi-currency refusals as Sage's 422 error array; a Start plan's
+403; allocations returned only on request; out-of-chart and control ledgers; an
+obfuscated contact), and the code before this change fails against it.
+
+**Porting note.** Drafted as §320 on `fix/erp-sage-accounting` (`f4698c72`)
+and renumbered on landing (§320 was taken). Its own `bill_refused`
+registration was dropped: §385 had already added the code to
+`base.ERP_REFUSAL_CODES`, `erpRefusals.ts` and the six locales.
+
+Tests: `backend/tests/test_erp_sage_accounting_adapter.py`,
+`frontend/tests-e2e/erp/sage-accounting.spec.ts` (lockdown → `period_closed`,
+Start → `purchases_not_permitted`), `frontend/src/lib/api/erpRefusals.test.ts`.

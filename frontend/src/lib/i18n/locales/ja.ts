@@ -5174,6 +5174,7 @@ export const messages = {
 	'erpRefusal.currencyUnknown': "{provider} に基本通貨が設定されていないため、請求書の通貨を確認できません。{provider} で基本通貨を設定してから再試行してください。",
 	'erpRefusal.currencyNotEnabled': "この請求書は {provider} の基本通貨ではなく、複数通貨も無効になっています。{provider} で複数通貨を有効にするか、通貨を修正してから再試行してください。",
 	'erpRefusal.idempotencyLookupIncomplete': "この請求書が送信済みかどうかを {provider} で確認できなかったため、再送信しませんでした。数分後に再試行してください。",
+	'erpRefusal.purchasesNotPermitted': "{provider} はこの請求書の作成を許可しませんでした。Accounting Start プランでは仕入請求書を作成できないか、接続している Sage ユーザーに仕入のアクセス権がありません。プランを変更するか、{provider} でそのユーザーに仕入のアクセス権を付与してから、再試行してください。",
 	'erpRefusal.existingInvoiceNotOpen': "{provider} にはこの請求書がすでにあり、下書きではなくなっているため、ここからは変更できません。{provider} で確認してください。",
 	'erpRefusal.lineAmountPrecision': "明細の金額の小数桁数が、{provider} でこの通貨に使える桁数を超えています。丸めてから再試行してください。",
 	'erpRefusal.currencyNotSupported': "{provider} は自社通貨の請求しか受け付けません。通貨を修正するか、{provider} で直接請求を登録してください。",
