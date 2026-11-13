@@ -933,27 +933,22 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change that touches more than one panel of
       `frontend/src/routes/organization/+page.svelte`.
 
-### Surfaced by the invoices / exceptions UX hunt (2026-10-05)
+### Surfaced by the invoice document lock (2026-11-13)
 
-- [ ] **(c) An approved or paid invoice's source document can still be
-      replaced or deleted, and the original is destroyed.** `PUT` / `DELETE
-      /api/invoices/{id}/file` refuse only `done`
-      (`backend/app/api/invoices.py`); on `approved`, `sending_to_erp`,
-      `sent_to_erp`, `posted_in_erp`, `payment_scheduled` and `paid` they
-      succeed, and the replace path deletes the previous object from storage
-      after the commit. The audit row names the old filename, but the document
-      the approver signed off, and the one the payment was made against, is
-      gone. The invoice modal mirrors the server (`canManageFile` hides the
-      controls only on `done`), so this is a policy question rather than a
-      UI one, which is why the UX hunt reported it instead of changing the
-      gate. **Durable fix:** decide whether the source document freezes with
-      the financial fields (`_FINANCIALLY_LOCKED_STATUSES`, which starts at
-      `approved`). If it does, refuse both routes from that set and gate
-      `canManageFile` on the same list. If replacement must stay possible
-      (for a corrected scan), keep the superseded object, for example by
-      versioning the key instead of deleting it, so the evidence chain
-      survives. **Trigger:** the product call, or the next change to either
-      file route.
+- [ ] **(c) An approved invoice's financial fields unlock when its ERP push
+      fails.** `_FINANCIALLY_LOCKED_STATUSES` (`backend/app/api/invoices.py`)
+      starts at `approved` but does not hold `failed`, and an approved invoice
+      whose push failed sits at `failed`. So `PATCH` and `PUT {id}/line-items`
+      let a manager change the amount, payee or lines there, and `/retry-erp`
+      then pushes (and the payment run pays) figures nobody approved. The
+      source document already closes this case (`invoice_entry.document_locked`,
+      decisions §363). **Durable fix:** gate the PATCH financial check and the
+      line-items check on the same predicate (status in the set, or `failed`
+      and `was_ever_approved`). Do it in the same change as the modal's
+      restated `FINANCIALLY_LOCKED_STATUSES` list, which would otherwise send
+      the frozen fields and 409 every save: serve the frozen-field set from
+      the server, or add `failed`-after-approval there too. **Trigger:** the
+      next change to either invoice edit route, or the money-path audit.
 
 ### Surfaced by the vendors table column fix (2026-10-06)
 
@@ -1225,12 +1220,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       budget picker on the requisition form that calls `checkBudget()` and
       shows the overspend warning before submit. **Trigger:** the next change
       to requisitions or budgets.
-- [ ] **(c) A rejected invoice has no resubmit button on the web.** The web
-      invoice modal offers none. Resubmission happens through the bulk
-      status change or the supplier portal, which a clerk fixing their own
-      rejection won't find. **Durable fix:** a "Resubmit for review" action in
-      the modal for a `rejected` invoice, behind the same role gate as the bulk
-      action. **Trigger:** the next invoice-modal change.
 - [ ] **(c) Settings with a backend and no screen.** Approval delegation,
       per-vendor / per-GL match tolerance, exception-agent autonomy level, the
       SCIM bearer token, an admin revoking another user's sessions, and the
