@@ -330,8 +330,8 @@ alone, and a bill with nothing owing but no visible payment reads
 `docs/followups.md` ("A bill paid in an ERP other than QuickBooks or Xero
 never reaches FeohLedger"). QuickBooks Online and Xero are the exceptions:
 QuickBooks' status comes back through its own webhook and a change-data-capture
-sweep, Xero's through the same sweep reading its `If-Modified-Since` listings
-(next two sections).
+sweep, Xero's through its invoice webhook and the same sweep reading its
+`If-Modified-Since` listings (next two sections).
 
 **A paid report may carry the ERP's own payment date and rail.** The generic
 body accepts optional `paid_on` (`YYYY-MM-DD`) and `payment_method` (a
@@ -397,9 +397,25 @@ with `FEOH_ERP_STATUS_SYNC_ENABLED` on a confirmed Xero push lands payable at
 read, `apply_bill_report`'s table, the write-back, the void) applies. What
 differs:
 
-- **No webhook; the sweep and an admin's "check now".** No Xero webhook is
-  wired here (`docs/followups.md`), so the `erp-status-sync` sweep is the
-  channel:
+- **The webhook, the sweep, and an admin's "check now" (decisions §392).**
+  `POST /api/erp/webhook/xero` takes Xero's invoice webhook for every connected
+  organisation: `x-xero-signature` (base64 HMAC-SHA256 of the raw body under the
+  platform app's ONE webhook key, `FEOH_ERP_XERO_WEBHOOK_KEY`; empty = off) is
+  checked before anything is parsed. The answers are Xero's protocol, not the
+  generic route's 204: **401** for anything unverifiable (no key, an oversized
+  body, a bad or missing signature) and a bodyless **200** for every verified
+  delivery whatever it decided, which is what the intent-to-receive check
+  requires before Xero enables the webhook (a correctly signed, empty delivery
+  must answer 200 and an incorrectly signed one 401). Each `INVOICE` event is
+  deduped before the answer by its own identity (organisation, category, type,
+  resource, time — Xero sends no event id), its `tenantId` picks the one tenant
+  connected to that organisation (`org_for_company`, the realm index), a tenant
+  the sweep would skip (`status_sync_now_refusal`) is skipped, and its
+  `resourceId` is read back and applied by `sync_bills`, the sweep's per-bill
+  path, after the response (`services/erp_xero_webhook`). A sales invoice or a
+  hand-keyed bill costs no Xero call: only a bill an invoice was pushed as is
+  read. The dedup store unreachable is our failure, a bodyless 503. The sweep
+  stays the backstop for a lost or failed event:
   `changed_bills` reads `GET Invoices?where=Type=="ACCPAY"` and `GET
   Payments?where=PaymentType=="ACCPAYPAYMENT"`, both with `If-Modified-Since`
   set to the connection's high-water mark (`yyyy-mm-ddThh:mm:ss`, UTC), 1,000
@@ -413,6 +429,9 @@ differs:
   /api/organization/erp/oauth/status-sync` (admin, audited first, four an hour
   per tenant, one at a time, 202 and the pass runs after the response; 409
   `status_sync_off` / `status_sync_unsupported` / `status_sync_needs_reconnect`).
+  The ERP settings panel's "Check payments now" button calls it, shown only
+  while `GET …/oauth/status` says `status_sync_available` (the same rule, its
+  `status_sync_refusal` naming the 409 code otherwise).
 - **Matched by the bill id, in every state.** `Reference` is ACCREC-only in
   Xero, so a bill carries no marker of ours. Its `InvoiceID` is a GUID Xero
   never reuses, so the report sets `match_by_reference` and the sync matches it

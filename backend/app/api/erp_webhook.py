@@ -1,4 +1,4 @@
-"""ERP webhook endpoints — status callbacks from ERPs, Merge.dev and QuickBooks."""
+"""ERP webhook endpoints — status callbacks from ERPs, Merge.dev, QuickBooks and Xero."""
 
 import json
 import logging
@@ -59,6 +59,7 @@ __all__ = [
     "ERP_RECONCILIATION_EXCEPTION_TYPE",
     "erp_webhook",
     "quickbooks_webhook",
+    "xero_webhook",
 ]
 
 
@@ -167,6 +168,90 @@ async def quickbooks_webhook(request: Request):
         logger.warning("QuickBooks webhook: dedup unavailable (%s)", exc.__class__.__name__)
         return _retry_please()
     dispatch_qbo_events(claimed)
+
+
+# ---------------------------------------------------------------------------
+# Xero — invoice webhooks (decisions §392)
+# ---------------------------------------------------------------------------
+
+
+def _xero_unverified() -> Response:
+    """Bodyless ``401``: the delivery could not be verified.
+
+    Xero's protocol, not a choice: its intent-to-receive check sends one
+    correctly and one incorrectly signed delivery, and enables the webhook
+    only when the first answers 200 and the second 401 (anything else fails
+    it), and it keeps sending such checks. The signature is the platform
+    app's ONE key, so a 401 says only "not signed by Xero" and names no
+    tenant: nothing enumerates. Every unverifiable delivery answers it (no
+    key configured, a body too large to read, a bad or missing signature)."""
+    return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+
+
+def _xero_ack() -> Response:
+    """Bodyless ``200`` for every verified delivery, whatever it decided.
+
+    Xero wants exactly 200 with no body for a delivery it signed (a 204 is a
+    failed delivery to it), so a malformed body, an unknown organisation, a
+    duplicate and an applied event all answer the same."""
+    return Response(status_code=status.HTTP_200_OK)
+
+
+@router.post("/webhook/xero", status_code=status.HTTP_200_OK)
+async def xero_webhook(request: Request) -> Response:
+    """Xero's invoice webhook for every connected organisation.
+
+    Declared before ``/webhook/{erp_type}`` so it is matched first. Like the
+    QuickBooks route, it carries no tenant and no per-tenant secret:
+
+    * the delivery is signed with the platform app's ONE webhook key
+      (``FEOH_ERP_XERO_WEBHOOK_KEY``): ``x-xero-signature`` is the base64
+      HMAC-SHA256 of the RAW body, checked before anything is parsed. An
+      empty key means webhooks are off, and every delivery is refused;
+    * each event names its organisation (``tenantId``), which the
+      control-plane connection index maps to the one tenant connected to it.
+
+    The answers are Xero's: 401 when the delivery cannot be verified, which
+    is what its intent-to-receive check requires, and a bodyless 200 for
+    every verified one, whatever it decided (a malformed body, an unknown
+    organisation, a duplicate), so nothing enumerates. A verified delivery's
+    INVOICE events are claimed (deduped) before the answer and applied after
+    it (``erp_xero_webhook.dispatch_xero_events``), each through the sweep's
+    per-bill path; our own failure (the dedup store down) is a bodyless 503
+    so Xero redelivers.
+    """
+    from app.services import erp_xero_webhook as xero_events
+    from app.services.webhook_security import verify_hmac_sha256_base64
+
+    key = settings.erp_xero_webhook_key
+    if not key:
+        logger.debug("Xero webhook refused: no webhook key configured")
+        return _xero_unverified()
+    max_bytes = settings.erp_webhook_max_bytes
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_bytes:
+                return _xero_unverified()
+        except ValueError:
+            return _xero_unverified()
+    raw_body = await request.body()
+    if len(raw_body) > max_bytes:
+        return _xero_unverified()
+    signature = extract_signature_header(dict(request.headers), "x-xero-signature")
+    if not verify_hmac_sha256_base64(key, raw_body, signature):
+        return _xero_unverified()
+    try:
+        body = json.loads(raw_body)
+    except ValueError:
+        return _xero_ack()
+    try:
+        claimed = await xero_events.claim_xero_events(xero_events.parse_xero_events(body))
+    except Exception as exc:  # noqa: BLE001 — Redis unreachable
+        logger.warning("Xero webhook: dedup unavailable (%s)", exc.__class__.__name__)
+        return _retry_please()
+    xero_events.dispatch_xero_events(claimed)
+    return _xero_ack()
 
 
 @router.post("/webhook/{erp_type}", status_code=status.HTTP_204_NO_CONTENT)

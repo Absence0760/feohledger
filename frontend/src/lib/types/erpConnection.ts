@@ -116,6 +116,12 @@ export interface ErpOAuthStatus {
 	connected_at?: string | null;
 	/** Today's call usage on a shared-quota ERP (Blackbaud); see `callUsageLines`. */
 	call_usage?: ErpCallUsage | null;
+	/** `POST …/oauth/status-sync` would run a pass now (decisions §392): the
+	 *  server's verdict, by the rule the POST itself applies. */
+	status_sync_available?: boolean;
+	/** Why not, as the POST's 409 code (`status_sync_off` /
+	 *  `status_sync_unsupported` / `status_sync_needs_reconnect`). */
+	status_sync_refusal?: string | null;
 	/** What a bring-your-own app must register as its redirect URI. */
 	redirect_uri: string;
 	providers: ErpOAuthProviderStatus[];
@@ -439,6 +445,27 @@ export function disconnectMessage(result: ErpDisconnectResult | null | undefined
 		default:
 			return { key: 'org.erp.oauth.disconnectedNotRevoked', tone: 'failure' };
 	}
+}
+
+/**
+ * Offer "Check payments now" (`POST …/oauth/status-sync`, decisions §392)?
+ * Only on the connected ERP, and only while the server says a pass would run
+ * (`status_sync_available`): the button follows the POST's own rule rather
+ * than guessing from the provider. An older server that sends no verdict
+ * offers nothing.
+ */
+export function statusSyncNowOffered(providerKey: string, status: ErpOAuthStatus | null): boolean {
+	return (
+		oauthConnectionState(providerKey, status) === 'connected' &&
+		status?.status_sync_available === true
+	);
+}
+
+/** `202 {started}`: a pass began, or one was already running (`started:
+ *  false`, nothing started twice). Either way the invoices it moves update as
+ *  it reads them. */
+export function statusSyncStartedKey(started: boolean): MessageKey {
+	return started ? 'org.erp.oauth.checkPaymentsStarted' : 'org.erp.oauth.checkPaymentsRunning';
 }
 
 /** `GET /api/organization/erp/oauth/pending`: the companies a parked consent

@@ -5236,6 +5236,9 @@ export const messages = {
 	'refusal.cardSkipErpBill': "El ERP no pudo confirmar que esta factura sigue abierta y sin pagar, por lo que no se emitió ninguna tarjeta.",
 	'refusal.cardSkipIssueFailed': "El proveedor de tarjetas no emitió ninguna tarjeta.",
 	'refusal.cardsNotEnabled': "Las tarjetas virtuales no están habilitadas. Actívelas en la configuración de la organización.",
+	'refusal.statusSyncOff': "La sincronización del estado de los pagos está desactivada en este servidor, así que los pagos registrados en el ERP no se comprueban desde aquí.",
+	'refusal.statusSyncUnsupported': "El ERP conectado no informa a FeohLedger de los pagos de sus facturas.",
+	'refusal.statusSyncNeedsReconnect': "Vuelva a conectar el ERP y compruebe de nuevo sus pagos.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Este proveedor todavía no está en {provider}. Sincronice los proveedores desde {provider} o cree el proveedor allí y vuelva a intentarlo.",

@@ -5426,6 +5426,9 @@ export const en = {
 	'refusal.cardSkipErpBill': "The ERP could not confirm this bill is still open and unpaid, so no card was issued.",
 	'refusal.cardSkipIssueFailed': "The card provider did not issue a card.",
 	'refusal.cardsNotEnabled': "Virtual cards are not enabled. Turn them on in Organization settings.",
+	'refusal.statusSyncOff': "Payment status sync is turned off on this server, so payments made in the ERP are not checked from here.",
+	'refusal.statusSyncUnsupported': "The connected ERP does not report its bills' payments back to FeohLedger.",
+	'refusal.statusSyncNeedsReconnect': "Reconnect the ERP, then check its payments again.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "This vendor isn't in {provider} yet. Sync vendors from {provider}, or add the vendor there, then retry.",

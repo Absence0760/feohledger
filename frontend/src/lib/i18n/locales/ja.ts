@@ -5153,6 +5153,9 @@ export const messages = {
 	'refusal.cardSkipErpBill': "ERP でこの請求書が未払いのままであることを確認できなかったため、カードは発行されませんでした。",
 	'refusal.cardSkipIssueFailed': "カード会社がカードを発行しませんでした。",
 	'refusal.cardsNotEnabled': "バーチャルカードが有効になっていません。組織設定で有効にしてください。",
+	'refusal.statusSyncOff': "このサーバーでは支払いステータスの同期がオフになっているため、ERPで行われた支払いはここから確認されません。",
+	'refusal.statusSyncUnsupported': "接続されているERPは、請求書の支払いをFeohLedgerに返しません。",
+	'refusal.statusSyncNeedsReconnect': "ERPを再接続してから、もう一度支払いを確認してください。",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "この取引先はまだ {provider} にありません。{provider} から取引先を同期するか、そちらで取引先を登録してから再試行してください。",

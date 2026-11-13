@@ -5244,6 +5244,9 @@ export const messages = {
 	'refusal.cardSkipErpBill': "Das ERP konnte nicht bestätigen, dass diese Rechnung noch offen und unbezahlt ist, daher wurde keine Karte ausgegeben.",
 	'refusal.cardSkipIssueFailed': "Der Kartenanbieter hat keine Karte ausgegeben.",
 	'refusal.cardsNotEnabled': "Virtuelle Karten sind nicht aktiviert. Aktivieren Sie sie in den Organisationseinstellungen.",
+	'refusal.statusSyncOff': "Die Synchronisierung des Zahlungsstatus ist auf diesem Server ausgeschaltet, daher werden im ERP erfasste Zahlungen von hier aus nicht geprüft.",
+	'refusal.statusSyncUnsupported': "Das verbundene ERP meldet die Zahlungen seiner Rechnungen nicht an FeohLedger zurück.",
+	'refusal.statusSyncNeedsReconnect': "Verbinden Sie das ERP erneut und prüfen Sie dann seine Zahlungen noch einmal.",
 
 	// A refused ERP push, stated with what to do (api/erpRefusals.ts, decisions §284)
 	'erpRefusal.vendorNotLinked': "Dieser Lieferant ist noch nicht in {provider}. Synchronisieren Sie die Lieferanten aus {provider} oder legen Sie den Lieferanten dort an und versuchen Sie es dann erneut.",
