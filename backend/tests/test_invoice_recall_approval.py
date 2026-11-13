@@ -589,6 +589,27 @@ async def test_bulk_status_does_not_recall(realdb, status):
     assert await _audit(realdb, invoice_id, RECALL) == []
 
 
+async def test_bulk_review_of_a_never_approved_failed_row_is_refused_at_the_engine(realdb):
+    """`failed → ready_for_review` is a recall edge. A `failed` row with no
+    approval stamp (a failed extraction) holds nothing to recall, so the bulk
+    bar's generic branch reaches the engine, which refuses the edge to anyone
+    but the recall, coded with the edge so the list names both statuses."""
+    invoice_id = await _invoice(realdb, status=InvoiceStatus.failed, approved=False)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={"ids": [str(invoice_id)], "status": "ready_for_review"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated"] == 0
+    (skip,) = body["skipped"]
+    assert skip["code"] == "invoice_transition_recall_only"
+    assert skip["params"] == {"status": "failed", "target": "ready_for_review"}
+    assert "except by recalling the approval" in skip["reason"]
+    assert (await _row(realdb, invoice_id)).status == InvoiceStatus.failed
+
+
 async def test_a_recalled_and_rejected_invoice_cannot_go_back_to_draft(realdb):
     """The path the money-path review found (decisions §379): recall, reject,
     `POST /bulk/status → new`. Draft is where `/complete`'s floor auto-approves
@@ -607,6 +628,10 @@ async def test_a_recalled_and_rejected_invoice_cannot_go_back_to_draft(realdb):
         assert body["updated"] == 0, body
         (skip,) = body["skipped"]
         assert "can't go back to draft" in skip["reason"]
+        # Coded on the skip row too, so the list states it in the reader's
+        # language (decisions §357's skip shape).
+        assert skip["code"] == "invoice_once_approved_not_to_draft"
+        assert skip["params"] == {}
         assert (await _row(realdb, invoice_id)).status == InvoiceStatus.rejected
 
         resp = await c.post(f"/api/invoices/{invoice_id}/resubmit")
@@ -633,6 +658,8 @@ async def test_a_once_approved_draft_is_never_read_again_so_it_cannot_pose_as_a_
         assert body["updated"] == 0, body
         (skip,) = body["skipped"]
         assert "already been approved" in skip["reason"]
+        assert skip["code"] == "invoice_once_approved_not_reread"
+        assert skip["params"] == {}
         assert (await _row(realdb, invoice_id)).status == InvoiceStatus.new
         resp = await c.post(f"/api/invoices/{invoice_id}/retry-erp")
         assert resp.status_code == 409
@@ -684,6 +711,8 @@ async def test_a_once_approved_draft_is_not_closed_without_an_approval_step(real
         assert body["updated"] == 0, body
         (skip,) = body["skipped"]
         assert "can't be closed without being approved again" in skip["reason"]
+        assert skip["code"] == "invoice_once_approved_not_closed_from_draft"
+        assert skip["params"] == {}
         assert (await _row(realdb, invoice_id)).status == InvoiceStatus.new
 
     async with realdb.client(key=TENANT, role="ap_manager") as c:
