@@ -66,7 +66,7 @@ export const messages = {
 		'Paga cada factura con su propia tarjeta virtual de un solo uso, emitida a través de Lithic o Nium, y obtén un reembolso típico del 1–2 % en los pagos a proveedores que aceptan tarjeta.',
 	'marketing.features.exceptions.title': 'Cola de excepciones',
 	'marketing.features.exceptions.body':
-		'Duplicados, alertas de fraude, importes por encima del límite y proveedores sin verificar se marcan, se asignan y se resuelven en una sola cola, sin rebuscar en el correo.',
+		'Duplicados, alertas de fraude, importes por encima del límite y proveedores sin verificar se marcan, se asignan y se resuelven en una sola cola, sin rebuscar en el correo. Un cambio en los datos bancarios de un proveedor espera la aprobación de una segunda persona, y cada cambio queda registrado. Una vez aprobado, las facturas aprobadas y pendientes de pago de ese proveedor quedan retenidas para revisión antes del pago.',
 
 	'marketing.how.eyebrow': 'Cómo funciona',
 	'marketing.how.heading': 'De la factura al libro mayor, en tres pasos.',
