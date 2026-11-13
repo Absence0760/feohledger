@@ -453,8 +453,9 @@ class ErpBillState(enum.StrEnum):
 class ErpBillReport:
     """One bill as the ERP reports it, for ``services/erp_status_sync``.
 
-    PII-free by construction: ids, a state, a date and a rail. Never the
-    vendor, the memo text, or an amount beyond what decides the state.
+    PII-free by construction: ids, a state, a date, a rail and the cash paid.
+    Never the vendor, the memo text, or an amount beyond what decides the
+    state and what was paid.
     """
 
     bill_id: str
@@ -463,6 +464,12 @@ class ErpBillReport:
     #: the ``PrivateNote`` marker), or None when the bill carries none — a bill
     #: someone keyed in the ERP by hand, or one we can no longer read.
     correlation_id: str | None = None
+    #: True for an ERP that writes no marker of ours onto a bill but whose bill
+    #: ids are never reused within a company (Xero's InvoiceID is a GUID). The
+    #: sync then matches the bill by the invoice's ``erp_reference`` within the
+    #: connection realm the push recorded, in any state — not only a deleted
+    #: bill, as it does for an ERP that marks its bills (§386).
+    match_by_reference: bool = False
     #: The date of the latest payment the ERP applied that FeohLedger did NOT
     #: post itself, and that payment's rail as a ``Payment.method`` value
     #: (None = not stated; it then counts as 1099-reportable).
@@ -482,6 +489,19 @@ class ErpBillReport:
     #: or nothing readable paid it in cash: the bill was settled without the
     #: money leaving, so it must not be booked as a cash payment.
     settled_by_credit: bool = False
+    #: The cash the ERP shows a person applied to the bill outside FeohLedger,
+    #: exact, when the adapter can state it (Xero: the sum of the bill's own
+    #: payments that are not ours). Only for a bill paid in full in cash
+    #: (``paid``, ``reduced_outside``, not ``settled_by_credit``). The status
+    #: sync then records the payment at THIS figure, and refuses (a person
+    #: decides) when it is not what the invoice owes here, rather than booking
+    #: FeohLedger's own figure as what left (decisions §386). None = not
+    #: stated (QuickBooks today): recorded at what is owed here, as before.
+    paid_amount: Decimal | None = None
+    #: The ISO 4217 code ``paid_amount`` is in (the bill's currency). The sync
+    #: compares it with the invoice's before comparing figures; a missing or
+    #: different one is refused like a different amount.
+    paid_currency: str | None = None
 
 
 @dataclass

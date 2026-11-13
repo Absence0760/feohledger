@@ -73,6 +73,16 @@ async def test_the_supplier_filter_returns_only_suppliers(xero):
     assert all(r.get("ContactID") and r.get("Name") for r in rows)
 
 
+async def test_the_vendor_walk_filter_keeps_customer_only_contacts_out(xero):
+    """`list_vendors` reads `IsSupplier==true OR IsCustomer==false` (§386): a
+    supplier with no bill yet carries neither flag. The OR must be honoured,
+    or the walk reads every customer too."""
+    where = "IsSupplier==true OR IsCustomer==false"
+    rows = (await _get(xero, "Contacts", {"where": where, "page": 1}))["Contacts"]
+    assert rows, "the org has no supplier contacts to check"
+    assert all(r.get("IsSupplier") is True or r.get("IsCustomer") is False for r in rows)
+
+
 @pytest.mark.parametrize("status", _PO_STATUSES)
 async def test_the_purchase_order_status_filter_is_honoured(xero, status):
     """`list_vendors` reads each unbilled status separately; an ignored filter
