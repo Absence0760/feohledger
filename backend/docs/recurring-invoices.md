@@ -193,6 +193,16 @@ such a template can re-create it; template CRUD and invoice approval are
 separately gated either way. See `../../docs/authentication.md` § Segregation of
 duties.
 
+**A `generate-now` invoice raised before the clicker was stamped got them back
+from its audit row.** Before decisions §131, generate-now passed no
+`uploaded_by_id` but wrote the clicker into the `invoice.created` row's
+`actor_id` (`details.source = "recurring_template"`). Migration
+`0126_uploader_audit_backfill` copies that employee onto every such invoice not
+yet `done`, only when its template id matches and no other creation record on the
+invoice disagrees, with an `invoice.segregation_backfilled` audit row for each
+(decisions §367). The sweep's row has no actor, so a sweep invoice off a
+pre-0096 template is untouched.
+
 ### The editor is implicated too, which is why it is a set and not a column
 
 Recording the author closed half the gap. An `ap_manager` who PATCHes *someone

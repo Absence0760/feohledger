@@ -1759,6 +1759,19 @@ it, but the `Invoice(...)` constructor never passed it, so the importer could
 approve what they had just imported while the same person doing the same thing
 through `POST /api/invoices` got a 403.
 
+**Invoices those two paths created before §131 were backfilled from their audit
+rows.** CSV import and `generate-now` both wrote the acting employee into
+`actor_id` on an audit row keyed to the invoice (`invoice.imported_csv`;
+`invoice.created` with `details.source = "recurring_template"`). Migration
+`0126_uploader_audit_backfill` copies that employee into `uploaded_by_id` on every
+such invoice still short of `done`, and only when every creation record on the
+invoice names the same employee and the record matches the invoice's own import
+marker or template id. Conflicting records, a missing actor (the sweep), the
+system sentinel and other channels' records all leave it NULL. Each change gets
+an `invoice.segregation_backfilled` audit row with no actor. An import older than
+the audit row (before 2026-09-08) has nothing naming its importer and keeps the
+legacy reading ([decisions.md](decisions.md) §367).
+
 Making the NULL case fail CLOSED was considered and rejected — it would render
 every email-intake, PEPPOL and portal-submitted invoice permanently
 unapprovable, an outage across three ingestion channels rather than a control.
