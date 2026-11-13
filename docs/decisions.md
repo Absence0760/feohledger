@@ -16812,3 +16812,70 @@ every invoice lock.
 **Review pending.** The first bullet closes a double-payment path a Security
 Analyst asked to review; the fail-closed fix landed ahead of that review, which
 is tracked in `docs/followups.md`.
+
+## 363. An invoice's source document freezes with its financial fields, and a superseded document is kept, not deleted (§16 follow-up, 2026-11-13)
+
+**The gap.** §16 froze `PUT` / `DELETE /api/invoices/{id}/file` only at `done`.
+From `approved` through `paid` both succeeded, and the replace path deleted the
+previous object after the commit. The document the approver signed off, and the
+one the payment was made against, could be swapped or removed after the fact.
+The audit row kept the filename, but the bytes were gone. A same-name replace
+before approval overwrote the object in place, so the version a reviewer
+rejected was lost too.
+
+**The rule.** One predicate, `api/invoice_entry.document_locked`:
+`FINANCIALLY_LOCKED_STATUSES` (now owned by `models/invoice_status`, and
+`api/invoices._FINANCIALLY_LOCKED_STATUSES` is that set), plus `failed` when the
+invoice was ever approved. That is a failed ERP push, which `/retry-erp` pushes
+again without a new approval. All three file routes, attach included, answer 409
+`invoice_document_locked` (`params.status`) once it holds. The clerk's entry
+window is checked first, as before, so a clerk still sees 403
+`invoice_entry_window_closed`.
+
+- **The modal reads the server, not a list.** `GET /review-actions` gains
+  `manage_file` (`invoice_entry.manage_file_refusal`: role, entry window, lock,
+  in the doors' order), and `canManageFile` is `isAllowed` of it. A locked
+  document shows the refusal's sentence where the toolbar was.
+- **Attach is frozen too.** A document added after sign-off is one nobody
+  approved against, and adding one to a paid invoice is exactly how a fraud
+  would be papered over. A late scan for the record belongs in the supplier
+  chat or the notes, not as the invoice's document.
+- **Before the lock, nothing is destroyed.** Replace and delete detach the
+  document and keep its object. Attach, replace and the supplier-portal resubmit
+  write a versioned key, `<org>/<invoice>/<12 hex>~<filename>`. `~` cannot come
+  out of `_safe_filename`, so the marker is unambiguous and
+  `storage.invoice_file_display_name` recovers the filename. The key keeps the
+  three segments `api/file_proxy` expects, so no other reader changes. The audit
+  row names the kept key (`invoice.file_replaced.previous_file_key`,
+  `invoice.file_deleted.file_key`, `invoice.resubmitted_by_vendor.previous_file_key`).
+  It is the only reference to that key, so `privacy_documents` reads the kept
+  documents from those rows and lists them as `RETAIN` evidence beside the
+  current one. The DSAR export stays complete, and erasure treats them as it
+  treats the invoice's own document. The proxy serves only the current
+  `file_key`, so a kept version is evidence for an auditor and the export, not
+  something the modal shows.
+- **PII.** A key carries two ids and the sanitized filename the audit row
+  already held. Nothing new goes to a log.
+
+**Rejected:**
+- *Keep replacement open after approval, versioned.* It keeps the evidence but
+  leaves the invoice presenting a document nobody approved. A corrected
+  document after approval is a correction to what was approved. It goes back
+  through review, the same way the amount does.
+- *A `superseded_file_keys` column.* It would need a migration fanned out to
+  every tenant, to hold a list the append-only audit row already holds, and
+  the audit row is shipped to WORM storage besides.
+- *Destroying the object on a pre-approval delete* (a document attached to the
+  wrong invoice). Delete-then-attach would then be a replace that bypasses the
+  rule. The remedy for a document that should not be held at all is erasure,
+  which already decides invoice documents.
+
+**Also:** `POST /{id}/resubmit` answers a coded 409 `invoice_not_resubmittable`
+in place of the state machine's plain "Cannot transition". It re-runs warnings,
+as the bulk resubmit already did. `review-actions` serves its `resubmit` verdict
+(`api/workflow.resubmit_refusal`: role, status, entry window), and the modal's
+new "Resubmit for Review" reads it.
+
+**Left open:** the financial fields themselves still unlock on an approved
+invoice's failed push (`docs/followups.md`). The document predicate covers that
+case. The PATCH and line-item gates do not yet.

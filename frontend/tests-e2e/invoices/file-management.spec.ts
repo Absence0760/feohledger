@@ -17,16 +17,19 @@ import {
  *
  * Backend contract (`backend/app/api/invoices.py`):
  *   - `PUT /api/invoices/{id}/file`    — replace an existing file. 200 on
- *     success, 404 if there's no file to replace, 409 once the invoice is
- *     `done`.
- *   - `DELETE /api/invoices/{id}/file` — delete the file. 200 on success,
- *     404 if there's no file, 409 once the invoice is `done`.
+ *     success, 404 if there's no file to replace, 409
+ *     `invoice_document_locked` from `approved` on.
+ *   - `DELETE /api/invoices/{id}/file` — detach the file. 200 on success,
+ *     404 if there's no file, the same 409 from `approved` on.
  *   Both take the entry roles, ap_clerk included — a clerk only inside the
- *   entry window (`backend/app/api/invoice_entry.py`).
+ *   entry window (`backend/app/api/invoice_entry.py`). A replaced or removed
+ *   document is kept in storage, named by its audit row (decisions §363).
  *
- * Frontend contract (`InvoiceModal.svelte`): a file-management toolbar,
- * hidden once the invoice is `done`, and for an entry-only ap_clerk once it
- * leaves the entry window (submitted, or ever approved).
+ * Frontend contract (`InvoiceModal.svelte`): a file-management toolbar, shown
+ * from the server's `manage_file` verdict (`GET .../review-actions`): replaced
+ * by a "document locked" note once the invoice is approved, and hidden for an
+ * entry-only ap_clerk once it leaves the entry window (submitted, or ever
+ * approved).
  *   - No file yet  → one "Upload File" button (aria-label "Upload invoice
  *     file"). Selecting a file attaches it.
  *   - Has a file   → "Replace" (picks + swaps the file) + a two-click
@@ -174,11 +177,46 @@ test.describe('/invoices — Invoice detail file management', () => {
 		}
 	});
 
-	test('replace/delete are refused (409) once the invoice is done — bypassing the UI', async ({
+	test('an approved invoice shows the document locked, with no file controls', async ({ page }) => {
+		const headers = await authedTenantHeaders(page);
+		const invoiceNumber = `E2E-FILEMGMT-LOCKED-${Date.now()}`;
+		const create = await page.request.post(`${API_BASE}/api/invoices`, {
+			headers,
+			data: { vendor: 'E2E Locked Vendor', invoice_number: invoiceNumber, amount: '55.00' }
+		});
+		expect(create.status()).toBe(201);
+		const invoiceId = ((await create.json()) as { id: string }).id;
+		const attach = await page.request.post(`${API_BASE}/api/invoices/${invoiceId}/file`, {
+			headers,
+			multipart: {
+				file: { name: 'signed.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 signed') }
+			}
+		});
+		expect(attach.status()).toBe(201);
+		tenantPsql(
+			`UPDATE invoices SET status = 'approved', approved_by = 'E2E Approver' WHERE id = '${invoiceId}'`,
+			currentTenantSlug()
+		);
+
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${invoiceId}/review-actions`) && r.status() === 200
+		);
+		await page.goto(`/invoices?id=${invoiceId}`);
+		await verdict;
+		const modal = page.locator('div.modal[role="dialog"]');
+		await expect(modal.locator('header h2')).toContainText(invoiceNumber);
+		await expect(modal.getByTestId('file-locked')).toHaveText(
+			'The source document cannot be changed once the invoice is approved.'
+		);
+		await expect(modal.getByRole('button', { name: 'Replace', exact: true })).toHaveCount(0);
+		await expect(modal.getByRole('button', { name: 'Delete File', exact: true })).toHaveCount(0);
+	});
+
+	test('replace/delete are refused (409) once the invoice is paid — bypassing the UI', async ({
 		page
 	}) => {
 		const headers = await authedTenantHeaders(page);
-		const invoiceNumber = `E2E-FILEMGMT-DONE-${Date.now()}`;
+		const invoiceNumber = `E2E-FILEMGMT-PAID-${Date.now()}`;
 
 		// Create a fresh invoice directly (no UI needed for this probe).
 		const create = await page.request.post(`${API_BASE}/api/invoices`, {
@@ -199,16 +237,19 @@ test.describe('/invoices — Invoice detail file management', () => {
 		});
 		expect(attach.status()).toBe(201);
 
-		// Move the invoice straight to `done` via direct SQL — there's no API
+		// Move the invoice straight to `paid` via direct SQL — there's no API
 		// path that lands a fresh invoice there without a full approval +
-		// payment + ERP lifecycle, and this probe only cares about the file
-		// endpoints' status gate.
-		tenantPsql(`UPDATE invoices SET status = 'done' WHERE id = '${invoiceId}'`, currentTenantSlug());
+		// payment lifecycle, and this probe only cares about the file
+		// endpoints' status gate. `paid` was open before decisions §363.
+		tenantPsql(
+			`UPDATE invoices SET status = 'paid', approved_by = 'E2E Approver' WHERE id = '${invoiceId}'`,
+			currentTenantSlug()
+		);
 		const status = tenantPsql(
 			`SELECT status FROM invoices WHERE id = '${invoiceId}'`,
 			currentTenantSlug()
 		).trim();
-		expect(status).toBe('done');
+		expect(status).toBe('paid');
 
 		const replace = await page.request.put(`${API_BASE}/api/invoices/${invoiceId}/file`, {
 			headers,
@@ -221,6 +262,9 @@ test.describe('/invoices — Invoice detail file management', () => {
 			}
 		});
 		expect(replace.status()).toBe(409);
+		expect(((await replace.json()) as { detail: { code: string } }).detail.code).toBe(
+			'invoice_document_locked'
+		);
 
 		const del = await page.request.delete(`${API_BASE}/api/invoices/${invoiceId}/file`, { headers });
 		expect(del.status()).toBe(409);

@@ -162,8 +162,13 @@ async def test_resubmit_without_extraction_goes_straight_back_to_review(realdb):
         exc = (await s.execute(select(APException).where(APException.id == exc_id))).scalar_one()
         assert exc.status == "resolved"
 
-        actions = {r.action for r in (await s.execute(select(AuditLog))).scalars().all()}
+        audit_rows = (await s.execute(select(AuditLog))).scalars().all()
+        actions = {r.action for r in audit_rows}
     assert "invoice.resubmitted_by_vendor" in actions
+    # The rejected version is kept, not deleted, and its audit row names it
+    # (decisions §363).
+    resubmitted = next(r for r in audit_rows if r.action == "invoice.resubmitted_by_vendor")
+    assert resubmitted.details["previous_file_key"] == f"{org_id}/{inv_id}/original.pdf"
 
 
 @pytest.mark.asyncio

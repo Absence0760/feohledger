@@ -657,3 +657,48 @@ async def test_complete_closes_an_unclaimed_approved_invoice(realdb, scenario):
             )
         ).all()
     assert len(rows) == 1
+
+
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_resubmit_verdict_matches_what_resubmit_answers(realdb, role):
+    """`resubmit` (the modal's "Resubmit for review") is null exactly when
+    `POST /resubmit` succeeds, and otherwise carries its code — from a
+    rejected invoice, a rejected one that was once approved (the clerk's
+    window), and statuses resubmit does not start from."""
+    scenarios = {
+        "rejected": ({"status": InvoiceStatus.rejected}, None),
+        "rejected_after_approval": ({"status": InvoiceStatus.rejected}, "Approver"),
+        "in_review": ({"status": InvoiceStatus.ready_for_review}, None),
+        "approved": ({"status": InvoiceStatus.approved}, "Approver"),
+    }
+    seen: set[str | None] = set()
+    for name, (kwargs, approved_by) in scenarios.items():
+        invoice_id = await _invoice(realdb, **kwargs)
+        if approved_by:
+            async with realdb.sessionmaker(TENANT)() as s:
+                (await s.get(Invoice, invoice_id)).approved_by = approved_by
+                await s.commit()
+        verdict = (await _verdict(realdb, role, invoice_id))["resubmit"]
+        async with realdb.client(key=TENANT, role=role) as c:
+            resp = await c.post(f"/api/invoices/{invoice_id}/resubmit")
+        _assert_parity(verdict, resp, (role, name, "resubmit"))
+        if verdict is None:
+            assert resp.json()["status"] == "ready_for_review"
+        else:
+            assert await _status_of(realdb, invoice_id) == kwargs["status"], (role, name)
+        seen.add(verdict and verdict["code"])
+
+    expected = {None, "invoice_not_resubmittable"}
+    if role == "ap_clerk":
+        expected.add("invoice_entry_window_closed")
+    assert seen == expected, (role, seen)
+
+
+async def test_resubmit_refuses_a_non_rejected_invoice_with_a_code(realdb):
+    """It used to surface the state machine's plain "Cannot transition" text."""
+    invoice_id = await _invoice(realdb, status=InvoiceStatus.new)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/resubmit")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "invoice_not_resubmittable"
+    assert resp.json()["detail"]["params"] == {"status": "new"}

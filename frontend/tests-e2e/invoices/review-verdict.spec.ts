@@ -347,4 +347,48 @@ test.describe('invoice modal — Submit and Retry ERP follow the server verdict'
 		await expect(modal.getByTestId('erp-error')).toBeVisible();
 		await expect(modal.getByTestId('retry-erp')).toHaveCount(0);
 	});
+
+	test('a rejected invoice offers Resubmit for Review, and it goes back to review', async ({
+		page
+	}) => {
+		const number = `${PREFIX}-RESUB-${Date.now()}`;
+		const id = await createInReview(page, number);
+		tenantPsql(`UPDATE invoices SET status='rejected' WHERE id='${id}'`);
+
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/review-actions`) && r.status() === 200
+		);
+		await page.goto(`/invoices?id=${id}`);
+		await verdict;
+		const modal = page.locator('div.modal[role="dialog"]');
+		await expect(modal.locator('header h2')).toContainText(number);
+
+		const resubmit = modal.getByTestId('resubmit-for-review');
+		await expect(resubmit).toHaveText('Resubmit for Review');
+		await expect(resubmit).toBeEnabled();
+		const posted = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/resubmit`) && r.request().method() === 'POST'
+		);
+		await resubmit.click();
+		expect((await posted).status()).toBe(200);
+		await expect(modal).toBeHidden();
+		expect(tenantPsql(`SELECT status FROM invoices WHERE id='${id}'`).trim()).toBe(
+			'ready_for_review'
+		);
+	});
+
+	test('an invoice that is not rejected offers no resubmit', async ({ page }) => {
+		const number = `${PREFIX}-NORESUB-${Date.now()}`;
+		const id = await createInReview(page, number);
+
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/review-actions`) && r.status() === 200
+		);
+		await page.goto(`/invoices?id=${id}`);
+		await verdict;
+		const modal = page.locator('div.modal[role="dialog"]');
+		await expect(modal.locator('header h2')).toContainText(number);
+		await expect(modal.getByRole('button', { name: 'Reject', exact: true })).toBeVisible();
+		await expect(modal.getByTestId('resubmit-for-review')).toHaveCount(0);
+	});
 });

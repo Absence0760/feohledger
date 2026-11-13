@@ -197,12 +197,39 @@ def invoice_file_url(file_key: str) -> str:
     return f"/api/invoices/file/{file_key}"
 
 
+# A versioned invoice-document key is ``<org>/<invoice>/<token>~<safe-filename>``.
+# `~` can never come out of `_safe_filename`, so the marker is unambiguous and a
+# user's own filename is always recoverable from the key (decisions §363).
+_VERSION_MARK = "~"
+_VERSIONED_BASENAME = re.compile(r"^[0-9a-f]{12}~(?P<name>.+)$")
+
+
+def invoice_file_display_name(file_key: str) -> str:
+    """The filename a user gave an invoice document, from its storage key.
+
+    The key's last segment, without the version token
+    :func:`upload_invoice_file` prefixes when ``versioned`` is set.
+    """
+    base = file_key.rsplit("/", 1)[-1]
+    match = _VERSIONED_BASENAME.match(base)
+    return match.group("name") if match else base
+
+
 async def upload_invoice_file(
     org_id: uuid.UUID,
     invoice_id: uuid.UUID,
     file: UploadFile,
+    *,
+    versioned: bool = False,
 ) -> tuple[str, str]:
-    """Upload a file to S3 and return (file_key, file_url)."""
+    """Upload a file to S3 and return (file_key, file_url).
+
+    ``versioned`` gives the object a key no earlier write to this invoice can
+    hold. The attach / replace / supplier-resubmit paths set it: they write onto
+    an invoice that may already have had documents, and a superseded document is
+    KEPT as evidence (decisions §363), so a plain filename key would overwrite
+    the old object whenever the new upload shares its name.
+    """
     content = await file.read()
 
     if len(content) > MAX_FILE_SIZE:
@@ -214,7 +241,10 @@ async def upload_invoice_file(
             f"File type '{content_type}' not allowed. Accepted: PDF, PNG, JPEG, TIFF, XML"
         )
 
-    file_key = f"{org_id}/{invoice_id}/{_safe_filename(file.filename)}"
+    basename = _safe_filename(file.filename)
+    if versioned:
+        basename = f"{uuid.uuid4().hex[:12]}{_VERSION_MARK}{basename}"
+    file_key = f"{org_id}/{invoice_id}/{basename}"
 
     await _put_object(file_key, content, content_type)
 

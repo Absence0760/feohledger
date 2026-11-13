@@ -328,6 +328,10 @@ const BUILDERS: Record<string, Builder> = {
 	invoice_entry_window_closed: fixed('refusal.invoiceEntryWindowClosed'),
 	invoice_not_erp_sendable: fixed('refusal.invoiceNotErpSendable'),
 	invoice_not_erp_retryable: fixed('refusal.invoiceNotErpRetryable'),
+	// `api/invoice_entry.document_lock_refusal` (the `/file` routes from
+	// `approved` on) and `api/workflow.resubmit_refusal` (decisions §363).
+	invoice_document_locked: fixed('refusal.invoiceDocumentLocked'),
+	invoice_not_resubmittable: fixed('refusal.invoiceNotResubmittable'),
 	// `api/workflow.close_refusals` — `/complete` closing to `done`, and a
 	// `POST /bulk/status → done` row's skip, refused while a live payment or
 	// virtual card holds the invoice (decisions §357). `params.claim` names

@@ -92,3 +92,11 @@ APPROVED_OR_BEYOND_STATUSES: tuple[InvoiceStatus, ...] = (
 POST_APPROVAL_LOCKED_STATUSES: frozenset[InvoiceStatus] = frozenset(
     set(APPROVED_OR_BEYOND_STATUSES) - {InvoiceStatus.approved}
 )
+
+#: Approved, whatever has happened since: the invoice's financial content
+#: (amount, payee, line items) and its source document are what the approver
+#: signed off. `api/invoices`' `_FINANCIALLY_LOCKED_STATUSES` is this set;
+#: `api/invoice_entry.document_locked` reads it for the document (decisions §363).
+FINANCIALLY_LOCKED_STATUSES: frozenset[InvoiceStatus] = frozenset(
+    {InvoiceStatus.approved} | POST_APPROVAL_LOCKED_STATUSES
+)

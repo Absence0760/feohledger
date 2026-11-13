@@ -42,7 +42,9 @@
 	import {
 		getReviewActions,
 		INVOICE_NOT_COMPLETABLE,
+		INVOICE_DOCUMENT_LOCKED,
 		INVOICE_NOT_ERP_RETRYABLE,
+		INVOICE_NOT_RESUBMITTABLE,
 		routeIntercompany,
 		type InvoiceActionVerdicts
 	} from '#lib/api/invoices.ts';
@@ -658,7 +660,10 @@
 			currentFileUrl
 	);
 	let extracting = $state(false);
-	let canManageFile = $derived(canWrite && status !== 'done');
+	// Upload / Replace / Delete: the server's `manage_file` verdict (the entry
+	// roles, a clerk's entry window, and the document lock from `approved` on —
+	// decisions §363), declared below with the other verdicts. Which button
+	// shows is whether there is a file, not a rule.
 	let isReadyForReview = $derived(status === 'ready_for_review');
 	// Whether to offer Approve / Reject / Submit / Retry ERP is the SERVER's
 	// verdict (`GET /api/invoices/{id}/review-actions`, run from the very gates
@@ -724,6 +729,19 @@
 		isOffered(retryVerdict) && retryVerdict?.code !== INVOICE_NOT_ERP_RETRYABLE
 	);
 	let retryRefusal = $derived(retryOffered ? (retryVerdict ?? null) : null);
+	// `POST /{id}/resubmit` ("Resubmit for review"): only on a rejected invoice
+	// — the status refusal hides it — and disabled with the reason otherwise
+	// (a clerk on an invoice that was approved before it was rejected).
+	let resubmitVerdict = $derived(verdicts?.resubmit);
+	let resubmitOffered = $derived(
+		isOffered(resubmitVerdict) && resubmitVerdict?.code !== INVOICE_NOT_RESUBMITTABLE
+	);
+	let resubmitRefusal = $derived(resubmitOffered ? (resubmitVerdict ?? null) : null);
+	let resubmitting = $state(false);
+	let canManageFile = $derived(isAllowed(verdicts?.manage_file));
+	// The one refusal worth stating where the file controls were: the frozen
+	// document. A role or a clerk's closed window just hides them.
+	let documentLocked = $derived(verdicts?.manage_file?.code === INVOICE_DOCUMENT_LOCKED);
 
 	let submitLabel = $derived.by(() => {
 		if (status === 'new' && activeSteps.approval) return m('invoices.modal.submit.forReview');
@@ -876,6 +894,25 @@
 			void loadVerdicts();
 		} finally {
 			submitting = false;
+		}
+	}
+
+	async function handleResubmit() {
+		resubmitting = true;
+		try {
+			// Save the rework first, as Submit does: the reviewer reads the
+			// version that goes back into the queue.
+			await invoiceStore.update(invoice.id, invoiceFieldPayload());
+			await api.post(`/api/invoices/${invoice.id}/resubmit`, {});
+			toast(m('invoices.modal.toast.resubmitted'), 'success');
+			// The host refetches with its own filters on close — see `submitDone`.
+			onclose();
+		} catch (err) {
+			if (handleStaleConflict(err)) return;
+			toast(err instanceof Error ? err.message : m('invoices.modal.toast.resubmitFailed'), 'error');
+			void loadVerdicts();
+		} finally {
+			resubmitting = false;
 		}
 	}
 
@@ -1849,6 +1886,10 @@
 							hidden
 						/>
 					</div>
+				{:else if documentLocked}
+					<p class="file-locked" data-testid="file-locked">
+						{refusalText(verdicts?.manage_file ?? null, m)}
+					</p>
 				{/if}
 				{#if currentFileUrl}
 					{@const isImage = /\.(png|jpg|jpeg|tiff?)$/i.test(currentFileUrl)}
@@ -2966,6 +3007,23 @@
 									</p>
 								{/if}
 							{/if}
+							{#if resubmitOffered}
+								<button
+									type="button"
+									class="btn-submit"
+									data-testid="resubmit-for-review"
+									disabled={resubmitting || saving || !isAllowed(resubmitVerdict)}
+									aria-describedby={resubmitRefusal ? 'resubmit-refusal' : undefined}
+									onclick={handleResubmit}
+								>
+									{resubmitting ? m('invoices.modal.submitting') : m('invoices.modal.submit.resubmit')}
+								</button>
+								{#if resubmitRefusal}
+									<p class="approver-hint" id="resubmit-refusal" data-testid="resubmit-refusal">
+										{refusalText(resubmitRefusal, m)}
+									</p>
+								{/if}
+							{/if}
 						</div>
 					</footer>
 				</form>
@@ -3105,6 +3163,15 @@
 		font-size: 0.9rem;
 	}
 
+	.file-locked {
+		flex-shrink: 0;
+		margin: 0;
+		padding: 10px 14px;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+		border-bottom: 1px solid var(--border);
+		background: var(--surface);
+	}
 	.file-actions {
 		flex-shrink: 0;
 		display: flex;

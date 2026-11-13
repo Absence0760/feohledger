@@ -486,3 +486,64 @@ def test_unknown_subject_type_collects_nothing(subject_type):
         )
     )
     assert result == []
+
+
+async def test_a_superseded_invoice_document_is_listed_and_retained(realdb):
+    """A replace, a removal and a supplier resubmit KEEP the old object and name
+    it only on their audit row (decisions §363). The walk reads it from there,
+    so the export lists it and erasure leaves it, like the current document.
+    A key outside the organisation's prefix is never taken from an audit row."""
+    from app.models.workflow import AuditLog
+
+    tenant_mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    seeded = await _seed_document_graph(tenant_mk, org_id)
+    kept = {
+        "invoice.file_replaced": ("previous_file_key", f"{org_id}/inv/aaaaaaaaaaaa~v1.pdf"),
+        "invoice.file_deleted": ("file_key", f"{org_id}/inv/bbbbbbbbbbbb~v2.pdf"),
+        "invoice.resubmitted_by_vendor": (
+            "previous_file_key",
+            f"{org_id}/inv/cccccccccccc~v3.pdf",
+        ),
+    }
+    async with tenant_mk() as s:
+        for action, (field_name, key) in kept.items():
+            s.add(
+                AuditLog(
+                    correlation_id=uuid.uuid4(),
+                    organization_id=org_id,
+                    action=action,
+                    entity_type="invoice",
+                    entity_id=seeded["invoice_id"],
+                    details={field_name: key},
+                )
+            )
+        s.add(
+            AuditLog(
+                correlation_id=uuid.uuid4(),
+                organization_id=org_id,
+                action="invoice.file_replaced",
+                entity_type="invoice",
+                entity_id=seeded["invoice_id"],
+                details={"previous_file_key": f"{uuid.uuid4()}/inv/foreign.pdf"},
+            )
+        )
+        await s.commit()
+
+    async with tenant_mk() as s:
+        docs = await collect_subject_documents(
+            subject_type="vendor_contact",
+            subject_id=seeded["vendor_id"],
+            organization_id=org_id,
+            tenant_db=s,
+        )
+
+    by_key = {d.file_key: d for d in docs}
+    for _field, key in kept.values():
+        doc = by_key[key]
+        assert doc.kind == privacy_documents.KIND_INVOICE
+        assert doc.disposition == RETAIN
+        assert doc.record_id == str(seeded["invoice_id"])
+        assert doc.reason
+    assert by_key[kept["invoice.file_replaced"][1]].filename == "v1.pdf"
+    assert not any(k.endswith("foreign.pdf") for k in by_key)

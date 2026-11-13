@@ -80,7 +80,6 @@ from app.services.exception_lifecycle import record_decision
 from app.services.extraction_dispatch import dispatch_extraction
 from app.services.invoice_warnings import refresh_warnings
 from app.services.storage import (
-    delete_file,
     get_file,
     tax_form_type_from_key,
     upload_chat_file,
@@ -704,7 +703,11 @@ async def resubmit_invoice(
 
     old_file_key = inv.file_key
     try:
-        file_key, file_url = await upload_invoice_file(vendor.organization_id, inv.id, file)
+        # Versioned: the rejected document is KEPT (decisions §363), so the
+        # corrected one must not land on its key when the filenames match.
+        file_key, file_url = await upload_invoice_file(
+            vendor.organization_id, inv.id, file, versioned=True
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     inv.file_key = file_key
@@ -718,6 +721,9 @@ async def resubmit_invoice(
         "filename": file.filename,
         "content_type": file.content_type,
     }
+    if old_file_key:
+        # The version AP rejected, kept: this audit row is its reference.
+        source_details["previous_file_key"] = old_file_key
 
     # Resolve the open rejection exception(s) — the vendor has responded.
     rejection_excs = (
@@ -802,14 +808,6 @@ async def resubmit_invoice(
         await db.commit()
         await db.refresh(inv)
         message = "Invoice resubmitted. Awaiting AP review."
-
-    # Best-effort: drop the superseded file object if the new one has a
-    # different key (same filename overwrites in place).
-    if old_file_key and old_file_key != file_key:
-        try:
-            await delete_file(old_file_key)
-        except Exception:
-            logger.warning("could not delete superseded invoice file on resubmit")
 
     return {
         "id": str(inv.id),
