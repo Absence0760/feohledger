@@ -1396,11 +1396,45 @@ AP manager picks one with **Choose ERP account**
 (`POST /api/gl-accounts/{id}/erp-link`, audited `gl_account.erp_link_confirmed`).
 Only an id the last sync offered, under the same connection, is accepted, and
 only on an unlinked row. A confirmed link is exempt from rules 3 and 4 (it still
-dies with its realm, or when the account leaves the ERP). The live case: an old
+leaves the row with its realm, kept for that company as below, and dies when
+the account leaves the ERP). The live case: an old
 row "Depreciation" when QuickBooks has a top-level "Depreciation" (40) and
 "Truck:Depreciation" (39). Picking 39 for the old row means the top-level
 account cannot also own the code "Depreciation" in that chart (it stays
 `code_taken`): pick the account the invoices coded to the row meant.
+
+**A GL account keeps its state for every company it was synced under**
+(decisions §376, `services/gl_account_erp_links`, migration 0127). A row's
+`erp_account_id` + `erp_link_realm`, its confirmation and its
+`erp_link_candidates` are its state in one company. A chart sync under a named
+realm first files every row's state from another named company in
+`gl_account_erp_links` under that company — the link with its confirmation,
+or the open decision with its candidates — and then puts back on its row the
+state kept for its own company, all before rule 0. So switching ERP company,
+or QuickBooks sandbox to production, and back restores the links a person
+confirmed and the decisions still waiting, instead of re-linking by code and
+asking again (a row whose code is only a legacy key there would otherwise come
+back unlinked with nothing to decide). A restored state is judged like any
+same-company one: rules 3 and 4 re-judge an unconfirmed link, a restored
+decision is refreshed against the pull, and the row it replaced is kept for
+its own company in turn. The response and audit row report `kept`, `restored`
+and `restore_dropped` (a `link_changes` entry with `restored: true` per
+restored link), and the message adds "N restored". Three rules hold:
+
+- **No two rows hold one account on the rules' own judgement.** An
+  unconfirmed kept link whose id another unconfirmed row already holds in that
+  company, or that two unconfirmed kept links claim, is dropped
+  (`restore_dropped`) and the row is judged as it stands. A confirmed link
+  always comes back, since it may share its account with the row named after
+  it, the one share a person can make.
+- **Only a named realm is kept.** A NULL-realm link (pre-0115, or made by a
+  no-realm sync) names no company, so it is judged by rule 0 as before. A
+  no-realm sync neither keeps nor restores. Nothing was backfilled.
+- **The push never reads a kept state.** It posts the row's own link, live in
+  the current realm, so after reconnecting to a company the chart needs one
+  sync before its restored links post (unlike vendors below). A restored
+  unconfirmed link is re-judged by rules 3 and 4 first, and the push cannot
+  run them.
 
 **Inactive accounts** arrive with `active=False` (QuickBooks is queried `where
 Active IN (true, false)`; NetSuite `isinactive`, BC `blocked`; Merge.dev
@@ -1443,6 +1477,7 @@ cuts a name itself. The
 response and the `gl_account.synced_from_erp` audit row carry exact counts
 (`created`, `updated`, `unchanged`, `linked`, `conflict_count`,
 `unlinked_count`, `code_drift_count`, `deactivated_count`, `realm_adopted`,
+`kept`, `restored`, `restore_dropped_count`,
 `parent_code_dropped_count`, `names_shortened_count`) and the codes, capped at 50 each in the response
 (the audit row is uncapped), plus the `realm` the pull came from; the
 `/gl-accounts` page shows refused, unlinked and deactivated codes as warnings
@@ -1533,7 +1568,6 @@ moved, because which ERP supplier the merged vendor's bills post to is not the
 merge's to choose. A NULL-realm link names no company, so it conflicts with
 any differing id on the other side (reported as realm `null`). The retired
 duplicate is left holding no link, so no later sync restores one onto it.
-GL accounts still hold one link per row (`docs/followups.md`).
 
 **Merge.dev suppliers are Contacts.** Merge's Accounting API has no `/vendors`
 path and no Vendor model; the adapter lists `GET /contacts?is_supplier=true`

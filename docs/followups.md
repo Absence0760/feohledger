@@ -1340,16 +1340,6 @@ scope (§260) — do not fold them into any of these.
       (`existing_invoice_not_open`). **Durable fix:** decide whether we submit
       for approval and poll, or post only to companies without workflows, and
       document it. **Trigger:** the first BC customer with approval workflows.
-- [ ] **(c) A GL account holds one ERP link, whichever company set it.**
-      Vendors keep a link per company (`vendor_erp_links`, decisions §356);
-      `gl_accounts` still holds one, and a chart sync under another company
-      drops it. A return to the first company re-links most rows by code, but
-      not a link a person confirmed (`erp_link_confirmed_at`) or a row waiting
-      with `erp_link_candidates`: those need deciding again. **Durable fix:**
-      keep the link that leaves a chart row under its realm, as
-      `vendor_erp_links` does, and restore it in rule 0 before re-judging.
-      **Trigger:** the first tenant that switches ERP company and back with
-      confirmed links, or the next change to rule 0 in `services/gl_account_sync`.
 - [ ] **(c) No one can clear a vendor's ERP link, so an ERP-link merge
       conflict can only be worked around.** A merge refuses
       `vendor_merge_erp_link_conflict` where the canonical and a duplicate hold

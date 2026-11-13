@@ -25,7 +25,7 @@ from app.models.expense import (
     PreapprovalStatus,
     ReconciliationStatus,
 )
-from app.models.gl_account import GLAccount
+from app.models.gl_account import GLAccount, GLAccountErpLink
 from app.models.international_tax import IntlTaxRecord, TaxKind
 from app.models.invoice import Invoice, InvoiceExtractionResult, InvoiceLineItem
 from app.models.invoice_embedding import InvoiceEmbedding
@@ -138,6 +138,7 @@ __all__ = [
     "ExpenseReportStatus",
     "ExpenseStatus",
     "GLAccount",
+    "GLAccountErpLink",
     "GoodsReceipt",
     "GRLineItem",
     "IntakeRequest",

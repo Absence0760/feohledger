@@ -544,6 +544,9 @@ async def sync_gl_accounts_from_erp(
     if result.conflicts or result.unlinked:
         # The reasons differ per code (`conflicts[].reason`); say only the counts.
         message += f"; {len(result.conflicts)} not linked, {len(result.unlinked)} unlinked"
+    if result.restored:
+        # Back on a company it was synced under before (§376).
+        message += f"; {result.restored} restored"
     return {
         "success": True,
         "message": message,

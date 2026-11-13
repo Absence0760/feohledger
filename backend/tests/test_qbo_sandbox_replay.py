@@ -394,6 +394,12 @@ async def test_the_live_sync_of_the_pre_284_chart_replays_exactly(realdb, sandbo
             "deactivated_count": 1,
             "realm": LINK_REALM,
             "realm_adopted": ADOPTED_CHART_LINKS,
+            # Reported since §376: the seeded links name no company, so none
+            # is kept, and nothing was kept for this one to restore.
+            "kept": 0,
+            "restored": 0,
+            "restore_dropped": [],
+            "restore_dropped_count": 0,
             # Reported since the live run; every sandbox parent path fits.
             "parent_code_dropped": [],
             "parent_code_dropped_count": 0,

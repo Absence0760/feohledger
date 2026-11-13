@@ -3,7 +3,16 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, Text, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -85,8 +94,61 @@ class GLAccount(Base, EntityMixin, TimestampMixin):
     #: — the ERP accounts the last sync found this UNLINKED row could mean and
     #: would not pick between. Non-NULL is "needs a decision"; cleared whenever
     #: the row is linked.
+    #:
+    #: These four columns are the row's state in ONE ERP company. Its state in
+    #: every other named company it was synced under is kept in
+    #: ``gl_account_erp_links`` (:class:`GLAccountErpLink`, migration 0127).
     erp_link_candidates: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True
     )
+
+
+class GLAccountErpLink(Base, TimestampMixin):
+    """A GL account's ERP link state in a company its row is NOT currently
+    synced under (migration 0127, docs/decisions.md §376).
+
+    ``gl_accounts`` holds one link — ``erp_account_id`` + ``erp_link_realm``,
+    with a person's confirmation (``erp_link_confirmed_*``) or, unlinked, the
+    pending decision (``erp_link_candidates``). A chart sync under another
+    company used to drop all of it, and a return re-linked rows by code only:
+    a link a person had confirmed, or a row waiting for a decision, had to be
+    decided again. Now the state that leaves the row is kept here under its
+    realm, and the next chart sync under that realm puts it back before rule 0
+    re-judges anything (``services/gl_account_erp_links``), as
+    ``vendor_erp_links`` does for vendors (§356).
+
+    At most one per ``(gl_account_id, realm)``; ``realm`` is always named (a
+    NULL-realm link names no company, so it is never kept). A kept row holds a
+    link (with its confirmation, if any) or a pending decision; the CHECK
+    refuses one that holds neither, or a confirmation with no link.
+    Nothing here is ever posted to: the push reads the row's own live link
+    only (``gl_chart.resolve_erp_account_ids``).
+    """
+
+    __tablename__ = "gl_account_erp_links"
+    __table_args__ = (
+        UniqueConstraint("gl_account_id", "realm", name="uq_gl_account_erp_links_account_realm"),
+        CheckConstraint(
+            "(erp_account_id IS NOT NULL OR erp_link_candidates IS NOT NULL) "
+            "AND (erp_link_confirmed_at IS NULL OR erp_account_id IS NOT NULL)",
+            name="ck_gl_account_erp_links_state",
+        ),
+        Index("ix_gl_account_erp_links_organization_id_realm", "organization_id", "realm"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    gl_account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("gl_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    #: ``services/erp_link_realm.connection_realm`` of the connection the state
+    #: was made under. Never NULL (class docstring).
+    realm: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The width of ``gl_accounts.erp_account_id``.
+    erp_account_id: Mapped[str | None] = mapped_column(String(255))
+    erp_link_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    erp_link_confirmed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: The ``gl_accounts.erp_link_candidates`` shape, ``realm`` included.
+    erp_link_candidates: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
