@@ -91,6 +91,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gl_account import GL_CODE_MAX_LENGTH, GLAccount
 from app.services.erp_adapters.base import GLAccountPayload
+from app.services.erp_record_names import fit_name
 
 #: Why an ERP account was not linked (a stable code; the browser localizes it).
 DUPLICATE_CODE = "duplicate_code"  # two accounts in this pull resolve to the code
@@ -99,6 +100,11 @@ CODE_TAKEN = "code_taken"  # our row with the code is linked to another live acc
 AMBIGUOUS_LEGACY = "ambiguous_legacy"  # our row's code is a legacy key two accounts share
 CODE_TOO_LONG = "code_too_long"  # longer than GL_CODE_MAX_LENGTH; never truncated
 MISSING_ERP_ID = "missing_erp_id"  # the ERP sent no id: nothing could post to it
+
+#: ``gl_accounts.name``'s length. A longer ERP name is stored shortened and
+#: marked (``services/erp_record_names``): the name is descriptive, nothing
+#: posts by it, so it never costs the account its link.
+_NAME_LENGTH = GLAccount.__table__.c.name.type.length
 
 #: Cap on the entries a sync RESPONSE lists; the counts are always exact, and
 #: the audit row lists everything.
@@ -137,6 +143,10 @@ class ChartSyncResult:
     #: (``GL_CODE_MAX_LENGTH``): the account is synced, its parent is not
     #: recorded (never truncated — a cut code names nothing).
     parent_code_dropped: list[str] = field(default_factory=list)
+    #: Codes of accounts whose ERP name is longer than ``gl_accounts.name``:
+    #: the account syncs, its name stored shortened and marked
+    #: (``erp_record_names.fit_name``).
+    names_shortened: list[str] = field(default_factory=list)
 
     def summary(self, *, capped: bool = True) -> dict:
         """The response projection (lists capped at :data:`MAX_LISTED`; counts
@@ -165,6 +175,8 @@ class ChartSyncResult:
             "deactivated": listed(self.deactivated),
             "parent_code_dropped_count": len(self.parent_code_dropped),
             "parent_code_dropped": listed(self.parent_code_dropped),
+            "names_shortened_count": len(self.names_shortened),
+            "names_shortened": listed(self.names_shortened),
         }
 
 
@@ -456,7 +468,7 @@ async def sync_chart_from_erp(
         db.add(
             GLAccount(
                 code=code,
-                name=acct.name,
+                name=_stored_name(code, acct, result),
                 account_type=acct.account_type,
                 parent_code=_parent_code(code, acct, result, our_code_of_id),
                 organization_id=organization_id,
@@ -521,7 +533,18 @@ async def sync_chart_from_erp(
     result.unlinked.sort()
     result.deactivated.sort()
     result.parent_code_dropped.sort()
+    result.names_shortened.sort()
     return result
+
+
+def _stored_name(code: str, acct: GLAccountPayload, result: ChartSyncResult) -> str:
+    """``acct``'s name as ``gl_accounts.name`` holds it — shortened and
+    marked when the ERP's does not fit, which is recorded in
+    ``names_shortened`` under ``code`` (our row's code for the account)."""
+    name, cut = fit_name(acct.name or "", _NAME_LENGTH)
+    if cut:
+        result.names_shortened.append(code)
+    return name
 
 
 def _same_account(code: str, acct: GLAccountPayload, *, legacy_ok: bool) -> bool:
@@ -567,8 +590,9 @@ def _apply(
     """Refresh a matched row's descriptive fields. Counts as updated only when
     something actually changed, so a re-run of an unchanged chart reports 0."""
     changed = False
-    if acct.name and row.name != acct.name:
-        row.name = acct.name
+    name = _stored_name(row.code, acct, result) if acct.name else None
+    if name and row.name != name:
+        row.name = name
         changed = True
     if acct.account_type and row.account_type != acct.account_type:
         row.account_type = acct.account_type

@@ -1047,7 +1047,7 @@ def _netsuite_account_to_payload(raw: dict) -> GLAccountPayload | None:
         return None
     return GLAccountPayload(
         code=code,
-        name=str(name or code)[:255],
+        name=str(name or code),
         account_type=_NETSUITE_ACCOUNT_TYPES.get(str(raw.get("accttype") or "")),
         erp_account_id=str(account_id),
         active=str(raw.get("isinactive", "F")).upper() != "T",

@@ -327,6 +327,9 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 			// Reported since the live run; every sandbox parent path fits.
 			parent_code_dropped: [],
 			parent_code_dropped_count: 0,
+			// Likewise every sandbox account name fits `gl_accounts.name`.
+			names_shortened: [],
+			names_shortened_count: 0,
 			link_changes: expect.any(Array),
 			success: true,
 			adapter: PROVIDER
