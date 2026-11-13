@@ -226,7 +226,18 @@ The system can pull the vendor master list from the connected ERP. This ensures 
 
 Each synced vendor stores:
 - `erp_vendor_id` — the vendor's ID in the external ERP (for two-way mapping)
+- `erp_link_realm` — the ERP company that ID was issued in; the vendor's links
+  in other companies are kept in `vendor_erp_links` (decisions §284, §356)
 - `erp_synced_at` — timestamp of last sync
+
+**Merging vendors moves their ERP links.** `POST
+/api/enrichment/vendors/consolidation/merge` hands each duplicate's links (the
+row's and every kept one) to the canonical vendor in every company the
+canonical has no link in, so the merged vendor's bills still post and a later
+sync restores nothing onto the retired duplicate. Two different ids in one
+company refuse the merge 409 `vendor_merge_erp_link_conflict`; leave that
+duplicate out. Detail: [data-enrichment.md](data-enrichment.md) § `POST /api/enrichment/vendors/consolidation/merge`,
+[erp-integration.md](erp-integration.md); decisions §373.
 
 ### Every changed vendor writes an audit row
 

@@ -144,7 +144,7 @@ decimal comparison rather than binary drift.
 
 #### Vendors
 - `vendors` — supplier master. `erp_vendor_id` + `erp_link_realm` are its ERP link in the company it was last synced under (decisions §284)
-- `vendor_erp_links` — its links in every other named ERP company (migration 0125): one per `(vendor_id, realm)`, filed by the vendor sync when a link leaves the row and restored by the next sync under that realm; the push reads a link only for the current realm (`services/vendor_erp_links`, decisions §356, `erp-integration.md` § GL accounts and vendors are linked by the ERP's unique key)
+- `vendor_erp_links` — its links in every other named ERP company (migration 0125): one per `(vendor_id, realm)`, filed by the vendor sync when a link leaves the row and restored by the next sync under that realm, and moved to the canonical vendor by a merge (decisions §373); the push reads a link only for the current realm (`services/vendor_erp_links`, decisions §356, `erp-integration.md` § GL accounts and vendors are linked by the ERP's unique key)
 
 #### Procurement (for 3-way matching)
 - `purchase_orders` — PO header (vendor, total, **currency**, status). `currency` is nullable with no default (migration 0099): the code the PO's source knew, NULL when none said — see `docs/decisions.md` §197

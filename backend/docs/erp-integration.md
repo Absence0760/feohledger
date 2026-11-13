@@ -1523,8 +1523,17 @@ ambiguous. Three rules hold:
   neither keeps nor restores anything. No link was backfilled: the ones earlier
   syncs dropped appear only in audit rows, which are history, not live links.
 
-A vendor merge moves no ERP link: the duplicate keeps its own, kept links
-included. GL accounts still hold one link per row (`docs/followups.md`).
+**A vendor merge moves the duplicates' links to the canonical vendor**
+(decisions §373, `services/vendor_merge._plan_erp_links`): the row link and
+every kept link, company by company, wherever the canonical has none in that
+company. A duplicate linked to the same id the canonical already holds there
+just drops it. Where the two hold **different** ids in one company, the merge
+is refused 409 `vendor_merge_erp_link_conflict` (`params.realms`) with nothing
+moved, because which ERP supplier the merged vendor's bills post to is not the
+merge's to choose. A NULL-realm link names no company, so it conflicts with
+any differing id on the other side (reported as realm `null`). The retired
+duplicate is left holding no link, so no later sync restores one onto it.
+GL accounts still hold one link per row (`docs/followups.md`).
 
 **Merge.dev suppliers are Contacts.** Merge's Accounting API has no `/vendors`
 path and no Vendor model; the adapter lists `GET /contacts?is_supplier=true`
