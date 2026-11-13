@@ -21,6 +21,9 @@ the customer's admin to consent in the provider's UI. The flow:
    without the vanity override — where the connect started) at
    ``/organization?section=erp&erp_connected=<provider>`` or
    ``…&erp_error=<stable_code>``. Never a token, code or provider message.
+   A consent that reached several companies (Xero, Sage) links nothing: the
+   token is parked server-side for the admin's pick, and the redirect carries
+   ``…&erp_choose_company=<provider>`` (§ Company picker below, decisions §355).
 
 ``POST /api/organization/erp/oauth/disconnect`` clears the block and its sealed
 tokens, then revokes best-effort; ``GET /api/organization/erp/oauth/status``
@@ -39,7 +42,7 @@ from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,6 +131,35 @@ class OAuthStatusResponse(BaseModel):
 class DisconnectResponse(BaseModel):
     disconnected: bool
     revoked: bool
+
+
+class PendingCompany(BaseModel):
+    id: str
+    name: str
+
+
+class PendingConnectResponse(BaseModel):
+    """A consent that reached several companies, waiting for the admin's pick.
+    Never a token: those stay sealed server-side (decisions §355)."""
+
+    provider: str
+    display_name: str
+    companies: list[PendingCompany]
+    expires_at: str
+
+
+class SelectCompanyRequest(BaseModel):
+    company_id: str = Field(min_length=1, max_length=128)
+
+
+class SelectCompanyResponse(BaseModel):
+    connected: bool
+    provider: str
+    external_tenant_id: str
+
+
+class DiscardPendingResponse(BaseModel):
+    discarded: bool
 
 
 def _direct(provider: str) -> dict:
@@ -466,6 +498,172 @@ async def oauth_disconnect(
     return DisconnectResponse(disconnected=True, revoked=revoked)
 
 
+# ---------------------------------------------------------------------------
+# Company picker: a consent that reached several companies (decisions §355)
+# ---------------------------------------------------------------------------
+#
+# The callback parks such a consent (``erp_oauth.park_pending_connect``) and
+# returns the admin with ``?erp_choose_company=<provider>``. These three routes
+# are the only way to it: bearer-authenticated (admin), credentialed so the
+# browser-binding cookie comes along, and keyed on that cookie's hash and the
+# admin who started the connect. A request from another browser, another
+# admin, or after the window finds nothing (``erp_pick_expired``).
+
+#: No pending connect for this browser and admin: none was parked, it lapsed,
+#: it was already used, or this is not the browser or admin that started it.
+PICK_EXPIRED = "erp_pick_expired"
+#: The pick names a company the consent did not offer. The pending connect is
+#: spent all the same: a pick is single-use whatever it names.
+PICK_UNKNOWN_COMPANY = "erp_pick_unknown_company"
+
+_PICK_EXPIRED_MESSAGE = (
+    "This ERP connection is no longer waiting for a company. Connect again to choose one."
+)
+
+#: The callback's refusal codes a pick can also end in, with their statuses.
+_PICK_REFUSALS = {
+    "already_linked": (
+        409,
+        "That company is already connected to another FeohLedger workspace.",
+    ),
+    "credentials_unavailable": (503, provider_credentials.CREDENTIALS_UNAVAILABLE_DETAIL),
+    "audit_unavailable": (
+        503,
+        "The change could not be recorded in the audit trail, so it was not saved.",
+    ),
+}
+
+
+def _pick_expired() -> HTTPException:
+    return HTTPException(status_code=409, detail=coded_refusal(PICK_EXPIRED, _PICK_EXPIRED_MESSAGE))
+
+
+def _display_name(provider: str) -> str:
+    spec = erp_oauth.load_providers().get(provider)
+    return spec.display_name if spec is not None else provider
+
+
+@router.get("/pending", response_model=PendingConnectResponse)
+async def oauth_pending(
+    request: Request,
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+):
+    """The companies a parked consent offers. Read-only: it does not spend it."""
+    pending = await erp_oauth.peek_pending_connect(
+        org.id, user.id, request.cookies.get(erp_oauth.BROWSER_COOKIE)
+    )
+    if pending is None:
+        raise _pick_expired()
+    return PendingConnectResponse(
+        provider=pending.provider,
+        display_name=_display_name(pending.provider),
+        companies=[PendingCompany(id=c.id, name=c.name) for c in pending.companies],
+        expires_at=pending.expires_at.isoformat(),
+    )
+
+
+@router.post("/pending/select", response_model=SelectCompanyResponse)
+async def oauth_pending_select(
+    body: SelectCompanyRequest,
+    request: Request,
+    response: Response,
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+    db: AsyncSession = Depends(get_control_db),
+):
+    """Link the company the admin picked, from the consent parked for them.
+
+    Spends the pending connect FIRST (GETDEL), so a pick is single-use
+    whatever follows (a plan lost since the consent spends it too, and the admin
+    starts again); then the checks the callback itself makes before a link
+    — the plan, the provider still known — and the same claim-and-link
+    (``_claim_and_link``: realm lock, linked-elsewhere check, audit-first
+    write). The company must be one the consent offered: the list was read
+    from the provider under the new token, which is what confirms the company
+    (§337's rule), and a client-supplied id outside it links nothing.
+    """
+    try:
+        pending = await erp_oauth.take_pending_connect(
+            org.id, user.id, request.cookies.get(erp_oauth.BROWSER_COOKIE)
+        )
+    except CredentialCryptoError:
+        raise HTTPException(
+            status_code=503,
+            detail=coded_refusal(
+                "credentials_unavailable", provider_credentials.CREDENTIALS_UNAVAILABLE_DETAIL
+            ),
+        ) from None
+    if pending is None or pending.token_response is None:
+        raise _pick_expired()
+    spec = erp_oauth.load_providers().get(pending.provider)
+    if spec is None:
+        raise _pick_expired()
+    chosen = next((c for c in pending.companies if c.id == body.company_id), None)
+    if chosen is None:
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=user.id,
+            action="organization.erp_connect_refused",
+            entity_id=org.id,
+            entity_type="organization",
+            details={"provider": spec.key, "reason": PICK_UNKNOWN_COMPANY},
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=coded_refusal(
+                PICK_UNKNOWN_COMPANY,
+                "That company was not offered by this connection. Connect again to choose one.",
+            ),
+        )
+    await ensure_live_erp_entitled(db, org.id, _direct(spec.key))
+
+    refused = await _claim_and_link(
+        db,
+        org,
+        user,
+        spec,
+        pending.token_response,
+        chosen.id,
+        pending.client_source,
+        picked_from=len(pending.companies),
+    )
+    if refused:
+        status, message = _PICK_REFUSALS[refused]
+        raise HTTPException(status_code=status, detail=coded_refusal(refused, message))
+    _clear_browser_cookie(response)
+    return SelectCompanyResponse(connected=True, provider=spec.key, external_tenant_id=chosen.id)
+
+
+@router.delete("/pending", response_model=DiscardPendingResponse)
+async def oauth_pending_discard(
+    request: Request,
+    response: Response,
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+):
+    """Drop the parked consent without linking anything. Idempotent.
+
+    The token is not revoked at the provider, for §337's reason: a provider's
+    revoke can reach the app's whole grant, including a connection this
+    tenant already relies on. Unused, it lapses with the provider's own expiry.
+    """
+    cookie = request.cookies.get(erp_oauth.BROWSER_COOKIE)
+    pending = await erp_oauth.peek_pending_connect(org.id, user.id, cookie)
+    discarded = pending is not None and await erp_oauth.discard_pending_connect(org.id, cookie)
+    if discarded:
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=user.id,
+            action="organization.erp_connect_cancelled",
+            entity_id=org.id,
+            entity_type="organization",
+            details={"provider": pending.provider},
+        )
+        _clear_browser_cookie(response)
+    return DiscardPendingResponse(discarded=discarded)
+
+
 async def _record_or_503(org_id: uuid.UUID, actor_id: uuid.UUID, action: str, details: dict):
     """Write an audit row or refuse with 503 — the audit-first rule (§239)."""
     try:
@@ -521,10 +719,12 @@ def _home(slug: str, org_settings: dict | None, *, spend_cookie: bool = False, *
     """
     base = tenant_base_url(slug, None) or tenant_base_url(slug, org_settings)
     if not base:
-        outcome = "connected" if "erp_connected" in params else "not connected"
-        resp = PlainTextResponse(
-            f"ERP {outcome}. Return to FeohLedger → Organization → ERP.", status_code=200
-        )
+        if "erp_choose_company" in params:
+            text_ = "Choose the company to connect: return to FeohLedger → Organization → ERP."
+        else:
+            outcome = "connected" if "erp_connected" in params else "not connected"
+            text_ = f"ERP {outcome}. Return to FeohLedger → Organization → ERP."
+        resp = PlainTextResponse(text_, status_code=200)
     else:
         query = urlencode({"section": "erp", **params})
         resp = RedirectResponse(f"{base}/organization?{query}", status_code=302)
@@ -656,45 +856,112 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
         logger.warning("erp_oauth: %s code exchange failed for org %s", spec.key, org.id)
         return fail("token_exchange_failed")
 
+    companies = await _companies(spec, token_response, params, resolved, org.id)
+    if not companies:
+        return fail("no_external_tenant")
+    if len(companies) > 1:
+        # Several companies: never pick one of a customer's ledgers for them
+        # (decisions §355). The token waits server-side, bound to this org,
+        # this admin and this browser's cookie, which stays set — the pick is
+        # its next and last use.
+        try:
+            await erp_oauth.park_pending_connect(
+                org_id=org.id,
+                user_id=user.id,
+                provider=spec.key,
+                client_source=creds.source,
+                browser_binding=bound["browser_binding"],
+                token_response=token_response,
+                companies=companies,
+            )
+        except Exception:  # noqa: BLE001 — sealing or Redis: nothing was parked
+            logger.warning("erp_oauth: %s pending connect not stored for org %s", spec.key, org.id)
+            return fail("credentials_unavailable")
+        resp = _home(slug, home_settings, erp_choose_company=spec.key)
+        # Renew the cookie for the pick's window: the one it carries was set
+        # at /authorize and lapses with that state.
+        attrs = {**erp_oauth.browser_cookie_attributes(), "max_age": erp_oauth.pending_ttl()}
+        resp.set_cookie(
+            erp_oauth.BROWSER_COOKIE, request.cookies[erp_oauth.BROWSER_COOKIE], **attrs
+        )
+        return resp
+
+    refused = await _claim_and_link(
+        db, org, user, spec, token_response, companies[0].id, creds.source
+    )
+    if refused:
+        return fail(refused)
+    return _home(slug, org.settings, spend_cookie=True, erp_connected=spec.key)
+
+
+async def _companies(spec, token_response: dict, params: dict, resolved: dict | None, org_id):
+    """The companies this consent reached (``list_external_tenants``); empty on
+    any failure, and when there are more than a picker can offer."""
     from app.services.erp_adapters.dispatcher import _ADAPTER_REGISTRY
-    from app.services.erp_adapters.oauth_base import OAuthErpAdapter
+    from app.services.erp_adapters.oauth_base import COMPANY_LIST_MAX, OAuthErpAdapter
 
     adapter_cls = _ADAPTER_REGISTRY.get(spec.key)
-    external_tenant_id = None
-    if adapter_cls is not None and issubclass(adapter_cls, OAuthErpAdapter):
-        try:
-            external_tenant_id = await adapter_cls.resolve_external_tenant_id(
-                access_token=str(token_response["access_token"]),
-                token_response=token_response,
-                callback_params=params,
-                erp_settings=resolved or {},
-            )
-        except Exception:  # noqa: BLE001 — any lookup failure refuses the connect
-            logger.warning("erp_oauth: %s company lookup failed for org %s", spec.key, org.id)
-            external_tenant_id = None
-    if not external_tenant_id:
-        return fail("no_external_tenant")
+    if adapter_cls is None or not issubclass(adapter_cls, OAuthErpAdapter):
+        return []
+    try:
+        companies = await adapter_cls.list_external_tenants(
+            access_token=str(token_response["access_token"]),
+            token_response=token_response,
+            callback_params=params,
+            erp_settings=resolved or {},
+        )
+    except Exception:  # noqa: BLE001 — any lookup failure refuses the connect
+        logger.warning("erp_oauth: %s company lookup failed for org %s", spec.key, org_id)
+        return []
+    return companies if len(companies) <= COMPANY_LIST_MAX else []
 
-    # The check-and-write must be atomic ACROSS tenants: the org row lock below
-    # serialises this tenant only, so two tenants' callbacks for one company
-    # would both pass the check. `realm_claim` holds a Redis lock on
-    # (provider, company) from the check through the commit.
+
+async def _claim_and_link(
+    db: AsyncSession,
+    org: Organization,
+    user: User,
+    spec,
+    token_response: dict,
+    external_tenant_id: str,
+    source: str,
+    *,
+    picked_from: int | None = None,
+) -> str | None:
+    """Claim the company and link it, committed. Returns the refusal code
+    (``already_linked`` / ``credentials_unavailable`` / ``audit_unavailable``),
+    or None once linked. The callback and the company pick share it, so a
+    picked company passes exactly the checks a single one does.
+
+    The check-and-write must be atomic ACROSS tenants: the org row lock below
+    serialises this tenant only, so two tenants' connects for one company
+    would both pass the check. ``realm_claim`` holds a Redis lock on
+    (provider, company) from the check through the commit.
+    """
     async with erp_oauth.realm_claim(spec.key, external_tenant_id) as claimed:
         if not claimed:
-            return fail("already_linked")
+            return "already_linked"
         org = await lock_organization(db, org)
         if await _realm_claimed_elsewhere(db, spec.key, external_tenant_id, org.id):
             await db.rollback()
-            return fail("already_linked")
+            return "already_linked"
         try:
-            await _link(db, org, user, spec, token_response, external_tenant_id, creds.source)
+            await _link(
+                db,
+                org,
+                user,
+                spec,
+                token_response,
+                external_tenant_id,
+                source,
+                picked_from=picked_from,
+            )
         except CredentialCryptoError:
             await db.rollback()
-            return fail("credentials_unavailable")
+            return "credentials_unavailable"
         except HTTPException:
             # The audit row could not be written, so nothing was linked.
             await db.rollback()
-            return fail("audit_unavailable")
+            return "audit_unavailable"
         try:
             await db.commit()
         except IntegrityError:
@@ -702,9 +969,8 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
             # 0117 — caught a second tenant linking the same company: the
             # database's answer to the race the Redis claim narrows.
             await db.rollback()
-            return fail("already_linked")
-
-    return _home(slug, org.settings, spend_cookie=True, erp_connected=spec.key)
+            return "already_linked"
+    return None
 
 
 async def _link(
@@ -715,6 +981,8 @@ async def _link(
     token_response: dict,
     external_tenant_id: str,
     source: str,
+    *,
+    picked_from: int | None = None,
 ) -> None:
     """Write the new connection (uncommitted): metadata into ``settings.erp``,
     tokens into the sealed store, audit row first.
@@ -730,6 +998,9 @@ async def _link(
     row names both realms (ERP company ids, not people). A reconnect after a
     disconnect has no previous company left to compare, so it is not flagged —
     the per-row realm, not this row, is what keeps those links from posting.
+
+    ``picked_from``: how many companies the consent offered when the admin
+    picked this one (decisions §355); recorded on the connect row.
     """
     current = dict(org.settings or {})
     prior_erp = current.get("erp")
@@ -770,6 +1041,7 @@ async def _link(
                 "changed": changed,
                 "realm": new_realm,
                 "previous_realm": previous_realm,
+                **({"picked_from": picked_from} if picked_from else {}),
             },
         )
         if previous_realm is not None and previous_realm != new_realm:

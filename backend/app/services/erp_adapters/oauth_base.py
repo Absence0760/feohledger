@@ -93,6 +93,54 @@ class OAuthProviderSpec:
     revoke_url_setting: str | None = None
 
 
+#: Bounds on what a provider's company list may put in front of the admin and
+#: into the pending connect (``services/erp_oauth.park_pending_connect``). A
+#: provider id longer than this, or one carrying a control character, is not a
+#: company we can address and is dropped rather than truncated.
+_COMPANY_ID_MAX = 128
+_COMPANY_NAME_MAX = 200
+#: More companies than this in one consent is not a list an admin picks from
+#: on a settings page; the connect is refused (``no_external_tenant``).
+COMPANY_LIST_MAX = 100
+
+
+@dataclass(frozen=True)
+class ExternalCompany:
+    """One provider-side company a fresh consent can reach.
+
+    ``id`` is what ``settings.erp.oauth.external_tenant_id`` stores (Xero
+    ``tenantId``, Sage business id, QuickBooks ``realmId``); ``name`` is the
+    provider's display name, shown in the company picker only (decisions §355).
+    """
+
+    id: str
+    name: str
+
+
+def clean_companies(rows: list[tuple[object, object]]) -> list[ExternalCompany]:
+    """Provider ``(id, name)`` pairs → the companies a picker may offer.
+
+    **Fails closed:** any row with an empty, over-long or control-character id
+    makes the whole list empty (``no_external_tenant``). Dropping it instead
+    could leave one company out of several, which the callback would then link
+    without asking — choosing a ledger for the customer (decisions §355). A
+    repeat of an id already listed is dropped; a missing name falls back to
+    the id. Order is the provider's.
+    """
+    out: list[ExternalCompany] = []
+    seen: set[str] = set()
+    for raw_id, raw_name in rows:
+        cid = str(raw_id or "").strip()
+        if not cid or len(cid) > _COMPANY_ID_MAX or not cid.isprintable():
+            return []
+        if cid in seen:
+            continue
+        seen.add(cid)
+        name = " ".join(str(raw_name or "").split())[:_COMPANY_NAME_MAX] or cid
+        out.append(ExternalCompany(id=cid, name=name))
+    return out
+
+
 class RefreshOnUnauthorized(httpx.Auth):
     """Replay a request once with a refreshed token when the provider answers 401.
 
@@ -185,7 +233,9 @@ class OAuthErpAdapter(ErpAdapter):
         ``GET /connections``, Sage's ``/businesses``) overrides this, and so
         does one whose callback parameter is unsigned and must be confirmed
         under the new token (QuickBooks). None refuses the connection
-        (``erp_error=no_external_tenant``).
+        (``erp_error=no_external_tenant``). The callback reads it through
+        :meth:`list_external_tenants`, which a provider whose consent can
+        reach several companies overrides instead.
 
         ``erp_settings`` is the org's resolved ``settings.erp`` as saved before
         the consent (QuickBooks reads its ``environment`` to pick the API host).
@@ -200,6 +250,33 @@ class OAuthErpAdapter(ErpAdapter):
             if value:
                 return value
         return None
+
+    @classmethod
+    async def list_external_tenants(
+        cls,
+        *,
+        access_token: str,
+        token_response: dict,
+        callback_params: dict[str, str],
+        erp_settings: dict | None = None,
+    ) -> list[ExternalCompany]:
+        """Every company a fresh consent reached — what the callback reads.
+
+        One → it is linked at once; several → the admin picks one
+        (decisions §355, ``api/erp_oauth`` § company picker); none → the
+        connect is refused (``no_external_tenant``). The default wraps
+        :meth:`resolve_external_tenant_id`, so a provider whose consent names
+        exactly one company (QuickBooks, with its realm confirmed under the new
+        token — §337; Blackbaud) keeps its own resolution unchanged. A provider
+        whose consent can cover several (Xero, Sage) overrides this.
+        """
+        value = await cls.resolve_external_tenant_id(
+            access_token=access_token,
+            token_response=token_response,
+            callback_params=callback_params,
+            erp_settings=erp_settings,
+        )
+        return clean_companies([(value, value)]) if value else []
 
     def external_tenant_id(self) -> str:
         """The provider-side company id captured at consent (QBO ``realmId`` etc.)."""

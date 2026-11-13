@@ -68,7 +68,12 @@ from app.services.erp_adapters.bill_allocation import (
     allocate_bill_lines,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
-from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
+from app.services.erp_adapters.oauth_base import (
+    ExternalCompany,
+    OAuthErpAdapter,
+    OAuthProviderSpec,
+    clean_companies,
+)
 from app.services.erp_adapters.posted_total import (
     MAX_CREATE_ATTEMPTS,
     VoidOutcome,
@@ -228,20 +233,21 @@ class XeroAdapter(OAuthErpAdapter):
     oauth_provider = XERO_OAUTH
 
     @classmethod
-    async def resolve_external_tenant_id(
+    async def list_external_tenants(
         cls,
         *,
         access_token: str,
         token_response: dict,
         callback_params: dict[str, str],
         erp_settings: dict | None = None,
-    ) -> str | None:
-        """The Xero organisation this consent connected (``GET /connections``).
+    ) -> list[ExternalCompany]:
+        """The Xero organisations this consent connected (``GET /connections``).
 
         A user may have connected several organisations over time; only the
-        ones authorised by THIS consent (matching ``authEventId``) count. More
-        than one organisation left → None (``no_external_tenant``): we never
-        pick one of a customer's ledgers for them.
+        ones authorised by THIS consent (matching ``authEventId``) count. One
+        consent may still authorise several, and then the admin picks which
+        (decisions §355) — we never pick one of a customer's ledgers for them.
+        A failed lookup is an empty list (``no_external_tenant``).
         """
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
@@ -249,17 +255,15 @@ class XeroAdapter(OAuthErpAdapter):
                 headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
             )
         if resp.status_code != 200:
-            return None
+            return []
         rows = resp.json()
         if not isinstance(rows, list):
-            return None
+            return []
         orgs = [r for r in rows if isinstance(r, dict) and r.get("tenantType") == "ORGANISATION"]
         event = _auth_event_id(access_token)
         if event:
             orgs = [r for r in orgs if r.get("authEventId") == event] or orgs
-        if len(orgs) != 1 or not orgs[0].get("tenantId"):
-            return None
-        return str(orgs[0]["tenantId"])
+        return clean_companies([(r.get("tenantId"), r.get("tenantName")) for r in orgs])
 
     async def _headers(self, *, json_body: bool = False) -> dict[str, str]:
         headers = {
