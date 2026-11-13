@@ -1166,6 +1166,69 @@ async def test_call_erp_failure_without_a_document_keeps_the_earlier_orphan():
 
 
 @pytest.mark.asyncio
+async def test_only_an_orphan_the_adapter_created_is_handed_back_as_its_own():
+    """The orphan id goes back to the adapter as `own_orphan_document_id` only
+    when the attempt that left it said it CREATED it (`erp_document_is_own`).
+    A later attempt that names a document it merely found replaces the orphan
+    and drops the claim, so a BC user's draft is never handed back as ours;
+    a row from before the flag existed is read as not ours (decisions §397)."""
+    from app.services.erp import (
+        ORPHAN_DOCUMENT_FINGERPRINT_KEY,
+        ORPHAN_DOCUMENT_ID_KEY,
+        ORPHAN_DOCUMENT_OWN_KEY,
+        ErpPostFailedError,
+        _call_erp,
+    )
+    from app.services.erp_adapters.base import ErpPostResult
+
+    seen: list[str | None] = []
+    results = [
+        # Our draft, whose read was lost.
+        ErpPostResult(success=False, message="read lost", erp_document_id="D-OURS"),
+        # A draft the lookup found and could not prove was ours.
+        ErpPostResult(success=False, message="refused", erp_document_id="D-FOUND", retryable=False),
+        ErpPostResult(success=False, message="refused", retryable=False),
+    ]
+    results[0].erp_document_is_own = True
+    results[0].erp_document_fingerprint = "120|24|144"
+
+    prints: list[str | None] = []
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            seen.append(payload.own_orphan_document_id)
+            prints.append(payload.own_orphan_document_fingerprint)
+            return results.pop(0)
+
+    inst = _instance(state_data={"erp_retries": 0})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostFailedError):
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+        assert inst.state_data[ORPHAN_DOCUMENT_ID_KEY] == "D-OURS"
+        assert inst.state_data[ORPHAN_DOCUMENT_OWN_KEY] is True
+        assert inst.state_data[ORPHAN_DOCUMENT_FINGERPRINT_KEY] == "120|24|144"
+        with pytest.raises(ErpPostRefusedError):
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+        assert inst.state_data[ORPHAN_DOCUMENT_ID_KEY] == "D-FOUND"
+        assert ORPHAN_DOCUMENT_OWN_KEY not in inst.state_data
+        assert ORPHAN_DOCUMENT_FINGERPRINT_KEY not in inst.state_data
+        with pytest.raises(ErpPostRefusedError):
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+
+    assert seen == [None, "D-OURS", None]
+    assert prints == [None, "120|24|144", None]
+
+    # Recorded before the flag existed: an orphan with no proof it was ours.
+    legacy = _instance(state_data={"erp_retries": 0, ORPHAN_DOCUMENT_ID_KEY: "D-OLD"})
+    seen.clear()
+    results.append(ErpPostResult(success=False, message="refused", retryable=False))
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostRefusedError):
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=legacy)
+    assert seen == [None]
+
+
+@pytest.mark.asyncio
 async def test_call_erp_success_clears_an_earlier_orphan():
     """Once a push succeeds its `erp_reference` names the bill of record; the
     orphan keys from an earlier failed attempt are cleared."""
@@ -1186,6 +1249,8 @@ async def test_call_erp_success_clears_an_earlier_orphan():
             "erp_retries": 0,
             ORPHAN_DOCUMENT_ID_KEY: "XERO-BILL-7",
             ORPHAN_DOCUMENT_NUMBER_KEY: "BILL-0007",
+            "erp_orphan_document_own": True,
+            "erp_orphan_document_fingerprint": "120|24|144",
         }
     )
     with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):

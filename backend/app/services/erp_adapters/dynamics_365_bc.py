@@ -6,6 +6,7 @@ API reference (API v2.0): https://learn.microsoft.com/en-us/dynamics365/business
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -317,6 +318,11 @@ class BusinessCentralAdapter(ErpAdapter):
             return erp_http_failure(_PROVIDER, lookup_status)
         if hits > 1:
             return erp_refusal(_PROVIDER, DUPLICATE_DOCUMENT_NUMBER)
+        # The ids of drafts this push made: created by this call, or an
+        # earlier attempt's draft recognised below as still what we sent. A
+        # result naming one of them says so (`erp_document_is_own`), which is
+        # what lets the next attempt recognise it.
+        own: dict[str, str | None] = {}
         if existing is not None:
             status = str(existing.get("status") or "").lower()
             if status not in ("open", "paid", "draft"):
@@ -326,32 +332,60 @@ class BusinessCentralAdapter(ErpAdapter):
             # is finished after the same total check a fresh draft gets; an
             # Open / Paid one counts as posted only at the approved total. A
             # different total is refused, and what the lookup found is never
-            # deleted: we cannot prove we created it. Either way the record is
-            # re-read whole, exactly (the lookup's list body is not trusted for
-            # money).
-            return await self._verify_and_post(
-                str(existing["id"]),
+            # deleted: we cannot prove we created it — unless it carries the
+            # id an earlier attempt recorded from its own create and is still
+            # exactly that draft (`_own_draft_shape`, decisions §397). Either
+            # way the record is re-read whole, exactly (the lookup's list body
+            # is not trusted for money).
+            found_id = str(existing["id"])
+            recorded_own = _same_bc_id(found_id, payload.own_orphan_document_id)
+            result = await self._verify_and_post(
+                found_id,
                 payload,
                 lines,
                 headers,
                 known_etag=existing.get("@odata.etag"),
                 found_by_lookup=True,
+                recorded_own=recorded_own,
+                own=own,
             )
+            if (
+                recorded_own
+                and not result.success
+                and result.retryable
+                and result.erp_document_id == found_id
+                and found_id not in own
+            ):
+                # A read failed before the draft could be judged (its record,
+                # lines or the company's LCY). Nothing was deleted or posted,
+                # so the claim carries to the next attempt, which judges the
+                # same id afresh; dropping it here would strand our draft.
+                own[found_id] = payload.own_orphan_document_fingerprint
+            return _mark_own(result, own)
 
         # Step 1: create the purchase invoice (a draft) at the gross amounts.
-        created = await self._create_draft(payload, lines.gross, headers)
+        created = await self._create_draft(payload, lines.gross, headers, own)
         if isinstance(created, ErpPostResult):
             return created
         doc_id, etag = created
         # Steps 2-4: check the draft's total, post it, check the posted total.
-        return await self._verify_and_post(doc_id, payload, lines, headers, known_etag=etag)
+        result = await self._verify_and_post(
+            doc_id, payload, lines, headers, known_etag=etag, own=own
+        )
+        return _mark_own(result, own)
 
     async def _create_draft(
-        self, payload: InvoicePayload, invoice_lines: list[dict], headers: dict
+        self,
+        payload: InvoicePayload,
+        invoice_lines: list[dict],
+        headers: dict,
+        own: dict[str, str | None] | None = None,
     ) -> tuple[str, object] | ErpPostResult:
         """POST the purchaseInvoice (a draft) and return ``(id, etag)``, or the
         failed result. Only the id and etag are read from the response; the
-        total is checked on a fresh, exactly-parsed read.
+        total is checked on a fresh, exactly-parsed read. The new id joins
+        ``own`` (this push made it) with the totals BC reported for it
+        (``_bc_totals_fingerprint``), so a retry can tell it is unchanged.
 
         A create BC refused outright left nothing in BC (``not_posted``): it is
         coded where a read of the vendor and accounts says why
@@ -387,6 +421,13 @@ class BusinessCentralAdapter(ErpAdapter):
             return ErpPostResult(
                 success=False, message=erp_failure_message(_PROVIDER, resp.status_code)
             )
+        if own is not None:
+            # The totals are money: read from the body parsed exactly.
+            try:
+                exact = loads_exact_json(resp.content)
+            except ValueError:
+                exact = None
+            own[str(doc_id)] = _bc_totals_fingerprint(exact)
         return str(doc_id), created.get("@odata.etag")
 
     async def _coded_refusal(
@@ -462,9 +503,20 @@ class BusinessCentralAdapter(ErpAdapter):
         known_etag: object = None,
         found_by_lookup: bool = False,
         may_reprice: bool = True,
+        recorded_own: bool = False,
+        own: dict[str, str | None] | None = None,
     ) -> ErpPostResult:
         """Read purchaseInvoice ``doc_id`` fresh and report success only for
         one whose ``totalAmountIncludingTax`` is exactly ``payload.amount``.
+
+        * Found by the lookup with the id an earlier attempt recorded from its
+          own create (``recorded_own``), still a draft and still exactly what
+          we sent (``_own_draft_shape``: BC's totals as at our create, the same
+          lines, header dates and currency) → ours: handled as a draft we just
+          created, so a gross one BC taxed on top is repriced (a net one is
+          not repriced again) and a mismatch is deleted. Edited, or no longer
+          a draft, it is handled as any found record: never deleted, never
+          repriced (decisions §397).
 
         * Read fails → retryable as its status says, naming ``doc_id`` so the
           push records it as a possible orphan; the draft stays in BC.
@@ -481,7 +533,8 @@ class BusinessCentralAdapter(ErpAdapter):
         * A draft the lookup found with a total ≠ ``payload.amount`` may be a
           BC user's own draft under this number, so it is refused
           ``posted_total_mismatch`` and left in BC — never deleted, and so
-          never repriced — and the message says so (decisions §391).
+          never repriced — and the message says so (decisions §391) — unless
+          it is our own unedited draft, above.
         * A draft we created that BC taxed on top of our gross lines →
           replaced, once, by a draft at the invoice's net amounts
           (``_reprice_to_net``). An invoice with no per-line net is refused
@@ -511,6 +564,24 @@ class BusinessCentralAdapter(ErpAdapter):
                 record.erp_document_id = doc_id
                 return record
             status = str(record.get("status") or "").lower()
+            if recorded_own and status == "draft":
+                shape = await _own_draft_shape(client, url, headers, record, payload, lines)
+                if isinstance(shape, ErpPostResult):
+                    shape.erp_document_id = doc_id
+                    return shape
+                if shape is not None:
+                    # Unedited, so a draft in the invoice's currency only if
+                    # BC's blank code is the company's LCY: checked as for any
+                    # found draft before it is treated as ours.
+                    refused = await self._found_currency_refusal(
+                        client, headers, record, payload, doc_id, posted=False
+                    )
+                    if refused is not None:
+                        return refused
+                    found_by_lookup = False
+                    may_reprice = shape == "gross"
+                    if own is not None:
+                        own[doc_id] = payload.own_orphan_document_fingerprint
             if found_by_lookup and status == "paid":
                 # BC already paid this vendor's invoice under this number —
                 # ours posted earlier and paid in BC, or the same bill keyed
@@ -550,7 +621,7 @@ class BusinessCentralAdapter(ErpAdapter):
                         return await _delete_and_refuse(client, url, headers, etag, doc_id, reason)
                     if not await _delete_draft(client, url, headers, etag):
                         return _draft_not_deleted(doc_id, POSTED_TOTAL_MISMATCH)
-                    return await self._reprice_to_net(payload, lines, headers)
+                    return await self._reprice_to_net(payload, lines, headers, own)
                 return await _delete_and_refuse(
                     client, url, headers, etag, doc_id, POSTED_TOTAL_MISMATCH
                 )
@@ -670,7 +741,11 @@ class BusinessCentralAdapter(ErpAdapter):
         return str(body.get("currencyCode") or "").strip().upper()
 
     async def _reprice_to_net(
-        self, payload: InvoicePayload, lines: _BcLines, headers: dict
+        self,
+        payload: InvoicePayload,
+        lines: _BcLines,
+        headers: dict,
+        own: dict[str, str | None] | None = None,
     ) -> ErpPostResult:
         """Create the draft again at the invoice's net amounts, then check it.
 
@@ -687,12 +762,12 @@ class BusinessCentralAdapter(ErpAdapter):
         reprice. A failed create is retryable: nothing is left in BC, and the
         retry starts again from the lookup.
         """
-        created = await self._create_draft(payload, lines.net or [], headers)
+        created = await self._create_draft(payload, lines.net or [], headers, own)
         if isinstance(created, ErpPostResult):
             return created
         doc_id, etag = created
         return await self._verify_and_post(
-            doc_id, payload, lines, headers, known_etag=etag, may_reprice=False
+            doc_id, payload, lines, headers, known_etag=etag, may_reprice=False, own=own
         )
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
@@ -1051,6 +1126,117 @@ def _bc_taxed_on_top(record: dict, payload: InvoicePayload) -> bool:
     excluding = _bc_decimal(record.get("totalAmountExcludingTax"))
     tax = _bc_decimal(record.get("totalTaxAmount"))
     return excluding == payload.amount and tax is not None and tax != 0
+
+
+def _same_bc_id(found: str, recorded: str | None) -> bool:
+    """Whether the lookup's hit is the draft an earlier attempt recorded from
+    its own create. Exact but for a GUID's case; nothing recorded is never a
+    match."""
+    return bool(recorded) and found.strip().lower() == str(recorded).strip().lower()
+
+
+def _mark_own(result: ErpPostResult, own: dict[str, str | None]) -> ErpPostResult:
+    """Say so when the result names a draft this push made (``own``), with its
+    totals at creation, so ``services/erp`` records it as ours and the next
+    attempt may recognise it. A found record's id is never in ``own``."""
+    if result.erp_document_id and result.erp_document_id in own:
+        result.erp_document_is_own = True
+        result.erp_document_fingerprint = own[result.erp_document_id]
+    return result
+
+
+def _bc_totals_fingerprint(record: object) -> str | None:
+    """A draft's three totals as BC states them, normalized: what our create
+    was answered with, compared on a retry. A BC user's edit that leaves our
+    lines alone still moves one of them — a line's tax group (``taxCode``,
+    which we never send) moves the tax, a line discount the excluding total.
+    None when any total is missing: then there is no proof to compare."""
+    if not isinstance(record, dict):
+        return None
+    parts = [
+        _bc_decimal(record.get(key))
+        for key in ("totalAmountExcludingTax", "totalTaxAmount", "totalAmountIncludingTax")
+    ]
+    if any(part is None for part in parts):
+        return None
+    return "|".join(format(part.normalize(), "f") for part in parts)
+
+
+def _bc_line_key(line: dict) -> tuple | None:
+    """What a purchase line says, in the fields ``_bc_line`` sends, normalized
+    for comparison; None for one missing any of them."""
+    account = line.get("accountId")
+    quantity = _bc_decimal(line.get("quantity"))
+    cost = _bc_decimal(line.get("unitCost"))
+    if not isinstance(account, str) or quantity is None or cost is None:
+        return None
+    return (
+        str(line.get("lineType") or ""),
+        account.strip().lower(),
+        str(line.get("description") or ""),
+        quantity,
+        cost,
+    )
+
+
+async def _own_draft_shape(
+    client, url: str, headers: dict, record: dict, payload: InvoicePayload, lines: _BcLines
+) -> str | None | ErpPostResult:
+    """Is draft ``record`` still exactly what a push of ours sent? ``"gross"``
+    or ``"net"`` for the line set it carries; None when anything we sent has
+    changed — so a BC user has edited it, or the invoice is no longer what was
+    sent — and it is then treated as anyone's draft; a failed lines read is the
+    failed result (retryable, as any read).
+
+    Compared: every line, in the fields we send (type, account, description,
+    quantity, unit cost), as a multiset — a line added, removed or changed is
+    an edit; ``totalAmountExcludingTax`` against those lines' sum, which
+    catches a field we never send (a line discount, prices made
+    tax-inclusive); the three totals against the ones BC answered our create
+    with (``payload.own_orphan_document_fingerprint``), which catches a line's
+    tax group changed (``taxCode``, never sent, moves only the tax); a
+    ``payToVendorId`` other than the vendor's; and the invoice and due dates
+    we sent. The vendor and
+    invoice number are the lookup's key, so they already match. The currency
+    is checked by the caller, which knows BC's blank-is-LCY rule.
+    """
+    recorded = payload.own_orphan_document_fingerprint
+    if recorded is None or _bc_totals_fingerprint(record) != recorded:
+        return None
+    # We never send a pay-to vendor, so BC's is the buy-from one; any other
+    # means a BC user redirected who this bill pays.
+    pay_to = str(record.get("payToVendorId") or "").strip().lower()
+    if pay_to and pay_to != str(payload.vendor_erp_id or "").strip().lower():
+        return None
+    resp = await client.get(f"{url}/purchaseInvoiceLines", headers=headers)
+    if resp.status_code != 200:
+        return erp_http_failure(_PROVIDER, resp.status_code)
+    try:
+        body = loads_exact_json(resp.content)
+    except ValueError:
+        body = None
+    rows = body.get("value") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return ErpPostResult(success=False, message=erp_failure_message(_PROVIDER, 200))
+
+    for field_name, sent in (
+        ("invoiceDate", payload.invoice_date),
+        ("dueDate", payload.due_date),
+    ):
+        if sent is not None and str(record.get(field_name) or "") != sent.isoformat():
+            return None
+    found = Counter(_bc_line_key(row) if isinstance(row, dict) else None for row in rows)
+    excluding = _bc_decimal(record.get("totalAmountExcludingTax"))
+    for shape, sent_lines in (("gross", lines.gross), ("net", lines.net)):
+        if sent_lines is None:
+            continue
+        if found != Counter(_bc_line_key(line) for line in sent_lines):
+            continue
+        sent_total = sum((line["quantity"] * line["unitCost"] for line in sent_lines), Decimal(0))
+        if excluding != sent_total:
+            continue
+        return shape
+    return None
 
 
 async def _read_invoice(client, url: str, headers: dict) -> dict | ErpPostResult:

@@ -96,6 +96,18 @@ class InvoicePayload:
     #: adapter whose duplicate lookup narrows by date searches these too, so
     #: a bill an earlier attempt created is found after the date was edited.
     prior_invoice_dates: list[date] = field(default_factory=list)
+    #: The ERP id of a document an earlier attempt of this push CREATED and
+    #: left behind (:attr:`ErpPostResult.erp_document_is_own`, persisted by
+    #: ``services/erp``) — never one an attempt merely found. An adapter whose
+    #: duplicate lookup cannot otherwise tell its own lost-response draft from
+    #: one keyed by hand may treat a found document with exactly this id as its
+    #: own, and only while it is still what was sent (Business Central,
+    #: decisions §397).
+    own_orphan_document_id: str | None = None
+    #: What the ERP said that document held when it was created
+    #: (:attr:`ErpPostResult.erp_document_fingerprint`), so the adapter can
+    #: tell it is unchanged. None means no proof, and the document is not ours.
+    own_orphan_document_fingerprint: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +431,18 @@ class ErpPostResult:
     #: organisation ``ShortCode``). Read by ``deep_links.erp_document_url``
     #: only; None leaves the link to the user's currently selected company.
     erp_company_code: str | None = None
+    #: True only when ``erp_document_id`` names a document THIS push created
+    #: (in this attempt, or an earlier one whose own id it recognised as still
+    #: unedited). ``services/erp`` persists it beside the orphan id and hands
+    #: the id back as :attr:`InvoicePayload.own_orphan_document_id`; a document
+    #: the adapter found and cannot prove it made leaves it False, so it is
+    #: never handed back as ours. Default False is the fail-closed answer.
+    erp_document_is_own: bool = False
+    #: With ``erp_document_is_own``: the adapter's opaque digest of the
+    #: document as the ERP reported it at creation (Business Central: its
+    #: three totals), persisted and handed back as
+    #: :attr:`InvoicePayload.own_orphan_document_fingerprint`.
+    erp_document_fingerprint: str | None = None
 
 
 #: Stable reason code: a payment written back to the ERP (``post_payment``)

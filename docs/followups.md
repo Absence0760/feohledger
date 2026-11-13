@@ -1334,16 +1334,16 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
 
-- [ ] **(c) A Business Central VAT-company push whose draft read was lost
-      cannot be finished by the retry.** The read failure names the gross
-      draft, so `services/erp` records it as the orphan, but the retry's
-      lookup cannot tell that draft from a BC user's and refuses it
-      `posted_total_mismatch`, left in BC (decisions §391); someone deletes it
-      in BC and retries. **Durable fix:** pass the recorded orphan id to
-      `post_invoice` (an `InvoicePayload` field), and let the BC adapter treat
-      a found draft with that id as its own, so it may reprice it. **Trigger:**
-      the first such refusal on a live BC tenant, or the next change to the
-      orphan plumbing in `services/erp`.
+- [ ] **(c) A Business Central draft the lookup finds is posted whatever its
+      pay-to vendor.** A found draft at the approved total and currency is
+      posted (decisions §391), but its `payToVendorId` is never read, so a BC
+      user who redirected who the bill pays has that bill booked as our
+      approved one. Our own recognised draft is checked (§397); anyone else's
+      is not. **Durable fix:** refuse a found draft or `Open` invoice whose
+      `payToVendorId` is set and is not `vendorId`, with the record left in BC,
+      choosing a refusal code (posted_total_mismatch does not describe it).
+      **Trigger:** the next change to the BC found-record path, or the first
+      live BC tenant (#654).
 - [ ] **(c) Business Central approval workflows are not handled.** A post step
       that fails after the draft is created is now a retryable failure, and a
       retry finishes the draft. But a BC company with purchase-approval
