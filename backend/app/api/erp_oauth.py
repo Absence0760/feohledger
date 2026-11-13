@@ -902,15 +902,17 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
     if len(companies) > 1:
         # Several companies: never pick one of a customer's ledgers for them
         # (decisions §355). The token waits server-side, bound to this org,
-        # this admin and this browser's cookie, which stays set — the pick is
-        # its next and last use.
+        # this admin and this browser. The nonce this callback verified was
+        # spent with its state, so the pick is bound to a fresh one: the cookie
+        # set below is minted here, never copied from the request.
+        pick_nonce = erp_oauth.new_browser_nonce()
         try:
             await erp_oauth.park_pending_connect(
                 org_id=org.id,
                 user_id=user.id,
                 provider=spec.key,
                 client_source=creds.source,
-                browser_binding=bound["browser_binding"],
+                browser_binding=erp_oauth.browser_binding(pick_nonce),
                 token_response=token_response,
                 companies=companies,
             )
@@ -918,10 +920,10 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
             logger.warning("erp_oauth: %s pending connect not stored for org %s", spec.key, org.id)
             return fail("credentials_unavailable")
         resp = _home(slug, home_settings, erp_choose_company=spec.key)
-        # Renew the cookie for the pick's window: the one it carries was set
-        # at /authorize and lapses with that state.
+        # The pick's cookie, for the pick's window: the one set at /authorize
+        # lapses with that state.
         attrs = {**erp_oauth.browser_cookie_attributes(), "max_age": erp_oauth.pending_ttl()}
-        resp.set_cookie(erp_oauth.BROWSER_COOKIE, browser_nonce, **attrs)
+        resp.set_cookie(erp_oauth.BROWSER_COOKIE, pick_nonce, **attrs)
         return resp
 
     refused = await _claim_and_link(

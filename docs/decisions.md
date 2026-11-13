@@ -16388,9 +16388,12 @@ for them stays ruled out: we never choose a customer's ledger.
 company links at once, as before; none is still `no_external_tenant`; several
 link nothing. The exchanged token is sealed (`credential_crypto`, AAD = org,
 provider, browser binding) and parked in Redis, keyed on the org and the hash of
-the nonce cookie that already matched (§336), with the starting admin's id and
-the provider's `(id, name)` list, for one `state` lifetime. The callback renews
-that cookie for the window and returns with `?erp_choose_company=<provider>`.
+a FRESH nonce the callback mints once the request's cookie has matched (§336),
+with the starting admin's id and the provider's `(id, name)` list, for one
+`state` lifetime. The callback sets that new nonce as the cookie for the window
+and returns with `?erp_choose_company=<provider>`. Minting rather than renewing
+means no request value is ever written back into a cookie (CodeQL
+`py/cookie-injection`), and the nonce spent with the state is not reused.
 The settings page lists the companies (`GET …/oauth/pending`) and posts the pick
 (`POST …/oauth/pending/select`). Both are admin, bearer-authenticated and
 credentialed, and find nothing for another browser or another admin

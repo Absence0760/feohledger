@@ -3184,8 +3184,9 @@ and then:
   token response (`credential_crypto`, AAD = org + provider + browser binding)
   and stores it in Redis under `erp:oauth:pending:<org>:<sha256(cookie)>`
   with the admin's id and the `(id, name)` list, for one state lifetime
-  (`FEOH_ERP_OAUTH_STATE_TTL_SECONDS`). The callback renews the nonce cookie
-  for that window instead of spending it, and returns with
+  (`FEOH_ERP_OAUTH_STATE_TTL_SECONDS`). The cookie in that key is a fresh
+  nonce the callback mints and sets for the window (never the request's
+  value written back), and the callback returns with
   `?erp_choose_company=<provider>`.
 
 The settings page (`ErpCompanyPicker.svelte` inside `ErpConnectionPanel`)

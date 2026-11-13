@@ -2153,7 +2153,12 @@ async def _park(realdb, provider) -> str:
     resp = await _callback(realdb, {"code": "AUTH-CODE-SECRET", "state": state})
     assert resp.status_code == 302
     assert resp.headers["location"].endswith(f"erp_choose_company={PROVIDER}")
-    return _BROWSER_COOKIES[state]
+    return _pick_cookie(resp)
+
+
+def _pick_cookie(resp: httpx.Response) -> str:
+    """The nonce the callback minted for the pick window (never the one sent)."""
+    return resp.cookies[erp_oauth.BROWSER_COOKIE]
 
 
 def _cookie(value: str | None) -> dict[str, str]:
@@ -2191,10 +2196,15 @@ async def test_several_companies_park_the_consent_and_link_nothing(
     assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
     assert await _sealed(realdb) == {}
     assert await _audit_actions(realdb) == []
-    # The cookie is renewed for the pick's window, not spent.
+    # The pick gets a fresh cookie for its window, minted by the callback and
+    # never copied from the request (the verified nonce was spent with its
+    # state); the parked record is bound to the new one.
     header = _set_cookie_header(resp).lower()
     assert f"max-age={erp_oauth.pending_ttl()}" in header
-    assert _BROWSER_COOKIES[state] in _set_cookie_header(resp)
+    fresh = _pick_cookie(resp)
+    assert fresh and fresh != _BROWSER_COOKIES[state]
+    assert (await _pending(realdb, fresh)).status_code == 200
+    assert (await _pending(realdb, _BROWSER_COOKIES[state])).status_code != 200
     # The parked record holds no token in the clear.
     (raw,) = [v for k, v in _autouse_fake_redis._kv.items() if k.startswith("erp:oauth:pending:")]
     assert "SECRET" not in raw
