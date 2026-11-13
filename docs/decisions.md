@@ -17503,3 +17503,59 @@ durable fix is a kept-link table for `gl_accounts` mirroring `vendor_erp_links`,
 which needs a migration; repurposing an existing column (such as
 `erp_link_candidates` JSONB) would be the keyed-JSON shape §356 rejected for
 vendors, with no uniqueness per realm. It stays in `docs/followups.md`.
+
+## 376. A GL account keeps its ERP link state for every company it was synced under, restored before rule 0 (§356/§373 follow-up, migration 0127, 2026-11-13)
+
+**The gap.** §356 gave vendors a link per company; `gl_accounts` still held
+one. A chart sync under another ERP company dropped a row's link (rule 0, §284),
+cleared a person's confirmation of it, and cleared an open decision
+(`erp_link_candidates` from another realm). A return to the first company
+re-linked most rows by code, but a link a person had confirmed among
+candidates had to be confirmed again, and a row waiting for a decision under a
+code that is only a legacy key there came back unlinked with nothing to decide:
+rule 2 visits rows by the pull's current codes, so it never reached the row.
+
+**The decision.** A kept-state table, `gl_account_erp_links` (migration 0127),
+mirroring `vendor_erp_links`: one row per `(gl_account_id, realm)`, `realm`
+never NULL, holding what the row held in that company — the link with its
+confirmation, or the open decision with its candidates. A CHECK refuses a row
+holding neither, or a confirmation with no link. `services/gl_account_erp_links`
+owns it, and `services/gl_account_sync` calls it on every pull with a named
+realm, before rule 0: first every row's state from another named company is
+filed under that company (so rule 0 moving or dropping a link loses nothing,
+including a link rule 0 moves by evidence), then the state kept for the pull's
+own company is put back on its row and removed from the table.
+
+A restored state is **restored before re-judging, not instead of it.** A
+restored unconfirmed link meets rules 3 and 4 like any same-company link; a
+confirmed one is exempt from them, as it was before it left; a restored
+decision is refreshed against the pull (candidates the ERP no longer has are
+dropped, a row the rules can now link is linked). Restoring is not a new
+judgement, so nothing here weakens a rule.
+
+**No two rows hold one account on the rules' own judgement.** The sync never
+leaves two unconfirmed rows linked to one ERP account, so an unconfirmed kept
+link whose id another unconfirmed row holds there, or that two unconfirmed kept
+links claim, is dropped (`restore_dropped`) and the row is judged as it stands;
+which row the account belongs to would be a guess. A confirmed link always comes
+back: the one sanctioned share is a person's choice of an account that the row
+named after it also holds (§284's "Truck:Depreciation" case), and dropping it
+would undo exactly the decision this exists to keep.
+
+**The push still reads only the row.** Vendors post a kept link at once on
+reconnecting (§356). GL accounts do not: a restored unconfirmed link is
+re-judged by rules 3 and 4 first, and the push cannot run them, so after a
+reconnect the chart needs one sync before restored links post. Until then the
+push refuses `account_not_linked`, which fails closed.
+
+**Only a named realm is kept, and nothing is backfilled** — §356's reasoning:
+a NULL-realm link names no company, and the links earlier syncs dropped exist
+only in `gl_account.synced_from_erp` audit rows, which are history, not live
+state. A no-realm (`mock`) pull neither keeps nor restores.
+
+**Rejected: candidates or kept links in a JSONB column on `gl_accounts`.** The
+keyed-JSON shape §356 and §373 already turned down: no uniqueness per realm, and
+every reader has to parse it. **Rejected: restore after rule 0.** Rule 0 would
+first judge the row's other-company link against this company's pull and could
+move it by evidence, so the kept state and the row would disagree about which
+link is this company's.
