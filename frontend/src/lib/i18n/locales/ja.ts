@@ -4987,6 +4987,7 @@ export const messages = {
 	'refusal.externalPaymentInRun': "この請求書は支払バッチ {run} に含まれています。バッチ全体を FeohLedger 外で支払済みとして記録するか、先にバッチをキャンセルしてください。",
 	'refusal.externalPaymentAmountMismatch': "金額は、適用済みクレジットメモと承諾済みの早期支払割引を差し引いた請求書の支払額（{amount}）と一致している必要があります。一部支払いは記録できません。",
 	'refusal.externalPaymentPaidOnFuture': "支払日に未来の日付は指定できません。",
+	'refusal.erpPaidAmountUnconfirmed': "支払われた金額を確認するために ERP の請求書を読み取れませんでした。ERP で請求書を確認してから、もう一度お試しください。",
 	'refusal.nachaRequiresRecordOnly': "銀行ファイルは、FeohLedger が支払いを送金せずに記録する場合にのみ利用できます。管理者が［設定］→［支払］で変更できます。",
 	'refusal.nachaNotConfigured': "銀行ファイルの設定が不完全です：{fields}。管理者が［設定］→［支払］で入力できます。",
 	'refusal.nachaPaymentNotAch': "請求書 {invoice} は ACH で支払われません。NACHA ファイルには ACH の支払いしか含められません。",

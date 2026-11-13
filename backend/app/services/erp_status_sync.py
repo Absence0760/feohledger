@@ -703,6 +703,14 @@ async def retry_erp_reported_payments(
     may clear it decides the ERP's payment is the one that stands — which is the
     queue's one-click record (``POST /api/exceptions/{id}/record-erp-payment``).
 
+    A row that states no cash figure, from an ERP whose bills read back (a
+    QuickBooks row kept before §393), is never recorded at FeohLedger's own
+    figure: the bill is read again under the invoice lock
+    (:func:`read_back_unstated_figure`), the figure it states now goes through
+    the record's amount and currency checks, and a read that confirms none
+    re-raises the row as payment-blocking for a person
+    (:func:`hold_unconfirmed_erp_payment`).
+
     Same transaction as the decision that triggered it; never commits.
     Idempotent: nothing is live once it succeeds. Returns whether a payment
     was recorded.
@@ -756,6 +764,18 @@ async def retry_erp_reported_payments(
                 amount = Decimal(str(facts["amount"])) if facts.get("amount") else None
             except (ValueError, ArithmeticError):
                 return False
+            currency = facts.get("amount_currency")
+            if amount is None:
+                # No figure stated (a QuickBooks row kept before §393): never
+                # booked at FeohLedger's own figure. The bill is read again
+                # under this lock, and a figure it cannot confirm goes to a
+                # person, blocking.
+                figure = await read_back_unstated_figure(db, invoice=invoice, org=org, facts=facts)
+                if figure.needed:
+                    if figure.amount is None:
+                        await hold_unconfirmed_erp_payment(db, invoice, org=org, facts=facts)
+                        return False
+                    amount, currency = figure.amount, figure.currency
             return await record_erp_reported_payment(
                 db,
                 invoice,
@@ -767,7 +787,7 @@ async def retry_erp_reported_payments(
                 method=reported_payment_method(facts.get("method")),
                 paid_on_reported=bool(facts.get("paid_on_reported")),
                 amount=amount,
-                amount_currency=facts.get("amount_currency"),
+                amount_currency=currency,
             )
     except Exception:  # noqa: BLE001 — isolated follow-on; logged with its traceback
         # ids only — no vendor, no amount, no reference.
@@ -797,6 +817,128 @@ async def _mark_retry_failed(db: AsyncSession, invoice_id: uuid.UUID) -> None:
         logger.exception(
             "ERP-reported payment: could not mark retry failure: invoice=%s", invoice_id
         )
+
+
+#: ``erp_report["refusal_code"]`` of a kept ERP payment that states no cash
+#: figure, from an ERP whose bills can be read back, when the read back could
+#: not confirm one: it failed, the bill is no longer under this connection, or
+#: it no longer reads as paid wholly in cash. The row is then payment-blocking
+#: and a person decides (decisions §393).
+ERP_PAID_AMOUNT_UNCONFIRMED = "erp_paid_amount_unconfirmed"
+
+
+@dataclass(frozen=True)
+class ReadBackFigure:
+    """What :func:`read_back_unstated_figure` learned about a kept payment."""
+
+    #: False when the row's ERP never reads its bills back (the generic ERP
+    #: webhook's adapters, which state no figure on any report): the payment is
+    #: recorded at what is owed here, the rule that channel's first report
+    #: already applies. True means the figure must come from the ERP.
+    needed: bool
+    #: The cash the bill states now, and its currency; ``amount`` None (with
+    #: ``needed``) means the read back could not confirm one.
+    amount: Decimal | None = None
+    currency: str | None = None
+
+
+async def read_back_unstated_figure(
+    db: AsyncSession, *, invoice: Invoice, org: Organization, facts: dict
+) -> ReadBackFigure:
+    """The cash figure for a kept ERP payment that states none, read from the bill.
+
+    A QuickBooks row kept before §393 carries ``amount: None``, because the
+    adapter stated no figure then. Recording it as it stands books what the
+    invoice owes HERE, which is not what left whenever a credit memo or an
+    early-payment discount applies only here (owed 240.00, the bill shows
+    250.00 paid by cheque, 240.00 booked). So the bill is read again, by the
+    caller, under the invoice lock it already holds, and only a figure the
+    bill states now is recorded: the record's own amount and currency checks
+    then decide, the way they do for a fresh report.
+
+    Read through the same connection checks the dispatch-time read uses
+    (:func:`_bill_to_read`'s company rules, :func:`_read_bill`'s bound and
+    org-wide unreachable hold): the row's ERP must be the one connected now,
+    the invoice must name its bill and the company it was posted to, and that
+    company must be the connected one. Anything short of a bill paid wholly in
+    cash, read now, is ``amount`` None. Never writes.
+    """
+    from app.services.erp_adapters.dispatcher import (
+        resolve_adapter_key,
+        status_sync_adapter_keys,
+    )
+    from app.services.erp_link_realm import connection_realm
+
+    erp_type = str(facts.get("erp_type") or "")
+    if erp_type not in status_sync_adapter_keys():
+        return ReadBackFigure(needed=False)
+    unconfirmed = ReadBackFigure(needed=True)
+    erp_config = (org.settings or {}).get("erp")
+    if not isinstance(erp_config, dict) or resolve_adapter_key(erp_config) != erp_type:
+        return unconfirmed  # another ERP is connected now: this bill cannot be read
+    state = (
+        await db.execute(
+            select(WorkflowInstance.state_data).where(WorkflowInstance.invoice_id == invoice.id)
+        )
+    ).scalar_one_or_none() or {}
+    bill_id = str(state.get("erp_reference") or "")
+    reported = str(facts.get("erp_document_id") or "")
+    realm = state.get("erp_realm")
+    if (
+        not bill_id
+        or bill_id == "UNKNOWN"
+        or (reported and reported != bill_id)
+        or not realm
+        or realm != connection_realm(erp_config)
+    ):
+        return unconfirmed
+    adapter = _adapter_or_none(erp_config)
+    if adapter is None:
+        return unconfirmed
+    report = await _read_bill(
+        _BillRead(
+            invoice=invoice,
+            payment=None,
+            adapter=adapter,
+            erp_config=erp_config,
+            bill_id=bill_id,
+            state=state,
+        ),
+        org.id,
+    )
+    if report is None or report.state is not ErpBillState.paid or report.paid_amount is None:
+        return unconfirmed
+    return ReadBackFigure(needed=True, amount=report.paid_amount, currency=report.paid_currency)
+
+
+async def hold_unconfirmed_erp_payment(
+    db: AsyncSession, invoice: Invoice, *, org: Organization, facts: dict
+) -> None:
+    """Re-raise a kept ERP payment whose figure could not be confirmed as a
+    payment-BLOCKING row for a person. Never commits.
+
+    The bill was reported paid in the ERP, so a run here would pay it twice;
+    and nothing may book it at FeohLedger's own figure. Through
+    :func:`open_erp_reconciliation_exception`, so a live non-blocking row is
+    closed as superseded and its facts ride the blocking one (or, when an
+    older blocker of that type is already open, it is refreshed in place).
+    The sentence says the record did not happen automatically and points at
+    the one-click record, which reads the bill again.
+    """
+    erp_type = facts.get("erp_type")
+    await open_erp_reconciliation_exception(
+        db,
+        invoice,
+        org_id=org.id,
+        exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
+        finding=erp_finding("erp_paid_retry_failed", erp_type),
+        erp_report={
+            **facts,
+            "kind": ERP_REPORT_PAID_NOT_RECORDED,
+            "refusal_code": ERP_PAID_AMOUNT_UNCONFIRMED,
+            "reported_at": datetime.now(UTC).isoformat(),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1104,8 +1246,9 @@ async def _credit_records_our_open_discount(
       more than the discount FeohLedger's own completed payments took, so the
       credit can cover only the discount that was left open.
 
-    An adapter that states neither fact (QuickBooks, which lists a credit as a
-    $0 BillPayment anyway) never qualifies, so its rule is unchanged.
+    An adapter that does not state ``reduced_outside_amount`` never qualifies.
+    QuickBooks states ``our_payment_applied`` (§393) but never that amount (it
+    lists a credit as a $0 BillPayment anyway), so its rule is unchanged.
     """
     from app.services.external_payment import EXTERNAL_PAYMENT_PROVIDER
 

@@ -678,6 +678,9 @@ const BUILDERS: Record<string, Builder> = {
 			: t('refusal.externalPaymentAmountChanged', { staged, amount });
 	}),
 	external_payment_paid_on_future: fixed('refusal.externalPaymentPaidOnFuture'),
+	// `api/exceptions.py::record_erp_payment` — a kept ERP payment stating no
+	// cash figure whose bill could not be read back to confirm one (§393)
+	erp_paid_amount_unconfirmed: fixed('refusal.erpPaidAmountUnconfirmed'),
 	// `api/payments.py` — `GET /runs/{id}/nacha` (`services/nacha.py`)
 	nacha_requires_record_only: fixed('refusal.nachaRequiresRecordOnly'),
 	nacha_not_configured: nachaNotConfigured,

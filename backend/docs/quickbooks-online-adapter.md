@@ -145,6 +145,18 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   (`our_payment_applied`): beside an outside reduction on an invoice payable
   here (voided here, the QuickBooks void not landed) the sync opens a blocking
   `payment_reconciliation` rather than book the owed figure.
+- **A row kept before §393 states no figure, so its bill is read again.** A
+  `paid_not_recorded` row a QuickBooks report left before this change carries
+  `amount: None`. When its flag clears (the re-attempt) or a person records it
+  from the exception (the one-click), the bill is read back under the invoice
+  lock (`erp_status_sync.read_back_unstated_figure`), and only the figure it
+  states now is recorded, through the same amount and currency checks. A read
+  that fails, a bill no longer under this connection, or one that no longer
+  reads as paid wholly in cash re-raises the row as a blocking
+  `payment_reconciliation` (`refusal_code: erp_paid_amount_unconfirmed`) for a
+  person; the one-click answers 409 with that code. Rows from the generic ERP
+  webhook's adapters, which never read a bill back, still record what is owed
+  here, as their first report does.
 - `apply_bill_report` matches a bill to its invoice by the marker's correlation
   id AND the invoice's `erp_reference` (a deleted bill, which cannot be read, by
   `erp_reference` within the recorded realm only), row-locks it, and:

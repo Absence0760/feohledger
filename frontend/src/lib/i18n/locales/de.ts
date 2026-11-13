@@ -5078,6 +5078,7 @@ export const messages = {
 	'refusal.externalPaymentInRun': "Diese Rechnung ist Teil des Zahlungslaufs {run}. Erfassen Sie den ganzen Lauf als außerhalb von FeohLedger bezahlt oder stornieren Sie den Lauf zuerst.",
 	'refusal.externalPaymentAmountMismatch': "Der Betrag muss dem offenen Betrag der Rechnung entsprechen ({amount}), abzüglich angewendeter Gutschriften und eines angenommenen Skontos. Teilzahlungen können nicht erfasst werden.",
 	'refusal.externalPaymentPaidOnFuture': "Das Zahlungsdatum darf nicht in der Zukunft liegen.",
+	'refusal.erpPaidAmountUnconfirmed': "Die Rechnung im ERP konnte nicht gelesen werden, um den gezahlten Betrag zu bestätigen. Prüfen Sie die Rechnung im ERP und versuchen Sie es dann erneut.",
 	'refusal.nachaRequiresRecordOnly': "Eine Bankdatei ist nur verfügbar, wenn FeohLedger Ihre Zahlungen erfasst statt sie zu versenden. Ein Administrator kann das unter Einstellungen → Zahlungen ändern.",
 	'refusal.nachaNotConfigured': "Die Bankdatei-Einstellungen sind unvollständig: {fields}. Ein Administrator kann sie unter Einstellungen → Zahlungen ergänzen.",
 	'refusal.nachaPaymentNotAch': "Rechnung {invoice} wird nicht per ACH bezahlt. Eine NACHA-Datei kann nur ACH-Zahlungen enthalten.",

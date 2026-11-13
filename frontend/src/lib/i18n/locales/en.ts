@@ -5257,6 +5257,7 @@ export const en = {
 	'refusal.externalPaymentInRun': "This invoice is in payment run {run}. Record the whole run as paid outside FeohLedger, or cancel the run first.",
 	'refusal.externalPaymentAmountMismatch': "The amount must equal what the invoice owes ({amount}), net of applied credit memos and any accepted early-payment discount. Partial payments can't be recorded.",
 	'refusal.externalPaymentPaidOnFuture': "The paid-on date can't be in the future.",
+	'refusal.erpPaidAmountUnconfirmed': "The ERP's bill could not be read to confirm what was paid. Check the bill in the ERP, then try again.",
 	'refusal.nachaRequiresRecordOnly': "A bank file is only available when FeohLedger records your payments rather than sending them. An admin can change this under Settings → Payments.",
 	'refusal.nachaNotConfigured': "The bank-file settings are incomplete: {fields}. An admin can complete them under Settings → Payments.",
 	'refusal.nachaPaymentNotAch': "Invoice {invoice} isn't paid by ACH. A NACHA file can only carry ACH payments.",

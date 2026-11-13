@@ -5070,6 +5070,7 @@ export const messages = {
 	'refusal.externalPaymentInRun': "Esta factura está en el lote de pago {run}. Registre el lote completo como pagado fuera de FeohLedger, o cancele primero el lote.",
 	'refusal.externalPaymentAmountMismatch': "El importe debe ser igual a lo que adeuda la factura ({amount}), descontadas las notas de crédito aplicadas y cualquier descuento por pronto pago aceptado. No se pueden registrar pagos parciales.",
 	'refusal.externalPaymentPaidOnFuture': "La fecha de pago no puede ser futura.",
+	'refusal.erpPaidAmountUnconfirmed': "No se pudo leer la factura en el ERP para confirmar lo que se pagó. Revise la factura en el ERP y vuelva a intentarlo.",
 	'refusal.nachaRequiresRecordOnly': "Un archivo bancario solo está disponible cuando FeohLedger registra sus pagos en lugar de enviarlos. Un administrador puede cambiarlo en Configuración → Pagos.",
 	'refusal.nachaNotConfigured': "La configuración del archivo bancario está incompleta: {fields}. Un administrador puede completarla en Configuración → Pagos.",
 	'refusal.nachaPaymentNotAch': "La factura {invoice} no se paga por ACH. Un archivo NACHA solo puede contener pagos ACH.",

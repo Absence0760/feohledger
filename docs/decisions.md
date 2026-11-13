@@ -19382,6 +19382,42 @@ refusals, so the webhook, the sweep, the re-attempt (§319) and the one-click
 record all apply the QuickBooks figure the way they apply Xero's.
 `amount_mismatch` is in `DOUBLE_PAY_REFUSALS`, so the row blocks.
 
+**Rows kept before this change are read again (money-path review).** Every
+QuickBooks `paid_not_recorded` row written before §393 carries `amount: None`,
+and prod has QuickBooks status sync on, so such rows exist. The re-attempt and
+the one-click passed that None on, and `record_invoice_paid_outside` booked
+what is owed here: a 10.00 credit memo applied only here, a bill QuickBooks
+shows paid 250.00 by cheque, and 240.00 booked as cash. Now a row that states no
+figure, from an ERP whose bills read back (`status_sync_adapter_keys`), is never
+booked as it stands. Under the invoice lock the caller already holds, the bill
+is read again through the dispatch check's own connection rules and bound
+(`read_back_unstated_figure`: the row's ERP is the one connected, the invoice
+names its bill and company, that company is the connected one), and only a
+`paid_amount` the bill states now goes to the record, whose amount and currency
+checks then refuse a mismatch as they would a fresh report (blocking). A read
+that fails, or that states no figure (part-paid since, credit-settled, another
+company), re-raises the row as a blocking `payment_reconciliation`
+(`hold_unconfirmed_erp_payment`, `refusal_code: erp_paid_amount_unconfirmed`)
+with the existing `erp_paid_retry_failed` sentence, which says the record did
+not happen automatically and points at the one-click. The one-click reads
+again too: a body figure the bill does not state is a 422, a read that confirms
+none is a 409 with that code, and a non-blocking row is first re-raised as
+blocking and committed (the one write a one-click refusal makes, since the bill
+is paid there and no run may pay it meanwhile).
+- *Rows from the generic ERP webhook* (NetSuite and the rest, which never read
+  a bill back) are unchanged: their first report records what is owed here, so
+  a re-attempt doing the same is no new risk.
+- *A sentence of its own* for the held row was weighed against a new catalogue
+  entry in six web locales, seven ARB files and their generated code; the
+  retry-failed sentence is accurate for both causes, and `refusal_code` carries
+  the machine detail. The one-click's 409 is localized
+  (`refusal.erpPaidAmountUnconfirmed`).
+- *The read happens inside a person's dismissal* (the re-attempt runs in that
+  transaction) and holds the invoice lock for at most
+  `FEOH_ERP_DISPATCH_CHECK_TIMEOUT_SECONDS`, as the dispatch check already does.
+  A connection-level failure trips the same one-minute org-wide hold, so a
+  QuickBooks outage re-raises legacy rows as blocking rather than waiting.
+
 **Rejected.**
 - *Stating `TotalAmt − Balance`.* That is what left the bill, not what the cash
   says. It would agree with the balance by construction and hide a cash read
@@ -19406,5 +19442,10 @@ QuickBooks' figure, cheque plus card at their sum, partial and credit-settled
 blocking with nothing booked, a credit memo here refused `amount_mismatch` with
 QuickBooks' figure kept, blocking and refused by the one-click, the bill in
 another currency or none and a payment in another refused, outside cash beside
-our live write-back blocking); `tests/test_qbo_recorded_replay.py` (the paid
-amount per recorded scenario).
+our live write-back blocking, and through Xero's own `report_from_bill`; a row
+kept with no figure booked only at the bill's re-read figure, refused at another,
+held blocking when the read fails or states none, and the one-click's same three
+outcomes); `tests/test_erp_reported_payment_recovery.py` (rows now carry the
+stated figure); `tests/test_qbo_recorded_replay.py` (the paid amount per
+recorded scenario); `frontend/src/lib/api/codedRefusals.test.ts` (the 409's
+sentence).

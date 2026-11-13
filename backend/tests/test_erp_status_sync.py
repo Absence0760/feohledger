@@ -714,6 +714,244 @@ async def test_a_bill_reduced_outside_with_no_payment_listed_still_blocks(realdb
     assert (await _apply(realdb, report)).action == "partial_payment_flagged"
 
 
+# ---------------------------------------------------------------------------
+# a QuickBooks row kept before §393 states no figure: re-read, never ours booked
+# ---------------------------------------------------------------------------
+
+
+async def _legacy_qbo_row(realdb, monkeypatch, *, blocking: bool):
+    """An invoice posted to a connected QuickBooks company, with the
+    ``paid_not_recorded`` row a QuickBooks report left before §393: the
+    payment's facts with ``amount: None``. Non-blocking rows were refused by
+    another open flag, which is returned; blocking ones by a double-pay
+    refusal, now answered (no other flag is open)."""
+    monkeypatch.setattr(erp_status_sync, "_unreachable_until", {})
+    company = f"realm-{uuid.uuid4().hex[:8]}"
+    await _connect(realdb, "a", company)
+    inv_id, corr = await _seed(
+        realdb, status=InvoiceStatus.posted_in_erp, realm=f"quickbooks_online:{company}"
+    )
+    org_id = realdb.info("a").org_id
+    flag_id, row_id = uuid.uuid4(), uuid.uuid4()
+    async with realdb.sessionmaker("a")() as s:
+        if not blocking:
+            s.add(
+                APException(
+                    id=flag_id,
+                    organization_id=org_id,
+                    invoice_id=inv_id,
+                    exception_type="duplicate",
+                    severity="error",
+                    description="stale",
+                    status="open",
+                )
+            )
+        s.add(
+            APException(
+                id=row_id,
+                organization_id=org_id,
+                invoice_id=inv_id,
+                exception_type="payment_reconciliation" if blocking else "erp_reconciliation",
+                severity="error",
+                description="QuickBooks Online reports this bill paid",
+                status="open",
+                erp_report={
+                    "kind": "paid_not_recorded",
+                    "erp_type": "quickbooks_online",
+                    "erp_document_id": BILL,
+                    "event_id": None,
+                    "method": "check",
+                    "reference": BILL,
+                    "paid_on": (utc_today() - timedelta(days=1)).isoformat(),
+                    "paid_on_reported": True,
+                    "amount": None,
+                    "amount_currency": None,
+                    "refusal_code": (
+                        "external_payment_in_run"
+                        if blocking
+                        else "external_payment_blocking_exception"
+                    ),
+                    "reported_at": "2026-11-01T00:00:00+00:00",
+                },
+            )
+        )
+        await s.commit()
+    return inv_id, corr, flag_id, row_id
+
+
+def _bill_reads(answer):
+    """QuickBooks' ``bill_report`` answering ``answer`` (a report, or an
+    exception to raise) — the read back the row's figure now comes from."""
+    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+
+    mock = (
+        AsyncMock(side_effect=answer)
+        if isinstance(answer, BaseException)
+        else AsyncMock(return_value=answer)
+    )
+    return patch.object(QuickBooksOnlineAdapter, "bill_report", new=mock), mock
+
+
+async def _dismiss_flag(realdb, flag_id) -> None:
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            f"/api/exceptions/{flag_id}/resolve", json={"action": "dismiss", "resolution": "stale"}
+        )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_a_legacy_quickbooks_row_books_the_bills_own_figure_when_its_flag_clears(
+    realdb, monkeypatch
+):
+    inv_id, corr, flag_id, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=False)
+    report = await _qbo_report(corr, "250.00", [_qbo_cash("901", "250.00")])
+    patcher, read = _bill_reads(report)
+    with patcher:
+        await _dismiss_flag(realdb, flag_id)
+
+    read.assert_awaited_once_with(BILL)  # read again, under the lock, before booking
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.amount == Decimal("250.00") and booked.status == "completed"
+    assert booked.method == "check" and booked.reference == BILL
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.paid
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "resolved"
+
+
+async def test_a_legacy_quickbooks_row_is_never_booked_at_our_own_smaller_figure(
+    realdb, monkeypatch
+):
+    """The review's case: a 10.00 credit memo applied here only, QuickBooks
+    shows the 250.00 bill paid by cheque. Before, clearing the flag booked
+    240.00 as cash. Now the bill's 250.00 is what is offered to the record,
+    which refuses it: blocking, with QuickBooks' figure kept."""
+    inv_id, corr, flag_id, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=False)
+    await _apply_credit_memo_here(realdb, inv_id, "10.00")
+    report = await _qbo_report(corr, "250.00", [_qbo_cash("901", "250.00")])
+    patcher, _ = _bill_reads(report)
+    with patcher:
+        await _dismiss_flag(realdb, flag_id)
+
+    assert await _payments(realdb, inv_id) == []
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.posted_in_erp
+    [live] = [e for e in await _exceptions(realdb, inv_id) if e.status == "open"]
+    assert live.exception_type == "payment_reconciliation"
+    assert live.erp_report["refusal_code"] == "external_payment_amount_mismatch"
+    assert live.erp_report["amount"] == "250.00"
+    assert live.erp_report["amount_currency"] == "USD"
+
+
+@pytest.mark.parametrize("read", ["fails", "states_no_figure"])
+async def test_a_legacy_quickbooks_row_the_bill_cannot_confirm_is_held_for_a_person(
+    realdb, monkeypatch, read
+):
+    inv_id, corr, flag_id, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=False)
+    answer = (
+        RuntimeError("simulated read failure")
+        if read == "fails"
+        # Now part-paid by a vendor credit beside a cheque: no cash figure.
+        else await _qbo_report(
+            corr, "250.00", [_qbo_cash("901", "200.00"), _qbo_vendor_credit("902", "50.00")]
+        )
+    )
+    patcher, _ = _bill_reads(answer)
+    with patcher:
+        await _dismiss_flag(realdb, flag_id)
+
+    assert await _payments(realdb, inv_id) == []
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.posted_in_erp
+    rows = {e.id: e for e in await _exceptions(realdb, inv_id)}
+    # The non-blocking row is replaced by a blocking one with its facts.
+    assert rows[row_id].status == "resolved"
+    [live] = [e for e in rows.values() if e.status == "open"]
+    assert live.exception_type == "payment_reconciliation"
+    assert live.erp_report["kind"] == "paid_not_recorded"
+    assert live.erp_report["refusal_code"] == "erp_paid_amount_unconfirmed"
+    assert live.erp_report["amount"] is None and live.erp_report["method"] == "check"
+    assert live.description_code == "exception.erp_paid_retry_failed"
+    assert live.description_params == {"erp": "QuickBooks Online"}
+    from app.services.payment_runs import blocking_exception_types
+
+    async with realdb.sessionmaker("a")() as s:
+        assert await blocking_exception_types(s, [inv_id]) == {inv_id: "payment_reconciliation"}
+
+
+async def test_the_one_click_on_a_legacy_quickbooks_row_books_only_the_bills_figure(
+    realdb, monkeypatch
+):
+    inv_id, corr, _, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=True)
+    body = {"method": "check", "reference": BILL, "paid_on": utc_today().isoformat()}
+
+    # A body figure the bill does not state is refused before anything is booked.
+    patcher, read = _bill_reads(await _qbo_report(corr, "250.00", [_qbo_cash("901", "250.00")]))
+    with patcher:
+        async with realdb.client(key="a", role="admin") as c:
+            wrong = await c.post(
+                f"/api/exceptions/{row_id}/record-erp-payment", json={**body, "amount": "240.00"}
+            )
+            res = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert wrong.status_code == 422, wrong.text
+    assert wrong.json()["detail"]["code"] == "external_payment_amount_mismatch"
+    assert read.await_count == 2
+    assert res.status_code == 201, res.text
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.amount == Decimal("250.00")
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.paid
+
+
+async def test_the_one_click_refuses_a_legacy_row_whose_bill_shows_another_figure(
+    realdb, monkeypatch
+):
+    inv_id, corr, _, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=True)
+    await _apply_credit_memo_here(realdb, inv_id, "10.00")
+    body = {"method": "check", "reference": BILL, "paid_on": utc_today().isoformat()}
+    patcher, _ = _bill_reads(await _qbo_report(corr, "250.00", [_qbo_cash("901", "250.00")]))
+    with patcher:
+        async with realdb.client(key="a", role="admin") as c:
+            res = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert res.status_code == 422, res.text
+    assert res.json()["detail"]["code"] == "external_payment_amount_mismatch"
+    assert await _payments(realdb, inv_id) == []
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "open"
+
+
+@pytest.mark.parametrize("blocking", [True, False])
+async def test_the_one_click_on_a_legacy_row_the_bill_cannot_confirm_is_refused(
+    realdb, monkeypatch, blocking
+):
+    """Refused with a code, nothing booked; a non-blocking row is re-raised as
+    the blocking row it should be, since the bill is paid in QuickBooks."""
+    inv_id, _, _, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=blocking)
+    body = {"method": "check", "reference": BILL, "paid_on": utc_today().isoformat()}
+    patcher, _ = _bill_reads(RuntimeError("simulated read failure"))
+    with patcher:
+        async with realdb.client(key="a", role="admin") as c:
+            res = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["code"] == "erp_paid_amount_unconfirmed"
+    assert await _payments(realdb, inv_id) == []
+    rows = {e.id: e for e in await _exceptions(realdb, inv_id) if e.erp_report}
+    [live] = [e for e in rows.values() if e.status == "open"]
+    assert live.exception_type == "payment_reconciliation"
+    if blocking:
+        assert live.id == row_id  # left as it was: nothing written
+        assert live.erp_report["refusal_code"] == "external_payment_in_run"
+    else:
+        assert rows[row_id].status == "resolved"
+        assert live.erp_report["refusal_code"] == "erp_paid_amount_unconfirmed"
+
+
+async def test_a_row_from_an_erp_that_never_reads_bills_back_needs_no_read():
+    """The generic ERP webhook's adapters state no figure on any report, so
+    their kept rows are recorded at what is owed here, as their first report
+    already is: nothing is read, and nothing is held for a figure."""
+    figure = await erp_status_sync.read_back_unstated_figure(
+        None, invoice=None, org=None, facts={"erp_type": "netsuite"}
+    )
+    assert figure == erp_status_sync.ReadBackFigure(needed=False)
+
+
 async def _sweep_with(realdb, monkeypatch, fake, *, now=None):
     from app.config import settings
 
@@ -1106,6 +1344,35 @@ async def _hold_in_a_draft_run(realdb, inv_id) -> uuid.UUID:
         )
         await s.commit()
     return run_id
+
+
+async def test_outside_cash_beside_our_live_xero_write_back_blocks_and_books_nothing(realdb):
+    """§393's branch, through Xero's own reading: our 245.00 write-back still
+    stands on the bill after a void here whose Xero delete did not land, and a
+    bookkeeper paid the remaining 5.00. Only 5.00 left outside us, so the
+    250.00 owed here is never booked as cash: it blocks for a person."""
+    from app.services.erp_adapters.xero import report_from_bill
+
+    inv_id, _ = await _seed(
+        realdb, status=InvoiceStatus.approved, bill_id=XERO_BILL, realm=XERO_REALM
+    )
+    bill = _xero_bill("250.00", paid="245.00")
+    bill["Payments"][0]["Reference"] = f"FeohLedger payment {uuid.uuid4()}"
+    bill["Payments"].append(
+        {"PaymentID": "xero-pay-2", "Date": bill["Payments"][0]["Date"], "Amount": Decimal("5.00")}
+    )
+    bill.update(AmountPaid=Decimal("250.00"), AmountDue=Decimal("0"), Status="PAID")
+    report = report_from_bill(bill, XERO_BILL)
+    assert report.state is ErpBillState.paid
+    assert report.reduced_outside and report.our_payment_applied
+    assert report.reduced_outside_amount == Decimal("5.00") and report.paid_amount is None
+
+    assert (await _apply_xero(realdb, report)).action == "partial_payment_flagged"
+    assert await _payments(realdb, inv_id) == []
+    [row] = await _exceptions(realdb, inv_id)
+    assert row.exception_type == "payment_reconciliation"
+    assert row.description_code == "exception.erp_partly_paid_outside"
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.approved
 
 
 async def test_the_one_click_refuses_a_stated_amount_with_no_currency(realdb):
