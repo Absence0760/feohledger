@@ -7,7 +7,8 @@
  * two accounts share, or a vendor name that matches more than one vendor, is
  * never linked to either, and a chart row whose code stopped identifying one
  * ERP account loses its link; a record retired because the ERP made it
- * inactive, or synced with a value too long to store, is reported too. Those
+ * inactive, or synced with a value too long to store (or a name stored
+ * shortened, `backend/app/services/erp_record_names.py`), is reported too. Those
  * are the lines an operator has to act on —
  * recode the invoices, link the vendor by hand — so they are stated as
  * warnings, apart from the success line, rather than folded into the server's
@@ -34,6 +35,8 @@ export interface GlSyncReport {
 	deactivated?: ReadonlyArray<string>;
 	/** Codes synced without their parent, whose code did not fit the column. */
 	parent_code_dropped?: ReadonlyArray<string>;
+	/** Codes synced with a shortened name, the ERP's did not fit. */
+	names_shortened?: ReadonlyArray<string>;
 }
 
 /** The vendor sync response's fields this reads. */
@@ -48,6 +51,8 @@ export interface VendorSyncReport {
 	deactivated?: number;
 	/** Vendors synced with a field too long to store left at its old value. */
 	values_too_long?: ReadonlyArray<{ name: string }>;
+	/** Vendors stored under a shortened name (`name` is the stored form). */
+	names_shortened?: ReadonlyArray<{ name: string }>;
 }
 
 export function glSyncReportLines(result: GlSyncReport, t: Translate): SyncReportLine[] {
@@ -82,6 +87,13 @@ export function glSyncReportLines(result: GlSyncReport, t: Translate): SyncRepor
 	if (parentDropped.length) {
 		lines.push({
 			text: t('glAccounts.toast.syncParentDropped', { codes: formatList([...parentDropped]) }),
+			tone: 'warning'
+		});
+	}
+	const shortened = result.names_shortened ?? [];
+	if (shortened.length) {
+		lines.push({
+			text: t('glAccounts.toast.syncNamesShortened', { codes: formatList([...shortened]) }),
 			tone: 'warning'
 		});
 	}
@@ -123,6 +135,14 @@ export function vendorSyncReportLines(result: VendorSyncReport, t: Translate): S
 	if (tooLong.length) {
 		lines.push({
 			text: t('vendors.toast.syncValuesTooLong', { names: formatList(tooLong) }),
+			tone: 'warning'
+		});
+	}
+	// Counted, not named: each name is up to the column's full width.
+	const shortened = result.names_shortened?.length ?? 0;
+	if (shortened) {
+		lines.push({
+			text: t('vendors.toast.syncNamesShortened', { n: shortened }),
 			tone: 'warning'
 		});
 	}

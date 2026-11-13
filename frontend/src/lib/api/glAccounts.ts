@@ -150,6 +150,9 @@ export interface GlAccountSyncResult {
 	parent_code_dropped_count?: number;
 	/** Codes synced without their parent (its code did not fit). Capped at 50. */
 	parent_code_dropped?: string[];
+	names_shortened_count?: number;
+	/** Codes synced with a shortened name (the ERP's did not fit). Capped at 50. */
+	names_shortened?: string[];
 	adapter: string;
 }
 

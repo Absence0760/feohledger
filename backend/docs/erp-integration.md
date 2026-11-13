@@ -1435,11 +1435,14 @@ is (NetSuite and BC included, so the id stays live), with one exception:
 QuickBooks shortens an account path over 100 characters itself, to
 `path[:100 - len(tail)] + "…#<Id>"` (`quickbooks_online._account_code`), which
 stays unique because the id is. An account whose `parent_code` does not fit the
-column syncs without its parent and is reported (`parent_code_dropped`). The
+column syncs without its parent and is reported (`parent_code_dropped`). An
+account NAME longer than `gl_accounts.name` (255) is stored shortened and
+marked by the shared rule below and reported (`names_shortened`); no adapter
+cuts a name itself. The
 response and the `gl_account.synced_from_erp` audit row carry exact counts
 (`created`, `updated`, `unchanged`, `linked`, `conflict_count`,
 `unlinked_count`, `code_drift_count`, `deactivated_count`, `realm_adopted`,
-`parent_code_dropped_count`) and the codes, capped at 50 each in the response
+`parent_code_dropped_count`, `names_shortened_count`) and the codes, capped at 50 each in the response
 (the audit row is uncapped), plus the `realm` the pull came from; the
 `/gl-accounts` page shows refused, unlinked and deactivated codes as warnings
 apart from the summary. A collision is never counted as `updated`.
@@ -1465,7 +1468,13 @@ wrong: a repeatable key leaves accounts unlinked, it never merges them.
 **Vendors** (`services/vendor_sync`) already matched by `erp_vendor_id` first.
 The name fallback — adopting a manually created, unlinked vendor of the same
 name — now applies only when exactly one pulled record has that name and
-exactly one unlinked local vendor does. Otherwise neither is linked nor created
+exactly one unlinked local vendor does. "The same name" means the same once
+case and spacing are set aside (`vendor_sync._norm_name`, the key the realm
+evidence below already used), on both sides: "Acme" and " ACME " in one pull,
+or a local "Globex Corp" beside a local "GLOBEX  corp", are one name and so an
+ambiguity, never a link to the exact spelling plus a second vendor for the
+other. A unique match links whatever the spelling, and the local vendor keeps
+its own. Otherwise neither is linked nor created
 and the response reports it (`conflicts`, reason `ambiguous_name`): linking the
 wrong "Acme" posts its bills to another supplier's ERP record. QuickBooks'
 `Vendor.AcctNum` is no longer mapped to our vendor `code`: on a QuickBooks
@@ -1511,6 +1520,24 @@ over-long `code`, email, phone, address, tax id or payment terms is not written
 each such record in `values_too_long` (`name`, `erp_vendor_id`, `fields`, field
 names only), and its audit row names the fields. Before, one NetSuite
 `entityid` over `vendors.code`'s 50 characters rolled back the whole sync.
+
+**An ERP name too long for its column is shortened and marked, for vendors and
+GL accounts alike** (`services/erp_record_names.fit_name`, decisions §352).
+`vendors.name` and `gl_accounts.name` are 255 characters; QuickBooks'
+`DisplayName` allows 500. A longer name keeps its first 254 characters
+(trailing space trimmed) and ends in `…`, the record still syncs and links, and
+the run reports it: `names_shortened` on the vendor response
+(`{"name", "erp_vendor_id"}`, the stored name) with `name_shortened: true` on
+that vendor's audit row, and `names_shortened` / `names_shortened_count` (codes)
+on the chart response and audit row. The `/vendors` and `/gl-accounts` pages
+show it as a warning. A name is a label — a bill posts by the ERP id, an account
+matches by id and code — so it is shortened rather than refused; a code or tax
+id is an identifier and is still dropped or refused, never cut. Every name
+comparison in the vendor sync (ambiguity counts, the name link, realm evidence)
+uses the stored form, so a shortened name matches as stored and an unchanged
+long name re-syncs as `unchanged`. Before, the vendor sync wrote the name
+unchecked and one over-long name rolled back the whole sync; the QuickBooks,
+NetSuite and Business Central chart mappings cut account names to 255 silently.
 
 **The push resolves only current-realm links.** `services/erp._resolve_erp_refs`
 filters both the vendor and the accounts by the realm of the connection being

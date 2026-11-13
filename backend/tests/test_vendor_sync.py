@@ -23,6 +23,7 @@ _QUIET = {
     "codes_cleared": 0,
     "realm_adopted": 0,
     "values_too_long": [],
+    "names_shortened": [],
     "realm": None,
 }
 
@@ -532,3 +533,104 @@ async def test_two_same_named_erp_vendors_with_no_local_are_both_created(realdb)
         )
         await s.commit()
     assert result == _QUIET | {"created": 2, "updated": 0, "unchanged": 0, "conflicts": []}
+
+
+async def test_names_differing_only_in_case_or_spacing_are_one_name_to_the_guard(realdb):
+    """The realm evidence (`_same_vendor`) already read "Acme" and " ACME "
+    as one supplier while the ambiguous-name counts compared exactly, so a
+    manual "Acme" was linked to the record spelled the same and "ACME" was
+    created beside it. Both counts are on the normalised name now: neither is
+    linked, neither created, and the conflict names the first spelling."""
+    local = await _manual_vendor(realdb, "Acme")
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s,
+            realdb.info("a").org_id,
+            [
+                {"erp_vendor_id": "ERP-A1", "name": "Acme"},
+                {"erp_vendor_id": "ERP-A2", "name": " ACME "},
+            ],
+        )
+        await s.commit()
+    assert result == _QUIET | {
+        "created": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "conflicts": [
+            {"name": "Acme", "reason": "ambiguous_name", "erp_vendor_ids": ["ERP-A1", "ERP-A2"]}
+        ],
+    }
+    async with realdb.sessionmaker("a")() as s:
+        rows = (await s.execute(select(Vendor))).scalars().all()
+    assert [(r.id, r.erp_vendor_id) for r in rows] == [(local, None)]
+
+
+async def test_two_local_spellings_of_one_name_link_neither(realdb):
+    await _manual_vendor(realdb, "Globex Corp")
+    await _manual_vendor(realdb, "GLOBEX  corp")
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s, realdb.info("a").org_id, [{"erp_vendor_id": "ERP-G", "name": "Globex Corp"}]
+        )
+        await s.commit()
+    assert result["conflicts"] == [
+        {"name": "Globex Corp", "reason": "ambiguous_name", "erp_vendor_ids": ["ERP-G"]}
+    ]
+    assert (result["created"], result["updated"]) == (0, 0)
+
+
+async def test_a_unique_name_links_across_case_and_spacing(realdb):
+    """One record and one unlinked local under the same normalised name is
+    the unambiguous case: linked, the local keeps its own spelling."""
+    local = await _manual_vendor(realdb, "Initech  Ltd")
+    async with realdb.sessionmaker("a")() as s:
+        result = await sync_vendors_from_erp(
+            s, realdb.info("a").org_id, [{"erp_vendor_id": "ERP-I", "name": "INITECH Ltd"}]
+        )
+        await s.commit()
+    assert (result["created"], result["updated"], result["conflicts"]) == (0, 1, [])
+    async with realdb.sessionmaker("a")() as s:
+        row = await s.get(Vendor, local)
+    assert (row.erp_vendor_id, row.name) == ("ERP-I", "Initech  Ltd")
+
+
+async def test_an_over_long_name_is_stored_shortened_and_marked_never_aborts_the_sync(realdb):
+    """QuickBooks' `DisplayName` allows 500 characters and `vendors.name` is
+    255: written unchecked, one such vendor failed the flush and rolled back
+    the whole sync. The vendor syncs under the shared rule's shortened, marked
+    name; the run and its audit row say so; and a re-sync of the same name is
+    unchanged rather than an update every run."""
+    from app.models.workflow import AuditLog
+    from app.services.erp_record_names import SHORTENED_MARK, fit_name
+
+    long_name = "Northwind Traders " + "and Associates " * 30
+    stored, cut = fit_name(long_name, 255)
+    assert cut and len(stored) == 255 and stored.endswith(SHORTENED_MARK)
+    pull = [
+        {"erp_vendor_id": "ERP-N", "name": long_name},
+        {"erp_vendor_id": "ERP-F", "name": "Fine Co"},
+    ]
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with mk() as s:
+        result = await sync_vendors_from_erp(s, org_id, pull)
+        await s.commit()
+
+    assert result["created"] == 2
+    assert result["names_shortened"] == [{"name": stored, "erp_vendor_id": "ERP-N"}]
+    async with mk() as s:
+        rows = {v.erp_vendor_id: v for v in (await s.execute(select(Vendor))).scalars().all()}
+        audit = (
+            await s.execute(
+                select(AuditLog)
+                .where(AuditLog.action == "vendor.synced_from_erp")
+                .where(AuditLog.entity_id == rows["ERP-N"].id)
+            )
+        ).scalar_one()
+    assert rows["ERP-N"].name == stored
+    assert audit.details["name_shortened"] is True
+
+    async with mk() as s:
+        again = await sync_vendors_from_erp(s, org_id, pull)
+        await s.commit()
+    assert (again["updated"], again["unchanged"]) == (0, 2)

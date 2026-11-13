@@ -24,6 +24,7 @@ from sqlalchemy import select
 from app.models.gl_account import GL_CODE_MAX_LENGTH, GLAccount
 from app.services.erp_adapters.base import GLAccountPayload
 from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+from app.services.erp_record_names import SHORTENED_MARK, fit_name
 from app.services.gl_account_sync import (
     AMBIGUOUS_LEGACY,
     CODE_TAKEN,
@@ -291,6 +292,39 @@ async def test_an_over_long_parent_code_is_dropped_never_aborts_the_sync(realdb)
     assert result.created == 2
     assert result.parent_code_dropped == ["6100", "6200"]
     assert result.summary()["parent_code_dropped_count"] == 2
+
+
+async def test_an_over_long_name_is_stored_shortened_and_marked_never_aborts_the_sync(realdb):
+    """`gl_accounts.name` is 255 characters and the sync wrote the ERP's
+    unchecked; only the QuickBooks adapter cut it, silently. The name is a
+    label (nothing posts by it), so the account still syncs and links, its
+    name is shortened by the shared rule and marked, the run says which — and a
+    re-sync of the same name is unchanged, not "updated" every time."""
+    long_name = "Professional Services – " + "Consulting " * 30
+    assert len(long_name) > 255
+    await _add(realdb, code="6200", name="Old", erp_account_id="62")
+    accounts = [_acct("6100", "61", name=long_name), _acct("6200", "62", name=long_name)]
+    result = await _sync(realdb, accounts)
+
+    stored, cut = fit_name(long_name, 255)
+    assert cut and len(stored) == 255 and stored.endswith(SHORTENED_MARK)
+    chart = await _rows(realdb)
+    assert (chart["6100"].name, chart["6100"].erp_account_id) == (stored, "61")
+    assert chart["6200"].name == stored
+    assert (result.created, result.updated) == (1, 1)
+    assert result.names_shortened == ["6100", "6200"]
+    assert result.summary()["names_shortened_count"] == 2
+
+    again = await _sync(realdb, accounts)
+    assert (again.updated, again.unchanged) == (0, 2)
+
+
+async def test_the_quickbooks_mapping_no_longer_cuts_the_name_itself(realdb):
+    """The adapter hands the sync the whole path; the one rule shortens it."""
+    long_path = "Parent:" + "Sub" * 100
+    rows = [{"Id": "9", "Name": "Leaf", "FullyQualifiedName": long_path}]
+    (account,) = await _qbo_payloads(rows)
+    assert account.name == long_path
 
 
 async def test_a_reported_parent_is_named_by_our_code_and_a_top_level_one_clears_it(realdb):

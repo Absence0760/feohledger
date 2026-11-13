@@ -16230,3 +16230,48 @@ decision. Also rejected: calling joserfc directly in `deps.py` and `mfa.py` as
 python-jose was, which would duplicate the extra claim checks and the error
 mapping in two places; `security-patterns.sh`'s `bypass-decode-token` rule now
 allows `jwt.decode` only in `utils/jwt_hs256.py` and `services/sso.py`.
+
+## 352. An ERP name too long for its column is stored shortened and marked; vendor names are matched case and spacing aside (2026-11-12)
+
+**Found** while closing two §287 / §284 follow-ups. `vendors.name` and
+`gl_accounts.name` are `String(255)`. The vendor sync wrote the ERP's name
+unchecked, so one QuickBooks vendor whose `DisplayName` (up to 500 characters)
+ran past the column failed the flush and rolled back the whole sync; the chart
+sync relied on three adapters (QuickBooks, NetSuite, Business Central) cutting
+the account name to 255 themselves, silently, and the others not at all.
+Separately, the vendor sync's ambiguous-name counts compared names with `==`
+while its realm evidence (`_same_vendor`) already ignored case and spacing, so
+"Acme" and "ACME" in one pull did not trip `ambiguous_name`: the manual "Acme"
+was linked to the record spelled the same and "ACME" created beside it.
+
+**The name rule, once for both syncs** (`services/erp_record_names.fit_name`).
+A name that does not fit keeps its first `max - 1` characters, trailing space
+trimmed, plus `…`, and the record syncs and links as usual; the run reports it
+(`names_shortened`, and on the vendor's audit row `name_shortened: true`), and
+the sync page shows a warning. The adapters no longer cut names. The shortening
+is deterministic, so an unchanged long name re-syncs as `unchanged`.
+
+**Why shortened, not refused.** Neither name is a key. A bill posts by the
+record's ERP id and a chart row matches by id and code; the name tells a person
+which record it is. Refusing the record would cost a payee its link (every bill
+refused `vendor_not_linked`) or a chart account its postability over a label.
+The `…` says, on every screen, that the full name is in the ERP. A code or tax
+id is the opposite case, an identifier, where a cut value names something else,
+so those stay dropped or refused (§287). The sanctions screen of a vendor so
+named runs on the stored name (its first 254 characters), as every other
+reader of the row does.
+
+**The ambiguous-name counts use the realm evidence's key.** Both the pull's
+count and the unlinked locals' count are keyed by `_norm_name` (whitespace
+collapsed, casefolded), and the name link looks the vendor up by the same key
+(by id from that count, not by `Vendor.name ==`). Casefolding stays in Python
+rather than SQL's `lower()`, which is not Unicode case folding ("ß"), so the
+one normaliser is the only one. Every comparison uses the stored (fitted) form
+of the ERP name, which is what a local row can hold.
+
+**Rejected:** a wider `name` column. It moves the limit rather than settling
+what happens past it (500 is QuickBooks' limit, not every ERP's), and costs a
+migration across every tenant for a label. Also rejected: listing each
+shortened vendor name in the toast, since each one is up to 255 characters; the
+vendor line counts them and the response carries the names.
+

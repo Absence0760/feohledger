@@ -683,7 +683,7 @@ def _bc_account_to_payload(raw: dict) -> GLAccountPayload | None:
         return None
     return GLAccountPayload(
         code=number,
-        name=str(raw.get("displayName") or number)[:255],
+        name=str(raw.get("displayName") or number),
         account_type=_BC_ACCOUNT_CATEGORIES.get(str(raw.get("category") or "").strip().lower()),
         erp_account_id=str(account_id),
         active=raw.get("blocked") is not True,
