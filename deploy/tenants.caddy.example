@@ -1,6 +1,11 @@
-# Per-VM tenant host list — copy to deploy/tenants.caddy (gitignored; deploy.sh
-# does this automatically if the file is missing) and add one block per tenant
-# subdomain. Each host also needs a DNS A record pointing at this VM.
+# Per-VM vanity host list: copy to deploy/tenants.caddy (gitignored; deploy.sh
+# does this automatically if the file is missing) and add one block per
+# customer vanity host (docs/founder-runbooks/custom-domain-provisioning.md
+# § 3a). The host also needs the customer's DNS record pointing at this VM.
+#
+# Platform hosts (<slug>.<APP_DOMAIN>) do NOT go here. Since docs/decisions.md
+# §364 they are served by CloudFront's wildcard, add-tenant.sh writes nothing
+# here, and deploy.sh removes any platform block it finds.
 #
 # After editing, apply without downtime:
 #   ./compose.sh exec caddy caddy reload --config /etc/caddy/Caddyfile
@@ -8,10 +13,10 @@
 # with: an editor that saves by writing a new file and renaming it over this one
 # leaves Caddy reading the old list and the reload silently changes nothing. Edit
 # in place, or recreate instead: ./compose.sh up -d --no-deps --force-recreate caddy
-# (add-tenant.sh, remove-tenant.sh and deploy.sh check for this themselves).
+# (deploy.sh checks for this itself).
 #
-# Example — the `acme` tenant on feohledger.com:
+# Example: the acme tenant's vanity host.
 #
-# acme.feohledger.com {
-# 	import spa
+# acme.acmecorp.com {
+# 	import vanity
 # }

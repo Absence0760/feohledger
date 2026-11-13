@@ -228,7 +228,10 @@ resource "aws_cloudfront_cache_policy" "frontend" {
   }
 }
 
-# The headers Caddy's (spa) snippet sets today (deploy/Caddyfile), unchanged.
+# The headers Caddy's (spa) snippet set while the VM served the SPA (the
+# snippet went in docs/decisions.md §364; the policy's `comment` keeps the old
+# wording rather than modify the policy in place). Vanity hosts get them too:
+# their Caddy block proxies the SPA from here and passes headers through.
 # Still no CSP: SvelteKit's hydration uses inline scripts.
 resource "aws_cloudfront_response_headers_policy" "frontend" {
   name    = "${var.project}-${var.environment}-frontend"

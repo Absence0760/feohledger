@@ -31,9 +31,11 @@ prefix sweep finds nothing, and the control-plane transaction finishes the job.
 
 The transient this trades for is real and accepted: between the database drop
 and the control-plane delete, the organisation row points at a database that is
-gone, so a request on that tenant's host errors. ``deploy/remove-tenant.sh``
-removes the Caddy host block and reloads *before* calling this, so in the
-deployment path nothing is serving that host by then.
+gone, so an API request for that tenant errors. Since docs/decisions.md §364
+the tenant's host is CloudFront's wildcard and keeps serving the static SPA,
+so nothing in front of the API stops serving it first; the window is the few
+seconds between the two steps, on a tenant whose termination is already
+under way, and ends with the API answering the slug as an unknown tenant.
 
 **What this does not reach** is disclosed rather than quietly omitted, because
 the DPA discloses it too: backup objects (the deploy script removes the

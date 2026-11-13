@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Provision a tenant end-to-end on the minimal single-VM stack: tenant DB +
-# org + admin user (via the same provision_tenant path as self-service
-# signup), the Caddy host block, and a zero-downtime reload. With the
-# recommended wildcard DNS record (*.APP_DOMAIN → this VM) no DNS work is
-# needed at all.
+# Provision a tenant on the minimal single-VM stack: tenant DB + org + admin
+# user, via the same provision_tenant path as self-service signup.
+#
+# Nothing on the web side: since docs/decisions.md §364 the VM serves only the
+# API, and <slug>.<APP_DOMAIN> is answered by CloudFront's wildcard alias and
+# certificate (infra/frontend.tf), so a new tenant needs no Caddy block, no
+# reload and no DNS record. (A customer's own vanity domain is the exception,
+# added by hand: docs/founder-runbooks/custom-domain-provisioning.md.)
 #
 # Usage: add-tenant.sh <slug> --name "Acme Corp" --admin-email a@acme.com
 #                      [--admin-password <pw>]
@@ -48,20 +51,10 @@ HOST="${SLUG}.${APP_DOMAIN}"
 
 # The provisioning command itself is built by deploy/lib.sh, which CI's day-one
 # job runs too (#575): a generated temporary password unless one was given,
-# --skip-existing so a re-run after a failed Caddy step skips provisioning and
-# still repairs the Caddy side below.
+# --skip-existing so a re-run of a tenant that already exists is a no-op
+# rather than the deliberate duplicate-slug error.
 feoh_tenant_argv "$SLUG" "$NAME" "$EMAIL" "$PASSWORD" || die "could not generate a temporary password."
 "${COMPOSE[@]}" exec -T api "${FEOH_TENANT_ARGV[@]}"
-
-if ! grep -q "^${HOST} {" tenants.caddy 2>/dev/null; then
-	printf '\n%s {\n\timport spa\n}\n' "$HOST" >>tenants.caddy
-fi
-# Reload unconditionally (zero-downtime, no-op when nothing changed) — inside
-# the grep guard a re-run after "block appended but reload failed" would skip
-# the reload forever and the tenant host would never start serving. Through
-# feoh_caddy_reload, which recreates Caddy instead when its mounted config is a
-# stale copy (lib.sh) — a reload would then reload the old host list.
-feoh_caddy_reload || die "caddy did not take the new host block — see the error above."
 
 echo
 echo "tenant ready: https://${HOST}"
@@ -69,4 +62,4 @@ echo "  admin login: ${EMAIL}"
 if [ "$FEOH_TENANT_FORCED" = 1 ]; then
 	echo "  temp password: ${FEOH_TENANT_PASSWORD}  (share securely; change forced at first login)"
 fi
-echo "  DNS: covered by a wildcard *.${APP_DOMAIN} record; otherwise add an A record for ${HOST}."
+echo "  web: served by CloudFront under the *.${APP_DOMAIN} wildcard; nothing to add on this VM or in DNS."

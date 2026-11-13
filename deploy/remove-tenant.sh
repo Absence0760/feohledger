@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Remove a tenant end-to-end from the minimal single-VM stack: stop serving its
-# host, then destroy its documents, database and control-plane records, then
-# delete its backup objects.
+# Remove a tenant end-to-end from the minimal single-VM stack: destroy its
+# documents, database and control-plane records, then delete its backup
+# objects.
 #
 # This is the deletion `/legal/dpa` § 13 and clause 10 of the Terms promise a
 # customer within 60 days of termination. It is the inverse of add-tenant.sh and
@@ -10,12 +10,17 @@
 #
 # Order matters and is not the obvious one:
 #
-#   1. Caddy host block + reload  — stop serving before anything is destroyed,
-#      so nobody meets a half-deleted tenant.
-#   2. scripts/delete_tenant.py   — the tenant DB, then documents, then the
+#   1. scripts/delete_tenant.py   — the tenant DB, then documents, then the
 #      control-plane rows (see that module for why THAT order).
-#   3. Backup objects             — last, because until the live data is gone
+#   2. Backup objects             — last, because until the live data is gone
 #      the backups are still the thing you would restore from if a step failed.
+#
+# There is no web step. Since docs/decisions.md §364 the VM serves only the
+# API: <slug>.<APP_DOMAIN> is CloudFront's wildcard, which serves the same
+# static SPA to every host, and with the organisation gone the API answers that
+# slug as an unknown tenant. A customer vanity domain is the exception: its
+# block in tenants.caddy is removed by hand (custom-domain-provisioning.md
+# § Rollback), and this script says so at the end.
 #
 # Usage: remove-tenant.sh <slug> [--dry-run] [--yes]
 set -euo pipefail
@@ -66,8 +71,8 @@ fi
 
 # --- 0. Show what is about to go, from the application's own inventory -------
 
-# A missing organisation is not necessarily a typo: the backup and Caddy legs
-# below depend only on the SLUG, so a run that destroyed the tenant and then
+# A missing organisation is not necessarily a typo: the backup leg below
+# depends only on the SLUG, so a run that destroyed the tenant and then
 # failed on backups has to be re-runnable to finish the job. Refusing here would
 # make the one leg most likely to need a retry the one that cannot have it.
 # A genuine typo is caught at the end of this section, where nothing at all is
@@ -87,7 +92,7 @@ case "$INVENTORY_RC" in
 4)
 	TENANT_PRESENT=0
 	echo "    No organisation with that slug — already deleted, or never existed."
-	echo "    Continuing: the Caddy and backup legs below key off the slug alone."
+	echo "    Continuing: the backup leg below keys off the slug alone."
 	;;
 *) die "the tenant inventory failed (delete_tenant.py exit ${INVENTORY_RC}, error above) — nothing was changed." ;;
 esac
@@ -135,12 +140,8 @@ else
 	echo "Backup objects:    BACKUP_S3_BUCKET is not set — no backup store to clean."
 fi
 
-CADDY_PRESENT=0
-grep -q "^${HOST} {" tenants.caddy 2>/dev/null && CADDY_PRESENT=1
-echo "Caddy host:        ${HOST} $([ "$CADDY_PRESENT" -eq 1 ] && echo "(serving)" || echo "(no block)")"
-
-if [ "$TENANT_PRESENT" -eq 0 ] && [ "$BACKUP_COUNT" -eq 0 ] && [ "$CADDY_PRESENT" -eq 0 ]; then
-	die "nothing found for slug '$SLUG' — no organisation, no backups, no Caddy block. Check the spelling."
+if [ "$TENANT_PRESENT" -eq 0 ] && [ "$BACKUP_COUNT" -eq 0 ]; then
+	die "nothing found for slug '$SLUG' — no organisation and no backups. Check the spelling."
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -160,31 +161,7 @@ if [ "$ASSUME_YES" -ne 1 ]; then
 	[ "$TYPED" = "$SLUG" ] || die "confirmation did not match — nothing was changed."
 fi
 
-# --- 2. Stop serving the host ----------------------------------------------
-
-if [ "$CADDY_PRESENT" -eq 1 ]; then
-	echo "==> removing the Caddy host block for ${HOST}"
-	# Drop the block from its host line to its closing brace. add-tenant.sh
-	# writes a fixed three-line shape, and awk tracks the brace rather than
-	# assuming a line count, so a hand-edited block with extra directives is
-	# removed whole instead of leaving an orphan `}` that breaks the config.
-	awk -v host="${HOST} {" '
-		$0 == host { skipping = 1; next }
-		skipping && $0 == "}" { skipping = 0; next }
-		skipping { next }
-		{ print }
-	' tenants.caddy >tenants.caddy.tmp
-	# Rewritten IN PLACE, not `mv`d over: Caddy mounts this one file, and a bind
-	# mount keeps the inode it started with — after a rename the container still
-	# reads the old list and the reload keeps serving the removed host (#579).
-	cat tenants.caddy.tmp >tenants.caddy
-	rm -f tenants.caddy.tmp
-	feoh_caddy_reload || die "caddy did not take the new host list — ${HOST} may still be served."
-else
-	echo "==> no Caddy host block for ${HOST} (already removed)"
-fi
-
-# --- 3. Documents, database, control plane ---------------------------------
+# --- 2. Documents, database, control plane ---------------------------------
 
 if [ "$TENANT_PRESENT" -eq 1 ]; then
 	echo "==> deleting tenant data"
@@ -193,7 +170,7 @@ else
 	echo "==> tenant data already deleted — skipping"
 fi
 
-# --- 4. Backups -------------------------------------------------------------
+# --- 3. Backups -------------------------------------------------------------
 
 BACKUP_RESULT="no backup store configured"
 if [ -n "$BUCKET" ]; then
@@ -218,13 +195,13 @@ if [ -n "$BUCKET" ]; then
 	BACKUP_RESULT="${REMOVED} version(s) of pg/*/${DB_NAME}.dump removed from s3://${BUCKET}, verified empty"
 fi
 
-# --- 5. The written confirmation, and what it does not cover ----------------
+# --- 4. The written confirmation, and what it does not cover ----------------
 
 cat <<-EOF
 
 	Tenant ${SLUG} removed.
 
-	  host stopped:     ${HOST}
+	  tenant host:      ${HOST} (no longer resolves to a tenant)
 	  tenant database:  ${DB_NAME}
 	  backups:          ${BACKUP_RESULT}
 
@@ -252,4 +229,8 @@ fi
 cat <<-EOF
 
 	Send the customer the confirmation printed above under "Tenant deletion".
+
+	If this tenant had a vanity domain, remove its block from deploy/tenants.caddy
+	and reload Caddy (docs/founder-runbooks/custom-domain-provisioning.md
+	§ Rollback / de-provisioning). Its registration went with the organisation.
 EOF

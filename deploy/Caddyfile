@@ -1,48 +1,53 @@
 # Caddy config for the minimal single-VM deployment (docs/minimal-deployment.md).
 # Domains come from deploy/.env via the compose service's environment.
-# TLS is automatic per-host HTTP-01 — every hostname listed here (and in
-# tenants.caddy) gets its own Let's Encrypt certificate, so each must resolve
-# to this VM before Caddy can issue for it. Recommended: one wildcard DNS
-# record (*.<APP_DOMAIN> → this VM) so new tenants need no DNS work at all —
-# a DNS wildcard needs no wildcard *certificate*; per-host HTTP-01 still
-# issues fine for each listed host.
+#
+# The VM serves the API only. The SPA, on the apex and every tenant subdomain,
+# is S3 + CloudFront (infra/frontend.tf, docs/decisions.md §278), and since
+# §364 nothing on this VM builds or serves it. So this file names no platform
+# host but api.<domain>: those names resolve to CloudFront, and a site block
+# for one would only have Caddy failing HTTP-01 for a certificate it can never
+# get.
+#
+# TLS is automatic per-host HTTP-01: every hostname here and in tenants.caddy
+# gets its own Let's Encrypt certificate, so each must resolve to this VM.
 
 {
 	email {$ACME_EMAIL}
 }
 
-# The static SvelteKit SPA. try_files matches adapter-static's
-# fallback: "index.html" — deep links rehydrate client-side. The root is the
-# `current` symlink deploy.sh swaps atomically to each published release
-# (deploy/lib.sh § The SPA Caddy serves); it is resolved per request, so a swap
-# needs no reload.
-(spa) {
-	root * /srv/current
-	encode zstd gzip
-	# Tablestakes security headers for the static SPA. The API host doesn't
-	# need them here — the backend middleware (app/main.py) sets its own on
-	# every response. No CSP: SvelteKit's hydration uses inline scripts.
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options nosniff
-		X-Frame-Options DENY
-		Referrer-Policy strict-origin-when-cross-origin
-	}
-	try_files {path} /index.html
-	file_server
-}
-
-# Bare app host — login / signup / marketing surface.
-{$APP_DOMAIN} {
-	import spa
-}
-
-# Backend API. The frontend is built with PUBLIC_API_URL=https://{$API_DOMAIN};
+# Backend API. The SPA is built with PUBLIC_API_URL=https://{$API_DOMAIN};
 # CORS for the tenant subdomains is the backend's job (FEOH_CORS_PRODUCTION_DOMAIN).
 {$API_DOMAIN} {
 	reverse_proxy api:8000
 }
 
-# One site block per tenant subdomain lives in the per-VM tenants.caddy
-# (gitignored — seeded from tenants.caddy.example by deploy.sh).
+# A customer's vanity host (docs/founder-runbooks/custom-domain-provisioning.md
+# § 3a). Its certificate is issued here, because CloudFront would need one per
+# customer; the page itself comes from CloudFront.
+#
+#   - /api keeps the vanity Host: that is how the backend resolves a
+#     registered custom domain to its tenant.
+#   - Everything else is the SPA, fetched from the platform domain. CloudFront
+#     refuses a Host that is not one of its alternate names, so Host and SNI
+#     are rewritten to {$APP_DOMAIN}; the page is the same build every host
+#     serves, and the SPA reads its tenant from the browser's own location.
+#     CloudFront's response-headers policy sets HSTS and the other security
+#     headers, and they pass through unchanged.
+(vanity) {
+	@api path /api /api/*
+	handle @api {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy https://{$APP_DOMAIN} {
+			header_up Host {$APP_DOMAIN}
+			transport http {
+				tls_server_name {$APP_DOMAIN}
+			}
+		}
+	}
+}
+
+# One block per vanity host, `<host> { import vanity }`, in the per-VM
+# tenants.caddy (gitignored; deploy.sh seeds it from tenants.caddy.example).
 import tenants.caddy

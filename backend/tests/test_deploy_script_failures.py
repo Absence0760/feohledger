@@ -114,7 +114,7 @@ def _deploy(tmp_path: Path, script: str, *tools: str) -> Deploy:
 ADD_ARGS = ("acme", "--name", "Acme Corp", "--admin-email", "admin@acme.test")
 
 
-def test_add_tenant_stops_before_caddy_when_provisioning_fails(tmp_path: Path) -> None:
+def test_add_tenant_fails_when_provisioning_fails(tmp_path: Path) -> None:
     d = _deploy(tmp_path, "add-tenant.sh")
     d.env_file(LOCAL_ENV)
     d.rule("docker", "scripts/create_tenant.py", 1)
@@ -122,31 +122,22 @@ def test_add_tenant_stops_before_caddy_when_provisioning_fails(tmp_path: Path) -
     result = d.run(*ADD_ARGS)
 
     assert result.returncode != 0
-    assert not (d.dir / "tenants.caddy").exists(), "a host block was written for a failed tenant"
-    assert not d.called("caddy")
-
-
-def test_add_tenant_fails_when_caddy_does_not_take_the_host(tmp_path: Path) -> None:
-    d = _deploy(tmp_path, "add-tenant.sh")
-    d.env_file(LOCAL_ENV)
-    d.rule("docker", "--force-recreate --wait caddy", 1)
-
-    result = d.run(*ADD_ARGS)
-
-    assert result.returncode != 0
-    assert "caddy did not take" in result.stderr
     assert "tenant ready" not in result.stdout
 
 
 def test_add_tenant_succeeds_end_to_end_against_the_stubs(tmp_path: Path) -> None:
-    """The control case for the two above: the same stubs, nothing failing."""
+    """The control case for the one above: the same stubs, nothing failing. The
+    tenant host is CloudFront's wildcard (docs/decisions.md §364), so Caddy is
+    neither written to nor reloaded."""
     d = _deploy(tmp_path, "add-tenant.sh")
     d.env_file(LOCAL_ENV)
 
     result = d.run(*ADD_ARGS)
 
     assert result.returncode == 0, result.stderr
-    assert "acme.app.example.com {" in (d.dir / "tenants.caddy").read_text()
+    assert "tenant ready: https://acme.app.example.com" in result.stdout
+    assert not (d.dir / "tenants.caddy").exists()
+    assert not d.called("caddy")
 
 
 @pytest.mark.parametrize("env", [None, "POSTGRES_PASSWORD=x\n"])
@@ -180,7 +171,6 @@ def test_remove_tenant_stops_when_the_inventory_fails(tmp_path: Path, rc: int, w
     Only exit 4 (no such organisation) means that now."""
     d = _deploy(tmp_path, "remove-tenant.sh")
     d.env_file(LOCAL_ENV)
-    (d.dir / "tenants.caddy").write_text("acme.app.example.com {\n\timport spa\n}\n")
     d.rule("docker", "delete_tenant.py --slug acme --dry-run", rc)
     d.rule("aws", "list-object-versions", 0, BACKUP_LISTING)
 
@@ -190,7 +180,6 @@ def test_remove_tenant_stops_when_the_inventory_fails(tmp_path: Path, rc: int, w
     assert "inventory failed" in result.stderr
     assert not d.called("delete-object"), "backups were deleted"
     assert not d.called("--yes"), "the tenant deletion ran"
-    assert "acme.app.example.com {" in (d.dir / "tenants.caddy").read_text()
     assert "removed." not in result.stdout
 
 
@@ -207,11 +196,11 @@ def test_remove_tenant_with_nothing_left_anywhere_is_refused(tmp_path: Path) -> 
 
 def test_remove_tenant_already_deleted_skips_the_data_leg_visibly(tmp_path: Path) -> None:
     """The one deliberate skip: an organisation already gone (exit 4) leaves
-    the Caddy and backup legs to finish, and says it skipped the data."""
+    the backup leg to finish, and says it skipped the data."""
     d = _deploy(tmp_path, "remove-tenant.sh")
-    d.env_file("POSTGRES_PASSWORD=x\nAPP_DOMAIN=app.example.com\n")  # no backup store
-    (d.dir / "tenants.caddy").write_text("acme.app.example.com {\n\timport spa\n}\n")
+    d.env_file(LOCAL_ENV)
     d.rule("docker", "--dry-run", 4)
+    d.rule("aws", "list-object-versions", 0, BACKUP_LISTING)
 
     result = d.run("acme", "--yes")
 
@@ -219,7 +208,25 @@ def test_remove_tenant_already_deleted_skips_the_data_leg_visibly(tmp_path: Path
     assert "already deleted, or never existed" in result.stdout
     assert "tenant data already deleted — skipping" in result.stdout
     assert not d.called("delete_tenant.py --slug acme --yes")
-    assert "acme.app.example.com" not in (d.dir / "tenants.caddy").read_text()
+    assert d.called("delete-object")
+
+
+def test_remove_tenant_never_touches_caddy(tmp_path: Path) -> None:
+    """A platform tenant host is CloudFront's wildcard (docs/decisions.md §364):
+    a vanity block in tenants.caddy is left for the operator, and the script
+    says so, rather than being guessed at."""
+    d = _deploy(tmp_path, "remove-tenant.sh")
+    d.env_file(LOCAL_ENV)
+    vanity = "shop.acmecorp.com {\n\timport vanity\n}\n"
+    (d.dir / "tenants.caddy").write_text(vanity)
+    d.rule("aws", "list-object-versions", 0, BACKUP_LISTING)
+
+    result = d.run("acme", "--yes")
+
+    assert result.returncode == 0, result.stderr
+    assert (d.dir / "tenants.caddy").read_text() == vanity
+    assert not d.called("caddy")
+    assert "vanity domain" in result.stdout
 
 
 def test_remove_tenant_keeps_the_backups_when_the_data_deletion_fails(tmp_path: Path) -> None:

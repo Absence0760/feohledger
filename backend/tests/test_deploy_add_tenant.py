@@ -126,7 +126,10 @@ def test_add_tenant_execs_the_shared_argv_into_the_api_container(
     ]
     # A given password is the operator's own, so it is never echoed back.
     assert "temp password" not in result.stdout
-    assert "acme.feohledger.example {" in (root / "tenants.caddy").read_text()
+    # The tenant host is CloudFront's wildcard (docs/decisions.md §364): no
+    # Caddy block, no reload.
+    assert (root / "tenants.caddy").read_text() == ""
+    assert not [c for c in _calls(log) if "caddy" in c]
 
 
 def test_add_tenant_prints_the_generated_password_it_provisioned_with(

@@ -21,10 +21,10 @@ name: Deploy to the VM
 # the SAME approved job, after the VM: backend first, so a new UI never calls an
 # API that has not shipped. It is built in a separate, ungated job (no AWS, no
 # secrets) that runs while the reviewer is still deciding — a second job in the
-# `production` environment would pause for a second approval. Publishing is
-# armed separately, by FRONTEND_PUBLISH_ENABLED=true, once infra/README.md §
-# Frontend on CloudFront is done; until then the build job is skipped, nothing
-# is uploaded, and the VM deploy runs exactly as before.
+# `production` environment would pause for a second approval. This is the ONLY
+# place the SPA is built: since §364 the VM serves the API alone. Publishing is
+# armed by FRONTEND_PUBLISH_ENABLED=true (infra/README.md § Frontend on
+# CloudFront); with it off, a release ships the backend and no SPA at all.
 #
 # `aws-deploy.yml` is the separate, disarmed pipeline for the ECS build-out
 # (docs/production-deployment.md); this one is for the stack that exists.
@@ -89,7 +89,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        # The same two values deploy.sh bakes into the VM's build. Repository
+        # The two values baked into the static build. Repository
         # variables, not environment ones: this job is deliberately outside the
         # `production` environment. Neither is secret.
         #
@@ -129,8 +129,8 @@ jobs:
     name: Deploy release to the app VM
     runs-on: ubuntu-latest
     # Runs when the SPA built OR was skipped (publish not armed). A failed build
-    # stops the deploy before approval: deploy.sh builds the same frontend on
-    # the VM, so that commit would fail there too, only later and half-shipped.
+    # stops the deploy before approval: shipping the backend of a commit whose
+    # SPA cannot be built would leave the edge on an older UI than the API.
     needs: build-frontend
     # Repository variable, not environment-scoped, so it is readable before the
     # environment gate. Prereleases are not production releases.
@@ -139,11 +139,12 @@ jobs:
       && (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
       && vars.VM_DEPLOY_ENABLED == 'true'
       && !(github.event_name == 'release' && github.event.release.prerelease)
-    # deploy.sh builds the frontend and backend on a t4g.medium (~30 min at
-    # worst). Worst case on the SSM side is 5 min to deliver + 45 min to run
-    # (the document's timeout) = 50; the poll gives up at 55. The SPA publish
-    # after it is a few minutes of uploads plus an invalidation CloudFront
-    # finishes in well under ten, so the job at 70 leaves room for both.
+    # deploy.sh builds the backend image and migrates every tenant on a
+    # t4g.medium (the SPA build left the VM in §364). Worst case on the SSM
+    # side is 5 min to deliver + 45 min to run (the document's timeout,
+    # infra/deploy.tf) = 50; the poll gives up at 55. The SPA publish after it
+    # is a few minutes of uploads plus an invalidation CloudFront finishes in
+    # well under ten, so the job at 70 leaves room for both.
     timeout-minutes: 70
 
     # MUST match the deploy role's trust policy (`:environment:production`),
@@ -297,22 +298,20 @@ jobs:
             --query Distribution.DomainName --output text)
           echo "::add-mask::${edge}"
           origins=("https://${edge}")
-          # Before the DNS cutover (infra variable frontend_on_cloudfront) the
-          # apex is still the VM's Caddy, serving its own build; after it, the
-          # apex and a tenant host must serve this one. CloudFront stamps every
-          # response with x-amz-cf-id, so the check follows DNS on its own. (A
-          # runner whose resolver still caches the pre-cutover A record sees
-          # Caddy and checks the distribution only — the next release covers
-          # the apex.) An apex that does not answer at all is an outage either
-          # way, so it fails the step rather than reading as "not cut over".
+          # The apex and a tenant host must serve this build. CloudFront stamps
+          # every response with x-amz-cf-id, so an apex without it is not on
+          # the distribution: since §364 the VM's Caddy serves no SPA, so that
+          # is an outage (infra variable frontend_on_cloudfront back at false),
+          # not a host still waiting for the cutover. An apex that does not
+          # answer at all fails the same way.
           app=${APP_URL%/}
           if ! headers=$(curl -sSI --max-time 20 "${app}/"); then
             echo "::error::${app} did not answer."
             exit 1
           fi
-          if grep -qi '^x-amz-cf-id:' <<<"$headers"; then
-            origins+=("${app}" "https://smoke-check.${app#https://}")
-          else
-            echo "${app} is not on CloudFront yet; checking the distribution only."
+          if ! grep -qi '^x-amz-cf-id:' <<<"$headers"; then
+            echo "::error::${app} is not served by CloudFront, and the VM serves no SPA (docs/decisions.md §364). Is frontend_on_cloudfront still true in infra/prod.tfvars?"
+            exit 1
           fi
+          origins+=("${app}" "https://smoke-check.${app#https://}")
           src/deploy/smoke-frontend.sh frontend-build "${origins[@]}"

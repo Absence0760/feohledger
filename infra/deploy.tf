@@ -52,8 +52,12 @@ resource "aws_ssm_document" "deploy" {
       action = "aws:runShellScript"
       name   = "deploy"
       inputs = {
-        # deploy.sh builds the frontend and backend on the VM; ~30 minutes is
-        # the documented ceiling, and this bounds a hung build.
+        # deploy.sh builds the backend image and migrates every tenant
+        # database; the SPA build left the VM in docs/decisions.md §364, which
+        # took the bulk of the old ~30-minute ceiling with it. 45 minutes is
+        # kept anyway: it only bounds a hung run, a cold image build plus a
+        # migration across every tenant has no tight bound, and lowering it
+        # changes the document for no gain.
         timeoutSeconds = "2700"
         runCommand = [
           "umask 027",

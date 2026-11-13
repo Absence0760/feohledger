@@ -258,7 +258,7 @@ variable "alert_phone_number" {
 }
 
 variable "uptime_tenant_slug" {
-  description = "Slug of one tenant whose host (<slug>.<domain>) uptime.tf checks from outside, covering the tenant wildcard's DNS and certificate and, before the CloudFront cutover, its Caddy site block. Use a tenant you control, such as a test tenant. No default, so the repo names no real tenant; set it in the private prod.tfvars. Null skips the tenant check; the apex and API checks run regardless."
+  description = "Slug of one tenant whose host (<slug>.<domain>) uptime.tf checks from outside, covering the tenant wildcard's DNS and certificate on CloudFront. Use a tenant you control, such as a test tenant. No default, so the repo names no real tenant; set it in the private prod.tfvars. Null skips the tenant check; the apex and API checks run regardless."
   type        = string
   default     = null
 
@@ -269,7 +269,7 @@ variable "uptime_tenant_slug" {
 }
 
 variable "frontend_on_cloudfront" {
-  description = "Point the apex and the tenant wildcard at the SPA's CloudFront distribution (frontend.tf) instead of the VM. Leave false until a build has been published to the bucket and checked on the distribution's *.cloudfront.net name (issue #582 § Cut-over plan); setting it back to false is the rollback. api.<domain> stays on the VM either way."
+  description = "Point the apex and the tenant wildcard at the SPA's CloudFront distribution (frontend.tf) instead of the VM. Leave false until a build has been published to the bucket and checked on the distribution's *.cloudfront.net name (issue #582 § Cut-over plan). Production has it true, and since docs/decisions.md §364 it must stay true: the VM's Caddy no longer serves the SPA, so false is an outage, not a rollback. api.<domain> stays on the VM either way."
   type        = bool
   default     = false
 }

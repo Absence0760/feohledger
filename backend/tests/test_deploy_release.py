@@ -200,19 +200,37 @@ def test_a_commit_from_before_the_www_layout_is_refused(checkout: Checkout) -> N
 
     assert result.returncode != 0
     assert "predates the deploy/www/ SPA layout" in result.stderr
-    assert "Rolling the frontend back" in result.stderr
+    assert "S3 + CloudFront" in result.stderr
     assert checkout.head() == checkout.second
 
 
-def test_the_real_compose_file_satisfies_the_layout_check() -> None:
-    """The check greps a commit's compose.prod.yml; if this file stopped matching,
-    every release deploy would be refused."""
+def test_the_real_compose_file_passes_the_layout_check() -> None:
+    """The check refuses a commit whose compose.prod.yml mounts frontend/build; if
+    this file matched it, every release deploy would be refused. (It used to
+    require the ./www mount, which §364 removed — a positive check would now
+    refuse the very commit that removed it.)"""
     result = subprocess.run(
-        ["bash", "-c", f'. "{LIB_SH}"; grep -Eq "$FEOH_WWW_MOUNT_RE" "{PROD_COMPOSE}"'],
+        ["bash", "-c", f'. "{LIB_SH}"; grep -Eq "$FEOH_BUILD_MOUNT_RE" "{PROD_COMPOSE}"'],
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_a_commit_from_the_www_era_is_still_deployable(checkout: Checkout) -> None:
+    """Re-deploying a commit from between §277 and §364 is the rollback past
+    §364, so its ./www mount must not be refused."""
+    _git(checkout.author, "checkout", "--quiet", "main")
+    compose = checkout.author / "deploy" / "compose.prod.yml"
+    compose.write_text("services:\n  caddy:\n    volumes:\n      - ./www:/srv:ro\n")
+    _git(checkout.author, "commit", "--quiet", "-am", "www era")
+    _git(checkout.author, "push", "--quiet", "origin", "main")
+    www_era = _git(checkout.author, "rev-parse", "HEAD")
+
+    result = checkout.sync(www_era)
+
     assert result.returncode == 0, result.stderr
+    assert checkout.head() == www_era
 
 
 def test_a_sha_origin_does_not_have_is_refused(checkout: Checkout) -> None:
@@ -366,14 +384,13 @@ def test_workflow_redacts_tenant_names_from_the_public_log() -> None:
     assert "::stop-commands::" in run, "deploy output must not be obeyed as workflow commands"
 
 
-# ── The SPA a release serves (#579, docs/decisions.md §277) ──────────────────
+# ── The VM serves no SPA (docs/decisions.md §364) ───────────────────────────
 #
-# v0.1.0's deploy rebuilt frontend/build while Caddy bind-mounted it: the mount
-# kept the deleted directory's inode, every page answered 404 with an empty body,
-# and `docker exec` into Caddy was refused. These pin the replacement: Caddy
-# mounts a directory that is never replaced, a release goes live by a symlink
-# rename inside it, the previous release is kept, and the deploy ends by
-# fetching the site through the VM's own Caddy.
+# The SPA is S3 + CloudFront (§278), built in CI and published by the release
+# workflow. The VM used to build it in a Node container and serve it from
+# deploy/www/ (§277, after v0.1.0's bind mount of the rebuilt frontend/build
+# served every page as an empty 404, #579). These pin that none of it is back:
+# no build service, no mount, no snippet, and no deploy step.
 
 
 def _lib(
@@ -396,113 +413,160 @@ def _with_stub(tmp_path: Path, name: str, script: str) -> str:
     return f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
 
 
-def _build(root: Path, marker: str) -> Path:
-    """What SvelteKit's build does to frontend/build: delete it, write it anew."""
-    build = root / "build"
-    shutil.rmtree(build, ignore_errors=True)
-    (build / "_app").mkdir(parents=True)
-    (build / "index.html").write_text(f"<!doctype html><title>{marker}</title>\n")
-    (build / "_app" / "app.js").write_text(f"// {marker}\n")
-    return build
+def _compose() -> dict:
+    return yaml.safe_load(PROD_COMPOSE.read_text())
 
 
-def _publish(root: Path, release: str) -> subprocess.CompletedProcess[str]:
-    return _lib(f'feoh_publish_frontend build www "{release}"', root)
+def test_compose_has_no_frontend_build_service_or_cache() -> None:
+    compose = _compose()
+    assert "frontend-build" not in compose["services"]
+    assert "pnpm-store" not in (compose.get("volumes") or {})
+    images = [svc.get("image", "") for svc in compose["services"].values()]
+    assert not any(image.startswith("node:") for image in images), images
 
 
-def test_caddy_mounts_the_stable_www_directory_never_the_build_output() -> None:
-    volumes = yaml.safe_load(PROD_COMPOSE.read_text())["services"]["caddy"]["volumes"]
-    mounts = {v.split(":")[1]: v.split(":")[0] for v in volumes}
-    assert mounts["/srv"] == "./www", mounts
-    assert not any("frontend/build" in v for v in volumes), (
-        "Caddy mounts the build output again: the build deletes and recreates it, and the "
-        "bind mount is left on an orphaned empty directory (#579)"
-    )
-    assert "/www/" in (DEPLOY / ".gitignore").read_text().splitlines()
+def test_caddy_mounts_no_spa_directory() -> None:
+    volumes = _compose()["services"]["caddy"]["volumes"]
+    assert not any(":/srv" in v for v in volumes), volumes
+    assert not any("frontend/build" in v or v.startswith("./www") for v in volumes), volumes
+    assert "./tenants.caddy:/etc/caddy/tenants.caddy:ro" in volumes
 
 
-def test_caddy_serves_the_current_symlink() -> None:
-    lines = [ln.strip() for ln in CADDYFILE.read_text().splitlines()]
-    assert "root * /srv/current" in lines
-    assert "root * /srv" not in lines
+def _caddy_code() -> list[str]:
+    return [
+        ln.strip()
+        for ln in CADDYFILE.read_text().splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
 
 
-def test_publishing_makes_the_build_live_through_a_relative_symlink(tmp_path: Path) -> None:
-    _build(tmp_path, "one")
+def test_caddyfile_serves_only_the_api_and_vanity_hosts() -> None:
+    code = _caddy_code()
+    assert "(spa) {" not in code
+    assert not any(ln.startswith(("root ", "try_files", "file_server")) for ln in code), code
+    # The only site blocks: the global options block and api.<domain>.
+    sites = [ln for ln in code if ln.endswith("{") and not ln.startswith(("(", "@", "handle"))]
+    assert sites == [
+        "{",
+        "{$API_DOMAIN} {",
+        "reverse_proxy https://{$APP_DOMAIN} {",
+        "transport http {",
+    ], sites
+    assert "{$APP_DOMAIN} {" not in code, "the apex is CloudFront's, not this VM's"
+    assert code[-1] == "import tenants.caddy"
 
-    result = _publish(tmp_path, "r1")
+
+def test_the_vanity_snippet_keeps_api_on_the_vanity_host_and_proxies_the_spa() -> None:
+    """custom-domain-provisioning.md § 3a: /api goes to the backend under the
+    vanity Host (how the backend finds the tenant); the page comes from
+    CloudFront, which refuses a Host that is not one of its alternate names."""
+    text = CADDYFILE.read_text()
+    body = text.split("(vanity) {", 1)[1].split("\n}\n", 1)[0]
+    lines = [ln.strip() for ln in body.splitlines()]
+    lines = [ln for ln in lines if ln and not ln.startswith("#")]
+    assert lines[:4] == ["@api path /api /api/*", "handle @api {", "reverse_proxy api:8000", "}"]
+    api_block = body.split("handle @api {", 1)[1].split("}", 1)[0]
+    assert "header_up" not in api_block, "the API must see the vanity Host"
+    spa_block = body.split("handle {", 1)[1]
+    assert "reverse_proxy https://{$APP_DOMAIN} {" in spa_block
+    assert "header_up Host {$APP_DOMAIN}" in spa_block
+    assert "tls_server_name {$APP_DOMAIN}" in spa_block
+
+
+def test_the_host_list_example_uses_the_vanity_snippet() -> None:
+    example = (DEPLOY / "tenants.caddy.example").read_text()
+    assert "import vanity" in example
+    assert "import spa" not in example
+
+
+def test_ci_validates_the_caddyfile_with_the_pinned_image() -> None:
+    """The Caddyfile is the API host's config; CI adapts it with the image the
+    compose file pins (scripts/check_deploy_caddyfile.sh)."""
+    jobs = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())["jobs"]
+    runs = [step.get("run", "") for step in jobs["deploy-compose"]["steps"]]
+    assert "scripts/check_deploy_caddyfile.sh" in runs
+    checker = (REPO_ROOT / "scripts" / "check_deploy_caddyfile.sh").read_text()
+    assert "import vanity" in checker, "the check must exercise the vanity snippet"
+    assert "config --images" in checker, "the image is read from compose, never restated"
+    assert "caddy:2" not in checker
+
+
+def test_deploy_sh_builds_and_publishes_no_spa() -> None:
+    code = _code()
+    for needle in ("frontend-build", "feoh_publish_frontend", "PNPM_SPEC", "RELEASE_ID"):
+        assert needle not in code, needle
+    assert "feoh_publish_frontend" not in LIB_SH.read_text()
+    assert "FEOH_WWW_MOUNT_RE" not in LIB_SH.read_text()
+
+
+# ── feoh_prune_platform_hosts ────────────────────────────────────────────────
+
+LEGACY_HOSTS = (
+    "# acme.app.example.com {\n#\timport spa\n# }\n\n"
+    "acme.app.example.com {\n\timport spa\n}\n\n"
+    "beta.app.example.com {\n\timport spa\n\theader X-Extra yes\n}\n"
+    "app.example.com {\n}\n"
+    "shop.acmecorp.com {\n\timport spa\n}\n"
+    "appXexample.com {\n\timport vanity\n}\n"
+)
+
+
+def _prune(tmp_path: Path, text: str) -> subprocess.CompletedProcess[str]:
+    (tmp_path / "tenants.caddy").write_text(text)
+    return _lib("feoh_prune_platform_hosts app.example.com", tmp_path)
+
+
+def test_prune_drops_platform_blocks_and_moves_vanity_blocks_to_the_new_snippet(
+    tmp_path: Path,
+) -> None:
+    result = _prune(tmp_path, LEGACY_HOSTS)
 
     assert result.returncode == 0, result.stderr
-    current = tmp_path / "www" / "current"
-    assert current.is_symlink()
-    # Relative, so it resolves the same under /srv inside the container.
-    assert os.readlink(current) == "releases/r1"
-    assert "one" in (current / "index.html").read_text()
-    assert (current / "_app" / "app.js").exists()
+    after = (tmp_path / "tenants.caddy").read_text()
+    for host in ("acme.app.example.com {", "beta.app.example.com {", "\napp.example.com {"):
+        assert host not in after, host
+    # A whole block goes, extra directives and all: no orphan brace or directive.
+    assert "X-Extra" not in after
+    # A vanity host stays and serves the same page through the new snippet; a
+    # dot in the domain is a literal dot, not "any character".
+    assert "shop.acmecorp.com {\n\timport vanity\n}" in after
+    assert "appXexample.com {\n\timport vanity\n}" in after
+    assert "\timport spa\n" not in after
+    # Comments are the operator's and are left alone.
+    assert after.startswith("# acme.app.example.com {\n#\timport spa\n# }\n")
+    for host in ("acme.app.example.com", "beta.app.example.com", "app.example.com"):
+        assert f"    {host}\n" in result.stdout
+    assert "import vanity" in result.stdout
 
 
-def test_a_rebuild_does_not_touch_the_live_release(tmp_path: Path) -> None:
-    """The outage itself: the build directory deleted and recreated under a live site."""
-    _build(tmp_path, "one")
-    assert _publish(tmp_path, "r1").returncode == 0
+def test_prune_is_idempotent_and_quiet_on_a_clean_list(tmp_path: Path) -> None:
+    assert _prune(tmp_path, LEGACY_HOSTS).returncode == 0
+    once = (tmp_path / "tenants.caddy").read_text()
 
-    _build(tmp_path, "two")
+    again = _lib("feoh_prune_platform_hosts app.example.com", tmp_path)
 
-    assert "one" in (tmp_path / "www" / "current" / "index.html").read_text()
-
-
-def test_the_previous_release_is_kept_for_rollback_and_older_ones_pruned(tmp_path: Path) -> None:
-    for n, marker in enumerate(["one", "two", "three"], start=1):
-        _build(tmp_path, marker)
-        result = _publish(tmp_path, f"r{n}")
-        assert result.returncode == 0, result.stderr
-
-    www = tmp_path / "www"
-    assert os.readlink(www / "current") == "releases/r3"
-    assert os.readlink(www / "previous") == "releases/r2"
-    assert "two" in (www / "previous" / "index.html").read_text()
-    assert sorted(p.name for p in (www / "releases").iterdir()) == ["r2", "r3"]
-    assert not (www / "current.new").exists()
-    assert not (www / "previous.new").exists()
+    assert again.returncode == 0, again.stderr
+    assert again.stdout == ""
+    assert (tmp_path / "tenants.caddy").read_text() == once
 
 
-@pytest.mark.parametrize("index", [None, ""])
-def test_a_build_with_no_page_is_never_published(tmp_path: Path, index: str | None) -> None:
-    _build(tmp_path, "one")
-    assert _publish(tmp_path, "r1").returncode == 0
-    build = _build(tmp_path, "two")
-    if index is None:
-        (build / "index.html").unlink()
-    else:
-        (build / "index.html").write_text(index)
+def test_prune_rewrites_the_host_list_in_place(tmp_path: Path) -> None:
+    """Caddy mounts tenants.caddy as one file; a rename would leave the running
+    container reading the old inode (#579)."""
+    (tmp_path / "tenants.caddy").write_text(LEGACY_HOSTS)
+    inode = (tmp_path / "tenants.caddy").stat().st_ino
 
-    result = _publish(tmp_path, "r2")
+    assert _lib("feoh_prune_platform_hosts app.example.com", tmp_path).returncode == 0
 
+    assert (tmp_path / "tenants.caddy").stat().st_ino == inode
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["tenants.caddy"]
+
+
+def test_prune_without_a_domain_refuses(tmp_path: Path) -> None:
+    (tmp_path / "tenants.caddy").write_text(LEGACY_HOSTS)
+    result = _lib('feoh_prune_platform_hosts ""', tmp_path)
     assert result.returncode != 0
-    assert "refusing to publish" in result.stderr
-    assert os.readlink(tmp_path / "www" / "current") == "releases/r1"
-    assert not (tmp_path / "www" / "releases" / "r2").exists()
-
-
-def test_a_published_release_is_never_overwritten(tmp_path: Path) -> None:
-    _build(tmp_path, "one")
-    assert _publish(tmp_path, "r1").returncode == 0
-    _build(tmp_path, "two")
-
-    result = _publish(tmp_path, "r1")
-
-    assert result.returncode != 0
-    assert "one" in (tmp_path / "www" / "current" / "index.html").read_text()
-
-
-def test_the_swap_is_a_rename_not_a_delete_and_recreate() -> None:
-    """`ln -sfn` straight onto `current` unlinks it and then creates it — a window
-    with no site. A link made under another name and renamed over it is one
-    rename(2), which a request sees as either the old release or the new one."""
-    body = LIB_SH.read_text().split("feoh_publish_frontend() {", 1)[1].split("\n}\n", 1)[0]
-    assert 'ln -sfn "releases/$id" "$www/current.new"' in body
-    assert 'mv -T "$www/current.new" "$www/current"' in body
-    assert 'ln -sfn "releases/$id" "$www/current"\n' not in body
+    assert (tmp_path / "tenants.caddy").read_text() == LEGACY_HOSTS
 
 
 # ── feoh_caddy_reload ────────────────────────────────────────────────────────
@@ -554,23 +618,27 @@ def test_caddy_is_recreated_when_a_mounted_file_is_a_stale_copy(tmp_path: Path, 
     assert stale in result.stdout
 
 
-def test_every_caddy_reload_goes_through_the_staleness_check() -> None:
-    for script in ("deploy.sh", "add-tenant.sh", "remove-tenant.sh"):
-        code = "\n".join(
-            ln
-            for ln in (DEPLOY / script).read_text().splitlines()
-            if not ln.lstrip().startswith("#")
-        )
-        assert "feoh_caddy_reload" in code, script
-        assert "caddy reload" not in code, f"{script} reloads Caddy without the staleness check"
-
-
-def test_remove_tenant_rewrites_the_host_list_in_place() -> None:
-    code = (DEPLOY / "remove-tenant.sh").read_text()
-    assert "mv tenants.caddy.tmp tenants.caddy" not in code, (
-        "a rename gives tenants.caddy a new inode the running Caddy never sees"
+def _script_code(script: str) -> str:
+    return "\n".join(
+        ln for ln in (DEPLOY / script).read_text().splitlines() if not ln.lstrip().startswith("#")
     )
-    assert "cat tenants.caddy.tmp >tenants.caddy" in code
+
+
+def test_every_caddy_reload_goes_through_the_staleness_check() -> None:
+    code = _script_code("deploy.sh")
+    assert "feoh_caddy_reload" in code
+    assert "caddy reload" not in code, "deploy.sh reloads Caddy without the staleness check"
+
+
+@pytest.mark.parametrize("script", ["add-tenant.sh", "remove-tenant.sh"])
+def test_tenant_scripts_never_touch_caddy(script: str) -> None:
+    """A platform tenant host is CloudFront's wildcard (§364): adding or removing
+    a tenant writes no host block and reloads nothing."""
+    code = _script_code(script)
+    assert not re.search(r">>?\s*tenants\.caddy", code), f"{script} writes the host list"
+    assert not re.search(r"(grep|awk|sed)\b[^\n]*tenants\.caddy", code), script
+    assert "feoh_caddy_reload" not in code
+    assert "caddy reload" not in code
 
 
 # ── feoh_smoke_check ─────────────────────────────────────────────────────────
@@ -632,16 +700,17 @@ def test_smoke_check_fails_unless_the_site_serves_a_page(
     assert "smoke check failed: https://app.example.com/" in result.stderr
 
 
-def test_deploy_publishes_after_the_roll_and_ends_with_the_smoke_check() -> None:
+def test_deploy_prunes_before_the_roll_and_ends_with_the_smoke_check() -> None:
     code = _code()
+    prune = code.index('feoh_prune_platform_hosts "$APP_DOMAIN"')
+    build = code.index('"${COMPOSE[@]}" build api')
     roll = code.index("up -d --wait --wait-timeout 300")
-    publish = code.rindex("\tpublish_frontend\n")
     reload_ = code.index("feoh_caddy_reload ||")
     smoke = code.index("./smoke.sh --vm ||")
     done = code.index('echo "deploy complete')
-    assert roll < publish < reload_ < smoke, (
-        "a release goes live only after the API rolled healthy, and the deploy ends "
-        "by proving the site serves"
+    assert prune < build < roll < reload_ < smoke, (
+        "the host list is pruned before the roll recreates Caddy, and the deploy ends "
+        "by proving the stack serves"
     )
     # The smoke check is the LAST step (#575): nothing that could still change
     # what is served runs after it.
@@ -651,111 +720,12 @@ def test_deploy_publishes_after_the_roll_and_ends_with_the_smoke_check() -> None
     assert {"curl", "python3"} <= set(preflight)
 
 
-def test_deploy_publishes_only_through_the_atomic_swap() -> None:
-    code = _code()
-    assert 'feoh_publish_frontend "$REPO_ROOT/frontend/build" "$WWW" "$RELEASE_ID"' in code
-    frontend = DEPLOY_SH.read_text().split("# ── Frontend", 1)[1].split("# ── Backend", 1)[0]
-    assert "rm -rf" not in frontend
-    assert "ln -s" not in frontend, "deploy.sh swaps the live release itself, bypassing lib.sh"
-
-
-# ── Redeploys and rollbacks ──────────────────────────────────────────────────
-
-
-def _releases(root: Path) -> list[str]:
-    return sorted(p.name for p in (root / "www" / "releases").iterdir())
-
-
-def _links(root: Path) -> tuple[str, str | None]:
-    www = root / "www"
-    previous = os.readlink(www / "previous") if (www / "previous").is_symlink() else None
-    return os.readlink(www / "current"), previous
-
-
-def _readme_rollback() -> str:
-    """The rollback command exactly as deploy/README.md prints it."""
-    line = next(
-        ln
-        for ln in (DEPLOY / "README.md").read_text().splitlines()
-        if "readlink www/previous" in ln
-    )
-    return line.strip().strip("`")
-
-
-def test_redeploying_an_identical_build_is_a_new_release(tmp_path: Path) -> None:
-    """A redeploy of the same commit gets a fresh id; the rotation still holds."""
-    for release in ("r1", "r2", "r3"):
-        _build(tmp_path, "same")
-        result = _publish(tmp_path, release)
-        assert result.returncode == 0, result.stderr
-
-    assert _links(tmp_path) == ("releases/r3", "releases/r2")
-    assert _releases(tmp_path) == ["r2", "r3"]
-    assert "same" in (tmp_path / "www" / "current" / "index.html").read_text()
-
-
-def test_the_readme_rollback_then_a_publish_prunes_the_bad_release(tmp_path: Path) -> None:
-    for release, marker in (("r1", "one"), ("r2", "good"), ("r3", "bad")):
-        _build(tmp_path, marker)
-        assert _publish(tmp_path, release).returncode == 0
-
-    rollback = subprocess.run(
-        ["bash", "-c", f"set -euo pipefail\n{_readme_rollback()}"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-
-    assert rollback.returncode == 0, rollback.stderr
-    assert _links(tmp_path) == ("releases/r2", "releases/r2")
-    assert "good" in (tmp_path / "www" / "current" / "index.html").read_text()
-    # A rollback deletes nothing: the bad release is still there to inspect.
-    assert _releases(tmp_path) == ["r2", "r3"]
-
-    _build(tmp_path, "fixed")
-    result = _publish(tmp_path, "r4")
-
-    assert result.returncode == 0, result.stderr
-    # The rolled-back-to release is what the fix replaced, so it is `previous`;
-    # the bad one was neither, so it is gone.
-    assert _links(tmp_path) == ("releases/r4", "releases/r2")
-    assert _releases(tmp_path) == ["r2", "r4"]
-    assert "good" in (tmp_path / "www" / "previous" / "index.html").read_text()
-
-
-def test_publishing_never_deletes_what_current_or_previous_names(tmp_path: Path) -> None:
-    """Whatever sequence of publishes and rollbacks, both links always resolve."""
-    www = tmp_path / "www"
-    steps = ["r1", "r2", "rollback", "r3", "rollback", "rollback", "r4", "r5", "rollback"]
-    for step in steps:
-        if step == "rollback":
-            subprocess.run(["bash", "-c", _readme_rollback()], cwd=tmp_path, check=True)
-        else:
-            _build(tmp_path, step)
-            assert _publish(tmp_path, step).returncode == 0
-        assert (www / "current" / "index.html").exists(), step
-        if (www / "previous").is_symlink():
-            assert (www / "previous" / "index.html").exists(), step
-
-
-def test_a_dangling_current_is_not_kept_as_previous(tmp_path: Path) -> None:
-    (tmp_path / "www" / "releases").mkdir(parents=True)
-    os.symlink("releases/gone", tmp_path / "www" / "current")
-    _build(tmp_path, "one")
-
-    result = _publish(tmp_path, "r1")
-
-    assert result.returncode == 0, result.stderr
-    assert _links(tmp_path) == ("releases/r1", None)
-
-
 # ── deploy.sh end to end, against stubs ──────────────────────────────────────
 #
 # The real deploy.sh and lib.sh run in a scratch repo with `docker`, `sops`,
-# `git` and `curl` stubbed and decrypt-env.sh replaced; flock, cp, ln and mv are
-# real. The docker stub plays the frontend build (deleting and recreating
-# frontend/build, as SvelteKit does) and records, at `up -d --wait`, which
-# release www/current resolved to — that is what Caddy would start serving.
+# `git` and `curl` stubbed and decrypt-env.sh replaced; flock, cp, awk and sed
+# are real. The docker stub records, at `up -d --wait`, the host list Caddy is
+# about to be recreated with.
 
 DEPLOY_DOCKER_STUB = """#!/bin/sh
 printf '%s\\n' "$*" >> "$STUB_DIR/calls"
@@ -763,16 +733,9 @@ if [ -n "${STUB_FAIL:-}" ]; then
   case "$*" in *"$STUB_FAIL"*) exit 1 ;; esac
 fi
 case "$*" in
-  *frontend-build*)
-    rm -rf "$REPO/frontend/build"
-    mkdir -p "$REPO/frontend/build"
-    echo "<!doctype html>$BUILD_MARK" > "$REPO/frontend/build/index.html" ;;
   *"up -d --wait --wait-timeout 300"*)
-    if [ -e "$REPO/deploy/www/current/index.html" ]; then
-      echo "AT-ROLL live $(readlink "$REPO/deploy/www/current")" >> "$STUB_DIR/calls"
-    else
-      echo "AT-ROLL nothing" >> "$STUB_DIR/calls"
-    fi ;;
+    n=$(grep -c 'import spa' "$REPO/deploy/tenants.caddy")
+    echo "AT-ROLL $n spa block(s)" >> "$STUB_DIR/calls" ;;
   *"exec -T caddy cat /etc/caddy/"*)
     for arg; do last=$arg; done
     cat "$REPO/deploy/${last##*/}" ;;
@@ -817,23 +780,15 @@ class Stack:
             "POSTGRES_PASSWORD=x\\nFEOH_SIGNUP_ENABLED=false\\n' > .env\n"
         )
         decrypt.chmod(0o755)
-        (self.repo / "frontend").mkdir()
-        (self.repo / "frontend" / "package.json").write_text(
-            '{\n  "packageManager": "pnpm@10.0.0"\n}\n'
-        )
         self.path = _with_stub(root, "docker", DEPLOY_DOCKER_STUB)
         _with_stub(root, "sops", "#!/bin/sh\nexit 0\n")
         _with_stub(root, "git", "#!/bin/sh\necho abcdef123456\n")
         _with_stub(root, "curl", DEPLOY_CURL_STUB)
-        self.www = self.deploy / "www"
-
-    def live_release(self, name: str) -> None:
-        (self.www / "releases" / name).mkdir(parents=True)
-        (self.www / "releases" / name / "index.html").write_text(f"<!doctype html>{name}\n")
-        os.symlink(f"releases/{name}", self.www / "current")
+        self.hosts = self.deploy / "tenants.caddy"
 
     def run(self, *args: str, fail: str = "") -> subprocess.CompletedProcess[str]:
         (self.root / "calls").write_text("")
+        (self.root / "curl_calls").write_text("")
         return subprocess.run(
             ["bash", str(self.deploy / "deploy.sh"), "--no-pull", *args],
             capture_output=True,
@@ -843,7 +798,6 @@ class Stack:
                 "HOME": str(self.root),
                 "STUB_DIR": str(self.root),
                 "REPO": str(self.repo),
-                "BUILD_MARK": "new-build",
                 "FEOH_SMOKE_INTERVAL": "0",
                 "STUB_FAIL": fail,
             },
@@ -852,8 +806,8 @@ class Stack:
     def calls(self) -> list[str]:
         return (self.root / "calls").read_text().splitlines()
 
-    def releases(self) -> list[str]:
-        return sorted(p.name for p in (self.www / "releases").iterdir())
+    def curled(self) -> set[str]:
+        return {line.split()[-1] for line in (self.root / "curl_calls").read_text().splitlines()}
 
 
 @pytest.fixture
@@ -861,76 +815,74 @@ def stack(tmp_path: Path) -> Stack:
     return Stack(tmp_path)
 
 
-def test_a_first_deploy_publishes_before_the_roll_and_only_once(stack: Stack) -> None:
-    """The one-time migration: no www/ yet, so the release must already be live
-    when `up` recreates Caddy onto the new mount — and not be published twice."""
+def test_a_deploy_builds_the_backend_only_and_smoke_checks_the_api(stack: Stack) -> None:
     result = stack.run()
 
     assert result.returncode == 0, result.stderr
-    [release] = stack.releases()
     calls = stack.calls()
-    assert f"AT-ROLL live releases/{release}" in calls
-    assert result.stdout.count("published release") == 1
-    assert not (stack.www / "previous").exists()
-    assert "new-build" in (stack.www / "current" / "index.html").read_text()
-    # It is the build's own output being published, which needs the build first.
-    build = next(i for i, c in enumerate(calls) if "frontend-build" in c)
-    roll = next(i for i, c in enumerate(calls) if "up -d --wait --wait-timeout 300" in c)
-    assert build < roll
+    assert any("build api" in c for c in calls)
+    assert not any("frontend-build" in c for c in calls)
+    assert not (stack.deploy / "www").exists(), "deploy.sh created an SPA directory"
+    # The VM's smoke check fetches what the VM serves, never the CloudFront apex.
+    curled = stack.curled()
+    assert "https://api.example.com/api/health" in curled
+    assert "https://app.example.com/" not in curled
+    assert "deploy complete" in result.stdout
 
 
-def test_a_redeploy_publishes_after_the_roll(stack: Stack) -> None:
-    stack.live_release("old")
-
-    result = stack.run()
-
-    assert result.returncode == 0, result.stderr
-    # Caddy still served the old release while the API rolled.
-    assert "AT-ROLL live releases/old" in stack.calls()
-    assert result.stdout.count("published release") == 1
-    new = os.readlink(stack.www / "current")
-    assert new != "releases/old"
-    assert os.readlink(stack.www / "previous") == "releases/old"
-    assert stack.releases() == sorted(["old", new.removeprefix("releases/")])
-
-
-def test_a_dangling_current_is_republished_before_the_roll(stack: Stack) -> None:
-    stack.www.mkdir()
-    os.symlink("releases/gone", stack.www / "current")
+def test_the_first_deploy_of_this_layout_prunes_the_legacy_host_list_before_the_roll(
+    stack: Stack,
+) -> None:
+    """A VM's tenants.caddy from before §364 holds `{ import spa }` per tenant;
+    the Caddyfile the roll recreates Caddy with has no `spa`, so they must be
+    gone first, or Caddy refuses the whole config and api. goes down with it."""
+    stack.hosts.write_text(
+        "acme.app.example.com {\n\timport spa\n}\n\nshop.acmecorp.com {\n\timport spa\n}\n"
+    )
 
     result = stack.run()
 
     assert result.returncode == 0, result.stderr
-    [release] = stack.releases()
-    assert f"AT-ROLL live releases/{release}" in stack.calls()
-    assert not (stack.www / "previous").exists()
+    assert "AT-ROLL 0 spa block(s)" in stack.calls()
+    after = stack.hosts.read_text()
+    assert "acme.app.example.com" not in after
+    assert "shop.acmecorp.com {\n\timport vanity\n}" in after
+    assert "acme.app.example.com" in result.stdout, "the dropped hosts are listed"
+    # The one vanity host is this VM's TLS to check.
+    assert "https://shop.acmecorp.com/" in stack.curled()
 
 
-@pytest.mark.parametrize("state", ["absent", "dangling"])
-def test_backend_only_refuses_without_a_live_release(stack: Stack, state: str) -> None:
-    if state == "dangling":
-        stack.www.mkdir()
-        os.symlink("releases/gone", stack.www / "current")
+def test_a_missing_host_list_is_seeded_from_the_example(stack: Stack) -> None:
+    result = stack.run()
+    assert result.returncode == 0, result.stderr
+    assert stack.hosts.read_text() == (DEPLOY / "tenants.caddy.example").read_text()
 
+
+def test_backend_only_is_accepted_and_handed_on(stack: Stack) -> None:
+    """Every deploy is backend-only now; the flag still parses so a rollback to an
+    older deploy.sh, which it is handed on to, keeps its meaning there."""
     result = stack.run("--backend-only")
+    assert result.returncode == 0, result.stderr
+    assert "deploy complete" in result.stdout
 
+
+def test_frontend_only_is_refused_with_a_pointer() -> None:
+    result = _run_deploy("--frontend-only")
     assert result.returncode != 0
-    assert "no live frontend release" in result.stderr
-    assert not any("up -d" in c or "build api" in c for c in stack.calls())
+    assert "no longer builds or serves the SPA" in result.stderr
+    assert "S3 + CloudFront" in result.stderr
 
 
-def test_backend_only_leaves_a_live_release_alone(stack: Stack) -> None:
-    stack.live_release("old")
+def test_leftover_spa_state_is_pointed_out_not_deleted(stack: Stack) -> None:
+    (stack.deploy / "www" / "releases" / "r1").mkdir(parents=True)
 
-    result = stack.run("--backend-only")
+    result = stack.run()
 
     assert result.returncode == 0, result.stderr
-    assert os.readlink(stack.www / "current") == "releases/old"
-    assert not any("frontend-build" in c for c in stack.calls())
-    curl_args = {
-        arg for line in (stack.root / "curl_calls").read_text().splitlines() for arg in line.split()
-    }
-    assert {"https://app.example.com/", "https://api.example.com/api/health"} <= curl_args
+    assert "deploy/www/ still holds SPA releases" in result.stderr
+    assert (stack.deploy / "www" / "releases" / "r1").exists()
+    # The stub answers `docker volume inspect` with success, i.e. the volume exists.
+    assert "docker volume rm feoh-prod_pnpm-store" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -938,7 +890,6 @@ def test_backend_only_leaves_a_live_release_alone(stack: Stack) -> None:
     [
         "deploy_migrate.sh",  # the migration step (init, alembic, every tenant)
         "build api",
-        "frontend-build",
     ],
 )
 def test_a_failed_build_or_migration_fails_the_deploy_before_the_roll(
@@ -946,22 +897,17 @@ def test_a_failed_build_or_migration_fails_the_deploy_before_the_roll(
 ) -> None:
     """deploy.sh rolls new code only over a schema that migrated: a failed
     migration (migrate_all_tenants exits non-zero on any failed tenant, #570)
-    or build must stop it before `up`, with the old release still live."""
-    stack.live_release("old")
-
+    or build must stop it before `up`."""
     result = stack.run(fail=fail)
 
     assert result.returncode != 0
     assert not any("up -d --wait --wait-timeout 300" in c for c in stack.calls())
-    assert os.readlink(stack.www / "current") == "releases/old"
     assert "deploy complete" not in result.stdout
 
 
 def test_a_failed_post_deploy_prune_warns_but_the_deploy_stands(stack: Stack) -> None:
     """The deliberate non-failure: disk hygiene after a deploy that is already
     live; the smoke check after it still decides the outcome."""
-    stack.live_release("old")
-
     result = stack.run(fail="image prune")
 
     assert result.returncode == 0, result.stderr
