@@ -66,7 +66,7 @@ export const messages = {
 		'Bezahlen Sie jede Rechnung mit einer eigenen virtuellen Einmalkarte, ausgegeben über Lithic oder Nium, und erhalten Sie typischerweise 1–2 % Rückvergütung auf Zahlungen an Lieferanten, die Karten akzeptieren.',
 	'marketing.features.exceptions.title': 'Ausnahmenliste',
 	'marketing.features.exceptions.body':
-		'Dubletten, Betrugsverdacht, Betragsüberschreitungen und unbestätigte Lieferanten werden markiert, zugewiesen und in einer Liste geklärt – ohne Suche im E-Mail-Postfach.',
+		'Dubletten, Betrugsverdacht, Betragsüberschreitungen und unbestätigte Lieferanten werden markiert, zugewiesen und in einer Liste geklärt – ohne Suche im E-Mail-Postfach. Eine Änderung der Bankverbindung eines Lieferanten wartet auf die Freigabe durch eine zweite Person, und jede Änderung wird protokolliert. Nach der Freigabe werden die genehmigten, noch offenen Rechnungen dieses Lieferanten vor der Zahlung zur Prüfung angehalten.',
 
 	'marketing.how.eyebrow': 'So funktioniert’s',
 	'marketing.how.heading': 'Von der Rechnung ins Hauptbuch, in drei Schritten.',
