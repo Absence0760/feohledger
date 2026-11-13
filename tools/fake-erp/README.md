@@ -431,7 +431,8 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   `a6100000-…`), plus heading `6000` and blocked `6900` (the adapter skips
   both). `GET …/purchaseOrders` (lines with `$expand=purchaseOrderLines`) —
   `PO-FAKE-BC-401` 1500.25, blank `currencyCode`, blank date `0001-01-01`;
-  `PO-FAKE-BC-402` 820.00 EUR. Every collection honours
+  `PO-FAKE-BC-402` 820.00 EUR, status `Draft` (synced as `unissued`, decisions
+  §394). Every collection honours
   `Prefer: odata.maxpagesize` and returns `@odata.nextLink` (`$skiptoken`).
   `DELETE …/purchaseInvoices({id})` needs `If-Match` and deletes only a `Draft`.
   A purchaseInvoice `Account` line must carry a posting account's `accountId`.

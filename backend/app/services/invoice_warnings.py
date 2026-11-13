@@ -1072,6 +1072,12 @@ async def _refresh_po_match(
         flag = warning("po_cancelled", "warning", poNumber=match.po_number)
         warnings.append(flag)
         await _raise("po_mismatch", "warning", flag)
+    elif match.status == "mismatch" and match.po_not_issued:
+        # The ERP has not approved or issued the PO yet (decisions §394): it
+        # authorizes nothing, so the invoice is held like a cancelled PO's.
+        flag = warning("po_not_issued", "warning", poNumber=match.po_number)
+        warnings.append(flag)
+        await _raise("po_mismatch", "warning", flag)
     elif match.status == "mismatch" and match.po_total_unverifiable_reason:
         # The PO's last ERP sync could not state its total exactly (decisions
         # §323): the matcher compared nothing, because the total on the row is
@@ -1268,6 +1274,8 @@ def blocking_finding_types(match) -> set[str]:
     if match.status == "no_po":
         found.add("po_mismatch")
     elif match.status == "mismatch" and match.po_cancelled:
+        found.add("po_mismatch")
+    elif match.status == "mismatch" and match.po_not_issued:
         found.add("po_mismatch")
     elif match.status == "mismatch" and match.po_total_unverifiable_reason:
         found.add("po_mismatch")
@@ -1885,6 +1893,10 @@ _PO_MATCH_FACT_FIELDS = (
     "currency_check",
     "po_total_unverifiable_reason",
     "po_cancelled",
+    # Not `po_not_issued` (decisions §394): a match stored before it existed
+    # lacks the key, so naming it would move every fingerprint on the first
+    # refresh after a deploy. The `po_match.issue.po_not_issued` issue code
+    # below already carries the same fact.
     "gr_id",
     "amount_variance",
     "amount_variance_pct",

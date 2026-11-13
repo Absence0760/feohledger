@@ -312,9 +312,15 @@ def gl_account_type(category: object) -> str | None:
 
 
 def _po_status(status: object) -> str:
+    """The PO's ``Status`` → ours. The real strings are not confirmed yet
+    (#654: sandbox only), so it reads words, not exact values: a draft, or one
+    awaiting approval, is ``unissued`` and nothing matches against it
+    (decisions §394); anything unrecognised stays ``open``."""
     s = str(status or "").strip().lower()
     if "cancel" in s:
         return "cancelled"
+    if "draft" in s or "approval" in s:
+        return "unissued"
     if s in {"complete", "completed", "closed", "invoiced", "processed"}:
         return "closed"
     return "open"

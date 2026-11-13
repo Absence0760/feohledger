@@ -2907,6 +2907,11 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoNotIssued(String poNumber) {
+    return 'La commande $poNumber n’est pas encore approuvée dans l’ERP — la facture n’a pas été rapprochée avec elle';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return 'Le total de la commande $poNumber n’a pas pu être confirmé par l’ERP lors de la dernière synchronisation — les montants n’ont pas été comparés';
   }
@@ -3119,6 +3124,10 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get invoicePoMatchIssuePoCancelled =>
       'Commande annulée — montants non comparés';
+
+  @override
+  String get invoicePoMatchIssuePoNotIssued =>
+      'Commande pas encore approuvée dans l’ERP — montants non comparés';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>

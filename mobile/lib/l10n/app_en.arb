@@ -1857,6 +1857,14 @@
       }
     }
   },
+  "invoiceWarningPoNotIssued": "PO {poNumber} is not approved in the ERP yet — the invoice was not matched against it",
+  "@invoiceWarningPoNotIssued": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningPoTotalUnverifiable": "The total of PO {poNumber} could not be confirmed from the ERP on its last sync — the amounts were not compared",
   "@invoiceWarningPoTotalUnverifiable": {
     "placeholders": {
@@ -2192,6 +2200,7 @@
     }
   },
   "invoicePoMatchIssuePoCancelled": "PO is cancelled — amounts not compared",
+  "invoicePoMatchIssuePoNotIssued": "PO not approved in the ERP yet — amounts not compared",
   "invoicePoMatchIssuePoTotalUnverifiable": "PO total not confirmed by the ERP on its last sync — amounts not compared",
   "invoicePoMatchIssueAmountMismatch": "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})",
   "@invoicePoMatchIssueAmountMismatch": {

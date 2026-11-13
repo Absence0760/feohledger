@@ -94,7 +94,7 @@
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let search = $state('');
-	let statusFilter = $state<'all' | 'open' | 'closed' | 'cancelled'>('all');
+	let statusFilter = $state<'all' | 'open' | 'unissued' | 'closed' | 'cancelled'>('all');
 	/**
 	 * Badge tone per PO status.
 	 *
@@ -107,6 +107,9 @@
 	 */
 	const STATUS_TONES: Record<string, BadgeTone> = {
 		open: 'accent',
+		// Not approved or issued in the ERP yet: it syncs, but nothing matches
+		// against it until the ERP issues it (decisions §394).
+		unissued: 'warning',
 		closed: 'success',
 		cancelled: 'muted'
 	};
@@ -276,6 +279,11 @@
 	let statusChips = $derived([
 		{ key: 'all', label: m('common.all'), count: allCount },
 		{ key: 'open', label: m('purchaseOrders.filter.open'), count: statusCounts.open },
+		{
+			key: 'unissued',
+			label: m('purchaseOrders.filter.unissued'),
+			count: statusCounts.unissued
+		},
 		{ key: 'closed', label: m('purchaseOrders.filter.closed'), count: statusCounts.closed },
 		{
 			key: 'cancelled',

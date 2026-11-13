@@ -35,6 +35,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.models.procurement import UNISSUED_PO_STATUS
 from app.services.po_matching import MatchResult, match_invoice_to_po
 
 
@@ -684,6 +685,51 @@ async def test_a_closed_po_still_matches():
 
     assert result.status == "matched"
     assert result.po_cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_an_unissued_po_is_never_matched_against():
+    """The invoice equals the PO exactly, but nobody in the ERP has approved or
+    issued the order (decisions §394): it authorizes nothing, so the amount
+    control does not pass, and no variance is reported (a 0 would read as a
+    perfect match)."""
+    po = _po(total=Decimal("1000.00"), status=UNISSUED_PO_STATUS)
+    result = await match_invoice_to_po(_mk_db(po=po), _invoice(amount=Decimal("1000.00")))
+
+    assert result.status == "mismatch"
+    assert result.po_not_issued is True
+    assert result.po_cancelled is False
+    assert result.within_tolerance is False
+    assert result.amount_variance is None
+    assert result.amount_variance_pct is None
+    assert [i["code"] for i in result.issues] == ["po_match.issue.po_not_issued"]
+    assert result.to_json_dict()["details"]["po_not_issued"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_unissued_po_stays_refused_with_full_receipts():
+    """Goods received against a draft order do not make it an issued one."""
+    po = _po(
+        total=Decimal("1000.00"),
+        status=UNISSUED_PO_STATUS,
+        line_items=[_li(quantity=Decimal("10"))],
+    )
+    gr = _gr(line_items=[_li(received=Decimal("10"))])
+    result = await match_invoice_to_po(_mk_db(po=po, gr=gr), _invoice(amount=Decimal("1000.00")))
+
+    assert result.status == "mismatch"
+    assert result.po_not_issued is True
+
+
+@pytest.mark.asyncio
+async def test_an_issued_po_still_matches():
+    """The same order once the ERP issues it (`open`) matches as usual."""
+    po = _po(total=Decimal("1000.00"), status="open")
+    result = await match_invoice_to_po(_mk_db(po=po), _invoice(amount=Decimal("1000.00")))
+
+    assert result.status == "matched"
+    assert result.po_not_issued is False
+    assert result.to_json_dict()["details"]["po_not_issued"] is False
 
 
 @pytest.mark.asyncio

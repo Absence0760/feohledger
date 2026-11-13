@@ -1809,26 +1809,6 @@ scope (§260) — do not fold them into any of these.
       group the closure can poll empty. **Trigger:** the first deployment that
       runs `FEOH_AUDIT_MODE=lambda` and wants self-service closure.
 
-### Surfaced by the live Xero Demo Company test (2026-10-20)
-
-Linking a synced purchase order to its vendor by the ERP's supplier id (and
-filling a missing link on a re-sync) landed with the test. Two gaps it exposed
-stay open.
-
-- [ ] **(c) An unapproved ERP purchase order syncs as `open` and can be
-      matched.** `PurchaseOrder.status` has three values (open / closed /
-      cancelled), so Xero's `DRAFT` and `SUBMITTED` and NetSuite's Pending
-      Supervisor Approval (`A`) all land as `open`. In the Demo Company, a
-      Draft PO showed as OPEN. An invoice can then pass 2/3-way match against
-      an order nobody in the ERP has approved. **Durable fix:** decide between
-      skipping not-yet-issued POs in each `list_pos` (they arrive once
-      approved, and the existing upsert refreshes the status) and adding an
-      unissued status that `po_matching` refuses. Both change the PO
-      vocabulary every adapter maps onto, so record the choice in
-      decisions.md. **Trigger:** before the first tenant matches invoices
-      against live Xero or NetSuite POs, or the next change to the PO status
-      vocabulary.
-
 ### Surfaced by the Blackbaud FE NXT API audit (#651, 2026-10-26)
 
 - [ ] **(c) A push refused by the SKY call budget is not re-sent when the
@@ -2278,7 +2258,8 @@ as oversights.
       period / inactive vendor or account / duplicate bill number (to map
       `period_closed` and `duplicate_document_number`), whether a bill
       settled by a debit memo reads `paid`, the purchasing-document `state`
-      strings for a draft or unapproved PO, multi-currency without an
+      strings for a draft or unapproved PO (the sync reads draft / submitted /
+      partially approved / analyzing as `unissued`, §394), multi-currency without an
       exchange rate, a top-level create in a multi-entity company, whether the
       token endpoint takes the form-encoded body, and the reverse-workflow
       answer in a reversal-enabled company.
@@ -2287,9 +2268,12 @@ as oversights.
       lookup's date window uses, the 400 body for a locked period / inactive
       supplier or account / duplicate number, whether `Paid` turns true on a
       credit (SupplierReturn) allocation, `CurrencyId` for home-currency
-      suppliers, account categories and PO status strings, and the Resellers
-      (Sandbox) host (#654).
-      **Blackbaud:** an empty `transaction_code_values`, the description
+      suppliers, account categories and PO status strings (read by word
+      today; a draft or awaiting-approval one is `unissued`, decisions §394),
+      and the Resellers (Sandbox) host (#654).
+      **Blackbaud:** whether a purchase order carries an approval state the
+      PO sync should map to `unissued` (none of `PurchaseOrderStatus` is
+      mapped to it today, decisions §394); an empty `transaction_code_values`, the description
       length, and job latency; which date ListInvoices' `from_date` /
       `to_date` filter on and whether they are inclusive (the adapter
       queries a day either side, `#651` B5); whether a closed period, an

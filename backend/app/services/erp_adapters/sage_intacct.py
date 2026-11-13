@@ -880,23 +880,18 @@ def _gl_account_type(raw: dict) -> str | None:
     return None
 
 
-#: Purchasing-document states for an order nobody in Intacct has issued yet: a
-#: draft, or one in (or refused by) purchasing approval. Such an order
-#: authorizes nothing, so it must not reach 2/3-way matching as ``open``.
-_UNISSUED_PO_STATES = frozenset({"draft", "submitted", "partiallyapproved", "declined"})
+#: PO ``state`` values for an order not yet approved (decisions §394): a
+#: draft, one submitted for approval, one partly through a multi-step approval,
+#: or one still being analysed. Nothing matches against one.
+_UNISSUED_PO_STATES = frozenset({"draft", "submitted", "partiallyapproved", "analyzing"})
 
 
 def _po_status(state: object) -> str:
     s = str(state or "").replace(" ", "").replace("_", "").lower()
-    if s in _UNISSUED_PO_STATES:
-        # TODO(#655 Intacct #12, postatus lane): return
-        # `models.procurement.UNISSUED_PO_STATUS` here once that lane lands the
-        # constant. Until then an unissued Intacct PO still syncs as `open`,
-        # as every adapter's does (docs/followups.md, "An unapproved ERP
-        # purchase order syncs as `open`").
-        return "open"
     if s in {"closed", "converted", "convertedbyline"}:
         return "closed"
-    if s in {"canceled", "cancelled"}:
+    if s in {"canceled", "cancelled", "declined"}:
         return "cancelled"
+    if s in _UNISSUED_PO_STATES:
+        return "unissued"
     return "open"

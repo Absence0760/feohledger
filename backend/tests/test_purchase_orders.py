@@ -21,7 +21,13 @@ from sqlalchemy import func, select
 
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
-from app.models.procurement import GoodsReceipt, GRLineItem, POLineItem, PurchaseOrder
+from app.models.procurement import (
+    UNISSUED_PO_STATUS,
+    GoodsReceipt,
+    GRLineItem,
+    POLineItem,
+    PurchaseOrder,
+)
 from app.models.vendor import Vendor
 
 # ---------------------------------------------------------------------------
@@ -1701,6 +1707,63 @@ async def test_sync_erp_cancelling_a_po_holds_the_invoice_citing_it(realdb, monk
     resp = await _try_run(realdb, inv_id)
     assert resp.status_code == 409, resp.text
     assert "po_mismatch" in resp.json()["detail"]
+
+
+async def test_sync_erp_taking_a_po_back_to_unissued_holds_the_invoice_citing_it(
+    realdb, monkeypatch
+):
+    """An earlier sync stored a PO as `open`; the ERP now reports it as not
+    approved (decisions §394). The total did not move, but an unissued order
+    authorizes nothing: the sync re-matches, the invoice is held with the
+    `po_not_issued` finding, and the run refuses it. The ERP approving it
+    later does not lift the hold from the sync (decisions §323, amended)."""
+    from app.services.erp_adapters.base import PoPayload
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-UNISS", total=Decimal("500.00"), currency="USD")],
+    )
+    inv_id = await _seed_approved_po_invoice(
+        realdb, number="INV-UNISS-1", po_number="PO-UNISS", amount="500.00"
+    )
+    assert await _po_mismatch_rows(realdb, inv_id) == []
+
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(
+                po_number="PO-UNISS",
+                total=Decimal("500.00"),
+                currency="USD",
+                status=UNISSUED_PO_STATUS,
+            )
+        ],
+    )
+    [held] = await _po_mismatch_rows(realdb, inv_id)
+    assert held.status == "open"
+    async with realdb.sessionmaker("a")() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.po_match["po_not_issued"] is True
+        assert "po_not_issued" in [w.get("code") for w in inv.warnings or []]
+
+    resp = await _try_run(realdb, inv_id)
+    assert resp.status_code == 409, resp.text
+    assert "po_mismatch" in resp.json()["detail"]
+
+    # The ERP issues it: the re-match matches again, but the sync never clears.
+    await _sync_with_listing(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="PO-UNISS", total=Decimal("500.00"), currency="USD")],
+    )
+    async with realdb.sessionmaker("a")() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.po_match["status"] == "matched"
+        assert inv.po_match["po_not_issued"] is False
+    [row] = await _po_mismatch_rows(realdb, inv_id)
+    assert row.id == held.id and row.status == "open"
 
 
 async def test_sync_erp_raising_a_po_total_never_clears_the_hold(realdb, monkeypatch):

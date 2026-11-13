@@ -336,6 +336,14 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         "PO {poNumber} is cancelled — the invoice was not matched against it",
         {"poNumber": "text"},
     ),
+    # The ERP has not approved or issued the PO yet (decisions §394): it
+    # authorizes nothing, so the invoice was not matched against it.
+    WarningSpec(
+        "po_not_issued",
+        "po_mismatch",
+        "PO {poNumber} is not approved in the ERP yet — the invoice was not matched against it",
+        {"poNumber": "text"},
+    ),
     # The PO's last ERP sync could not state its total exactly, so the total on
     # record is not compared against (decisions §323). No figure is printed:
     # the stale one is precisely what must not be presented as the PO's.
@@ -625,6 +633,12 @@ PO_MATCH_ISSUE_SPECS: tuple[WarningSpec, ...] = (
         PO_MATCH_ISSUE_PREFIX + "po_cancelled",
         PO_MATCH_ISSUE_TYPE,
         "PO is cancelled — amounts not compared",
+        {},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "po_not_issued",
+        PO_MATCH_ISSUE_TYPE,
+        "PO not approved in the ERP yet — amounts not compared",
         {},
     ),
     WarningSpec(
