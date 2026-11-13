@@ -34,7 +34,7 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from app.config import settings
-from app.services import erp_oauth, tenant_deletion
+from app.services import erp_oauth, post_commit, tenant_deletion
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.erp_adapters.sage_accounting import SAGE_ACCOUNTING_OAUTH
 from app.services.tenant_deletion import (
@@ -163,13 +163,13 @@ async def test_the_database_goes_first_then_documents_then_the_control_row():
 
     async def _grant(_plan, _session):
         order.append("grant")
-        return None, None
+        return None
 
     with (
         patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
         patch.object(tenant_deletion.storage, "delete_prefix", _sweep),
         patch.object(tenant_deletion, "_drop_postgres_database", _drop),
-        patch.object(tenant_deletion, "_revoke_erp_grant", _grant),
+        patch.object(tenant_deletion, "_read_erp_grant", _grant),
         patch.object(tenant_deletion, "control_session_factory", lambda: _Session()),
     ):
         result = await delete_tenant("ordertest")
@@ -255,7 +255,7 @@ async def test_an_object_put_after_the_first_listing_is_swept_by_the_second():
     with (
         patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
         patch.object(tenant_deletion.storage, "delete_prefix", _sweep),
-        patch.object(tenant_deletion, "_revoke_erp_grant", AsyncMock(return_value=(None, None))),
+        patch.object(tenant_deletion, "_read_erp_grant", AsyncMock(return_value=None)),
         patch.object(tenant_deletion, "control_session_factory", lambda: _Session()),
     ):
         result = await delete_tenant("latepu")
@@ -343,6 +343,19 @@ class _GrantSession:
         self.org_settings = org_settings
         self.deletes = 0
         self.savepoints = 0
+        self.info: dict = {}  # where `post_commit` queues its jobs
+
+    def in_nested_transaction(self) -> bool:
+        return False
+
+    async def commit(self):
+        """The closure's commit, as SQLAlchemy's `after_commit` sees it: the
+        queued post-commit jobs start, and the test awaits them."""
+        post_commit._on_after_commit(self)
+        await post_commit.drain_post_commit()
+
+    def rollback(self):
+        post_commit._on_after_rollback(self)
 
     async def __aenter__(self):
         return self
@@ -538,20 +551,23 @@ async def test_a_tenant_without_an_erp_grant_calls_nobody(monkeypatch):
     assert "ERP OAuth grant" not in format_confirmation(result)
 
 
-@pytest.mark.asyncio
-async def test_the_grant_is_read_on_the_closures_own_session(monkeypatch, sage_platform_app):
-    """A self-service closure holds the org row FOR UPDATE on its session; the
-    grant must be read there, not on a second session (decisions §306)."""
-    _ScriptedRevoke(200).install(monkeypatch)
-    org_id = uuid.uuid4()
-    plan = _FakePlan(
-        organization_id=org_id,
+def _closing_plan() -> _FakePlan:
+    return _FakePlan(
+        organization_id=uuid.uuid4(),
         slug="closing",
         name="Closing Co",
         db_name="feoh_closing",
         database_exists=False,
         control_rows={},
     )
+
+
+@pytest.mark.asyncio
+async def test_the_grant_is_read_on_the_closures_own_session(monkeypatch, sage_platform_app):
+    """A self-service closure holds the org row FOR UPDATE on its session; the
+    grant must be read there, not on a second session (decisions §306)."""
+    _ScriptedRevoke(200).install(monkeypatch)
+    plan = _closing_plan()
     held = _GrantSession(_grant_settings("sage_accounting"))
     seen: list[object] = []
 
@@ -575,7 +591,136 @@ async def test_the_grant_is_read_on_the_closures_own_session(monkeypatch, sage_p
     # transaction before its control-plane delete.
     assert held.savepoints == 1
     assert held.deletes == len(CONTROL_DELETIONS) and other.deletes == 0
+    assert result.erp_grant_provider == "sage_accounting"
+    await held.commit()
     assert result.erp_grant_revocation == erp_oauth.REVOKED
+
+
+@pytest.mark.asyncio
+async def test_a_closure_calls_the_provider_only_after_its_commit(
+    monkeypatch, sage_platform_app, caplog
+):
+    """The closure's transaction holds the org, user and subscription rows
+    FOR UPDATE until its caller commits. The provider is never called inside
+    it (root CLAUDE.md, `post_commit`): the tokens are read there, and the
+    revoke is queued for the commit. The outcome still reaches the result and
+    the log, provider and outcome only."""
+    revoke = _ScriptedRevoke(200).install(monkeypatch)
+    caplog.set_level("DEBUG")
+    plan = _closing_plan()
+    held = _GrantSession(_grant_settings("sage_accounting"))
+
+    async def _resolved(_org_id, got_settings, _db):
+        erp = dict(got_settings["erp"])
+        oauth = dict(erp.pop("oauth"))
+        oauth.update(_GRANT_TOKENS)
+        return erp, oauth
+
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _resolved)
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: _GrantSession(None)),
+    ):
+        result = await delete_tenant("closing", control_session=held)
+
+    # Everything the closure's transaction does is done, and it is still open.
+    assert held.deletes == len(CONTROL_DELETIONS)
+    assert revoke.calls == [], "the provider was called while the closure held its locks"
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "sage_accounting",
+        tenant_deletion.GRANT_REVOKE_AFTER_COMMIT,
+    )
+    assert "NOT yet confirmed" in format_confirmation(result)
+
+    await held.commit()
+    (call,) = revoke.calls
+    assert call["data"]["token"] == "REFRESH-SECRET-9"
+    assert result.erp_grant_revocation == erp_oauth.REVOKED
+    assert "ERP OAuth grant (sage_accounting) revoked" in caplog.text
+    for secret in (*_GRANT_TOKENS.values(), "sage-platform-secret"):
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_closure_whose_provider_refuses_after_commit_reports_failed(
+    monkeypatch, sage_platform_app, caplog
+):
+    """After the commit nothing can stop the deletion, and nothing should: a
+    refusal is logged as ``failed`` and lands on the result."""
+    revoke = _ScriptedRevoke(503).install(monkeypatch)
+    caplog.set_level("DEBUG")
+    held = _GrantSession(_grant_settings("sage_accounting"))
+
+    async def _resolved(_org_id, got_settings, _db):
+        erp = dict(got_settings["erp"])
+        oauth = dict(erp.pop("oauth"))
+        oauth.update(_GRANT_TOKENS)
+        return erp, oauth
+
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _resolved)
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=_closing_plan())),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: _GrantSession(None)),
+    ):
+        result = await delete_tenant("closing", control_session=held)
+    assert revoke.calls == []
+    await held.commit()
+    assert len(revoke.calls) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_FAILED
+    assert "ERP OAuth grant (sage_accounting) failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_closure_that_rolls_back_revokes_nothing(monkeypatch, sage_platform_app):
+    """A rolled-back closure leaves the organisation and its sealed row; the
+    resumed closure reads and revokes again. Revoking now would cut a grant
+    whose workspace still says connected."""
+    revoke = _ScriptedRevoke(200).install(monkeypatch)
+    held = _GrantSession(_grant_settings("sage_accounting"))
+
+    async def _resolved(_org_id, got_settings, _db):
+        erp = dict(got_settings["erp"])
+        oauth = dict(erp.pop("oauth"))
+        oauth.update(_GRANT_TOKENS)
+        return erp, oauth
+
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _resolved)
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=_closing_plan())),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: _GrantSession(None)),
+    ):
+        await delete_tenant("closing", control_session=held)
+    held.rollback()
+    await held.commit()  # a later commit on the session runs nothing queued before
+    assert revoke.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_closure_with_a_provider_without_an_endpoint_reports_it_at_once(monkeypatch):
+    """Nothing to call, so nothing to defer: Blackbaud reads ``unsupported``
+    on the result straight away, and the commit sends nothing."""
+    revoke = _ScriptedRevoke(200).install(monkeypatch)
+    held = _GrantSession(_grant_settings("blackbaud_fe_nxt"))
+
+    async def _resolved(_org_id, got_settings, _db):
+        erp = dict(got_settings["erp"])
+        oauth = dict(erp.pop("oauth"))
+        oauth.update(_GRANT_TOKENS)
+        return erp, oauth
+
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _resolved)
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=_closing_plan())),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: _GrantSession(None)),
+    ):
+        result = await delete_tenant("closing", control_session=held)
+    await held.commit()
+    assert revoke.calls == []
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_UNSUPPORTED
 
 
 @pytest.mark.asyncio
@@ -627,6 +772,7 @@ def test_every_grant_outcome_has_its_confirmation_text():
         erp_oauth.REVOKE_FAILED,
         erp_oauth.REVOKE_UNSUPPORTED,
         tenant_deletion.GRANT_UNREADABLE,
+        tenant_deletion.GRANT_REVOKE_AFTER_COMMIT,
     )
     for outcome in outcomes:
         text_out = format_confirmation(
@@ -641,6 +787,8 @@ def test_every_grant_outcome_has_its_confirmation_text():
         line = next(ln for ln in text_out.splitlines() if "ERP OAuth grant" in ln)
         if outcome == erp_oauth.REVOKED:
             assert "revoked at the provider" in line
+        elif outcome == tenant_deletion.GRANT_REVOKE_AFTER_COMMIT:
+            assert "NOT yet confirmed" in line and "connected apps" in line
         else:
             assert "NOT revoked" in line and "connected apps" in line, outcome
 
