@@ -1405,3 +1405,76 @@ describe('the expense report and card reconciliation refusals (decisions §348, 
 		expect(out).not.toContain('Currency mismatch');
 	});
 });
+
+describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_status_change`)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+
+	it('states every code the endpoint defines — the reverse of the literal pin', () => {
+		const source = readFileSync(
+			new URL('../../../../backend/app/api/invoices.py', import.meta.url).pathname,
+			'utf8'
+		);
+		const codes = [...source.matchAll(/^INVOICE_[A-Z_]+ = "(invoice_[a-z_]+)"/gm)].map(
+			(x) => x[1]
+		);
+		expect(codes).toHaveLength(4);
+		for (const code of codes) {
+			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
+		}
+		// The skips that reuse a code stated elsewhere still need theirs here.
+		for (const code of [
+			'invoice_entry_window_closed',
+			INVOICE_STALE_APPROVAL,
+			INVOICE_REQUIRED_FIELDS_MISSING
+		]) {
+			expect(CODED_REFUSAL_CODES).toContain(code);
+		}
+	});
+
+	const FIXED: [string, MainMessageKey][] = [
+		['invoice_bulk_not_found', 'refusal.invoiceBulkNotFound'],
+		['invoice_still_extracting', 'refusal.invoiceStillExtracting'],
+		['invoice_recall_one_at_a_time', 'refusal.invoiceRecallOneAtATime']
+	];
+
+	it.each(FIXED)('%s is the fixed sentence %s in every shipped locale', (code, key) => {
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, `${locale} ${code}`).toBe((messages as Record<string, string>)[key]);
+			expect(text, `${locale} ${code}`).toBeTruthy();
+		}
+	});
+
+	it('invoice_status_immutable names the status by its label, in every shipped locale', () => {
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(
+				'invoice_status_immutable',
+				{ status: 'done' },
+				translator(messages, locale)
+			);
+			expect(text, locale).toContain((messages as Record<string, string>)['invoices.status.done']);
+			expect(text, locale).not.toMatch(/[{}]/);
+		}
+	});
+
+	it('invoice_status_immutable without a status falls back to the server English', () => {
+		expect(codedRefusalText('invoice_status_immutable', {}, enT)).toBeNull();
+	});
+
+	it('a skip row localizes through the transport entry point the bulk toast calls', () => {
+		const row = {
+			id: 'x',
+			reason: 'the invoice is still being read; wait for extraction to finish',
+			code: 'invoice_still_extracting',
+			params: {}
+		};
+		expect(localizeApiDetail(row, deT)).toBe(de['refusal.invoiceStillExtracting']);
+	});
+});

@@ -891,20 +891,16 @@ or is a sibling of a fix that needs its own pass.
 
 ### Surfaced by the money-path review of the recall (2026-11-13, decisions §379)
 
-- [ ] **(c) The bulk-status endpoint's own skip sentences read in English
-      only.** Since the engine's refusals were coded, every skip a
-      `POST /api/invoices/bulk/status` row gets from a service or the state
-      machine carries `code` + `params` (`api/invoices._refused_skip`), but the
-      six the endpoint writes itself are bare English `reason`s: `invoice not
-      found`, an entry-only caller's source, an immutable status, a mid-read
-      `pending → new`, the one-at-a-time recall, and missing required fields.
-      The list shows them untranslated beside localized rows. **Durable fix:**
-      a `coded_refusal` per sentence (the missing-fields one can reuse
-      `invoice_required_fields_missing` with its `fields`, the immutable one
-      `invoice_not_completable`'s `params.status` shape), built through
-      `_coded_skip`, with `codedRefusals.ts` entries in the six locales.
-      **Trigger:** the next change to `bulk_status_change` or to the invoice
-      list's bulk bar.
+- [ ] **(c) The expenses bulk GL-code toast splices English into a
+      localized sentence.** `routes/expenses/+page.svelte` (`bulkGlCode`)
+      builds `` `${m('expenses.toast.glCoded', …)} (skipped ${n})` ``, so the
+      "(skipped N)" tail reads in English in every locale. Found while sweeping
+      the other bulk endpoints for decisions §387 (their skip `reason`s are
+      never rendered — vendors, exceptions and expenses toasts show counts
+      only — so they need no code). **Durable fix:** a pluralized
+      `expenses.toast.glCodedSkipped` key in the six locales, as
+      `invoices.toast.updatedSkipped` does. **Trigger:** the next change to the
+      expenses bulk bar.
 
 ### Surfaced by the vendors table column fix (2026-10-06)
 

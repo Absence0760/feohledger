@@ -379,6 +379,21 @@ const BUILDERS: Record<string, Builder> = {
 	invoice_once_approved_not_closed_from_draft: fixed(
 		'refusal.invoiceOnceApprovedNotClosedFromDraft'
 	),
+	// `api/invoices.bulk_status_change`'s own skips (decisions §387): an id
+	// not found in the entity, an immutable row (`params.status`, named by its
+	// label), a `pending` row still being read, and a recall asked of the bulk
+	// bar. Its other skips reuse codes stated elsewhere in this table.
+	invoice_bulk_not_found: fixed('refusal.invoiceBulkNotFound'),
+	invoice_status_immutable: (params, t) => {
+		const status = str(params, 'status');
+		return status === null
+			? null
+			: t('refusal.invoiceStatusImmutable', {
+					status: statusLabel(status, invoiceStatusLabelKey, t)
+				});
+	},
+	invoice_still_extracting: fixed('refusal.invoiceStillExtracting'),
+	invoice_recall_one_at_a_time: fixed('refusal.invoiceRecallOneAtATime'),
 	// `api/workflow.close_refusals` — `/complete` closing to `done`, and a
 	// `POST /bulk/status → done` row's skip, refused while a live payment or
 	// virtual card holds the invoice (decisions §357). `params.claim` names

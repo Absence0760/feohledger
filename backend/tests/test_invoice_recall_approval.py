@@ -585,6 +585,8 @@ async def test_bulk_status_does_not_recall(realdb, status):
     assert body["updated"] == 0
     (skip,) = body["skipped"]
     assert "Recall approval" in skip["reason"]
+    assert skip["code"] == "invoice_recall_one_at_a_time"
+    assert skip["params"] == {}
     assert (await _row(realdb, invoice_id)).status == status
     assert await _audit(realdb, invoice_id, RECALL) == []
 
