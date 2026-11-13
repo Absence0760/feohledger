@@ -18453,3 +18453,68 @@ post-processor rollback and is absent when nothing was sent),
 `tests/test_migration_0128_payee_and_merge_stamp.py`, and
 `tests/test_payment_run_actions.py` / `tests/test_exception_raiser_stamping.py`
 updated for the new call.
+
+## 384. While a modal dialog is open, everything outside the topmost one is inert (a11y, 2026-11-13)
+
+**Context.** Every dialog rendered in place with `role="dialog"
+aria-modal="true"` and the shared focus trap, and nothing more. `aria-modal`
+only asks assistive tech to stay inside; the trap only holds Tab. A screen
+reader's virtual cursor, a pointer and a touch still reached the page behind,
+and axe's WCAG 2.2 `target-size` rule reported the `/invoices` sort buttons
+behind the invoice dialog and the recall dialog stacked over it as "partially
+obscured" targets at 320px (`tests-e2e/a11y/recall-import-verify.spec.ts`).
+The phone sidebar overlay had already solved the same problem for itself with
+`inert` (`routes/+layout.svelte`).
+
+**Decision.** `lib/actions/modalInert.ts` marks `inert` on everything that
+neither is the topmost open modal dialog nor contains it, walked down from
+`<body>` along that dialog's ancestor path. It is driven by the open-modal
+registry `actions/focusTrap.ts` already keeps (the one the toast region hosts
+itself by), synchronously on every open and close:
+
+- **Home: the focus trap's registry, not a new action per shell.** Every modal
+  here, `ui/Modal` and the four hand-rolled shells (`InvoiceModal`,
+  `RunDetailModal`, `BulkRecodeGLModal`, the portal discount-accept dialog),
+  already registers there by carrying `aria-modal="true"` and `use:focusTrap`,
+  so all five get it with no edit, and a new dialog cannot opt out by
+  forgetting a second action. The marking itself lives in its own module so
+  the walk unit-tests without a DOM. A shell-level `$effect` (where `ui/Modal`
+  keeps its scroll lock) was rejected: it would cover one shell of five.
+- **Stacking is a recompute, not a nest of saved states.** Each sync takes off
+  every mark it made and marks afresh for the current top. The recall dialog
+  over the invoice dialog therefore makes the invoice dialog inert, and closing
+  either, in either order, leaves exactly what the remaining stack needs.
+- **Never clobber.** An element already `inert` when a sync marks (the layout's
+  `<main>` and skip link behind the sidebar overlay) is skipped and not
+  recorded, so no sync ever removes it.
+- **Live regions stay live.** An inert subtree is pruned from the accessibility
+  tree, so the toast region (`data-dialog-satellite`) and SvelteKit's route
+  announcer are keepers wherever they are, and no attribute is ever written
+  onto the region itself (it would travel with it into the dialog). The region
+  normally lives inside the topmost dialog anyway; `ui/Toast.svelte` re-syncs
+  after each move, so the marks follow it. A toast raised while the region was
+  still outside the new top dialog is re-inserted after the move, as before.
+- **Focus.** The sync runs before the closing dialog's deferred focus restore,
+  so the trigger is focusable again by then. A dialog with another stacked over
+  it no longer reclaims focus when inert drops its focused control
+  (`onFocusOut` acts only for the topmost).
+- **Portals.** Nothing in the app moves a picker, menu or listbox out of a
+  dialog to `<body>` (the only `body.appendChild` calls are transient download
+  links; native datalists are browser UI). A node inserted at `<body>` level
+  after a dialog opened is not marked, so a future portal would keep working;
+  content inserted inside a marked subtree inherits its inertness.
+
+**Rejected: `aria-hidden` on the background** (the `aria-hidden` library's
+pattern). It hides from assistive tech only, so pointer, touch and focus still
+reach the page and axe's target-size finding stands. **Rejected: native
+`<dialog>` + `showModal()`.** It gives top-layer inertness for free, but every
+shell, the toast hosting and its band placement (§313, #635/#636) are built on
+an in-place fixed backdrop; converting five shells is a larger, riskier change
+for the same result.
+
+Tests: `src/lib/actions/modalInert.test.ts` (open, nested open, close in both
+orders, a pre-existing `inert` preserved, the exempt regions, the region
+following the top dialog); `tests-e2e/a11y/modal-inert.spec.ts` (the page and
+then the under-dialog go inert, the toast region stays live, closing restores
+each and returns focus); `tests-e2e/a11y/recall-import-verify.spec.ts` at 320px
+is the axe guard that was red.

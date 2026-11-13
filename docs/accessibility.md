@@ -274,6 +274,17 @@ The current build implements:
   `frontend/src/lib/actions/focusTrap.test.ts` (the rules) and
   `frontend/tests-e2e/a11y/toast-timing.spec.ts` (the wiring in a page: `ui/Modal`
   and `InvoiceModal` at 1280, 375 and 320px, and a capped, scrolling stack).
+- **An open dialog makes the page behind it inert** (SC 1.3.2, 2.4.3, 2.5.8;
+  decisions §384) — while a modal dialog is open everything outside the
+  topmost one is `inert`, so a screen reader's cursor, a pointer or a touch
+  cannot reach the page behind, and a dialog opened over another makes the
+  first one inert too until it closes. `aria-modal` alone only asks assistive
+  tech to stay inside, and axe's target-size rule reported the controls behind
+  as obscured targets. The toast region and the route announcer are never made
+  inert, so status messages are still announced, and focus still returns to
+  the control that opened the dialog. Guarded by
+  `frontend/src/lib/actions/modalInert.test.ts` and
+  `frontend/tests-e2e/a11y/modal-inert.spec.ts`.
 - **The sidebar on a phone floats over the page** — at 700px and below the
   sidebar is an icon rail, and expanding it opens the full panel as an overlay
   over an inert, dimmed page instead of squeezing the content to the ~100px a

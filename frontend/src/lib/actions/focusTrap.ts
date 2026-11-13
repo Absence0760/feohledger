@@ -1,5 +1,7 @@
 import type { Action } from 'svelte/action';
 
+import { syncModalInert } from './modalInert.ts';
+
 interface FocusTrapParams {
 	/** Invoked on Escape pressed while focus is within the trapped element. */
 	onEscape?: () => void;
@@ -49,9 +51,10 @@ export function tabBoundaryTarget<T>(
 
 /**
  * The open modal dialogs (those carrying `aria-modal="true"`), oldest first.
- * The toast region hosts itself in the topmost one (`ui/Toast.svelte`); this is
- * the deterministic signal for it — mounted/unmounted here, not inferred from
- * DOM mutations.
+ * The toast region hosts itself in the topmost one (`ui/Toast.svelte`), and
+ * everything outside the topmost one is made inert (`./modalInert.ts`); this
+ * is the deterministic signal for both — mounted/unmounted here, not inferred
+ * from DOM mutations.
  */
 const openModals: HTMLElement[] = [];
 const modalListeners = new Set<() => void>();
@@ -68,6 +71,11 @@ export function onModalDialogsChange(fn: () => void): () => void {
 }
 
 function notifyModals() {
+	// Everything outside the topmost dialog is inert (`./modalInert.ts`,
+	// decisions §384) — synchronously, before any listener runs and before the
+	// closing dialog's deferred focus restore, so the trigger it returns to is
+	// focusable again by then.
+	syncModalInert(topModalDialog());
 	for (const fn of [...modalListeners]) fn();
 }
 
@@ -176,8 +184,15 @@ export const focusTrap: Action<HTMLElement, FocusTrapParams | undefined> = (node
 	function onFocusOut(e: FocusEvent) {
 		if (e.relatedTarget) return;
 		if ((e.target as Element | null)?.closest?.(`[${DIALOG_SATELLITE_ATTR}]`)) return;
+		// Only the topmost dialog reclaims focus: one with another stacked over
+		// it was made inert, which drops its focused control, and must not pull
+		// focus back from the dialog that now owns it.
 		queueMicrotask(() => {
-			if (node.isConnected && (document.activeElement === document.body || !document.activeElement)) {
+			if (
+				node.isConnected &&
+				(!openModals.includes(node) || openModals.at(-1) === node) &&
+				(document.activeElement === document.body || !document.activeElement)
+			) {
 				node.focus();
 			}
 		});

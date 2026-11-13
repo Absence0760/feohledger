@@ -723,6 +723,24 @@ centred dialog with backdrop-click + Esc to close:
   feature-specific — the shell, backdrop, and close behaviour are not.
   If you find yourself writing `position: fixed; inset: 0` or
   `role="dialog"` in a component, stop and use `<Modal>`.
+- **The page behind an open dialog is `inert`** (decisions §384). While any
+  modal dialog is open, everything outside the topmost one carries `inert`:
+  no focus, no pointer or touch, nothing in the accessibility tree. A dialog
+  opened over another (the recall dialog over the invoice dialog) makes the
+  first inert as well, and closing it gives back exactly the state before.
+  `actions/modalInert.ts` does this off `focusTrap`'s open-modal registry, so a
+  dialog gets it by being a `role="dialog"` with `aria-modal="true"` and
+  `use:focusTrap` — which `<Modal>` already is; a dialog needs nothing more.
+  It never removes an `inert` it did not set (the sidebar overlay's), and it
+  never makes the toast region or SvelteKit's route announcer inert, since an
+  inert live region announces nothing — a new app-level live region outside the
+  routed page joins `INERT_EXEMPT_SELECTOR`. **Don't portal a dialog's popup to
+  `<body>`**: nothing does today, and a node added there after the dialog
+  opened is left usable, but keep pickers, menus and listboxes inside the
+  dialog's own subtree. Guards: `src/lib/actions/modalInert.test.ts`,
+  `tests-e2e/a11y/modal-inert.spec.ts`, and axe's `target-size` in
+  `tests-e2e/a11y/recall-import-verify.spec.ts` (the page's sort buttons
+  behind two stacked dialogs at 320px).
 
 ### Unsaved changes (`guardUnsavedChanges`)
 
@@ -1163,6 +1181,9 @@ inherit it for free. Reuse these; don't re-solve them per page.
   synchronously is then lost to `<body>` when it unmounts. If the trigger is
   gone or now disabled, focus lands on `<main id="main-content">` instead; if
   something else already took focus (a second dialog), it is left alone.
+  The page outside the topmost dialog is `inert` while it is open (§ Modals,
+  decisions §384), and that is taken off before the restore runs, so the
+  trigger can take focus again.
   Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` uses it, and so do the four pre-existing hand-rolled
   feature shells (`InvoiceModal`, `RunDetailModal`, `BulkRecodeGLModal`,
   portal discount-accept) so every dialog gets identical focus management.
