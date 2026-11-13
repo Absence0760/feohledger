@@ -8,6 +8,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from app.services.payment_methods import RailPart
+
 if TYPE_CHECKING:
     from app.services.erp_call_budget import CallBudget
 
@@ -548,6 +550,13 @@ class ErpBillReport:
     #: compares it with the invoice's before comparing figures; a missing or
     #: different one is refused like a different amount.
     paid_currency: str | None = None
+    #: How ``paid_amount`` was paid: one ``RailPart`` per cash payment a person
+    #: made, its rail (a ``Payment.method`` value, None = not stated) and the
+    #: exact amount it applied to THIS bill. No account data. Stated only with
+    #: ``paid_amount``, and its parts sum to it; a bill paid on two rails is
+    #: then recorded with this breakdown and split by it on the 1099, which one
+    #: ``payment_method`` cannot do (decisions §396). Empty = not stated.
+    payment_parts: tuple[RailPart, ...] = ()
 
 
 @dataclass

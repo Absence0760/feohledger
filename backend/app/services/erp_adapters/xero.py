@@ -115,6 +115,7 @@ from app.services.erp_adapters.posted_total import (
     previous_bill_removed,
 )
 from app.services.erp_oauth import register_oauth_provider
+from app.services.payment_methods import RailPart
 from app.utils.json_money import dumps_exact_json
 
 logger = logging.getLogger(__name__)
@@ -766,47 +767,85 @@ class XeroAdapter(OAuthErpAdapter):
         async with self.oauth_client(timeout=15) as client:
             bill = await self._read_bill(client, headers, str(bill_id))
             report = report_from_bill(bill, str(bill_id))
-            latest = _latest_cash_payment(bill)
-            if report.reduced_outside and not report.settled_by_credit and latest is not None:
-                report.payment_method = await self._payment_rail(client, headers, latest)
+            cash = _cash_payments([p for p in bill.get("Payments") or [] if isinstance(p, dict)])
+            # Only a bill paid in full outside us is ever recorded, so only its
+            # rails are read: a part-paid bill's would cost reads for nothing.
+            if (
+                report.state is ErpBillState.paid
+                and report.reduced_outside
+                and not report.settled_by_credit
+                and cash
+            ):
+                parts = await self._payment_rails(client, headers, cash)
+                # `card` only when EVERY cash payment came off a card account: a
+                # bank payment beside a card one is not all card (§396). The
+                # split itself rides `payment_parts`, stated with the cash
+                # figure it breaks down.
+                report.payment_method = "card" if all(p.method == "card" for p in parts) else None
+                if report.paid_amount is not None:
+                    report.payment_parts = parts
         return report
 
-    async def _payment_rail(self, client, headers, payment: dict) -> str | None:
-        """``card`` when a person paid the bill from a Xero credit-card account
-        (so it stays off the 1099, like QuickBooks' ``CreditCard``), else None
-        ("not stated"). A Xero payment names the account it came from, not a
-        rail, and the bill's own list of payments omits even that, so the
-        payment and then its account are read.
+    async def _payment_rails(self, client, headers, cash: list[dict]) -> tuple[RailPart, ...]:
+        """Each cash payment's rail and amount (decisions §396): ``card`` when a
+        person paid from a Xero credit-card account (so that part stays off the
+        1099, like QuickBooks' ``CreditCard``), else None ("not stated"). A Xero
+        payment names the account it came from, not a rail, and the bill's own
+        list of payments omits even that, so each payment and then its account
+        are read, an account once per bill.
 
-        Best effort: a read that fails for any reason (no payments scope, a
-        429, an outage) is "not stated", never a failed report. The bill's
-        state is already known by then, and failing here would turn a bill
-        known to be paid outside into one we cannot vouch for, at dispatch and
-        on every sweep tick at the same bill."""
+        Best effort, per payment: a read that fails for any reason (no payments
+        scope, a 429, an outage) leaves THAT payment's rail not stated, never a
+        failed report. The bill's state is already known by then, and failing
+        here would turn a bill known to be paid outside into one we cannot vouch
+        for, at dispatch and on every sweep tick at the same bill. These reads
+        do NOT wait out a 429 (plain ``client.get``, not :func:`_status_get`): a
+        bill with many payments would otherwise sleep once per read, under the
+        invoice lock the read-back holds and past the dispatch check's bound. A
+        rate-limited read leaves that payment not stated, so the cost of
+        pressure is an over-report, never an under-report. The amounts are the
+        bill's own ``Amount`` per payment, the figures ``paid_amount`` sums, so
+        the parts add up to it whatever the reads answer."""
+        kinds: dict[str, str | None] = {}
+        out: list[RailPart] = []
+        for payment in cash:
+            account_id = await self._payment_account(client, headers, payment)
+            if account_id is not None and account_id not in kinds:
+                kinds[account_id] = await self._account_type(client, headers, account_id)
+            kind = kinds.get(account_id) if account_id is not None else None
+            out.append(
+                RailPart(
+                    "card" if kind == "CREDITCARD" else None,
+                    _decimal(payment.get("Amount")) or Decimal(0),
+                )
+            )
+        return tuple(out)
+
+    async def _payment_account(self, client, headers, payment: dict) -> str | None:
         payment_id = payment.get("PaymentID")
         if not payment_id:
             return None
         try:
-            resp = await _status_get(
-                client, f"{_api_base()}/Payments/{payment_id}", headers=headers
-            )
+            resp = await client.get(f"{_api_base()}/Payments/{payment_id}", headers=headers)
             if resp.status_code != 200:
                 return None
             rows = _json(resp).get("Payments") or []
-            first = rows[0] if rows and isinstance(rows[0], dict) else {}
-            account_id = (first.get("Account") or {}).get("AccountID")
-            if not account_id:
-                return None
-            resp = await _status_get(
-                client, f"{_api_base()}/Accounts/{account_id}", headers=headers
-            )
+        except (httpx.HTTPError, ValueError):
+            return None
+        first = rows[0] if rows and isinstance(rows[0], dict) else {}
+        account_id = (first.get("Account") or {}).get("AccountID")
+        return str(account_id) if account_id else None
+
+    async def _account_type(self, client, headers, account_id: str) -> str | None:
+        try:
+            resp = await client.get(f"{_api_base()}/Accounts/{account_id}", headers=headers)
             if resp.status_code != 200:
                 return None
             accounts = _json(resp).get("Accounts") or []
         except (httpx.HTTPError, ValueError):
             return None
-        kind = str((accounts[0] if accounts else {}).get("Type") or "").upper()
-        return "card" if kind == "CREDITCARD" else None
+        first = accounts[0] if accounts and isinstance(accounts[0], dict) else {}
+        return str(first.get("Type") or "").upper() or None
 
     async def bills_for_payment(self, payment_id: str) -> list[str]:
         headers = await self._headers()
@@ -1237,7 +1276,8 @@ async def _status_get(client, url: str, **kwargs) -> httpx.Response:
     """A status-sync GET that waits out Xero's per-minute limit, once.
 
     Xero allows 60 calls a minute per organisation, and a full reconciliation
-    reads one to three per bill, so a tenant with more than a few dozen payable
+    reads one per bill (plus the rail reads of a bill paid outside us, which
+    do not wait: ``XeroAdapter._payment_rails``), so a tenant with more than a few dozen payable
     bills meets a 429 on every pass. Failing there would fail every pass at the
     same bill and never read the rest. So a 429 whose ``Retry-After`` is within
     the minute is waited out and the read is made again, once: Xero's own

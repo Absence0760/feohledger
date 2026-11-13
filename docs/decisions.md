@@ -19667,6 +19667,115 @@ accounts, the PO fields); `frontend/tests-e2e/erp/sage-intacct.spec.ts` (the
 bill read from fake-erp is `posted`; a closed period is `bill_refused`; PO sync
 against the spec's field names).
 
+## 396. A payment the ERP shows made on two rails keeps the split, and the 1099 reports it part by part (follow-up of §393, migration 0130, 2026-11-15)
+
+**The gap.** A bill an ERP shows paid by a cheque AND a card is recorded here as
+one `Payment`, and `Payment.method` holds one rail. QuickBooks' report stated no
+rail for such a bill (§393), so the card part was reported on the payer's
+1099-NEC although the card settlement entity reports it on a 1099-K: an
+over-report. Xero's report read the rail of the latest cash payment alone, so a
+bank payment followed by a card one was booked as all card and the bank part
+left off the 1099: an under-report. Nothing on the payment or its audit row
+said which rails paid how much.
+
+**The rule.**
+
+- **The report states the split.** `ErpBillReport.payment_parts`: one
+  `payment_methods.RailPart` (a rail, or None = not stated, and an exact
+  `Decimal`) per cash payment a person made, no account data. Stated only with
+  `paid_amount`, which it breaks down. QuickBooks: each cash BillPayment's
+  `PayType` and what its lines applied to this bill (`_cash_parts`, the same
+  `_applied_to` figures `paid_amount` sums). Xero: every cash payment's account
+  is read, each account once per bill (`_payment_rails`); `CREDITCARD` is
+  `card`, anything else, or a read that fails for that payment, not stated.
+  Xero's `payment_method` is `card` only when every part is card. Rails are
+  read only for a bill `paid` (the only one ever recorded), and these reads
+  never wait out a 429 (`_status_get`'s once-a-minute wait would otherwise
+  repeat per payment, under the invoice lock the read-back holds and past the
+  dispatch check's bound): a rate-limited read leaves that payment not stated,
+  an over-report, never an under-report.
+- **The record keeps it, or drops it whole.** `payment_methods.split_by_rail`
+  is the one judgement. A breakdown stands only when every part is a positive
+  whole-cent amount (33.335 + 66.665 sums to 100.00, but neither prints
+  unrounded on a form) and the parts sum EXACTLY to the amount booked. Then `method` is
+  the parts' one rail, or NULL over several, and `payments.rail_breakdown`
+  holds the parts. Anything else is `unreconciled`: no breakdown, no rail, so
+  the whole payment is reportable, logged by id only. Nothing is prorated or
+  rounded. The `payment.recorded_outside` audit row carries the stated parts,
+  `rail_breakdown_status` (`applied` / `unreconciled` / `superseded`) and
+  `method_stated`, so the trail says what the ERP claimed whether or not it
+  stood.
+- **The 1099 splits by it.** `build_1099_report` joins a `LATERAL` sum over the
+  array (`payment_methods.rail_breakdown_sums_sql`, card parts classified by
+  the same `CARD_PAYMENT_METHODS`), and applies the split only when the row
+  passes the writer's rule again (`RailBreakdownSumsSql.applies_to`: every part
+  a positive whole-cent amount, cast only from an exact decimal string, summing
+  to `Payment.amount`), so a row written by any other path cannot bend a filed
+  figure (a negative part, a missing amount SUM would skip) or fail the report
+  (an amount that is not a number); and the 1099 figure is the
+  payment's own amount in the invoice's currency
+  (`PaymentReportingAmountSql.is_payment_amount`). Otherwise the payment counts
+  as its `method` says, which for a split one is NULL: reportable, whole. A
+  split payment is counted on `payment_count` and `card_payment_count` both,
+  and its reportable part takes its invoice's box, so the per-box
+  reconciliation stays exact.
+- **The kept facts carry it.** A refused record keeps `payment_parts` beside
+  `amount` on the `paid_not_recorded` row, a later amount-less report never
+  erases either (`_merged_report`), and the re-attempt, the read-back of a row
+  that stated no figure (`ReadBackFigure.parts`) and the one-click all book
+  the same split.
+- **A person's one rail.** The one-click form asks for one rail. Over a
+  breakdown of several rails the breakdown stands, as the ERP's cash figure
+  stands against a typed one (§386): one rail cannot describe a payment made on
+  two. Against a breakdown of one rail, a person naming another has corrected
+  it and their rail is the record (`superseded`). Against an unreconciled one,
+  their rail stands. The dialog does not yet show the split or say it will
+  stand over the rail picked; that is tracked in `docs/followups.md`.
+
+**Where it persists: a JSONB column on `payments`, not a child table.** The
+aggregate needs it queryable, so it must be stored, not only audited (under
+`FEOH_AUDIT_MODE=lambda` the audit row is not even local). The breakdown is
+written once, in the record's own transaction, never changed alone, and read
+only summed per payment inside the one query that already reads the row. A
+`payment_rail_parts` table would put a record with no lifecycle of its own into
+the per-table registries (workspace closure's `CLOSURE_ALLOWED`, for one) and
+need a grouped join to answer what a lateral over the row answers. What a table would
+have given, typed amounts and a shape the database enforces, is covered by
+exact decimal strings cast to `numeric` in SQL, the writer's exact-sum rule,
+the read-side re-check, and `ck_payments_rail_breakdown_array` (an array or
+NULL, so `jsonb_array_elements` can never meet an object and fail the report).
+Rejected too: a single `card_amount` column. It answers the 1099 but not the
+follow-up's other question, which rails paid how much, and a Xero bank part
+(not stated) would be indistinguishable from a cheque.
+
+**No backfill (§141).** A payment recorded before 0130 states one rail or none,
+and nothing stored says how it split: its audit row names the rail booked, not
+the ERP's payments, and re-reading today's bill would date a split from a read
+nobody made then. Those payments keep counting by `method` (QuickBooks' two-rail
+ones as reportable, Xero's latest-card ones as card); a preparer who needs a
+past year exact reads the bill in the ERP.
+
+**Not verified live.** Both adapters' readings are against their doubles and the
+published shapes (§386, §393); no recorded QuickBooks or Xero bill paid on two
+rails exists yet.
+
+Tests: `tests/test_payment_methods.py` (the split judgement: two rails, all
+card, a cent short or over, a zero, a negative or a NaN part fail closed, an
+unknown rail, the JSON round trip and a malformed breakdown);
+`tests/test_qbo_status_sync_adapter.py` (cheque plus card parts summing to the
+cash, only this bill's lines, none without a cash figure);
+`tests/test_xero_status_sync_adapter.py` (bank then card is not all card, two
+card payments read their account once, one unreadable payment not stated);
+`tests/test_erp_status_sync.py` (real rows: cheque plus card kept and audited,
+two cards recorded as card, parts not summing recorded reportable and audited
+`unreconciled`, a kept two-rail row booked with its split when its blocker
+clears, the one-click booking the split over a person's one rail, the merge
+keeping the parts, Xero bank plus card); `tests/test_tax_1099_boxes.py` (the
+aggregate's split per box and count, parts not summing counted whole, a split
+on a home-currency figure not applied);
+`tests/test_migration_0130_payment_rail_breakdown.py` (parity with
+`create_all`, idempotent, no backfill, the CHECK, a control-plane no-op).
+
 ## 397. Business Central recognises its own lost-read draft by the id its create recorded, and only while it is unedited (§391 follow-up, 2026-11-15)
 
 **Context.** §391 made every draft the duplicate lookup finds untouchable,

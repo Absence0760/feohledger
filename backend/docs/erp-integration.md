@@ -470,8 +470,13 @@ differs:
   `quickbooks-online-adapter.md` § Phases 3–5 as built).
 - **The rail.** A Xero payment names the account it came from, not a rail: a
   `CREDITCARD` account reads as `card` (off the 1099), anything else as not
-  stated. A rail that cannot be read for any reason (no payments scope, a 429,
-  an outage) is not stated, never a failed report.
+  stated. EVERY cash payment's account is read (each account once per bill),
+  and the bill's rail is `card` only when all of them are card; the report also
+  states each payment's rail and amount (`payment_parts`), so a bank payment
+  beside a card one is split on the 1099 rather than booked as all card
+  (decisions §396). A rail that cannot be read for any reason (no payments
+  scope, a 429, an outage) leaves that payment's rail not stated, never a
+  failed report.
 - **Write-back.** `post_payment` `PUT`s a Payment against the bill from the
   mapped account, the exact `Decimal` amount (`dumps_exact_json`), dated the
   payment's settlement day. Idempotent in two layers: our marker is looked up
@@ -498,7 +503,9 @@ differs:
   (live ones only), never only in the bill's own `Payments` array. A reconciled payment
   cannot be deleted; that refusal is flagged for a person as for QuickBooks.
 - **Rate limits.** Xero allows 60 calls a minute per organisation, and a full
-  reconciliation reads one to three per bill, so a status read that meets a
+  reconciliation reads one per bill, plus, for a bill paid in full outside us,
+  each cash payment and each paying account once (the rail reads, which never
+  wait: a 429 there leaves that payment's rail not stated), so a status read that meets a
   429 with a `Retry-After` within the minute (and an `X-Rate-Limit-Problem`
   absent or naming a per-minute limit) waits it out once and reads again
   (`xero._status_get`). A longer `Retry-After` is the daily cap (1,000 calls

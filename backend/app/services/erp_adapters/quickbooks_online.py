@@ -114,6 +114,7 @@ from app.services.erp_adapters.posted_total import (
     create_attempt_key,
     previous_bill_removed,
 )
+from app.services.payment_methods import RailPart
 from app.utils.json_money import dumps_exact_json
 
 PROVIDER = "QuickBooks Online"
@@ -977,6 +978,11 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         settled_by_credit = reduced_outside and (
             len(cash) < len(external) or cash_applied < outside
         )
+        paid_amount = (
+            cash_applied
+            if state is ErpBillState.paid and reduced_outside and not settled_by_credit and not ours
+            else None
+        )
         return ErpBillReport(
             bill_id=str(bill.get("Id") or bill_id),
             state=state,
@@ -997,15 +1003,12 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             # wholly in cash by others: a credit-settled bill is never booked as
             # cash, a part-paid one is never recorded, and one we part-paid
             # ourselves is not one payment a record could state.
-            paid_amount=(
-                cash_applied
-                if state is ErpBillState.paid
-                and reduced_outside
-                and not settled_by_credit
-                and not ours
-                else None
-            ),
+            paid_amount=paid_amount,
             paid_currency=_cash_currency(bill, cash),
+            # Which rail paid how much of that cash (§396), stated with it.
+            payment_parts=(
+                _cash_parts(cash, str(bill.get("Id"))) if paid_amount is not None else ()
+            ),
         )
 
     async def bills_for_payment(self, payment_id: str) -> list[str]:
@@ -1395,11 +1398,24 @@ def _cash_rail(cash: list[dict]) -> str | None:
     """The rail of the cash a person paid the bill with, as a ``Payment.method``.
 
     One rail only when every cash payment used it. A bill paid part by cheque
-    and part by card has no one rail an ERP-paid record could state, so it is
-    not stated, which counts as 1099-reportable (decisions §393), rather than
-    the latest payment's rail standing for all of it."""
+    and part by card has no one rail, so none is stated here (decisions §393),
+    rather than the latest payment's rail standing for all of it; the split
+    itself rides ``payment_parts`` (:func:`_cash_parts`, §396)."""
     rails = {_PAY_TYPE_METHODS.get(str(p.get("PayType"))) for p in cash}
     return rails.pop() if len(rails) == 1 else None
+
+
+def _cash_parts(cash: list[dict], bill_id: str) -> tuple[RailPart, ...]:
+    """Each cash payment's rail and what it applied to THIS bill (decisions
+    §396): the breakdown the ERP-paid record keeps, so a cheque-plus-card bill
+    is split on the 1099 rather than reported whole. The amounts are the same
+    ``_applied_to`` figures ``paid_amount`` sums, so the parts add up to it by
+    construction. A ``PayType`` we do not know is a part with no rail stated
+    (reportable)."""
+    return tuple(
+        RailPart(_PAY_TYPE_METHODS.get(str(p.get("PayType"))), _applied_to(p, bill_id))
+        for p in cash
+    )
 
 
 def _is_voided_payment(record: dict) -> bool:

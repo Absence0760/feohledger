@@ -745,6 +745,7 @@ async def record_erp_payment(
         ERP_PAID_AMOUNT_UNCONFIRMED,
         hold_unconfirmed_erp_payment,
         read_back_unstated_figure,
+        reported_payment_parts,
     )
     from app.services.exception_lifecycle import is_payment_blocking
     from app.services.external_payment import (
@@ -752,6 +753,7 @@ async def record_erp_payment(
         ExternalPaymentRefused,
         record_invoice_paid_outside,
     )
+    from app.services.payment_methods import rail_parts_from_json
 
     _refuse_future_paid_on(body.paid_on)
     scoped = apply_entity_scope(
@@ -799,6 +801,9 @@ async def record_erp_payment(
     facts = row.erp_report or {}
     stated = facts.get("amount")
     stated_currency_raw = facts.get("amount_currency")
+    # How the ERP says that figure was paid, rail by rail (decisions §396): kept
+    # beside it, and booked with it, so the 1099 splits a cheque-plus-card bill.
+    stated_parts = rail_parts_from_json(facts.get("payment_parts")) if stated else ()
     if not stated and invoice is not None:
         # No figure stated (a QuickBooks row kept before §393): the bill is
         # read again under the invoice lock held above, and only the figure it
@@ -820,6 +825,7 @@ async def record_erp_payment(
                     ),
                 )
             stated, stated_currency_raw = figure.amount, figure.currency
+            stated_parts = figure.parts
     if stated:
         try:
             stated_amount = Decimal(str(stated))
@@ -868,6 +874,7 @@ async def record_erp_payment(
             amount=amount,
             answering_exception_ids=frozenset({row.id}),
             actor_name=user.full_name,
+            rail_parts=reported_payment_parts(stated_parts) if stated else (),
         )
     except ExternalPaymentRefused as exc_:
         raise _external_refusal_http(exc_) from exc_

@@ -1371,19 +1371,20 @@ scope (§260) — do not fold them into any of these.
       `feat/erp-status-sync` branch. It contradicts §295's "either place may
       pay" decision and needs a product call before reuse. **Trigger:** the
       first tenant on one of those ERPs who pays bills in the ERP.
-- [ ] **(c) A bill the ERP shows paid on two rails keeps no record of the
-      split.** One `Payment` row holds one rail, so QuickBooks' cheque-plus-card
-      bill is recorded with no rail (§393): its card part is over-reported on
-      the payer's 1099, and nothing on the payment or its audit row says which
-      rails paid how much. Xero is worse: its `bill_report` reads the rail of
-      `_latest_cash_payment` alone (`_payment_rail`, two calls), so bank then
-      card is booked as all card, under-reported. **Durable fix:** the report
-      carries each cash payment's rail and amount (no account data); the
-      ERP-paid record writes that breakdown into its audit details, the 1099
-      aggregate splits a recorded payment by it, and Xero reads the account of
-      every cash payment, stating `card` only when all are card. **Trigger:**
-      the first bill paid on two rails seen live, or the next 1099 aggregate
-      change.
+- [ ] **(c) The exception dialog's one-click record asks for one rail over a
+      payment the ERP split across two.** A kept `paid_not_recorded` row can
+      carry `payment_parts` (decisions §396), and the record books that split
+      over the rail the person picks, but the dialog
+      (`frontend/src/routes/exceptions/+page.svelte`) still requires a rail,
+      never shows the split, and the response's `method: null` says nothing
+      about why; only the audit row's `method_stated` keeps their pick.
+      **Durable fix:** add `payment_parts` to `ErpReport`
+      (`frontend/src/lib/types/erpReport.ts`), render the split in the
+      invoice's currency when it spans more than one rail, and make the rail
+      field read-only there (the server already ignores it); expose the
+      payment's breakdown on `PaymentResponse`. **Trigger:** the first two-rail
+      row a person records, or the next change to the exception dialog (with
+      the ERP-amount entry below it).
 - [ ] **(c) A Xero connection made before `accounting.payments` reads every
       payable bill on every pass.** Its `Payments` change listing answers
       401/403, which the sweep reads as an incomplete listing and falls back

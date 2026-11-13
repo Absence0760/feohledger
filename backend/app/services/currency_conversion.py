@@ -377,6 +377,12 @@ class PaymentReportingAmountSql:
 
     amount: ColumnElement
     is_expressible: ColumnElement[bool]
+    #: The reporting figure IS ``payment_amount``, in the invoice's own currency
+    #: (rung 2, or rung 1 restating it exactly). A caller splitting a payment by
+    #: parts stated in the payment's own currency (the 1099's rail breakdown,
+    #: decisions §396) may apply them only then; any other figure would need a
+    #: rate, and none is fetched on a read.
+    is_payment_amount: ColumnElement[bool]
 
 
 def card_currency_sql(reporting_currency: str) -> ColumnElement[str]:
@@ -462,6 +468,10 @@ def payment_reporting_amount_sql(
             else_=None,
         ),
         is_expressible=or_(home_leg, invoice_leg),
+        is_payment_amount=and_(
+            invoice_leg,
+            or_(~home_leg, payment_source_amount == payment_amount),
+        ),
     )
 
 
