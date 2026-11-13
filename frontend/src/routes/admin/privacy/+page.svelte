@@ -429,9 +429,15 @@
 		{/if}
 		{#if dsarResult.complete === false}
 			<p class="truncated-notice" role="status" data-testid="dsar-truncated-notice">
-				{m('admin.privacy.export.truncated', {
-					sections: dsarResult.truncated_sections?.length ?? 0
-				})}
+				<!-- The bundle download is always masked (decisions §369), so after an
+				     unmasked disclosure it is not "everything held": say where the
+				     unmasked bank details are. -->
+				{m(
+					dsarResult.banking_disclosure === 'unmasked'
+						? 'admin.privacy.export.truncatedUnmasked'
+						: 'admin.privacy.export.truncated',
+					{ sections: dsarResult.truncated_sections?.length ?? 0 }
+				)}
 			</p>
 		{/if}
 		{#if dsarResult.banking_disclosure === 'unmasked'}
@@ -442,16 +448,24 @@
 		<div class="json-view-wrap">
 			<pre class="json-view" data-testid="dsar-bundle">{JSON.stringify(dsarResult.data, null, 2)}</pre>
 		</div>
-		<div class="modal-footer">
+		<div class="modal-footer export-footer">
 			<button type="button" class="btn-cancel" onclick={() => (dsarResult = null)}
 				>{m('admin.privacy.export.close')}</button
 			>
 			{#if dsarResult.full_bundle_url}
+				{#if dsarResult.banking_disclosure === 'unmasked'}
+					<small class="bundle-masked-note" id="dsar-bundle-masked" data-testid="dsar-bundle-masked">
+						{m('admin.privacy.export.bundleMasked')}
+					</small>
+				{/if}
 				<button
 					type="button"
 					class={dsarResult.complete === false ? 'btn-primary' : 'btn-cancel'}
 					onclick={downloadFullBundle}
 					disabled={bundleDownloading}
+					aria-describedby={dsarResult.banking_disclosure === 'unmasked'
+						? 'dsar-bundle-masked'
+						: undefined}
 					data-testid="dsar-download-bundle"
 				>
 					{bundleDownloading
@@ -767,6 +781,20 @@
 		margin: 0.5rem 0 0;
 		color: var(--danger);
 		font-size: 0.85rem;
+	}
+
+	/* The masked-bundle note sits beside the download button it describes, and
+	   wraps onto its own line rather than squeezing the buttons at 320px. */
+	.export-footer {
+		flex-wrap: wrap;
+		align-items: center;
+	}
+	.bundle-masked-note {
+		flex: 1 1 14rem;
+		color: var(--text-muted);
+		font-size: 0.8rem;
+		line-height: 1.4;
+		text-align: right;
 	}
 
 	/* The request-form fields live in the page body, outside `.modal` (which

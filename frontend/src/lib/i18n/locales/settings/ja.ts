@@ -1245,6 +1245,8 @@ export const messages = {
 	'admin.privacy.export.truncated': "ここに表示されているのは最初の部分のみです。{sections, plural, other {# 件のセクション}}に、この画面に一覧表示されている以上のレコードがあります。保有しているすべてのデータを本人に提供するには、完全なバンドルをダウンロードしてください。",
 	'admin.privacy.export.download': "完全なバンドルをダウンロード",
 	'admin.privacy.export.downloading': "ダウンロードを準備しています…",
+	'admin.privacy.export.truncatedUnmasked': "ここに表示されているのは最初の部分のみです。{sections, plural, other {# 件のセクション}}に、この画面に一覧表示されている以上のレコードがあります。保有しているすべてのレコードは完全なバンドルをダウンロードして取得してください。ただしバンドルでは銀行情報がマスクされるため、マスクされていない銀行情報はこの画面にのみ表示されます。",
+	'admin.privacy.export.bundleMasked': "ダウンロードしたファイルでは銀行情報がマスクされます。マスクされていない版はここに表示されているものです。",
 	'admin.privacy.count.roles': "{n, plural, other {ロール # 件}}",
 	'admin.privacy.count.pushDevices': "{n, plural, other {プッシュ通知デバイス # 台}}",
 	'admin.privacy.count.passkeys': "{n, plural, other {パスキー # 件}}",

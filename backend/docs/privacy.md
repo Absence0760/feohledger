@@ -216,6 +216,11 @@ records as they stand then; `generated_at` says when.
   data and it is never capped, so the `POST` response — where an unmasked
   disclosure answers to its permission, justification, step-up and own audit
   row — already holds it whole. The download unlocks nothing that gate guards.
+  So after an unmasked disclosure the page says so beside the download button
+  ("the downloaded file masks bank details; the unmasked copy is the one shown
+  here", tied to the button by `aria-describedby`), and the truncation notice
+  no longer calls the download everything held (`admin.privacy.export.bundleMasked`,
+  `admin.privacy.export.truncatedUnmasked`).
 - **Streamed, never stored.** `privacy_export.stream_full_dsar_bundle` reads
   each section off a server-side cursor (`yield_per=STREAM_CHUNK_ROWS`, 500)
   and renders it in chunks into an anonymous `SpooledTemporaryFile`

@@ -1271,6 +1271,8 @@ export const enSettings = {
 	'admin.privacy.export.truncated': "Shown here is the first part only: {sections, plural, one {# section holds} other {# sections hold}} more records than this view lists. Download the complete bundle to give the subject everything held.",
 	'admin.privacy.export.download': "Download complete bundle",
 	'admin.privacy.export.downloading': "Preparing download…",
+	'admin.privacy.export.truncatedUnmasked': "Shown here is the first part only: {sections, plural, one {# section holds} other {# sections hold}} more records than this view lists. Download the complete bundle for every record held; it masks bank details, so the unmasked bank details are only in this view.",
+	'admin.privacy.export.bundleMasked': "The downloaded file masks bank details. The unmasked copy is the one shown here.",
 	'admin.privacy.count.roles': "{n, plural, one {# role} other {# roles}}",
 	'admin.privacy.count.pushDevices': "{n, plural, one {# push-notification device} other {# push-notification devices}}",
 	'admin.privacy.count.passkeys': "{n, plural, one {# passkey} other {# passkeys}}",
