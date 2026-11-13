@@ -405,17 +405,28 @@ export const api = {
 	get: <T>(path: string, init?: Pick<RequestInit, 'credentials'>) => request<T>(path, init),
 	// `headers` is for the few writes that carry a per-request header of their
 	// own — today the `Idempotency-Key` on recording a goods receipt.
-	post: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
-		request<T>(path, { method: 'POST', body: JSON.stringify(body), ...(headers ? { headers } : {}) }),
+	post: <T>(
+		path: string,
+		body: unknown,
+		headers?: Record<string, string>,
+		init?: Pick<RequestInit, 'credentials'>
+	) =>
+		request<T>(path, {
+			method: 'POST',
+			body: JSON.stringify(body),
+			...(headers ? { headers } : {}),
+			...init
+		}),
 	patch: <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
 	put: <T>(path: string, body: unknown) => request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
 	// `body` is optional — most DELETEs don't carry one, but a few need
 	// credentials in the body rather than the URL (e.g. the passkey-delete
 	// step-up password, which must never land in a query string / access log).
-	delete: (path: string, body?: unknown) =>
-		request<void>(path, {
+	delete: <T = void>(path: string, body?: unknown, init?: Pick<RequestInit, 'credentials'>) =>
+		request<T>(path, {
 			method: 'DELETE',
-			...(body === undefined ? {} : { body: JSON.stringify(body) })
+			...(body === undefined ? {} : { body: JSON.stringify(body) }),
+			...init
 		}),
 	upload: <T>(
 		path: string,

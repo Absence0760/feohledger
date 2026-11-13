@@ -622,11 +622,13 @@ def _resolve_sage(body, status: int = 200):
         return httpx.Response(status, json=body)
 
     with patch("httpx.AsyncClient", _transport_client(handler)):
-        return asyncio.run(
-            SageAccountingAdapter.resolve_external_tenant_id(
+        rows = asyncio.run(
+            SageAccountingAdapter.list_external_tenants(
                 access_token="tok", token_response={}, callback_params={}
             )
         )
+    # The callback links on exactly one; the tests below read it the same way.
+    return rows[0].id if len(rows) == 1 else None
 
 
 def test_resolve_business_reads_the_one_business():
@@ -635,6 +637,36 @@ def test_resolve_business_reads_the_one_business():
 
 def test_resolve_business_never_picks_among_several():
     assert _resolve_sage({"$items": [{"id": "biz-1"}, {"id": "biz-2"}]}) is None
+
+
+def test_a_malformed_business_beside_a_good_one_links_nothing():
+    """Fail closed: dropping the bad row would leave one company and link it
+    without the admin choosing (decisions §355)."""
+    assert _resolve_sage({"$items": [{"id": "biz-1"}, {"id": "bad\nid"}]}) is None
+
+
+def test_list_businesses_offers_every_business_the_login_reaches():
+    """Several businesses: all of them, named, for the admin to pick from
+    (decisions §355)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "$items": [
+                    {"id": "biz-1", "name": "Acme"},
+                    {"id": "biz-2", "displayed_as": "Acme Retail"},
+                ]
+            },
+        )
+
+    with patch("httpx.AsyncClient", _transport_client(handler)):
+        got = asyncio.run(
+            SageAccountingAdapter.list_external_tenants(
+                access_token="tok", token_response={}, callback_params={}
+            )
+        )
+    assert [(c.id, c.name) for c in got] == [("biz-1", "Acme"), ("biz-2", "Acme Retail")]
 
 
 def test_resolve_business_failure_is_not_connected():

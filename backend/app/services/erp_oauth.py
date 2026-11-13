@@ -130,9 +130,9 @@ from sqlalchemy import select
 
 from app import redis as app_redis
 from app.config import settings
-from app.services import provider_credentials
+from app.services import credential_crypto, provider_credentials
 from app.services.credential_crypto import CredentialCryptoError
-from app.services.erp_adapters.oauth_base import OAuthProviderSpec
+from app.services.erp_adapters.oauth_base import ExternalCompany, OAuthProviderSpec
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +166,7 @@ TOKEN_PATHS: tuple[str, ...] = (ACCESS_TOKEN_PATH, REFRESH_TOKEN_PATH)
 _STATE_PREFIX = "erp:oauth:state:"
 _LOCK_PREFIX = "erp:oauth:refresh-lock:"
 _REALM_LOCK_PREFIX = "erp:oauth:realm-claim:"
+_PENDING_PREFIX = "erp:oauth:pending:"
 _LOCK_TTL_SECONDS = 30
 _LOCK_WAIT_SECONDS = 20.0
 _LOCK_POLL_SECONDS = 0.1
@@ -888,6 +889,201 @@ async def realm_claim(provider: str, external_tenant_id: str) -> AsyncIterator[b
         yield True
     finally:
         await _release_lock(key, token)
+
+
+# ---------------------------------------------------------------------------
+# A consent that reached several companies: held until the admin picks one
+# ---------------------------------------------------------------------------
+#
+# Xero (several organisations in one consent) and Sage (a login with several
+# businesses) can answer a consent with more than one company. We never pick a
+# customer's ledger for them (decisions §355), so the callback parks the
+# exchanged token HERE — server-side, sealed, never in a URL or the browser —
+# and the settings page offers the list.
+#
+# The pending connect is keyed on the org AND the hash of the browser-binding
+# cookie that already matched at the callback (§336), so only that browser can
+# reach it, and it also names the admin who started it. Reading it back needs a
+# bearer-authenticated, credentialed request from that admin in that browser —
+# the same two proofs ``/authorize`` and the callback rest on, so the picker
+# adds no new way in. Single use (GETDEL), alive only as long as a ``state``
+# (``FEOH_ERP_OAUTH_STATE_TTL_SECONDS``), and anything stale, mismatched or
+# unreadable reads as "no pending connect".
+
+
+@dataclass(frozen=True)
+class PendingConnect:
+    """A parked consent. ``token_response`` is set only by
+    :func:`take_pending_connect`; :func:`peek_pending_connect` never opens it."""
+
+    org_id: uuid.UUID
+    user_id: uuid.UUID
+    provider: str
+    client_source: str
+    companies: tuple[ExternalCompany, ...]
+    expires_at: datetime
+    token_response: dict | None = None
+
+
+def pending_ttl() -> int:
+    """How long a parked consent waits for the admin's pick — one ``state``'s
+    lifetime, the window the whole connect already has."""
+    return _state_ttl()
+
+
+def _pending_key(org_id: uuid.UUID, binding: str) -> str:
+    return f"{_PENDING_PREFIX}{org_id}:{binding}"
+
+
+def _pending_context(org_id: uuid.UUID, provider: str, binding: str) -> dict[str, str]:
+    """The seal's AAD: the token opens only for this org, provider and browser."""
+    return {
+        "purpose": "erp_oauth_pending",
+        "org": str(org_id),
+        "provider": provider,
+        "binding": binding,
+    }
+
+
+async def park_pending_connect(
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    provider: str,
+    client_source: str,
+    browser_binding: str,
+    token_response: dict,
+    companies: list[ExternalCompany],
+) -> datetime:
+    """Hold a consent for the admin's pick; returns when it lapses.
+
+    The token response is sealed (``credential_crypto``) before it reaches
+    Redis. A second park from the same browser replaces the first — the
+    browser's cookie names one connect at a time (§336). Raises
+    ``CredentialCryptoError`` when it cannot be sealed.
+    """
+    if not browser_binding:
+        raise ValueError("a browser binding is required")
+    ttl = pending_ttl()
+    issued = int(time.time())
+    envelope = await credential_crypto.seal(
+        json.dumps(token_response, separators=(",", ":"), default=str).encode(),
+        _pending_context(org_id, provider, browser_binding),
+    )
+    record = {
+        "u": str(user_id),
+        "p": provider,
+        "c": client_source,
+        "i": issued,
+        "e": issued + ttl,
+        "companies": [[c.id, c.name] for c in companies],
+        "ct": _b64(envelope.ciphertext),
+        "wk": _b64(envelope.wrapped_key),
+        "kp": envelope.key_provider,
+        "kid": envelope.key_id,
+    }
+    r = await app_redis.get_redis()
+    await r.setex(_pending_key(org_id, browser_binding), ttl, json.dumps(record))
+    return datetime.fromtimestamp(issued + ttl, UTC)
+
+
+def _parse_pending(raw: Any, user_id: uuid.UUID) -> dict | None:
+    """The stored record, or None when it is absent, malformed, lapsed, or
+    another admin's (a different user signed in to the starting browser)."""
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    if not raw:
+        return None
+    try:
+        record = json.loads(raw)
+        if int(record["e"]) < int(time.time()) or str(record["u"]) != str(user_id):
+            return None
+        companies = tuple(ExternalCompany(id=str(i), name=str(n)) for i, n in record["companies"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not companies:
+        return None
+    return {**record, "companies": companies}
+
+
+def _pending_from(org_id: uuid.UUID, record: dict, token_response: dict | None) -> PendingConnect:
+    return PendingConnect(
+        org_id=org_id,
+        user_id=uuid.UUID(str(record["u"])),
+        provider=str(record["p"]),
+        client_source=str(record.get("c") or ""),
+        companies=record["companies"],
+        expires_at=datetime.fromtimestamp(int(record["e"]), UTC),
+        token_response=token_response,
+    )
+
+
+async def peek_pending_connect(
+    org_id: uuid.UUID, user_id: uuid.UUID, cookie_value: str | None
+) -> PendingConnect | None:
+    """The parked consent this browser and admin may pick for, without its
+    token and without spending it. None for anything else."""
+    if not cookie_value:
+        return None
+    r = await app_redis.get_redis()
+    record = _parse_pending(
+        await r.get(_pending_key(org_id, browser_binding(cookie_value))), user_id
+    )
+    return _pending_from(org_id, record, None) if record else None
+
+
+def _aged(token_response: dict, elapsed: int) -> dict:
+    """The token response as if issued now: its lifetimes less the time it
+    waited, so the stored expiry is not later than the provider's."""
+    out = dict(token_response)
+    for key in ("expires_in", "x_refresh_token_expires_in", "refresh_token_expires_in"):
+        try:
+            if out.get(key):
+                out[key] = max(int(out[key]) - elapsed, 0)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+async def take_pending_connect(
+    org_id: uuid.UUID, user_id: uuid.UUID, cookie_value: str | None
+) -> PendingConnect | None:
+    """Spend the parked consent (GETDEL: two picks cannot both get it) and
+    open its token. None when there is none for this browser and admin — a
+    record found for another admin is spent all the same. Raises
+    ``CredentialCryptoError`` when the token cannot be opened (also spent)."""
+    if not cookie_value:
+        return None
+    binding = browser_binding(cookie_value)
+    r = await app_redis.get_redis()
+    record = _parse_pending(await r.getdel(_pending_key(org_id, binding)), user_id)
+    if record is None:
+        return None
+    envelope = credential_crypto.Envelope(
+        ciphertext=_unb64(str(record["ct"])),
+        wrapped_key=_unb64(str(record["wk"])),
+        key_provider=str(record["kp"]),
+        key_id=str(record.get("kid") or ""),
+    )
+    plaintext = await credential_crypto.open_envelope(
+        envelope, _pending_context(org_id, str(record["p"]), binding)
+    )
+    try:
+        token_response = json.loads(plaintext)
+    except ValueError:
+        raise CredentialCryptoError("A pending ERP connection could not be read.") from None
+    if not isinstance(token_response, dict) or not token_response.get("access_token"):
+        raise CredentialCryptoError("A pending ERP connection could not be read.")
+    elapsed = max(int(time.time()) - int(record.get("i") or 0), 0)
+    return _pending_from(org_id, record, _aged(token_response, elapsed))
+
+
+async def discard_pending_connect(org_id: uuid.UUID, cookie_value: str | None) -> bool:
+    """Drop this browser's parked consent, if any. True when one was dropped."""
+    if not cookie_value:
+        return False
+    r = await app_redis.get_redis()
+    return bool(await r.delete(_pending_key(org_id, browser_binding(cookie_value))))
 
 
 #: Why a connection needs the admin's consent again (``settings.erp.oauth.

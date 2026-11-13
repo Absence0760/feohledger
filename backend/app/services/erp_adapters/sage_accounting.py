@@ -70,7 +70,12 @@ from app.services.erp_adapters.bill_allocation import (
     allocate_bill_lines,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
-from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
+from app.services.erp_adapters.oauth_base import (
+    ExternalCompany,
+    OAuthErpAdapter,
+    OAuthProviderSpec,
+    clean_companies,
+)
 from app.services.erp_adapters.posted_total import check_posted_total
 from app.services.erp_oauth import register_oauth_provider
 from app.utils.json_money import dumps_exact_json
@@ -185,19 +190,19 @@ class SageAccountingAdapter(OAuthErpAdapter):
     oauth_provider = SAGE_ACCOUNTING_OAUTH
 
     @classmethod
-    async def resolve_external_tenant_id(
+    async def list_external_tenants(
         cls,
         *,
         access_token: str,
         token_response: dict,
         callback_params: dict[str, str],
         erp_settings: dict | None = None,
-    ) -> str | None:
-        """The business this consent connected (``GET /businesses``).
+    ) -> list[ExternalCompany]:
+        """The businesses this consent reaches (``GET /businesses``).
 
-        A Sage login can reach several businesses; with exactly one, that is
-        the business. With several → None (``no_external_tenant``): we never
-        pick one of a customer's ledgers for them.
+        A Sage login can reach several businesses; with several the admin picks
+        which (decisions §355) — we never pick one of a customer's ledgers for
+        them. A failed lookup is an empty list (``no_external_tenant``).
         """
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
@@ -205,13 +210,18 @@ class SageAccountingAdapter(OAuthErpAdapter):
                 headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
             )
         if resp.status_code != 200:
-            return None
+            return []
         body = resp.json()
         rows = body.get("$items", body) if isinstance(body, dict) else body
-        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
-            return None
-        business_id = rows[0].get("id")
-        return str(business_id) if business_id else None
+        if not isinstance(rows, list):
+            return []
+        return clean_companies(
+            [
+                (r.get("id"), r.get("name") or r.get("displayed_as"))
+                for r in rows
+                if isinstance(r, dict)
+            ]
+        )
 
     async def _headers(self) -> dict[str, str]:
         return {

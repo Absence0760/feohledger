@@ -1996,3 +1996,337 @@ async def test_test_erp_on_a_disconnected_oauth_erp_is_a_coded_failure(
         "connection_failed",
         PROVIDER,
     )
+
+
+# ---------------------------------------------------------------------------
+# company picker: a consent that reached several companies (decisions §355)
+# ---------------------------------------------------------------------------
+
+_PICK_A = "company-a"
+_PICK_B = "company-b"
+
+
+@pytest.fixture
+def several_companies(monkeypatch):
+    """The consent reaches two companies — what Xero (several organisations in
+    one consent) and Sage (a login with several businesses) can answer. Stubbed
+    on the QuickBooks adapter so these tests reuse this file's QuickBooks
+    harness; the providers' own lists are covered in their adapter tests."""
+    from app.services.erp_adapters.oauth_base import ExternalCompany
+    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+
+    companies = [ExternalCompany(_PICK_A, "Acme Holdings"), ExternalCompany(_PICK_B, "Acme Retail")]
+    seen: list[dict] = []
+
+    async def _list(cls, **kwargs):
+        seen.append(kwargs)
+        return list(companies)
+
+    monkeypatch.setattr(QuickBooksOnlineAdapter, "list_external_tenants", classmethod(_list))
+    return seen
+
+
+async def _park(realdb, provider) -> str:
+    """Authorize + callback for a several-company consent; the browser's cookie."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "AUTH-CODE-SECRET", "state": state})
+    assert resp.status_code == 302
+    assert resp.headers["location"].endswith(f"erp_choose_company={PROVIDER}")
+    return _BROWSER_COOKIES[state]
+
+
+def _cookie(value: str | None) -> dict[str, str]:
+    return {"Cookie": f"{erp_oauth.BROWSER_COOKIE}={value}"} if value else {}
+
+
+async def _pending(realdb, cookie, role: str | None = "admin") -> httpx.Response:
+    async with realdb.client(key="a", role=role) as c:
+        return await c.get("/api/organization/erp/oauth/pending", headers=_cookie(cookie))
+
+
+async def _pick(realdb, cookie, company_id: str, key: str = "a") -> httpx.Response:
+    async with realdb.client(key=key, role="admin") as c:
+        return await c.post(
+            "/api/organization/erp/oauth/pending/select",
+            json={"company_id": company_id},
+            headers=_cookie(cookie),
+        )
+
+
+@pytest.mark.plan("scale")
+async def test_several_companies_park_the_consent_and_link_nothing(
+    realdb, platform_app, provider, several_companies, _autouse_fake_redis
+):
+    """The callback never picks: nothing linked, nothing sealed, no audit row,
+    nothing secret in the redirect, and the token waits sealed server-side."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "AUTH-CODE-SECRET", "state": state})
+
+    location = resp.headers["location"]
+    assert location.endswith(f"/organization?section=erp&erp_choose_company={PROVIDER}")
+    for secret in ("ACCESS-SECRET", "REFRESH-SECRET", "AUTH-CODE-SECRET", _PICK_A):
+        assert secret not in location
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    assert await _sealed(realdb) == {}
+    assert await _audit_actions(realdb) == []
+    # The cookie is renewed for the pick's window, not spent.
+    header = _set_cookie_header(resp).lower()
+    assert f"max-age={erp_oauth.pending_ttl()}" in header
+    assert _BROWSER_COOKIES[state] in _set_cookie_header(resp)
+    # The parked record holds no token in the clear.
+    (raw,) = [v for k, v in _autouse_fake_redis._kv.items() if k.startswith("erp:oauth:pending:")]
+    assert "SECRET" not in raw
+
+
+@pytest.mark.plan("scale")
+async def test_the_pending_connect_lists_its_companies_without_a_token(
+    realdb, platform_app, provider, several_companies
+):
+    cookie = await _park(realdb, provider)
+    resp = await _pending(realdb, cookie)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["provider"] == PROVIDER
+    assert body["companies"] == [
+        {"id": _PICK_A, "name": "Acme Holdings"},
+        {"id": _PICK_B, "name": "Acme Retail"},
+    ]
+    assert datetime.fromisoformat(body["expires_at"]) > datetime.now(UTC)
+    assert "SECRET" not in resp.text
+    # Reading it does not spend it.
+    assert (await _pending(realdb, cookie)).status_code == 200
+
+
+@pytest.mark.plan("scale")
+@pytest.mark.parametrize("cookie", [None, "another-browsers-nonce"])
+async def test_another_browser_finds_no_pending_connect(
+    realdb, platform_app, provider, several_companies, cookie
+):
+    """The pending connect is keyed on the cookie that matched at the callback
+    (§336): the admin's bearer from another browser reaches nothing, and
+    trying does not spend it for the browser that started it."""
+    real = await _park(realdb, provider)
+    for resp in (await _pending(realdb, cookie), await _pick(realdb, cookie, _PICK_A)):
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "erp_pick_expired"
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    assert (await _pick(realdb, real, _PICK_A)).status_code == 200
+
+
+@pytest.mark.plan("scale")
+async def test_picking_a_company_links_it_audited_and_spends_the_pending_connect(
+    realdb, platform_app, provider, several_companies
+):
+    cookie = await _park(realdb, provider)
+    resp = await _pick(realdb, cookie, _PICK_B)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "connected": True,
+        "provider": PROVIDER,
+        "external_tenant_id": _PICK_B,
+    }
+    header = _set_cookie_header(resp).lower()
+    assert "max-age=0" in header
+
+    oauth = (await _org_settings(realdb))["erp"]["oauth"]
+    assert oauth["external_tenant_id"] == _PICK_B
+    assert oauth["access_token"] == "ACCESS-SECRET-1"
+    assert oauth["refresh_token"] == "REFRESH-SECRET-1"
+    assert oauth["client_source"] == "platform"
+    assert datetime.fromisoformat(oauth["expires_at"]) > datetime.now(UTC)
+    rows = {r.action: r for r in await _audit_actions(realdb)}
+    assert rows["organization.erp_connected"].details["picked_from"] == 2
+    assert rows["organization.erp_connected"].details["realm"] is not None
+    assert "SECRET" not in json.dumps(rows["organization.erp_connected"].details)
+
+    # Single use: a second pick, or another read, finds nothing.
+    again = await _pick(realdb, cookie, _PICK_A)
+    assert again.status_code == 409
+    assert again.json()["detail"]["code"] == "erp_pick_expired"
+    assert (await _pending(realdb, cookie)).status_code == 409
+    assert (await _org_settings(realdb))["erp"]["oauth"]["external_tenant_id"] == _PICK_B
+
+
+@pytest.mark.plan("scale")
+async def test_a_company_the_consent_did_not_offer_links_nothing_and_spends_it(
+    realdb, platform_app, provider, several_companies
+):
+    cookie = await _park(realdb, provider)
+    resp = await _pick(realdb, cookie, "someone-elses-company")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "erp_pick_unknown_company"
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    refused = [r for r in await _audit_actions(realdb) if r.action.endswith("connect_refused")]
+    assert refused and refused[0].details["reason"] == "erp_pick_unknown_company"
+    # Spent: the offered company cannot be picked on a second try.
+    assert (await _pick(realdb, cookie, _PICK_A)).json()["detail"]["code"] == "erp_pick_expired"
+
+
+@pytest.mark.plan("scale")
+async def test_a_picked_company_linked_to_another_tenant_is_refused(
+    realdb, platform_app, provider, several_companies
+):
+    block = {**_connected_block(realdb.info("b").org_id), "external_tenant_id": _PICK_A}
+    await _set_settings(realdb, {"erp": {"type": PROVIDER, "oauth": block}}, key="b")
+    cookie = await _park(realdb, provider)
+    resp = await _pick(realdb, cookie, _PICK_A)
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "already_linked"
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+
+
+@pytest.mark.plan("scale")
+async def test_a_pick_whose_audit_row_cannot_be_written_links_nothing(
+    realdb, platform_app, provider, several_companies, monkeypatch
+):
+    from app.api import erp_oauth as erp_oauth_api
+
+    cookie = await _park(realdb, provider)
+
+    async def _no_audit(**_kw):
+        raise RuntimeError("audit sink down")
+
+    monkeypatch.setattr(erp_oauth_api, "record_auth_audit_or_raise", _no_audit)
+    resp = await _pick(realdb, cookie, _PICK_A)
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["code"] == "audit_unavailable"
+    assert await _sealed(realdb) == {}
+
+
+@pytest.mark.plan("scale")
+async def test_discarding_the_pending_connect_links_nothing(
+    realdb, platform_app, provider, several_companies
+):
+    cookie = await _park(realdb, provider)
+    async with realdb.client(key="a", role="admin") as c:
+        first = await c.delete("/api/organization/erp/oauth/pending", headers=_cookie(cookie))
+        second = await c.delete("/api/organization/erp/oauth/pending", headers=_cookie(cookie))
+    assert first.json() == {"discarded": True}
+    assert "max-age=0" in _set_cookie_header(first).lower()
+    cancelled = [r for r in await _audit_actions(realdb) if r.action.endswith("connect_cancelled")]
+    assert len(cancelled) == 1 and cancelled[0].details == {"provider": PROVIDER}
+    assert second.json() == {"discarded": False}
+    assert (await _pick(realdb, cookie, _PICK_A)).json()["detail"]["code"] == "erp_pick_expired"
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+
+
+@pytest.mark.plan("scale")
+async def test_a_single_company_still_connects_without_a_pick(realdb, platform_app, provider):
+    """The picker is only for several: one company links at the callback."""
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    assert resp.headers["location"].endswith(f"erp_connected={PROVIDER}")
+    assert "erp_choose_company" not in resp.headers["location"]
+
+
+@pytest.mark.plan("scale")
+async def test_more_companies_than_a_picker_offers_is_refused(
+    realdb, platform_app, provider, monkeypatch
+):
+    from app.services.erp_adapters.oauth_base import COMPANY_LIST_MAX, ExternalCompany
+    from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
+
+    async def _list(cls, **_kw):
+        return [ExternalCompany(f"c-{i}", f"C {i}") for i in range(COMPANY_LIST_MAX + 1)]
+
+    monkeypatch.setattr(QuickBooksOnlineAdapter, "list_external_tenants", classmethod(_list))
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "c", "state": state})
+    assert resp.headers["location"].endswith("erp_error=no_external_tenant")
+
+
+@pytest.mark.plan("scale")
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/api/organization/erp/oauth/pending", None),
+        ("POST", "/api/organization/erp/oauth/pending/select", {"company_id": _PICK_A}),
+        ("DELETE", "/api/organization/erp/oauth/pending", None),
+    ],
+)
+@pytest.mark.parametrize("role", ["ap_manager", "ap_clerk", "cfo", None])
+async def test_picker_routes_are_admin_only(
+    realdb, platform_app, provider, several_companies, method, path, body, role
+):
+    """Even from the starting browser: the cookie is not a credential."""
+    cookie = await _park(realdb, provider)
+    async with realdb.client(key="a", role=role) as c:
+        resp = await c.request(method, path, json=body, headers=_cookie(cookie))
+    assert resp.status_code == (401 if role is None else 403)
+    assert (await _pending(realdb, cookie)).status_code == 200
+
+
+async def test_a_pending_connect_is_only_the_starting_admins_and_lapses(monkeypatch):
+    """Service level: another admin in the starting browser finds nothing (and
+    a pick by them spends it), and a lapsed one is gone."""
+    from app.services.erp_adapters.oauth_base import ExternalCompany
+
+    org, admin, other = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    cookie = "browser-nonce"
+
+    async def park():
+        await erp_oauth.park_pending_connect(
+            org_id=org,
+            user_id=admin,
+            provider=PROVIDER,
+            client_source="platform",
+            browser_binding=erp_oauth.browser_binding(cookie),
+            token_response=_token_body(),
+            companies=[ExternalCompany("x", "X"), ExternalCompany("y", "Y")],
+        )
+
+    await park()
+    assert await erp_oauth.peek_pending_connect(org, other, cookie) is None
+    assert await erp_oauth.peek_pending_connect(uuid.uuid4(), admin, cookie) is None
+    assert await erp_oauth.take_pending_connect(org, other, cookie) is None
+    assert await erp_oauth.peek_pending_connect(org, admin, cookie) is None  # spent
+
+    await park()
+    later = time.time() + erp_oauth.pending_ttl() + 1
+    monkeypatch.setattr(erp_oauth.time, "time", lambda: later)
+    assert await erp_oauth.peek_pending_connect(org, admin, cookie) is None
+    assert await erp_oauth.take_pending_connect(org, admin, cookie) is None
+
+
+async def test_a_taken_pending_connect_ages_its_token_lifetimes(monkeypatch):
+    """The stored expiry must not run later than the provider's: the time the
+    consent waited is taken off its lifetimes."""
+    from app.services.erp_adapters.oauth_base import ExternalCompany
+
+    org, admin, cookie = uuid.uuid4(), uuid.uuid4(), "browser-nonce"
+    await erp_oauth.park_pending_connect(
+        org_id=org,
+        user_id=admin,
+        provider=PROVIDER,
+        client_source="platform",
+        browser_binding=erp_oauth.browser_binding(cookie),
+        token_response=_token_body(),
+        companies=[ExternalCompany("x", "X"), ExternalCompany("y", "Y")],
+    )
+    now = time.time() + 300
+    monkeypatch.setattr(erp_oauth.time, "time", lambda: now)
+    taken = await erp_oauth.take_pending_connect(org, admin, cookie)
+    assert taken is not None and taken.token_response is not None
+    assert taken.token_response["access_token"] == "ACCESS-SECRET-1"
+    assert 3299 <= taken.token_response["expires_in"] <= 3300
+    assert taken.token_response["x_refresh_token_expires_in"] <= 8726400 - 299
+
+
+def test_clean_companies_drops_repeats_and_normalises_names():
+    from app.services.erp_adapters.oauth_base import clean_companies
+
+    got = clean_companies([("a", "  Acme   Ltd "), ("a", "dup"), ("b", None)])
+    assert [(c.id, c.name) for c in got] == [("a", "Acme Ltd"), ("b", "b")]
+
+
+@pytest.mark.parametrize("bad", ["", None, "x" * 129, "bad\nid"])
+def test_clean_companies_fails_closed_on_an_unaddressable_id(bad):
+    """One bad row empties the list: dropping it could leave a single company
+    out of several, which the callback would link without a pick (§355)."""
+    from app.services.erp_adapters.oauth_base import clean_companies
+
+    assert clean_companies([("a", "A"), (bad, "bad")]) == []

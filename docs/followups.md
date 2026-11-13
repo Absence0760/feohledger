@@ -1493,12 +1493,6 @@ scope (§260) — do not fold them into any of these.
       (`existing_invoice_not_open`). **Durable fix:** decide whether we submit
       for approval and poll, or post only to companies without workflows, and
       document it. **Trigger:** the first BC customer with approval workflows.
-- [ ] **(c) Connecting picks no company when the consent covers several.** Xero
-      (several organisations authorised in one consent) and Sage v3.1 (a login
-      with several businesses) resolve to none, and the connect is refused
-      (`no_external_tenant`). **Durable fix:** a company picker after consent,
-      stored with the grant. **Trigger:** the first customer whose consent
-      covers more than one company.
 - [ ] **(c) A vendor holds one `erp_vendor_id`, whichever ERP set it.** A tenant
       that switches ERP posts the old ERP's ids, and the new ERP rejects them,
       and some syncs stored a name or code where the ERP gave no id. **Durable

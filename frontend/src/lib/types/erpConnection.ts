@@ -404,11 +404,41 @@ export function oauthAttentionKey(
 	return null;
 }
 
-/** The `?erp_connected=` / `?erp_error=` return from the OAuth callback. */
+/** The `?erp_connected=` / `?erp_error=` / `?erp_choose_company=` return
+ *  from the OAuth callback. `choose`: the consent reached several companies
+ *  and waits, server-side, for the admin to pick one (decisions §355). */
 export type OAuthReturn =
 	| { kind: 'connected'; provider: string }
+	| { kind: 'choose'; provider: string }
 	| { kind: 'error'; code: string }
 	| null;
+
+/** `GET /api/organization/erp/oauth/pending`: the companies a parked consent
+ *  offers. Never a token — those stay sealed server-side. */
+export interface ErpPendingConnect {
+	provider: string;
+	display_name: string;
+	companies: { id: string; name: string }[];
+	expires_at: string;
+}
+
+/** The coded refusals a company pick can end in, each with its sentence.
+ *  `erp_pick_expired` covers "lapsed", "already used" and "not this browser";
+ *  the server folds them together and so does this. */
+export const PICK_REFUSAL_KEYS = {
+	erp_pick_expired: 'org.erp.oauth.pick.expired',
+	erp_pick_unknown_company: 'org.erp.oauth.pick.unknownCompany',
+	already_linked: 'org.erp.oauth.error.alreadyLinked',
+	credentials_unavailable: 'org.erp.oauth.error.credentialsUnavailable',
+	audit_unavailable: 'org.erp.oauth.error.auditUnavailable'
+} as const satisfies Record<string, MessageKey>;
+
+/** A pick refusal's message key, or null for a code this build does not know
+ *  (the caller then shows the server's sentence). */
+export function pickRefusalKey(code: string | null | undefined): MessageKey | null {
+	if (!code || !Object.hasOwn(PICK_REFUSAL_KEYS, code)) return null;
+	return PICK_REFUSAL_KEYS[code as keyof typeof PICK_REFUSAL_KEYS];
+}
 
 /** The OAuth callback's `erp_error` codes an admin can act on, each with its
  * own explanation. Any other code falls back to the generic message. */
@@ -453,7 +483,11 @@ export function platformConnectUrl(params: Record<string, unknown>): string | nu
 const RETURN_PARAM_LIMIT = 64;
 
 /** The query parameters the OAuth callback appends on its way back. */
-export const OAUTH_RETURN_PARAMS: readonly string[] = ['erp_connected', 'erp_error'];
+export const OAUTH_RETURN_PARAMS: readonly string[] = [
+	'erp_connected',
+	'erp_error',
+	'erp_choose_company'
+];
 
 /**
  * `url` without the OAuth return parameters (path + query, the shape
@@ -472,6 +506,8 @@ export function readOAuthReturn(params: Pick<URLSearchParams, 'get'>): OAuthRetu
 	if (error) return { kind: 'error', code: error.slice(0, RETURN_PARAM_LIMIT) };
 	const connected = params.get('erp_connected');
 	if (connected) return { kind: 'connected', provider: connected.slice(0, RETURN_PARAM_LIMIT) };
+	const choose = params.get('erp_choose_company');
+	if (choose) return { kind: 'choose', provider: choose.slice(0, RETURN_PARAM_LIMIT) };
 	return null;
 }
 

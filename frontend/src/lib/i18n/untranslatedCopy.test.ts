@@ -57,6 +57,7 @@ const TRANSLATED = [
 	'/src/lib/components/modals/RunDetailModal.svelte',
 	'/src/lib/components/modals/VendorConsolidationModal.svelte',
 	'/src/lib/components/modals/VendorModal.svelte',
+	'/src/lib/components/organization/ErpCompanyPicker.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
 	'/src/lib/components/ui/InvoicePicker.svelte',
 	'/src/lib/components/ui/PlanUpgradeNotice.svelte',

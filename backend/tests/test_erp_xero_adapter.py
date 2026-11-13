@@ -1187,12 +1187,13 @@ def _resolve_xero(rows, token: str = "opaque"):
         return httpx.Response(200, json=rows)
 
     with patch("httpx.AsyncClient", _transport_client(handler)):
-        tenant = _run(
-            XeroAdapter.resolve_external_tenant_id(
+        orgs = _run(
+            XeroAdapter.list_external_tenants(
                 access_token=token, token_response={}, callback_params={}
             )
         )
-    return tenant, seen
+    # The callback links on exactly one; the tests below read it the same way.
+    return (orgs[0].id if len(orgs) == 1 else None), seen
 
 
 def test_resolve_tenant_reads_the_one_connected_organisation(monkeypatch):
@@ -1226,6 +1227,46 @@ def test_resolve_tenant_never_picks_among_several_organisations(monkeypatch):
     ]
     tenant, _ = _resolve_xero(rows, token=_jwt({"authentication_event_id": "e1"}))
     assert tenant is None
+
+
+def test_list_tenants_offers_every_organisation_this_consent_authorised(monkeypatch):
+    """Several organisations in one consent: all of them, named, for the admin
+    to pick from (decisions §355) — an earlier consent's are still left out."""
+    monkeypatch.setattr(settings, "erp_xero_api_base", "")
+    rows = [
+        {"tenantId": "t-a", "tenantType": "ORGANISATION", "authEventId": "e1", "tenantName": "A"},
+        {"tenantId": "t-b", "tenantType": "ORGANISATION", "authEventId": "e1", "tenantName": "B"},
+        {"tenantId": "t-old", "tenantType": "ORGANISATION", "authEventId": "e0"},
+        {"tenantId": "t-p", "tenantType": "PRACTICEMANAGER", "authEventId": "e1"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=rows)
+
+    with patch("httpx.AsyncClient", _transport_client(handler)):
+        got = _run(
+            XeroAdapter.list_external_tenants(
+                access_token=_jwt({"authentication_event_id": "e1"}),
+                token_response={},
+                callback_params={},
+            )
+        )
+    assert [(c.id, c.name) for c in got] == [("t-a", "A"), ("t-b", "B")]
+
+
+def test_list_tenants_failure_is_empty(monkeypatch):
+    monkeypatch.setattr(settings, "erp_xero_api_base", "")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"Title": "Unauthorized"})
+
+    with patch("httpx.AsyncClient", _transport_client(handler)):
+        got = _run(
+            XeroAdapter.list_external_tenants(
+                access_token="t", token_response={}, callback_params={}
+            )
+        )
+    assert got == []
 
 
 def test_resolve_tenant_uses_the_operator_base_for_connections(monkeypatch):
