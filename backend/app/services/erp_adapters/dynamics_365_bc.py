@@ -469,9 +469,12 @@ class BusinessCentralAdapter(ErpAdapter):
         * Read fails → retryable as its status says, naming ``doc_id`` so the
           push records it as a possible orphan; the draft stays in BC.
         * Paid and found by the lookup → refused ``existing_invoice_not_open``:
-          BC has paid it, and success would send it to our payment run too.
+          BC has paid a bill we cannot prove we sent, and success would close
+          the invoice at ``done`` as our own push, hiding that payment.
         * Open / Paid (posted in between, or Open found by the lookup) → success
-          only when BC's total is the approved amount. Otherwise refused,
+          only when BC's total is the approved amount, and, for one the lookup
+          found, in the invoice's currency (``_found_currency_refusal``; a
+          found draft is checked the same way before it is posted). Otherwise refused,
           non-retryably and never deleted (reversing a posted invoice is an
           accountant's corrective credit memo in BC): ``posted_total_mismatch``,
           or ``posted_total_unconfirmed`` when no total is stated.
@@ -511,15 +514,26 @@ class BusinessCentralAdapter(ErpAdapter):
             if found_by_lookup and status == "paid":
                 # BC already paid this vendor's invoice under this number —
                 # ours posted earlier and paid in BC, or the same bill keyed
-                # and paid there by hand. Reporting it posted would send it on
-                # to our own payment run, paying it twice; an accountant
-                # decides in BC (decisions §391).
+                # and paid there by hand. BC has no status sync, so success
+                # would close the invoice at `done` as our own push: a payment
+                # made in BC, perhaps before or without our approval, linked to
+                # a bill we never sent and recorded nowhere here. A person
+                # reconciles it in BC (decisions §391).
                 result = erp_refusal(_PROVIDER, EXISTING_INVOICE_NOT_OPEN)
                 result.erp_document_id = doc_id
                 result.erp_document_number = record.get("number") or None
                 return result
             if status in ("open", "paid"):
-                return _bc_posted(doc_id, record, payload, found_by_lookup=found_by_lookup)
+                result = _bc_posted(doc_id, record, payload, found_by_lookup=found_by_lookup)
+                if result.success and found_by_lookup:
+                    # At the approved figure, but in which currency? Ours is
+                    # sent with the invoice's; a found one may be any.
+                    refused = await self._found_currency_refusal(
+                        client, headers, record, payload, doc_id, posted=True
+                    )
+                    if refused is not None:
+                        return refused
+                return result
             if status != "draft":
                 return erp_refusal(_PROVIDER, EXISTING_INVOICE_NOT_OPEN)
 
@@ -540,6 +554,13 @@ class BusinessCentralAdapter(ErpAdapter):
                 return await _delete_and_refuse(
                     client, url, headers, etag, doc_id, POSTED_TOTAL_MISMATCH
                 )
+
+            if found_by_lookup:
+                refused = await self._found_currency_refusal(
+                    client, headers, record, payload, doc_id, posted=False
+                )
+                if refused is not None:
+                    return refused
 
             post_resp = await client.post(
                 await self._api_url(f"purchaseInvoices({doc_id})/Microsoft.NAV.post"),
@@ -581,6 +602,72 @@ class BusinessCentralAdapter(ErpAdapter):
         result = erp_refusal(_PROVIDER, EXISTING_INVOICE_NOT_OPEN)
         result.erp_document_id = doc_id
         return result
+
+    async def _found_currency_refusal(
+        self,
+        client,
+        headers: dict,
+        record: dict,
+        payload: InvoicePayload,
+        doc_id: str,
+        *,
+        posted: bool,
+    ) -> ErpPostResult | None:
+        """Why an invoice the lookup found, at the approved figure, is not this
+        invoice after all — or None.
+
+        Matching the figure says nothing when the currency differs: 1,000.00
+        EUR is not 1,000.00 USD, and reporting it posted would pay the
+        supplier the dollar figure against a euro bill. A draft we create is
+        sent with the invoice's ``currencyCode``; one the lookup finds may be
+        a BC user's in any currency. So its ``currencyCode`` must be the
+        invoice's. BC leaves the code blank for the company's local currency
+        (LCY), so a blank one is read as the company's LCY
+        (``companyInformation.currencyCode``, API v2.0), never assumed to be
+        the invoice's. Any difference, or an LCY BC does not state, is
+        ``posted_total_mismatch`` with the record left in BC; a failed LCY
+        read is a retryable failure naming the record (decisions §391).
+        """
+        wanted = (payload.currency or "").strip().upper()
+        stated = str(record.get("currencyCode") or "").strip().upper()
+        if not stated:
+            lcy = await self._local_currency(client, headers)
+            if isinstance(lcy, ErpPostResult):
+                lcy.erp_document_id = doc_id
+                return lcy
+            stated = lcy
+        if stated and wanted and stated == wanted:
+            return None
+        if not posted:
+            return _draft_not_deleted(doc_id, POSTED_TOTAL_MISMATCH)
+        return ErpPostResult(
+            success=False,
+            erp_document_id=doc_id,
+            erp_document_number=record.get("number") or None,
+            message=f"{_PROVIDER} post refused: {POSTED_TOTAL_MISMATCH} "
+            f"(the invoice is posted in {_PROVIDER} and was not deleted)",
+            retryable=False,
+            refusal_code=POSTED_TOTAL_MISMATCH,
+            refusal_provider=_PROVIDER,
+        )
+
+    async def _local_currency(self, client, headers: dict) -> str | ErpPostResult:
+        """The company's local currency code (BC's LCY), upper-cased, from
+        ``GET companies({id})/companyInformation``; "" when BC states none.
+        Read as the documented single object or as a one-row collection."""
+        resp = await client.get(await self._api_url("companyInformation"), headers=headers)
+        if resp.status_code != 200:
+            return erp_http_failure(_PROVIDER, resp.status_code)
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+        if isinstance(body, dict) and isinstance(body.get("value"), list):
+            rows = [r for r in body["value"] if isinstance(r, dict)]
+            body = rows[0] if len(rows) == 1 else None
+        if not isinstance(body, dict):
+            return ErpPostResult(success=False, message=erp_failure_message(_PROVIDER, 200))
+        return str(body.get("currencyCode") or "").strip().upper()
 
     async def _reprice_to_net(
         self, payload: InvoicePayload, lines: _BcLines, headers: dict

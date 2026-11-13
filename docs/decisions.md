@@ -19143,10 +19143,30 @@ onto main after #670, which had since introduced `tax_not_itemised` and
   orphan, and recognising that recorded id as ours is a follow-up.
 - **A found `Paid` invoice is refused, not reported posted**
   (`existing_invoice_not_open`). With the new key it may be the same bill
-  keyed and paid by hand in BC; success would move it to our payment run and
-  pay it twice. A found `Open` one at the approved total is the idempotent
-  success it always was. A lookup BC answers 200 with no readable collection
-  is a retryable failure, never a miss.
+  keyed and paid by hand in BC, perhaps before or without our approval. BC
+  has no status sync, so success would close the invoice at `done` as though
+  our push had created the bill: linked to a document FeohLedger never sent,
+  with a payment made in BC recorded nowhere here (no payment row, no 1099
+  line) and nobody asked to reconcile it. (A first draft of this entry said
+  success would send it to our payment run; that holds only for an ERP whose
+  bills sync back, which BC's do not.) A found `Open` one at the approved
+  total is the idempotent success it always was. A lookup BC answers 200
+  with no readable collection is a retryable failure, never a miss.
+- **A found invoice must also be in the invoice's currency** (money-path
+  review). Matching the figure says nothing across currencies: a hand-keyed
+  1,000.00 EUR bill is not the approved 1,000.00 USD one. A draft we create
+  carries the invoice's `currencyCode`; one the lookup finds may be a BC
+  user's in any. So before a found `Open` / `Paid` invoice is reported posted,
+  and before a found draft is posted, its `currencyCode` must equal the
+  invoice's. BC leaves the code blank for the company's local currency
+  (LCY), and that blank is read as the company's LCY
+  (`GET companies({id})/companyInformation`, whose `currencyCode` API v2.0
+  documents; read as one object or a one-row collection), never assumed.
+  A difference, or an LCY BC does not state, is `posted_total_mismatch` with
+  the record left in BC (a currency-specific code exists only as Blackbaud's
+  `currency_mismatch`, whose sentence names the ledger currency, which is not
+  the fault here); a failed LCY read is retryable. Only found records are
+  checked: the read costs one call, and only where the currency is not ours.
 - **A VAT company gets one net reprice of a draft we created.** When the gross
   draft's `totalAmountExcludingTax` is the approved amount and BC added
   non-zero tax (`pricesIncludeTax` false), that draft is deleted (real etag,
@@ -19198,12 +19218,17 @@ Tests: `tests/test_erp_adapter_idempotency.py` (the lookup filter, several
 hits, an unreadable lookup, the GUID and length preflights, the VAT reprice
 and its refusals, a found taxed draft left not repriced, a found Paid invoice
 refused, a found draft's coded post refusal left in BC, the post read-back, coded create and post
-refusals, `Corrective` → unknown); `tests/test_erp_adapter_money_exact.py`;
+refusals, `Corrective` → unknown; a found Open or draft invoice in EUR refused,
+a found blank-code one accepted in the company's LCY and refused against
+another or an unstated LCY, a failed LCY read retryable); `tests/test_erp_adapter_money_exact.py`;
 `tests/test_erp_vendor_sync_adapter.py` (terms code, blocked vendor);
 `tests/test_erp_gl_sync.py` (`directPosting`);
 `tests/test_erp_base_url_overrides.py`; `tests/test_erp_adapter_error_pii.py`;
 `frontend/tests-e2e/erp/dynamics.spec.ts` (VAT net post, edited-draft
-refusal, terms code, against fake-erp).
+refusal, terms code, against fake-erp; the VAT net post's invoice number is
+kept inside BC's `Code[35]`, since a longer one was correctly refused
+`doc_number_too_long` before any call). fake-erp answers `companyInformation`
+with a USD LCY.
 
 ## 392. Xero's invoice webhook answers in Xero's own codes, and the ERP panel can check payments now (§386 follow-ups, 2026-11-14)
 

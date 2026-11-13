@@ -3700,6 +3700,20 @@ async def d365_get_vendor(
     return copy.deepcopy(vendor)
 
 
+# Every fake BC company keeps its books in US dollars: BC leaves a purchase
+# invoice's `currencyCode` blank for this local currency (LCY), and the adapter
+# reads it from here to judge a found invoice with a blank code.
+D365_LOCAL_CURRENCY = "USD"
+
+
+@d365_sync.get("/{environment}/api/v2.0/companies({company_id})/companyInformation")
+async def d365_company_information(request: Request, environment: str, company_id: str) -> dict:
+    """The company's information, as API v2.0 documents it (one object);
+    `currencyCode` is the company's LCY."""
+    _require_d365_auth(request)
+    return {"id": f"ci-{company_id}", "displayName": "Fake BC Company", "currencyCode": D365_LOCAL_CURRENCY}
+
+
 @d365_sync.get("/{environment}/api/v2.0/companies({company_id})/purchaseOrders")
 async def d365_list_purchase_orders(request: Request, environment: str, company_id: str) -> dict:
     _require_d365_auth(request)

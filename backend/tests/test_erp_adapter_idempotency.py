@@ -435,13 +435,21 @@ def _bc_record(
     *,
     excluding: Decimal | None = None,
     tax: Decimal | None = None,
+    currency: str = "USD",
 ):
     """A purchaseInvoice read, with its body on the wire exactly as BC sends it.
     ``excluding`` / ``tax`` are its ``totalAmountExcludingTax`` /
-    ``totalTaxAmount``, stated only when given."""
+    ``totalTaxAmount``, stated only when given; ``currency`` its
+    ``currencyCode`` ("" = BC's blank, the company's local currency)."""
     from app.utils.json_money import dumps_exact_json
 
-    record = {"id": doc_id, "number": "PI-9", "status": status, "@odata.etag": etag}
+    record = {
+        "id": doc_id,
+        "number": "PI-9",
+        "status": status,
+        "@odata.etag": etag,
+        "currencyCode": currency,
+    }
     if total is not None:
         record["totalAmountIncludingTax"] = total
     if excluding is not None:
@@ -1524,7 +1532,8 @@ def test_d365_an_unreadable_lookup_is_a_retryable_failure_never_a_miss(monkeypat
 def test_d365_a_paid_invoice_found_by_the_lookup_is_refused_not_reported_posted(monkeypatch):
     """BC already holds this vendor's invoice under this number as Paid at the
     approved total — ours paid in BC, or the same bill keyed and paid there by
-    hand. Success would send it on to our own payment run and pay it twice."""
+    hand. Success would close the invoice at ``done`` as our own push, with
+    that payment recorded nowhere here (decisions §391)."""
     adapter = _offline_bc(monkeypatch)
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
@@ -1547,6 +1556,82 @@ def test_d365_a_paid_invoice_found_by_the_lookup_is_refused_not_reported_posted(
     assert result.retryable is False
     assert result.refusal_code == "existing_invoice_not_open"
     assert result.erp_document_id == "bc-p"
+
+
+def _found_at_the_approved_total(monkeypatch, status: str, *, currency: str, lcy=None):
+    """The lookup finds this vendor's invoice under this number at the approved
+    100.00, its ``currencyCode`` ``currency``; ``lcy`` is the company's
+    ``companyInformation`` read (a response), when the adapter asks for it.
+    Returns the result and the client mock."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        posts = [_mock_response(200, {"access_token": "tok"})]
+        if status == "Draft":
+            posts.append(_mock_response(204, None))  # Microsoft.NAV.post
+        client.post = AsyncMock(side_effect=[*posts, AssertionError("no create")])
+        gets = [
+            _mock_response(200, {"value": [{"id": "bc-f", "status": status}]}),
+            _bc_record("bc-f", status, Decimal("100.00"), currency=currency),
+        ]
+        if lcy is not None:
+            gets.append(lcy)
+        if status == "Draft":
+            gets.append(_bc_record("bc-f", "Open", Decimal("100.00"), currency=currency))
+        client.get = AsyncMock(side_effect=gets)
+        client.delete = AsyncMock(side_effect=AssertionError("a found invoice is never deleted"))
+        result = _run(adapter.post_invoice(_payload()))
+    return result, client
+
+
+@pytest.mark.parametrize("status", ["Open", "Draft"])
+def test_d365_a_found_invoice_in_another_currency_is_refused(monkeypatch, status):
+    """100.00 EUR is not the approved 100.00 USD: refused, left in BC, never
+    posted, and no LCY read is needed for a stated code (decisions §391)."""
+    result, client = _found_at_the_approved_total(monkeypatch, status, currency="EUR")
+    assert result.success is False and result.retryable is False
+    assert result.refusal_code == "posted_total_mismatch"
+    assert result.erp_document_id == "bc-f"
+    assert client.get.await_count == 2
+    assert client.post.await_count == 1  # the token only: a found draft is not posted
+    client.delete.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", ["Open", "Draft"])
+def test_d365_a_found_blank_currency_invoice_in_the_companys_lcy_is_accepted(monkeypatch, status):
+    """BC leaves ``currencyCode`` blank for the local currency: read as the
+    company's LCY, here USD, the invoice's own."""
+    lcy = _mock_response(200, {"id": "ci-1", "currencyCode": "USD"})
+    result, client = _found_at_the_approved_total(monkeypatch, status, currency="", lcy=lcy)
+    assert result.success, result.message
+    assert result.erp_document_id == "bc-f"
+    lcy_url = client.get.await_args_list[2].args[0]
+    assert lcy_url.endswith("/companies(1b2c3d4e-0000-0000-0000-00000000c001)/companyInformation")
+
+
+@pytest.mark.parametrize(
+    "lcy_body",
+    [
+        {"id": "ci-1", "currencyCode": "GBP"},
+        {"value": [{"id": "ci-1", "currencyCode": "GBP"}]},
+        {"id": "ci-1", "currencyCode": ""},  # BC states no LCY: not confirmed
+    ],
+)
+def test_d365_a_found_blank_currency_invoice_not_in_the_invoices_currency_is_refused(
+    monkeypatch, lcy_body
+):
+    lcy = _mock_response(200, lcy_body)
+    result, client = _found_at_the_approved_total(monkeypatch, "Open", currency="", lcy=lcy)
+    assert result.success is False and result.retryable is False
+    assert result.refusal_code == "posted_total_mismatch"
+    client.delete.assert_not_awaited()
+
+
+def test_d365_a_failed_lcy_read_is_retryable_not_success(monkeypatch):
+    lcy = _mock_response(503, {})
+    result, _ = _found_at_the_approved_total(monkeypatch, "Open", currency="", lcy=lcy)
+    assert result.success is False and result.retryable is True
+    assert result.erp_document_id == "bc-f"
 
 
 def test_d365_a_failed_read_of_a_created_draft_names_it_as_a_possible_orphan(monkeypatch):

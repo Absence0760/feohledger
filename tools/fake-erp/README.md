@@ -425,6 +425,8 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   `Prefer: odata.maxpagesize` and returns `@odata.nextLink` (`$skiptoken`).
   `DELETE …/purchaseInvoices({id})` needs `If-Match` and deletes only a `Draft`.
   A purchaseInvoice `Account` line must carry a posting account's `accountId`.
+  `GET …/companyInformation` answers one object whose `currencyCode` (`USD` for
+  every fake company) is the LCY a blank purchaseInvoice `currencyCode` means.
 - **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, `28`,
   and inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
   (`PO-FAKE-NS-501` 2100.50 USD open, vendor `25`; `PO-FAKE-NS-502` 640.00 GBP
