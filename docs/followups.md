@@ -1175,16 +1175,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the first DSAR for a vendor with more than a few thousand
       invoices, or the next change to `privacy_export`.
 
-- [ ] **(c) `/admin/privacy` is still mostly hardcoded English.** The step-up
-      prompt it gained in §237 is localized (`StepUpPrompt`), but the page's own
-      headings, form labels, help text and result summaries are literal English
-      strings in `frontend/src/routes/admin/privacy/+page.svelte`.
-      **Durable fix:** move every string into the six locale files under a
-      `privacy.admin.*` namespace, with the result summaries built from the export's
-      typed counts rather than server sentences.
-      **Trigger:** the next change to that page, or the first non-English privacy
-      officer.
-
 - [ ] **(c) An expense that sits on no report has no owner, so anyone can rewrite it.**
       §241 made a report's lines owner-only, but `expenses` has no creator column.
       A loose line stays editable by any `admin` / `ap_manager` / `ap_clerk` until a
@@ -1240,14 +1230,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       `/organization` (or the user row's actions for sessions), each with its
       own help guide step. **Trigger:** the first customer asking to change
       one, or SCIM onboarding for an enterprise tenant.
-- [ ] **(c) Pages still hardcoded in English.** The Report Builder page,
-      `/admin/access-review`, `/admin/privacy`, the vendors list's "Merge
-      duplicates" action and the budget dimension labels
-      (`lib/types/budget.ts`) carry literal English. Help has to name those
-      labels in bold rather than through `{ui:}`. **Durable fix:** extract them
-      to the catalogues and swap the guides' bold labels for `{ui:}`
-      references (`content.test.ts` will check them). **Trigger:** the next
-      i18n extraction slice.
 - [ ] **(c) Help for the mobile app and the supplier portal.** The help centre
       covers the employee web app. Mobile users and suppliers get none.
       **Durable fix:** a portal-side help section (suppliers are a separate
