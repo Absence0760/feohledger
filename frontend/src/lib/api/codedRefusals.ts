@@ -29,8 +29,11 @@
  *    email and name checks, the captcha, the verification link), the
  *    shared rate limiter's 429 on every surface it guards, and every vendor
  *    merge refusal (self-merge, cross-entity, a payments-blocked duplicate,
- *    an ERP company where both are linked to different supplier records), and
- *    the refusals of the vendor ERP unlink that is that conflict's way through;
+ *    an ERP company where both are linked to different supplier records, a
+ *    duplicate holding approved invoices still to be paid), and the refusals
+ *    of the vendor ERP unlink that is that conflict's way through, and the
+ *    invoice state machine's own refusals (an edge it has no transition for,
+ *    the recall's edges, the once-approved rules);
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -297,6 +300,17 @@ function rateLimited(params: Params, t: Translate): string | null {
 	return t('refusal.rateLimitedHours', { n: Math.ceil(seconds / 3600) });
 }
 
+/** An engine refusal naming the edge it refused, by the statuses' labels. */
+function transitionNamed(key: MessageKey, params: Params, t: Translate): string | null {
+	const from = str(params, 'status');
+	const to = str(params, 'target');
+	if (from === null || to === null) return null;
+	return t(key, {
+		from: statusLabel(from, invoiceStatusLabelKey, t),
+		to: statusLabel(to, invoiceStatusLabelKey, t)
+	});
+}
+
 // --- the table ---------------------------------------------------------------
 
 type Builder = (params: Params, t: Translate) => string | null;
@@ -350,6 +364,21 @@ const BUILDERS: Record<string, Builder> = {
 		if (claim === 'virtual_card') return t('refusal.cardBlocksRecall');
 		return null;
 	},
+	// The state machine's own 409s (`services/workflow_engine.py`), reached
+	// through every door that transitions an invoice and through a
+	// `POST /bulk/status` row's skip. `params.status` / `params.target` are
+	// `InvoiceStatus` values, named by their labels; an edge with either missing
+	// falls back to the server's sentence.
+	invoice_transition_invalid: (p, t) => transitionNamed('refusal.invoiceTransitionInvalid', p, t),
+	invoice_transition_recall_only: (p, t) =>
+		transitionNamed('refusal.invoiceTransitionRecallOnly', p, t),
+	// A once-approved invoice gets back to approval only through a person
+	// (decisions §374, §379).
+	invoice_once_approved_not_reread: fixed('refusal.invoiceOnceApprovedNotReread'),
+	invoice_once_approved_not_to_draft: fixed('refusal.invoiceOnceApprovedNotToDraft'),
+	invoice_once_approved_not_closed_from_draft: fixed(
+		'refusal.invoiceOnceApprovedNotClosedFromDraft'
+	),
 	// `api/workflow.close_refusals` — `/complete` closing to `done`, and a
 	// `POST /bulk/status → done` row's skip, refused while a live payment or
 	// virtual card holds the invoice (decisions §357). `params.claim` names
@@ -726,6 +755,14 @@ const BUILDERS: Record<string, Builder> = {
 	// Its `params.realms` names the ERP companies in conflict, for the API
 	// reader; the sentence does not need them (decisions §373).
 	vendor_merge_erp_link_conflict: fixed('refusal.vendorMergeErpLinkConflict'),
+	// A duplicate holds approved invoices still to be paid (decisions §379).
+	// `params.count` spans every duplicate; without it the sentence is the
+	// server's.
+	vendor_merge_approved_unpaid: (p, t) => {
+		const n = p.count;
+		if (typeof n !== 'number' || !Number.isInteger(n) || n < 1) return null;
+		return t('refusal.vendorMergeApprovedUnpaid', { n });
+	},
 	// Clearing a vendor's ERP link in one company (`services/vendor_erp_unlink.py`,
 	// decisions §375). The in-flight count is required: a sentence with no
 	// number is the server's job.
