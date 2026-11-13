@@ -26,9 +26,9 @@ class InvoiceEditSheet extends StatefulWidget {
 class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
   final _formKey = GlobalKey<FormState>();
 
-  /// Mirrors the backend `_FINANCIALLY_LOCKED_STATUSES` gate — see
-  /// [InvoiceStatus.isFinanciallyLocked].
-  late final bool _locked = widget.invoice.status.isFinanciallyLocked;
+  /// The server's financial-lock verdict for this invoice — see
+  /// [Invoice.financiallyLocked].
+  late final bool _locked = widget.invoice.financiallyLocked;
   late final TextEditingController _vendor;
   late final TextEditingController _invoiceNumber;
   late final TextEditingController _amount;
@@ -122,8 +122,9 @@ class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
           _dueDate == null ? null : formatIsoDate(_dueDate!);
     }
 
-    // An approved (or later) invoice is financially frozen server-side: the
-    // backend 409s the WHOLE PATCH if it carries any of `kFinancialInvoiceFields`
+    // A financially locked invoice (approved or later, or a failed ERP push
+    // after approval) is frozen server-side: the backend 409s the WHOLE PATCH
+    // if it carries any of `kFinancialInvoiceFields`
     // (`_FINANCIAL_FIELDS` in `backend/app/api/invoices.py`). Dropping them here
     // is what lets a mixed edit through — a combined description + amount save
     // used to lose the description too, because the rejected request took the

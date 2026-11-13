@@ -53,27 +53,6 @@ enum InvoiceStatus {
     _ => true,
   };
 
-  /// Whether the invoice's *financial* content — how much, and to whom — is
-  /// frozen. Mirrors the backend `_FINANCIALLY_LOCKED_STATUSES`
-  /// (`backend/app/api/invoices.py`), which is literally
-  /// `{approved} | IMMUTABLE_STATUSES` — written the same way here so the two
-  /// halves can't drift apart: `!isEditable` IS this file's mirror of
-  /// `IMMUTABLE_STATUSES`, and `approved` is the extra state it adds.
-  ///
-  /// The approval signature (`services/approval_signature.py`) is computed over
-  /// the exact amount and the payment run reads `Invoice.amount` /
-  /// `Invoice.vendor_id` straight off the row — so editing money after sign-off
-  /// would pay a figure nobody approved, and re-saving the vendor would
-  /// re-point the payee at another supplier's bank details (the BEC redirect
-  /// the dual-control `VendorChangeRequest` gate exists to stop). A PATCH
-  /// carrying any of [kFinancialInvoiceFields] in one of these states is
-  /// refused with 409; reject → correct → re-approve is the way through.
-  ///
-  /// Note this is *narrower* than [isEditable]: an `approved` invoice is still
-  /// editable (GL coding, notes, addresses) — only the money and the payee are
-  /// frozen.
-  bool get isFinanciallyLocked => this == InvoiceStatus.approved || !isEditable;
-
   /// The statuses an entry-only caller (an AP clerk) may change an invoice
   /// in — a mirror of `_ENTRY_WINDOW_STATUSES` in
   /// `backend/app/api/invoice_entry.py`. An explicit allowlist there too, so a
@@ -91,8 +70,9 @@ enum InvoiceStatus {
   };
 }
 
-/// The invoice fields frozen once the invoice is financially locked — a mirror
-/// of `_FINANCIAL_FIELDS` in `backend/app/api/invoices.py`.
+/// The invoice fields frozen once the invoice is financially locked
+/// ([Invoice.financiallyLocked]) — a mirror of `_FINANCIAL_FIELDS` in
+/// `backend/app/api/invoices.py`.
 ///
 /// These are *wire* names (PATCH body keys), which is why both `vendor` and its
 /// DB spelling `vendor_name` appear: the backend runs its check before remapping
@@ -316,6 +296,27 @@ class Invoice {
   final String? approvalDate;
   final DateTime createdAt;
 
+  /// Whether the invoice's *financial* content — how much, to whom, and on
+  /// which lines — is frozen: the server's own verdict
+  /// (`InvoiceResponse.financially_locked`, from
+  /// `models/invoice_status.financially_locked` — backend decisions §370),
+  /// never a status list restated here. It holds from `approved` on, and at a
+  /// failed ERP push after approval, which `/retry-erp` re-pushes with no new
+  /// approval; the status-list copy this replaced missed that case.
+  ///
+  /// The approval signature is computed over the exact amount and the payment
+  /// run reads `Invoice.amount` / `Invoice.vendor_id` straight off the row, so
+  /// editing money after sign-off would pay a figure nobody approved, and
+  /// re-saving the vendor would re-point the payee at another supplier's bank
+  /// details. A PATCH carrying any of [kFinancialInvoiceFields] then is
+  /// refused 409 `invoice_financially_locked`.
+  ///
+  /// Narrower than [InvoiceStatus.isEditable]: an `approved` invoice is still
+  /// editable (GL coding, notes, addresses) — only the money and the payee are
+  /// frozen. **Fails closed:** a response without the field (and an [Invoice]
+  /// built without saying) is locked.
+  final bool financiallyLocked;
+
   /// The row's version (`InvoiceResponse.updated_at`), kept as the server's
   /// exact string rather than parsed: it is a token echoed back as
   /// `expected_updated_at` so an approval binds the version this screen showed
@@ -357,6 +358,7 @@ class Invoice {
     this.poMatch,
     this.erpDocumentId,
     this.erpDocumentUrl,
+    this.financiallyLocked = true,
   });
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
@@ -394,6 +396,7 @@ class Invoice {
           : null,
       erpDocumentId: json['erp_document_id'] as String?,
       erpDocumentUrl: json['erp_document_url'] as String?,
+      financiallyLocked: json['financially_locked'] as bool? ?? true,
     );
   }
 

@@ -34,47 +34,49 @@ void main() {
   });
 
   group('financial freeze', () {
-    // The backend's `_FINANCIALLY_LOCKED_STATUSES` is `{approved} |
-    // IMMUTABLE_STATUSES` (backend/app/api/invoices.py). Spelled out here so a
-    // change to either side of the mirror has to be deliberate.
-    const lockedStatuses = {
-      InvoiceStatus.approved,
-      InvoiceStatus.sendingToErp,
-      InvoiceStatus.sentToErp,
-      InvoiceStatus.postedInErp,
-      InvoiceStatus.paymentScheduled,
-      InvoiceStatus.paid,
-      InvoiceStatus.done,
+    // Whether an invoice is financially locked is the SERVER's verdict
+    // (`InvoiceResponse.financially_locked`, backend decisions §370): a status
+    // list restated here missed an approved invoice whose ERP push failed,
+    // which sits at `failed` and is still re-pushed and paid unapproved.
+    Map<String, dynamic> json({
+      Object? locked = _absent,
+      String status = 'failed',
+    }) => {
+      'id': 'inv1',
+      'status': status,
+      'created_at': '2026-01-01T00:00:00Z',
+      if (locked != _absent) 'financially_locked': locked,
     };
 
-    test('isFinanciallyLocked matches {approved} | IMMUTABLE_STATUSES', () {
-      for (final status in InvoiceStatus.values) {
-        expect(
-          status.isFinanciallyLocked,
-          lockedStatuses.contains(status),
-          reason: status.value,
-        );
-      }
+    test('reads the server verdict, whatever the status says', () {
+      // A failed ERP push after approval: `failed`, and locked.
+      expect(Invoice.fromJson(json(locked: true)).financiallyLocked, isTrue);
+      // A failed extraction (never approved): `failed`, and open.
+      expect(Invoice.fromJson(json(locked: false)).financiallyLocked, isFalse);
+      expect(
+        Invoice.fromJson(json(locked: false, status: 'new')).financiallyLocked,
+        isFalse,
+      );
     });
 
-    test('approved is still editable, but financially locked', () {
+    test('fails closed when the server did not say', () {
+      expect(Invoice.fromJson(json()).financiallyLocked, isTrue);
+      expect(Invoice.fromJson(json(locked: null)).financiallyLocked, isTrue);
+      expect(
+        Invoice(
+          id: 'inv1',
+          status: InvoiceStatus.newStatus,
+          createdAt: DateTime(2026, 1, 1),
+        ).financiallyLocked,
+        isTrue,
+      );
+    });
+
+    test('approved is still editable outside the money fields', () {
       // The narrower gate is the whole point: AP may keep fixing GL coding /
       // notes on an approved invoice; only money + payee are frozen.
       expect(InvoiceStatus.approved.isEditable, isTrue);
-      expect(InvoiceStatus.approved.isFinanciallyLocked, isTrue);
-    });
-
-    test('a pre-approval status is neither locked nor immutable', () {
-      for (final status in [
-        InvoiceStatus.newStatus,
-        InvoiceStatus.pending,
-        InvoiceStatus.readyForReview,
-        InvoiceStatus.rejected,
-        InvoiceStatus.failed,
-      ]) {
-        expect(status.isFinanciallyLocked, isFalse, reason: status.value);
-        expect(status.isEditable, isTrue, reason: status.value);
-      }
+      expect(InvoiceStatus.failed.isEditable, isTrue);
     });
 
     test('kFinancialInvoiceFields mirrors the backend _FINANCIAL_FIELDS', () {
@@ -406,3 +408,6 @@ void main() {
     });
   });
 }
+
+/// Marks a key left out of a JSON fixture, as distinct from an explicit null.
+const Object _absent = Object();

@@ -24,7 +24,7 @@ mobile/
 │   │   ├── inspection.dart      # Inspection + InspectionResult enum (pass/fail/partial + unknown for a free-form/QMS value) + InspectionDraft (quantities sent as raw strings) + quantityToDisplay
 │   │   ├── audit_entry.dart     # AuditEntry + AuditFieldChange (invoice activity timeline; details.changes diff)
 │   │   ├── contract.dart        # Contract + ContractStatus enum (draft/active/expired/terminated/cancelled; isActionable gate on the lifecycle buttons)
-│   │   ├── invoice.dart         # Invoice, InvoiceStatus enum (12 states); isEditable mirrors backend IMMUTABLE_STATUSES, isFinanciallyLocked mirrors the narrower _FINANCIALLY_LOCKED_STATUSES ({approved} ∪ immutable) + kFinancialInvoiceFields / stripFinancialFields
+│   │   ├── invoice.dart         # Invoice, InvoiceStatus enum (12 states); isEditable mirrors backend IMMUTABLE_STATUSES; `Invoice.financiallyLocked` is the server's `financially_locked` verdict (missing = locked; decisions §370) + kFinancialInvoiceFields / stripFinancialFields
 │   │   ├── mfa_challenge.dart    # MFAChallenge (login MFA-challenge response) — challengeToken + offered methods (totp/email) + mustEnroll
 │   │   ├── exception.dart       # ApException, ApExceptionStatus + ApExceptionSeverity enums
 │   │   ├── notification.dart    # AppNotification (in-app notification center row); eventLabel + linksToInvoice helper; copyMarkedRead for optimistic mark-read
