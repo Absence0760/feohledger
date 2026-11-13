@@ -1400,23 +1400,20 @@ scope (§260) — do not fold them into any of these.
       cash outside us, with a recorded-shape fixture (§318). **Trigger:** the
       next change to the QuickBooks status reader, or the first such
       mismatch seen live.
-- [ ] **(c) Xero bills reach FeohLedger only by the sweep or an admin's
-      request.** No Xero webhook is wired (§386), so a bill paid in Xero is
-      seen at the next `erp-status-sync` tick (or `POST
-      /api/organization/erp/oauth/status-sync`), and §296's dispatch-time read
-      is what stops a run paying it meanwhile. **Durable fix:** subscribe the
-      platform app to Xero's invoice webhooks (`x-xero-signature`, base64
-      HMAC-SHA256 with the webhook key, the intent-to-receive handshake),
-      dedupe by event, and read the named bill back as the QuickBooks webhook
-      does. Confirm against a live app first which events a bill payment
-      raises. **Trigger:** the first Xero tenant who pays in Xero and in
-      FeohLedger, or a sweep interval found too slow.
-- [ ] **(c) The ERP panel has no "check payments now" button.** `POST
-      /api/organization/erp/oauth/status-sync` (§386) is API-only.
-      **Durable fix:** a button on the ERP settings panel, shown when status
-      sync is on and the connected ERP reports back (the 409 codes say why it
-      cannot run), with its strings in every locale and an e2e spec.
-      **Trigger:** the first Xero tenant, or the live Xero re-test.
+- [ ] **(c) The QuickBooks webhook lags two rules the Xero one keeps (§392).**
+      `erp_status_sync.claim_qbo_events` claims a delivery's events one by
+      one, so a dedup store failing on the second leaves the first claimed
+      while the route answers 503: Intuit's redelivery is then deduped away
+      and that change waits for the CDC sweep. And `process_qbo_event` does
+      not ask `status_sync_now_refusal`, so with status sync off (or a
+      connection needing reconnect) a delivery still reads the bill and
+      `apply_bill_report` acts on a `done` invoice, which the sweep never
+      does. **Durable fix:** release the claims made before a failure and
+      re-raise (as `erp_xero_webhook.claim_xero_events` does), and skip a
+      tenant `status_sync_now_refusal` refuses, each with its test in
+      `tests/test_qbo_webhook.py`. **Trigger:** the next change to
+      `erp_status_sync.py`'s QuickBooks webhook path (left alone in round 8
+      while the QuickBooks lane held the file).
 - [ ] **(c) A Xero connection made before `accounting.payments` reads every
       payable bill on every pass.** Its `Payments` change listing answers
       401/403, which the sweep reads as an incomplete listing and falls back
@@ -2474,6 +2471,23 @@ as oversights.
       migration 0117 has run (the deploy's own migration step). **Trigger:**
       before the first pilot customer on QuickBooks pays a bill through
       FeohLedger.
+
+- [ ] **Register the Xero webhook and store its key.** Built and off until
+      the key is set (decisions §392). In the Xero developer portal, on the
+      production app: Webhooks → delivery URL
+      `<FEOH_API_PUBLIC_URL>/api/erp/webhook/xero`, the **Invoices** category.
+      Copy the app's webhook key into
+      `infra-secrets/feohledger/prod.sops.yaml` as
+      `FEOH_ERP_XERO_WEBHOOK_KEY=<webhook key>` (never into this repo), deploy,
+      and only then let the portal run its intent-to-receive check: with no
+      key every delivery answers 401 and the check fails. Status sync must be
+      on as well (`FEOH_ERP_STATUS_SYNC_ENABLED=true`, the step above), or the
+      events are accepted and change nothing. Then, against the Demo Company,
+      confirm what §392 could not: that paying a bill in Xero raises an
+      INVOICE UPDATE for it (a bill payment has no category of its own), that
+      `eventDateUtc` repeats exactly on Xero's retry (the dedup key), and that
+      a delivery carries `tenantType` `ORGANISATION`. **Trigger:** before the
+      first pilot customer on Xero pays a bill in Xero.
 
 - [ ] **Clear up what the wrong QuickBooks bill-payment reader left behind.**
       Until decisions §317 the adapter saw no payments on any real QuickBooks

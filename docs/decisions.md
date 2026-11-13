@@ -19019,3 +19019,108 @@ the door and the floor stamp the approver; `receiving_conflicts`,
 reader); `tests/test_migration_0129_invoice_approver_id.py` (literals pinned to
 the app, chain, parity, each backfill case including the two recall cases,
 idempotence, Alembic on a tenant and on the control plane).
+
+## 392. Xero's invoice webhook answers in Xero's own codes, and the ERP panel can check payments now (§386 follow-ups, 2026-11-14)
+
+**Context.** §386 made Xero's bills sync back, through the sweep and an admin's
+`POST /api/organization/erp/oauth/status-sync`, and left two follow-ups: no
+Xero webhook, so a bill paid in Xero waited for the next tick; and no button
+for the on-request pass, which was API-only.
+
+**Decision — the webhook.** `POST /api/erp/webhook/xero`
+(`api/erp_webhook.xero_webhook`, the work in `services/erp_xero_webhook`).
+Xero's webhook documentation could not be fetched (the developer site refused
+automated reads); the protocol below is from Xero's published AsyncAPI
+description and integrators' guides, and the live check is the operator step
+in `docs/followups.md`.
+
+- **Verified first, with one platform key.** `x-xero-signature` is the base64
+  HMAC-SHA256 of the raw body under the app's webhook key
+  (`FEOH_ERP_XERO_WEBHOOK_KEY`, sops; `.env.development` carries
+  `dev-xero-webhook-key`, as it does QuickBooks' verifier token). Checked with
+  `webhook_security.verify_hmac_sha256_base64`, the QuickBooks route's helper,
+  before the body is parsed. An empty key refuses every delivery: no fallback.
+- **The answers are Xero's, not the generic route's silent 204.** Xero enables
+  a webhook only after its intent-to-receive check: a correctly signed
+  delivery with no events must answer 200 and an incorrectly signed one 401,
+  both with no body, and anything else (a 204 included) fails it. It keeps
+  sending such checks, so a route that answered 204 to a bad signature would
+  be switched off. So: **401** for every unverifiable delivery (no key, a body
+  past `FEOH_ERP_WEBHOOK_MAX_BYTES`, a bad or missing signature) and a
+  bodyless **200** for every verified one, whatever it then decided (not
+  JSON, an unknown organisation, a duplicate, an applied event). The
+  invariant's purpose holds: the 401 says only "not signed with the one
+  platform key", which names no tenant and no invoice, and every
+  post-verification decision answers identically. Our own failure (the dedup
+  store down) is the bodyless 503 the other webhooks use, so Xero redelivers.
+- **Deduped by the event's own identity.** Xero sends no event id. An event is
+  keyed by the SHA-256 of what it states about itself (`tenantId`,
+  `eventCategory`, `eventType`, `resourceId`, `eventDateUtc`), which a
+  redelivery repeats; two changes to one bill differ in time. It is claimed
+  (`is_event_already_processed`, namespace `erp:xero`) before the answer, and
+  a failed event's claim is released after it, as QuickBooks' are. Rejected:
+  `firstEventSequence` (it numbers a delivery, not an event, and its
+  uniqueness is not published) and `resourceId` alone (it would swallow every
+  later change to the bill for the dedup TTL).
+- **The tenant is the one connected to the event's organisation, fail
+  closed.** `tenantId` goes through `erp_status_sync.org_for_company("xero",
+  …)`, the control-plane index on the stored connection (migration 0117),
+  which also requires the tenant still be on Xero. No connection, or another
+  ERP, is a silent no-op; the bill id alone never picks a tenant.
+- **One rule decides.** A tenant the sweep or the on-request pass would skip
+  (`status_sync_now_refusal`: status sync off, an unsupported ERP, a
+  connection that needs reconnecting) is skipped. Otherwise the event's
+  `resourceId` goes to `erp_status_sync.sync_bills`, the sweep's per-bill
+  path, unchanged: it reads only a bill an invoice here was pushed as in that
+  organisation (`_bills_we_posted`), so a sales invoice or a hand-keyed bill
+  costs no Xero call, and `apply_bill_report` decides exactly as it does for
+  a sweep tick. Only `INVOICE` events are read; `CONTACT`, `CREDITNOTE` and
+  application events are dropped, as is an event whose `tenantType` is not
+  `ORGANISATION`.
+- **After the response.** Xero wants its answer within five seconds, and an
+  event costs one to three reads (§386's minute-limit wait included), so the
+  claimed events run as a task on the request's loop
+  (`dispatch_xero_events`, the `dispatch_qbo_events` shape). The sweep stays
+  the backstop for anything a failed or lost event misses.
+- **fake-erp signs what Xero would send.** `tools/fake-erp/xero_webhooks.py`
+  (stdlib only) builds Xero's envelope and signs it with the dev key; `POST
+  /xero/api.xro/2.0/__webhook` returns `{body, signature}` for a spec to POST
+  (the fake never calls the backend), and the backend's tests load the module
+  in-process to prove the route accepts what it signs.
+
+**Decision — "Check payments now".** `GET /api/organization/erp/oauth/status`
+now states the on-request pass's verdict, `status_sync_available` and
+`status_sync_refusal` (the POST's 409 code), computed by
+`status_sync_now_refusal`, the rule the POST applies; a credential store that
+cannot be opened reads as unavailable with no code. `ErpConnectionPanel`
+offers the button only on a connected ERP while that verdict says a pass would
+run, so it never shows on a server with status sync off or an ERP that does
+not report back. The click's answer lands in the panel's live region: 202
+`started` or "already running", or the coded refusal in the reader's language
+(the limiter's `rate_limited` with how long to wait; the three
+`status_sync_*` codes, now in `api/codedRefusals.ts` and every locale), after
+which a 409 re-reads the status so the button follows the new verdict. A
+server verdict was chosen over showing the button everywhere and letting the
+409 explain: the three refusals are facts the admin cannot act on from this
+panel (the operator's flag, the ERP's capability) or already sees there (the
+reconnect state), §382's reasoning for the bank-file panel.
+
+**Not verified live.** That paying a bill in Xero raises an `INVOICE` UPDATE
+for it (a payment has no category of its own), that `eventDateUtc` repeats
+exactly on a retry, that every delivery carries `tenantType`, and the exact
+intent-to-receive rules, are from the published description, not a Demo
+Company pass (`docs/followups.md` (b)).
+
+Tests: `tests/test_xero_webhook.py` (the signature, raw-byte coverage, no key,
+an oversized body, the handshake's 200 and 401 with no body, the dedup store
+down, parsing, the event key, dedupe, a failed event's release, an unknown
+organisation, every skip refusal, real rows: a bill paid in Xero reaching
+`paid` at Xero's amount through the webhook, a hand-keyed bill and another
+organisation's event reading nothing, status sync off, and fake-erp's signed
+delivery verifying); `tests/test_rbac.py` (the route's alternate gate);
+`tests/test_erp_oauth.py` (the status verdict, and an unreadable one);
+`src/lib/types/erpConnection.test.ts` (`statusSyncNowOffered`,
+`statusSyncStartedKey`, the strings in every locale);
+`src/lib/api/codedRefusals.test.ts` (the three codes);
+`tests-e2e/erp/xero-status-sync.spec.ts` (the webhook against fake-erp, a
+forged delivery, the handshake, the panel's button).
