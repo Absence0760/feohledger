@@ -83,6 +83,10 @@ class DSARResponse(BaseModel):
     # The portable bundle: every PII field + related-record summary held about
     # the subject, grouped by source. Loosely typed by design.
     data: dict
+    # Typed per-section record counts of ``data`` (section name → count), from
+    # ``privacy_export.bundle_record_counts``. What a client summarises the
+    # export from, so it never has to walk the bundle or quote server prose.
+    record_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class ErasureRequest(BaseModel):

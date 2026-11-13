@@ -11,6 +11,8 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { getAccessReview, acknowledgeAccessReview } from '#lib/api/accessReviews.ts';
 	import type { AccessReviewResponse } from '#lib/types/accessReview.ts';
+	import { roleLabelKey } from '#lib/types/admin.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	// RBAC: the backend gates both /api/access-reviews routes to admin | cfo
 	// (`require_roles(ROLE_ADMIN, ROLE_CFO)`) — the reviewer privilege. Wait for
@@ -23,12 +25,25 @@
 		if (userLoaded && !allowed) goto('/');
 	});
 
-	const COLUMNS = [
-		{ label: 'User' },
-		{ label: 'Roles' },
-		{ label: 'Last privileged action' },
-		{ label: 'Status' }
-	];
+	const COLUMNS = $derived([
+		{ label: m('admin.accessReview.col.user') },
+		{ label: m('admin.accessReview.col.roles') },
+		{ label: m('admin.accessReview.col.lastAction') },
+		{ label: m('admin.accessReview.col.status') }
+	]);
+
+	/** A system role in the reader's language; a custom role's stored name
+	 *  verbatim (it is tenant data, not copy — see `roleLabelKey`). */
+	function roleNames(roles: string[]): string {
+		return roles
+			.map((r) => {
+				const key = roleLabelKey(r);
+				return key ? m(key) : r;
+			})
+			.join(', ');
+	}
+
+	const TIME = { hour: 'numeric', minute: 'numeric' } as const;
 
 	let review = $state<AccessReviewResponse | null>(null);
 	let loading = $state(true);
@@ -47,7 +62,7 @@
 		try {
 			review = await getAccessReview();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load the access review.';
+			error = e instanceof Error ? e.message : m('admin.accessReview.error.load');
 		} finally {
 			loading = false;
 		}
@@ -62,41 +77,35 @@
 		try {
 			const res = await acknowledgeAccessReview();
 			lastAcknowledged = { at: res.last_completed_at, byMe: true };
-			toast('Access review acknowledged for this period.', 'success');
+			toast(m('admin.accessReview.toast.acknowledged'), 'success');
 		} catch (e) {
-			toast(e instanceof Error ? e.message : 'Failed to acknowledge the review.', 'error');
+			toast(e instanceof Error ? e.message : m('admin.accessReview.error.acknowledge'), 'error');
 		} finally {
 			acknowledging = false;
 		}
 	}
 </script>
 
-<PageHeader title="Access Review">
+<PageHeader title={m('admin.accessReview.title')}>
 	{#snippet actions()}
 		<button
 			class="btn-primary"
 			onclick={handleAcknowledge}
 			disabled={acknowledging || loading || review === null}
 		>
-			{acknowledging ? 'Acknowledging…' : 'Acknowledge review'}
+			{acknowledging ? m('admin.accessReview.action.acknowledging') : m('admin.accessReview.action.acknowledge')}
 		</button>
 	{/snippet}
 
 	<p class="page-hint">
-		Every active user holding an elevated role (admin / ap_manager / cfo, or a
-		custom role granting a fraud-sensitive permission) whose last <em>mutating</em>
-		privileged action is stale or absent — the periodic SOX access-control review.
-		A read (viewing a record) doesn't reset the clock; only a write does.
+		{m('admin.accessReview.hint')}
 		<HelpTip term="access-review" />
 		<HelpTip term="role" />
 	</p>
 
 	{#if lastAcknowledged}
 		<p class="ack-note" data-testid="access-review-ack-note">
-			Acknowledged for this period at {formatDate(lastAcknowledged.at, undefined, {
-				hour: 'numeric',
-				minute: 'numeric'
-			})}.
+			{m('admin.accessReview.ackNote', { when: formatDate(lastAcknowledged.at, undefined, TIME) })}
 		</p>
 	{/if}
 
@@ -114,35 +123,33 @@
 	<div class="kpi-row">
 		<KpiCard
 			value={review ? String(review.total) : null}
-			label="Elevated users"
+			label={m('admin.accessReview.kpi.elevated')}
 			pending={loading}
 		/>
 		<KpiCard
 			value={review ? String(review.dormant_count) : null}
-			label="Dormant"
+			label={m('admin.accessReview.kpi.dormant')}
 			highlight={review && review.dormant_count > 0 ? 'red' : null}
 			pending={loading}
 		/>
 		<KpiCard
-			value={review ? `${review.dormant_after_days}d` : null}
-			label="Dormancy window"
+			value={review ? m('admin.accessReview.kpi.windowDays', { n: review.dormant_after_days }) : null}
+			label={m('admin.accessReview.kpi.window')}
 			pending={loading}
 		/>
 		<KpiCard
-			value={review
-				? formatDate(review.generated_at, undefined, { hour: 'numeric', minute: 'numeric' })
-				: null}
-			label="Generated"
+			value={review ? formatDate(review.generated_at, undefined, TIME) : null}
+			label={m('admin.accessReview.kpi.generated')}
 			pending={loading}
 		/>
 	</div>
 
 	{#if loading}
-		<p class="state" data-testid="access-review-loading">Loading…</p>
+		<p class="state" data-testid="access-review-loading">{m('common.loading')}</p>
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="access-review-error" />
 	{:else if review}
-		<DataTable columns={COLUMNS} isEmpty={reviewUsers.length === 0} empty="No elevated users.">
+		<DataTable columns={COLUMNS} isEmpty={reviewUsers.length === 0} empty={m('admin.accessReview.empty')}>
 			{#snippet body()}
 				{#each reviewUsers as u (u.user_id)}
 					<tr class:dormant-row={u.dormant}>
@@ -152,22 +159,22 @@
 								<span class="user-email">{u.email}</span>
 							</div>
 						</td>
-						<td>{u.roles.join(', ')}</td>
+						<td>{roleNames(u.roles)}</td>
 						<td>
 							{#if u.last_privileged_action_at}
 								{formatDate(u.last_privileged_action_at)}
 								{#if u.days_since !== null}
-									<span class="days-ago">({u.days_since}d ago)</span>
+									<span class="days-ago">{m('admin.accessReview.daysAgo', { n: u.days_since })}</span>
 								{/if}
 							{:else}
-								<span class="never">Never</span>
+								<span class="never">{m('admin.accessReview.never')}</span>
 							{/if}
 						</td>
 						<td>
 							{#if u.dormant}
-								<Badge tone="danger">Dormant</Badge>
+								<Badge tone="danger">{m('admin.accessReview.status.dormant')}</Badge>
 							{:else}
-								<Badge tone="success">Active</Badge>
+								<Badge tone="success">{m('admin.accessReview.status.active')}</Badge>
 							{/if}
 						</td>
 					</tr>

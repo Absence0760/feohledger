@@ -72,6 +72,7 @@ from app.services.privacy_export import (
     BankingDisclosureNotPermitted,
     SubjectNotFound,
     build_dsar_bundle,
+    bundle_record_counts,
     resolve_subject_id,
 )
 from app.tenant import get_tenant, get_tenant_db
@@ -328,6 +329,7 @@ async def dsar_export(
         generated_at=now.isoformat(),
         banking_disclosure="unmasked" if body.include_banking else "masked",
         data=bundle,
+        record_counts=bundle_record_counts(bundle),
     )
 
 

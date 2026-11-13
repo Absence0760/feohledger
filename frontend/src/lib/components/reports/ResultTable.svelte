@@ -3,7 +3,8 @@
 	// `result.columns`, with money-typed measures rendered through <Money> (the
 	// values are exact decimal strings, never re-computed here). Paginates over
 	// `total_rows`.
-	import { cellCurrency, type ReportResult } from '#lib/types/reports.ts';
+	import { cellCurrency, resultColumnLabel, type ReportResult } from '#lib/types/reports.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 
@@ -16,7 +17,7 @@
 
 	const columns = $derived(
 		result.columns.map((c) => ({
-			label: c.label,
+			label: resultColumnLabel(m, c),
 			class: c.kind === 'measure' ? 'right' : undefined
 		}))
 	);
@@ -40,7 +41,7 @@
 </script>
 
 <div class="result" data-testid="report-result">
-	<DataTable {columns} isEmpty={result.rows.length === 0} empty="No rows for this report.">
+	<DataTable {columns} isEmpty={result.rows.length === 0} empty={m('reports.result.empty')}>
 		{#snippet body()}
 			{#each result.rows as row, i (i)}
 				<tr>
@@ -65,9 +66,9 @@
 	<div class="pager">
 		<span class="caption" data-testid="report-result-caption">
 			{#if result.total_rows === 0}
-				No results
+				{m('reports.result.none')}
 			{:else}
-				Showing {rangeStart}–{rangeEnd} of {result.total_rows}
+				{m('reports.result.showing', { start: rangeStart, end: rangeEnd, total: result.total_rows })}
 			{/if}
 		</span>
 		<div class="pager-btns">
@@ -75,14 +76,14 @@
 				type="button"
 				class="btn-secondary"
 				disabled={!canPrev}
-				onclick={() => onpage?.(result.page - 1)}>Previous</button
+				onclick={() => onpage?.(result.page - 1)}>{m('reports.result.previous')}</button
 			>
-			<span class="page-of">Page {result.page} of {pageCount}</span>
+			<span class="page-of">{m('reports.result.pageOf', { page: result.page, pages: pageCount })}</span>
 			<button
 				type="button"
 				class="btn-secondary"
 				disabled={!canNext}
-				onclick={() => onpage?.(result.page + 1)}>Next</button
+				onclick={() => onpage?.(result.page + 1)}>{m('reports.result.next')}</button
 			>
 		</div>
 	</div>

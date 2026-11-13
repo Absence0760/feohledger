@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Budget, BudgetDimension, BudgetSpend } from '#lib/types/budget.ts';
-	import { BUDGET_DIMENSIONS, BUDGET_DIMENSION_LABELS } from '#lib/types/budget.ts';
+	import { BUDGET_DIMENSIONS, BUDGET_DIMENSION_LABEL_KEYS } from '#lib/types/budget.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
@@ -199,7 +199,7 @@
 				<span>{m('budgets.modal.field.dimension')}</span>
 				<select bind:value={dimension} disabled={!canEdit}>
 					{#each BUDGET_DIMENSIONS as d}
-						<option value={d}>{BUDGET_DIMENSION_LABELS[d]}</option>
+						<option value={d}>{m(BUDGET_DIMENSION_LABEL_KEYS[d])}</option>
 					{/each}
 				</select>
 			</label>

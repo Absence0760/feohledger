@@ -16597,6 +16597,62 @@ generator covers both clients.
   machine detail as the ERP rows did): `erp_report` is ERP data, and the id is
   the only thing that tells the reader which of an invoice's payments to chase.
 
+## 360. A label the server owns renders by its key, and an export's summary from its typed counts (i18n follow-up, 2026-11-13)
+
+**The gap.** The Report Builder, `/admin/privacy`, `/admin/access-review` and the
+budget dimension labels (`lib/types/budget.ts`) were literal English, so the help
+guides had to name their controls in `**bold**` rather than `{ui:}`. Two of those
+surfaces show text the *server* composed: the builder's catalog carries an
+English `label` per source and field, and the privacy page's only result summary
+was a hand-built "`Erased. ${n} field(s) redacted.`" beside a raw JSON dump.
+
+**The calls.**
+
+- **Catalog labels key on the catalog key.** `types/reports.ts` maps each source
+  and field key to a catalogue entry and composes a measure's name the way
+  `report_builder._measure_label` does; the server's `label` is the fallback for
+  a key this build predates, never the first choice. One flat field map serves
+  all four sources because a key means one thing in every source —
+  `types/reports.test.ts` reads `report_builder.py` and fails if that stops
+  holding, if a key has no label, or if the English differs from the server's.
+  Rejected: a `label_key` on the catalog response (the ERP-form pattern, §300's
+  `SERVER_NAMED`). It would be the more general shape, but the catalog is a
+  fixed whitelist of ~30 keys that the client already knows by name, and the
+  server-side change would buy nothing the drift test does not.
+- **The DSAR summary comes from typed counts the response did not have.**
+  `DSARResponse` gains `record_counts: dict[str, int]` (additive, default `{}`),
+  computed by `privacy_export.bundle_record_counts` over
+  `DSAR_COUNTED_SECTIONS`: a list counts its length, a capped collection or the
+  document manifest its true `total`. The bundle's own tallies were not usable —
+  only the vendor bundle has `counts`, the user bundle's `activity` covers two
+  sections, and the vendor-user bundle has neither. The frontend's label map is
+  pinned to the tuple by reading the Python source; `test_privacy.py` proves
+  each subject type's real bundle is covered section by section. The persisted
+  history row's `record_counts` is deliberately unchanged.
+- **The erasure toast is two ICU plurals over the typed counts**, and a
+  `documents_failed > 0` result now says the erasure is incomplete (the field
+  was on the response and the page ignored it). A 404 renders a localized "no
+  one matches" instead of the server's "Subject not found".
+- **The admin pages' keys are `admin.privacy.*` / `admin.accessReview.*` in the
+  settings slice,** not the `privacy.admin.*` the follow-up suggested: §300
+  already puts every `/admin/**` string there, `admin/+layout.ts` loads it, and
+  `/help` loads it for the guides' `{ui:}` references. A main-catalogue
+  namespace would have shipped them to every page. The builder's and budgets'
+  keys stay in the main catalogue (`reports.*`, `budgets.dimension.*`); neither
+  route loads a slice.
+- **The untranslated-copy guard reads component props and script labels.**
+  Its attribute list was the HTML five, so `KpiCard label="Dormant"`,
+  `DataTable empty="…"` and a script-side `COLUMNS = [{ label: 'User' }]`
+  passed it. `label` / `ariaLabel` / `empty` join the attribute list, and a new
+  script scan catches copy-bearing object properties, skipping values shaped
+  like message keys. Every file already on the roster passed unchanged.
+
+**Left as is.** Enum *values* inside the builder (a status filter's options, a
+status cell) are the stored codes, as on the API. Role names in the access
+review render through `roleLabelKey` (system roles translated, custom roles
+verbatim). All five non-English locales are first-pass translations pending
+native review.
+
 ## 361. Expense-report and corporate-card refusals are coded at the endpoint, not only in the verdict (§348 follow-up, 2026-11-13)
 
 **Decision.** Every `services/expense_controls` gate is now `coded=True`, so

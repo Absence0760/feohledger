@@ -51,6 +51,7 @@ const TRANSLATED = [
 	'/src/lib/components/marketing/HeroPipeline.svelte',
 	'/src/lib/components/marketing/Landing.svelte',
 	'/src/lib/components/marketing/Pricing.svelte',
+	'/src/lib/components/modals/BudgetModal.svelte',
 	'/src/lib/components/modals/BulkRecodeGLModal.svelte',
 	'/src/lib/components/modals/CreateVendorModal.svelte',
 	'/src/lib/components/modals/InviteVendorPortalUserModal.svelte',
@@ -58,13 +59,25 @@ const TRANSLATED = [
 	'/src/lib/components/modals/VendorConsolidationModal.svelte',
 	'/src/lib/components/modals/VendorModal.svelte',
 	'/src/lib/components/organization/ErpCompanyPicker.svelte',
+	// The Report Builder and its editors (decisions §360). Catalog field and
+	// source names render by catalog key (`types/reports.ts`), never the
+	// server's English label, unless this build predates the key.
+	'/src/lib/components/reports/DimensionEditor.svelte',
+	'/src/lib/components/reports/FilterEditor.svelte',
+	'/src/lib/components/reports/MeasureEditor.svelte',
+	'/src/lib/components/reports/ResultTable.svelte',
+	'/src/lib/components/reports/SaveReportModal.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
 	'/src/lib/components/ui/InvoicePicker.svelte',
 	'/src/lib/components/ui/PlanUpgradeNotice.svelte',
 	'/src/lib/components/ui/VendorPicker.svelte',
+	'/src/routes/admin/access-review/+page.svelte',
+	'/src/routes/admin/privacy/+page.svelte',
+	'/src/routes/budgets/+page.svelte',
 	'/src/routes/credit-memos/+page.svelte',
 	'/src/routes/exceptions/+page.svelte',
 	'/src/routes/find-workspace/+page.svelte',
+	'/src/routes/reports/+page.svelte',
 	'/src/routes/vendors/+page.svelte'
 ];
 
@@ -94,17 +107,44 @@ const TOASTS_TRANSLATED = [
 	// fallbacks (#635).
 	'/src/lib/components/modals/BulkRecodeGLModal.svelte',
 	'/src/lib/components/modals/RunDetailModal.svelte',
+	// Was "Erased. 3 field(s) redacted." — a hand-built plural over a typed
+	// count (decisions §360).
+	'/src/routes/admin/privacy/+page.svelte',
+	'/src/routes/admin/access-review/+page.svelte',
 	'/src/routes/invoices/+page.svelte',
 	// Was "Payment voided", "Draft payment run created…" and six English
 	// load-failure fallbacks (#635).
 	'/src/routes/payments/+page.svelte',
+	'/src/routes/reports/+page.svelte',
 	// Was "Selected all 3 matching vendor(s)" and every bulk-action failure in
 	// English (#635).
 	'/src/routes/vendors/+page.svelte'
 ];
 
-/** Attributes a human reads. `class` / `role` / `type` are not copy. */
-const COPY_ATTRS = new Set(['aria-label', 'aria-description', 'title', 'placeholder', 'alt']);
+/**
+ * Attributes a human reads. `class` / `role` / `type` are not copy.
+ *
+ * The camel-case three are the shared components' props for the same thing —
+ * `KpiCard label=`, `DataTable empty=`, `Modal` / `RowAction` / `RowLink`
+ * `ariaLabel=` — which the HTML-attribute list never reached: `/admin/access-review`
+ * shipped `label="Dormant"` and `empty="No elevated users."` past it.
+ */
+const COPY_ATTRS = new Set([
+	'aria-label',
+	'aria-description',
+	'title',
+	'placeholder',
+	'alt',
+	'label',
+	'ariaLabel',
+	'empty'
+]);
+
+/** A message key, which is not copy even though it is letters (`'admin.privacy.title'`). */
+const MESSAGE_KEY = /^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9_-]+)+$/;
+
+/** Object-literal properties in a script whose string value reaches a reader. */
+const COPY_PROPS = new Set(['label', 'ariaLabel', 'empty', 'title', 'placeholder']);
 
 /**
  * Two or more Latin letters in a row is the test for "a word". It lets through
@@ -275,6 +315,45 @@ function literalToastCopy(source: string): string[] {
 	return out;
 }
 
+/**
+ * Latin-letter string literals assigned to a copy-bearing property in the
+ * instance script — `const COLUMNS = [{ label: 'Status' }]`, the shape every
+ * `DataTable` column list takes and the template scan cannot see.
+ *
+ * A message key is letters too, so a value shaped like one is skipped; so is
+ * anything inside an `m(…)` call.
+ */
+function literalCopyProps(source: string): string[] {
+	const ast = parse(source, { modern: true }) as unknown as { instance?: { content: unknown } };
+	const out: string[] = [];
+	const seen = new Set<unknown>();
+	(function walk(node: unknown): void {
+		if (node === null || typeof node !== 'object' || seen.has(node)) return;
+		seen.add(node);
+		if (Array.isArray(node)) {
+			for (const child of node) walk(child);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		const callee = record.callee as Record<string, unknown> | undefined;
+		if (record.type === 'CallExpression' && callee?.type === 'Identifier' && callee.name === 'm') return;
+		if (record.type === 'Property') {
+			const key = record.key as Record<string, unknown> | undefined;
+			const value = record.value as Record<string, unknown> | undefined;
+			const name = key?.type === 'Identifier' ? String(key.name) : '';
+			const text = value?.type === 'Literal' && typeof value.value === 'string' ? value.value : '';
+			if (COPY_PROPS.has(name) && IS_COPY.test(text) && !MESSAGE_KEY.test(text)) {
+				out.push(`${name}: '${text}'`);
+			}
+		}
+		for (const [key, value] of Object.entries(record)) {
+			if (key === 'loc') continue;
+			walk(value);
+		}
+	})(ast.instance?.content);
+	return out;
+}
+
 describe('translated surfaces carry no literal copy', () => {
 	it('reads the component tree', () => {
 		expect(Object.keys(RAW).length).toBeGreaterThan(50);
@@ -309,6 +388,28 @@ describe('translated surfaces carry no literal copy', () => {
 		expect(textNodes(sample)).toEqual(['Your privacy choices', 'Accept all']);
 		// `title={m(…)}` is an ExpressionTag, so only the bare literal is named.
 		expect(literalCopyAttrs(sample)).toEqual(['aria-label="Cookie and privacy consent"']);
+	});
+
+	it('detects the shared components\' copy props, in the template and the script', () => {
+		// The /admin/access-review shapes: a KpiCard label, a DataTable empty
+		// state, a column list in the script — beside the keyed forms of each,
+		// and a message key that is letters but not copy.
+		const sample = [
+			'<script lang="ts">',
+			"\tconst COLUMNS = [{ label: 'User' }, { label: m('x.y') }, { class: 'actions-col' }];",
+			"\tconst chips = [{ key: 'all', label: 'admin.privacy.title' }];",
+			'</script>',
+			'<KpiCard label="Dormant" value={n} />',
+			'<KpiCard label={m(\'k\')} value={n} />',
+			'<DataTable empty="No elevated users." />',
+			'<RowAction ariaLabel="Remove filter">x</RowAction>'
+		].join('\n');
+		expect(literalCopyAttrs(sample)).toEqual([
+			'label="Dormant"',
+			'empty="No elevated users."',
+			'ariaLabel="Remove filter"'
+		]);
+		expect(literalCopyProps(sample)).toEqual(["label: 'User'"]);
 	});
 
 	it('detects literal toast copy, and only toast copy', () => {
@@ -348,6 +449,10 @@ describe('translated surfaces carry no literal copy', () => {
 			expect(
 				literalCopyAttrs(source),
 				`${path} has a hardcoded human-readable attribute. An aria-label is read aloud; key it like any other string.`
+			).toEqual([]);
+			expect(
+				literalCopyProps(source),
+				`${path} builds copy in its script (a column label, an empty state). Key it and pass m(…).`
 			).toEqual([]);
 			expect(source, `${path} should call m()`).toMatch(/\bm\(/);
 		});

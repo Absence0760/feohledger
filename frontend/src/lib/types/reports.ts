@@ -14,6 +14,8 @@
  * ISO-8601 strings.
  */
 
+import type { MessageKey } from '#lib/i18n/messages.ts';
+
 /** Aggregation functions a measure may be rolled up with. */
 export type AggFn = 'sum' | 'avg' | 'count' | 'min' | 'max';
 
@@ -183,35 +185,118 @@ export type CreateReportBody = ReportSpec & {
 /** Body for `PATCH /api/reports/{id}` — any subset of the saved definition. */
 export type UpdateReportBody = Partial<CreateReportBody>;
 
-/** Human labels for the aggregation functions. */
-export const AGG_LABELS: Record<AggFn, string> = {
-	sum: 'Sum',
-	avg: 'Average',
-	count: 'Count',
-	min: 'Min',
-	max: 'Max'
+/** Catalogue keys for the aggregation functions. */
+export const AGG_LABEL_KEYS: Record<AggFn, MessageKey> = {
+	sum: 'reports.agg.sum',
+	avg: 'reports.agg.avg',
+	count: 'reports.agg.count',
+	min: 'reports.agg.min',
+	max: 'reports.agg.max'
 };
 
-/** Human labels for the filter operators. */
-export const OP_LABELS: Record<FilterOp, string> = {
-	eq: 'is',
-	ne: 'is not',
-	gt: 'greater than',
-	gte: 'at least',
-	lt: 'less than',
-	lte: 'at most',
-	in: 'is any of',
-	contains: 'contains',
-	between: 'between'
+/** Catalogue keys for the filter operators. */
+export const OP_LABEL_KEYS: Record<FilterOp, MessageKey> = {
+	eq: 'reports.op.eq',
+	ne: 'reports.op.ne',
+	gt: 'reports.op.gt',
+	gte: 'reports.op.gte',
+	lt: 'reports.op.lt',
+	lte: 'reports.op.lte',
+	in: 'reports.op.in',
+	contains: 'reports.op.contains',
+	between: 'reports.op.between'
 };
 
-/** Human labels for the date grains. */
-export const GRAIN_LABELS: Record<DateGrain, string> = {
-	day: 'Day',
-	month: 'Month',
-	quarter: 'Quarter',
-	year: 'Year'
+/** Catalogue keys for the date grains. */
+export const GRAIN_LABEL_KEYS: Record<DateGrain, MessageKey> = {
+	day: 'reports.grain.day',
+	month: 'reports.grain.month',
+	quarter: 'reports.grain.quarter',
+	year: 'reports.grain.year'
 };
+
+/**
+ * The catalogue key for each data source and field the server's catalog
+ * offers, keyed by the catalog KEY (`backend/app/services/report_builder.py::
+ * REPORT_SOURCES`). The catalog's own `label` is server English; the builder
+ * renders these instead and falls back to that label only for a key this build
+ * predates. A field key means the same thing in every source, so one flat map
+ * serves all four. `reports.test.ts` reads the backend catalog and fails when a
+ * key is added there without a label here (decisions §360).
+ */
+export const REPORT_SOURCE_LABEL_KEYS: Record<string, MessageKey> = {
+	invoices: 'reports.source.invoices',
+	payments: 'reports.source.payments',
+	vendors: 'reports.source.vendors',
+	expenses: 'reports.source.expenses'
+};
+
+export const REPORT_FIELD_LABEL_KEYS: Record<string, MessageKey> = {
+	amount: 'reports.field.amount',
+	category: 'reports.field.category',
+	completed_at: 'reports.field.completedAt',
+	corridor: 'reports.field.corridor',
+	cost_center: 'reports.field.costCenter',
+	created_at: 'reports.field.createdAt',
+	currency: 'reports.field.currency',
+	department: 'reports.field.department',
+	due_date: 'reports.field.dueDate',
+	expense_date: 'reports.field.expenseDate',
+	gl_account: 'reports.field.glAccount',
+	id: 'reports.field.id',
+	invoice_date: 'reports.field.invoiceDate',
+	kyc_status: 'reports.field.kycStatus',
+	merchant: 'reports.field.merchant',
+	method: 'reports.field.method',
+	name: 'reports.field.name',
+	payment_method: 'reports.field.paymentMethod',
+	payment_terms: 'reports.field.paymentTerms',
+	project: 'reports.field.project',
+	provider: 'reports.field.provider',
+	risk_level: 'reports.field.riskLevel',
+	risk_score: 'reports.field.riskScore',
+	source: 'reports.field.source',
+	status: 'reports.field.status',
+	submitted_at: 'reports.field.submittedAt',
+	tax_amount: 'reports.field.taxAmount',
+	vendor_name: 'reports.field.vendorName'
+};
+
+/** A translate function — `m` from the i18n store, passed in so this module
+ *  stays free of the store (and testable without it). */
+type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
+
+/** A data source's label in the reader's language, else the server's. */
+export function sourceLabel(t: Translate, key: string, serverLabel?: string): string {
+	const k = REPORT_SOURCE_LABEL_KEYS[key];
+	return k ? t(k) : (serverLabel ?? key);
+}
+
+/** A catalog field's label in the reader's language, else the server's. */
+export function fieldLabel(t: Translate, key: string, serverLabel?: string): string {
+	const k = REPORT_FIELD_LABEL_KEYS[key];
+	return k ? t(k) : (serverLabel ?? key);
+}
+
+/** An aggregated measure's label — the server's rule (`report_builder.
+ *  _measure_label`): a row count is just "Count", anything else is
+ *  "<Agg> of <field>". */
+export function measureLabel(t: Translate, key: string, agg: AggFn, serverLabel?: string): string {
+	if (key === 'id' && agg === 'count') return t('reports.measure.count');
+	return t('reports.measure.of', { agg: t(AGG_LABEL_KEYS[agg]), field: fieldLabel(t, key, serverLabel) });
+}
+
+/** A result column's header. A measure column's key is `<field>_<agg>`
+ *  (`measureColumnKey`); one whose shape this build cannot read keeps the
+ *  server's label. */
+export function resultColumnLabel(t: Translate, col: ResultColumn): string {
+	if (col.kind === 'dimension') return fieldLabel(t, col.key, col.label);
+	const cut = col.key.lastIndexOf('_');
+	const agg = col.key.slice(cut + 1) as AggFn;
+	const field = col.key.slice(0, cut);
+	if (cut <= 0 || !(agg in AGG_LABEL_KEYS) || !(field in REPORT_FIELD_LABEL_KEYS)) return col.label;
+	return measureLabel(t, field, agg);
+}
 
 /** The result-column key a measure produces once aggregated (`<key>_<agg>`).
  *  Matches the backend's column-key convention so `sort` keys line up. */
