@@ -3999,6 +3999,7 @@ export const messages = {
 	'refusal.invoiceNotCompletable': "Nur eine neue oder genehmigte Rechnung kann eingereicht oder abgeschlossen werden.",
 	'refusal.invoiceNotResubmittable': "Nur eine abgelehnte Rechnung kann erneut zur Prüfung eingereicht werden.",
 	'refusal.invoiceDocumentLocked': "Das Quelldokument kann nach der Genehmigung der Rechnung nicht mehr geändert werden.",
+	'refusal.invoiceFinanciallyLocked': "Betrag, Zahlungsempfänger und Positionen können nach der Genehmigung der Rechnung nicht mehr geändert werden: Sie sind das, was genehmigt wurde und gezahlt wird.",
 	'refusal.invoiceEntryWindowClosed': "Dieser Schritt geht über die Rechnungserfassung hinaus und erfordert daher einen AP-Manager.",
 	'refusal.invoiceNotErpSendable': "Nur eine genehmigte Rechnung kann an das ERP gesendet werden.",
 	'refusal.invoiceNotErpRetryable': "Nur eine genehmigte Rechnung, deren ERP-Übertragung fehlgeschlagen ist, kann erneut gesendet werden.",

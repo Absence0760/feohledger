@@ -32,6 +32,12 @@ export type InvoiceActionVerdicts = {
 	 *  `api/invoice_entry.manage_file_refusal`: the entry roles, the entry
 	 *  window, and the document lock from `approved` on (decisions §363). */
 	manage_file: ActionRefusal;
+	/** `PATCH` carrying a financial field (amount, payee, …) and
+	 *  `PUT /line-items` — `api/invoice_entry.edit_financials_refusal`: the
+	 *  entry roles, the entry window, and the financial lock (from `approved`
+	 *  on, and at a failed ERP push after approval — decisions §370). The
+	 *  modal edits and sends the financial fields only while this is `null`. */
+	edit_financials: ActionRefusal;
 };
 
 /** `invoice_not_completable` — `/complete` from a status it does not advance
@@ -48,6 +54,10 @@ export const INVOICE_NOT_ERP_RETRYABLE = 'invoice_not_erp_retryable';
 export const INVOICE_NOT_RESUBMITTABLE = 'invoice_not_resubmittable';
 /** `invoice_document_locked` — the `/file` routes on an approved invoice. */
 export const INVOICE_DOCUMENT_LOCKED = 'invoice_document_locked';
+/** `invoice_financially_locked` — `PATCH` (a financial field) or
+ *  `PUT /line-items` on an approved invoice, or on one whose ERP push failed
+ *  after approval (`models/invoice_status.financially_locked`, decisions §370). */
+export const INVOICE_FINANCIALLY_LOCKED = 'invoice_financially_locked';
 
 /**
  * The server's verdicts on the caller's workflow actions for this invoice

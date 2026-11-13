@@ -3991,6 +3991,7 @@ export const messages = {
 	'refusal.invoiceNotCompletable': "Solo una factura nueva o aprobada puede enviarse o completarse.",
 	'refusal.invoiceNotResubmittable': "Solo una factura rechazada puede reenviarse para revisión.",
 	'refusal.invoiceDocumentLocked': "El documento de origen no puede modificarse una vez aprobada la factura.",
+	'refusal.invoiceFinanciallyLocked': "El importe, el beneficiario y las líneas no pueden modificarse una vez aprobada la factura: son lo que se aprobó y lo que se pagará.",
 	'refusal.invoiceEntryWindowClosed': "Este paso va más allá del registro de la factura, por lo que requiere un gerente de cuentas por pagar.",
 	'refusal.invoiceNotErpSendable': "Solo una factura aprobada puede enviarse al ERP.",
 	'refusal.invoiceNotErpRetryable': "Solo se puede reintentar una factura aprobada cuyo envío al ERP falló.",

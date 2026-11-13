@@ -436,6 +436,14 @@ export interface Invoice {
 	 */
 	erp_document_url: string | null;
 	priors_summary: { cache: number; rag: number } | null;
+	/**
+	 * Whether the amount, payee, line items and document are frozen
+	 * (`models/invoice_status.financially_locked` — from `approved` on, and at a
+	 * failed ERP push after approval; decisions §370). A snapshot of the row as
+	 * read: the invoice modal decides from its live `edit_financials` verdict
+	 * instead, which follows the status the modal moves the invoice to.
+	 */
+	financially_locked: boolean;
 }
 
 /**
