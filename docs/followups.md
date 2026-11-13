@@ -1403,20 +1403,25 @@ scope (§260) — do not fold them into any of these.
       next change to `services/erp_oauth`.
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
-- [ ] **(c) Approving first and recording the receipt second still works.**
-      §267 refuses a receiver at approval, but the reverse order is open: a
-      manager approves the invoice, then records the goods receipt that lifts
-      its "billed beyond receipt" hold. `receipts_clear_hold` and the agent
-      coordinator's `_receipts_implicated` cannot refuse the approver because
-      nothing records who approved by id — only the `approved_by` display name,
-      and the audit log, which fails open in lambda mode.
-      **Durable fix:** a tenant migration adding `invoices.approved_by_user_id`
-      (NULL for history — no honest backfill, §141's reasoning), stamped in
-      `review.approve_invoice`; `receipts_clear_hold` and
-      `_receipts_implicated` refuse a recorder who approved the invoice, with
-      tests on both doors. **Trigger:** the next change to receipt entry or the
-      approval chain, or the first tenant running three-way matching with more
-      than one approver.
+- [ ] **(c) The approver of record can still resolve their invoice's
+      `po_mismatch` by hand in the queue.** Since §389 a receipt the approver
+      records after approving no longer lifts the invoice's hold, but
+      `exception_lifecycle.segregation_refusal` refuses only the implicated set
+      and the raiser (§169), so the same approver can resolve the held row
+      themselves, on their own word rather than an independent receipt.
+      **Durable fix:** a third refusal axis for `po_mismatch` (the hold a
+      receipt evidences) naming the invoice's approvers
+      (`approval_chain.approver_ids`; `approved_by_user_id` is on the row, so
+      the pure predicate can read the approval of record without I/O), with
+      its coded sentence on web and mobile, read by every door
+      `segregation_refusal` serves (single and bulk resolve, the agent
+      coordinator, the payments queue verdict, `clearance_stands`). It widens
+      §169's policy, which deliberately left approvers able to clear, so it
+      needs that call made. Until it is, §389 binds an approver who does not
+      use the queue, not one set on it. **Trigger:** the operator's call on
+      widening §169, which should be the next decision on this control; at the
+      latest the next change to `exception_lifecycle.segregation_refusal`, or
+      the first tenant running three-way matching with more than one approver.
 - [ ] **(c) A multi-PO split's `po_ids` vanish on the next warning refresh, and
       the receiver check with them.** `approval_chain.receipt_recorders` reads
       the split's PO ids from `po_match.po_ids`, but `refresh_warnings`

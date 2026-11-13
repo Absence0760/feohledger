@@ -13,7 +13,9 @@ write a receipt, so the 3-way leg and the "billed beyond receipt" payment hold
   * idempotency — a replayed key returns the same receipt with 200;
   * the matching consequence — a receipt recorded by someone else lifts the
     hold in the same request; one recorded by the invoice's own uploader does
-    not (decisions §262); cancelling a receipt raises it again;
+    not (decisions §262), nor one recorded by anyone who approved it — the
+    approval of record or a chain level — after approving (§389); cancelling a
+    receipt raises it again;
   * the PO detail's per-line received quantities, which the form reads.
 """
 
@@ -605,6 +607,284 @@ async def test_the_uploader_cannot_release_their_invoice_by_cancelling_a_receipt
     (row,) = await _po_mismatch_rows(realdb, inv_id)
     assert row.status == "open"
     assert await _blocked(realdb, inv_id)
+
+
+# --------------------------------------------------------------------------- #
+# Approved first, received second (decisions §389)
+#
+# §267 refuses a receiver at approval. The other order is the same person
+# doing both: the approver's receipt lands and counts, but it does not lift the
+# hold on the invoice they approved. An independent person releases it — by
+# recording the delivery themselves (after the approver's receipt is
+# cancelled), or by resolving the held row in the queue.
+# --------------------------------------------------------------------------- #
+
+
+async def _approve_held(realdb, inv_id, role):
+    """Approve through the door every approval path shares. Approval gates on
+    no payment-blocking exception, so the hold rides along; it is the payment
+    run it stops."""
+    async with realdb.client(key=TENANT, role=role) as c:
+        resp = await c.post(f"/api/invoices/{inv_id}/approve", json={})
+    assert resp.status_code == 200, resp.text
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.status == InvoiceStatus.approved
+        # The door stamps who approved, by id (migration 0129).
+        assert inv.approved_by_user_id == realdb.info(TENANT).users[role]
+
+
+async def _held_invoices_on_one_po(realdb, *, count=1):
+    """Six of ten in, recorded by the clerk; `count` invoices each billing the
+    full PO, uploaded by nobody who acts here, so each is held."""
+    po_id, number, (li,) = await _po(realdb)
+    async with realdb.client(key=TENANT, role="ap_clerk") as c:
+        first = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["6"]))
+        assert first.status_code == 201, first.text
+    from app.services.invoice_warnings import refresh_warnings
+
+    invoices = []
+    for _ in range(count):
+        inv_id = await _invoice(realdb, number, uploaded_by=uuid.uuid4())
+        async with realdb.sessionmaker(TENANT)() as s:
+            inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+            await refresh_warnings(s, inv, org_settings={})
+            await s.commit()
+        (row,) = await _po_mismatch_rows(realdb, inv_id)
+        assert row.status == "open"
+        invoices.append(inv_id)
+    return po_id, li, invoices
+
+
+@pytest.mark.asyncio
+async def test_the_approver_cannot_release_their_invoice_with_a_later_receipt(realdb):
+    """The follow-up's worked example: the manager approves the held invoice,
+    then records the four missing units. The receipt lands — it may well be
+    true — but the hold stays for someone else."""
+    po_id, li, (inv_id,) = await _held_invoices_on_one_po(realdb)
+    await _approve_held(realdb, inv_id, "ap_manager")
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert resp.status_code == 201, resp.text
+    (row,) = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "open"
+    assert await _blocked(realdb, inv_id)
+
+
+@pytest.mark.asyncio
+async def test_an_independent_recorder_releases_the_approved_invoice(realdb):
+    po_id, li, (inv_id,) = await _held_invoices_on_one_po(realdb)
+    await _approve_held(realdb, inv_id, "ap_manager")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert resp.status_code == 201, resp.text
+    (row,) = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "resolved"
+    assert row.resolved_by == "PO match"
+    assert not await _blocked(realdb, inv_id)
+
+
+@pytest.mark.asyncio
+async def test_the_way_through_is_an_independent_receipt_in_place_of_the_approvers(realdb):
+    """The approver's receipt is cancelled (cancelling can only raise a hold, so
+    anyone with receipt entry may), and someone else records the delivery: the
+    hold lifts in that request."""
+    po_id, li, (inv_id,) = await _held_invoices_on_one_po(realdb)
+    await _approve_held(realdb, inv_id, "ap_manager")
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        tainted = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert tainted.status_code == 201
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        cancelled = await c.post(f"/api/goods-receipts/{tainted.json()['id']}/cancel")
+        assert cancelled.status_code == 200, cancelled.text
+        assert (await _po_mismatch_rows(realdb, inv_id))[0].status == "open"
+        independent = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert independent.status_code == 201, independent.text
+    (row,) = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "resolved"
+    assert not await _blocked(realdb, inv_id)
+
+
+@pytest.mark.asyncio
+async def test_one_receipt_holds_only_the_invoice_its_recorder_approved(realdb):
+    """A receipt serves every invoice citing its PO, and its re-match walks all
+    of them. Two invoices on one PO, one approved by the manager and one by the
+    admin: the manager's receipt releases the admin's and holds their own."""
+    po_id, li, (mine, theirs) = await _held_invoices_on_one_po(realdb, count=2)
+    await _approve_held(realdb, mine, "ap_manager")
+    await _approve_held(realdb, theirs, "admin")
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert resp.status_code == 201, resp.text
+    assert (await _po_mismatch_rows(realdb, mine))[0].status == "open"
+    assert (await _po_mismatch_rows(realdb, theirs))[0].status == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_a_chain_level_approver_cannot_release_it_either(realdb):
+    """A level of a multi-level chain is signed by id in the instance's chain
+    state; that approver is in the invoice's approval chain while the later
+    levels are still open, so their receipt does not lift the hold."""
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+    from app.services.approval_chain import CHAIN_STATE_KEY
+
+    manager = realdb.info(TENANT).users["ap_manager"]
+    po_id, li, (inv_id,) = await _held_invoices_on_one_po(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        snapshot = {"steps": [{"type": "approval", "enabled": True, "config": {}}]}
+        definition = WorkflowDefinition(
+            name=f"rcpt-chain-{uuid.uuid4().hex[:6]}",
+            steps_config=snapshot,
+            is_active=False,
+            organization_id=realdb.info(TENANT).org_id,
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                definition_id=definition.id,
+                invoice_id=inv_id,
+                steps_config_snapshot=snapshot,
+                state_data={
+                    CHAIN_STATE_KEY: {
+                        "current_level": 1,
+                        "levels": [
+                            {"level": 0, "approvals": [{"user_id": str(manager)}]},
+                            {"level": 1, "approvals": []},
+                        ],
+                    }
+                },
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert resp.status_code == 201, resp.text
+    (row,) = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "open"
+
+
+@pytest.mark.asyncio
+async def test_the_approval_steps_opt_out_lets_the_approvers_receipt_lift_it(realdb):
+    """`require_segregation: false` on the approval step lifts §267 at approval,
+    so it lifts the reverse order too: one policy, not two."""
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+
+    manager = realdb.info(TENANT).users["ap_manager"]
+    po_id, li, (inv_id,) = await _held_invoices_on_one_po(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        snapshot = {
+            "steps": [
+                {"type": "approval", "enabled": True, "config": {"require_segregation": False}}
+            ]
+        }
+        definition = WorkflowDefinition(
+            name=f"rcpt-optout-{uuid.uuid4().hex[:6]}",
+            steps_config=snapshot,
+            is_active=False,
+            organization_id=realdb.info(TENANT).org_id,
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                definition_id=definition.id, invoice_id=inv_id, steps_config_snapshot=snapshot
+            )
+        )
+        inv = await s.get(Invoice, inv_id)
+        inv.status = InvoiceStatus.approved
+        inv.approved_by = "Manager"
+        inv.approval_date = utc_today()
+        inv.approved_by_user_id = manager
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert resp.status_code == 201, resp.text
+    (row,) = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_the_queues_opt_out_lets_the_approvers_receipt_lift_it_too(realdb):
+    """`settings.exceptions.require_segregation: false` switches off the
+    auto-close's segregation limits altogether, the approver's receipt among
+    them. Holding it there would be a refusal nothing enforces: under that
+    opt-out the queue lets anyone clear the row by hand."""
+    from app.models.organization import Organization
+
+    async with realdb.control_sessionmaker()() as cs:
+        org = (
+            await cs.execute(
+                select(Organization).where(Organization.id == realdb.info(TENANT).org_id)
+            )
+        ).scalar_one()
+        org.settings = {**(org.settings or {}), "exceptions": {"require_segregation": False}}
+        await cs.commit()
+    po_id, li, (inv_id,) = await _held_invoices_on_one_po(realdb)
+    await _approve_held(realdb, inv_id, "ap_manager")
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert resp.status_code == 201, resp.text
+    (row,) = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_approving_and_receiving_at_once_cannot_slip_past_both_orders(realdb):
+    """The same manager approves and records the missing units concurrently.
+    The receipt's re-match locks the invoice, which the approval door holds,
+    so whichever commits second sees the other: either the approval is refused
+    as a receiver's (§267), or it lands and the receipt does not release it
+    (§389). Never both through."""
+    import asyncio
+
+    po_id, li, (inv_id,) = await _held_invoices_on_one_po(realdb)
+
+    async def approve():
+        async with realdb.client(key=TENANT, role="ap_manager") as c:
+            return await c.post(f"/api/invoices/{inv_id}/approve", json={})
+
+    async def receive():
+        async with realdb.client(key=TENANT, role="ap_manager") as c:
+            return await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+
+    approved, received = await asyncio.gather(approve(), receive())
+    assert received.status_code == 201, received.text
+    (row,) = await _po_mismatch_rows(realdb, inv_id)
+    if approved.status_code == 200:
+        assert row.status == "open"
+        assert await _blocked(realdb, inv_id)
+    else:
+        assert approved.status_code == 403, approved.text
+        assert approved.json()["detail"]["code"] == "approval_segregation_receiver"
+
+
+@pytest.mark.asyncio
+async def test_an_approval_naming_nobody_leaves_the_receipt_rule_as_it_was(realdb):
+    """An approval with no recorded approver — an unattended auto-approve, or
+    one from before migration 0129 that its audit row could not name — has
+    nobody for the reverse order to refuse (decisions §389's residue)."""
+    po_id, li, (inv_id,) = await _held_invoices_on_one_po(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = await s.get(Invoice, inv_id)
+        inv.status = InvoiceStatus.approved
+        inv.approved_by = "system (auto-approve)"
+        inv.approval_date = utc_today()
+        inv.approved_by_user_id = None
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post("/api/goods-receipts", json=_body(po_id, [li], ["4"]))
+    assert resp.status_code == 201, resp.text
+    (row,) = await _po_mismatch_rows(realdb, inv_id)
+    assert row.status == "resolved"
 
 
 @pytest.mark.asyncio

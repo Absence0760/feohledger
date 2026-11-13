@@ -311,8 +311,9 @@ async def run_agent(
             if isinstance(exc, _ReceiptsImplicated):
                 reason = (
                     "A goods receipt on the matched purchase order was recorded by "
-                    "someone involved in this invoice, so it cannot be what clears "
-                    "the hold. Escalated to a human."
+                    "someone involved in creating this invoice, by someone who "
+                    "approved it, or by nobody it can name, so it cannot be what "
+                    "clears the hold. Escalated to a human."
                 )
                 logger.info(
                     "Agent resolution rests on an implicated receipt on invoice %s; escalating",
@@ -443,8 +444,9 @@ class _FindingPersists(NotApprovable):
 
 class _ReceiptsImplicated(NotApprovable):
     """The live match the agent's change leaves behind counts a hand-entered
-    receipt recorded by someone implicated in the invoice (or by nobody known).
-    The PO-match auto-close refuses to release on that evidence
+    receipt recorded by someone implicated in the invoice, by someone who
+    approved it (decisions §389), or by nobody known. The PO-match auto-close
+    refuses to release on that evidence
     (``invoice_warnings.receipts_clear_hold``, decisions §262); an agent run
     must not either, whoever triggered it — so the apply unwinds and the row
     escalates."""

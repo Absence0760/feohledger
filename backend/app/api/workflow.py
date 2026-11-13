@@ -74,7 +74,6 @@ from app.tenant import (
     get_tenant_db,
     get_write_entity_id,
 )
-from app.utils.dates import utc_today
 
 router = APIRouter(prefix="/invoices", tags=["workflow"])
 
@@ -954,6 +953,7 @@ async def complete_invoice(
         from app.services.approval_chain import (
             finite_money_threshold,
             receipt_recorders,
+            record_final_approval,
             reporting_gate_amount,
             violates_receiving_segregation,
             violates_segregation,
@@ -1004,8 +1004,9 @@ async def complete_invoice(
                 user.id, await receipt_recorders(db, invoice), approval_config
             )
         ):
-            invoice.approval_date = utc_today()
-            invoice.approved_by = "system (below threshold)"
+            # The caller is the effective approver (§267), so their later
+            # receipt cannot release this invoice either (§389).
+            record_final_approval(invoice, approved_by="system (below threshold)", actor_id=user.id)
             await transition_invoice(
                 db,
                 invoice,
