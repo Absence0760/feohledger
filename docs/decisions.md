@@ -16737,3 +16737,17 @@ coded 422 before falling back to `message`.
 reader's language is the policy engine's change, tracked in
 `docs/followups.md`. The role dependency's 403 stays a plain string, as
 everywhere (`role_not_permitted` is only its verdict form).
+
+## 368. Email intake reads only the per-tenant dedup claim; the legacy unscoped check is gone (PR #509 follow-up, 2026-11-13)
+
+PR #509 scoped the intake dedup claim to `email_intake:<org_id>:<message_id>`
+and kept a transitional read of the bare `email_intake:<message_id>` key
+(`_legacy_claim_live`) so a redelivery of a pre-deploy message could not create
+a second payable. That guard only mattered while a pre-#509 claim could still
+be live, i.e. for the 72h dedup TTL after #509 reached each environment. #509
+merged 2026-10-05 and shipped in v0.1.0; production's first deploy (2026-10-18)
+already carried it, so production never held an unscoped claim, and any local
+or pre-production Redis has been past the TTL for over five weeks. The check,
+its only helper `webhook_security.event_claim_exists` (no other caller), and
+their tests are deleted. `test_an_unscoped_message_id_claim_no_longer_blocks_any_tenant`
+pins the absence: a bare Message-ID claim no longer drops any tenant's invoice.
