@@ -706,6 +706,12 @@ def _outside_scenarios(realdb, role):
         "completed": {"initiated_by": someone, "status": "completed", "leg_status": "completed"},
         # A draft whose only leg is gone (failed): nothing left to send.
         "draft_nothing_left": {"initiated_by": someone, "leg_status": "failed"},
+        # An exported file whose only payment verify took out (§362).
+        "exported_nothing_left": {
+            "initiated_by": someone,
+            "status": "exported",
+            "leg_status": "failed",
+        },
     }
 
 
@@ -725,7 +731,13 @@ def _assert_bank_parity(verdict, resp, label):
         assert detail == verdict["message"], (label, verdict, detail)
 
 
-_OUTSIDE_ACTIONS = ("record_outside", "nacha_export", "nacha_regenerate", "nacha_void")
+_OUTSIDE_ACTIONS = (
+    "record_outside",
+    "nacha_export",
+    "nacha_regenerate",
+    "nacha_void",
+    "nacha_verify",
+)
 
 
 async def _outside_post(c, run_id, action):
@@ -740,6 +752,8 @@ async def _outside_post(c, run_id, action):
         return await c.post(
             f"/api/payments/runs/{run_id}/nacha/void", json={"reason": "bank rejected it"}
         )
+    if action == "nacha_verify":
+        return await c.post(f"/api/payments/runs/{run_id}/nacha/verify")
     params = {"regenerate": "true"} if action == "nacha_regenerate" else {}
     return await c.get(f"/api/payments/runs/{run_id}/nacha", params=params)
 
@@ -750,7 +764,7 @@ _OUTSIDE_MODES = ("record_only", "record_only_unconfigured", "processor", "opted
 @pytest.mark.parametrize("mode", _OUTSIDE_MODES)
 @pytest.mark.parametrize("role", ROLES)
 async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(realdb, role, mode):
-    """`actions.{record_outside,nacha_export,nacha_regenerate,nacha_void}` are
+    """`actions.{record_outside,nacha_export,nacha_regenerate,nacha_void,nacha_verify}` are
     `None` exactly when their endpoint accepts, and otherwise carry the refusal
     it answers with — every role, every run state, on a configured record-only
     tenant, an unconfigured one, a processor tenant, and with maker-checker
@@ -782,7 +796,18 @@ async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(re
 
     if role == "ap_clerk":
         return
-    assert seen["nacha_void"] <= {None, "nacha_run_not_exported", "role_not_permitted"}
+    assert seen["nacha_void"] <= {
+        None,
+        "nacha_run_not_exported",
+        "nacha_void_requires_record_only",
+        "role_not_permitted",
+    }
+    assert seen["nacha_verify"] <= {
+        None,
+        "nacha_verify_not_exported",
+        "nacha_nothing_to_verify",
+        "role_not_permitted",
+    }
     if role == "ap_manager" and mode == "record_only":
         # The matrix reaches the gates it claims to.
         assert seen["nacha_export"] == {
@@ -797,8 +822,14 @@ async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(re
             None,
             "nacha_nothing_to_regenerate",
             "payment_run_segregation",
+            "nacha_nothing_to_export",
         }, seen["nacha_regenerate"]
         assert seen["nacha_void"] == {None, "nacha_run_not_exported"}, seen["nacha_void"]
+        assert seen["nacha_verify"] == {
+            None,
+            "nacha_verify_not_exported",
+            "nacha_nothing_to_verify",
+        }, seen["nacha_verify"]
     if role == "admin":
         expected_record = {
             None,
@@ -813,6 +844,15 @@ async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(re
             assert "nacha_not_configured" in seen["nacha_export"], seen["nacha_export"]
         if mode == "processor":
             assert "nacha_requires_record_only" in seen["nacha_export"], seen["nacha_export"]
+            # A file exported before the switch to processor mode keeps its
+            # claim: the void that would hand the run to the rail is refused
+            # (decisions §362), and only that refusal — never a release.
+            assert seen["nacha_void"] == {
+                "nacha_run_not_exported",
+                "nacha_void_requires_record_only",
+            }, seen["nacha_void"]
+            # Verify never releases the run, so it stays available there.
+            assert None in seen["nacha_verify"], seen["nacha_verify"]
 
 
 async def test_regenerate_refuses_a_run_with_no_exported_file(realdb):

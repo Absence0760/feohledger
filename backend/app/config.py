@@ -394,6 +394,12 @@ class Settings(BaseSettings):
     # row lock is held across it; past the bound the item is HELD, never paid
     # blind (`erp_bill_unverified`, retry-safe).
     erp_dispatch_check_timeout_seconds: float = 10.0
+    # How many of those reads one request makes at once when it checks many
+    # bills under its locks — the NACHA export and its verify step (decisions
+    # §362). Each `bill_report` is two QuickBooks calls (the bill, then its
+    # payments), so 4 keeps one file at 8 requests in flight, under Intuit's
+    # per-company concurrency throttle.
+    erp_dispatch_check_concurrency: int = 4
     # OAuth connection health (Phase 5, decisions §295,
     # `services/erp_connection_health`): keeps a quiet connection's refresh
     # token alive, and tells admins (in-app + email) before it expires or as

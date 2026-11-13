@@ -507,6 +507,9 @@ NACHA_RUN_NOT_EXPORTABLE = "nacha_run_not_exportable"
 NACHA_NOTHING_TO_REGENERATE = "nacha_nothing_to_regenerate"
 NACHA_NOTHING_TO_EXPORT = "nacha_nothing_to_export"
 NACHA_RUN_NOT_EXPORTED = "nacha_run_not_exported"
+NACHA_VOID_REQUIRES_RECORD_ONLY = "nacha_void_requires_record_only"
+NACHA_NOTHING_TO_VERIFY = "nacha_nothing_to_verify"
+NACHA_VERIFY_NOT_EXPORTED = "nacha_verify_not_exported"
 
 
 def _nacha(code: str, message: str, http_status: int = status.HTTP_409_CONFLICT, **params):
@@ -585,17 +588,61 @@ def run_nacha_export_refusal(
     return None
 
 
-def run_nacha_void_refusal(run) -> ActionRefusal | None:
+def run_nacha_void_refusal(run, *, record_only: bool) -> ActionRefusal | None:
     """Why ``POST /runs/{id}/nacha/void`` ("the bank rejected the file") would
     refuse, or ``None`` — the ONE definition the endpoint raises from and the
     run dialog's ``actions.nacha_void`` is read from (issue #575). Only an
-    ``exported`` run has a file to release."""
+    ``exported`` run has a file to release.
+
+    **And only on a tenant that records payments** (``record_only``, from
+    ``payment_execution_mode`` — the same condition the export itself
+    required; decisions §362). The ``exported`` claim is what keeps a file the
+    bank took from being paid a second time: ``/execute``, ``/cancel`` and
+    re-staging all refuse it. On a tenant switched to processor mode after
+    exporting, releasing the run back to ``draft`` would hand it straight to
+    the rail — one Execute pays every supplier in the file again, as would a
+    cancel and a restage. Refusing the void keeps the claim, so all three
+    stay closed; refusing only the Execute would leave the cancel-and-restage
+    path open, since the invoices carry no memory of the file. The exits stay:
+    record the run as paid, or switch back to record-only to release it.
+    """
     if run.status != "exported":
         return ActionRefusal(
             NACHA_RUN_NOT_EXPORTED,
             f"Only an 'exported' run's bank file can be voided, not '{run.status}'",
             status.HTTP_409_CONFLICT,
         )
+    if not record_only:
+        return _nacha(
+            NACHA_VOID_REQUIRES_RECORD_ONLY,
+            "This run's bank file was exported while FeohLedger recorded payments, and "
+            "payments are now sent through a processor. Releasing the run would let it be "
+            "executed and pay these suppliers twice. If the bank took the file, record the "
+            "run as paid; if it did not, an admin must switch payments back to record-only "
+            "first.",
+        )
+    return None
+
+
+def run_nacha_verify_refusal(run, pending_payments: int) -> ActionRefusal | None:
+    """Why ``POST /runs/{id}/nacha/verify`` ("verify before upload") would
+    refuse, or ``None`` — the ONE definition the endpoint raises from and the
+    run dialog's ``actions.nacha_verify`` is read from (decisions §362).
+
+    It re-reads the bills of an exported file, so it needs an ``exported`` run
+    with a ``pending`` payment still in it. No maker-checker or CFO gate: it
+    can only take payments OUT of the file, never put money in motion, and
+    the person about to upload the file is exactly who should run it. Nor a
+    record-only gate: it never releases the run, so it opens no path to the
+    rail on a tenant that has since switched modes.
+    """
+    if run.status != "exported":
+        return _nacha(
+            NACHA_VERIFY_NOT_EXPORTED,
+            f"Only an 'exported' run's bank file can be verified, not '{run.status}'",
+        )
+    if pending_payments <= 0:
+        return _nacha(NACHA_NOTHING_TO_VERIFY, "This run's bank file has no payments left in it")
     return None
 
 
