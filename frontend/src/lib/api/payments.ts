@@ -213,10 +213,11 @@ export async function downloadRunNacha(
 
 /**
  * The bank rejected (or never received) the exported file: release the run
- * back to `draft` so it can be re-exported, cancelled or executed. An
- * attestation FeohLedger cannot check, so `reason` is required (≤ 500
- * characters) and lands on the audit trail. `payment.execute`; 409 unless the
- * run is `exported`.
+ * back to `draft` so it can be re-exported or cancelled. An attestation
+ * FeohLedger cannot check, so `reason` is required (≤ 500 characters) and
+ * lands on the audit trail. `payment.execute`; 409 unless the run is
+ * `exported` and the tenant records payments (`nacha_void_requires_record_only`
+ * after a switch to processor mode — decisions §362).
  */
 export function voidRunNachaExport(
 	runId: string,
@@ -225,6 +226,41 @@ export function voidRunNachaExport(
 	return api.post<{ id: string; status: string }>(`/api/payments/runs/${runId}/nacha/void`, {
 		reason
 	});
+}
+
+/** One payment `verifyRunNacha` took out of the file, or could not vouch for. */
+export interface NachaVerifyItem {
+	payment_id: string;
+	invoice_id: string;
+	invoice_number: string | null;
+	/** The dispatcher's machine code (`erp_bill_not_open:paid`, `erp_bill_unverified`, …). */
+	reason: string;
+}
+
+/** What `POST /runs/{id}/nacha/verify` found (decisions §362). */
+export interface NachaVerifyResult {
+	id: string;
+	status: string;
+	/** `verified`: upload the file. `superseded`: do NOT upload it — payments were
+	 *  taken out; regenerate (or, with none left, the run is cancelled).
+	 *  `held`: some bills could not be read just now; verify again first. */
+	result: 'verified' | 'superseded' | 'held';
+	checked: number;
+	remaining: number;
+	removed: NachaVerifyItem[];
+	held: NachaVerifyItem[];
+	/** Whether the org's ERP reports bill payments back at all. */
+	erp_checked: boolean;
+}
+
+/**
+ * Verify an exported file before uploading it: re-read the ERP bill of every
+ * payment still in it. A bill paid in the ERP since the export is taken out of
+ * the run (the file then needs regenerating); the run is never released.
+ * `payment.execute`, idempotent and audited.
+ */
+export function verifyRunNacha(runId: string): Promise<NachaVerifyResult> {
+	return api.post<NachaVerifyResult>(`/api/payments/runs/${runId}/nacha/verify`, {});
 }
 
 /**

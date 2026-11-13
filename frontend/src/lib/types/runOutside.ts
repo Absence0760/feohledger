@@ -12,7 +12,8 @@ import { isOffered, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
  * Paying a run outside FeohLedger — which of the run dialog's controls are
  * RENDERED, from the server's verdicts (`GET /api/payments/runs/{id}`'s
  * `actions`, built from `payment_controls.run_record_outside_refusal`,
- * `.run_nacha_export_refusal` and `.run_nacha_void_refusal` — the gates the
+ * `.run_nacha_export_refusal`, `.run_nacha_void_refusal` and
+ * `.run_nacha_verify_refusal` — the gates the
  * endpoints raise from). Whether a rendered control may be PRESSED is
  * `isAllowed(verdict)` alone.
  *
@@ -30,6 +31,8 @@ export const BANK_FILE_DOWNLOAD_HIDDEN = ['nacha_already_exported', 'nacha_run_n
 export const BANK_FILE_REGENERATE_HIDDEN = ['nacha_nothing_to_regenerate'];
 /** `POST /runs/{id}/nacha/void` refusal that means "no file to reject". */
 export const BANK_FILE_REJECT_HIDDEN = ['nacha_run_not_exported'];
+/** `POST /runs/{id}/nacha/verify` refusals that mean "no file to verify". */
+export const BANK_FILE_VERIFY_HIDDEN = ['nacha_verify_not_exported', 'nacha_nothing_to_verify'];
 /** `POST /runs/{id}/record-outside` refusal that means "not a run to record". */
 export const RUN_RECORD_HIDDEN = ['payment_run_not_recordable'];
 
