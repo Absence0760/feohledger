@@ -91,6 +91,11 @@ already paid in the old system), use `done` or `paid` so they don't
 re-enter the approval pipeline. For open AP that still needs to be paid,
 import it as `new` — it enters the normal approval pipeline and gets a real
 audit trail, segregation check, and approval signature when a human approves it.
+The importer is recorded as the invoice's `uploaded_by_id`, so they cannot
+approve what they imported (decisions §131). An import made before that, from
+2026-09-08 when the `invoice.imported_csv` audit row shipped, got its importer
+from that row in migration `0126_uploader_audit_backfill` (decisions §367); an
+import older than the row has no record of who ran it and keeps a NULL uploader.
 
 **Importable statuses are restricted to `new`, `done`, `paid`, `rejected`.** A
 CSV import bypasses the workflow engine, so landing an invoice directly at a

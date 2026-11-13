@@ -16737,3 +16737,61 @@ coded 422 before falling back to `message`.
 reader's language is the policy engine's change, tracked in
 `docs/followups.md`. The role dependency's 403 stays a plain string, as
 everywhere (`role_not_permitted` is only its verdict form).
+
+## 367. An invoice an employee created before §131 gets the uploader its own creation record names, and only that (§198 follow-up, 2026-11-13)
+
+**Decided:** 2026-11-13 · `backend/alembic/versions/0126_uploader_audit_backfill.py` ·
+`backend/tests/test_migration_0126_uploader_audit_backfill.py`
+
+Before §131, CSV import and recurring `generate-now` built the invoice without
+`uploaded_by_id`, so `violates_segregation` read it as "no employee created this"
+and the importer or the clicker could approve it, or clear a payment-blocking
+exception on it (§169). §198's residual named the fix: both paths wrote the
+acting employee into `actor_id` on an audit row keyed to the invoice, so the
+person is recorded, not inferred, and §141's "no honest author" objection does
+not apply. Migration `0126_uploader_audit_backfill` copies them in. The other
+pre-§131 employee paths were checked at `08ae54b8c^`: manual create and file
+upload both passed `uploaded_by_id=user.id`, and the mirror was 0100's.
+
+**The rule is "every creation record agrees on one named employee", not "the
+earliest matching row".** The follow-up said to take the earliest row's actor.
+That picks a winner when two rows disagree, which is a guess with a tiebreak.
+Instead the migration reads every audit row on the invoice whose action a
+creation path writes (`invoice.created`, `invoice.imported_csv`,
+`invoice.uploaded`, `invoice.submitted_by_vendor`, `invoice.created_from_po`,
+`invoice.peppol_received`, and `invoice.intercompany_routed` with
+`role = 'mirror'`). It stamps only when all of them are evidence rows and all
+name the same employee. Two import rows naming two people, an import row beside
+a portal or PEPPOL record, or a generator row beside one with no actor: each
+leaves the invoice NULL, because the records disagree about who created it and
+the migration cannot know which is right. A human can.
+
+**An evidence row must describe its own invoice.** `invoice.imported_csv` counts
+only with `details.source = 'csv_import'` on an invoice whose
+`meta.imported.source` is `'csv_import'`; the importer writes both in one
+transaction. The operator's provenance backfill (§81) stamps a different source
+and leaves no audit row, so it never qualifies. `invoice.created` counts only
+with `details.source = 'recurring_template'` and a `recurring_template_id` equal
+to the invoice's own. The actor must be present, must belong to the invoice's
+organization, and must not be the nil-UUID sentinel email intake and PEPPOL
+write. So the system channels stay NULL: the sweep's row has no actor, and a
+template written before 0096 has no author to fall back to (§141's call stands).
+
+**Scope matches 0100:** every status with a successor in `VALID_TRANSITIONS`
+(all but `done`), because the uploader also gates clearing an exception after
+approval and `paid` can be voided. A stamped uploader is never overwritten. Each
+invoice changed gets an `invoice.segregation_backfilled` row with no actor, the
+old and new uploader, and the ids of the audit rows it read, so an approval
+given before the backfill stays legible as one the rules then allowed. The
+UPDATE and the INSERT are one statement. `downgrade` is a no-op for 0100's
+reason.
+
+**What it does not reach.** `invoice.imported_csv` was first written on
+2026-09-08 (#384), one day before §131. An import before that left no audit row
+at all, so nothing names its importer, and those invoices keep the legacy NULL
+reading. `generate-now` wrote its row from the feature's first commit, so every
+pre-§131 generate-now invoice is covered.
+
+The migration's literals (terminal statuses, the sentinel, the import marker,
+the creation actions) restate app constants, and the test pins each to its
+source so a rename fails CI rather than silently narrowing the conflict check.

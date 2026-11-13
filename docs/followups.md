@@ -813,29 +813,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the first tenant running the supplier portal in more than one currency, or the
       next change to `invoices.currency`.
 
-- [ ] **(c) Invoices an employee created before §131 still carry a NULL uploader, although the audit trail names them.**
-      Before §131 (2026-09-09), CSV import (`POST /api/invoices/import-csv`) and
-      recurring `generate-now` built the `Invoice` without `uploaded_by_id`. Each still
-      wrote an audit row keyed to the invoice with the acting employee in `actor_id`:
-      `invoice.imported_csv` for the import, and `invoice.created` with
-      `details.source = "recurring_template"` for generate-now (the sweep's copy of
-      that row has `actor_id` NULL). `approval_chain.violates_segregation` reads a NULL
-      uploader as "no employee created this", so on any such invoice not yet `done`,
-      the importer or generator can still approve it or clear a payment-blocking
-      exception on it. §198 closed the inter-company mirror's version of this gap from
-      the routing audit row. These two paths have the same kind of evidence and
-      were left out only because they are not mirrors.
-      **Durable fix:** a tenant data migration on the pattern of
-      `0100_mirror_implicated_backfill`. Set `uploaded_by_id` from the earliest matching
-      audit row's `actor_id`, only where the invoice's is NULL, the row's is not, and
-      the status has a successor in `VALID_TRANSITIONS`. Write an
-      `invoice.segregation_backfilled` row (actor NULL, old/new) for each change, and
-      test it against real audit rows the way `test_intercompany.py`'s 0100 section
-      does. Confirm first that no other pre-§131 employee path produced NULL (manual
-      create and upload always stamped the uploader).
-      **Trigger:** the next round that ships a tenant migration, or the first tenant
-      found with a pre-2026-09-09 CSV import or generate-now invoice still in flight.
-
 - [ ] **(c) A recurring template keeps stamping a GL code whose account was retired after it was written.**
       §199 refuses a retired or unknown code on every write that SETS one, including
       a recurring template's `gl_account` on create and on a PATCH that changes it.
