@@ -140,6 +140,9 @@ async def _seed_split(
     number: str,
     with_invoice_date: bool = True,
     po_currencies: list[str | None] | None = None,
+    link_vendor: bool = True,
+    vendor_name: str = "Initech Parts",
+    approved_once: bool = False,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Create a vendor, ``len(po_totals)`` open POs under it, and an invoice in
     ``ready_for_review`` referencing a NON-EXISTENT po_number (so the live match
@@ -151,7 +154,7 @@ async def _seed_split(
 
     async with mk() as s:
         vendor = Vendor(
-            name="Initech Parts",
+            name=vendor_name,
             status="active",
             source="manual",
             organization_id=org_id,
@@ -178,8 +181,12 @@ async def _seed_split(
         inv = Invoice(
             organization_id=org_id,
             invoice_number=number,
-            vendor_name="Initech Parts",
-            vendor_id=vendor.id,
+            vendor_name=vendor_name,
+            vendor_id=vendor.id if link_vendor else None,
+            # A recalled invoice back in review keeps its approval stamps
+            # (decisions §374).
+            approved_by="Original Approver" if approved_once else None,
+            approval_date=date(2026, 11, 1) if approved_once else None,
             amount=invoice_amount,
             invoice_date=date.today() if with_invoice_date else None,
             status=InvoiceStatus.ready_for_review,
@@ -552,3 +559,45 @@ async def test_rerun_on_resolved_split_is_noop(realdb):
         assert len(decisions) == 1
         inv = await s.get(Invoice, inv_id)
         assert inv.status == InvoiceStatus.approved
+
+
+async def test_the_split_agent_never_sets_the_payee_of_a_once_approved_invoice(realdb):
+    """A recalled invoice (stamps kept) with no vendor linked, matching a clean
+    two-PO split under a vendor of the same name: the agent would fill
+    `vendor_id` from the first PO and approve. It escalates instead, with the
+    invoice unchanged (decisions §379)."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+    tag = uuid.uuid4().hex[:8]
+
+    inv_id, _corr, exc_id = await _seed_split(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_totals=[Decimal("600.00"), Decimal("400.00")],
+        number=f"INV-SPLIT-PAYEE-{tag}",
+        link_vendor=False,
+        vendor_name=f"Split Payee {tag}",
+        approved_once=True,
+    )
+
+    org_settings = {"exception_agents": {"autonomy_level": "balanced"}}
+    async with mk() as s:
+        exc = await s.get(APException, exc_id)
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings=org_settings,
+            actor_roles={"ap_manager"},
+        )
+        assert result.decision.action_taken == ACTION_ESCALATED
+        assert "approved once" in result.decision.rationale
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.vendor_id is None
+        assert inv.po_number == f"PO-DOES-NOT-EXIST-INV-SPLIT-PAYEE-{tag}"
+        assert inv.status == InvoiceStatus.ready_for_review
+        assert (await s.get(APException, exc_id)).status == "escalated"

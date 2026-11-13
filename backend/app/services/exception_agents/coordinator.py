@@ -22,7 +22,10 @@ from app.services.exception_agents.base import (
     ACTION_NO_ACTION,
 )
 from app.services.exception_agents.registry import get_resolver
-from app.services.exception_agents.resolvers.amount_mismatch import NotApprovable
+from app.services.exception_agents.resolvers.amount_mismatch import (
+    NotApprovable,
+    PayeeFixedByApproval,
+)
 from app.services.exception_lifecycle import (
     deciding,
     record_decision,
@@ -323,6 +326,15 @@ async def run_agent(
                 )
                 logger.info(
                     "Agent change left the PO-match finding in place on invoice %s; escalating",
+                    invoice.id,
+                )
+            elif isinstance(exc, PayeeFixedByApproval):
+                reason = (
+                    "This invoice was approved once, so the agent will not set its "
+                    "vendor from the purchase order. Escalated to a human."
+                )
+                logger.info(
+                    "Agent would set the payee of once-approved invoice %s; escalating",
                     invoice.id,
                 )
             elif isinstance(exc, NotApprovable):
