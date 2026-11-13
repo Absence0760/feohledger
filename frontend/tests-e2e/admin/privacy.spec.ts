@@ -112,6 +112,11 @@ test.describe('/admin/privacy (admin)', () => {
 		await expect(dsarModal.getByTestId('dsar-truncated-notice')).toContainText(
 			'1 section holds more records'
 		);
+		// A masked export's download IS everything held, so no masking caveat.
+		await expect(dsarModal.getByTestId('dsar-truncated-notice')).toContainText(
+			'to give the subject everything held'
+		);
+		await expect(dsarModal.getByTestId('dsar-bundle-masked')).toHaveCount(0);
 
 		const [download] = await Promise.all([
 			page.waitForEvent('download'),
@@ -124,6 +129,57 @@ test.describe('/admin/privacy (admin)', () => {
 		expect(bundle.complete).toBe(true);
 		expect(bundle.data.vendor.name).toBe(name);
 		expect(bundle.data.related_invoices.truncated).toBe(false);
+	});
+
+	test('after an unmasked disclosure, says the download masks banking and the view does not', async ({
+		page
+	}) => {
+		const name = `E2E Unmasked Bundle Vendor ${Date.now()}`;
+		const vendorId = await createVendor(page, name);
+
+		// The unmask itself needs a step-up and is exercised end to end in
+		// privacy-unmasked-step-up.spec.ts. Here only its flag (plus a cut, so the
+		// truncation notice renders) is set on the REAL response: what is under
+		// test is the copy. `GET /dsar/{id}/bundle` is always masked (decisions
+		// §369), so "download for everything held" would be untrue here.
+		await page.route('**/api/privacy/dsar', async (route) => {
+			const response = await route.fetch();
+			const json = await response.json();
+			await route.fulfill({
+				response,
+				json: {
+					...json,
+					banking_disclosure: 'unmasked',
+					complete: false,
+					truncated_sections: ['related_invoices']
+				}
+			});
+		});
+
+		await page.goto('/admin/privacy');
+		await page.getByLabel('Subject type').selectOption('vendor_contact');
+		await page.getByLabel('Identifier').fill(vendorId);
+		await page.getByRole('button', { name: 'Export data (DSAR)' }).click();
+
+		const dsarModal = page.getByRole('dialog', { name: 'Data export' });
+		await expect(dsarModal).toBeVisible({ timeout: 10_000 });
+
+		const notice = dsarModal.getByTestId('dsar-truncated-notice');
+		await expect(notice).toContainText('1 section holds more records');
+		await expect(notice).toContainText(
+			'it masks bank details, so the unmasked bank details are only in this view'
+		);
+		await expect(notice).not.toContainText('to give the subject everything held');
+
+		// Beside the button, and tied to it, so the caveat is read with it.
+		const note = dsarModal.getByTestId('dsar-bundle-masked');
+		await expect(note).toHaveText(
+			'The downloaded file masks bank details. The unmasked copy is the one shown here.'
+		);
+		const download = dsarModal.getByRole('button', { name: 'Download complete bundle' });
+		await expect(download).toHaveAccessibleDescription(
+			'The downloaded file masks bank details. The unmasked copy is the one shown here.'
+		);
 	});
 
 	test('erasure requires the acknowledgement checkbox and is a real, irreversible redaction', async ({

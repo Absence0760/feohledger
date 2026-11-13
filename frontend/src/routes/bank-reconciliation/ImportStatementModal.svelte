@@ -15,7 +15,8 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { DEFAULT_CURRENCY, currencyOptions } from '#lib/utils/money.ts';
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import { normalizeCurrencyCode } from '#lib/utils/currencyCode.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 
 	let {
@@ -30,12 +31,12 @@
 	let accountIdentifier = $state('');
 	let periodStart = $state('');
 	let periodEnd = $state('');
-	/* eslint-disable svelte/state-referenced-locally -- seeded once from the store */
-	// A form's initial value, so it needs A code: the org's when it resolved,
-	// else the platform default — explicitly, since the store itself no longer
-	// substitutes one (decisions §200).
-	let currency = $state(orgCurrency.currency ?? DEFAULT_CURRENCY);
-	/* eslint-enable svelte/state-referenced-locally */
+	// Any ISO 4217 code, never blank (decisions §377). `CurrencyInput` seeds it
+	// from the org's currency once that resolves (the platform default only
+	// while it has not, explicitly, since the store substitutes none —
+	// decisions §200) and stops following it once the user types.
+	let currency = $state('');
+	const statementCurrency = $derived(normalizeCurrencyCode(currency));
 	let saving = $state(false);
 
 	/**
@@ -54,10 +55,12 @@
 	 */
 	let importError = $state<string | null>(null);
 
-	const currencies = $derived(currencyOptions(orgCurrency.currency ?? DEFAULT_CURRENCY));
-
 	const canSubmit = $derived(
-		file !== null && accountIdentifier.trim() !== '' && periodStart !== '' && periodEnd !== ''
+		file !== null &&
+			accountIdentifier.trim() !== '' &&
+			periodStart !== '' &&
+			periodEnd !== '' &&
+			statementCurrency !== null
 	);
 
 	function onFile(e: Event) {
@@ -75,7 +78,7 @@
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
-		if (!canSubmit || !file || saving) return;
+		if (!canSubmit || !file || statementCurrency === null || saving) return;
 		saving = true;
 		importError = null;
 		try {
@@ -83,7 +86,7 @@
 				account_identifier: accountIdentifier.trim(),
 				period_start: periodStart,
 				period_end: periodEnd,
-				currency
+				currency: statementCurrency
 			});
 			toast(
 				m('bankRecon.toast.imported', {
@@ -128,11 +131,11 @@
 			</label>
 			<label class="field">
 				<span>{m('bankRecon.import.currency')}</span>
-				<select bind:value={currency}>
-					{#each currencies as code (code)}
-						<option value={code}>{code}</option>
-					{/each}
-				</select>
+				<CurrencyInput
+					bind:value={currency}
+					preferred={orgCurrency.currency}
+					testid="bank-statement-currency"
+				/>
 			</label>
 		</div>
 

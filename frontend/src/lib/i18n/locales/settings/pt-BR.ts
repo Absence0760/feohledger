@@ -1253,6 +1253,8 @@ export const messages = {
 	'admin.privacy.export.truncated': "Aqui é exibida apenas a primeira parte: {sections, plural, one {# seção contém} other {# seções contêm}} mais registros do que esta visualização lista. Baixe o pacote completo para entregar ao titular tudo o que é mantido.",
 	'admin.privacy.export.download': "Baixar o pacote completo",
 	'admin.privacy.export.downloading': "Preparando o download…",
+	'admin.privacy.export.truncatedUnmasked': "Aqui é exibida apenas a primeira parte: {sections, plural, one {# seção contém} other {# seções contêm}} mais registros do que esta visualização lista. Baixe o pacote completo para obter todos os registros mantidos; ele mascara os dados bancários, então os dados bancários sem máscara estão apenas nesta visualização.",
+	'admin.privacy.export.bundleMasked': "O arquivo baixado mascara os dados bancários. A cópia sem máscara é a exibida aqui.",
 	'admin.privacy.count.roles': "{n, plural, one {# função} other {# funções}}",
 	'admin.privacy.count.pushDevices': "{n, plural, one {# dispositivo de notificações push} other {# dispositivos de notificações push}}",
 	'admin.privacy.count.passkeys': "{n, plural, one {# chave de acesso} other {# chaves de acesso}}",
