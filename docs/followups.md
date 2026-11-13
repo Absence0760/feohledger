@@ -1323,17 +1323,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       apportion header tax across lines or keep refusing, then build it in the
       shared `bill_lines` rules so every adapter follows. **Trigger:** the first
       pilot customer on QuickBooks whose bills carry header-only tax.
-- [ ] **(c) A NACHA file's bills are read once, at export.** The dispatch-time
-      QuickBooks check (decisions §296) reads each bill when the file is built,
-      but the money moves when a person uploads it to the bank, hours or days
-      later; a bill paid in QuickBooks in between is paid twice. The export also
-      reads its bills one after another while holding the run and every invoice
-      lock (about a second each, so a large file holds them for minutes).
-      **Durable fix:** read the file's bills concurrently under a bounded
-      semaphore once the locks are taken, and offer a "verify before upload"
-      step (re-read the run's bills; void and regenerate the file when any is no
-      longer open). **Trigger:** the first record-only tenant on QuickBooks with
-      status sync on, or a NACHA run over ~50 payments.
 
 ### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
 
@@ -2220,21 +2209,6 @@ user-visible halves still open.
       **Durable fix:** a mobile ERP refusal-code map with ARB strings, read on
       the exception detail. **Trigger:** the next change to the mobile
       exception detail.
-### Surfaced by the 2026-10-31 follow-ups batch, round 3 (decisions §338–§344)
-
-- [ ] **(c) ⚠️ SECURITY ANALYST REVIEW — "Bank rejected the file" can reopen a
-      run that was exported and then switched to processor mode.** The NACHA
-      void (`run_nacha_void_refusal`) checks only that the run is `exported`. If
-      a tenant exports a file, the bank takes it, and the tenant then switches
-      `payments.mode` to `processor`, a holder of `payment.execute` can void the
-      run back to draft over the API and Execute it, paying the same suppliers
-      twice. §251 says the `exported` claim closes the switch-to-processor path;
-      the void reopens it. The web panel is hidden off record-only tenants, but
-      the API accepts, and §344's parity test pins that verdict. **Durable
-      fix:** refuse the void (or the Execute after it) once a file was exported
-      on a tenant now in processor mode, with a parity case. **Trigger:** the
-      Security Analyst's review, or the first tenant switching modes with an
-      exported run.
 ### Surfaced by the 2026-10-31 follow-ups batch, round 4 (decisions §345–§348)
 
 - [ ] **(c) Mobile's invoice approve still restates its rule.**
@@ -2480,6 +2454,17 @@ as oversights.
 
 ## (b) Operator steps on merged code
 
+- [ ] **⚠️ SECURITY ANALYST REVIEW — fix landed, review pending: "Bank
+      rejected the file" on a run exported before a switch to processor mode.**
+      Built (decisions §362): `/nacha/void` is now refused
+      (`nacha_void_requires_record_only`) unless the tenant resolves
+      record-only, so a file the bank may have taken keeps its `exported` claim
+      and cannot be executed, or cancelled and restaged, on the rail; §344's
+      parity test pins the refusal. **Durable fix:** a Security Analyst reviews
+      that the claim closes every path (and the accepted residual §362 names: a
+      record-only void is an attestation, and the tenant may switch modes
+      after it), then this entry is pruned. **Trigger:** the Security Analyst's
+      review, or the first tenant switching modes with an exported run.
 - [ ] **Make the supply-chain scans blocking once they are signed off.**
       Built (decisions §349, §350): `supply-chain-scan.yml` runs zizmor and
       osv-scanner advisory, and the baseline is fixed (0 high, 0 medium; no

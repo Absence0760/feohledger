@@ -16464,3 +16464,78 @@ push and closing: a payment outside `LIVE_PAYMENT_TERMINAL_STATUSES`, a card not
   moved, so it is done". A completed payment is what `paid → done` is for; an
   `approved` invoice holding one is out of step already, and closing it hides
   that. The rail's own exits apply, as §309 says for the push.
+
+## 362. A file exported before a switch to processor mode keeps its claim; a NACHA file's bills are read concurrently and re-read before upload (§251 / §296 / §344 follow-ups, 2026-11-13)
+
+**Context.** Two gaps in the bank-file path. First, "Bank rejected the file"
+(`/nacha/void`) checked only that the run was `exported`. A tenant that
+exported a file, had it taken by its bank, and then switched `payments.mode` to
+`processor` could release the run to `draft` over the API and Execute it — or
+cancel and restage it — so the rail paid the suppliers the file already paid.
+§251 says the `exported` claim closes the switch-to-processor path; the void
+reopened it, and §344's parity test pinned that verdict. Second, the export's
+ERP-bill read (§296) happens when the file is built, but the money moves when
+a person uploads it; a bill paid in QuickBooks in between was paid twice. And
+the export read its bills one after another while holding the run lock and
+every invoice lock.
+
+**Decision.**
+
+- **The void is refused on a tenant that does not record payments**
+  (`run_nacha_void_refusal(run, record_only=…)`, 409 coded
+  `nacha_void_requires_record_only`), resolved by `payment_execution_mode` —
+  the same condition the export required. The claim stays, so `/execute`,
+  `/cancel` and re-staging keep refusing. Exits: record the run as paid, or an
+  admin switches back to record-only and voids there. Refusing the void rather
+  than the Execute after it is what closes every path: a gate on Execute (say,
+  on `nacha_export_count > 0`) still lets the released run be cancelled and its
+  invoices restaged into a fresh run, because the invoices carry no memory of
+  the file. Accepted residual: a void made on a record-only tenant is an
+  attestation, as §251 says, and a tenant can switch modes after one — the same
+  trust a regenerated second file already rests on.
+- **The export reads its bills concurrently**, at most
+  `FEOH_ERP_DISPATCH_CHECK_CONCURRENCY` (4; a `bill_report` is two QuickBooks
+  calls) at once, and only after every local check has passed.
+  `erp_status_sync.erp_bill_dispatch_refusal` is split into a database half
+  before the read, the read itself (no session), and a database half after it;
+  `erp_bill_dispatch_refusals` runs the halves sequentially on the one session
+  (an `AsyncSession` cannot be shared between tasks) and only the reads under a
+  semaphore. Verdicts are unchanged. The org-wide "unreachable" hold is checked
+  as each read starts, so after a connection failure the reads not yet started
+  hold without reading; those already in flight cost at most one timeout each.
+- **Verify before upload**, `POST /runs/{id}/nacha/verify` (`payment.execute`,
+  `run_nacha_verify_refusal`, `actions.nacha_verify`). It re-reads the bill of
+  every `pending` payment in an `exported` run. A bill no longer open takes its
+  payment out of the run — `failed` with `erp_bill_not_open:<state>`, exactly
+  what the rail dispatcher records, plus the blocking `payment_reconciliation`
+  — and answers `superseded`: do not upload the file; regenerate it
+  (`regenerate=true`, next modifier) for what is left, or, with nothing left,
+  the run is `cancelled`. A failed read takes nothing out (`held`).
+  - *"Void and regenerate" literally* was rejected. Voiding returns the run to
+    `draft` with the paid bill's payment still in it, and the next export
+    refuses it on the flag the check opened; there is no per-leg removal from a
+    draft run. Worse, it would release the claim — the path the first bullet
+    closes — and a verify run by mistake after the upload would turn "the bank
+    took it" into a draft anyone can pay again. Taking the stale payment out
+    while the run stays claimed has neither problem.
+  - *No maker-checker or CFO gate*: verify only takes money out of a file, and
+    the uploader is who should run it. *No record-only gate*: it never releases
+    the run, so it is safe on a tenant that has switched modes.
+  - *Bills only*, not `dispatch_preflight` again: the file on disk is fixed at
+    export, so a local change since (a bank-detail swap, a credit) does not
+    alter what the bank would pay; only a payment made elsewhere does. The
+    preflight's discount check also depends on the file's effective date,
+    which the run does not store.
+  - **Idempotent and audited.** A payment taken out is no longer `pending`, so
+    a repeat reads only what is left and changes nothing when those bills are
+    open; the exception is de-duplicated. Every call writes
+    `payment_run.nacha_verified` (result, counts, ids and reason codes, the
+    file-ID modifier checked) as evidence that the file was checked and when;
+    each payment taken out writes `payment.failed`. A taken-out payment is
+    retry-safe like the dispatcher's, but its run is `exported` or `cancelled`,
+    which `/retry-failed` refuses; after a later record-outside rolls the run up
+    to `partial`, a retry still meets the blocking flag, as at the rail.
+
+**Review pending.** The first bullet closes a double-payment path a Security
+Analyst asked to review; the fail-closed fix landed ahead of that review, which
+is tracked in `docs/followups.md`.

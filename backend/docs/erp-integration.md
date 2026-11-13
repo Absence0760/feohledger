@@ -1258,7 +1258,8 @@ the three cannot disagree about what is live (decisions §309).
   which waits on the send's `FOR UPDATE`; whichever commits first, the other
   sees it and refuses (`payments.md` § The ERP is a third rail).
 - **What the user does:** cancel the run (`POST /api/payments/runs/{id}/cancel`;
-  an exported run first needs `/nacha/void`) or void the payment, or cancel the
+  an exported run first needs `/nacha/void`, on a record-only tenant only —
+  decisions §362) or void the payment, or cancel the
   card, then send again. A voided, failed or cancelled payment and a cancelled
   card no longer hold the invoice.
 - **QuickBooks status sync (§295) covers the other order, and does not

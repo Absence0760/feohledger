@@ -208,7 +208,10 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   and open no exception. A push with no document id or company, or a bill in a
   company other than the one connected now → held `erp_bill_unlinked:<why>`
   with a non-blocking `erp_reconciliation`, since no retry clears it. The NACHA
-  export and `POST /api/cards/generate` do the same read.
+  export and `POST /api/cards/generate` do the same read; the export reads its
+  bills concurrently (`FEOH_ERP_DISPATCH_CHECK_CONCURRENCY`), and
+  `POST /api/payments/runs/{id}/nacha/verify` re-reads them before the file is
+  uploaded, taking a bill paid since out of the run (decisions §362).
 - The write-back re-reads the payment's status first (a void can commit
   between the sync's transition and the ERP call), posts what reached the
   supplier (the settled amount when it is in the bill's currency), and runs
