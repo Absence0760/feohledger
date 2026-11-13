@@ -13,6 +13,7 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
+from app.schemas.currency import CurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 
@@ -37,7 +38,7 @@ class ReconciliationCreate(BaseModel):
     vendor_id: str
     statement_date: date
     statement_reference: str | None = Field(default=None, max_length=120)
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: CurrencyCode = "USD"
     notes: str | None = Field(default=None, max_length=500)
     lines: list[StatementLineInput] = Field(default_factory=list)
 

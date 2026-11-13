@@ -51,6 +51,7 @@ from app.services.provider_credentials import (
 )
 from app.services.sso import generate_scim_token
 from app.tenant import get_tenant, lock_organization, normalize_custom_domain
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.tenant_urls import is_under_platform_domain
 
 logger = logging.getLogger(__name__)
@@ -194,9 +195,10 @@ def _validate_settings_patch(incoming: dict) -> None:
     otherwise persist silently and corrupt a value every other reader assumes
     is well-typed:
 
-    * `invoice_defaults.currency` — must be a 3-letter alpha string (ISO-4217
-      shape). Every currency formatter downstream (`<Money>`, the reporting
-      rollups) assumes this; a stray int or a 2-char typo would corrupt every
+    * `invoice_defaults.currency` — must be three ASCII letters (the shared
+      ISO 4217 shape rule, `utils/currency_code`); it is uppercased in place.
+      Every currency formatter downstream (`<Money>`, the reporting rollups)
+      assumes this; a stray int or a 2-char typo would corrupt every
       invoice created under the default from then on.
     * `payments.cfo_approval_above` — must be numeric (int/float, not `bool`
       — `bool` is a `int` subclass in Python and would otherwise sneak past a
@@ -210,17 +212,15 @@ def _validate_settings_patch(incoming: dict) -> None:
     """
     invoice_defaults = incoming.get("invoice_defaults")
     if isinstance(invoice_defaults, dict) and "currency" in invoice_defaults:
-        currency = invoice_defaults["currency"]
-        if (
-            not isinstance(currency, str)
-            or len(currency) != 3
-            or not currency.isascii()
-            or not currency.isalpha()
-        ):
+        # The one shape rule (decisions §381), stored uppercased: a lowercase
+        # default used to pass and stamp every new invoice in lowercase.
+        currency = iso_currency_or_none(invoice_defaults["currency"])
+        if currency is None:
             raise HTTPException(
                 status_code=422,
                 detail="invoice_defaults.currency must be a 3-letter currency code (e.g. 'USD').",
             )
+        invoice_defaults["currency"] = currency
 
     payments_cfg = incoming.get("payments")
     if isinstance(payments_cfg, dict) and "mode" in payments_cfg:

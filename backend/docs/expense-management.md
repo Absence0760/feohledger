@@ -534,7 +534,13 @@ were not — `max_length=3` alone accepts `""`, `"us"` and `"usd"` — so
 `Expense`, `ExpenseReport`, `ExpensePreapproval`, `CorporateCardTransaction` and
 `ExpensePolicy.per_diem_currency` all took whatever the client sent. They now
 share one `CurrencyCode` annotated type (`normalize_iso_currency`): stripped,
-uppercased, and a 422 unless it is exactly three letters.
+uppercased, and a 422 unless it is exactly three ASCII letters. The rule lives in
+`app/utils/currency_code.py` and the request-side types in
+`app/schemas/currency.py`, which every request schema's currency field now uses
+(invoices, credit memos, contracts, intake, budgets, catalogs, requisitions,
+recurring templates, entities, discount offers, vendor statements): non-ASCII is
+refused before uppercasing, since `"ÄÖÜ".isalpha()` is true and `"uß".upper()`
+is the ASCII `"USS"` (`docs/decisions.md` §381).
 
 A currency code is only a *label* until something groups or compares on it, and
 two things did:

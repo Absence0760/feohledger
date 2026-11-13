@@ -53,6 +53,7 @@ from app.services.punchout_adapters import (
     get_punchout_adapter,
 )
 from app.tenant import apply_entity_scope
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.search import ilike_contains
 
 logger = logging.getLogger(__name__)
@@ -342,8 +343,8 @@ def normalize_cart_currency(raw: str | None) -> str:
     ASCII letters, so the caller drops the cart the same way it drops any other
     unusable one.
     """
-    code = (raw or "").strip().upper()
-    if len(code) != 3 or not code.isascii() or not code.isalpha():
+    code = iso_currency_or_none(raw)
+    if code is None:
         raise PunchoutError("invalid_cart_currency")
     return code
 

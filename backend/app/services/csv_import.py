@@ -44,7 +44,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
-from app.schemas.expense import normalize_iso_currency
 from app.services.audit_dispatch import dispatch_audit
 from app.services.gl_chart import load_invoice_chart
 from app.services.invoice_warnings import (
@@ -54,6 +53,7 @@ from app.services.invoice_warnings import (
 )
 from app.services.numeric_bounds import MONEY_NUMERIC, fits_numeric
 from app.services.vendor_matching import scope_vendor_candidates
+from app.utils.currency_code import normalize_iso_currency
 from app.utils.dates import parse_ambiguous_date
 
 # CSV imports are always small structured text (vendor lists, invoice batches,

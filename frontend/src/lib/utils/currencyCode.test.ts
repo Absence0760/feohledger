@@ -4,7 +4,8 @@ import {
 	currencySuggestions,
 	isoCurrencyCodes,
 	normalizeCurrencyCode,
-	seededCurrency
+	seededCurrency,
+	upperAsciiLetters
 } from './currencyCode.ts';
 import { COMMON_CURRENCIES, DEFAULT_CURRENCY } from './money.ts';
 
@@ -25,6 +26,23 @@ describe('normalizeCurrencyCode', () => {
 			expect(normalizeCurrencyCode(bad)).toBeNull();
 		}
 	});
+
+	it('refuses letters that are not ASCII, checked before uppercasing (decisions §381)', () => {
+		// "uß".toUpperCase() is "USS" and "ﬀa" is "FFA": an upper-then-check
+		// rule would have accepted both.
+		for (const bad of ['ÄÖÜ', 'ДОЛ', 'ＵＳＤ', 'uß', 'ﬀa']) {
+			expect(normalizeCurrencyCode(bad)).toBeNull();
+		}
+	});
+});
+
+describe('upperAsciiLetters', () => {
+	it('uppercases ASCII letters only, so a typed "ß" never becomes "SS"', () => {
+		expect(upperAsciiLetters('pln')).toBe('PLN');
+		expect(upperAsciiLetters('uß')).toBe('Uß');
+		expect(upperAsciiLetters('äöü')).toBe('äöü');
+		expect(upperAsciiLetters('u$d')).toBe('U$D');
+	});
 });
 
 describe('currencyCodeProblem', () => {
@@ -34,6 +52,7 @@ describe('currencyCodeProblem', () => {
 		expect(currencyCodeProblem('EU')).toBe('invalid');
 		expect(currencyCodeProblem('EURO')).toBe('invalid');
 		expect(currencyCodeProblem('pln')).toBeNull();
+		expect(currencyCodeProblem('ÄÖÜ')).toBe('invalid');
 	});
 });
 

@@ -219,11 +219,11 @@ STATEMENT_CURRENCY_INVALID = "statement_currency_invalid"
 def statement_currency(raw: str | None) -> str:
     """The normalized currency of an uploaded statement, or a coded 422.
 
-    Shape-checked by ``schemas.expense.normalize_iso_currency``, the one check
+    Shape-checked by ``utils.currency_code.normalize_iso_currency``, the one check
     every currency boundary uses, so ``"usd"`` is stored ``USD`` and ``"EURO"``
     is refused rather than overflowing the ``String(3)`` column.
     """
-    from app.schemas.expense import normalize_iso_currency
+    from app.utils.currency_code import normalize_iso_currency
 
     value = (raw or "").strip()
     if not value:

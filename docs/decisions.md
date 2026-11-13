@@ -18211,6 +18211,57 @@ statuses named, malformed params fall back);
 `frontend/tests-e2e/erp/xero-company-picker.spec.ts` (an unoffered company and
 `already_linked` keep the picker, and the same consent then links).
 
+## 381. One currency shape rule, ASCII first, and no shortlist pickers left (§377 follow-up, 2026-11-13)
+
+§377 moved the statement uploads off a `<select>` over `COMMON_CURRENCIES`.
+Two more pickers had the same limit: the `/credit-memos` create / edit dialog
+(the shortlist), and `/organization`'s Invoice Defaults currency (six
+hardcoded options), which is also a rung of the reporting currency. A PLN
+credit memo, or a ZAR organization's own default, could not be entered from
+the web at all. **Both now use `ui/CurrencyInput`.** It gained a bindable
+`touched`: an edit (and a loaded setting) opens the field touched, so the
+record's own code is never re-seeded from the org currency, and the credit-memo
+dialog resets it for each new memo, as its select did. A linked credit memo's
+currency stays a disabled one-option display, because it is the invoice's and
+asserting any other is a 409. The other create forms (invoice, expense,
+budget, recurring, contract, requisition, intake, entity) already took a plain
+text input, so nothing limited them to a list; `utils/currencyPickers.test.ts`
+fails on any `.svelte` that builds options from the shortlist or hardcodes a
+common code as an `<option value>`.
+
+**The rule is three ASCII letters, checked before uppercasing.**
+`normalize_iso_currency` checked `len == 3 and isalpha()`, which is true for
+`"ÄÖÜ"`, and the browser cannot format such a code (`Intl.NumberFormat`
+throws, so the figure renders bare). Uppercasing first is not safe either:
+`"uß".upper()` is the ASCII `"USS"` (and `"ﬀ"` is `"FF"`), in Python and in
+JavaScript alike. So the rule strips, refuses non-ASCII, then uppercases and
+requires `[A-Z]{3}` in full. It lives in `app/utils/currency_code.py`
+(`normalize_iso_currency` raising, `iso_currency_or_none` not), and the
+frontend's `normalizeCurrencyCode` applies the same order; `CurrencyInput`
+uppercases only ASCII letters as typed, so a typed `ß` stays visibly invalid
+instead of becoming `SS`.
+
+**Every request schema's currency field shares it.** They checked four ways: a
+bare `max_length=3` (invoices, contracts, intake, budgets, catalogs,
+requisitions), `min_length=3, max_length=3` (entities, discount offers,
+recurring templates, pasted vendor statements), two copies of an `isalpha()`
+validator (`threshold_currency`), and the shared helper (expenses, credit
+memos). An API client could store `""`, `"us"`, `"usd"` or `"ÄÖÜ"`. They now
+use `app/schemas/currency.py`, whose four types differ only in what blank
+means: `CurrencyCode` (required), `OptionalCurrencyCode` (`None` = not sent,
+blank refused), `CurrencyCodeOrUnset` (blank = `None`, for the credit memo's
+"resolve it for me" and the policy's "use the reporting currency"), and
+`BlankableCurrencyCode`, the invoice PATCH only, where `""` is the legacy "no
+currency" value the credit-memo currency guard answers with a 409, not a 422.
+Defaults are unchanged (several create schemas still default `USD`; the pasted
+vendor statement's is tracked in `docs/followups.md`). The non-schema checks
+call the same rule: the statement uploads, the CSV `_parse_currency`, the
+organization `invoice_defaults.currency` PATCH (now stored uppercased),
+`models.procurement.po_currency_code`, the punch-out cart, and the extraction
+normaliser. **Rejected: validate against the full ISO 4217 list.** The
+backend has no maintained list to pin, a list rejects a code issued after it
+was cut, and the shape is what the formatters and grouping keys need.
+
 ## 382. The server says whether a run's bank-file panel applies; a run exported before a switch to processor mode keeps it (§362 follow-up, 2026-11-13)
 
 **The gap.** §362 keeps "Verify before upload" open in either mode, since it

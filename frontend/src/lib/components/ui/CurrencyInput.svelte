@@ -14,26 +14,40 @@
 	 * currency usually lands after the modal mounts, and seeding only once at
 	 * mount left a GBP organization's statement on the platform default.
 	 *
-	 * Sits inside the caller's `<label>`, which names it.
+	 * `touched` is bindable so a caller that reopens the field on a record
+	 * that already holds a currency (an edit) can say so: a touched field is
+	 * never re-seeded, and the caller can reset it for each new record. A
+	 * caller that remounts the field (a branch that swaps it out and back)
+	 * keeps the user's choice the same way.
+	 *
+	 * Sits inside the caller's `<label>`, which names it. `describedby` names
+	 * a hint of the caller's own; the error, when shown, is added after it.
 	 */
 	import { untrack } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import {
 		currencyCodeProblem,
 		currencySuggestions,
-		seededCurrency
+		seededCurrency,
+		upperAsciiLetters
 	} from '#lib/utils/currencyCode.ts';
 
 	let {
 		value = $bindable(''),
 		preferred = null,
+		touched = $bindable(false),
 		disabled = false,
+		describedby,
 		testid
 	}: {
 		value?: string;
 		/** The organization's currency (`orgCurrency.currency`), or `null` while unresolved. */
 		preferred?: string | null;
+		/** True once the field holds a user's (or a loaded record's) choice; never re-seeded then. */
+		touched?: boolean;
 		disabled?: boolean;
+		/** Id of a caller-owned hint describing the field. */
+		describedby?: string;
 		testid?: string;
 	} = $props();
 
@@ -41,7 +55,6 @@
 	const listId = `${uid}-list`;
 	const errorId = `${uid}-error`;
 
-	let touched = $state(false);
 	let input = $state<HTMLInputElement | null>(null);
 
 	// Depends on `preferred` and `touched` only: re-running on its own write
@@ -67,6 +80,9 @@
 	// Shown once the user has typed: a field seeded with a valid code never
 	// starts out red, and native validation still blocks a submit regardless.
 	const showError = $derived(touched && problem !== null);
+	const describedBy = $derived(
+		[describedby, showError ? errorId : null].filter(Boolean).join(' ') || undefined
+	);
 
 	$effect(() => {
 		input?.setCustomValidity(message);
@@ -75,7 +91,7 @@
 	function onInput(e: Event) {
 		touched = true;
 		const el = e.currentTarget as HTMLInputElement;
-		const upper = el.value.toUpperCase();
+		const upper = upperAsciiLetters(el.value);
 		if (upper !== el.value) el.value = upper;
 		value = upper;
 	}
@@ -94,7 +110,7 @@
 	required
 	{disabled}
 	aria-invalid={showError ? 'true' : undefined}
-	aria-describedby={showError ? errorId : undefined}
+	aria-describedby={describedBy}
 	data-testid={testid}
 />
 <datalist id={listId}>

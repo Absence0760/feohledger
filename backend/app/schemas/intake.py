@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.procurement import IntakeStatus, IntakeType
+from app.schemas.currency import CurrencyCode, OptionalCurrencyCode
 from app.schemas.money import OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
@@ -34,7 +35,7 @@ class IntakeRequestBase(BaseModel):
     description: str | None = None
     # Digits match `intake_requests.estimated_amount` Numeric(15, 2).
     estimated_amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str = Field(default="USD", max_length=3)
+    currency: CurrencyCode = "USD"
     vendor_name: str | None = Field(default=None, max_length=255)
     vendor_id: str | None = None
     # Flexible intake questionnaire answers (advisory; no PII).
@@ -63,7 +64,7 @@ class IntakeRequestUpdate(BaseModel):
     description: str | None = None
     # Digits match `intake_requests.estimated_amount` Numeric(15, 2).
     estimated_amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str | None = Field(default=None, max_length=3)
+    currency: OptionalCurrencyCode = None
     vendor_name: str | None = Field(default=None, max_length=255)
     vendor_id: str | None = None
     form_data: dict | None = None

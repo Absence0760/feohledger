@@ -60,6 +60,37 @@ async def test_wrong_length_currency_rejected(realdb):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("currency", ["ÄÖÜ", "uß", "ＵＳＤ"])
+async def test_non_ascii_currency_rejected(realdb, currency):
+    """Three letters that are not three ASCII letters must 422 (decisions §381).
+
+    `"uß"` matters on its own: `str.upper()` turns it into the ASCII `"USS"`,
+    so an uppercase-then-check rule would have accepted it."""
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch(
+            "/api/organization",
+            json={"settings": {"invoice_defaults": {"currency": currency}}},
+        )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_lowercase_currency_is_stored_uppercased(realdb):
+    """`"pln"` is a code, stored as `"PLN"`: a lowercase default used to be
+    stored as typed and stamped onto every new invoice that way."""
+    try:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.patch(
+                "/api/organization",
+                json={"settings": {"invoice_defaults": {"currency": " pln "}}},
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["settings"]["invoice_defaults"]["currency"] == "PLN"
+    finally:
+        await _reset(realdb, "a")
+
+
+@pytest.mark.asyncio
 async def test_valid_currency_accepted(realdb):
     """A well-formed 3-letter currency code saves and round-trips."""
     try:

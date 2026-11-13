@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.procurement import CatalogType
+from app.schemas.currency import CurrencyCode, OptionalCurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@ class CatalogItemBase(BaseModel):
     # Digits match `catalog_items.unit_price` Numeric(15, 2). A catalog list
     # price is never negative.
     unit_price: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str = Field(default="USD", max_length=3)
+    currency: CurrencyCode = "USD"
     uom: str | None = Field(default=None, max_length=20)
     vendor_id: str | None = None
     gl_account_id: str | None = None
@@ -52,7 +53,7 @@ class CatalogItemUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     description: str | None = None
     unit_price: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str | None = Field(default=None, max_length=3)
+    currency: OptionalCurrencyCode = None
     uom: str | None = Field(default=None, max_length=20)
     vendor_id: str | None = None
     gl_account_id: str | None = None
