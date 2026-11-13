@@ -446,6 +446,16 @@ What the merge does, in one tenant transaction (`app/services/vendor_merge.py`):
   rebuilt from future reviewer corrections — no money, no history. The dropped
   count surfaces on the result (and the audit row) as
   `vendor_extraction_priors:dropped`.
+- **Moves the duplicates' ERP links** — the row's `erp_vendor_id` /
+  `erp_link_realm` and every `vendor_erp_links` row — to the canonical vendor,
+  company (realm) by company, wherever the canonical has none in that company:
+  a duplicate's row link takes the canonical's row if that is empty, and every
+  other moved link is filed as the canonical's kept link. The same id already
+  held there is simply released. The duplicate ends with no link at all, so its
+  invoices still post once they are the canonical's and no sync can restore a
+  link onto it. Two **different** ids in one company refuse the merge (below).
+  See [erp-integration.md](erp-integration.md) § A vendor keeps its link for
+  every company it was linked in; decisions §373.
 - **Soft-retires each duplicate** (`status="inactive"`) — never hard-deleted, so
   the historical vendor row + its audit trail survive. (A retired duplicate is
   also already excluded from future consolidation scans, which only see
@@ -455,22 +465,29 @@ What the merge does, in one tenant transaction (`app/services/vendor_merge.py`):
 - **Idempotent** — a re-run with the FKs already moved and the duplicates already
   inactive reassigns zero rows and re-deactivates nothing (200, empty counts).
 - **Audited** — a PII-free `vendor.merged` audit row on the canonical vendor
-  (canonical id + duplicate ids + per-table reassigned counts; no `tax_id` /
-  bank / address).
+  (canonical id + duplicate ids + per-table reassigned counts + `erp_links`, one
+  `{realm, erp_vendor_id, from_vendor_id, placed}` per link a duplicate gave
+  up, `placed` = `row` / `kept` / `released`; no `tax_id` / bank / address).
 - **Refusals** — self-merge (canonical in the duplicate set) and an empty
   duplicate set → 422; an unknown vendor → 404; a **cross-entity** merge
   (canonical and a duplicate in different entities) → 422 (folding across
   entities would silently re-home another subsidiary's spend); a
   **payments-blocked duplicate into an unblocked canonical** → 422 (it would
   make the held invoices payable — a sanctions-block bypass; the reverse
-  direction is allowed). Each is a coded refusal (`{code, message, params}`,
+  direction is allowed); an **ERP company where the canonical and a duplicate,
+  or two duplicates, are linked to different supplier records** → 409
+  `vendor_merge_erp_link_conflict`, with nothing moved (the merge would have to
+  pick which ERP supplier the merged vendor posts to; leave that duplicate out).
+  Each is a coded refusal (`{code, message, params}`,
   `api/refusals.py::coded_refusal`) so the web app states it in the reader's
   language: `vendor_merge_self`, `vendor_merge_no_duplicates`,
   `vendor_merge_canonical_not_found`, `vendor_merge_duplicate_not_found`,
-  `vendor_merge_cross_entity`, `vendor_merge_blocked_duplicate`, plus the
-  endpoint's own `vendor_merge_invalid_id` for an id that is not a UUID.
-  Status codes and the English `message` are unchanged, and `params` is
-  always empty — no vendor name, tax id or bank detail rides on a refusal.
+  `vendor_merge_cross_entity`, `vendor_merge_blocked_duplicate`,
+  `vendor_merge_erp_link_conflict`, plus the endpoint's own
+  `vendor_merge_invalid_id` for an id that is not a UUID. `params` is empty
+  except on the ERP-link conflict, whose `realms` lists the ERP companies in
+  conflict (sorted, `null` for an unnamed one) — no vendor name, tax id or bank
+  detail rides on a refusal.
 
 ### Frontend UI
 
@@ -484,7 +501,7 @@ clustering `reasons` as pills). A per-cluster **Merge into canonical** button us
 a two-step arm → **Confirm merge** (the fold is soft-retire-irreversible), calls
 `/consolidation/merge` for that cluster's duplicate ids, drops the merged cluster
 from the list, surfaces the backend's 4xx refusal (self-merge / cross-entity /
-blocked duplicate / unknown) in the failure toast — in the reader's language,
+blocked duplicate / ERP-link conflict / unknown) in the failure toast — in the reader's language,
 through `#lib/api/codedRefusals.ts` — and refreshes the vendor list. API client +
 types: `#lib/api/vendors.ts` (`getVendorConsolidationSuggestions` /
 `mergeVendorConsolidation`) + `#lib/types/vendor.ts`. e2e:

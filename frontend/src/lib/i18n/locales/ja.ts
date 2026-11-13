@@ -5041,6 +5041,7 @@ export const messages = {
 	'refusal.vendorMergeInvalidId': "これらの取引先のいずれかを特定できませんでした。このダイアログを閉じて、もう一度開いてください。",
 	'refusal.vendorMergeCrossEntity': "これらの取引先は異なるエンティティに属しています。統合によって、ある子会社の支出を別の子会社に移すことはできません。",
 	'refusal.vendorMergeBlockedDuplicate': "重複の一方は支払いがブロックされていますが、正規の取引先はブロックされていないため、統合すると保留中の請求書が支払可能になってしまいます。先にスクリーニング審査でブロックを解決するか、この取引先を統合から除外してください。",
+	'refusal.vendorMergeErpLinkConflict': "正規の取引先と重複の一方が、同じERP会社内の異なる仕入先レコードに紐付いているため、統合後の取引先をどちらに計上するかを統合で選ぶことはできません。この重複を統合から除外してください。",
 	'refusal.workspaceCloseConfirmationMismatch': "閉鎖することを確認するため、このワークスペースのアドレスを表示どおり正確に入力してください。",
 	'refusal.workspaceCloseRefused': "このワークスペースには保管が必要な記録または他のユーザーのアカウントがあるため、ここでは閉鎖できません。閉鎖するにはサポートにお問い合わせください。",
 	'refusal.workspaceCloseActorNotAdmin': "このワークスペースを閉鎖できるのは、有効な管理者だけです。",

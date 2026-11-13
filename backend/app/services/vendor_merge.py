@@ -20,7 +20,13 @@ What a merge does, in one tenant transaction:
      (the table is uniquely keyed on ``(vendor_id, field_name)``, so both a
      canonical/duplicate and a duplicate/duplicate clash would otherwise blow
      up the merge with an ``IntegrityError``). See ``_prior_precedence``.
-  4. Mark each merged duplicate ``status="inactive"`` (a soft retire — we never
+  4. Move each duplicate's ERP links — its row link and every link kept in
+     ``vendor_erp_links`` — to the canonical vendor, realm by realm, wherever
+     the canonical has none in that realm (``_plan_erp_links``,
+     docs/decisions.md §373). The duplicate is left holding none, so its
+     invoices still post once they are the canonical's, and no later sync can
+     restore a link onto a retired vendor.
+  5. Mark each merged duplicate ``status="inactive"`` (a soft retire — we never
      hard-delete a vendor, so the historical row + its audit trail survive).
 
 The operation is:
@@ -45,7 +51,11 @@ Refusals (raised as ``VendorMergeError`` → mapped to 4xx by the API layer):
   * a ``payments_blocked`` (sanctioned) duplicate merging into an unblocked
     canonical — would silently make its held invoices payable once
     reassigned. Merging a clean vendor into an already-blocked canonical is
-    fine (tightens, never bypasses, the block).
+    fine (tightens, never bypasses, the block),
+  * an ERP company in which the canonical and a duplicate (or two duplicates)
+    are linked to DIFFERENT supplier records — the merge would have to choose
+    which ERP supplier the merged vendor's bills post to, and it never guesses
+    (``VENDOR_MERGE_ERP_LINK_CONFLICT``, ``params.realms``).
 """
 
 from __future__ import annotations
@@ -73,7 +83,7 @@ from app.models.procurement import (
 )
 from app.models.recurring_invoice import RecurringInvoiceTemplate
 from app.models.sanctions_check import SanctionsCheck
-from app.models.vendor import Vendor
+from app.models.vendor import Vendor, VendorErpLink
 from app.models.vendor_change_request import VendorChangeRequest
 from app.models.vendor_priors import VendorExtractionPrior
 from app.models.vendor_statement_recon import VendorStatementReconciliation
@@ -86,6 +96,7 @@ __all__ = [
     "VENDOR_MERGE_CANONICAL_NOT_FOUND",
     "VENDOR_MERGE_CROSS_ENTITY",
     "VENDOR_MERGE_DUPLICATE_NOT_FOUND",
+    "VENDOR_MERGE_ERP_LINK_CONFLICT",
     "VENDOR_MERGE_INVALID_ID",
     "VENDOR_MERGE_NO_DUPLICATES",
     "VENDOR_MERGE_SELF",
@@ -102,6 +113,8 @@ __all__ = [
 #
 # ``VendorExtractionPrior`` is handled specially (unique ``(vendor_id,
 # field_name)``) and is therefore NOT in this plain-reassign list — see below.
+# So is ``VendorErpLink`` (unique ``(vendor_id, realm)``, and a realm the
+# canonical is already linked in must not gain a second link): ``_plan_erp_links``.
 VENDOR_FK_CHILDREN: tuple[type, ...] = (
     Invoice,
     PurchaseOrder,
@@ -124,15 +137,18 @@ VENDOR_FK_CHILDREN: tuple[type, ...] = (
 
 
 #: The stable code of each refusal, so a client states it in the reader's
-#: language (``frontend/src/lib/api/codedRefusals.ts``). None carries params:
-#: each code is exactly as specific as the English it replaces, and none names a
-#: vendor — which duplicate tripped the rule is already on the steward's screen.
+#: language (``frontend/src/lib/api/codedRefusals.ts``). Only the ERP-link
+#: conflict carries params (the ERP companies in conflict, which name no
+#: vendor); each code is exactly as specific as the English it replaces, and none
+#: names a vendor — which duplicate tripped the rule is already on the steward's
+#: screen.
 VENDOR_MERGE_SELF = "vendor_merge_self"
 VENDOR_MERGE_NO_DUPLICATES = "vendor_merge_no_duplicates"
 VENDOR_MERGE_CANONICAL_NOT_FOUND = "vendor_merge_canonical_not_found"
 VENDOR_MERGE_DUPLICATE_NOT_FOUND = "vendor_merge_duplicate_not_found"
 VENDOR_MERGE_CROSS_ENTITY = "vendor_merge_cross_entity"
 VENDOR_MERGE_BLOCKED_DUPLICATE = "vendor_merge_blocked_duplicate"
+VENDOR_MERGE_ERP_LINK_CONFLICT = "vendor_merge_erp_link_conflict"
 #: Raised by the endpoint, not here: a request id that is not a UUID at all.
 VENDOR_MERGE_INVALID_ID = "vendor_merge_invalid_id"
 
@@ -143,15 +159,18 @@ class VendorMergeError(Exception):
     with ``status_code`` and :attr:`detail`, the coded refusal carrying the
     PII-free English ``message``."""
 
-    def __init__(self, code: str, message: str, *, status_code: int = 422):
+    def __init__(
+        self, code: str, message: str, *, status_code: int = 422, params: dict | None = None
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.params = params or {}
 
     @property
     def detail(self) -> dict:
-        return coded_refusal(self.code, self.message)
+        return coded_refusal(self.code, self.message, **self.params)
 
 
 @dataclass
@@ -163,6 +182,12 @@ class VendorMergeResult:
     # Duplicate ids that were flipped active → inactive by THIS call (a re-run
     # with them already inactive returns []).
     deactivated_vendor_ids: list[uuid.UUID] = field(default_factory=list)
+    # Each ERP link a duplicate gave up, one dict per (duplicate, realm):
+    # ``realm`` (None for a link that names no company), ``erp_vendor_id``,
+    # ``from_vendor_id`` and ``placed`` — ``row`` / ``kept`` where it moved onto
+    # the canonical, ``released`` where the canonical already held that same id
+    # in that realm. The ``vendor.merged`` audit row carries it verbatim.
+    erp_links: list[dict] = field(default_factory=list)
 
     @property
     def total_reassigned(self) -> int:
@@ -193,6 +218,140 @@ def _prior_precedence(row) -> tuple:
     )
 
 
+@dataclass
+class _ErpLinkPlan:
+    """What ``_plan_erp_links`` decided: the link (if any) that lands on the
+    canonical's row, the links filed for it in ``vendor_erp_links``, and the
+    per-link record the audit row carries (``VendorMergeResult.erp_links``)."""
+
+    row: tuple[str | None, str, Vendor] | None = None
+    kept: list[tuple[str, str]] = field(default_factory=list)
+    records: list[dict] = field(default_factory=list)
+
+
+def _plan_erp_links(
+    canonical: Vendor, duplicates: list[Vendor], kept: list[VendorErpLink]
+) -> _ErpLinkPlan:
+    """Decide, realm by realm, where each duplicate's ERP links go
+    (docs/decisions.md §373). Pure: reads the locked rows, writes nothing.
+
+    A vendor's links are its row link (``erp_vendor_id`` under
+    ``erp_link_realm``, which may be NULL) plus each kept link (always named,
+    never the row's own realm — §356). For every duplicate link, in request
+    order and realm order:
+
+    * the canonical (or an earlier duplicate, once moved) already holds the
+      SAME id in that realm → ``released``: the duplicate drops it, nothing moves;
+    * it holds a DIFFERENT id there → conflict. Two ERP supplier records claim
+      the one merged vendor, and which one its bills post to is not ours to
+      choose;
+    * a NULL-realm link names no company, so it may be the same company as any
+      named link: it conflicts with any link of a different id on the other
+      side, in any realm (reported as realm ``None``);
+    * otherwise the link moves to the canonical.
+
+    Any conflict refuses the whole merge — before a single row is written —
+    with every conflicting realm in ``params.realms`` (sorted, ``None`` last).
+
+    Placement keeps §356's shape: a link that was a duplicate's ROW link takes
+    the canonical's row when the canonical's row is empty (a NULL-realm link
+    can only live on a row, and is the only kind that must); every other moved
+    link is filed as kept. Each realm ends with at most one link on the
+    canonical, and the realm on its row is never also kept. The count of
+    vendors holding a given id in a realm never rises: the id leaves the
+    duplicate as it reaches the canonical.
+    """
+    kept_by_vendor: dict[uuid.UUID, list[VendorErpLink]] = {}
+    for link in kept:
+        kept_by_vendor.setdefault(link.vendor_id, []).append(link)
+
+    def links_of(vendor: Vendor) -> list[tuple[str | None, str, bool]]:
+        own = [(vendor.erp_link_realm, vendor.erp_vendor_id, True)] if vendor.erp_vendor_id else []
+        filed = sorted(kept_by_vendor.get(vendor.id, []), key=lambda k: k.realm)
+        return own + [(k.realm, k.erp_vendor_id, False) for k in filed]
+
+    held: dict[str | None, str] = {realm: erp_id for realm, erp_id, _ in links_of(canonical)}
+    row_free = not canonical.erp_vendor_id
+    plan = _ErpLinkPlan()
+    conflicts: set[str | None] = set()
+    for dup in duplicates:
+        for realm, erp_id, on_row in links_of(dup):
+            record = {"realm": realm, "erp_vendor_id": erp_id, "from_vendor_id": str(dup.id)}
+            if realm in held:
+                if held[realm] != erp_id:
+                    conflicts.add(realm)
+                    continue
+                plan.records.append({**record, "placed": "released"})
+                continue
+            unnamed = held.get(None)
+            if realm is None:
+                if any(other != erp_id for other in held.values()):
+                    conflicts.add(None)
+                    continue
+                if held:
+                    # Every link the canonical holds is this same id, under a
+                    # named company: the unnamed copy adds nothing.
+                    plan.records.append({**record, "placed": "released"})
+                    continue
+            elif unnamed is not None and unnamed != erp_id:
+                conflicts.add(None)
+                continue
+            held[realm] = erp_id
+            # A NULL-realm link is always a row link, and reaches here only when
+            # nothing was held — so the canonical's row is still free for it.
+            if realm is None or (on_row and row_free):
+                plan.row = (realm, erp_id, dup)
+                row_free = False
+                plan.records.append({**record, "placed": "row"})
+            else:
+                plan.kept.append((realm, erp_id))
+                plan.records.append({**record, "placed": "kept"})
+    if conflicts:
+        realms = sorted(conflicts, key=lambda r: (r is None, r or ""))
+        raise VendorMergeError(
+            VENDOR_MERGE_ERP_LINK_CONFLICT,
+            "The canonical vendor and a duplicate are linked to different supplier "
+            "records in the same ERP company, and a merge can't choose which one the "
+            "merged vendor posts to. Leave that duplicate out of this merge.",
+            status_code=409,
+            params={"realms": realms},
+        )
+    return plan
+
+
+async def _apply_erp_links(
+    db: AsyncSession,
+    canonical: Vendor,
+    duplicates: list[Vendor],
+    plan: _ErpLinkPlan,
+) -> None:
+    """Write ``plan``: strip every duplicate of its ERP links, then give the
+    canonical the ones that moved. The duplicates' kept rows are deleted rather
+    than re-pointed, so the unique ``(vendor_id, realm)`` constraint is never
+    crossed mid-statement, and the canonical's new kept rows are realms it held
+    none in (``_plan_erp_links``)."""
+    dup_ids = [d.id for d in duplicates]
+    await db.execute(sa_delete(VendorErpLink).where(VendorErpLink.vendor_id.in_(dup_ids)))
+    for dup in duplicates:
+        dup.erp_vendor_id = None
+        dup.erp_link_realm = None
+    await db.flush()
+    if plan.row is not None:
+        realm, erp_id, source = plan.row
+        canonical.erp_vendor_id = erp_id
+        canonical.erp_link_realm = realm
+        canonical.erp_synced_at = canonical.erp_synced_at or source.erp_synced_at
+    for realm, erp_id in plan.kept:
+        db.add(
+            VendorErpLink(
+                organization_id=canonical.organization_id,
+                vendor_id=canonical.id,
+                realm=realm,
+                erp_vendor_id=erp_id,
+            )
+        )
+
+
 async def merge_vendors(
     db: AsyncSession,
     *,
@@ -201,8 +360,9 @@ async def merge_vendors(
 ) -> VendorMergeResult:
     """Fold ``duplicate_vendor_ids`` into ``canonical_vendor_id``.
 
-    Reassigns every child ``vendor_id`` FK from each duplicate → canonical, then
-    soft-retires each duplicate (``status="inactive"``). Does NOT commit — the
+    Reassigns every child ``vendor_id`` FK from each duplicate → canonical,
+    moves the duplicates' ERP links (``_plan_erp_links``), then soft-retires
+    each duplicate (``status="inactive"``). Does NOT commit — the
     caller owns the transaction (so the audit row commits atomically with the
     reassignment). Row-locks all involved vendors first.
 
@@ -294,9 +454,28 @@ async def merge_vendors(
                     status_code=422,
                 )
 
+    # ERP links: planned in full before anything is written, so a conflicting
+    # realm refuses the merge with nothing moved. The kept links are locked with
+    # the vendors: a concurrent sync files and restores them.
+    kept_links = (
+        (
+            await db.execute(
+                select(VendorErpLink)
+                .where(VendorErpLink.vendor_id.in_(all_ids))
+                .order_by(VendorErpLink.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    dup_vendors = [by_id[d] for d in duplicates]
+    erp_plan = _plan_erp_links(canonical, dup_vendors, list(kept_links))
+
     result = VendorMergeResult(
         canonical_vendor_id=canonical_vendor_id,
         duplicate_vendor_ids=list(duplicates),
+        erp_links=erp_plan.records,
     )
 
     # 1. Reassign every plain vendor_id FK child table duplicate → canonical.
@@ -362,7 +541,11 @@ async def merge_vendors(
     if prior_res.rowcount:
         result.reassigned[VendorExtractionPrior.__tablename__] = prior_res.rowcount
 
-    # 3. Soft-retire each duplicate (never hard-delete — preserve history). Only
+    # 3. ERP links — the duplicate's row link and kept links, realm by realm.
+    if erp_plan.records:
+        await _apply_erp_links(db, canonical, dup_vendors, erp_plan)
+
+    # 4. Soft-retire each duplicate (never hard-delete — preserve history). Only
     #    flip the ones not already inactive, so a re-run reports an empty
     #    deactivated list (idempotent).
     for d in duplicates:

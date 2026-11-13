@@ -5314,6 +5314,7 @@ export const en = {
 	'refusal.vendorMergeInvalidId': "One of these vendors couldn't be identified. Close this dialog and open it again.",
 	'refusal.vendorMergeCrossEntity': "These vendors belong to different entities, and a merge can't move one subsidiary's spend to another.",
 	'refusal.vendorMergeBlockedDuplicate': "A duplicate has its payments blocked and the canonical vendor doesn't, so merging would release its held invoices. Resolve the block in its screening review first, or leave it out of this merge.",
+	'refusal.vendorMergeErpLinkConflict': "The canonical vendor and a duplicate are linked to different supplier records in the same ERP company, and a merge can't choose which one the merged vendor posts to. Leave that duplicate out of this merge.",
 	'refusal.workspaceCloseConfirmationMismatch': "Type this workspace's address exactly as shown to confirm that it should be closed.",
 	'refusal.workspaceCloseRefused': "This workspace can't be closed here because it holds records that must be kept or other people's accounts. Contact support to close it.",
 	'refusal.workspaceCloseActorNotAdmin': "Only an active administrator of this workspace can close it.",

@@ -5132,6 +5132,7 @@ export const messages = {
 	'refusal.vendorMergeInvalidId': "Einer dieser Lieferanten konnte nicht erkannt werden. Schließen Sie diesen Dialog und öffnen Sie ihn erneut.",
 	'refusal.vendorMergeCrossEntity': "Diese Lieferanten gehören zu unterschiedlichen Einheiten, und eine Zusammenführung kann keine Ausgaben von einer Tochtergesellschaft auf eine andere verschieben.",
 	'refusal.vendorMergeBlockedDuplicate': "Für ein Duplikat sind Zahlungen gesperrt, für den maßgeblichen Lieferanten nicht. Eine Zusammenführung würde dessen zurückgehaltene Rechnungen freigeben. Heben Sie die Sperre zuerst in der Screening-Prüfung auf oder lassen Sie das Duplikat bei dieser Zusammenführung weg.",
+	'refusal.vendorMergeErpLinkConflict': "Der maßgebliche Lieferant und ein Duplikat sind in derselben ERP-Firma mit unterschiedlichen Lieferantendatensätzen verknüpft, und eine Zusammenführung kann nicht entscheiden, an welchen der zusammengeführte Lieferant bucht. Lassen Sie dieses Duplikat bei dieser Zusammenführung weg.",
 	'refusal.workspaceCloseConfirmationMismatch': "Geben Sie die Adresse dieses Workspace genau wie angezeigt ein, um zu bestätigen, dass er geschlossen werden soll.",
 	'refusal.workspaceCloseRefused': "Dieser Workspace kann hier nicht geschlossen werden, weil er Daten enthält, die aufbewahrt werden müssen, oder Konten anderer Personen. Wenden Sie sich an den Support, um ihn zu schließen.",
 	'refusal.workspaceCloseActorNotAdmin': "Nur ein aktiver Administrator dieses Workspace kann ihn schließen.",

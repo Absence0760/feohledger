@@ -17041,3 +17041,68 @@ or pre-production Redis has been past the TTL for over five weeks. The check,
 its only helper `webhook_security.event_claim_exists` (no other caller), and
 their tests are deleted. `test_an_unscoped_message_id_claim_no_longer_blocks_any_tenant`
 pins the absence: a bare Message-ID claim no longer drops any tenant's invoice.
+
+## 373. A vendor merge moves the duplicates' ERP links, company by company, and refuses two different ids in one company (§356 follow-up, 2026-11-13)
+
+**The gap.** §356 left the merge alone: `services/vendor_merge` moved every
+`vendor_id` FK but no ERP link, neither the row's `erp_vendor_id` /
+`erp_link_realm` nor a kept `vendor_erp_links` row. Where only the duplicate
+was linked, the merged invoices were the canonical's and the push resolved the
+canonical, so they were refused `vendor_not_linked` while the id sat on a
+retired vendor. And the next sync under a kept realm restored the kept link
+onto that retired duplicate, keeping the ERP supplier pointed at a vendor
+nothing pays.
+
+**The rule** (`_plan_erp_links`, then `_apply_erp_links`). A vendor's links are
+its row link plus its kept links, one per realm. The merge plans, before any
+write, where each duplicate link goes, in request order:
+
+- the canonical (or an earlier duplicate's moved link) holds the **same** id in
+  that realm → released; the duplicate just drops it;
+- it holds a **different** id there → conflict;
+- a NULL-realm link names no company, so it may be the same company as any
+  named link: it conflicts with any differing id on the other side, in any
+  realm, and is reported as realm `null`;
+- otherwise the link moves. A duplicate's row link takes the canonical's row if
+  that row is empty (a NULL-realm link can only live on a row); every other
+  moved link is filed as the canonical's kept link.
+
+Then every duplicate's kept rows are deleted and its row link cleared, and the
+canonical gains the moved links. The duplicate ends with none, so no sync can
+restore one onto it. §356's shape holds: one link per `(vendor, realm)`, and
+the row's realm is never also kept. A merge never raises the number of vendors
+holding an id in a realm: the id leaves the duplicate as it reaches the
+canonical, and the unique `(vendor_id, realm)` constraint is never crossed
+mid-statement because the duplicate rows are deleted rather than re-pointed.
+The `vendor.merged` audit row carries `erp_links`, one
+`{realm, erp_vendor_id, from_vendor_id, placed}` per link a duplicate gave up.
+The kept rows are locked `FOR UPDATE` with the vendors, since a concurrent sync
+files and restores them. Bank details, sanctions state and the SoD sets are not
+touched; only the link columns and the kept rows move.
+
+**A conflict refuses the whole merge** (409 `vendor_merge_erp_link_conflict`,
+`params.realms` sorted, `null` last), with nothing moved. **Rejected: leave both
+links and flag the realm.** The merged invoices are the canonical's, so they
+would post to the canonical's ERP supplier while the duplicate's record (the one
+those bills were raised against) stays on a retired vendor and can be restored
+onto it. Which ERP supplier the merged vendor's bills post to would be chosen
+silently, by which vendor the steward picked as canonical, and a flag nobody
+reads before the next push does not stop that. Two ERP records for one payee
+is a fact about the ERP the steward has to settle, and refusing is the only
+option that states it before money is booked. **Rejected: pick a winner** (the
+canonical's, or the most recently synced). That is the same silent choice with
+a rule attached. **Rejected: refuse only on the realm currently connected.**
+Every kept realm is a company the tenant may return to, and §356's point is
+that those links are live the moment it does.
+
+The refusal has one way through today: leave that duplicate out. No endpoint
+lets a person clear a vendor's ERP link, and merging the suppliers in the ERP
+does not clear one either (a same-company link is never re-judged). That gap
+is tracked in `docs/followups.md` with its durable fix (an audited unlink
+action), rather than loosening the merge to work around it.
+
+**Not done here: GL accounts' single link** (the adjacent §356 follow-up). The
+durable fix is a kept-link table for `gl_accounts` mirroring `vendor_erp_links`,
+which needs a migration; repurposing an existing column (such as
+`erp_link_candidates` JSONB) would be the keyed-JSON shape §356 rejected for
+vendors, with no uniqueness per realm. It stays in `docs/followups.md`.

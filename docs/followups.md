@@ -1355,16 +1355,19 @@ scope (§260) — do not fold them into any of these.
       `vendor_erp_links` does, and restore it in rule 0 before re-judging.
       **Trigger:** the first tenant that switches ERP company and back with
       confirmed links, or the next change to rule 0 in `services/gl_account_sync`.
-- [ ] **(c) A vendor merge leaves the ERP links on the retired duplicate.**
-      `services/vendor_merge` moves no `erp_vendor_id`, and since decisions
-      §356 no kept `vendor_erp_links` row either. When the duplicate held the
-      ERP link, the canonical vendor's invoices are refused `vendor_not_linked`
-      while the id sits on the inactive duplicate, and a later sync under a
-      kept realm restores that link onto the duplicate too. **Durable fix:**
-      the merge moves each realm's link (row and kept) to the canonical vendor
-      where the canonical has none in that realm, and reports any realm where
-      both hold different ids instead of choosing one. **Trigger:** the next
-      change to `vendor_merge`, or a merged vendor refused `vendor_not_linked`.
+- [ ] **(c) No one can clear a vendor's ERP link, so an ERP-link merge
+      conflict can only be worked around.** A merge refuses
+      `vendor_merge_erp_link_conflict` where the canonical and a duplicate hold
+      different ids in one ERP company (decisions §373). The steward's only way
+      forward is to leave that duplicate out: no endpoint unlinks a vendor's row
+      link or deletes a kept `vendor_erp_links` row, and merging the two
+      suppliers in the ERP does not clear either, because a same-company link is
+      never re-judged by a sync. **Durable fix:** a `vendor.manage`-gated,
+      audited "unlink from this ERP company" action on the vendor (row link or
+      the kept link for one realm), with the push's `vendor_not_linked` as the
+      visible consequence, so the steward can drop the stale record's link and
+      re-run the merge. **Trigger:** the first merge refused with this code, or
+      the next change to vendor ERP-link editing.
 - [ ] **(c) A bill paid in any ERP but QuickBooks never reaches FeohLedger.**
       Status sync-back (§295) covers adapters with `supports_status_sync`,
       which today means QuickBooks only. For every other ERP a push still closes

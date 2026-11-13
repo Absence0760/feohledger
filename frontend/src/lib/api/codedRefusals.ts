@@ -28,7 +28,8 @@
  *    and every self-service signup refusal (the workspace address, the
  *    email and name checks, the captcha, the verification link), the
  *    shared rate limiter's 429 on every surface it guards, and every vendor
- *    merge refusal (self-merge, cross-entity, a payments-blocked duplicate);
+ *    merge refusal (self-merge, cross-entity, a payments-blocked duplicate,
+ *    an ERP company where both are linked to different supplier records);
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -680,8 +681,8 @@ const BUILDERS: Record<string, Builder> = {
 	// Any 429 from the shared limiter (`services/rate_limit.py`).
 	[RATE_LIMITED]: rateLimited,
 	// A refused vendor merge (`services/vendor_merge.py`; the malformed-id 422
-	// is raised by its endpoint, `api/enrichment.py`). No params — the
-	// sentence never names a vendor, its tax id or its bank.
+	// is raised by its endpoint, `api/enrichment.py`). The sentence never names
+	// a vendor, its tax id or its bank.
 	vendor_merge_self: fixed('refusal.vendorMergeSelf'),
 	vendor_merge_no_duplicates: fixed('refusal.vendorMergeNoDuplicates'),
 	vendor_merge_canonical_not_found: fixed('refusal.vendorMergeCanonicalNotFound'),
@@ -689,6 +690,9 @@ const BUILDERS: Record<string, Builder> = {
 	vendor_merge_invalid_id: fixed('refusal.vendorMergeInvalidId'),
 	vendor_merge_cross_entity: fixed('refusal.vendorMergeCrossEntity'),
 	vendor_merge_blocked_duplicate: fixed('refusal.vendorMergeBlockedDuplicate'),
+	// Its `params.realms` names the ERP companies in conflict, for the API
+	// reader; the sentence does not need them (decisions §373).
+	vendor_merge_erp_link_conflict: fixed('refusal.vendorMergeErpLinkConflict'),
 	// Closing a workspace (`api/organization_close.py`, decisions §306). The
 	// refusal's blockers are listed by the page itself; the toast is the
 	// fixed sentence, and a blocker list this build cannot read falls back.
