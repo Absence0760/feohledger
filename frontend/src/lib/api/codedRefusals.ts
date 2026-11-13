@@ -328,6 +328,16 @@ const BUILDERS: Record<string, Builder> = {
 	invoice_entry_window_closed: fixed('refusal.invoiceEntryWindowClosed'),
 	invoice_not_erp_sendable: fixed('refusal.invoiceNotErpSendable'),
 	invoice_not_erp_retryable: fixed('refusal.invoiceNotErpRetryable'),
+	// `api/workflow.close_refusals` — `/complete` closing to `done`, and a
+	// `POST /bulk/status → done` row's skip, refused while a live payment or
+	// virtual card holds the invoice (decisions §357). `params.claim` names
+	// the rail; an unknown one falls back to the server's sentence.
+	payment_blocks_completion: (params, t) => {
+		const claim = str(params, 'claim');
+		if (claim === 'payment') return t('refusal.paymentBlocksCompletion');
+		if (claim === 'virtual_card') return t('refusal.cardBlocksCompletion');
+		return null;
+	},
 	// `services/payment_controls.py` — the run dialog's `actions` verdict
 	// Maker-checker names the step it refuses in `params.step` for the two
 	// that are not approve / execute (`payment_controls._segregation_for`).

@@ -2657,6 +2657,17 @@ def _skip_reason(exc: HTTPException, fallback: str) -> str:
     return detail_text(exc.detail) or fallback
 
 
+def _coded_skip(invoice_id: uuid.UUID, refusal: dict) -> BulkStatusSkip:
+    """A bulk-status skip from a coded refusal (`api/refusals.coded_refusal`):
+    its English as ``reason``, its code and params for the browser to state."""
+    return BulkStatusSkip(
+        id=str(invoice_id),
+        reason=refusal["message"],
+        code=refusal["code"],
+        params=refusal["params"],
+    )
+
+
 # Targets a human may legitimately drive in bulk. Each is routed below through
 # its owning service where one exists (`approved` / `rejected` / a resubmit).
 BULK_STATUS_TARGETS: frozenset[DBInvoiceStatus] = frozenset(
@@ -2671,7 +2682,7 @@ BULK_STATUS_TARGETS: frozenset[DBInvoiceStatus] = frozenset(
 )
 
 
-@router.post("/bulk/status", response_model=BulkStatusResponse)
+@router.post("/bulk/status", response_model=BulkStatusResponse, response_model_exclude_none=True)
 async def bulk_status_change(
     body: BulkStatusRequest,
     db: AsyncSession = Depends(get_tenant_db),
@@ -2763,6 +2774,16 @@ async def bulk_status_change(
         from app.services.approval_chain import receipt_recorders_by_invoice
 
         receivers = await receipt_recorders_by_invoice(db, invoices)
+    # Closing by hand asks the rule `/complete` asks (`api/workflow.close_refusals`,
+    # decisions §357): only from `new` / `approved`, and never while a live
+    # payment or card holds the invoice — a staged or exported run, or a minted
+    # card, leaves it `approved`, and `done` would take it off the payable set
+    # with our rail still paying it. Read for the whole locked batch at once.
+    close_refused: dict[uuid.UUID, dict] = {}
+    if target == DBInvoiceStatus.done:
+        from app.api.workflow import close_refusals
+
+        close_refused = await close_refusals(db, invoices)
     for inv in invoices:
         # A clerk's batch moves only invoices still in entry: from `new` or
         # `rejected`, never approved before (same skip-and-report contract).
@@ -2776,6 +2797,9 @@ async def bulk_status_change(
                     ),
                 )
             )
+            continue
+        if inv.id in close_refused:
+            skipped.append(_coded_skip(inv.id, close_refused[inv.id]))
             continue
         if inv.status in IMMUTABLE_STATUSES:
             skipped.append(

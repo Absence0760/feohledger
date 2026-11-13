@@ -25,6 +25,7 @@
 	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
+	import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -772,7 +773,10 @@
 				status: bulkStatusValue,
 				...(bulkNeedsReason ? { reason: bulkRejectReason.trim() } : {}),
 				...(bulkStatusValue === 'approved' ? { expected_updated_at: selectedVersions() } : {}),
-			})) as { updated: number; skipped: { id: string; reason: string }[] };
+			})) as {
+				updated: number;
+				skipped: { id: string; reason: string; code?: string | null; params?: Record<string, unknown> }[];
+			};
 			await invoiceStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
 			await invoiceStore.fetchCounts(buildParams());
 			selected = new Set();
@@ -786,7 +790,11 @@
 			// non-immutable skip.
 			let msg: string;
 			if (res.skipped?.length) {
-				const uniqueReasons = [...new Set(res.skipped.map((s) => s.reason))];
+				// A coded skip (`BulkStatusSkip.code`) is stated in the reader's
+				// language; any other keeps the server's sentence.
+				const uniqueReasons = [
+					...new Set(res.skipped.map((s) => localizeApiDetail(s, m) ?? s.reason))
+				];
 				const reasonText =
 					uniqueReasons.length === 1
 						? uniqueReasons[0]

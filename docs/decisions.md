@@ -16313,3 +16313,48 @@ migration across every tenant for a label. Also rejected: listing each
 shortened vendor name in the toast, since each one is up to 255 characters; the
 vendor line counts them and the response carries the names.
 
+## 357. Closing an invoice by hand refuses a status it does not close from and a live claim, at both doors (§309 / §347 follow-up, 2026-11-12)
+
+**The gap.** §347 narrowed `POST /{id}/complete` to `new` / `approved` but left
+`POST /bulk/status → done` with no gate of its own, and neither door asked the
+rails. A staged run books a live `pending` payment and leaves its invoice
+`approved`; an exported NACHA run and a minted virtual card do the same. Closing
+that invoice to `done` took it off the payable set while our rail still paid it,
+and from `done` (terminal) no void puts the claim back on the queue — the
+invoice's state and its money stop agreeing. (`posted_in_erp` / `sent_to_erp` /
+`paid` rows were already skipped by bulk's `IMMUTABLE_STATUSES` check, so the
+follow-up's `posted_in_erp` case was closed in practice; it is now refused by
+the shared rule with `/complete`'s code rather than by a side effect of the
+edit lock.)
+
+**The rule.** One predicate, `api/workflow.close_refusals(db, invoices)`, beside
+`complete_status_refusal` which it calls first, then a live claim read by
+`services/erp_export_gate.live_claims` — the batch form of §309's
+`erp_export_live_claim`, which now delegates to it — through
+`payment_runs.live_payment_invoices` and `card_issuance.live_card_invoice_ids`.
+"Live" therefore has one reading for the run builder, the card mint, the ERP
+push and closing: a payment outside `LIVE_PAYMENT_TERMINAL_STATUSES`, a card not
+`cancelled`. The refusal is `payment_blocks_completion`, `params.claim`
+`payment` / `virtual_card`, payment named first.
+
+- **`/complete` asks only where its outcome is `done`** (`new` with no approval
+  step, `approved` with no ERP step). Submit-for-review moves nothing payable,
+  and the send branch already meets §309's `payment_blocks_erp_export`, so a
+  second code there would only rename the same refusal. `GET /review-actions`
+  reads the same function, so the modal's verdict and the door agree (pinned
+  by the parity matrix).
+- **Bulk asks once for the locked batch** and reports each refused row as a skip,
+  before the immutable-status check, so a closed-from-the-wrong-status row
+  carries `invoice_not_completable` too. The skip gained optional `code` /
+  `params` beside its English `reason`; the list localizes a coded skip and
+  keeps the server sentence otherwise. Other skips are unchanged.
+- **A new code, not `payment_blocks_erp_export`.** That sentence tells the reader
+  to clear the claim "before sending the invoice to the ERP"; the action here is
+  closing it. Same remedy (cancel the run, void the payment, cancel the card),
+  different verb.
+- **No race window.** Both doors read on rows locked `FOR UPDATE`, and the run
+  builder (§330) and the card mint lock the invoice too.
+- **Rejected:** letting a settled (`completed`) payment through, as "the money
+  moved, so it is done". A completed payment is what `paid → done` is for; an
+  `approved` invoice holding one is out of step already, and closing it hides
+  that. The rail's own exits apply, as §309 says for the push.

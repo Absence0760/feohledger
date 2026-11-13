@@ -3975,6 +3975,8 @@ export const messages = {
 	'refusal.invoiceEntryWindowClosed': "Esta etapa vai além do lançamento da fatura, por isso exige um gerente de contas a pagar.",
 	'refusal.invoiceNotErpSendable': "Somente uma fatura aprovada pode ser enviada para o ERP.",
 	'refusal.invoiceNotErpRetryable': "Somente uma fatura aprovada cujo envio para o ERP falhou pode ser reenviada.",
+	'refusal.paymentBlocksCompletion': "O FeohLedger já está pagando esta fatura: ela tem um pagamento ativo. Cancele o lote de pagamento dele ou anule o pagamento antes de encerrar a fatura.",
+	'refusal.cardBlocksCompletion': "Um cartão virtual foi emitido para pagar esta fatura. Cancele o cartão antes de encerrar a fatura.",
 	'refusal.paymentRunSegregation': "Segregação de funções: o usuário que criou este lote de pagamentos não pode também aprová-lo ou executá-lo. Outro usuário deve fazê-lo.",
 	'refusal.paymentRunAwaitingCfo': "Este lote excede o limite de aprovação do CFO da organização e aguarda a aprovação de um usuário com a função de CFO.",
 	'refusal.paymentRunNothingToRetry': "Nenhum dos pagamentos com falha deste lote pode ser reenviado com segurança: cada um pode ter chegado ao processador de pagamentos. Verifique cada um com o processador e depois anule-o ou registre o que aconteceu.",

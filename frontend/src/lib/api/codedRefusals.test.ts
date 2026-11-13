@@ -636,6 +636,29 @@ describe('the ERP send refused because FeohLedger is already paying the invoice'
 	});
 });
 
+describe('closing an invoice refused because FeohLedger is already paying it', () => {
+	it('states the /complete 409 and the bulk-done skip, per rail', () => {
+		expect(
+			localizeApiDetail(detail('payment_blocks_completion', { claim: 'payment' }), enT)
+		).toBe(EN_ALL['refusal.paymentBlocksCompletion']);
+		expect(codedRefusalText('payment_blocks_completion', { claim: 'virtual_card' }, deT)).toBe(
+			de['refusal.cardBlocksCompletion']
+		);
+		// A `POST /bulk/status` skip row carries the same code beside its reason.
+		expect(
+			localizeApiDetail(
+				{ id: 'x', reason: 'English', code: 'payment_blocks_completion', params: { claim: 'payment' } },
+				deT
+			)
+		).toBe(de['refusal.paymentBlocksCompletion']);
+	});
+
+	it('falls back to the server sentence for a claim this build does not know', () => {
+		expect(codedRefusalText('payment_blocks_completion', {}, enT)).toBeNull();
+		expect(codedRefusalText('payment_blocks_completion', { claim: 'cheque' }, enT)).toBeNull();
+	});
+});
+
 describe('the ERP send refused because of the vendor', () => {
 	it('states the 409 the send doors answer with, per hold', () => {
 		expect(

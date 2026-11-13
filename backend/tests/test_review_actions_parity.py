@@ -302,6 +302,32 @@ _WORKFLOW_SCENARIOS = {
     "approved_duplicate": (InvoiceStatus.approved, True, _WITH_ERP, "duplicate"),
     "approved_live_payment": (InvoiceStatus.approved, True, _WITH_ERP, "payment"),
     "approved_blocked_vendor": (InvoiceStatus.approved, True, _WITH_ERP, "blocked_vendor"),
+    # `/complete` closes these to `done` (no ERP step): refused while our rails
+    # hold the invoice (decisions §357), closed once the claim is dead.
+    "approved_no_erp_live_payment": (
+        InvoiceStatus.approved,
+        True,
+        [_STEP_APPROVAL, _STEP_NO_ERP],
+        "payment",
+    ),
+    "approved_no_erp_exported_run": (
+        InvoiceStatus.approved,
+        True,
+        [_STEP_APPROVAL, _STEP_NO_ERP],
+        "exported_payment",
+    ),
+    "approved_no_erp_live_card": (
+        InvoiceStatus.approved,
+        True,
+        [_STEP_APPROVAL, _STEP_NO_ERP],
+        "card",
+    ),
+    "approved_no_erp_voided_payment": (
+        InvoiceStatus.approved,
+        True,
+        [_STEP_APPROVAL, _STEP_NO_ERP],
+        "voided_payment",
+    ),
     "failed_push": (InvoiceStatus.failed, True, _WITH_ERP, None),
     "failed_push_duplicate": (InvoiceStatus.failed, True, _WITH_ERP, "duplicate"),
     "failed_extraction": (InvoiceStatus.failed, False, _WITH_ERP, None),
@@ -377,10 +403,10 @@ async def _workflow_invoice(realdb, scenario: str) -> uuid.UUID:
                 organization_id=org_id,
                 invoice=inv,
             )
-        elif arrangement == "payment":
+        elif arrangement in ("payment", "exported_payment", "voided_payment"):
             run = PaymentRun(
                 organization_id=org_id,
-                status="draft",
+                status="exported" if arrangement == "exported_payment" else "draft",
                 total_amount=inv.amount,
                 requires_cfo_approval=False,
             )
@@ -392,8 +418,23 @@ async def _workflow_invoice(realdb, scenario: str) -> uuid.UUID:
                     payment_run_id=run.id,
                     amount=inv.amount,
                     method="ach",
-                    status="pending",
+                    status="voided" if arrangement == "voided_payment" else "pending",
                     correlation_id=inv.correlation_id,
+                )
+            )
+        elif arrangement == "card":
+            from app.models.virtual_card import VirtualCard
+
+            s.add(
+                VirtualCard(
+                    organization_id=org_id,
+                    invoice_id=inv.id,
+                    card_provider="mock",
+                    provider_card_id=f"mock-{uuid.uuid4().hex[:8]}",
+                    amount_limit=inv.amount,
+                    currency="USD",
+                    status="active",
+                    last_four="4242",
                 )
             )
         elif arrangement == "blocked_vendor":
@@ -488,7 +529,12 @@ async def test_the_workflow_verdicts_match_what_complete_send_and_retry_answer(
         assert seen["send_to_erp"] == {"role_not_permitted"}
         assert seen["retry_erp"] == {"role_not_permitted"}
     else:
-        assert seen["complete"] == {None, "invoice_not_completable", *export_codes}, seen
+        assert seen["complete"] == {
+            None,
+            "invoice_not_completable",
+            "payment_blocks_completion",
+            *export_codes,
+        }, seen
         assert seen["send_to_erp"] == {None, "invoice_not_erp_sendable", *export_codes}, seen
         assert seen["retry_erp"] == {
             None,
@@ -569,3 +615,45 @@ async def test_complete_no_longer_closes_a_posted_or_paid_invoice(realdb):
             "params": {"status": before.value},
         }
         assert await _status_of(realdb, invoice_id) == before
+
+
+@pytest.mark.parametrize(
+    ("scenario", "claim"),
+    [
+        ("approved_no_erp_live_payment", "payment"),
+        ("approved_no_erp_exported_run", "payment"),
+        ("approved_no_erp_live_card", "virtual_card"),
+    ],
+)
+async def test_complete_does_not_close_an_invoice_our_rails_hold(realdb, scenario, claim):
+    """A staged or exported run, or a minted card, leaves the invoice
+    `approved`; `/complete` with no ERP step used to close it to `done` while
+    our rail still paid it (decisions §357)."""
+    invoice_id = await _workflow_invoice(realdb, scenario)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/complete")
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "payment_blocks_completion"
+    assert detail["params"] == {"claim": claim}
+    assert await _status_of(realdb, invoice_id) == InvoiceStatus.approved
+
+
+@pytest.mark.parametrize("scenario", ["approved_no_erp", "approved_no_erp_voided_payment"])
+async def test_complete_closes_an_unclaimed_approved_invoice(realdb, scenario):
+    """No claim, or one the rails no longer count as live: closes as before,
+    with its `invoice.completed` audit row."""
+    invoice_id = await _workflow_invoice(realdb, scenario)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/complete")
+    assert resp.status_code == 200, resp.text
+    assert await _status_of(realdb, invoice_id) == InvoiceStatus.done
+    async with realdb.sessionmaker(TENANT)() as s:
+        rows = (
+            await s.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_id == invoice_id, AuditLog.action == "invoice.completed"
+                )
+            )
+        ).all()
+    assert len(rows) == 1

@@ -251,10 +251,14 @@ approval step (with none, `/complete` closes a `new` invoice to `done`).
 409 `invoice_not_completable`). Any other status used to fall through to
 `→ done`, so `sent_to_erp`, `posted_in_erp` and `paid` could be closed by a door
 the modal never offered there — `posted_in_erp → done` past the payment.
-`POST /bulk/status` can still set `done` from those statuses: it is a deliberate
-manager action with its own audit row, and it checks neither the source status
-nor a live payment, so this narrowing does not by itself close
-`posted_in_erp → done` — it removes the door that did it silently. The modal offers
+`POST /bulk/status → done` asks the same rule, and both doors also refuse to
+close an invoice our rails still hold: a staged or exported run payment, or a
+minted virtual card, leaves it `approved`, and `done` would take it off the
+payable set while that rail still pays it. One predicate,
+`api/workflow.close_refusals`, owns both checks (409 / a coded skip
+`payment_blocks_completion`, `params.claim`; decisions §357); `/complete` asks it
+only where its outcome is `done`, since its ERP-send branch meets §309's own
+claim gate. The modal offers
 Submit from `GET /api/invoices/{id}/review-actions`' `complete` verdict, built
 from this gate, the entry gate and the ERP push gates.
 

@@ -3911,6 +3911,8 @@ export const messages = {
 	'refusal.invoiceEntryWindowClosed': "この操作は請求書の入力範囲を超えるため、買掛金マネージャーが行う必要があります。",
 	'refusal.invoiceNotErpSendable': "ERP に送信できるのは承認済みの請求書のみです。",
 	'refusal.invoiceNotErpRetryable': "再試行できるのは、ERP への送信に失敗した承認済みの請求書のみです。",
+	'refusal.paymentBlocksCompletion': "FeohLedger はこの請求書を既に支払い中です（有効な支払いがあります）。請求書を完了する前に、その支払いバッチを取り消すか支払いを無効にしてください。",
+	'refusal.cardBlocksCompletion': "この請求書の支払いにバーチャルカードが発行されています。請求書を完了する前に、カードを取り消してください。",
 	'refusal.paymentRunSegregation': "職務分掌: この支払いランを作成したユーザーは、承認または実行することはできません。別のユーザーが行う必要があります。",
 	'refusal.paymentRunAwaitingCfo': "このランは組織のCFO承認しきい値を超えているため、CFOロールを持つユーザーの承認を待っています。",
 	'refusal.paymentRunNothingToRetry': "このランの失敗した支払いはいずれも安全に再送信できません。それぞれが決済プロセッサーに届いた可能性があります。決済プロセッサーでそれぞれを確認してから、無効にするか結果を記録してください。",

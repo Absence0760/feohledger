@@ -92,9 +92,8 @@ def complete_status_refusal(invoice: Invoice) -> dict | None:
     four outcomes start from `new` or `approved`. Every other status used to
     fall through to `→ done`, so `sent_to_erp`, `posted_in_erp` and `paid`
     could be closed by this door although the modal never offered it there —
-    `posted_in_erp → done` skipping the payment. `POST /bulk/status` can still
-    set `done` from them, as a deliberate manager action with its own audit
-    row; whether it should gate the source status too is an open follow-up.
+    `posted_in_erp → done` skipping the payment. `POST /bulk/status → done`
+    asks it too, through :func:`close_refusals` (decisions §357).
     """
     if invoice.status in _COMPLETABLE_STATUSES:
         return None
@@ -103,6 +102,71 @@ def complete_status_refusal(invoice: Invoice) -> dict | None:
         "Only a new or approved invoice can be submitted or completed.",
         status=invoice.status.value,
     )
+
+
+#: Closing an invoice to `done` refused because one of our rails is already
+#: paying it (decisions §357). ``params.claim`` is ``payment`` / ``virtual_card``
+#: (`services/erp_export_gate.CLAIM_*`).
+PAYMENT_BLOCKS_COMPLETION = "payment_blocks_completion"
+
+_CLAIM_BLOCKS_COMPLETION_MESSAGES = {
+    "payment": (
+        "FeohLedger is already paying this invoice: it has a live payment. Cancel its "
+        "payment run or void the payment before closing the invoice."
+    ),
+    "virtual_card": (
+        "A virtual card has been issued to pay this invoice. Cancel the card before "
+        "closing the invoice."
+    ),
+}
+
+
+def claim_close_refusal(claim: str) -> dict:
+    """The coded 409 for closing an invoice one of our rails holds."""
+    return coded_refusal(
+        PAYMENT_BLOCKS_COMPLETION, _CLAIM_BLOCKS_COMPLETION_MESSAGES[claim], claim=claim
+    )
+
+
+async def close_refusals(db: AsyncSession, invoices) -> dict[uuid.UUID, dict]:
+    """Why each of ``invoices`` may not be closed to `done` now → its coded
+    refusal; an invoice that may be closed is absent.
+
+    The one rule both doors that close an invoice by hand ask:
+    `POST /{id}/complete` (where its outcome is `done`) and
+    `POST /bulk/status → done`. First the source status
+    (:func:`complete_status_refusal`: only `new` and `approved`), then a live
+    claim — a payment not voided / failed / cancelled, or a card not
+    cancelled, read by `erp_export_gate.live_claims` through the rails' own
+    predicates. A staged or exported run, and a minted card, all leave the
+    invoice `approved`; closing it then takes it out of the payable set while
+    our rail still pays it, and from `done` nothing can void the claim back
+    onto the queue. Call it on rows locked for update, as both doors do: the
+    run builder and the card mint lock the invoice too, so no claim lands
+    between this read and the transition.
+    """
+    refusals: dict[uuid.UUID, dict] = {}
+    candidates = []
+    for invoice in invoices:
+        refused = complete_status_refusal(invoice)
+        if refused is not None:
+            refusals[invoice.id] = refused
+        else:
+            candidates.append(invoice.id)
+    from app.services.erp_export_gate import live_claims
+
+    for invoice_id, claim in (await live_claims(db, candidates)).items():
+        refusals[invoice_id] = claim_close_refusal(claim)
+    return refusals
+
+
+def _completes_to_done(invoice: Invoice, *, approval_enabled: bool, erp_enabled: bool) -> bool:
+    """Whether `/complete` on this (completable) invoice closes it to `done`:
+    a `new` one with no approval step, or an `approved` one with no ERP step.
+    The other two outcomes submit for review or start the ERP send."""
+    if invoice.status == InvoiceStatus.new:
+        return not approval_enabled
+    return invoice.status == InvoiceStatus.approved and not erp_enabled
 
 
 def complete_entry_refusal(user: User, invoice: Invoice, *, approval_enabled: bool) -> dict | None:
@@ -136,8 +200,10 @@ async def workflow_action_refusals(
 
     Built from the gates those doors raise from, in their order: the route's
     role list (``holds_any_role``, the predicate ``require_roles`` enforces),
-    :func:`complete_status_refusal`, :func:`complete_entry_refusal`, and for
-    the pushes ``erp_send.erp_send_refusal`` (plan, status, export gate).
+    :func:`complete_status_refusal`, :func:`complete_entry_refusal`, then,
+    where `/complete` closes the invoice, :func:`close_refusals`' live-claim
+    check, and for the pushes ``erp_send.erp_send_refusal`` (plan, status,
+    export gate).
     Reads only. Not covered: `/complete`'s required-fields check, which judges
     what the reader types into the form before the pre-save, and the
     ``refresh_warnings`` it runs, which can open a duplicate the POST then
@@ -171,16 +237,18 @@ async def workflow_action_refusals(
         if complete is None:
             approval_enabled = await is_step_enabled(db, org.id, "approval", invoice_id=invoice.id)
             complete = complete_entry_refusal(actor, invoice, approval_enabled=approval_enabled)
-        if (
-            complete is None
-            and invoice.status == InvoiceStatus.approved
-            and await is_step_enabled(db, org.id, "erp_export", invoice_id=invoice.id)
-        ):
-            # `/complete` on an approved invoice with the ERP step IS the send,
-            # through the same `start_erp_send`; the entry gate above has
-            # already refused anyone without a manage role, so the send's
-            # verdict is this one.
-            complete = send_to_erp
+            if complete is None:
+                erp_enabled = await is_step_enabled(db, org.id, "erp_export", invoice_id=invoice.id)
+                if invoice.status == InvoiceStatus.approved and erp_enabled:
+                    # `/complete` on an approved invoice with the ERP step IS
+                    # the send, through the same `start_erp_send`; the entry
+                    # gate above has already refused anyone without a manage
+                    # role, so the send's verdict is this one.
+                    complete = send_to_erp
+                elif _completes_to_done(
+                    invoice, approval_enabled=approval_enabled, erp_enabled=erp_enabled
+                ):
+                    complete = (await close_refusals(db, [invoice])).get(invoice.id)
     return {"complete": complete, "send_to_erp": send_to_erp, "retry_erp": retry_erp}
 
 
@@ -719,6 +787,13 @@ async def complete_invoice(
 
     # Check workflow config for this invoice
     erp_enabled = await is_step_enabled(db, org_id, "erp_export", invoice_id=invoice.id)
+
+    if _completes_to_done(invoice, approval_enabled=approval_enabled, erp_enabled=erp_enabled):
+        # Closing it: refused while our rails hold a live payment or card on it
+        # (decisions §357). The send branch below has its own claim gate (§309).
+        refused = (await close_refusals(db, [invoice])).get(invoice.id)
+        if refused is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
 
     await refresh_warnings(db, invoice, org_settings=org.settings)
 

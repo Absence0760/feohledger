@@ -2262,16 +2262,6 @@ user-visible halves still open.
       exported run.
 ### Surfaced by the 2026-10-31 follow-ups batch, round 4 (decisions §345–§348)
 
-- [ ] **(c) `POST /bulk/status → done` closes an invoice with no source-status
-      or live-claim check.** §347 narrowed `/complete` to `new` / `approved`,
-      but the bulk door still moves a `posted_in_erp` invoice to `done` past its
-      payment, and neither door checks for a live payment or card before closing
-      an `approved` invoice (a staged or exported run leaves its invoice
-      `approved`). **Durable fix:** gate bulk `done` on the same
-      `complete_status_refusal` and on §309's `live_payment_invoices` /
-      `live_card_invoice_ids`, reported per row as bulk already does; add the
-      live-claim check to `/complete` too. **Trigger:** now — scheduled for the
-      batch PR's next round.
 - [ ] **(c) Mobile's invoice approve still restates its rule.**
       `invoice_detail_screen` and the home-screen approve use
       `canApproveInvoice` only, not `GET /api/invoices/{id}/review-actions`.

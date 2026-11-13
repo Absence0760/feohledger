@@ -3979,6 +3979,8 @@ export const messages = {
 	'refusal.invoiceEntryWindowClosed': "Dieser Schritt geht über die Rechnungserfassung hinaus und erfordert daher einen AP-Manager.",
 	'refusal.invoiceNotErpSendable': "Nur eine genehmigte Rechnung kann an das ERP gesendet werden.",
 	'refusal.invoiceNotErpRetryable': "Nur eine genehmigte Rechnung, deren ERP-Übertragung fehlgeschlagen ist, kann erneut gesendet werden.",
+	'refusal.paymentBlocksCompletion': "FeohLedger bezahlt diese Rechnung bereits: Es gibt eine aktive Zahlung dafür. Brechen Sie ihren Zahlungslauf ab oder stornieren Sie die Zahlung, bevor Sie die Rechnung abschließen.",
+	'refusal.cardBlocksCompletion': "Für die Zahlung dieser Rechnung wurde eine virtuelle Karte ausgestellt. Stornieren Sie die Karte, bevor Sie die Rechnung abschließen.",
 	'refusal.paymentRunSegregation': "Funktionstrennung: Wer diesen Zahlungslauf erstellt hat, darf ihn nicht auch genehmigen oder ausführen. Das muss eine andere Person tun.",
 	'refusal.paymentRunAwaitingCfo': "Dieser Lauf überschreitet die CFO-Freigabeschwelle der Organisation und wartet auf die Freigabe durch einen Benutzer mit der CFO-Rolle.",
 	'refusal.paymentRunNothingToRetry': "Keine der fehlgeschlagenen Zahlungen dieses Laufs kann sicher erneut gesendet werden: Jede könnte den Zahlungsdienstleister erreicht haben. Prüfen Sie jede beim Zahlungsdienstleister und stornieren Sie sie dann oder erfassen Sie, was passiert ist.",

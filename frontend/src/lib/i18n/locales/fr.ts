@@ -3980,6 +3980,8 @@ export const messages = {
 	'refusal.invoiceEntryWindowClosed': "Cette étape dépasse la saisie de la facture ; elle nécessite donc un responsable comptabilité fournisseurs.",
 	'refusal.invoiceNotErpSendable': "Seule une facture approuvée peut être envoyée vers l’ERP.",
 	'refusal.invoiceNotErpRetryable': "Seule une facture approuvée dont l’envoi vers l’ERP a échoué peut être relancée.",
+	'refusal.paymentBlocksCompletion': "FeohLedger paie déjà cette facture : elle a un paiement actif. Annulez son lot de paiement ou annulez le paiement avant de clôturer la facture.",
+	'refusal.cardBlocksCompletion': "Une carte virtuelle a été émise pour payer cette facture. Annulez la carte avant de clôturer la facture.",
 	'refusal.paymentRunSegregation': "Séparation des tâches : l'utilisateur qui a créé ce lot de paiements ne peut pas aussi l'approuver ou l'exécuter. Un autre utilisateur doit le faire.",
 	'refusal.paymentRunAwaitingCfo': "Ce lot dépasse le seuil d'approbation CFO de l'organisation et attend la validation d'un utilisateur ayant le rôle CFO.",
 	'refusal.paymentRunNothingToRetry': "Aucun des paiements en échec de ce lot ne peut être renvoyé en toute sécurité : chacun a peut-être atteint le prestataire de paiement. Vérifiez chacun auprès du prestataire, puis annulez-le ou enregistrez ce qui s'est passé.",
