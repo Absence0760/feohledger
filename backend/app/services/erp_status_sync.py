@@ -480,9 +480,7 @@ async def record_erp_reported_payment(
     None records what is owed here.
     """
     from app.services.external_payment import (
-        REFUSAL_AMOUNT_MISMATCH,
         ExternalPaymentRefused,
-        Refusal,
         record_invoice_paid_outside,
     )
 
@@ -511,20 +509,9 @@ async def record_erp_reported_payment(
     paid_on = paid_on or utc_today()
     reference = erp_paid_reference(erp_type, erp_document_id, event_id)
     try:
-        if amount is not None and (
-            not amount_currency
-            or amount_currency.strip().upper() != (invoice.currency or "").strip().upper()
-        ):
-            # A figure in another currency (or none stated) says nothing about
-            # what this invoice owes; comparing the numbers would.
-            raise ExternalPaymentRefused(
-                Refusal(
-                    REFUSAL_AMOUNT_MISMATCH,
-                    "The ERP reports the payment in another currency than the invoice's.",
-                    http_status=422,
-                    params={"amount": str(amount), "currency": amount_currency},
-                )
-            )
+        # The currency is judged by the record itself, beside the amount and
+        # AFTER its live-claim refusals: a payment in another currency on an
+        # invoice FeohLedger is also paying is first a double payment (§309).
         await record_invoice_paid_outside(
             db,
             org=org,
@@ -535,6 +522,7 @@ async def record_erp_reported_payment(
             actor_id=None,
             source="erp",
             amount=amount,
+            amount_currency=amount_currency,
         )
     except ExternalPaymentRefused as exc:
         # When FeohLedger itself still has a claim on paying this invoice — a
@@ -1007,17 +995,13 @@ async def apply_bill_report(
             action = "double_payment_flagged" if opened else action
         elif (
             status == InvoiceStatus.paid
-            # Credit alone, with no payment of anyone else's on the bill, moved
-            # no money twice: it is the bookkeeper recording the discount or
-            # short settlement our write-back left open, as its flag asked
-            # (§386). (QuickBooks lists a credit as a $0 BillPayment, so there
-            # this never holds and the rule is unchanged.)
-            and not (report.settled_by_credit and not report.external_payment_ids)
             and await _paid_through_feohledger(db, invoice.id)
+            and not await _credit_records_our_open_discount(db, invoice.id, report)
         ):
             # FeohLedger's own rail paid it (its write-back missing or
-            # refused) and a person paid it in QuickBooks too: the money has
-            # left twice. A payment recorded as made OUTSIDE FeohLedger is
+            # refused) and a person settled it in the ERP too, by a payment or
+            # by a credit beyond the discount our write-back left open: the
+            # bill has been settled twice. A payment recorded as made OUTSIDE FeohLedger is
             # most likely that same QuickBooks payment, so it is not flagged.
             opened = await open_erp_reconciliation_exception(
                 db,
@@ -1068,6 +1052,49 @@ async def apply_bill_report(
 
     await db.commit()
     return SyncOutcome(action, invoice_id)
+
+
+async def _credit_records_our_open_discount(
+    db: AsyncSession, invoice_id: uuid.UUID, report: ErpBillReport
+) -> bool:
+    """Is the credit on this paid bill the discount our own write-back left open?
+
+    A Xero payment carries no discount, so a write-back of a discounted payment
+    leaves the discount due on the bill and flags it for the bookkeeper, who
+    records it there as a credit (§386). That credit moved no money twice, so
+    it is not "paid twice", but only when every fact says so:
+
+    * the bill was settled by credit, and nobody else's payment is on it;
+    * OUR write-back is on the bill (``our_payment_applied``). Without it, our
+      rail paid and the bill still showed the whole amount due, so a credit
+      for that amount is a second settlement of the same bill;
+    * what came off beyond our write-back (``reduced_outside_amount``) is no
+      more than the discount FeohLedger's own completed payments took, so the
+      credit can cover only the discount that was left open.
+
+    An adapter that states neither fact (QuickBooks, which lists a credit as a
+    $0 BillPayment anyway) never qualifies, so its rule is unchanged.
+    """
+    from app.services.external_payment import EXTERNAL_PAYMENT_PROVIDER
+
+    outside = report.reduced_outside_amount
+    if (
+        not report.settled_by_credit
+        or report.external_payment_ids
+        or not report.our_payment_applied
+        or outside is None
+    ):
+        return False
+    discount = (
+        await db.execute(
+            select(func.coalesce(func.sum(Payment.discount_amount), 0)).where(
+                Payment.invoice_id == invoice_id,
+                Payment.status == "completed",
+                Payment.provider.is_distinct_from(EXTERNAL_PAYMENT_PROVIDER),
+            )
+        )
+    ).scalar_one()
+    return outside <= Decimal(discount)
 
 
 async def _paid_through_feohledger(db: AsyncSession, invoice_id: uuid.UUID) -> bool:
@@ -1474,9 +1501,16 @@ async def _resolved_erp(org: Organization) -> dict | None:
         return await provider_config(org, "erp", db=ctrl) or None
 
 
-async def _bills_we_posted(factory, bill_ids: list[str], realm: str | None) -> list[str]:
+async def _bills_we_posted(
+    factory, bill_ids: list[str], realm: str | None, *, by_reference: bool = False
+) -> list[str]:
     """The bills of ``bill_ids`` some invoice here was pushed as, under
     ``realm`` (or before realms were recorded), in their order.
+
+    ``by_reference`` is for an adapter whose bills are matched by their id
+    within the recorded realm (``ErpAdapter.bills_match_by_reference``, Xero):
+    there a push that recorded no realm, or a pass with none, can never match
+    (`_matching_invoice_id`), so such a bill is not read either.
 
     A change feed lists every bill the company changed, most of them keyed in
     the ERP by hand. Reading those back spends the ERP's API allowance (Xero
@@ -1489,7 +1523,11 @@ async def _bills_we_posted(factory, bill_ids: list[str], realm: str | None) -> l
     reference = WorkflowInstance.state_data["erp_reference"].astext
     recorded = WorkflowInstance.state_data["erp_realm"].astext
     query = select(reference).where(reference.in_(bill_ids))
-    if realm:
+    if by_reference:
+        if not realm:
+            return []
+        query = query.where(recorded == realm)
+    elif realm:
         query = query.where(or_(recorded == realm, recorded.is_(None)))
     async with factory() as db:
         ours = {str(r) for r in (await db.execute(query)).scalars() if r}
@@ -1508,7 +1546,12 @@ async def sync_bills(org: Organization, bill_ids: list[str], *, event_id: str | 
     realm = connection_realm(erp_config)
     factory = async_sessionmaker(get_tenant_engine(org.db_name), expire_on_commit=False)
     changed = 0
-    for bill_id in await _bills_we_posted(factory, list(dict.fromkeys(bill_ids)), realm):
+    for bill_id in await _bills_we_posted(
+        factory,
+        list(dict.fromkeys(bill_ids)),
+        realm,
+        by_reference=adapter.bills_match_by_reference,
+    ):
         report = await adapter.bill_report(bill_id)
         async with factory() as db:
             outcome = await apply_bill_report(

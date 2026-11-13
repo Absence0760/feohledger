@@ -488,9 +488,10 @@ def test_parse_qbo_events_reads_the_recorded_delivery():
 # ---------------------------------------------------------------------------
 
 #: The fields the status sync reads, as paths (``[]`` = every list element).
-#: ``CurrencyRef`` is read only when present (``post_payment``), so it is not
-#: required of the fake.
+#: ``CurrencyRef.value`` is required by ``post_payment``, which refuses a bill
+#: stating no currency, so the fake must carry it as QuickBooks does.
 BILL_READS = {
+    "CurrencyRef.value",
     "Id",
     "SyncToken",
     "TotalAmt",

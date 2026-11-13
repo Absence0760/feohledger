@@ -288,6 +288,9 @@ class XeroAdapter(OAuthErpAdapter):
     #: and our payments are written back (``post_payment``), so a confirmed
     #: push lands payable at ``posted_in_erp`` while status sync is on (§386).
     supports_status_sync = True
+    #: A Xero bill carries no marker of ours; its never-reused InvoiceID is
+    #: matched by reference (``report_from_bill``).
+    bills_match_by_reference = True
 
     @classmethod
     async def list_external_tenants(
@@ -929,8 +932,8 @@ class XeroAdapter(OAuthErpAdapter):
 
         Refused before any write: no mapped pay-from account
         (``payment_account_not_mapped``), a bill gone from Xero
-        (``bill_not_in_erp``), another currency than the bill's
-        (``currency_mismatch``), or more than the bill still has due
+        (``bill_not_in_erp``), another currency than the bill's, or either
+        side stating none (``currency_mismatch``), or more than the bill still has due
         (``payment_exceeds_balance``). The amount posted is what reached the
         supplier. A Xero payment carries no discount, so an early-payment
         discount taken here leaves the bill partly due there, and the
@@ -959,8 +962,10 @@ class XeroAdapter(OAuthErpAdapter):
                     )
                 if ours:
                     return erp_refusal(PROVIDER, BILL_PAYMENT_VOIDED)
-                bill_currency = str(bill.get("CurrencyCode") or "").upper()
-                if bill_currency and payload.currency and bill_currency != payload.currency.upper():
+                # Fail closed: a bill or a payment that states no currency is
+                # not known to be in the same one, so the figure is not posted.
+                bill_currency = str(bill.get("CurrencyCode") or "").strip().upper()
+                if not bill_currency or bill_currency != (payload.currency or "").strip().upper():
                     return _nothing_posted(erp_refusal(PROVIDER, CURRENCY_MISMATCH))
                 due = _decimal(bill.get("AmountDue"))
                 if due is None or payload.amount <= 0 or payload.amount > due:
@@ -1024,11 +1029,14 @@ class XeroAdapter(OAuthErpAdapter):
 
     async def void_payment(self, payload: PaymentPayload) -> ErpPostResult:
         """Delete the Xero payment :meth:`post_payment` wrote for this payment
-        (Xero deletes a payment; it has no void). Found among the bill's own
-        payments by our marker, so a payment never written, one already
-        deleted, or a bill already gone is a success with nothing to do. Xero
-        refuses to delete a reconciled payment; that refusal is returned, and
-        the caller flags it for a person."""
+        (Xero deletes a payment; it has no void). "Ours" is the definition
+        ``post_payment`` uses: the payments ``GET Payments`` finds by our
+        ``Reference`` on this bill (``_our_payments``), never only those the
+        bill's own ``Payments`` array happens to list. Only live ones are
+        deleted, so a payment never written, one already deleted, or a bill
+        already gone is a success with nothing to do. Xero refuses to delete a
+        reconciled payment; that refusal is returned, and the caller flags it
+        for a person."""
         try:
             if not payload.bill_id:
                 return ErpPostResult(success=True, message="No bill in Xero")
@@ -1037,14 +1045,16 @@ class XeroAdapter(OAuthErpAdapter):
                 bill = await self._read_bill(client, headers, payload.bill_id)
                 if str(bill.get("Status") or "").upper() in _GONE_STATUSES:
                     return ErpPostResult(success=True, message="No bill in Xero")
-                ours = [
+                live = [
                     p
-                    for p in bill.get("Payments") or []
-                    if isinstance(p, dict) and _payment_marker(p) == str(payload.payment_id).lower()
+                    for p in await self._our_payments(
+                        client, headers, payload.payment_id, payload.bill_id
+                    )
+                    if not _payment_deleted(p) and p.get("PaymentID")
                 ]
-                if not ours:
+                if not live:
                     return ErpPostResult(success=True, message="No bill payment of ours to void")
-                payment_erp_id = str(ours[0].get("PaymentID"))
+                payment_erp_id = str(live[0].get("PaymentID"))
                 resp = await client.post(
                     f"{_api_base()}/Payments/{payment_erp_id}",
                     content=dumps_exact_json({"Status": "DELETED"}),
@@ -1359,7 +1369,12 @@ def report_from_bill(bill: dict, bill_id: str) -> ErpBillReport:
     found = str(bill.get("InvoiceID") or bill_id)
 
     def report(state: ErpBillState, **kw) -> ErpBillReport:
-        return ErpBillReport(bill_id=found, state=state, match_by_reference=True, **kw)
+        return ErpBillReport(
+            bill_id=found,
+            state=state,
+            match_by_reference=XeroAdapter.bills_match_by_reference,
+            **kw,
+        )
 
     if str(bill.get("Type") or "").upper() != "ACCPAY":
         return report(ErpBillState.unknown)
@@ -1409,6 +1424,8 @@ def report_from_bill(bill: dict, bill_id: str) -> ErpBillReport:
         paid_only_by_us=bool(ours) and not reduced_outside,
         reduced_outside=reduced_outside,
         settled_by_credit=settled_by_credit,
+        our_payment_applied=bool(ours),
+        reduced_outside_amount=outside,
         # The cash a person applied in Xero, exact, so the payment is recorded
         # at what left and never at what FeohLedger reckons was owed (§386).
         # Stated only for a bill paid wholly in cash by others: a credit-settled

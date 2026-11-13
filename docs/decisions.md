@@ -18685,7 +18685,10 @@ the next adapter that turns the capability on is swept with no second list.
   Xero never reuses, so the report sets `match_by_reference` and
   `_matching_invoice_id` matches by `erp_reference` within the recorded realm,
   exactly one invoice or none, the way QuickBooks' deleted bills already were.
-  Rejected: writing our correlation id into a line description (a person can
+  A push that recorded no realm can therefore never match, so the sweep does
+  not read its bill either (`ErpAdapter.bills_match_by_reference`, which
+  `_bills_we_posted` asks; QuickBooks' marker can still match such a bill, so
+  it keeps reading them). Rejected: writing our correlation id into a line description (a person can
   edit it, and it would print on the bill).
 - **"Paid" is read from the payments on the bill, never `Status` alone (§303).**
   `AmountPaid` must equal the sum of the listed payments, or the report is
@@ -18702,7 +18705,11 @@ the next adapter that turns the capability on is swept with no second list.
   every locale) and kept on the `paid_not_recorded` row with the amount and its
   currency, which the re-attempt and a merge never drop. A figure in another
   currency than the invoice's, or none stated, is refused the same way, never
-  compared as a bare number. Recording the owed figure, as QuickBooks still does
+  compared as a bare number. That check sits in `record_invoice_paid_outside`
+  beside the amount check (`source="erp"`), so it runs AFTER §309's live-claim
+  refusals: a payment in another currency on an invoice FeohLedger is also
+  paying is reported as the double payment it is (`in_run` / `payment_live` /
+  `card_live`), naming the claim a person must undo. Recording the owed figure, as QuickBooks still does
   (it states no amount; `docs/followups.md`), would book money that did not
   leave whenever a credit memo or an early-payment discount applies only here.
   **The row is payment-blocking** (`amount_mismatch` joins
@@ -18713,7 +18720,9 @@ the next adapter that turns the capability on is swept with no second list.
   turned off. **The one-click record books the stated figure or nothing**:
   `POST /api/exceptions/{id}/record-erp-payment` takes the row's stated amount
   as the amount, so it refuses until a person corrects the invoice or the bill,
-  and a body figure that disagrees is a 422. Before this, the dialog's
+  and a body figure that disagrees is a 422, as is a stated figure with no
+  currency (the sweep's rule on the same facts; a blank on both sides is not a
+  match). Before this, the dialog's
   amount-less record would have booked FeohLedger's figure (and captured a
   discount the supplier never granted) and closed the row.
 - **The channel is the sweep, plus an admin's "check now".** No Xero webhook is
@@ -18757,17 +18766,31 @@ from the mapped pay-from account at the exact `Decimal` that reached the
 supplier (`dumps_exact_json`), idempotent in §295's two layers (our marker,
 looked up among all payments, deleted ones included; and `Idempotency-Key`).
 A write-back someone deleted in Xero is refused `bill_payment_voided`. Refused
-before any write: no account, a bill gone, another currency, or more than is
+before any write: no account, a bill gone, another currency (or none stated on
+either side: fail closed, in the QuickBooks write-back too), or more than is
 due. **A discount is not a payment**: Xero's Payment has no discount field, so
 the bill is left open by the discount and flagged
 (`erp_payment_writeback_balance_open`, now carrying `discount_amount` in its
 `erp_report`), §295's conservative answer kept; booking it as a credit note is
 an opt-in for a product call (`docs/followups.md`). Following that flag's
-advice must not raise an alarm: a bill FeohLedger paid that then shows a credit
-and no payment of anyone else's is not "paid twice" (QuickBooks lists a credit
-as a $0 BillPayment, so its rule is unchanged). `void_payment` deletes our
-Xero payment (Xero has no payment void); a reconciled one is refused by Xero
-and flagged.
+advice must not raise an alarm, so a credit after our payment is not "paid
+twice" when, and only when, every fact says it is that discount: the bill was
+settled by credit with no payment of anyone else's on it, **our write-back is
+on the bill** (`ErpBillReport.our_payment_applied`), and what came off beyond
+our write-back (`reduced_outside_amount`, `total - due - ours`) is no more than
+the `Payment.discount_amount` FeohLedger's own completed payments took. Without
+the write-back the bill still showed the whole amount due when our rail paid
+(say the write-back was refused `payment_account_not_mapped`), so a credit for
+it is a second settlement and raises `erp_paid_twice`; so does a credit larger
+than the discount, or one after a payment that took none. (A first draft keyed
+the exemption on "credit and no outside payment" alone, which hid exactly that
+case; the money-path review caught it.) QuickBooks states neither fact (it
+lists a credit as a $0 BillPayment anyway), so its rule is unchanged.
+`void_payment` deletes our Xero payment (Xero has no payment void), finding
+"ours" exactly as `post_payment` does, by `GET Payments` on our `Reference` for
+this bill, live ones only, never only among the bill's own `Payments`: two
+definitions would let a payment one sees go undeleted by the other. A
+reconciled one is refused by Xero and flagged.
 
 **Decision — the audit findings.**
 
@@ -18798,8 +18821,8 @@ and flagged.
 stateful double (`test_xero_status_sync_adapter.py`) and fake-erp. Unconfirmed
 until a Demo Company pass (#654): the `If-Modified-Since` format Xero accepts,
 that `GET Payments` lists deleted payments, that a bill's own `Payments` array
-carries each payment's `Reference` (our marker; `report_from_bill` and
-`void_payment` rely on it), the `X-Rate-Limit-Problem` values, the `OR`
+carries each payment's `Reference` (our marker; `report_from_bill` relies on
+it, `void_payment` no longer does), the `X-Rate-Limit-Problem` values, the `OR`
 filter, and the ValidationException body for each refusal.
 
 **Accepted residual.** A payment someone keys in Xero with our exact marker text
@@ -18809,14 +18832,22 @@ marker is a UUID nobody types by accident.
 
 Tests: `tests/test_xero_status_sync_adapter.py` (`bill_report`,
 `changed_bills`, `bills_for_payment`, `post_payment` idempotency and refusals,
-`void_payment`, the minute-limit wait, the paid amount);
+`void_payment` by the same lookup as the post, the fail-closed currency, the
+minute-limit wait, the paid amount, our write-back and the outside reduction on
+the report);
 `tests/test_erp_xero_adapter.py` (X1–X4); the Xero section of
 `tests/test_erp_status_sync.py` (real rows: recorded at Xero's amount, a
 mismatch kept and blocking and the one-click refused, another currency
-refused, §309's live claim blocks, a credit after our payment not paid twice,
-matched only in the recorded organisation, a hand-keyed bill never read, the
+refused or none stated, §309's live claim named before a currency mismatch,
+the one-click refusing a currency-less figure, a credit after our discounted
+payment not paid twice, while a credit our write-back never reached, one past
+the discount and one after an undiscounted payment are,
+matched only in the recorded organisation, a hand-keyed bill and a realm-less
+push's bill never read, the
 sweep covers Xero, the on-request refusals, single-flight and its audit); `tests/test_erp_oauth.py` § status sync on request;
-`tests/test_erp_payment_writeback.py` (the discount on the balance flag).
+`tests/test_erp_payment_writeback.py` (the discount on the balance flag);
+`tests/test_qbo_status_sync_adapter.py` (the QuickBooks write-back's
+fail-closed currency).
 
 ## 387. The bulk-status endpoint's own skips are coded, reusing codes where the meaning is the same
 

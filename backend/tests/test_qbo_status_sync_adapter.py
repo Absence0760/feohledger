@@ -77,6 +77,8 @@ class _Qbo:
             "VendorRef": {"value": "56"},
             "SyncToken": "0",
             "LinkedTxn": [],
+            # QuickBooks states every bill's currency, the home one included.
+            "CurrencyRef": {"value": "USD", "name": "United States Dollar"},
             **kw,
         }
         return self.bills[bill_id]
@@ -537,6 +539,8 @@ def test_a_card_payment_books_from_the_card_account():
         ({"bill_id": "999"}, BILL_NOT_IN_ERP),
         ({"amount": Decimal("100.01")}, PAYMENT_EXCEEDS_BALANCE),
         ({"currency": "EUR"}, "currency_mismatch"),
+        # A payment stating no currency is not known to be in the bill's.
+        ({"currency": ""}, "currency_mismatch"),
     ],
 )
 def test_post_payment_refuses_before_writing(overrides, code):
@@ -547,6 +551,22 @@ def test_post_payment_refuses_before_writing(overrides, code):
     assert result.refusal_code == code
     assert result.not_posted is True
     assert qbo.posts() == []
+
+
+def test_a_bill_stating_no_currency_is_refused_not_paid_as_a_bare_number():
+    qbo = _Qbo()
+    qbo.bill(CurrencyRef=None)
+    result = _run(qbo, lambda: _adapter().post_payment(_payload()))
+    assert not result.success and result.refusal_code == "currency_mismatch"
+    assert result.not_posted is True
+    assert qbo.posts() == []
+
+
+def test_the_write_back_names_the_bills_currency():
+    qbo = _Qbo()
+    qbo.bill()
+    assert _run(qbo, lambda: _adapter().post_payment(_payload())).success
+    assert json.loads(qbo.posts()[0]["content"])["CurrencyRef"] == {"value": "USD"}
 
 
 def test_a_replay_of_a_payment_since_voided_is_refused_not_reported_written():
