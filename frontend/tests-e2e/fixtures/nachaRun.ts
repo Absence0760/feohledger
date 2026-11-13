@@ -61,6 +61,21 @@ async function putPaymentsSettings(page: Page, payments: Record<string, unknown>
 	expect(resp.ok(), await resp.text()).toBe(true);
 }
 
+/**
+ * Switch the tenant's payments to `mode` after the run's file is out, keeping
+ * the rest of `settings.payments` (decisions §382: a run exported before a
+ * switch to processor mode keeps its bank-file panel). `withExportedRun` puts
+ * the original block back afterwards.
+ */
+export async function switchPaymentsMode(page: Page, mode: 'record_only' | 'processor') {
+	const current = await paymentsSettings(page);
+	await putPaymentsSettings(page, {
+		...(current ?? {}),
+		mode,
+		...(mode === 'processor' ? { provider: 'mock' } : {})
+	});
+}
+
 /** A queue row the run path accepts: not blocked, not pinned to a live card,
  *  and no accepted discount (the teardown below does not unwind one). */
 async function plainQueueItem(page: Page): Promise<QueueItem> {

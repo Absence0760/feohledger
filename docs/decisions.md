@@ -18158,3 +18158,52 @@ approves); `tests/test_exception_agents_missing_po.py` and
 only before any approval); `tests/test_vendor_merge.py` (each approved-unpaid
 status refuses, nothing moves; paid, done, failed extraction, recalled and
 rejected move; the count across duplicates; recall clears the way).
+
+## 382. The server says whether a run's bank-file panel applies; a run exported before a switch to processor mode keeps it (§362 follow-up, 2026-11-13)
+
+**The gap.** §362 keeps "Verify before upload" open in either mode, since it
+never releases the run, and refuses "Bank rejected the file" on a tenant that no
+longer records payments. The run dialog hid the whole bank-file panel unless the
+tenant's execution mode was `record_only` (`canDownloadBankFile`). On a tenant
+switched to processor mode with a run still `exported`, the reader holding the
+file could not verify it before uploading and was not told why the run could not
+be released. Only Record was left. Nothing was paid twice, because the server
+keeps the claim, but the dialog restated a client condition where it should have
+read a server verdict.
+
+**Decision.**
+
+- **`GET /runs/{id}` carries `bank_file_applies`**, from
+  `payment_controls.run_bank_file_applies(run, record_only=…)`. It is `true` on
+  every run of a record-only tenant, and on a processor tenant only while the
+  run's stored status is `exported`, which is the claim §251 / §362 keep. A
+  processor tenant's draft has no file and never gets one, so the panel does
+  not apply to it. The field says only whether the panel is the right place to
+  look. Which controls it offers stays each control's own `actions.nacha_*`
+  verdict, and those already answered coherently in processor mode: Download is
+  hidden (`nacha_already_exported`), Regenerate is refused
+  `nacha_requires_record_only`, Bank rejected the file is refused
+  `nacha_void_requires_record_only`, and Verify is `null`. The dialog renders
+  the refused ones disabled beside their sentences, so the reader learns why
+  the run cannot be released or redone.
+- **The client mode check is gone.** `canDownloadBankFile` was removed. A
+  verify result already on screen stays there whatever the run became, because
+  a superseded file must not be uploaded even after the run is cancelled.
+
+**Rejected:**
+- *Hide Download on `nacha_requires_record_only` and drop the mode check, with
+  no new field.* It works today, but it gives one code two meanings: hidden on
+  Download, explained on Regenerate. It also makes the panel's presence an
+  accident of which refusals happen to be hidden. One server fact is plainer
+  and has a parity test of its own.
+- *Gate on `nacha_export_count > 0`.* A run released back to `draft` after the
+  bank rejected its file keeps its count but no longer holds a file. The
+  stored `exported` status is what the `nacha_*` verdicts compare, so the
+  panel reads the same thing.
+
+**Tests.** `backend/tests/test_payment_action_verdicts.py`
+(`test_run_bank_file_applies`, `test_the_bank_file_panel_verdict_in_each_mode`:
+the field and the four verdicts on a run exported before the switch, Verify
+accepted in both modes with the claim kept, no panel on a processor draft);
+`frontend/tests-e2e/payments/nacha-verify.spec.ts` (an exported run, switched
+to processor: the panel shows Verify enabled and the two refusals' sentences).

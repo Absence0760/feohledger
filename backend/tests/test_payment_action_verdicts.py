@@ -868,3 +868,80 @@ async def test_regenerate_refuses_a_run_with_no_exported_file(realdb):
     assert resp.json()["detail"]["code"] == "nacha_nothing_to_regenerate"
     async with realdb.sessionmaker(TENANT)() as s:
         assert (await s.get(PaymentRun, run_id)).status == "draft"
+
+
+# ── Whether the bank-file panel applies — `bank_file_applies` (§382) ────────
+
+
+@pytest.mark.parametrize(
+    ("record_only", "status", "applies"),
+    [
+        (True, "draft", True),
+        (True, "exported", True),
+        (True, "cancelled", True),
+        (False, "draft", False),
+        (False, "exported", True),
+        (False, "cancelled", False),
+        (False, "completed", False),
+    ],
+)
+async def test_run_bank_file_applies(record_only, status, applies):
+    """The panel applies on every run of a record-only tenant, and on a
+    processor tenant only to a run still holding an exported file."""
+    from types import SimpleNamespace
+
+    from app.services.payment_controls import run_bank_file_applies
+
+    run = SimpleNamespace(status=status)
+    assert run_bank_file_applies(run, record_only=record_only) is applies
+
+
+@pytest.mark.parametrize("mode", ("record_only", "processor"))
+async def test_the_bank_file_panel_verdict_in_each_mode(realdb, mode):
+    """`GET /runs/{id}` says whether the bank-file panel applies, and on a
+    tenant switched to processor mode with a run still exported it does —
+    with Verify allowed and every control that would release or redo the file
+    refused under its code, so the dialog can say why (decisions §362, §382).
+    A processor tenant's draft has no file and the panel does not apply."""
+    payments = {
+        "record_only": {"mode": "record_only", "nacha": NACHA_CFG},
+        "processor": {"mode": "processor", "provider": "mock", "nacha": NACHA_CFG},
+    }[mode]
+    someone = realdb.info(TENANT).users["ap_manager"]
+
+    async def read(status):
+        run_id = await _bank_run(realdb, status=status, initiated_by=someone)
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.get(f"/api/payments/runs/{run_id}")
+        assert resp.status_code == 200, resp.text
+        return run_id, resp.json()
+
+    # The run is exported while the tenant records payments; the switch (if
+    # any) happens after, which is the case the follow-up describes.
+    await _set_payments_settings(realdb, {"mode": "record_only", "nacha": NACHA_CFG})
+    exported_id = await _bank_run(realdb, status="exported", initiated_by=someone)
+    await _set_payments_settings(realdb, payments)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        body = (await c.get(f"/api/payments/runs/{exported_id}")).json()
+    assert body["bank_file_applies"] is True, body
+    actions = body["actions"]
+    assert actions["nacha_verify"] is None, actions
+    assert actions["nacha_export"]["code"] == "nacha_already_exported", actions
+    if mode == "processor":
+        assert actions["nacha_void"]["code"] == "nacha_void_requires_record_only", actions
+        assert actions["nacha_regenerate"]["code"] == "nacha_requires_record_only", actions
+    else:
+        assert actions["nacha_void"] is None, actions
+        assert actions["nacha_regenerate"] is None, actions
+
+    # Verify is what the verdict says: accepted in either mode, and the run
+    # keeps its claim.
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post(f"/api/payments/runs/{exported_id}/nacha/verify")
+    assert resp.status_code == 200, resp.text
+    async with realdb.sessionmaker(TENANT)() as s:
+        assert (await s.get(PaymentRun, exported_id)).status == "exported"
+
+    _, draft = await read("draft")
+    assert draft["bank_file_applies"] is (mode == "record_only"), draft

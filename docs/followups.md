@@ -1199,24 +1199,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       that, when present, appends one debit entry for the batch total and switches
       the batch to service class 200, with builder tests on the control totals.
       **Trigger:** a pilot customer's bank rejects or asks for a balanced file.
-- [ ] **(c) An exported run on a tenant since switched to processor mode shows no
-      bank-file panel.** `RunDetailModal`'s `showBankFile` requires
-      `canDownloadBankFile(executionMode)` (record-only), so after a switch the
-      dialog hides "Verify before upload", which decisions §362 deliberately
-      leaves open in either mode, and hides "Bank rejected the file" without
-      saying why the release is refused (`nacha_void_requires_record_only`). The
-      only control left is Record. Nothing is paid twice, since the server keeps
-      the claim, but a reader still holding the file cannot check it before
-      uploading and is not told why the run cannot be released. **Durable fix:**
-      also show the panel for an `exported` run whatever the mode. Download and
-      Regenerate stay hidden or disabled by their own verdicts
-      (`nacha_requires_record_only`). Verify stays offered. Reject renders
-      disabled beside the void refusal's sentence, the reason line
-      `run-nacha-void-refusal` that the gnacha lane of PR #707 added. Extend
-      `tests-e2e/payments/nacha-verify.spec.ts` with the switched tenant.
-      **Trigger:** the first tenant that moves from record-only to a processor
-      with a run still exported, or the next change to the run dialog's bank-file
-      panel.
 
 ### Surfaced by scoping the QuickBooks Online adapter (2026-10-07)
 

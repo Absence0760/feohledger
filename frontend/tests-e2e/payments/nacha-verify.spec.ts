@@ -1,5 +1,11 @@
 import { expect, test } from '../fixtures/helpers';
-import { routeVerify, runDialog, verifyAnswer, withExportedRun } from '../fixtures/nachaRun';
+import {
+	routeVerify,
+	runDialog,
+	switchPaymentsMode,
+	verifyAnswer,
+	withExportedRun
+} from '../fixtures/nachaRun';
 
 /**
  * "Verify before upload" in the run dialog (decisions §362): after exporting a
@@ -19,10 +25,16 @@ import { routeVerify, runDialog, verifyAnswer, withExportedRun } from '../fixtur
  * is pinned in the backend's `test_nacha.py`.
  *
  * A refused control states its reason, like Download and Regenerate. No
- * refusal the server raises today renders Verify or "Bank rejected the file"
- * disabled — each one hides the control instead (`types/runOutside.ts`) — so
- * the run read is routed to carry one this build does not know, which is
- * exactly the case the reason line exists for.
+ * refusal the server raises today renders Verify disabled — each one hides it
+ * instead (`types/runOutside.ts`) — so the run read is routed to carry one this
+ * build does not know, which is exactly the case the reason line exists for.
+ *
+ * A run exported before the tenant switched to processor mode keeps the panel
+ * (decisions §382): the server says it applies (`bank_file_applies`), Verify
+ * stays allowed (§362 gives it no record-only gate), and Regenerate and "Bank
+ * rejected the file" render disabled beside the server's reasons, so the
+ * reader holding the file can check it and learns why the run cannot be
+ * released.
  */
 
 test.describe('run dialog — verify the bank file before upload', () => {
@@ -148,6 +160,72 @@ test.describe('run dialog — verify the bank file before upload', () => {
 			await expect(modal.getByTestId('run-nacha-void-refusal')).toHaveText(
 				'E2E: the release is refused for a reason this build does not know.'
 			);
+		});
+	});
+
+	test('a run exported before a switch to processor mode keeps Verify and says why it cannot be released', async ({
+		page
+	}) => {
+		await withExportedRun(page, async (run) => {
+			await switchPaymentsMode(page, 'processor');
+			// Reopen the dialog so it reads the run, and the mode, again.
+			await page.keyboard.press('Escape');
+			await expect(runDialog(page)).toHaveCount(0);
+			await page.reload();
+			const opened = page.waitForResponse(
+				(r) =>
+					new URL(r.url()).pathname === `/api/payments/runs/${run.runId}` &&
+					r.request().method() === 'GET'
+			);
+			await page.getByRole('button', { name: `View payment run ${run.runId.slice(0, 8)}` }).click();
+			const body = (await (await opened).json()) as {
+				bank_file_applies: boolean;
+				actions: Record<string, { code: string } | null>;
+			};
+			// The server's verdict, not a restated mode check.
+			expect(body.bank_file_applies).toBe(true);
+			expect(body.actions.nacha_verify).toBeNull();
+			expect(body.actions.nacha_void?.code).toBe('nacha_void_requires_record_only');
+			expect(body.actions.nacha_regenerate?.code).toBe('nacha_requires_record_only');
+
+			const modal = runDialog(page);
+			await expect(modal.locator('.status-badge')).toHaveText('Exported');
+			await expect(modal.getByTestId('run-nacha-panel')).toBeVisible();
+			// No first file to download: it is already out.
+			await expect(modal.getByRole('button', { name: 'Download bank file (NACHA)' })).toHaveCount(0);
+
+			const verify = modal.getByTestId('nacha-verify');
+			await expect(verify).toBeEnabled();
+			await expect(verify).not.toHaveAttribute('aria-describedby');
+			await expect(modal.getByTestId('run-nacha-verify-refusal')).toHaveCount(0);
+
+			const reject = modal.getByTestId('nacha-reject');
+			await expect(reject).toBeDisabled();
+			await expect(reject).toHaveAttribute('aria-describedby', 'run-nacha-void-refusal');
+			await expect(modal.getByTestId('run-nacha-void-refusal')).toHaveText(
+				"This run's bank file was exported while FeohLedger recorded your payments, and payments are now sent through a processor. Releasing the run could pay these suppliers twice. If the bank took the file, record the run as paid. If it didn't, an admin must switch payments back to record-only first."
+			);
+
+			const regenerate = modal.getByRole('button', { name: 'Regenerate file' });
+			await expect(regenerate).toBeDisabled();
+			await expect(regenerate).toHaveAttribute('aria-describedby', 'run-nacha-regenerate-refusal');
+			await expect(modal.getByTestId('run-nacha-regenerate-refusal')).toHaveText(
+				'A bank file is only available when FeohLedger records your payments rather than sending them. An admin can change this under Settings → Payments.'
+			);
+
+			// Verify is the real check, and the run keeps its claim.
+			const verified = page.waitForResponse(
+				(r) =>
+					new URL(r.url()).pathname === `/api/payments/runs/${run.runId}/nacha/verify` &&
+					r.request().method() === 'POST'
+			);
+			await verify.click();
+			expect((await verified).status()).toBe(200);
+			await expect(modal.getByTestId('nacha-verify-result')).toHaveAttribute(
+				'data-result',
+				'verified'
+			);
+			await expect(modal.locator('.status-badge')).toHaveText('Exported');
 		});
 	});
 });

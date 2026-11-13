@@ -2323,6 +2323,17 @@ result on screen. Not checked again: the local facts `dispatch_preflight` read
 at export — they cannot change the file already on disk, only a bill paid
 elsewhere makes it pay twice.
 
+**Where the panel applies** — `GET /runs/{id}`'s `bank_file_applies`
+(`payment_controls.run_bank_file_applies`, decisions §382): `true` on every run
+of a record-only tenant, and on a processor tenant only while the run's stored
+status is `exported` (a file exported before the switch). The dialog renders
+the panel from that and its controls from their own verdicts, never from the
+tenant's mode. On such a switched run Verify stays allowed; Download is hidden
+(`nacha_already_exported`); Regenerate (`nacha_requires_record_only`) and "Bank
+rejected the file" (`nacha_void_requires_record_only`) render disabled beside
+those refusals' sentences, so the reader learns why the run cannot be released.
+A processor tenant's draft has no file and gets no panel.
+
 Once the bank has taken the file, `POST /api/payments/runs/{id}/record-outside`
 `{reference, paid_on}` records every pending payment of the `exported` (or
 `draft`, if the customer paid some other way) run as paid outside, keeping each
