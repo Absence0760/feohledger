@@ -4155,6 +4155,8 @@ export const en = {
 	'refusal.invoiceEntryWindowClosed': "This step is past invoice entry, so it needs an AP manager.",
 	'refusal.invoiceNotErpSendable': "Only an approved invoice can be sent to the ERP.",
 	'refusal.invoiceNotErpRetryable': "Only an approved invoice whose ERP push failed can be retried.",
+	'refusal.paymentBlocksCompletion': "FeohLedger is already paying this invoice: it has a live payment. Cancel its payment run or void the payment before closing the invoice.",
+	'refusal.cardBlocksCompletion': "A virtual card has been issued to pay this invoice. Cancel the card before closing the invoice.",
 	'refusal.paymentRunSegregation': "Segregation of duties: the user who created this payment run cannot also approve or execute it. A different user must.",
 	'refusal.paymentRunAwaitingCfo': "This run exceeds the organization's CFO-approval threshold and is awaiting sign-off from a user with the CFO role.",
 	'refusal.paymentRunNothingToRetry': "None of this run's failed payments can be sent again safely: each may have reached the payment processor. Check each one with the processor, then void it or record what happened.",

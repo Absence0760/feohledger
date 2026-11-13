@@ -154,14 +154,29 @@ async def erp_export_live_claim(db: AsyncSession, invoice_id: uuid.UUID) -> str 
     a payment not ``voided`` / ``failed`` / ``cancelled``, a card not
     ``cancelled``. A payment is named first when both exist.
     """
+    return (await live_claims(db, [invoice_id])).get(invoice_id)
+
+
+async def live_claims(db: AsyncSession, invoice_ids) -> dict[uuid.UUID, str]:
+    """The batch form of :func:`erp_export_live_claim`: each of ``invoice_ids``
+    one of our rails is already paying → :data:`CLAIM_PAYMENT` or
+    :data:`CLAIM_VIRTUAL_CARD` (a payment named first). Ids with no live claim
+    are absent. Also what closing an invoice to ``done`` asks (decisions §357,
+    ``api/workflow.close_refusals``), so "live" has one reading there too."""
     from app.services.card_issuance import live_card_invoice_ids
     from app.services.payment_runs import live_payment_invoices
 
-    if invoice_id in await live_payment_invoices(db, [invoice_id]):
-        return CLAIM_PAYMENT
-    if invoice_id in await live_card_invoice_ids(db, [invoice_id]):
-        return CLAIM_VIRTUAL_CARD
-    return None
+    ids = list(invoice_ids)
+    if not ids:
+        return {}
+    claims: dict[uuid.UUID, str] = dict.fromkeys(
+        await live_payment_invoices(db, ids), CLAIM_PAYMENT
+    )
+    # Cards only for what no payment already claims: the single form never
+    # asked the card table once a payment answered, and still does not.
+    rest = [i for i in ids if i not in claims]
+    claims.update(dict.fromkeys(await live_card_invoice_ids(db, rest), CLAIM_VIRTUAL_CARD))
+    return claims
 
 
 def claimed_export_params(claim: str, *, possibly_posted: bool = False) -> dict:

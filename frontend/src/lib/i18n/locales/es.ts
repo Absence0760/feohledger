@@ -3971,6 +3971,8 @@ export const messages = {
 	'refusal.invoiceEntryWindowClosed': "Este paso va más allá del registro de la factura, por lo que requiere un gerente de cuentas por pagar.",
 	'refusal.invoiceNotErpSendable': "Solo una factura aprobada puede enviarse al ERP.",
 	'refusal.invoiceNotErpRetryable': "Solo se puede reintentar una factura aprobada cuyo envío al ERP falló.",
+	'refusal.paymentBlocksCompletion': "FeohLedger ya está pagando esta factura: tiene un pago activo. Cancele su lote de pago o anule el pago antes de cerrar la factura.",
+	'refusal.cardBlocksCompletion': "Se ha emitido una tarjeta virtual para pagar esta factura. Cancele la tarjeta antes de cerrar la factura.",
 	'refusal.paymentRunSegregation': "Segregación de funciones: el usuario que creó esta remesa de pagos no puede también aprobarla ni ejecutarla. Debe hacerlo otro usuario.",
 	'refusal.paymentRunAwaitingCfo': "Esta remesa supera el umbral de aprobación del CFO de la organización y espera la aprobación de un usuario con el rol de CFO.",
 	'refusal.paymentRunNothingToRetry': "Ninguno de los pagos fallidos de esta remesa puede reenviarse con seguridad: cada uno pudo haber llegado al procesador de pagos. Verifique cada uno con el procesador y luego anúlelo o registre lo que ocurrió.",

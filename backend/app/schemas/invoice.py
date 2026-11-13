@@ -385,10 +385,17 @@ class BulkStatusSkip(BaseModel):
     frozen"; `reason` carries the real cause (the underlying service's own
     `HTTPException.detail`) so the caller isn't misled into treating an
     authorization refusal as a data problem.
+
+    A skip from a coded refusal (`api/refusals.coded_refusal`) also carries its
+    ``code`` and ``params``, so the browser states it in the reader's language
+    and falls back to ``reason`` for a code it does not know. Both are left out
+    of an uncoded skip (the route drops ``None``), whose shape is unchanged.
     """
 
     id: str
     reason: str
+    code: str | None = None
+    params: dict | None = None
 
 
 class BulkStatusResponse(BaseModel):
