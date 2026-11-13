@@ -50,7 +50,7 @@ test.describe('a near-duplicate CSV invoice number is reported, localized', () =
 					name: 'seed.csv',
 					mimeType: 'text/csv',
 					buffer: Buffer.from(
-						`invoice_number,vendor_name,amount,status\n${existing},${vendor},10.00,new\n`
+						`invoice_number,vendor_name,amount,currency,status\n${existing},${vendor},10.00,USD,new\n`
 					)
 				}
 			}
@@ -68,7 +68,9 @@ test.describe('a near-duplicate CSV invoice number is reported, localized', () =
 		await modal.locator('input[type="file"]').setInputFiles({
 			name: 'invoices.csv',
 			mimeType: 'text/csv',
-			buffer: Buffer.from(`invoice_number,vendor_name,amount,status\n${nearMatch},${vendor},10.00,new\n`)
+			buffer: Buffer.from(
+				`invoice_number,vendor_name,amount,currency,status\n${nearMatch},${vendor},10.00,USD,new\n`
+			)
 		});
 
 		const imported = page.waitForResponse(

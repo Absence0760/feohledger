@@ -100,6 +100,8 @@ class FakeOAuthApp:
                 # tokens carry, and how many refresh grants succeeded.
                 "lifetime": 1800,
                 "refreshes": 0,
+                # Well-formed, client-authenticated revoke requests received.
+                "revocations": 0,
             },
         )
 
@@ -164,26 +166,41 @@ class FakeOAuthApp:
             "expires_in": st["lifetime"],
         }
 
-    async def revoke(self, request: Request) -> Response:
-        """RFC 7009 revocation (HTTP Basic client auth, form ``token``).
+    async def revoke(self, request: Request, *, client_auth: str = "basic") -> Response:
+        """RFC 7009 revocation: a form body carrying ``token``, the client by
+        HTTP Basic or, with ``client_auth="body"``, as ``client_id`` /
+        ``client_secret`` form fields (Sage's way).
 
         Revoking the live refresh token ends the consent: it and every access
         token issued under it stop working. An unknown token is still a 200, as
-        RFC 7009 requires, so a revoke never reveals which tokens exist.
+        RFC 7009 requires, so a revoke never reveals which tokens exist. A JSON
+        body, or a Basic header sent to a form-fields provider, is refused, so
+        a client sending the wrong shape is caught rather than ignored.
         """
         import base64
 
-        header = request.headers.get("authorization", "")
-        try:
-            decoded = base64.b64decode(header.removeprefix("Basic ")).decode()
-        except Exception:  # noqa: BLE001
-            decoded = ""
-        cid, _, secret = decoded.partition(":")
+        raw = (await request.body()).decode("utf-8", errors="replace")
+        form = {k: v[0] for k, v in parse_qs(raw).items()}
+        if not request.headers.get("content-type", "").startswith(
+            "application/x-www-form-urlencoded"
+        ) or not form.get("token"):
+            raise ProviderError(400, {"error": "invalid_request"})
+        if client_auth == "basic":
+            header = request.headers.get("authorization", "")
+            try:
+                decoded = base64.b64decode(header.removeprefix("Basic ")).decode()
+            except Exception:  # noqa: BLE001
+                decoded = ""
+            cid, _, secret = decoded.partition(":")
+        else:
+            if request.headers.get("authorization"):
+                raise ProviderError(401, {"error": "invalid_client"})
+            cid, secret = form.get("client_id", ""), form.get("client_secret", "")
         if (cid, secret) != (self.client_id, self.client_secret):
             raise ProviderError(401, {"error": "invalid_client"})
-        raw = (await request.body()).decode("utf-8", errors="replace")
-        token = (parse_qs(raw).get("token") or [""])[0]
+        token = form["token"]
         st = self._state()
+        st["revocations"] += 1
         if token and token == st["refresh_token"]:
             st["refresh_token"] = None
             st["issued"].clear()
@@ -211,8 +228,11 @@ async def fake_oauth_lifetime(key: str, body: dict) -> dict:
 
 @app.get("/__oauth/{key}/stats")
 async def fake_oauth_stats(key: str) -> dict:
-    """Test hook: how many refresh grants succeeded (proves a refresh ran)."""
-    return {"refreshes": _fake_oauth_app(key)._state()["refreshes"]}
+    """Test hook: how many refresh grants succeeded (proves a refresh ran), and
+    how many well-formed, client-authenticated revoke requests arrived (proves
+    a Disconnect reached the provider)."""
+    st = _fake_oauth_app(key)._state()
+    return {"refreshes": st["refreshes"], "revocations": st["revocations"]}
 
 
 @app.post("/__oauth/{key}/revoke-access")
@@ -1835,6 +1855,7 @@ async def xero_organisation(request: Request) -> JSONResponse:
                 {
                     "OrganisationID": XERO_TENANT_ID,
                     "Name": "Fake Xero Org",
+                    "ShortCode": "!fAkE1",
                     "BaseCurrency": "ZAR",
                     "CountryCode": "ZA",
                 }
@@ -1980,16 +2001,35 @@ XERO_TENANT_ID = "fake-xero-tenant-1"
 XERO_OAUTH = FakeOAuthApp("xero", "fake-xero-client", "fake-xero-secret")
 
 
+def _xero_multi_org() -> dict[str, dict[str, int]]:
+    """Consents armed by POST /xero/__organisations, by state → code → token."""
+    return _xero_state().setdefault("multi_org", {"states": {}, "codes": {}, "tokens": {}})
+
+
 @app.get("/xero/identity/connect/authorize")
 async def xero_authorize(
     redirect_uri: str, state: str, client_id: str = "", response_type: str = ""
 ) -> Response:
-    return XERO_OAUTH.authorize(redirect_uri, state, client_id, response_type)
+    resp = XERO_OAUTH.authorize(redirect_uri, state, client_id, response_type)
+    multi = _xero_multi_org()
+    count = multi["states"].pop(state, None)
+    if count:
+        from urllib.parse import urlsplit
+
+        code = parse_qs(urlsplit(resp.headers["location"]).query)["code"][0]
+        multi["codes"][code] = count
+    return resp
 
 
 @app.post("/xero/identity/connect/token")
 async def xero_token(request: Request) -> dict:
-    return await XERO_OAUTH.token(request, client_auth="basic")
+    form = {k: v[0] for k, v in parse_qs((await request.body()).decode()).items()}
+    body = await XERO_OAUTH.token(request, client_auth="basic")
+    multi = _xero_multi_org()
+    count = multi["codes"].pop(form.get("code", ""), None)
+    if count and form.get("grant_type") == "authorization_code":
+        multi["tokens"][body["access_token"]] = count
+    return body
 
 
 @app.post("/xero/identity/connect/revocation")
@@ -1997,20 +2037,48 @@ async def xero_revocation(request: Request) -> Response:
     return await XERO_OAUTH.revoke(request)
 
 
+#: The extra organisations `GET /xero/connections` lists for a consent armed
+#: by `POST /xero/__organisations` (the backend's company picker, decisions
+#: §355). Fixed literals the e2e asserts.
+XERO_EXTRA_TENANT_ID = "fake-xero-tenant-{n}"
+
+
+@app.post("/xero/__organisations")
+async def xero_organisations(body: dict) -> dict:
+    """Test hook: ``{"state", "count"}`` — the consent carrying this ``state``
+    authorises ``count`` organisations. Keyed on the one consent, not set
+    globally, so a Xero connect in a parallel e2e worker is unaffected.
+    Reset by POST /__reset."""
+    state = str(body.get("state") or "")
+    if not state:
+        raise ProviderError(400, {"detail": "state is required"})
+    _xero_multi_org()["states"][state] = max(1, int(body.get("count", 2)))
+    return {"status": "ok"}
+
+
 @app.get("/xero/connections")
 async def xero_connections(request: Request) -> Response:
     if not XERO_OAUTH.issued(request):
         return JSONResponse({"Title": "Unauthorized"}, status_code=401)
-    return JSONResponse(
-        [
+    rows = [
+        {
+            "id": "fake-xero-connection-1",
+            "tenantId": XERO_TENANT_ID,
+            "tenantType": "ORGANISATION",
+            "tenantName": "Fake Xero Org",
+        }
+    ]
+    bearer = request.headers.get("authorization", "").removeprefix("Bearer ")
+    for n in range(2, _xero_multi_org()["tokens"].get(bearer, 1) + 1):
+        rows.append(
             {
-                "id": "fake-xero-connection-1",
-                "tenantId": XERO_TENANT_ID,
+                "id": f"fake-xero-connection-{n}",
+                "tenantId": XERO_EXTRA_TENANT_ID.format(n=n),
                 "tenantType": "ORGANISATION",
-                "tenantName": "Fake Xero Org",
+                "tenantName": f"Fake Xero Org {n}",
             }
-        ]
-    )
+        )
+    return JSONResponse(rows)
 
 app.include_router(xero)
 
@@ -2254,6 +2322,14 @@ async def sage_authorize(
 @app.post("/sage/oauth2/token")
 async def sage_token(request: Request) -> dict:
     return await SAGE_OAUTH.token(request, client_auth="body")
+
+
+@app.post("/sage/oauth2/revoke")
+async def sage_revoke(request: Request) -> Response:
+    """Sage's revocation (``https://oauth.accounting.sage.com/revoke``): the
+    refresh token as form ``token``, the client as form fields like the token
+    endpoint. Ends the consent, so a later refresh is ``invalid_grant``."""
+    return await SAGE_OAUTH.revoke(request, client_auth="body")
 
 
 @sage.get("/businesses")

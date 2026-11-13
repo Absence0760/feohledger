@@ -202,7 +202,22 @@ env:
   # first page of daily work, /invoices, is next at 68, then /organization 51.
   # ~10% headroom on main's 391, the same margin as the earlier entries.
   # MAX_LARGEST_CHUNK_KB is unchanged at 100.
-  MAX_TOTAL_KB: 430
+  # 2026-11-13 — total 430 → 480, genuine product weight. Main had already
+  # reached 427 of 430 (shell 201, heaviest route 97 /help/guides/[id],
+  # catalogues main 89 / help 10 / portal 6 / settings 24 / marketing 4).
+  # Round PR #707 measured 437 on CI, +10 KB of localized refusals and UI:
+  # roughly 60 new coded refusals and their sentences in six locales (keyed
+  # exception descriptions §358, SAML bridge §359, expense §361, NACHA §362,
+  # document and financial lock §363 / §370, CSV rows §372, vendor merge
+  # §373), the extracted admin pages (§360) and the new controls. Per kind:
+  # shell 201 → 205 (the coded-refusal registry the whole app reads), main
+  # catalogue 89 → 92, settings 24 → 26; heaviest route unchanged. ~10%
+  # headroom on 437, the same margin as the earlier entries. Trigger to
+  # trim instead of ratcheting again: the next time `refusal.*` crosses
+  # ~15 KB of the main catalogue, give refusal sentences their own lazy
+  # slice the way help (§261) and settings (§300) were split.
+  # MAX_LARGEST_CHUNK_KB is unchanged at 100 (largest chunk 92).
+  MAX_TOTAL_KB: 480
   MAX_LARGEST_CHUNK_KB: 100
 
 jobs:

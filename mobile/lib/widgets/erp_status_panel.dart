@@ -4,6 +4,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
+import 'package:feohledger_mobile/widgets/external_link.dart';
 
 /// ERP-sync facts derived from an invoice's audit log, mirroring the web
 /// modal's `erpInfo`: the latest `invoice.erp_*` / `invoice.completed` entry
@@ -58,10 +59,14 @@ class ErpStatusPanel extends StatelessWidget {
   final Invoice invoice;
   final ErpInfo? erpInfo;
 
+  /// Injected by tests; the reference link otherwise opens externally.
+  final UrlOpener? opener;
+
   const ErpStatusPanel({
     super.key,
     required this.invoice,
     required this.erpInfo,
+    this.opener,
   });
 
   static const _erpStatuses = {
@@ -93,75 +98,155 @@ class ErpStatusPanel extends StatelessWidget {
     final info = erpInfo;
 
     final reference = _reference;
+    // The bill's own page in the ERP, when the backend built one (decisions
+    // §302, §354). A linked reference is its own semantics node so it stays
+    // actionable, and the nodes around it keep the screen's order.
+    final linked =
+        reference != null && ExternalLink.safeUri(invoice.erpDocumentUrl) != null;
+    // Each detail row, with what a screen reader announces for it. The two
+    // are built together so the announcement cannot drop a row the screen
+    // shows (the last update used to be visible and never read).
     final rows = <Widget>[];
-    if (reference != null) {
-      rows.add(_kv(l.erpStatusReference, reference));
+    final announced = <String>[];
+    void addRow(String label, String value, {bool error = false}) {
+      rows.add(_kv(label, _text(value, error: error)));
+      announced.add('$label $value');
     }
-    if (info?.erpDocumentId != null && info!.erpDocumentId!.isNotEmpty) {
-      rows.add(_kv(l.erpStatusDocumentId, info.erpDocumentId!));
+
+    final documentId = info?.erpDocumentId;
+    if (documentId != null && documentId.isNotEmpty) {
+      addRow(l.erpStatusDocumentId, documentId);
     }
-    if (info?.lastError != null && info!.lastError!.isNotEmpty) {
-      rows.add(_kv(l.erpStatusError, info.lastError!, error: true));
+    final lastError = info?.lastError;
+    if (lastError != null && lastError.isNotEmpty) {
+      addRow(l.erpStatusError, lastError, error: true);
     }
     if (info != null) {
-      final by = info.actor != null ? ' by ${info.actor}' : '';
-      rows.add(_kv(l.erpStatusLastUpdate,
-          '${info.actionLabel}$by · ${formatDateTime(info.time)}'));
+      final actor = info.actor;
+      final action = actor != null
+          ? l.erpStatusActionBy(info.actionLabel, actor)
+          : info.actionLabel;
+      addRow(l.erpStatusLastUpdate, '$action · ${formatDateTime(info.time)}');
     }
-    if (rows.isEmpty) {
+    if (rows.isEmpty && reference == null) {
       // ERP-bound status but no audit detail yet (e.g. sending in flight).
-      rows.add(_kv(l.erpStatusStatus, invoice.status.label));
+      addRow(l.erpStatusStatus, invoice.status.label);
     }
 
-    // One merged announcement for the whole panel.
-    final summary = [
-      l.erpStatusTitle,
-      if (reference != null) '${l.erpStatusReference} $reference',
-      if (info?.erpDocumentId != null) '${l.erpStatusDocumentId} ${info!.erpDocumentId}',
-      if (info?.lastError != null) '${l.erpStatusError} ${info!.lastError}',
-    ].join(', ');
-
-    return Semantics(
-      label: summary,
-      excludeSemantics: true,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.indigo.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.indigo.withValues(alpha: 0.3)),
+    final header = Row(
+      children: [
+        Icon(Icons.sync_alt, size: 18, color: Colors.indigo.shade700),
+        const SizedBox(width: 8),
+        Text(
+          l.erpStatusTitle,
+          style: TextStyle(
+            color: Colors.indigo.shade700,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
         ),
+      ],
+    );
+
+    final Widget? referenceRow = reference == null
+        ? null
+        : _kv(
+            l.erpStatusReference,
+            center: linked,
+            linked
+                ? ExternalLink(
+                    key: const ValueKey('erp-reference-link'),
+                    text: reference,
+                    url: invoice.erpDocumentUrl,
+                    hint: l.erpStatusOpensInErp,
+                    failureMessage: l.externalLinkOpenFailed,
+                    style: _valueStyle,
+                    opener: opener,
+                  )
+                : _text(reference),
+          );
+
+    final Widget body;
+    if (linked) {
+      // Three nodes in the order they sit on screen: the title, the reference
+      // (its label, then the link with its own action), then the details
+      // merged. One summary read before the reference put the details ahead
+      // of the row that comes first visually (WCAG 1.3.2).
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            label: l.erpStatusTitle,
+            excludeSemantics: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [header, const SizedBox(height: 8)],
+            ),
+          ),
+          referenceRow!,
+          if (rows.isNotEmpty)
+            Semantics(
+              key: const ValueKey('erp-status-details'),
+              label: announced.join(', '),
+              excludeSemantics: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: rows,
+              ),
+            ),
+        ],
+      );
+    } else {
+      // Nothing actionable: one merged announcement, in screen order.
+      body = Semantics(
+        label: [
+          l.erpStatusTitle,
+          if (reference != null) '${l.erpStatusReference} $reference',
+          ...announced,
+        ].join(', '),
+        excludeSemantics: true,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(Icons.sync_alt, size: 18, color: Colors.indigo.shade700),
-                const SizedBox(width: 8),
-                Text(
-                  l.erpStatusTitle,
-                  style: TextStyle(
-                    color: Colors.indigo.shade700,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
+            header,
             const SizedBox(height: 8),
+            ?referenceRow,
             ...rows,
           ],
         ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.indigo.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.indigo.withValues(alpha: 0.3)),
       ),
+      child: body,
     );
   }
 
-  Widget _kv(String label, String value, {bool error = false}) {
+  static const _valueStyle = TextStyle(fontSize: 13);
+
+  Widget _text(String value, {bool error = false}) => Text(
+        value,
+        style: TextStyle(
+          fontSize: 13,
+          color: error ? Colors.red.shade900 : null,
+          fontWeight: error ? FontWeight.w600 : null,
+        ),
+      );
+
+  /// A label/value row. [center] aligns the label with a 48-dp link target.
+  Widget _kv(String label, Widget value, {bool center = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+            center ? CrossAxisAlignment.center : CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 110,
@@ -174,16 +259,7 @@ class ErpStatusPanel extends StatelessWidget {
               ),
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 13,
-                color: error ? Colors.red.shade900 : null,
-                fontWeight: error ? FontWeight.w600 : null,
-              ),
-            ),
-          ),
+          Expanded(child: value),
         ],
       ),
     );

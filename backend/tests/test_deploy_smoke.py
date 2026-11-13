@@ -5,8 +5,10 @@ and of `.github/workflows/aws-deploy.yml` (through public DNS), and it must fail
 non-zero, loudly and completely, whenever the deployed stack does not serve as
 it is configured:
 
-- the apex, `api.<domain>/api/health` and a tenant host each serve a 200 with a
-  body — curl verifies the certificate, so the tenant check is the TLS check;
+- the apex (remote mode only: since docs/decisions.md §364 it is CloudFront's,
+  not the VM's), `api.<domain>/api/health` and a tenant host (on the VM, its
+  first vanity host) each serve a 200 with a body — curl verifies the
+  certificate, so the tenant check is the TLS check;
 - `GET /api/public-config` reports `signup_enabled` exactly as the env has it,
   and a captcha site key whenever signup is on (the configured one, if known).
 
@@ -244,19 +246,23 @@ def _vm_env(smoke: Smoke, extra: str = "") -> None:
 
 
 def test_vm_mode_reads_the_env_and_goes_through_the_local_caddy(smoke: Smoke) -> None:
+    vanity = "shop.acmecorp.example"
     _vm_env(smoke, "FEOH_SIGNUP_ENABLED=true\nFEOH_HCAPTCHA_SITEKEY=site-key-1\n")
     (smoke.dir / "tenants.caddy").write_text(
-        "# acme.example.com {\n\n" + f"{TENANT} {{\n\timport spa\n}}\n\nzeta.x {{\n}}\n"
+        "# acme.example.com {\n\n" + f"{vanity} {{\n\timport vanity\n}}\n\nzeta.x {{\n}}\n"
     )
     smoke.healthy(signup=True)
+    smoke.serve(f"https://{vanity}/")
     result = smoke.run("--vm")
     assert result.returncode == 0, result.stderr
     calls = smoke.calls()
-    assert len(calls) == 4
+    assert len(calls) == 3
     for call in calls:
         host = call.split()[-1].removeprefix("https://").split("/", 1)[0]
         assert f"--resolve {host}:443:127.0.0.1" in call
-    assert any(c.endswith(f"https://{TENANT}/") for c in calls), "first tenant host checked"
+    assert any(c.endswith(f"https://{vanity}/") for c in calls), "first vanity host checked"
+    # The apex is CloudFront's (§364): the VM's Caddy has no block for it.
+    assert not any(c.endswith(f"https://{APP}/") for c in calls)
 
 
 def test_vm_mode_defaults_signup_on_like_the_app(smoke: Smoke) -> None:
@@ -269,15 +275,22 @@ def test_vm_mode_defaults_signup_on_like_the_app(smoke: Smoke) -> None:
     assert "the environment has it on" in result.stderr
 
 
-def test_vm_mode_without_a_tenant_says_so(smoke: Smoke) -> None:
-    """A first deploy runs before add-tenant.sh: there is no tenant host to
-    check yet, and that is said, not passed over silently."""
+def test_vm_mode_without_a_vanity_host_says_so(smoke: Smoke) -> None:
+    """With no vanity host the VM issues no certificate beyond api., and that is
+    said, not passed over silently."""
     _vm_env(smoke, "FEOH_SIGNUP_ENABLED=false\n")
     smoke.healthy()
     result = smoke.run("--vm")
     assert result.returncode == 0, result.stderr
-    assert "lists no tenant host yet" in result.stderr
-    assert not any(TENANT in c for c in smoke.calls())
+    assert "lists no vanity host" in result.stderr
+    assert not any(TENANT in c or c.endswith(f"https://{APP}/") for c in smoke.calls())
+
+
+def test_vm_mode_needs_only_the_api_domain(smoke: Smoke) -> None:
+    (smoke.dir / ".env").write_text(f"APP_DOMAIN={APP}\nFEOH_SIGNUP_ENABLED=false\n")
+    result = smoke.run("--vm")
+    assert result.returncode == 2
+    assert "API_DOMAIN missing" in result.stderr
 
 
 def test_vm_mode_without_an_env_exits_2(smoke: Smoke) -> None:

@@ -759,3 +759,105 @@ async def test_sso_callback_broken_config_is_400_not_500(monkeypatch):
     assert exc.value.status_code == 400
     assert exc.value.detail == "SSO is not configured for this tenant."
     assert "client_secret" not in exc.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raised", "reason", "code", "message"),
+    [
+        (
+            "DeactivatedAccount",
+            "inactive",
+            "sso_account_inactive",
+            "This account has been deactivated. Contact your administrator.",
+        ),
+        (
+            "EmailDomainNotAllowed",
+            "domain_blocked",
+            "sso_email_domain_blocked",
+            "Your email domain isn't allowed to sign in to this workspace.",
+        ),
+        (
+            "UnsafeEmailAddress",
+            "unsafe_email",
+            "sso_email_unusable",
+            "The identity provider supplied an unusable email address.",
+        ),
+    ],
+)
+async def test_sso_callback_identity_refusals_are_coded(monkeypatch, raised, reason, code, message):
+    """The OIDC callback's identity refusals are coded refusals in the English
+    they always had, so the callback page localizes them — and the SAML bridge
+    states the same codes (`api/refusals.py`, decisions §359). The audit reason
+    is unchanged."""
+    import uuid
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    import app.services.identity_provisioning as ip
+    from app.api import auth_sso
+
+    exc_type = getattr(ip, raised)
+
+    def _make():
+        return exc_type(uuid.uuid4()) if raised == "DeactivatedAccount" else exc_type("u@acme.com")
+
+    async def _consume_state(state):
+        return {"tenant": "acme", "nonce": "nonce-y"}
+
+    async def _fetch_org(slug, db):
+        return SimpleNamespace(id=uuid.uuid4(), slug="acme", settings={})
+
+    async def _sign_in_settings(db, org):
+        return {}
+
+    config = SimpleNamespace(
+        discovery_url="https://idp.test/.well-known/openid-configuration",
+        client_id="cid",
+        client_secret="not-a-real-secret",
+        allowed_email_domains=[],
+        provider="okta",
+    )
+
+    async def _discovery(url):
+        return {}
+
+    async def _exchange(*a, **kw):
+        return {"id_token": "stub"}
+
+    async def _validate(*a, **kw):
+        return {"email": "u@acme.com", "sub": "sub-1"}
+
+    def _check(email, allowed):
+        if raised == "DeactivatedAccount":
+            return email
+        raise _make()
+
+    async def _jit(*a, **kw):
+        raise _make()
+
+    audits: list[dict] = []
+
+    async def _audit(**kw):
+        audits.append(kw)
+
+    monkeypatch.setattr(auth_sso, "consume_state", _consume_state)
+    monkeypatch.setattr(auth_sso, "_fetch_org_by_slug", _fetch_org)
+    monkeypatch.setattr(auth_sso, "sign_in_settings", _sign_in_settings)
+    monkeypatch.setattr(auth_sso, "_resolve_sso_or_none", lambda settings: config)
+    monkeypatch.setattr(auth_sso, "fetch_discovery", _discovery)
+    monkeypatch.setattr(auth_sso, "exchange_code_for_tokens", _exchange)
+    monkeypatch.setattr(auth_sso, "validate_id_token", _validate)
+    monkeypatch.setattr(auth_sso, "extract_and_check_email", _check)
+    monkeypatch.setattr(auth_sso, "jit_provision", _jit)
+    monkeypatch.setattr(auth_sso, "dispatch_auth_audit", _audit)
+
+    request = SimpleNamespace(client=SimpleNamespace(host="203.0.113.7"), headers={})
+    body = auth_sso.SSOCallbackRequest(code="c", state="s")
+    with pytest.raises(HTTPException) as exc:
+        await auth_sso.sso_callback(body, request, db=None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == {"code": code, "message": message, "params": {}}
+    assert [a["details"]["reason"] for a in audits] == [reason]

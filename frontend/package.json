@@ -46,6 +46,14 @@
 		"overrides": {
 			"cookie@<0.7.0": ">=0.7.0 <0.8.0",
 			"undici@<7.28.0": ">=7.28.0"
+		},
+		"patchedDependencies": {
+			"deepmerge@4.3.1": "patches/deepmerge@4.3.1.patch"
+		},
+		"auditConfig": {
+			"ignoreGhsas": [
+				"GHSA-gcqx-w48m-w2h4"
+			]
 		}
 	}
 }

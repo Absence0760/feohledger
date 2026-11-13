@@ -1258,7 +1258,8 @@ the three cannot disagree about what is live (decisions §309).
   which waits on the send's `FOR UPDATE`; whichever commits first, the other
   sees it and refuses (`payments.md` § The ERP is a third rail).
 - **What the user does:** cancel the run (`POST /api/payments/runs/{id}/cancel`;
-  an exported run first needs `/nacha/void`) or void the payment, or cancel the
+  an exported run first needs `/nacha/void`, on a record-only tenant only —
+  decisions §362) or void the payment, or cancel the
   card, then send again. A voided, failed or cancelled payment and a cancelled
   card no longer hold the invoice.
 - **QuickBooks status sync (§295) covers the other order, and does not
@@ -1395,11 +1396,45 @@ AP manager picks one with **Choose ERP account**
 (`POST /api/gl-accounts/{id}/erp-link`, audited `gl_account.erp_link_confirmed`).
 Only an id the last sync offered, under the same connection, is accepted, and
 only on an unlinked row. A confirmed link is exempt from rules 3 and 4 (it still
-dies with its realm, or when the account leaves the ERP). The live case: an old
+leaves the row with its realm, kept for that company as below, and dies when
+the account leaves the ERP). The live case: an old
 row "Depreciation" when QuickBooks has a top-level "Depreciation" (40) and
 "Truck:Depreciation" (39). Picking 39 for the old row means the top-level
 account cannot also own the code "Depreciation" in that chart (it stays
 `code_taken`): pick the account the invoices coded to the row meant.
+
+**A GL account keeps its state for every company it was synced under**
+(decisions §376, `services/gl_account_erp_links`, migration 0127). A row's
+`erp_account_id` + `erp_link_realm`, its confirmation and its
+`erp_link_candidates` are its state in one company. A chart sync under a named
+realm first files every row's state from another named company in
+`gl_account_erp_links` under that company — the link with its confirmation,
+or the open decision with its candidates — and then puts back on its row the
+state kept for its own company, all before rule 0. So switching ERP company,
+or QuickBooks sandbox to production, and back restores the links a person
+confirmed and the decisions still waiting, instead of re-linking by code and
+asking again (a row whose code is only a legacy key there would otherwise come
+back unlinked with nothing to decide). A restored state is judged like any
+same-company one: rules 3 and 4 re-judge an unconfirmed link, a restored
+decision is refreshed against the pull, and the row it replaced is kept for
+its own company in turn. The response and audit row report `kept`, `restored`
+and `restore_dropped` (a `link_changes` entry with `restored: true` per
+restored link), and the message adds "N restored". Three rules hold:
+
+- **No two rows hold one account on the rules' own judgement.** An
+  unconfirmed kept link whose id another unconfirmed row already holds in that
+  company, or that two unconfirmed kept links claim, is dropped
+  (`restore_dropped`) and the row is judged as it stands. A confirmed link
+  always comes back, since it may share its account with the row named after
+  it, the one share a person can make.
+- **Only a named realm is kept.** A NULL-realm link (pre-0115, or made by a
+  no-realm sync) names no company, so it is judged by rule 0 as before. A
+  no-realm sync neither keeps nor restores. Nothing was backfilled.
+- **The push never reads a kept state.** It posts the row's own link, live in
+  the current realm, so after reconnecting to a company the chart needs one
+  sync before its restored links post (unlike vendors below). A restored
+  unconfirmed link is re-judged by rules 3 and 4 first, and the push cannot
+  run them.
 
 **Inactive accounts** arrive with `active=False` (QuickBooks is queried `where
 Active IN (true, false)`; NetSuite `isinactive`, BC `blocked`; Merge.dev
@@ -1435,11 +1470,15 @@ is (NetSuite and BC included, so the id stays live), with one exception:
 QuickBooks shortens an account path over 100 characters itself, to
 `path[:100 - len(tail)] + "…#<Id>"` (`quickbooks_online._account_code`), which
 stays unique because the id is. An account whose `parent_code` does not fit the
-column syncs without its parent and is reported (`parent_code_dropped`). The
+column syncs without its parent and is reported (`parent_code_dropped`). An
+account NAME longer than `gl_accounts.name` (255) is stored shortened and
+marked by the shared rule below and reported (`names_shortened`); no adapter
+cuts a name itself. The
 response and the `gl_account.synced_from_erp` audit row carry exact counts
 (`created`, `updated`, `unchanged`, `linked`, `conflict_count`,
 `unlinked_count`, `code_drift_count`, `deactivated_count`, `realm_adopted`,
-`parent_code_dropped_count`) and the codes, capped at 50 each in the response
+`kept`, `restored`, `restore_dropped_count`,
+`parent_code_dropped_count`, `names_shortened_count`) and the codes, capped at 50 each in the response
 (the audit row is uncapped), plus the `realm` the pull came from; the
 `/gl-accounts` page shows refused, unlinked and deactivated codes as warnings
 apart from the summary. A collision is never counted as `updated`.
@@ -1465,7 +1504,13 @@ wrong: a repeatable key leaves accounts unlinked, it never merges them.
 **Vendors** (`services/vendor_sync`) already matched by `erp_vendor_id` first.
 The name fallback — adopting a manually created, unlinked vendor of the same
 name — now applies only when exactly one pulled record has that name and
-exactly one unlinked local vendor does. Otherwise neither is linked nor created
+exactly one unlinked local vendor does. "The same name" means the same once
+case and spacing are set aside (`vendor_sync._norm_name`, the key the realm
+evidence below already used), on both sides: "Acme" and " ACME " in one pull,
+or a local "Globex Corp" beside a local "GLOBEX  corp", are one name and so an
+ambiguity, never a link to the exact spelling plus a second vendor for the
+other. A unique match links whatever the spelling, and the local vendor keeps
+its own. Otherwise neither is linked nor created
 and the response reports it (`conflicts`, reason `ambiguous_name`): linking the
 wrong "Acme" posts its bills to another supplier's ERP record. QuickBooks'
 `Vendor.AcctNum` is no longer mapped to our vendor `code`: on a QuickBooks
@@ -1485,6 +1530,56 @@ a named one. An inactive ERP vendor is never created or linked as a payee, and a
 vendor linked to one becomes `inactive` (never the reverse). Business Central
 and Merge.dev vendors with no `id` are skipped, never keyed by the vendor No.,
 `remote_id` or name.
+
+**A vendor keeps its link for every company it was linked in** (decisions
+§356, `services/vendor_erp_links`, migration 0125). The row's `erp_vendor_id` +
+`erp_link_realm` is the link in the company the vendor was last synced under.
+When a sync under another company drops that link, or moves it by the evidence
+rule above, the link is first filed in `vendor_erp_links` under its own realm
+(the audit row's `kept: true`). The next sync under that realm puts it back on
+the row before anything else runs (`change: restored`, `restored` in the
+response, "N relinked" in its message), and files the row's own named link in
+turn. So switching ERP, or QuickBooks sandbox to production, and back restores
+the links the tenant had, including vendors whose names the pull makes
+ambiguous. Three rules hold:
+
+- **The push never uses an id another ERP or company set.** `services/erp`
+  and the PO sync resolve a vendor through `vendor_erp_ids`: the row's link
+  when it is live in the current realm, else the link kept for exactly that
+  realm. A vendor with neither is unlinked there, and the push refuses it
+  `vendor_not_linked` before any HTTP call. A tenant back on a company it used
+  before posts that company's ids at once, before any sync.
+- **No payee shares an ERP supplier.** A kept id that another vendor already
+  holds in that company, or that two kept links claim, is dropped
+  (`unlinked`, `kept: false`) instead of restored. A link from another company
+  is not adopted onto an id a vendor already holds here.
+- **Only a named realm is kept.** A NULL-realm link (pre-0115, or made by a
+  no-realm sync) names no company, so it is dropped as before. A no-realm sync
+  neither keeps nor restores anything. No link was backfilled: the ones earlier
+  syncs dropped appear only in audit rows, which are history, not live links.
+
+**A vendor merge moves the duplicates' links to the canonical vendor**
+(decisions §373, `services/vendor_merge._plan_erp_links`): the row link and
+every kept link, company by company, wherever the canonical has none in that
+company. A duplicate linked to the same id the canonical already holds there
+just drops it. Where the two hold **different** ids in one company, the merge
+is refused 409 `vendor_merge_erp_link_conflict` (`params.realms`) with nothing
+moved, because which ERP supplier the merged vendor's bills post to is not the
+merge's to choose. A NULL-realm link names no company, so it conflicts with
+any differing id on the other side (reported as realm `null`). The retired
+duplicate is left holding no link, so no later sync restores one onto it.
+
+**A person can clear a vendor's link in one company** (decisions §375,
+`services/vendor_erp_unlink`): `POST /api/vendors/{id}/erp-links/unlink`,
+`vendor.manage`, audited `vendor.erp_unlinked`. It clears the row link and the
+kept link for that realm, and is refused 409 `vendor_erp_unlink_in_flight`
+while one of the vendor's invoices is `sending_to_erp`, `sent_to_erp` to that
+company (or to an unrecorded one), or `failed` with its outcome unknown. That
+is the way through the merge conflict above. The vendor's next push there is
+refused `vendor_not_linked`; a later sync re-links the record only by the
+ordinary rules (by id, or a name unique on both sides), never onto a vendor
+still linked in that company. Detail: [vendor-management.md](vendor-management.md)
+§ Unlinking a vendor from one ERP company.
 
 **Merge.dev suppliers are Contacts.** Merge's Accounting API has no `/vendors`
 path and no Vendor model; the adapter lists `GET /contacts?is_supplier=true`
@@ -1511,6 +1606,24 @@ over-long `code`, email, phone, address, tax id or payment terms is not written
 each such record in `values_too_long` (`name`, `erp_vendor_id`, `fields`, field
 names only), and its audit row names the fields. Before, one NetSuite
 `entityid` over `vendors.code`'s 50 characters rolled back the whole sync.
+
+**An ERP name too long for its column is shortened and marked, for vendors and
+GL accounts alike** (`services/erp_record_names.fit_name`, decisions §353).
+`vendors.name` and `gl_accounts.name` are 255 characters; QuickBooks'
+`DisplayName` allows 500. A longer name keeps its first 254 characters
+(trailing space trimmed) and ends in `…`, the record still syncs and links, and
+the run reports it: `names_shortened` on the vendor response
+(`{"name", "erp_vendor_id"}`, the stored name) with `name_shortened: true` on
+that vendor's audit row, and `names_shortened` / `names_shortened_count` (codes)
+on the chart response and audit row. The `/vendors` and `/gl-accounts` pages
+show it as a warning. A name is a label — a bill posts by the ERP id, an account
+matches by id and code — so it is shortened rather than refused; a code or tax
+id is an identifier and is still dropped or refused, never cut. Every name
+comparison in the vendor sync (ambiguity counts, the name link, realm evidence)
+uses the stored form, so a shortened name matches as stored and an unchanged
+long name re-syncs as `unchanged`. Before, the vendor sync wrote the name
+unchecked and one over-long name rolled back the whole sync; the QuickBooks,
+NetSuite and Business Central chart mappings cut account names to 255 silently.
 
 **The push resolves only current-realm links.** `services/erp._resolve_erp_refs`
 filters both the vendor and the accounts by the realm of the connection being
@@ -1721,7 +1834,8 @@ A confirmed push stores the adapter's `erp_document_id` on
 `state_data["erp_reference"]` write in `services/erp._call_erp`. Both are on
 `InvoiceResponse`; the invoice modal's ERP section shows the id as
 "ERP Reference", linked when there is a URL, at every status from
-`sending_to_erp` on, `done` included.
+`sending_to_erp` on, `done` included. The mobile ERP panel does the same,
+opening the link outside the app (`ExternalLink`, https only).
 
 - **Only the ERP's id is stored**, never the document number or the
   `"UNKNOWN"` placeholder `erp_reference` falls back to: the column is what a
@@ -1737,13 +1851,25 @@ A confirmed push stores the adapter's `erp_document_id` on
 
   | Adapter | Link |
   |---|---|
-  | `xero` | `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=<id>` |
+  | `xero` | `https://go.xero.com/organisationlogin/default.aspx?shortcode=<ShortCode>&redirecturl=/AccountsPayable/View.aspx?InvoiceID=<id>`, or the bare `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=<id>` when the ShortCode could not be read |
   | `quickbooks_online` | `https://app.qbo.intuit.com/app/bill?txnId=<id>` (`app.sandbox.qbo.intuit.com` when `environment` is `sandbox`) |
   | everything else (Merge.dev, mock, the other direct adapters) | none — the id is shown alone |
 
-  Both open in the user's currently selected organisation / company
-  (`docs/followups.md`). Invoices posted before 0117 got the id backfilled
-  from `state_data` but no link. Reasoning: `docs/decisions.md` §302.
+  **The Xero link opens in the bill's organisation.** Xero's
+  `organisationlogin` redirect switches the signed-in user to the organisation
+  named by its `ShortCode`, then opens the bill, which is the form Xero's own
+  MCP server builds. After each confirmed push (a created bill or an adopted
+  idempotent one) `XeroAdapter.organisation_short_code` reads `ShortCode` from
+  `GET /Organisation` and returns it as `ErpPostResult.erp_company_code`;
+  nothing stores it on the connection, so connections made earlier need no
+  backfill or reconnect. The read is best effort: it costs one Xero call per
+  confirmed push, and a failed read never fails a bill that is already
+  posted. The link then falls back to the bare page, which opens in whichever
+  organisation the user has selected. **The QuickBooks link opens in the
+  user's current company.** Intuit documents no URL that selects a company by
+  `realmId`, so none is guessed. Invoices posted before 0118 got the id
+  backfilled from `state_data` but no link, and links stored before §354 keep
+  the bare Xero form. Reasoning: `docs/decisions.md` §302, §354.
 
 **Manual retry:** `POST /api/invoices/{id}/retry-erp` resets `erp_retries` to 0
 and moves the invoice to `sending_to_erp`. The route then dispatches the push.
@@ -2327,11 +2453,12 @@ token comes only from `self.access_token()`, and every call sends
 `https://api.accounting.sage.com/v3.1` (override
 `FEOH_ERP_SAGE_ACCOUNTING_API_BASE`). OAuth: authorize at
 `https://www.sageone.com/oauth2/auth/central` with `filter=apiv3.1`, token at
-`https://oauth.accounting.sage.com/token`, scope `full_access`. Platform app
+`https://oauth.accounting.sage.com/token`, revoke at
+`https://oauth.accounting.sage.com/revoke` (§ Connecting an OAuth ERP), scope `full_access`. Platform app
 credentials: `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `_SECRET` (empty →
-unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_URL`
-override the OAuth endpoints, which dev points at fake-erp so the connect flow
-runs locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
+unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_URL` / `_REVOKE_URL`
+override the OAuth endpoints, which dev points at fake-erp so the connect and
+disconnect flows run locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
 
 **Region coverage: not the US, not South Africa.** Every v3.1 operation lists
 its availability as CA, DE, ES, FR, GB, IE and US, but **Sage retired the US
@@ -2938,8 +3065,11 @@ and calls `await self.access_token()`.
 | Route | Auth | Contract |
 |---|---|---|
 | `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan; called **credentialed** (`credentials: 'include'`) | `200 {"authorize_url"}` plus the HttpOnly nonce cookie `__Host-feoh_erp_oauth_nonce` on the API host (§ Bound to the browser that started it); the page navigates the browser to the URL. `404` unknown provider, `409` no app configured, `409` coded `erp_connect_platform_host` (`params.url` when there is a platform address to offer) when this host cannot carry the cookie — a custom domain, or an `Origin` not same-site with the API; `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
-| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant platform origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>` (the `FEOH_TENANT_URL_TEMPLATE` address, not a vanity one — that is where a connect starts; the vanity URL only when no template is set). Every answer given after the nonce cookie matched clears it; a forged, expired or mismatched state leaves it alone, so a junk-state link cannot break a connect in flight. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `browser_mismatch` (the browser lacks the nonce cookie the state's hash names — checked right after the state is burned, before the provider's answer or the code is looked at), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant` (no company id, or — QuickBooks — a `realmId` the new token cannot reach), `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
-| `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked"}`. `503` when the credential store cannot be opened, with nothing changed. |
+| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant platform origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>` — or, when the consent reached several companies, links nothing and 302s with `&erp_choose_company=<provider>` (§ A consent that reaches several companies) (the `FEOH_TENANT_URL_TEMPLATE` address, not a vanity one — that is where a connect starts; the vanity URL only when no template is set). Every answer given after the nonce cookie matched clears it; a forged, expired or mismatched state leaves it alone, so a junk-state link cannot break a connect in flight. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `browser_mismatch` (the browser lacks the nonce cookie the state's hash names — checked right after the state is burned, before the provider's answer or the code is looked at), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant` (no company id, more than `oauth_base.COMPANY_LIST_MAX` (100) companies, or — QuickBooks — a `realmId` the new token cannot reach), `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
+| `GET /api/organization/erp/oauth/pending` | admin; **credentialed** | The consent parked for this browser and admin: `{provider, display_name, companies: [{id, name}], expires_at}`. Does not spend it. `409` coded `erp_pick_expired` for anything else (none parked, lapsed, used, another browser or another admin). Never a token. |
+| `POST /api/organization/erp/oauth/pending/select` | admin + `erp_integrations` plan; **credentialed** | `{company_id}` → `200 {connected, provider, external_tenant_id}`, the nonce cookie cleared. Checks the offered id and the plan on a peek, then spends the pending connect (GETDEL) and links through the callback's own claim-and-link (`_claim_and_link`: realm lock, linked-elsewhere check, `organization.erp_connected` audit-first with `picked_from`). Coded refusals: `409 erp_pick_expired`, `409 erp_pick_unknown_company` (an id the consent did not offer; audited `organization.erp_connect_refused`), `409 already_linked`, `503 credentials_unavailable`, `503 audit_unavailable`; the plan gate's own `402`. Every refusal but `erp_pick_expired` and a token that cannot be opened leaves the pending connect to pick from again (§355). |
+| `DELETE /api/organization/erp/oauth/pending` | admin; **credentialed** | Drops the parked consent, links nothing: `{discarded}` (idempotent), the cookie cleared and `organization.erp_connect_cancelled` written best-effort when one was dropped. The token is not revoked (§337's reason). |
+| `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked", "revocation"}`, `revocation` being `revoked`, `failed` (the provider did not confirm, or could not be reached) or `unsupported` (it has no revocation endpoint: Blackbaud), and null when nothing was connected. The settings page says "Disconnected" only on `revoked`; otherwise it tells the admin to remove FeohLedger on the provider's side (`types/erpConnection.disconnectMessage`). `503` when the credential store cannot be opened, with nothing changed. |
 | `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
 
 Connect and disconnect write `organization.erp_connected` /
@@ -2947,7 +3077,7 @@ Connect and disconnect write `organization.erp_connected` /
 changed by name — never a token) BEFORE anything is saved, through
 `record_auth_audit_or_raise`; a row that cannot be written means nothing is
 linked or cleared. The revoke outcome, known only after the commit, follows as
-`organization.erp_token_revoked`.
+`organization.erp_token_revoked` (`{provider, revoked, revocation}`).
 
 **Bound to the browser that started it (login-CSRF).** The callback is
 public and carries no JWT, so a signed single-use `state` alone let a rogue
@@ -3035,13 +3165,84 @@ tenant lookups (no stored connection to refresh yet), pinned by
 `tests/test_erp_oauth.py::test_every_oauth_adapter_api_client_refreshes_on_401`;
 end to end in `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`.
 
+### A consent that reaches several companies (company picker)
+
+Xero (a consent can authorise several organisations) and Sage v3.1 (a login can
+reach several businesses) may answer one consent with more than one company. We
+never pick one of a customer's ledgers for them (decisions §355). The callback
+reads `OAuthErpAdapter.list_external_tenants` — Xero's and Sage's own lists; for
+every other provider the default wraps `resolve_external_tenant_id`, so
+QuickBooks keeps its realm confirmation (§337) and Blackbaud its token field —
+and then:
+
+- **none** (or more than `COMPANY_LIST_MAX`, or any row whose id is empty,
+  over-long or carries a control character — `oauth_base.clean_companies`
+  fails closed, since dropping that row could leave one company of several and
+  link it unasked): `erp_error=no_external_tenant`;
+- **one**: linked at once, exactly as before — no extra step;
+- **several**: nothing is linked. `erp_oauth.park_pending_connect` seals the
+  token response (`credential_crypto`, AAD = org + provider + browser binding)
+  and stores it in Redis under `erp:oauth:pending:<org>:<sha256(cookie)>`
+  with the admin's id and the `(id, name)` list, for one state lifetime
+  (`FEOH_ERP_OAUTH_STATE_TTL_SECONDS`). The cookie in that key is a fresh
+  nonce the callback mints and sets for the window (never the request's
+  value written back), and the callback returns with
+  `?erp_choose_company=<provider>`.
+
+The settings page (`ErpCompanyPicker.svelte` inside `ErpConnectionPanel`)
+reads `GET …/pending` and posts the pick to `POST …/pending/select`. It reads
+on **every** admin mount, not only when `?erp_choose_company=` is present: the
+panel strips that parameter on mount, so a reload, or coming back to
+`/organization` while the consent is still parked, finds the picker again. On a
+plain mount the `409 erp_pick_expired` (or a 404) is "nothing parked" and says
+nothing; only a return that asked for the pick reports it as lapsed
+(`tests-e2e/erp/xero-company-picker.spec.ts`). What keeps
+the picker from weakening §336 / §337:
+
+- **Same browser, same admin.** The pending connect is keyed on the cookie that
+  already matched at the callback, and records the admin who started the
+  connect. Every picker route is bearer-authenticated (admin) AND credentialed;
+  without that cookie, or as another user, there is nothing to find. A pick is
+  a bearer request, so a cross-site page cannot forge one, and nothing about
+  the pending connect is in a URL.
+- **Single-use and short-lived, but a refusal the admin can act on keeps it.**
+  The checks that need no token (an id the consent offered, the plan) run on a
+  peek and refuse without spending, so the admin picks again from the same
+  list. Then `select` GETDELs the record, so two picks cannot both link and a
+  replay of a successful one finds nothing. A claim refusal (`already_linked`,
+  or the two 503s) puts it back with `restore_pending_connect`: same window,
+  the token as aged so far, never over a newer connect from that browser
+  (SET NX). A provider no longer configured drops it (`erp_pick_expired`),
+  since no pick could succeed. A lapsed record (`e` past) reads as none.
+- **Confirmed companies only.** The list was read from the provider under the
+  new token; a `company_id` outside it links nothing
+  (`erp_pick_unknown_company`, audited). The link runs through the callback's
+  own `_claim_and_link`, so the realm lock, the cross-tenant check, the unique
+  index and audit-first apply unchanged.
+- **The token lifetimes age.** `take_pending_connect` subtracts the time the
+  consent waited from `expires_in` and the refresh lifetime, so the stored
+  expiry never runs later than the provider's.
+
+A cancelled, lapsed or refused pick revokes nothing at the provider: as with a
+refused QuickBooks realm (§337), a revoke can reach the app's whole grant, and
+the consent can reach a company this workspace or another one is connected to
+(decisions §355 records the reasoning per path). That is why the refusals the
+admin can retry keep the pending connect rather than strand the grant. Xero keeps
+every organisation the user authorised listed under the app's connections
+until the user removes them in Xero; only the picked one is used.
+
+fake-erp: `POST /xero/__organisations {"state", "count"}` arms the consent
+carrying that `state` to authorise `count` organisations; driven end to end by
+`frontend/tests-e2e/erp/xero-company-picker.spec.ts`.
+
 **Per-provider hooks on the spec.** The company id comes from
 `external_tenant_id_param` (a callback query parameter: QBO `realmId` — which
 nothing signs, so QuickBooks overrides the resolver to confirm it, below), from
 `external_tenant_id_token_field` (a token-response field: Blackbaud
 `environment_id`), or from an override of
-`OAuthErpAdapter.resolve_external_tenant_id` (Xero `GET /connections`, Sage's
-business lookup). `extra_token_headers(erp_settings)` adds headers to every
+`OAuthErpAdapter.resolve_external_tenant_id`. A provider whose consent can
+reach several companies (Xero `GET /connections`, Sage's business lookup)
+overrides `list_external_tenants` instead (above). `extra_token_headers(erp_settings)` adds headers to every
 token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
 or `body`. The resolver also receives the org's saved `settings.erp`
 (`erp_settings`), which QuickBooks reads for its `environment`.
@@ -3063,13 +3264,24 @@ the 403, so `tests-e2e/erp/quickbooks-online.spec.ts` drives the refusal.
 `revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
 which documents that) instead of RFC 7009's form body; sent a form, Intuit may
 refuse it, and Disconnect would then leave the grant live behind a
-`revoked: false` the user never sees. **Which providers revoke:** QuickBooks
-(JSON) and Xero (RFC 7009 form + Basic, `identity.xero.com/connect/revocation`;
-revoking the refresh token also removes the org's connection, so the next
-consent offers the org afresh instead of "Already connected"). Sage Accounting
-and Blackbaud FE NXT configure no revoke URL yet, so their Disconnect only
-forgets our copy of the tokens (`docs/followups.md`). An empty `scopes` sends no `scope`. Operator URL overrides
-(`*_url_setting`) are read on every call.
+`revocation: "failed"`. The revoke authenticates the client the way the token
+endpoint does (`token_auth`). **Which providers revoke** (decisions §371):
+
+| Provider | Revocation | Shape |
+|---|---|---|
+| QuickBooks Online | `developer.api.intuit.com/v2/oauth2/tokens/revoke` | JSON `{"token"}`, Basic |
+| Xero | `identity.xero.com/connect/revocation` | RFC 7009 form, Basic. Revoking the refresh token also removes the org's connection, so the next consent offers the org afresh instead of "Already connected" |
+| Sage Accounting | `oauth.accounting.sage.com/revoke` (`FEOH_ERP_SAGE_ACCOUNTING_REVOKE_URL`) | RFC 7009 form, the client as `client_id` / `client_secret` form fields like its token endpoint, never Basic |
+| Blackbaud FE NXT | none: SKY API's OAuth service has only `/authorization` and `/token` | `revocation: "unsupported"`. The grant ends when the customer disconnects the app from the environment in Blackbaud Marketplace (or the developer does, under My Applications); regenerating the client secret does not end it |
+
+Every `OAuthProviderSpec` sets exactly one of `revoke_url` and
+`no_revoke_endpoint_reason`; one with neither does not construct, so a new
+provider cannot quietly forget the grant on Disconnect. **Deleting a tenant
+revokes too**: `services/tenant_deletion` reads the sealed tokens just before
+the control-plane rows (which hold them) are deleted, calls
+`erp_oauth.revoke_grant`, and prints the outcome in the deletion confirmation.
+It never blocks the deletion and never logs a token. An empty `scopes` sends no
+`scope`. Operator URL overrides (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before
 any post, with `QuickBooks Online post refused: <reason>`: `vendor_not_linked`,

@@ -18,6 +18,11 @@ privilege) and both audited into the tenant's append-only trail:
   deletes the subject's sole-subject documents from object storage, their
   passkey rows, and their live sessions; what is deleted vs retained is decided
   in ``services/privacy_documents`` and published in ``backend/docs/privacy.md``.
+- ``GET /privacy/dsar/{request_id}/bundle`` — the COMPLETE bundle for an
+  export already requested, every section uncapped, streamed as a JSON file.
+  The ``POST`` response caps each high-volume section; this is where the rest
+  of the subject's data is (GDPR Art. 15 owes all of it). Audited
+  ``privacy.dsar_export.full_bundle``. Always masked — see the route.
 - ``GET /privacy/requests`` — the privacy officer's request history (PII-free).
 
 Subjects span the control plane (``User``) and the tenant DB (``VendorUser``,
@@ -39,6 +44,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,9 +78,13 @@ from app.services.privacy_export import (
     BankingDisclosureNotPermitted,
     SubjectNotFound,
     build_dsar_bundle,
+    bundle_record_counts,
     resolve_subject_id,
+    stream_full_dsar_bundle,
+    truncated_sections,
 )
 from app.tenant import get_tenant, get_tenant_db
+from app.utils.spooled_export import drain_spool, spool_body
 
 router = APIRouter(prefix="/privacy", tags=["privacy"])
 
@@ -256,6 +266,7 @@ async def dsar_export(
             status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found"
         ) from exc
 
+    cut = truncated_sections(bundle)
     request_row = DataSubjectRequest(
         id=uuid.uuid4(),
         organization_id=org.id,
@@ -291,6 +302,10 @@ async def dsar_export(
             "subject_type": body.subject_type,
             "subject_id": str(subject_id),
             "banking_disclosure": "unmasked" if body.include_banking else "masked",
+            # Section NAMES only — whether the inline bundle was the whole set,
+            # and which parts the subject has to fetch from the full bundle.
+            "complete": not cut,
+            "truncated_sections": cut,
         },
     )
 
@@ -328,6 +343,116 @@ async def dsar_export(
         generated_at=now.isoformat(),
         banking_disclosure="unmasked" if body.include_banking else "masked",
         data=bundle,
+        record_counts=bundle_record_counts(bundle),
+        complete=not cut,
+        truncated_sections=cut,
+        full_bundle_url=f"/api/privacy/dsar/{request_row.id}/bundle",
+    )
+
+
+@router.get("/dsar/{request_id}/bundle")
+async def dsar_full_bundle(
+    request_id: uuid.UUID,
+    org: Organization = Depends(get_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+    control_db: AsyncSession = Depends(get_control_db),
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+) -> StreamingResponse:
+    """The complete DSAR bundle for an export already requested — nothing capped.
+
+    ``POST /privacy/dsar`` caps each high-volume section at
+    ``MAX_EXPORT_ROWS`` because it is built whole in memory on the event loop;
+    a supplier with years of invoices would otherwise make that response
+    unbounded. GDPR Art. 15 owes the subject every row, so this route is where
+    the rest is: the same sections, read off server-side cursors and rendered
+    in bounded chunks (``privacy_export.stream_full_dsar_bundle``), spooled to
+    an anonymous temp file (``utils/spooled_export``) and streamed back as a
+    JSON attachment. Nothing is written to object storage: a stored bundle is a
+    full copy of a subject's PII in a bucket under Object Lock, which a later
+    erasure of the same subject could not remove (decisions §369).
+
+    Admin only, like every privacy route; the request must be a
+    ``dsar_export`` in this org (anything else is the same opaque 404). Banking
+    is always MASKED here: the ``vendor`` record is the only section carrying
+    it and it is never capped, so an unmasked disclosure stays the
+    ``POST``'s — behind its permission, justification and second-factor proof —
+    and this download unlocks nothing that gate guards.
+
+    Order of operations: the whole body is rendered into the spool, THEN the
+    ``privacy.dsar_export.full_bundle`` audit row is committed, THEN both
+    sessions are released and the bytes start. A database error while
+    rendering is a clean 500 with no audit row and no data sent; no data
+    leaves without its audit row.
+    """
+    request_row = (
+        await db.execute(
+            select(DataSubjectRequest).where(
+                DataSubjectRequest.id == request_id,
+                DataSubjectRequest.organization_id == org.id,
+                DataSubjectRequest.request_type == REQUEST_DSAR_EXPORT,
+            )
+        )
+    ).scalar_one_or_none()
+    if request_row is None or request_row.subject_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+
+    generated_at = datetime.now(UTC)
+    summary: dict = {}
+    chunks = stream_full_dsar_bundle(
+        subject_type=request_row.subject_type,
+        subject_id=request_row.subject_id,
+        organization_id=org.id,
+        control_db=control_db,
+        tenant_db=db,
+        envelope={
+            "request_id": str(request_row.id),
+            "subject_type": request_row.subject_type,
+            "subject_id": str(request_row.subject_id),
+            "generated_at": generated_at.isoformat(),
+        },
+        summary=summary,
+    )
+    try:
+        spool = await spool_body(chunks)
+    except SubjectNotFound as exc:
+        # The subject was deleted since the export was requested.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found"
+        ) from exc
+
+    try:
+        # PII-free: the subject's UUID + type and per-section tallies.
+        await dispatch_audit(
+            db,
+            correlation_id=uuid.uuid4(),
+            organization_id=org.id,
+            actor_id=user.id,
+            action="privacy.dsar_export.full_bundle",
+            entity_type="data_subject_request",
+            entity_id=request_row.id,
+            details={
+                "subject_type": request_row.subject_type,
+                "subject_id": str(request_row.subject_id),
+                "banking_disclosure": "masked",
+                "record_counts": summary.get("record_counts", {}),
+            },
+        )
+        await db.commit()
+        await db.close()
+        await control_db.close()
+    except BaseException:
+        spool.close()
+        raise
+
+    filename = f"dsar-{request_row.id}.json"
+    return StreamingResponse(
+        drain_spool(spool),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            # A subject's personal data: no shared or browser cache keeps it.
+            "Cache-Control": "no-store",
+        },
     )
 
 

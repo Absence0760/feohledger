@@ -71,6 +71,16 @@ BACKUP_S3_BUCKET: ""
 FEOH_ENVIRONMENT: "production"
 # openssl rand -hex 32
 FEOH_SECRET_KEY: ""
+# The payee bank-fingerprint key (decisions §383): HMAC over the vendor bank
+# details each payment records as the payee it paid, compared on a void. Its own
+# key, never FEOH_SECRET_KEY's value. Required: a deployed env refuses to boot
+# without it, and decrypt-env.sh refuses first. NEVER rotate it by replacing the
+# value alone — move the old one into FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS first
+# (docs/secrets-rotation.md § FEOH_PAYEE_FINGERPRINT_KEY). openssl rand -hex 32
+FEOH_PAYEE_FINGERPRINT_KEY: ""
+# Retired fingerprint keys, comma-separated, kept while a payment they stamped
+# may still be voided. Empty until the first rotation.
+# FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS: ""
 # The app KMS key that seals tenant ERP / payment / card credentials
 # (`terraform output app_kms_key_alias`). The alias is
 # `alias/feohledger-app-<environment>`, where the suffix is the infra tfvars

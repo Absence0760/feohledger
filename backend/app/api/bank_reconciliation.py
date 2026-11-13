@@ -49,6 +49,7 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.api.refusals import statement_currency
 from app.models.bank_reconciliation import BankStatement, BankTransaction
 from app.models.invoice import Invoice
 from app.models.organization import Organization
@@ -343,7 +344,9 @@ async def upload_statement(
     account_identifier: str = Form(...),
     period_start: date = Form(...),
     period_end: date = Form(...),
-    currency: str = Form("USD"),
+    # No default: a statement's currency is not knowable from the file, and
+    # `USD` labelled a GBP statement in dollars (decisions §377).
+    currency: str | None = Form(None),
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
@@ -360,6 +363,7 @@ async def upload_statement(
     ``uq_bank_statements_org_account_hash`` (migration 0080), the same shape
     Positive Pay uses for its per-(run, format) slot.
     """
+    statement_ccy = statement_currency(currency)
     raw = await _read_capped(file, MAX_CSV_IMPORT_SIZE)
     content_hash = hashlib.sha256(raw).hexdigest()
 
@@ -384,7 +388,7 @@ async def upload_statement(
                 account_identifier=account_identifier,
                 period_start=period_start,
                 period_end=period_end,
-                currency=currency,
+                currency=statement_ccy,
                 imported_by=user.id,
                 # Raw-file storage (the uploaded statement → S3) is deferred,
                 # same as vendor-statement-recon's CSV intake; keep file_key

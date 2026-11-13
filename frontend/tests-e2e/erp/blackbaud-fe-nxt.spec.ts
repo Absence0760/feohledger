@@ -58,7 +58,9 @@ import {
  *      and the rotated refresh token persisted; a consent revoked at the
  *      provider turns the connection to `needs_reconnect`, and reconnecting
  *      clears it.
- *   5. Disconnect — clears the connection.
+ *   5. Disconnect — clears the connection and answers `revocation:
+ *      'unsupported'`: SKY API has no revocation endpoint, so the grant ends
+ *      only when the customer disconnects the app in Blackbaud (decisions §371).
  */
 
 const PROVIDER = 'blackbaud_fe_nxt';
@@ -398,7 +400,11 @@ test.describe('/erp blackbaud_fe_nxt adapter against fake-erp', () => {
 		const resp = await page.request.post(`${API_BASE}/api/organization/erp/oauth/disconnect`, {
 			headers
 		});
-		expect((await resp.json()).disconnected).toBe(true);
+		expect(await resp.json()).toEqual({
+			disconnected: true,
+			revoked: false,
+			revocation: 'unsupported'
+		});
 		const status = await oauthStatus(page);
 		expect(status.connected).toBe(false);
 	});

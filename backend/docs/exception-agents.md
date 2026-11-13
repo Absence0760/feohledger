@@ -411,6 +411,11 @@ rather than escalating a blank.
   PO total and so legitimately gates on it; this matches `multi_po_split_v1`). The
   gate is also checked **before** any `po_number`/`po_match` mutation, so an
   escalation never leaves a half-applied PO link in the committed state.
+  **The payee of an invoice approved once is never the agent's** (decisions
+  §379): where filling the empty `vendor_id` would set it on an invoice that
+  was ever approved (a recalled one, back in review with its stamps), `apply`
+  escalates before any mutation (`amount_mismatch.PayeeFixedByApproval`, raised
+  by `refuse_payee_change_after_approval`, which `multi_po_split_v1` asks too).
   Idempotent: a re-run after the link finds the live match no longer `no_po` and
   bails, and the coordinator's exception row-lock already prevents a second
   decision on a resolved exception. Writes the two audit rows (`invoice.approved`
@@ -466,7 +471,8 @@ or three POs. This is the deferred *"Multi-PO split matching"* follow-up to
   CFO / maximum gate exactly as the single-PO resolvers (the gate is on the
   **invoice** amount, which never changes — the combined PO total is informational),
   sets `invoice.po_number` to a combined `"PO-A,PO-B"` reference + aligns
-  `vendor_id`, and writes a **multi-PO match snapshot** onto `invoice.po_match`
+  `vendor_id` (escalating instead when that would set the payee of an invoice
+  ever approved, as `missing_po_v1` does), and writes a **multi-PO match snapshot** onto `invoice.po_match`
   (`match_type: "multi-po-split"`, the PO ids/numbers + combined total) for the
   modal. The single-PO matcher can't produce a `matched` for a split, so the
   snapshot is written **directly** — `refresh_warnings` is deliberately **not**

@@ -767,6 +767,43 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceDetailReject => 'Ablehnen';
 
   @override
+  String get invoiceDetailRecall => 'Genehmigung zurücknehmen';
+
+  @override
+  String get invoiceDetailRecallTitle => 'Diese Genehmigung zurücknehmen?';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      'Die Rechnung geht zurück in die Prüfung, damit ihre Beträge korrigiert werden können, und braucht danach eine neue Genehmigung über die gesamte Genehmigungskette. Die Funktionstrennung zählt Sie dann, wie den Einreicher, zu den an dieser Rechnung Beteiligten. Die ursprüngliche Genehmigung bleibt im Prüfprotokoll erhalten.';
+
+  @override
+  String get invoiceDetailRecallReason => 'Warum nehmen Sie sie zurück?';
+
+  @override
+  String get invoiceDetailRecalled =>
+      'Genehmigung zurückgenommen. Die Rechnung ist wieder in der Prüfung.';
+
+  @override
+  String get invoiceDetailRecallFailed =>
+      'Die Genehmigung konnte nicht zurückgenommen werden – bitte erneut versuchen';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      'Nur bei einer genehmigten Rechnung oder einer, deren ERP-Übertragung nach der Genehmigung fehlgeschlagen ist, kann die Genehmigung zurückgenommen werden.';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'Im ERP liegt möglicherweise bereits eine Rechnung zu diesem Beleg vor, und sie kann dort bezahlt werden. Korrigieren oder stornieren Sie sie im ERP; die Genehmigung kann in FeohLedger nicht zurückgenommen werden.';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'FeohLedger bezahlt diese Rechnung bereits: Es gibt eine aktive Zahlung. Brechen Sie den Zahlungslauf ab oder stornieren Sie die Zahlung, bevor Sie die Genehmigung zurücknehmen.';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'Für die Zahlung dieser Rechnung wurde eine virtuelle Karte ausgestellt. Stornieren Sie die Karte, bevor Sie die Genehmigung zurücknehmen.';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1044,7 +1081,11 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
-      'Genehmigt — Zahlungsempfänger und Betrag sind gesperrt. Zum Ändern die Rechnung ablehnen, korrigieren und erneut genehmigen.';
+      'Genehmigt — Zahlungsempfänger und Betrag sind gesperrt.';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
+      'Genehmigt — Zahlungsempfänger und Betrag sind gesperrt. Zum Ändern die Genehmigung zurücknehmen, die Rechnung korrigieren und erneut genehmigen lassen.';
 
   @override
   String get invoiceEditLockedHelper => 'Nach der Genehmigung gesperrt';
@@ -1098,7 +1139,18 @@ class AppLocalizationsDe extends AppLocalizations {
   String get erpStatusLastUpdate => 'Letzte Aktualisierung';
 
   @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action von $actor';
+  }
+
+  @override
   String get erpStatusStatus => 'Status';
+
+  @override
+  String get erpStatusOpensInErp => 'öffnet die Rechnung im ERP';
+
+  @override
+  String get externalLinkOpenFailed => 'Der Link konnte nicht geöffnet werden';
 
   @override
   String get fileViewerPdfTitle => 'Rechnungs-PDF';
@@ -3356,6 +3408,169 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get exceptionDescriptionErpSyncBackFailed =>
       'Die Zahlung dieser Rechnung wurde abgewickelt, aber FeohLedger konnte die Erfassung nicht abschließen, daher steht die Rechnung noch nicht auf „Bezahlt“, obwohl das Geld geflossen ist. Nichts wiederholt dies automatisch: Verwenden Sie „ERP-Abgleich wiederholen“ beim Zahlungslauf dieser Zahlung unter Zahlungen.';
+
+  @override
+  String exceptionDescriptionExtractionFailed(String errorClass) {
+    return 'Extraktion fehlgeschlagen: $errorClass';
+  }
+
+  @override
+  String exceptionDescriptionPositivePayAlteredAmount(String checkNumber) {
+    return 'Positive-Pay-Rückmeldung: Scheck $checkNumber mit verändertem Betrag';
+  }
+
+  @override
+  String exceptionDescriptionPositivePayNotOnFile(String checkNumber) {
+    return 'Positive-Pay-Rückmeldung: Scheck $checkNumber nicht in der Ausstellungsdatei';
+  }
+
+  @override
+  String get exceptionDescriptionVendorBankChanged =>
+      'Bankverbindung des Lieferanten geändert; vor der Zahlung prüfen.';
+
+  @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      'Zahlungsempfänger seit der letzten Zahlung dieser Rechnung geändert; vor erneuter Zahlung prüfen.';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      'Lieferant seit der letzten Zahlung dieser Rechnung zusammengeführt, und diese Zahlung hat keinen Zahlungsempfänger erfasst; vor erneuter Zahlung prüfen.';
+
+  @override
+  String exceptionDescriptionComplianceHoldFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Gründe',
+      one: '$count Grund',
+    );
+    return 'Zahlung zur Compliance-Prüfung angehalten ($_temp0)';
+  }
+
+  @override
+  String get exceptionDescriptionComplianceNoScreenableVendor =>
+      'Kein prüfbarer Lieferant auf der Rechnung';
+
+  @override
+  String exceptionDescriptionComplianceProviderUnavailable(String provider) {
+    return 'Sanktionsprüfung konnte nicht ausgeführt werden: kein Adapter für den konfigurierten Anbieter „$provider“';
+  }
+
+  @override
+  String exceptionDescriptionComplianceReviewRequired(
+    String provider,
+    String matchedList,
+  ) {
+    return 'Lieferantenprüfung über $provider erfordert eine Überprüfung ($matchedList)';
+  }
+
+  @override
+  String exceptionDescriptionComplianceReviewRequiredUnlisted(String provider) {
+    return 'Lieferantenprüfung über $provider erfordert eine Überprüfung (siehe Prüfprotokoll)';
+  }
+
+  @override
+  String exceptionDescriptionComplianceUnrecognisedResult(
+    String provider,
+    String result,
+  ) {
+    return 'Lieferantenprüfung über $provider lieferte ein unbekanntes Ergebnis „$result“; wird als prüfungsbedürftig behandelt';
+  }
+
+  @override
+  String exceptionDescriptionComplianceAdverseMedia(String provider) {
+    return 'Lieferantenprüfung über $provider ergab negative Medienberichte; Prüfung durch die Kreditorenbuchhaltung erforderlich';
+  }
+
+  @override
+  String get exceptionDescriptionComplianceAdverseMediaUnnamedProvider =>
+      'Lieferantenprüfung ergab negative Medienberichte; Prüfung durch die Kreditorenbuchhaltung erforderlich';
+
+  @override
+  String exceptionDescriptionComplianceAmlSpend(
+    String projected,
+    String threshold,
+  ) {
+    return 'Die Ausgaben bei diesem Lieferanten in den letzten 12 Monaten würden $projected erreichen (Schwellenwert $threshold); Prüfung durch die Kreditorenbuchhaltung erforderlich';
+  }
+
+  @override
+  String exceptionDescriptionComplianceAmlSpendPartial(
+    String projected,
+    String threshold,
+    int excluded,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      excluded,
+      locale: localeName,
+      other: '$excluded Zahlungen wurden',
+      one: '$excluded Zahlung wurde',
+    );
+    return 'Die Ausgaben bei diesem Lieferanten in den letzten 12 Monaten würden mindestens $projected erreichen (Schwellenwert $threshold); Prüfung durch die Kreditorenbuchhaltung erforderlich. $_temp0 ohne Betrag in der Heimatwährung nicht berücksichtigt, die tatsächliche Summe ist also höher';
+  }
+
+  @override
+  String exceptionDescriptionPaymentAgedOut(
+    String paymentId,
+    String hours,
+    String invoiceStatus,
+  ) {
+    return 'Die Zahlung $paymentId war nach $hours h noch unterwegs und wurde vom Abgleich als fehlgeschlagen markiert; der Zahlungsweg hat nie bestätigt, das Geld kann also geflossen sein oder nicht. Die Rechnung steht auf „$invoiceStatus“. Klären Sie es mit dem Zahlungsdienstleister und stornieren Sie oder zahlen Sie erneut – bis dahin ist diese Rechnung für neue Zahlungsläufe gesperrt.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInDoubt(
+    String paymentId,
+    String failureCode,
+  ) {
+    return 'Die Zahlung $paymentId ist beim Versand fehlgeschlagen ($failureCode), nachdem der Zahlungsdienstleister sie möglicherweise schon angenommen hatte; das Geld kann also geflossen sein oder nicht. Klären Sie es mit dem Zahlungsdienstleister und stornieren Sie oder zahlen Sie erneut – bis dahin ist diese Rechnung für neue Zahlungsläufe gesperrt.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInterruptedFailed(
+    String paymentId,
+  ) {
+    return 'Die Zahlung $paymentId ist fehlgeschlagen, aber ein früherer Sendeversuch wurde unterbrochen, nachdem sie den Zahlungsdienstleister möglicherweise schon erreicht hatte; das Geld kann also geflossen sein oder nicht. Klären Sie es mit dem Zahlungsdienstleister und stornieren Sie oder zahlen Sie erneut – bis dahin ist diese Rechnung für neue Zahlungsläufe gesperrt.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInterruptedCancelled(
+    String paymentId,
+  ) {
+    return 'Die Zahlung $paymentId wurde abgebrochen, aber ein früherer Sendeversuch wurde unterbrochen, nachdem sie den Zahlungsdienstleister möglicherweise schon erreicht hatte; das Geld kann also geflossen sein oder nicht. Klären Sie es mit dem Zahlungsdienstleister und stornieren Sie oder zahlen Sie erneut – bis dahin ist diese Rechnung für neue Zahlungsläufe gesperrt.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementCurrencyMismatch(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+  ) {
+    return 'Abweichende Abrechnungswährung: Der Zahlungsdienstleister meldete $settledAmount $settledCurrency, diese Zahlung genehmigt aber $authorizedAmount $authorizedCurrency. Geld wurde in einer nicht genehmigten Währung bewegt – gleichen Sie es mit dem Zahlungsdienstleister ab, bevor Sie diese Rechnung freigeben.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementAmountOver(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  ) {
+    return 'Abweichender Abrechnungsbetrag: Der Zahlungsdienstleister meldete $settledAmount $settledCurrency, MEHR als die genehmigten $authorizedAmount $authorizedCurrency (Abweichung $variance). Geld wurde in nicht genehmigter Höhe bewegt – gleichen Sie es mit dem Zahlungsdienstleister ab, bevor Sie diese Rechnung freigeben.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementAmountUnder(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  ) {
+    return 'Abweichender Abrechnungsbetrag: Der Zahlungsdienstleister meldete $settledAmount $settledCurrency, WENIGER als die genehmigten $authorizedAmount $authorizedCurrency (Abweichung $variance). Geld wurde in nicht genehmigter Höhe bewegt – gleichen Sie es mit dem Zahlungsdienstleister ab, bevor Sie diese Rechnung freigeben.';
+  }
 
   @override
   String get warningsPoMatchStatusMatched => 'Abgeglichen';

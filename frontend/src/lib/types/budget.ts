@@ -17,6 +17,7 @@
 // on `BudgetSummary.by_currency`.
 
 import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 export type BudgetDimension = 'department' | 'project' | 'cost_center' | 'gl_account';
 
@@ -27,12 +28,20 @@ export const BUDGET_DIMENSIONS: BudgetDimension[] = [
 	'gl_account'
 ];
 
-export const BUDGET_DIMENSION_LABELS: Record<BudgetDimension, string> = {
-	department: 'Department',
-	project: 'Project',
-	cost_center: 'Cost Center',
-	gl_account: 'GL Account'
+/** The catalogue key naming each dimension — the budgets list's chips and
+ *  column, the budget form's select, and the help guide's `{ui:}` references. */
+export const BUDGET_DIMENSION_LABEL_KEYS: Record<BudgetDimension, MessageKey> = {
+	department: 'budgets.dimension.department',
+	project: 'budgets.dimension.project',
+	cost_center: 'budgets.dimension.costCenter',
+	gl_account: 'budgets.dimension.glAccount'
 };
+
+/** The key for a stored dimension, or `null` for one this build predates
+ *  (the caller shows the stored value verbatim). */
+export function budgetDimensionLabelKey(d: string): MessageKey | null {
+	return BUDGET_DIMENSION_LABEL_KEYS[d as BudgetDimension] ?? null;
+}
 
 export interface Budget {
 	id: string;

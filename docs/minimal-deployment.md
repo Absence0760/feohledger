@@ -11,8 +11,8 @@ footprint.
 Postgres 16 for the databases, real S3 for files, everything else in-process.**
 
 ```
-        *.feohledger.com  ──────────► one VM (EC2 t4g.medium)
-                                 ├── Caddy         — TLS, static frontend, /api reverse-proxy
+        api.feohledger.com ─────────► one VM (EC2 t4g.medium)
+                                 ├── Caddy         — TLS, /api reverse-proxy (+ vanity hosts)
                                  ├── FastAPI       — backend container (uvicorn)
                                  └── Redis 7       — token blocklist, rate limits, MFA state
                                         │  TLS (verify-full)
@@ -105,21 +105,21 @@ Resizing is a change to `app_instance_type` in the tfvars (a stop → change-typ
    SSE-KMS) plus the backups bucket (lifecycle-expired, no lock — see
    § Backups). Set `FEOH_S3_BUCKET`, omit `FEOH_S3_ENDPOINT_URL`, and drop the
    MinIO container — less RAM, real durability, pennies at pilot volume.
-2. **Caddy on the VM serves the frontend.** GitHub Pages can't serve wildcard
-   tenant subdomains and CloudFront+ACM is more moving parts. Caddy serves the
-   static SPA (published releases under `deploy/www/`, swapped atomically —
-   `deploy/README.md` § How the SPA is served), reverse-proxies `api.feohledger.com` to the backend, and
-   auto-provisions TLS. Start with an **explicit hostname list** (one line per
-   tenant subdomain — plain HTTP-01, no DNS plugin, no extra IAM); move to a
-   wildcard cert via DNS-01 + the Route 53 plugin only when tenant churn makes
-   the list annoying.
-   **Superseded for the SPA by S3 + CloudFront** (`infra/frontend.tf`,
-   `docs/decisions.md` §278). The first release deploy took the site down
-   because the files Caddy served were rebuilt in place. An upload plus an
-   invalidation has no empty moment, and one wildcard certificate covers every
-   tenant. Until the DNS cutover (`frontend_on_cloudfront`) and the step-4
-   cleanup after it, Caddy still serves the SPA as described here and is the
-   rollback path. It keeps `api.` either way.
+2. **The SPA is S3 + CloudFront; Caddy on the VM serves the API.** The first
+   plan here was Caddy serving the static SPA as well, because GitHub Pages
+   can't serve wildcard tenant subdomains and CloudFront + ACM looked like more
+   moving parts. The first release deploy changed that: it took the site down
+   because the files Caddy served were rebuilt in place (#579). The SPA moved to
+   S3 + CloudFront (`infra/frontend.tf`, `docs/decisions.md` §278), where an
+   upload plus an invalidation has no empty moment and one wildcard certificate
+   covers every tenant, and after a day of clean traffic the VM stopped
+   building and serving it (§364). Caddy now reverse-proxies
+   `api.feohledger.com` to the backend, auto-provisions its TLS, and serves
+   customer vanity hosts (`docs/founder-runbooks/custom-domain-provisioning.md`
+   § 3a), proxying their pages from CloudFront. Tenant subdomains need no Caddy
+   block and no DNS record. Rolling back to the VM serving the SPA means
+   re-deploying a commit from before §364 (`infra/README.md` § Frontend on
+   CloudFront, Rollback).
 3. **Everything stays in `local` dispatch mode.** The Lambda/SQS split exists
    for burst isolation, which a pilot doesn't have.
 4. **Secrets follow the estate pattern.** This repo is public — `*.sops` files
@@ -205,12 +205,12 @@ Resizing is a change to `app_instance_type` in the tfvars (a stop → change-typ
   (dnf-automatic, security-only; docker/containerd excluded so a package
   update never bounces the stack at a random hour — update those around a
   deploy window), 2 GB swap, the nightly backup cron, and the IMDS hop-limit
-  fix. Node/pnpm are *not* needed on the VM — the frontend builds inside a
-  `node:24` container.
-- DNS: three records → the instance IP: `feohledger.com`, `api.feohledger.com`, and a
-  **wildcard `*.feohledger.com`** so tenant onboarding never touches DNS again.
-  (A DNS wildcard needs no wildcard *certificate* — Caddy still issues
-  ordinary per-host HTTP-01 certs.)
+  fix. Node/pnpm are *not* needed on the VM — the SPA builds in CI.
+- DNS (`infra/compute.tf`): `api.feohledger.com` → the instance IP; the apex
+  and a **wildcard `*.feohledger.com`** alias the SPA's CloudFront
+  distribution (`frontend_on_cloudfront = true`), whose ACM wildcard
+  certificate covers every tenant, so tenant onboarding never touches DNS or
+  Caddy.
 
 ### 1b. Database (RDS)
 
@@ -259,28 +259,19 @@ redeploy can never pick up an upstream retag; bumps arrive as Dependabot
   Caddy's `X-Forwarded-For` — untrusted, every user would collapse into the
   proxy's container IP and the signup/login caps would throttle everyone
   collectively.
-- `caddy` — ports 80/443, mounts `deploy/www/` at `/srv` and serves
-  `/srv/current`, a symlink `deploy.sh` swaps by rename to each newly published
-  release, keeping the previous one for an instant rollback. Never the build
-  output itself: the build deletes and recreates `frontend/build`, and a bind
-  mount left on the deleted directory served every page as an empty 404 (#579,
-  `docs/decisions.md` §277). Plus `deploy/Caddyfile` (domains via env) and the per-VM, gitignored
-  `deploy/tenants.caddy` host list (one block per tenant subdomain —
-  per-host HTTP-01 certs, no DNS plugin; maintained by `add-tenant.sh`, not
-  by hand):
-  - `feohledger.com` + each tenant host → SPA (`try_files {path} /index.html`)
-  - `api.feohledger.com` → `reverse_proxy api:8000`
-- `frontend-build` — the Node 24 alpine container `deploy.sh` builds the SPA
-  in (`docker compose run --rm frontend-build`), with the repo bind-mounted and
-  the pnpm store cached in a volume. A `build` profile keeps `up` from ever
-  starting it. It lives in the compose file, not as a `docker run` in
-  `deploy.sh`, so Dependabot reads its image (`docs/decisions.md` §203).
+- `caddy` — ports 80/443. `deploy/Caddyfile` (domains via env) has one site,
+  `api.feohledger.com` → `reverse_proxy api:8000`, and a `vanity` snippet for
+  customer domains, listed one block each in the per-VM, gitignored
+  `deploy/tenants.caddy` (per-host HTTP-01 certs; `/api` to the backend under
+  the vanity `Host`, the page proxied from CloudFront). It mounts no site
+  directory: the apex and every tenant host are CloudFront's
+  (`docs/decisions.md` §364).
 
-The frontend is built by the deploy script with
+The SPA is built in CI (`vm-deploy.yml`'s `build-frontend` job) with
 `PUBLIC_API_URL=https://<API_DOMAIN>` and `PUBLIC_SITE_URL=https://<APP_DOMAIN>`
-baked in. The second is the origin of the absolute `og:image` URL in the
-link-preview card (`frontend/src/app.html`); see
-[environment.md](environment.md) § Frontend.
+baked in, and published to S3 + CloudFront after the VM deploy. The second is
+the origin of the absolute `og:image` URL in the link-preview card
+(`frontend/src/app.html`); see [environment.md](environment.md) § Frontend.
 
 ### 3. Backend env (`prod.sops.yaml` — contract: `deploy/prod.sops.yaml.example`)
 
@@ -314,6 +305,7 @@ Beyond the committed defaults, the deployed env sets at minimum:
 | `FEOH_DEPLOYED_REGION` | the region this VM runs in (`us`/`eu`/`uk`/`ca`/`au`) — advisory only, but empty makes every tenant's data-residency `alignment` report `unknown` / `aligned: null` ("cannot attest") |
 | `FEOH_EMAIL_PROVIDER` / `FEOH_EMAIL_FROM` | `ses` / verified sender |
 | `FEOH_ANTHROPIC_API_KEY` **or** `FEOH_EXTRACTION_PROVIDER` | **Decide before first boot.** A real key (Claude Vision; Anthropic becomes a sub-processor of tenant invoices), `mock` (fabricated fields — a demo box only), or neither (invoices keyed in by hand; every upload's extraction fails and `deploy.sh` warns). Extraction is the one adapter that does not fall back to `mock` in a deployed env — `backend/docs/ai-extraction.md` § Platform provider precedence |
+| `FEOH_PAYEE_FINGERPRINT_KEY` | **Required.** `openssl rand -hex 32`, its own value (never `FEOH_SECRET_KEY`'s): the key of the payee bank fingerprint each payment records and its void compares (decisions §383). The API refuses to boot without it and `decrypt-env.sh` refuses first. Rotate only through `FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS`, never by replacement (`docs/secrets-rotation.md`) |
 | `FEOH_APPROVAL_SIGNING_KEY` + the other HMAC signing keys | real values (each key's presence is its feature's on-switch; leave unset = feature off) |
 
 Everything else keeps its safe default: mock adapters (extraction excepted,
@@ -335,23 +327,21 @@ Copy `prod.sops.yaml` onto the VM as `deploy/prod.sops.yaml` (`deploy/decrypt-en
 checks it without deploying), then run
 `deploy/deploy.sh`: it preflights its own prerequisites and the required env
 keys (clear errors before any work happens), pulls main, decrypts secrets,
-builds the frontend in the `frontend-build` service's `node:24` container
-(`PUBLIC_API_URL` baked from `API_DOMAIN`, `PUBLIC_SITE_URL` from `APP_DOMAIN`;
-pnpm store cached in a volume) and the backend image, runs
+builds the backend image, runs
 `sh scripts/deploy_migrate.sh` (`init_control_plane.py`, `alembic upgrade head`, `migrate_all_tenants.py`) **before**
 the new API serves traffic (same ordering contract as the future ECS
 pipeline), then rolls the containers with `up -d --wait` — the deploy fails
 loudly if the API healthcheck never passes, and a failed build or migration
-leaves the previous containers serving. Only then does the new SPA go live — a
-copy of the build under `deploy/www/releases/`, switched in by one symlink
-rename — followed by a Caddy reload and, last, a **smoke check**
-(`deploy/smoke.sh --vm`): `curl` from the VM, through its own Caddy, must get a
-200 with a non-empty body from `https://<APP_DOMAIN>/`,
-`https://<API_DOMAIN>/api/health` and the first tenant host (over a valid
-certificate), and `/api/public-config` must report signup as `.env` configures
-it, with a captcha site key while it is on — or the deploy fails
-(`deploy/README.md` § Deploys, § How the SPA is served). Flags: `--no-pull`, `--ref <sha>`,
-`--backend-only`, `--frontend-only`. Only one deploy runs at a time (a `flock`
+leaves the previous containers serving. Then a Caddy reload and, last, a
+**smoke check** (`deploy/smoke.sh --vm`): `curl` from the VM, through its own
+Caddy, must get a 200 with a non-empty body from
+`https://<API_DOMAIN>/api/health` and the first vanity host if there is one
+(over a valid certificate), and `/api/public-config` must report signup as
+`.env` configures it, with a captcha site key while it is on — or the deploy
+fails (`deploy/README.md` § Deploys). The VM builds no SPA (`docs/decisions.md`
+§364); the release workflow publishes it to CloudFront afterwards and checks
+the edge. Flags: `--no-pull`, `--ref <sha>`, and `--backend-only`, which every
+deploy now is and which is accepted for compatibility. Only one deploy runs at a time (a `flock`
 on `deploy/.deploy.lock`), and after the checkout the script re-runs the
 `deploy.sh` it just checked out, so a release that changes the deploy steps is
 deployed by them.
@@ -376,8 +366,8 @@ the newest. One-time setup: `infra/README.md` § Release deploys.
 
 Tenants are one command each: `deploy/add-tenant.sh <slug> --name "Company"
 --admin-email admin@company.com` provisions the tenant (the same
-`provision_tenant` path self-service signup uses), appends the Caddy host
-block, and reloads — no DNS step thanks to the wildcard record. Do **not**
+`provision_tenant` path self-service signup uses) — no Caddy block and no DNS
+step, since the tenant host is CloudFront's wildcard. Do **not**
 run `scripts/seed.py` (demo data) in prod.
 
 ### 5. Backups (RDS automated backups + `deploy/backup.sh`)
@@ -631,7 +621,7 @@ rebuilding the stack:
 | Managed Redis (ElastiCache) | Same HA push | Same seam: set `FEOH_REDIS_URL` in the sops env, redeploy. Redis holds only ephemeral state (blocklist / MFA / rate limits) — no data migration. |
 | SQS + Lambda async workers | Extraction/OCR saturates the VM | Already implemented and bundled in the same image (`awslambdaric`). Provision queues + functions (production-deployment.md § Lambda workers), flip `FEOH_EXTRACTION_MODE=lambda` + `FEOH_SQS_*_QUEUE_URL` in the sops env, redeploy. Same pattern for the ERP and audit modes. |
 | ~~CloudFront + S3 frontend~~ | ~~Global latency / offloading the VM~~ | **Built** (`infra/frontend.tf`, published by `vm-deploy.yml`; `docs/decisions.md` §278). The trigger turned out to be deploy safety, not latency. Cutover steps: `infra/README.md` § Frontend on CloudFront. |
-| Wildcard TLS certificate | Tenant count makes per-host certs noisy (Let's Encrypt ~50 certs/week limit) | DNS already wildcards; swap the Caddy image for an xcaddy build with the Route 53 DNS plugin and replace `tenants.caddy` with one `*.feohledger.com` site block. |
+| ~~Wildcard TLS certificate~~ | ~~Tenant count makes per-host certs noisy~~ | **Moot** since `docs/decisions.md` §364: tenant hosts are on CloudFront's ACM wildcard, and Caddy issues only `api.` and vanity-host certificates. |
 | Real provider adapters (payments, cards, AI extraction, ERP, sanctions…) | Going live with real money / real data | Per-org `Organization.settings.*` flips + sops keys — zero infrastructure. |
 | Background sweeps (payment reconciler, audit shipping, renewals, dunning…) | First real payments / compliance needs | `FEOH_*_ENABLED=true` in the sops env, redeploy. |
 | SES production access | Emailing unverified recipients (self-service signup) | AWS console request; until it clears, keep `FEOH_EMAIL_PROVIDER=ses` (the sandbox still delivers to verified addresses), signup closed, and tenants CLI-provisioned. Never `console` in a deployment: it logs every temporary password, reset link and sign-in code, and the app refuses to boot with it. |
@@ -645,7 +635,7 @@ healthcheck, the `localdb` / `pgtools` split, and the RDS/ElastiCache override
 seams), `Caddyfile` (+ `tenants.caddy.example`), `lib.sh` (the database-mode
 decision every script sources) + `compose.sh` / `psql.sh` (ad-hoc compose and
 psql in that mode), `deploy.sh` (preflight → build → migrate → roll →
-verify), `add-tenant.sh` (tenant + Caddy + reload in one command,
+verify), `add-tenant.sh` (tenant DB + org + admin in one command,
 re-runnable via `--skip-existing`), `backup.sh`, `restore.sh` (streamed
 restore of any night's dumps, either database mode), and `decrypt-env.sh` +
 `prod.sops.yaml.example` (the secrets file and the contract it is checked

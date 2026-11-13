@@ -28,6 +28,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
 from app.models.agent_decision import AgentDecision
@@ -48,6 +49,8 @@ async def _seed_missing_po(
     with_invoice_date: bool = True,
     link_vendor: bool = True,
     po_currencies: list[str | None] | None = None,
+    vendor_name: str = "Globex Supplies",
+    approved_once: bool = False,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Create a vendor, ``len(po_totals)`` open POs under it, and an invoice in
     ``ready_for_review`` that references a NON-EXISTENT po_number (so the live
@@ -64,7 +67,7 @@ async def _seed_missing_po(
 
     async with mk() as s:
         vendor = Vendor(
-            name="Globex Supplies",
+            name=vendor_name,
             status="active",
             source="manual",
             organization_id=org_id,
@@ -92,8 +95,12 @@ async def _seed_missing_po(
         inv = Invoice(
             organization_id=org_id,
             invoice_number=number,
-            vendor_name="Globex Supplies",
+            vendor_name=vendor_name,
             vendor_id=vendor.id if link_vendor else None,
+            # A recalled invoice back in review keeps its approval stamps
+            # (decisions §374).
+            approved_by="Original Approver" if approved_once else None,
+            approval_date=date(2026, 11, 1) if approved_once else None,
             amount=invoice_amount,
             invoice_date=date.today() if with_invoice_date else None,
             status=InvoiceStatus.ready_for_review,
@@ -596,3 +603,89 @@ async def test_a_po_whose_total_the_erp_no_longer_vouches_for_is_not_a_candidate
     async with mk() as s:
         inv = await s.get(Invoice, inv_id)
     assert inv.po_number == "PO-INV-MPO-UNV-1"
+
+
+# ---------------------------------------------------------------------------
+# The payee of a once-approved invoice is never the agent's (decisions §379)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("approved_once", [False, True], ids=["never-approved", "recalled"])
+async def test_the_agent_sets_an_empty_payee_only_before_any_approval(realdb, approved_once):
+    """No vendor linked, one confident PO under a vendor of the same name. On a
+    never-approved invoice the agent fills `vendor_id` from the PO and approves,
+    as before. On one approved once and recalled (stamps kept), filling the
+    payee would choose who is paid after a sign-off, with the agent approving
+    as the triggering human: it escalates with nothing changed."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+    tag = uuid.uuid4().hex[:8]
+
+    inv_id, _corr, exc_id = await _seed_missing_po(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_totals=[Decimal("1000.00")],
+        number=f"INV-MPO-PAYEE-{tag}",
+        link_vendor=False,
+        vendor_name=f"Payee Check {tag}",
+        approved_once=approved_once,
+    )
+
+    org_settings = {"exception_agents": {"autonomy_level": "balanced"}}
+    async with mk() as s:
+        exc = await s.get(APException, exc_id)
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings=org_settings,
+            actor_roles={"ap_manager"},
+        )
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        exc = await s.get(APException, exc_id)
+        if not approved_once:
+            assert result.decision.action_taken == ACTION_AUTO_RESOLVED
+            assert inv.vendor_id is not None
+            assert inv.status == InvoiceStatus.approved
+            return
+        assert result.decision.action_taken == ACTION_ESCALATED
+        assert "approved once" in result.decision.rationale
+        assert inv.vendor_id is None
+        assert inv.po_number == f"PO-DOES-NOT-EXIST-INV-MPO-PAYEE-{tag}"
+        assert inv.status == InvoiceStatus.ready_for_review
+        assert exc.status == "escalated"
+
+
+def test_the_payee_guard_reads_only_a_change_on_a_once_approved_invoice():
+    """`refuse_payee_change_after_approval`, the one guard both vendor-setting
+    resolvers ask: it refuses only a write that changes the payee of an invoice
+    ever approved."""
+    from types import SimpleNamespace
+
+    from app.services.exception_agents.resolvers.amount_mismatch import (
+        PayeeFixedByApproval,
+        refuse_payee_change_after_approval,
+    )
+
+    vendor = uuid.uuid4()
+
+    def inv(*, vendor_id=None, approved_by=None, approval_date=None):
+        return SimpleNamespace(
+            vendor_id=vendor_id,
+            approved_by=approved_by,
+            approval_date=approval_date,
+            status=InvoiceStatus.ready_for_review,
+        )
+
+    # Never approved: filling the payee is the resolver's job.
+    refuse_payee_change_after_approval(inv(), vendor)
+    # Approved once: nothing to write, or the same payee, passes.
+    refuse_payee_change_after_approval(inv(approved_by="A"), None)
+    refuse_payee_change_after_approval(inv(vendor_id=vendor, approved_by="A"), vendor)
+    for stamped in (inv(approved_by="A"), inv(approval_date=date(2026, 11, 1))):
+        with pytest.raises(PayeeFixedByApproval):
+            refuse_payee_change_after_approval(stamped, vendor)

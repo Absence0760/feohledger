@@ -162,8 +162,43 @@ async def test_resubmit_without_extraction_goes_straight_back_to_review(realdb):
         exc = (await s.execute(select(APException).where(APException.id == exc_id))).scalar_one()
         assert exc.status == "resolved"
 
-        actions = {r.action for r in (await s.execute(select(AuditLog))).scalars().all()}
+        audit_rows = (await s.execute(select(AuditLog))).scalars().all()
+        actions = {r.action for r in audit_rows}
     assert "invoice.resubmitted_by_vendor" in actions
+    # The rejected version is kept, not deleted, and its audit row names it
+    # (decisions §363).
+    resubmitted = next(r for r in audit_rows if r.action == "invoice.resubmitted_by_vendor")
+    assert resubmitted.details["previous_file_key"] == f"{org_id}/{inv_id}/original.pdf"
+
+
+@pytest.mark.asyncio
+async def test_resubmit_does_not_re_read_an_invoice_ap_once_approved(realdb):
+    """An invoice AP approved, then recalled (decisions §374) and rejected for
+    the supplier to reissue, is not re-extracted even with the extraction step
+    on: a re-read would rewrite signed-off figures, and the engine refuses
+    `→ pending` for it. The corrected document goes straight to review."""
+    from datetime import date
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed(mk, org_id)
+    await _enable_extraction(mk, org_id)
+    inv_id = await _add_invoice(mk, org_id, vendor_id, status=InvoiceStatus.rejected)
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        inv.approved_by = "Original Approver"
+        inv.approval_date = date(2026, 11, 1)
+        await s.commit()
+    await _add_rejection_exc(mk, org_id, inv_id)
+
+    dispatch = AsyncMock()
+    with patch("app.api.portal.dispatch_extraction", dispatch):
+        async with _client(realdb, vu_id, vendor_id) as client:
+            resp = await client.post(f"/api/portal/invoices/{inv_id}/resubmit", files={"file": PDF})
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["status"] == "ready_for_review"
+    dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

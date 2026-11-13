@@ -180,7 +180,12 @@ def test_every_code_has_a_call_site():
     """
     sources = "\n".join(
         (_BACKEND / rel).read_text(encoding="utf-8")
-        for rel in (*PRODUCER_MODULES, "app/services/po_matching.py", *ERP_PRODUCER_MODULES)
+        for rel in (
+            *PRODUCER_MODULES,
+            "app/services/po_matching.py",
+            *ERP_PRODUCER_MODULES,
+            *DIRECT_EXCEPTION_PRODUCER_MODULES,
+        )
     )
     erp_built = {s.code for s in cat.ERP_RECONCILIATION_SPECS}
     for code in codes():
@@ -199,6 +204,79 @@ ERP_PRODUCER_MODULES = (
     "app/services/erp_payment_writeback.py",
     "app/services/payment_erp_sync.py",
 )
+
+
+#: The modules that build a `DIRECT_EXCEPTION_SPECS` finding (decisions §358):
+#: the direct `create_exception` callers, and the two helpers that compose
+#: findings for them (compliance hold reasons, settlement discrepancies).
+DIRECT_EXCEPTION_PRODUCER_MODULES = (
+    "app/api/positive_pay.py",
+    "app/api/vendors.py",
+    "app/api/payments.py",
+    "app/services/compliance.py",
+    "app/services/sanctions_categories.py",
+    "app/services/payment_reconciler.py",
+    "app/services/payment_settlement.py",
+    # The void's payee comparison (decisions §383).
+    "app/services/payee_stamp.py",
+)
+
+#: Direct `create_exception` callers whose description is a PERSON's words, so
+#: it has no code by nature. Each entry says why; nothing else may be listed.
+HUMAN_AUTHORED_EXCEPTION_SITES = {
+    # The reviewer's own rejection reason.
+    "app/services/review.py",
+}
+
+
+def test_every_create_exception_call_passes_a_code():
+    """Every exception `app/` opens directly carries a `description_code`.
+
+    `_ensure_exception` refuses prose at runtime; a direct
+    `exception_service.create_exception` caller has no such check, which is how
+    six sites kept writing server English after §240 (decisions §358). A call
+    with no `description_code=` keyword is a description the queue can only
+    ever render in English.
+    """
+    offenders: list[str] = []
+    for path in sorted((_BACKEND / "app").rglob("*.py")):
+        rel = path.relative_to(_BACKEND).as_posix()
+        if rel in HUMAN_AUTHORED_EXCEPTION_SITES or rel == "app/services/exception_service.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name != "create_exception":
+                continue
+            if not any(kw.arg == "description_code" for kw in node.keywords):
+                offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, "create_exception with no description_code: " + ", ".join(offenders)
+
+
+def test_the_human_authored_exemption_is_still_needed():
+    """An exempt module that stops calling `create_exception` leaves a hole
+    the next caller there could walk through unseen."""
+    for rel in HUMAN_AUTHORED_EXCEPTION_SITES:
+        assert "create_exception(" in (_BACKEND / rel).read_text(encoding="utf-8"), rel
+
+
+def test_a_compliance_hold_frames_even_a_single_reason():
+    """Each hold reason is a lower-case clause written to follow its frame, so
+    `frame_single` keeps the frame where a lone price-variance finding would
+    be stored as itself (decisions §358)."""
+    reason = cat.exception_finding("compliance_no_screenable_vendor")
+    out = cat.exception_findings("compliance_hold_findings", [reason], frame_single=True)
+    assert out["code"] == "exception.compliance_hold_findings"
+    assert out["params"]["count"] == 1
+    assert out["params"][cat.FINDINGS_PARAM] == [reason]
+    assert out["message"] == (
+        "Payment held for compliance review (1 reason): no screenable vendor on invoice"
+    )
+    # Without it, the default single-finding behaviour is unchanged.
+    assert cat.exception_findings("compliance_hold_findings", [reason]) == reason
 
 
 def test_every_erp_code_is_reachable():

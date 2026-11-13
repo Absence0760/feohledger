@@ -73,6 +73,29 @@ describe('refusalText', () => {
 		).not.toBe('x');
 	});
 
+	it('localizes the invoice modal’s file and financial-lock refusals', () => {
+		// `GET /api/invoices/{id}/review-actions` → `manage_file` /
+		// `edit_financials` (api/invoice_entry, decisions §363 / §370).
+		expect(
+			refusalText({ code: 'invoice_document_locked', message: 'x', params: { status: 'failed' } }, t)
+		).toBe(en['refusal.invoiceDocumentLocked']);
+		expect(
+			refusalText(
+				{ code: 'invoice_financially_locked', message: 'x', params: { status: 'failed' } },
+				t
+			)
+		).toBe(en['refusal.invoiceFinanciallyLocked']);
+	});
+
+	it('treats an unanswered financial-lock verdict as locked', () => {
+		// The modal derives `financiallyLocked` as `!isAllowed(verdict)`: until
+		// the server answers, the money fields are not edited or sent.
+		const lock = { code: 'invoice_financially_locked', message: 'x', params: {} };
+		expect(!isAllowed(undefined)).toBe(true);
+		expect(!isAllowed(lock)).toBe(true);
+		expect(!isAllowed(null)).toBe(false);
+	});
+
 	it('falls back to the server sentence for a code it predates', () => {
 		expect(refusalText({ code: 'some_future_code', message: 'Server says no.' }, t)).toBe(
 			'Server says no.'

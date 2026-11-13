@@ -70,7 +70,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
-from app.models.payment import Payment
+from app.models.payment import Payment, PaymentRun
 from app.services.applied_credit_integrity import applied_credit_conflicts
 from app.services.approval_chain import violates_segregation
 from app.services.payment_controls import run_segregation_enabled
@@ -361,6 +361,15 @@ def _check_amount(stated: Decimal | None, owed: Decimal, currency: str | None) -
         )
 
 
+async def _sent_in_an_exported_file(db: AsyncSession, payment: Payment) -> bool:
+    if payment.payee_recorded_at is None or payment.payment_run_id is None:
+        return False
+    run_status = (
+        await db.execute(select(PaymentRun.status).where(PaymentRun.id == payment.payment_run_id))
+    ).scalar_one_or_none()
+    return run_status == "exported"
+
+
 async def _complete(
     db: AsyncSession,
     *,
@@ -393,6 +402,18 @@ async def _complete(
     # None for that case anyway, and inventing a rate would be worse).
     payment.settled_amount = payment.amount
     payment.settled_currency = (invoice.currency or "").upper() or None
+    # The payee this record pays (decisions §383): the invoice's vendor and its
+    # bank details on file now, the only payee FeohLedger can know for money it
+    # never saw move. An entry of an EXPORTED NACHA file keeps the payee that
+    # file carried, since the customer's upload is what paid it; a file the bank
+    # rejected (`/nacha/void`, run back to `draft`) paid nobody, so its stamp is
+    # replaced.
+    if not await _sent_in_an_exported_file(db, payment):
+        from app.services.payee_stamp import stamp_payee_from_vendor
+
+        await stamp_payee_from_vendor(
+            db, payment, invoice=invoice, organization_id=org.id, at=datetime.now(UTC)
+        )
     await db.flush()
 
     await dispatch_audit(

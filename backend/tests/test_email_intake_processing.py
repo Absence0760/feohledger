@@ -477,16 +477,15 @@ async def test_a_redelivery_to_the_same_tenant_is_still_deduped_after_scoping():
     dispatch.assert_awaited_once()
 
 
-async def test_a_live_pre_upgrade_unscoped_claim_still_dedupes_the_redelivery():
-    """Deploy-window guard. A message processed by the pre-per-tenant code left
-    an unscoped ``email_intake:<message_id>`` claim that does not say which
-    tenant it reached. Its redelivery after the deploy must still be treated as
-    a duplicate — for every tenant, since none can be ruled out — or it would
-    create a second payable for the one it did reach."""
+async def test_an_unscoped_message_id_claim_no_longer_blocks_any_tenant():
+    """The pre-per-tenant ``email_intake:<message_id>`` claim format is retired
+    (decisions §368): every claim of that shape expired long ago, so a bare
+    Message-ID key must NOT be read as "already processed". Only the per-tenant
+    key dedupes, and each tenant the message names gets its invoice."""
     from app.services.webhook_security import is_event_already_processed
 
-    msg_id = "<processed-before-the-deploy@vendor.example.com>"
-    # Exactly what the old code wrote: the bare Message-ID as the claim.
+    msg_id = "<unscoped-claim@vendor.example.com>"
+    # Exactly what the retired code wrote: the bare Message-ID as the claim.
     assert await is_event_already_processed("email_intake", msg_id) is False
 
     org_a = _org(token="aaa", enabled=True, slug="acme")
@@ -508,24 +507,11 @@ async def test_a_live_pre_upgrade_unscoped_claim_still_dedupes_the_redelivery():
                 attachments=[_pdf()],
             ),
         )
-        # A message the old code never saw is unaffected by the legacy check.
-        fresh = await email_intake.process_inbound_email(
-            MagicMock(),
-            InboundEmail(
-                to="invoices+aaa@ap.co",
-                sender="v@x.com",
-                message_id="<after-the-deploy@vendor.example.com>",
-                attachments=[_pdf()],
-            ),
-        )
 
-    assert result.error == "Duplicate delivery"
-    assert result.invoices_created == []
-    assert fresh.error is None
-    # Only `fresh` created anything: one invoice for each of the two tenants
-    # the resolver returns.
-    assert len(fresh.invoices_created) == 2
+    assert result.error is None
+    assert len(result.invoices_created) == 2
     assert create_invoice.await_count == 2
+    assert not hasattr(email_intake, "_legacy_claim_live")
 
 
 async def test_the_dedup_claim_key_is_the_org_scoped_message_id():

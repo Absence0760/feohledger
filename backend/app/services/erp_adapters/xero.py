@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -68,7 +69,12 @@ from app.services.erp_adapters.bill_allocation import (
     allocate_bill_lines,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
-from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
+from app.services.erp_adapters.oauth_base import (
+    ExternalCompany,
+    OAuthErpAdapter,
+    OAuthProviderSpec,
+    clean_companies,
+)
 from app.services.erp_adapters.posted_total import (
     MAX_CREATE_ATTEMPTS,
     VoidOutcome,
@@ -78,6 +84,8 @@ from app.services.erp_adapters.posted_total import (
 )
 from app.services.erp_oauth import register_oauth_provider
 from app.utils.json_money import dumps_exact_json
+
+logger = logging.getLogger(__name__)
 
 PROVIDER = "Xero"
 XERO_API_BASE = "https://api.xero.com/api.xro/2.0"
@@ -228,20 +236,21 @@ class XeroAdapter(OAuthErpAdapter):
     oauth_provider = XERO_OAUTH
 
     @classmethod
-    async def resolve_external_tenant_id(
+    async def list_external_tenants(
         cls,
         *,
         access_token: str,
         token_response: dict,
         callback_params: dict[str, str],
         erp_settings: dict | None = None,
-    ) -> str | None:
-        """The Xero organisation this consent connected (``GET /connections``).
+    ) -> list[ExternalCompany]:
+        """The Xero organisations this consent connected (``GET /connections``).
 
         A user may have connected several organisations over time; only the
-        ones authorised by THIS consent (matching ``authEventId``) count. More
-        than one organisation left → None (``no_external_tenant``): we never
-        pick one of a customer's ledgers for them.
+        ones authorised by THIS consent (matching ``authEventId``) count. One
+        consent may still authorise several, and then the admin picks which
+        (decisions §355) — we never pick one of a customer's ledgers for them.
+        A failed lookup is an empty list (``no_external_tenant``).
         """
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
@@ -249,17 +258,15 @@ class XeroAdapter(OAuthErpAdapter):
                 headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
             )
         if resp.status_code != 200:
-            return None
+            return []
         rows = resp.json()
         if not isinstance(rows, list):
-            return None
+            return []
         orgs = [r for r in rows if isinstance(r, dict) and r.get("tenantType") == "ORGANISATION"]
         event = _auth_event_id(access_token)
         if event:
             orgs = [r for r in orgs if r.get("authEventId") == event] or orgs
-        if len(orgs) != 1 or not orgs[0].get("tenantId"):
-            return None
-        return str(orgs[0]["tenantId"])
+        return clean_companies([(r.get("tenantId"), r.get("tenantName")) for r in orgs])
 
     async def _headers(self, *, json_body: bool = False) -> dict[str, str]:
         headers = {
@@ -339,6 +346,44 @@ class XeroAdapter(OAuthErpAdapter):
         return items
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
+        """Post the bill; a confirmed one also carries the organisation's
+        ``ShortCode``, so its deep link opens in this organisation
+        (``deep_links``, decisions §354)."""
+        result = await self._post_invoice(payload)
+        if result.success and result.erp_document_id:
+            result.erp_company_code = await self.organisation_short_code()
+        return result
+
+    async def organisation_short_code(self) -> str | None:
+        """The connected organisation's ``ShortCode`` (``GET /Organisation``),
+        or None when it cannot be read.
+
+        Best effort by design: it runs after the bill is confirmed, so a failed
+        read must not turn a posted bill into a failed push. The link then
+        falls back to the page in the user's currently selected organisation.
+        Read at each push rather than stored on the connection, so a connection
+        made before this existed needs no backfill or reconnect.
+        """
+        try:
+            headers = await self._headers()
+            async with self.oauth_client(timeout=10) as client:
+                resp = await client.get(f"{_api_base()}/Organisation", headers=headers)
+            if resp.status_code != 200:
+                logger.warning(
+                    "xero: Organisation read for the deep link returned %s", resp.status_code
+                )
+                return None
+            orgs = _json(resp).get("Organisations") or []
+            code = orgs[0].get("ShortCode") if orgs and isinstance(orgs[0], dict) else None
+        except Exception as exc:  # noqa: BLE001 — the bill is posted; only the link degrades
+            logger.warning(
+                "xero: Organisation read for the deep link failed (%s)", type(exc).__name__
+            )
+            return None
+        code = str(code or "").strip()
+        return code or None
+
+    async def _post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
             return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
         if payload.invoice_date is None or payload.due_date is None:

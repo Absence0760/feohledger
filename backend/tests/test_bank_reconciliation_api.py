@@ -163,6 +163,7 @@ async def test_upload_credits_are_skipped_not_matched(realdb):
                 "account_identifier": "Operating ****1234",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -181,6 +182,7 @@ async def test_upload_malformed_csv_returns_422(realdb):
                 "account_identifier": "Operating ****1234",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("bad.csv", b"not,a,valid,header\r\n", "text/csv")},
         )
@@ -212,6 +214,7 @@ async def test_uploading_the_same_file_twice_returns_the_first_statement(realdb)
         "account_identifier": account,
         "period_start": (_TODAY - timedelta(days=30)).isoformat(),
         "period_end": _TODAY.isoformat(),
+        "currency": "USD",
     }
     async with realdb.client(key="a", role="ap_manager") as c:
         first = await c.post(
@@ -258,6 +261,7 @@ async def test_a_different_file_on_the_same_account_still_imports(realdb):
         "account_identifier": account,
         "period_start": (_TODAY - timedelta(days=30)).isoformat(),
         "period_end": _TODAY.isoformat(),
+        "currency": "USD",
     }
     async with realdb.client(key="a", role="ap_manager") as c:
         first = await c.post(
@@ -319,6 +323,7 @@ async def test_two_concurrent_uploads_cannot_both_claim_one_payment(realdb):
                     "account_identifier": f"Race ****{tag}",
                     "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                     "period_end": _TODAY.isoformat(),
+                    "currency": "USD",
                 },
                 files={"file": (f"statement-{tag}.csv", body, "text/csv")},
             )
@@ -372,6 +377,7 @@ async def test_upload_over_the_size_cap_is_rejected(realdb):
                 "account_identifier": "Operating ****9020",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("huge.csv", oversized, "text/csv")},
         )
@@ -396,6 +402,7 @@ async def test_list_and_get_detail(realdb):
                 "account_identifier": "Operating ****5555",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -451,6 +458,7 @@ async def test_resolve_transaction_sets_and_clears_manual_match(realdb):
                 "account_identifier": "Operating ****9999",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -525,6 +533,7 @@ async def test_resolve_refuses_a_credit_transaction(realdb):
                 "account_identifier": "Operating ****7777",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -558,6 +567,7 @@ async def test_resolve_malformed_payment_id_is_422_not_500(realdb):
                 "account_identifier": "Operating ****0042",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -580,6 +590,7 @@ async def test_resolve_unknown_payment_is_404(realdb):
                 "account_identifier": "Operating ****0001",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -614,6 +625,7 @@ async def test_resolve_refuses_to_double_claim_a_payment(realdb):
                 "account_identifier": "Operating ****7777",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -658,6 +670,7 @@ async def test_delete_cascades_transactions_and_audits(realdb):
                 "account_identifier": "Operating ****4242",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -710,6 +723,7 @@ async def test_ap_clerk_can_read_but_not_upload_or_delete(realdb):
                 "account_identifier": "Operating ****4242",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -746,6 +760,7 @@ async def test_upload_flags_reference_hit_with_wrong_amount_as_amount_mismatch(r
                 "account_identifier": "Operating ****9001",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -782,6 +797,7 @@ async def test_statement_list_surfaces_amount_mismatch_count(realdb):
                 "account_identifier": account,
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -814,6 +830,7 @@ async def test_manual_resolve_cannot_stamp_a_wrong_amount_as_reconciled(realdb):
                 "account_identifier": "Operating ****9003",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -873,6 +890,7 @@ async def test_upload_flags_a_debit_against_a_failed_payment_as_status_conflict(
                 "account_identifier": "Operating ****9010",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -939,6 +957,64 @@ async def test_upload_flags_a_debit_in_another_currency_as_currency_mismatch(rea
     assert tx["variance_amount"] is None
 
 
+@pytest.mark.parametrize(
+    ("currency", "code", "params"),
+    [
+        (None, "statement_currency_required", {}),
+        ("", "statement_currency_required", {}),
+        ("EURO", "statement_currency_invalid", {"value": "EURO"}),
+        ("US$", "statement_currency_invalid", {"value": "US$"}),
+        # Letters, but not ASCII: `isalpha()` admitted it (decisions §381).
+        ("ÄÖÜ", "statement_currency_invalid", {"value": "ÄÖÜ"}),
+    ],
+)
+async def test_upload_refuses_a_blank_or_malformed_statement_currency(
+    realdb, currency, code, params
+):
+    """The statement's currency is never defaulted to USD (decisions §377): an
+    omitted or blank field and a malformed code are each a coded 422, and no
+    statement is written."""
+    data = {
+        "account_identifier": "Operating ****7001",
+        "period_start": (_TODAY - timedelta(days=30)).isoformat(),
+        "period_end": _TODAY.isoformat(),
+    }
+    if currency is not None:
+        data["currency"] = currency
+    csv_body = _csv("Date,Amount,Description", f"{_TODAY.isoformat()},-5.00,x")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/bank-reconciliation/upload",
+            data=data,
+            files={"file": ("statement.csv", csv_body, "text/csv")},
+        )
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert (detail["code"], detail["params"]) == (code, params)
+    async with realdb.sessionmaker("a")() as s:
+        written = await s.execute(
+            select(BankStatement).where(BankStatement.account_identifier == "Operating ****7001")
+        )
+        assert written.scalars().all() == []
+
+
+async def test_upload_normalizes_a_lowercase_statement_currency(realdb):
+    csv_body = _csv("Date,Amount,Description", f"{_TODAY.isoformat()},-5.00,lower")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/bank-reconciliation/upload",
+            data={
+                "account_identifier": "Operating ****7002",
+                "period_start": (_TODAY - timedelta(days=30)).isoformat(),
+                "period_end": _TODAY.isoformat(),
+                "currency": " gbp ",
+            },
+            files={"file": ("statement.csv", csv_body, "text/csv")},
+        )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["currency"] == "GBP"
+
+
 async def test_manual_resolve_cannot_stamp_a_failed_payment_as_reconciled(realdb):
     """The manual path runs the SAME classifier as the matcher, so a clerk
     cannot resolve a bank line onto a payment our books say never went out and
@@ -958,6 +1034,7 @@ async def test_manual_resolve_cannot_stamp_a_failed_payment_as_reconciled(realdb
                 "account_identifier": "Operating ****9012",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -1012,6 +1089,7 @@ async def test_duplicate_payment_reference_does_not_500_the_import(realdb):
                 "account_identifier": "Operating ****9005",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -1056,6 +1134,7 @@ async def test_outstanding_reports_uncleared_unmatched_and_mismatched(realdb):
                 "account_identifier": "Operating ****9006",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -1149,6 +1228,7 @@ async def test_outstanding_excludes_a_cleanly_reconciled_payment(realdb):
                 "account_identifier": "Operating ****9007",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -1218,6 +1298,7 @@ async def test_concurrent_resolve_cannot_claim_one_payment_twice(realdb):
                 "account_identifier": "Operating ****9008",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
@@ -1281,6 +1362,7 @@ async def test_a_second_claim_on_one_payment_is_impossible_at_the_db_layer(reald
                 "account_identifier": "Operating ****9030",
                 "period_start": (_TODAY - timedelta(days=30)).isoformat(),
                 "period_end": _TODAY.isoformat(),
+                "currency": "USD",
             },
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )

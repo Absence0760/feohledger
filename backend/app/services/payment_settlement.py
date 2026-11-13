@@ -43,6 +43,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
+from app.services.invoice_warning_catalog import exception_finding
 from app.services.numeric_bounds import fits_numeric
 
 # One cent — the same band `positive_pay.DEFAULT_AMOUNT_TOLERANCE` uses for its
@@ -512,34 +513,35 @@ def settlement_coverage(
     )
 
 
-def describe_discrepancy(verification: SettlementVerification) -> str:
-    """One-line, PII-free summary for an ``Exception.description``.
+def discrepancy_finding(verification: SettlementVerification) -> dict:
+    """The catalogue finding an ``Exception`` description carries for a
+    settlement discrepancy (decisions §358).
 
     Names amounts, currencies and the verdict — never a vendor, a bank
     account or an invoice number (the exception row already carries the
-    invoice FK).
+    invoice FK). The figures are bare ``number`` params beside their own
+    currency codes, because the two sides of a currency mismatch are in two
+    currencies; a code the processor did not report renders as ``?``.
+    Raises for a verdict that is not a discrepancy: both discrepancy outcomes
+    always carry a reported and an authorized figure, and nothing else opens
+    a settlement exception.
     """
-    settled = (
-        f"{verification.settled_amount} {verification.settled_currency or '?'}"
-        if verification.settled_amount is not None
-        else "an unreported amount"
-    )
-    authorized = (
-        f"{verification.authorized_amount} {verification.authorized_currency or '?'}"
-        if verification.authorized_amount is not None
-        else "the authorized amount"
-    )
+    if not verification.is_discrepancy:
+        raise ValueError(f"not a settlement discrepancy: {verification.outcome}")
+    figures = {
+        "settledAmount": str(verification.settled_amount),
+        "settledCurrency": verification.settled_currency or "?",
+        "authorizedAmount": str(verification.authorized_amount),
+        "authorizedCurrency": verification.authorized_currency or "?",
+    }
     if verification.outcome == OUTCOME_CURRENCY_MISMATCH:
-        return (
-            f"Settlement currency mismatch: the processor reported {settled} but this "
-            f"payment authorizes {authorized}. Money moved on a currency AP did not "
-            f"authorize — reconcile with the processor before releasing this invoice."
-        )
-    variance = verification.variance
-    direction = "MORE than" if (variance or Decimal("0")) > 0 else "LESS than"
-    return (
-        f"Settlement amount mismatch: the processor reported {settled}, "
-        f"{direction} the authorized {authorized} (variance {variance}). "
-        f"Money moved at an amount AP did not authorize — reconcile with the "
-        f"processor before releasing this invoice."
-    )
+        return exception_finding("settlement_currency_mismatch", **figures)
+    variance = verification.variance or Decimal("0")
+    if variance > 0:
+        return exception_finding("settlement_amount_over", variance=str(variance), **figures)
+    return exception_finding("settlement_amount_under", variance=str(variance), **figures)
+
+
+def describe_discrepancy(verification: SettlementVerification) -> str:
+    """The English of :func:`discrepancy_finding` — a one-line, PII-free summary."""
+    return discrepancy_finding(verification)["message"]

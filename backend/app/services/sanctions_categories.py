@@ -32,6 +32,8 @@ to put in an audit row, an API response and a UI badge, while
 
 from __future__ import annotations
 
+from app.services.invoice_warning_catalog import exception_finding
+
 # Taxonomy labels. Adapters normalise their provider's own vocabulary into
 # these (e.g. World-Check's ``ADVERSE-MEDIA`` → ``adverse_media``).
 CATEGORY_SANCTIONS = "sanctions"
@@ -88,16 +90,21 @@ def has_adverse_media(categories: tuple[str, ...] | list[str] | None) -> bool:
     return CATEGORY_ADVERSE_MEDIA in _normalize(categories)
 
 
-def adverse_media_reason(provider: str | None) -> str:
-    """The PII-free sentence added to ``ComplianceDecision.reasons``.
+def adverse_media_finding(provider: str | None) -> dict:
+    """The PII-free catalogue finding a compliance hold lists for this hit.
 
     Names the signal and the provider only — never the match detail, which can
-    embed the article, the person, or a date of birth (invariant #7).
+    embed the article, the person, or a date of birth (invariant #7). A missing
+    provider is its own code, never an English phrase spliced into the param.
     """
-    return (
-        "vendor screening returned an adverse-media (negative news) hit "
-        f"via {provider or 'the configured provider'}; AP review required"
-    )
+    if provider:
+        return exception_finding("compliance_adverse_media", provider=provider)
+    return exception_finding("compliance_adverse_media_unnamed_provider")
+
+
+def adverse_media_reason(provider: str | None) -> str:
+    """The English of :func:`adverse_media_finding`, for ``ComplianceDecision.reasons``."""
+    return adverse_media_finding(provider)["message"]
 
 
 def _normalize(categories: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:

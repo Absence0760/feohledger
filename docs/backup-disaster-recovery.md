@@ -82,8 +82,8 @@ Everything in this section lives only on the VM. None of it is in S3, none of it
 | Per-VM state | What it is | How it comes back |
 |---|---|---|
 | `deploy/.env` | the decrypted secrets file, recreated on every `deploy.sh` run (`deploy/.gitignore:1-4`) | `deploy/decrypt-env.sh` against the canonical `infra-secrets/feohledger/prod.sops.yaml` — this one is genuinely recoverable |
-| `deploy/tenants.caddy` | one Caddy site block per tenant subdomain; gitignored, seeded empty from `tenants.caddy.example` by `deploy/deploy.sh:55` | rebuilt by hand from the restored control plane's organization slugs — **not** by re-running `add-tenant.sh`, which provisions a new tenant DB and admin user |
-| `caddy_data` / `caddy_config` volumes | Let's Encrypt certificates and ACME account state (`deploy/compose.prod.yml:122-125`) | Caddy re-issues per host over HTTP-01 on first request. Watch Let's Encrypt's rate limits on a rebuild with many tenant hosts — the compose file flags this, and it is the one part of Scenario B that can be throttled rather than merely slow |
+| `deploy/tenants.caddy` | one Caddy site block per customer **vanity** host (tenant subdomains are CloudFront's since `docs/decisions.md` §364); gitignored, seeded empty from `tenants.caddy.example` by `deploy/deploy.sh` | rebuilt by hand from the restored control plane's registered custom domains (`settings.brand.custom_domains`); with none, there is nothing to rebuild |
+| `caddy_data` / `caddy_config` volumes | Let's Encrypt certificates and ACME account state (`deploy/compose.prod.yml`) for `api.<domain>` and any vanity host | Caddy re-issues per host over HTTP-01 on first request. With only `api.` and a handful of vanity hosts on the VM, Let's Encrypt's rate limits no longer bind on a rebuild |
 | `redisdata` volume | JWT blocklist, MFA OTPs, SSO state, rate-limit counters | not restored, by design — see § Targets |
 
 `pgdata` is the fourth of the four named volumes (`deploy/compose.prod.yml:129-133`) and is the one this runbook does cover: the nightly dumps are its off-instance copy.
@@ -121,13 +121,13 @@ Everything in this section lives only on the VM. None of it is in S3, none of it
    ./compose.sh run --rm api sh scripts/deploy_migrate.sh
    ```
    Step 2 already ran these once, but it ran them against an empty cluster — the restore in step 3 is what put the tenant databases there, so they need it again.
-5. Rebuild `deploy/tenants.caddy`. A fresh VM has the empty seeded copy, so **every tenant subdomain is unserved until its block is back**. List the slugs from the control plane and append one block each, then reload Caddy without a restart:
+5. Rebuild `deploy/tenants.caddy` **only if a tenant has a vanity domain**. Tenant subdomains are served by CloudFront and need nothing on the VM (`docs/decisions.md` §364). List the registered custom domains from the control plane, append one block each, then reload Caddy without a restart:
    ```bash
-   ./psql.sh -d feohledger -Atc "SELECT slug FROM organizations ORDER BY slug"
+   ./psql.sh -d feohledger -Atc "SELECT slug, settings->'brand'->'custom_domains' FROM organizations WHERE settings->'brand' ? 'custom_domains' ORDER BY slug"
    ./compose.sh exec caddy caddy reload --config /etc/caddy/Caddyfile
    ```
-   Each block is the three lines in `deploy/tenants.caddy.example` — `<slug>.<APP_DOMAIN> { import spa }`. **Do not use `deploy/add-tenant.sh` for this**: it provisions a *new* tenant — database, organization and admin user — and appending a Caddy block is only its last step.
-6. Re-point DNS at the new instance. With the recommended wildcard record (`*.<APP_DOMAIN>`) there is no per-tenant DNS step; Caddy still issues a per-host certificate over HTTP-01 on first request, so expect the first hit on each tenant host to be slow and watch for Let's Encrypt rate limiting if there are many.
+   Each block is the three lines in `deploy/tenants.caddy.example` — `<vanity host> { import vanity }`. **Do not use `deploy/add-tenant.sh` here**: it provisions a *new* tenant (database, organization and admin user) and writes no Caddy block.
+6. Re-point DNS at the new instance: `api.<APP_DOMAIN>` (the Elastic IP moves with `infra/`), and each customer's vanity record if they use an `A` record rather than a `CNAME` to `api.<APP_DOMAIN>`. The apex and `*.<APP_DOMAIN>` alias CloudFront and do not move. Caddy issues `api.`'s and each vanity host's certificate over HTTP-01 on first request, so expect that first hit to be slow.
 
 ### Scenario C — accidental S3 object deletion
 

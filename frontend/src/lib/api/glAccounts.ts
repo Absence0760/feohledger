@@ -144,12 +144,22 @@ export interface GlAccountSyncResult {
 	link_changes: { code: string; from: string | null; to: string | null }[];
 	/** Pre-0115 links this pull confirmed and stamped with the connection. */
 	realm_adopted?: number;
+	/** States from another ERP company filed for a return there (decisions §376). */
+	kept?: number;
+	/** Rows whose state kept for this company was put back before re-judging. */
+	restored?: number;
+	restore_dropped_count?: number;
+	/** Codes whose kept link was dropped: another row held its account. Capped at 50. */
+	restore_dropped?: string[];
 	deactivated_count?: number;
 	/** Codes retired because the ERP made their account inactive. Capped at 50. */
 	deactivated?: string[];
 	parent_code_dropped_count?: number;
 	/** Codes synced without their parent (its code did not fit). Capped at 50. */
 	parent_code_dropped?: string[];
+	names_shortened_count?: number;
+	/** Codes synced with a shortened name (the ERP's did not fit). Capped at 50. */
+	names_shortened?: string[];
 	adapter: string;
 }
 

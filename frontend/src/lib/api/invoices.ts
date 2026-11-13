@@ -25,6 +25,24 @@ export type InvoiceActionVerdicts = {
 	send_to_erp: ActionRefusal;
 	/** `POST /retry-erp` — the same push gates, from `failed`. */
 	retry_erp: ActionRefusal;
+	/** `POST /resubmit` ("Resubmit for review") — `api/workflow.resubmit_refusal`:
+	 *  the entry roles, a `rejected` invoice only, the clerk's entry window. */
+	resubmit: ActionRefusal;
+	/** `POST` / `PUT` / `DELETE /file` (Upload / Replace / Delete) —
+	 *  `api/invoice_entry.manage_file_refusal`: the entry roles, the entry
+	 *  window, and the document lock from `approved` on (decisions §363). */
+	manage_file: ActionRefusal;
+	/** `PATCH` carrying a financial field (amount, payee, …) and
+	 *  `PUT /line-items` — `api/invoice_entry.edit_financials_refusal`: the
+	 *  entry roles, the entry window, and the financial lock (from `approved`
+	 *  on, and at a failed ERP push after approval — decisions §370). The
+	 *  modal edits and sends the financial fields only while this is `null`. */
+	edit_financials: ActionRefusal;
+	/** `POST /recall-approval` ("Recall approval") — `services/review.recall_refusal`:
+	 *  `invoice.approve`, an approved invoice or one whose ERP push failed after
+	 *  approval, no bill the ERP may hold, no live payment or virtual card
+	 *  (decisions §374). */
+	recall_approval: ActionRefusal;
 };
 
 /** `invoice_not_completable` — `/complete` from a status it does not advance
@@ -36,6 +54,18 @@ export const INVOICE_NOT_ERP_SENDABLE = 'invoice_not_erp_sendable';
 /** `invoice_not_erp_retryable` — `/retry-erp` on anything but an approved
  *  invoice's failed push. Hidden, like {@link INVOICE_NOT_COMPLETABLE}. */
 export const INVOICE_NOT_ERP_RETRYABLE = 'invoice_not_erp_retryable';
+/** `invoice_not_resubmittable` — `/resubmit` on anything but a `rejected`
+ *  invoice. Hidden, like {@link INVOICE_NOT_COMPLETABLE}. */
+export const INVOICE_NOT_RESUBMITTABLE = 'invoice_not_resubmittable';
+/** `invoice_document_locked` — the `/file` routes on an approved invoice. */
+export const INVOICE_DOCUMENT_LOCKED = 'invoice_document_locked';
+/** `invoice_financially_locked` — `PATCH` (a financial field) or
+ *  `PUT /line-items` on an approved invoice, or on one whose ERP push failed
+ *  after approval (`models/invoice_status.financially_locked`, decisions §370). */
+export const INVOICE_FINANCIALLY_LOCKED = 'invoice_financially_locked';
+/** `invoice_not_recallable` — `/recall-approval` on an invoice holding no
+ *  approval to take back. Hidden, like {@link INVOICE_NOT_COMPLETABLE}. */
+export const INVOICE_NOT_RECALLABLE = 'invoice_not_recallable';
 
 /**
  * The server's verdicts on the caller's workflow actions for this invoice
@@ -45,6 +75,17 @@ export const INVOICE_NOT_ERP_RETRYABLE = 'invoice_not_erp_retryable';
  */
 export function getReviewActions(invoiceId: string): Promise<InvoiceActionVerdicts> {
 	return api.get(`/api/invoices/${invoiceId}/review-actions`);
+}
+
+/**
+ * Recall an invoice's approval (`POST /api/invoices/{id}/recall-approval`):
+ * back to `ready_for_review`, so its frozen figures can be corrected and
+ * approved again through the whole chain. The reason is required and lands on
+ * the `invoice.approval_recalled` audit row. Offered from the `recall_approval`
+ * verdict only (decisions §374).
+ */
+export function recallApproval(invoiceId: string, reason: string): Promise<Invoice> {
+	return api.post<Invoice>(`/api/invoices/${invoiceId}/recall-approval`, { reason });
 }
 
 /**

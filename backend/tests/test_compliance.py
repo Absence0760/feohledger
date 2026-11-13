@@ -479,6 +479,11 @@ async def test_aml_trailing_spend_threshold_triggers_hold():
     )
     assert decision.verdict == "hold"
     assert any("trailing 12-month" in r for r in decision.reasons)
+    # Every hold reason is also a catalogue finding, in the same order
+    # (decisions §358) — that is what the hold exception is keyed from.
+    assert [f["message"] for f in decision.findings] == decision.reasons
+    assert [f["code"] for f in decision.findings] == ["exception.compliance_aml_spend"]
+    assert decision.findings[0]["params"]["currency"] == "USD"
 
 
 @pytest.mark.asyncio
@@ -599,6 +604,13 @@ async def test_compliance_holds_when_configured_provider_has_no_adapter():
     )
     assert decision.verdict == "hold"
     assert any("worldcheck" in r for r in decision.reasons)
+    assert decision.findings == [
+        {
+            "code": "exception.compliance_provider_unavailable",
+            "params": {"provider": "worldcheck"},
+            "message": decision.reasons[0],
+        }
+    ]
     # No screening row was written — nothing was screened.
     assert decision.sanctions_check_row is None
 
@@ -1015,6 +1027,9 @@ async def test_unrecognised_screening_result_holds_rather_than_allows(unknown):
         "unreadable sanctions answer must never resolve to allow"
     )
     assert any("unrecognised result" in r for r in decision.reasons)
+    codes = [f["code"] for f in decision.findings]
+    assert "exception.compliance_unrecognised_result" in codes
+    assert [f["message"] for f in decision.findings] == decision.reasons
 
 
 @pytest.mark.asyncio
@@ -1092,3 +1107,82 @@ async def test_unrecognised_result_composes_with_the_other_gates():
         payment_amount=Decimal("50000.00"),
     )
     assert decision.verdict == "refuse"
+
+
+# ---------------------------------------------------------------------------
+# Hold reasons are catalogue findings (decisions §358)
+#
+# The `payment_compliance_hold` exception lists the decision's `findings`, so
+# every hold-capable reason needs a code. A word in the sentence (a list name
+# present or absent, a provider named or not) picks the code, never a param.
+# ---------------------------------------------------------------------------
+
+
+class _ScreenAdapter:
+    provider_name = "fixture"
+
+    def __init__(self, *, result, matched_list, adverse_media, provider="fixture"):
+        self._shape = SimpleNamespace(
+            result=result,
+            provider=provider,
+            risk_score=0,
+            matched_list=matched_list,
+            raw_response={},
+            categories=["adverse_media"] if adverse_media else [],
+            adverse_media=adverse_media,
+        )
+
+    async def screen_vendor(self, **_kwargs):
+        return self._shape
+
+
+@pytest.mark.parametrize(
+    ("matched_list", "adverse_media", "provider", "expected"),
+    [
+        ("OFAC-SDN", False, "fixture", ["exception.compliance_review_required"]),
+        (None, False, "fixture", ["exception.compliance_review_required_unlisted"]),
+        (
+            "PEP",
+            True,
+            "fixture",
+            [
+                "exception.compliance_review_required",
+                "exception.compliance_adverse_media",
+            ],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_each_hold_reason_is_a_catalogue_finding(
+    matched_list, adverse_media, provider, expected
+):
+    db = _mock_db_with_zero_trailing_spend()
+    with patch(
+        "app.services.compliance.get_sanctions_adapter",
+        return_value=_ScreenAdapter(
+            result="review_required",
+            matched_list=matched_list,
+            adverse_media=adverse_media,
+            provider=provider,
+        ),
+    ):
+        decision = await check_payment_compliance(
+            db,
+            vendor=_vendor(kyc_status="verified"),
+            payment_amount=Decimal("100.00"),
+            payment_currency="USD",
+            payment_method="ach",
+            org_settings={},
+            organization_id=uuid.uuid4(),
+        )
+    assert decision.verdict == "hold"
+    assert [f["code"] for f in decision.findings] == expected
+    # Same reasons, same order, same English — `failure_reason` joins the
+    # one, the exception is keyed from the other.
+    assert [f["message"] for f in decision.findings] == decision.reasons
+    if matched_list:
+        assert decision.findings[0]["params"]["matchedList"] == matched_list
+    # No English placeholder phrase rides a param.
+    for f in decision.findings:
+        assert "see audit row" not in str(f["params"])
+        assert "configured provider" not in str(f["params"])

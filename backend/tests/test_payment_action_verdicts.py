@@ -706,6 +706,12 @@ def _outside_scenarios(realdb, role):
         "completed": {"initiated_by": someone, "status": "completed", "leg_status": "completed"},
         # A draft whose only leg is gone (failed): nothing left to send.
         "draft_nothing_left": {"initiated_by": someone, "leg_status": "failed"},
+        # An exported file whose only payment verify took out (§362).
+        "exported_nothing_left": {
+            "initiated_by": someone,
+            "status": "exported",
+            "leg_status": "failed",
+        },
     }
 
 
@@ -725,7 +731,13 @@ def _assert_bank_parity(verdict, resp, label):
         assert detail == verdict["message"], (label, verdict, detail)
 
 
-_OUTSIDE_ACTIONS = ("record_outside", "nacha_export", "nacha_regenerate", "nacha_void")
+_OUTSIDE_ACTIONS = (
+    "record_outside",
+    "nacha_export",
+    "nacha_regenerate",
+    "nacha_void",
+    "nacha_verify",
+)
 
 
 async def _outside_post(c, run_id, action):
@@ -740,6 +752,8 @@ async def _outside_post(c, run_id, action):
         return await c.post(
             f"/api/payments/runs/{run_id}/nacha/void", json={"reason": "bank rejected it"}
         )
+    if action == "nacha_verify":
+        return await c.post(f"/api/payments/runs/{run_id}/nacha/verify")
     params = {"regenerate": "true"} if action == "nacha_regenerate" else {}
     return await c.get(f"/api/payments/runs/{run_id}/nacha", params=params)
 
@@ -750,7 +764,7 @@ _OUTSIDE_MODES = ("record_only", "record_only_unconfigured", "processor", "opted
 @pytest.mark.parametrize("mode", _OUTSIDE_MODES)
 @pytest.mark.parametrize("role", ROLES)
 async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(realdb, role, mode):
-    """`actions.{record_outside,nacha_export,nacha_regenerate,nacha_void}` are
+    """`actions.{record_outside,nacha_export,nacha_regenerate,nacha_void,nacha_verify}` are
     `None` exactly when their endpoint accepts, and otherwise carry the refusal
     it answers with — every role, every run state, on a configured record-only
     tenant, an unconfigured one, a processor tenant, and with maker-checker
@@ -782,7 +796,18 @@ async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(re
 
     if role == "ap_clerk":
         return
-    assert seen["nacha_void"] <= {None, "nacha_run_not_exported", "role_not_permitted"}
+    assert seen["nacha_void"] <= {
+        None,
+        "nacha_run_not_exported",
+        "nacha_void_requires_record_only",
+        "role_not_permitted",
+    }
+    assert seen["nacha_verify"] <= {
+        None,
+        "nacha_verify_not_exported",
+        "nacha_nothing_to_verify",
+        "role_not_permitted",
+    }
     if role == "ap_manager" and mode == "record_only":
         # The matrix reaches the gates it claims to.
         assert seen["nacha_export"] == {
@@ -797,8 +822,14 @@ async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(re
             None,
             "nacha_nothing_to_regenerate",
             "payment_run_segregation",
+            "nacha_nothing_to_export",
         }, seen["nacha_regenerate"]
         assert seen["nacha_void"] == {None, "nacha_run_not_exported"}, seen["nacha_void"]
+        assert seen["nacha_verify"] == {
+            None,
+            "nacha_verify_not_exported",
+            "nacha_nothing_to_verify",
+        }, seen["nacha_verify"]
     if role == "admin":
         expected_record = {
             None,
@@ -813,6 +844,15 @@ async def test_the_outside_payment_verdicts_match_what_their_endpoints_answer(re
             assert "nacha_not_configured" in seen["nacha_export"], seen["nacha_export"]
         if mode == "processor":
             assert "nacha_requires_record_only" in seen["nacha_export"], seen["nacha_export"]
+            # A file exported before the switch to processor mode keeps its
+            # claim: the void that would hand the run to the rail is refused
+            # (decisions §362), and only that refusal — never a release.
+            assert seen["nacha_void"] == {
+                "nacha_run_not_exported",
+                "nacha_void_requires_record_only",
+            }, seen["nacha_void"]
+            # Verify never releases the run, so it stays available there.
+            assert None in seen["nacha_verify"], seen["nacha_verify"]
 
 
 async def test_regenerate_refuses_a_run_with_no_exported_file(realdb):
@@ -828,3 +868,80 @@ async def test_regenerate_refuses_a_run_with_no_exported_file(realdb):
     assert resp.json()["detail"]["code"] == "nacha_nothing_to_regenerate"
     async with realdb.sessionmaker(TENANT)() as s:
         assert (await s.get(PaymentRun, run_id)).status == "draft"
+
+
+# ── Whether the bank-file panel applies — `bank_file_applies` (§382) ────────
+
+
+@pytest.mark.parametrize(
+    ("record_only", "status", "applies"),
+    [
+        (True, "draft", True),
+        (True, "exported", True),
+        (True, "cancelled", True),
+        (False, "draft", False),
+        (False, "exported", True),
+        (False, "cancelled", False),
+        (False, "completed", False),
+    ],
+)
+async def test_run_bank_file_applies(record_only, status, applies):
+    """The panel applies on every run of a record-only tenant, and on a
+    processor tenant only to a run still holding an exported file."""
+    from types import SimpleNamespace
+
+    from app.services.payment_controls import run_bank_file_applies
+
+    run = SimpleNamespace(status=status)
+    assert run_bank_file_applies(run, record_only=record_only) is applies
+
+
+@pytest.mark.parametrize("mode", ("record_only", "processor"))
+async def test_the_bank_file_panel_verdict_in_each_mode(realdb, mode):
+    """`GET /runs/{id}` says whether the bank-file panel applies, and on a
+    tenant switched to processor mode with a run still exported it does —
+    with Verify allowed and every control that would release or redo the file
+    refused under its code, so the dialog can say why (decisions §362, §382).
+    A processor tenant's draft has no file and the panel does not apply."""
+    payments = {
+        "record_only": {"mode": "record_only", "nacha": NACHA_CFG},
+        "processor": {"mode": "processor", "provider": "mock", "nacha": NACHA_CFG},
+    }[mode]
+    someone = realdb.info(TENANT).users["ap_manager"]
+
+    async def read(status):
+        run_id = await _bank_run(realdb, status=status, initiated_by=someone)
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.get(f"/api/payments/runs/{run_id}")
+        assert resp.status_code == 200, resp.text
+        return run_id, resp.json()
+
+    # The run is exported while the tenant records payments; the switch (if
+    # any) happens after, which is the case the follow-up describes.
+    await _set_payments_settings(realdb, {"mode": "record_only", "nacha": NACHA_CFG})
+    exported_id = await _bank_run(realdb, status="exported", initiated_by=someone)
+    await _set_payments_settings(realdb, payments)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        body = (await c.get(f"/api/payments/runs/{exported_id}")).json()
+    assert body["bank_file_applies"] is True, body
+    actions = body["actions"]
+    assert actions["nacha_verify"] is None, actions
+    assert actions["nacha_export"]["code"] == "nacha_already_exported", actions
+    if mode == "processor":
+        assert actions["nacha_void"]["code"] == "nacha_void_requires_record_only", actions
+        assert actions["nacha_regenerate"]["code"] == "nacha_requires_record_only", actions
+    else:
+        assert actions["nacha_void"] is None, actions
+        assert actions["nacha_regenerate"] is None, actions
+
+    # Verify is what the verdict says: accepted in either mode, and the run
+    # keeps its claim.
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post(f"/api/payments/runs/{exported_id}/nacha/verify")
+    assert resp.status_code == 200, resp.text
+    async with realdb.sessionmaker(TENANT)() as s:
+        assert (await s.get(PaymentRun, exported_id)).status == "exported"
+
+    _, draft = await read("draft")
+    assert draft["bank_file_applies"] is (mode == "record_only"), draft

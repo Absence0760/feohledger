@@ -26,7 +26,7 @@ import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,6 +61,7 @@ from app.services import storage
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.exception_service import create_exception
+from app.services.invoice_warning_catalog import exception_finding
 from app.services.positive_pay import (
     CLASS_AMOUNT_MISMATCH,
     CLASS_NOT_ON_FILE,
@@ -693,17 +694,26 @@ async def process_return(
         key = result.matched_check_number or normalize_check_number(result.check_number)
         invoice_id = issued_map.get(key)
 
-        reason = (
-            "altered amount"
-            if result.classification == CLASS_AMOUNT_MISMATCH
-            else "not on issued file"
-        )
-        description = f"Positive Pay return: check {result.check_number} {reason}"
+        # The verdict is a word, so it picks the code; the cheque number is the
+        # one param (decisions §358).
+        if result.classification == CLASS_AMOUNT_MISMATCH:
+            finding = exception_finding(
+                "positive_pay_altered_amount", checkNumber=result.check_number
+            )
+        else:
+            finding = exception_finding("positive_pay_not_on_file", checkNumber=result.check_number)
 
         # Dedupe so re-processing a bank redelivery doesn't pile up duplicates.
-        # The key is the DESCRIPTION — which carries this cheque's number and
-        # its verdict — on both branches, narrowed by `invoice_id` when we have
-        # one.
+        # The key is THIS cheque's number and its verdict — the code and its
+        # `checkNumber` param — on both branches, narrowed by `invoice_id` when
+        # we have one.
+        #
+        # A row raised before §358 has no code: its English description WAS
+        # the key, and the fallback English is still that exact sentence, so
+        # such a row is matched on `description` instead. Without that arm a
+        # bank redelivery processed after the upgrade would re-raise every
+        # return already in the queue. A coded row is never matched on its
+        # English — that is the scraping the catalogue exists to retire.
         #
         # It used to be `(invoice_id, "fraud_flag")` on the invoice-scoped
         # branch, mirroring `invoice_warnings._ensure_exception`. That is the
@@ -721,7 +731,17 @@ async def process_return(
         dedupe = select(func.count()).where(
             APException.exception_type == "fraud_flag",
             APException.status.in_(["open", "escalated"]),
-            APException.description == description,
+            or_(
+                and_(
+                    APException.description_code == finding["code"],
+                    APException.description_params["checkNumber"].astext
+                    == finding["params"]["checkNumber"],
+                ),
+                and_(
+                    APException.description_code.is_(None),
+                    APException.description == finding["message"],
+                ),
+            ),
         )
         if invoice_id is not None:
             dedupe = dedupe.where(APException.invoice_id == invoice_id)
@@ -740,7 +760,9 @@ async def process_return(
             exception_type="fraud_flag",
             severity="error",
             status="open",
-            description=description,
+            description=finding["message"],
+            description_code=finding["code"],
+            description_params=finding["params"],
             organization_id=org_id,
             invoice_id=invoice_id,
             entity_id=row.entity_id,

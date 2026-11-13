@@ -16,6 +16,7 @@ import { api } from '#lib/api.ts';
 import type { Payment, PaymentMethod } from '#lib/types/payment.ts';
 import type { ExecutionModeResponse, NachaSecCode } from '#lib/types/paymentExecution.ts';
 import type { RetryFailedResult } from '#lib/types/runRetry.ts';
+import type { NachaVerifyItem, NachaVerifyResult } from '#lib/types/runOutside.ts';
 import { triggerDownload } from '#lib/utils/download.ts';
 
 /**
@@ -213,10 +214,11 @@ export async function downloadRunNacha(
 
 /**
  * The bank rejected (or never received) the exported file: release the run
- * back to `draft` so it can be re-exported, cancelled or executed. An
- * attestation FeohLedger cannot check, so `reason` is required (≤ 500
- * characters) and lands on the audit trail. `payment.execute`; 409 unless the
- * run is `exported`.
+ * back to `draft` so it can be re-exported or cancelled. An attestation
+ * FeohLedger cannot check, so `reason` is required (≤ 500 characters) and
+ * lands on the audit trail. `payment.execute`; 409 unless the run is
+ * `exported` and the tenant records payments (`nacha_void_requires_record_only`
+ * after a switch to processor mode — decisions §362).
  */
 export function voidRunNachaExport(
 	runId: string,
@@ -225,6 +227,20 @@ export function voidRunNachaExport(
 	return api.post<{ id: string; status: string }>(`/api/payments/runs/${runId}/nacha/void`, {
 		reason
 	});
+}
+
+// `NachaVerifyResult` lives in the pure `#lib/types/runOutside.ts` so the e2e
+// tree can type its stubs against it; re-exported for existing importers.
+export type { NachaVerifyItem, NachaVerifyResult };
+
+/**
+ * Verify an exported file before uploading it: re-read the ERP bill of every
+ * payment still in it. A bill paid in the ERP since the export is taken out of
+ * the run (the file then needs regenerating); the run is never released.
+ * `payment.execute`, idempotent and audited.
+ */
+export function verifyRunNacha(runId: string): Promise<NachaVerifyResult> {
+	return api.post<NachaVerifyResult>(`/api/payments/runs/${runId}/nacha/verify`, {});
 }
 
 /**

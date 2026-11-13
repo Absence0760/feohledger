@@ -13,6 +13,7 @@
 		PolicyViolation,
 		CorporateCardTransaction,
 		CardMatchSuggestion,
+		CardImportResult,
 		ExpenseSummary
 	} from '#lib/types/expense.ts';
 	import {
@@ -32,6 +33,7 @@
 	import { expenseStore } from '#lib/stores/expenses.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { isAllowed, refusalText, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
+	import { policyViolationText } from '#lib/api/policyViolations.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listGlAccounts,
@@ -74,6 +76,7 @@
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import CsvImportErrors from '#lib/components/ui/CsvImportErrors.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import BulkBar from '#lib/components/ui/BulkBar.svelte';
@@ -800,7 +803,7 @@
 
 	// --- Violation badge helpers (shared by expenses + report-detail rows) ---
 	function violationTitle(list: PolicyViolation[]): string {
-		return list.map((v) => v.message).join('; ');
+		return list.map((v) => policyViolationText(v, m)).join('; ');
 	}
 
 	function switchTab(next: Tab) {
@@ -1003,6 +1006,10 @@
 	let reconFilter = $state<string>(page.url.searchParams.get('recon') ?? 'all');
 	let cardBusy = $state(false);
 	let cardFileInput = $state<HTMLInputElement>();
+	// The last card import's refused rows, listed above the table until
+	// dismissed or the next import (decisions §377). A refused row used to
+	// show only as part of a "skipped" count, with no reason.
+	let cardImportResult = $state<CardImportResult | null>(null);
 
 	// Match-suggestion picker modal state.
 	let matchTxn = $state<CorporateCardTransaction | null>(null);
@@ -1069,14 +1076,18 @@
 		const file = input.files?.[0];
 		if (!file) return;
 		cardBusy = true;
+		cardImportResult = null;
 		try {
 			const result = await importCardCsv(file);
+			// `skipped` counts refused rows too; only the rest are duplicates.
+			const refused = result.errors.length;
+			const duplicates = Math.max(result.skipped - refused, 0);
+			cardImportResult = refused > 0 ? result : null;
 			toast(
 				m('expenses.cards.toast.imported', { n: result.imported }) +
-					(result.skipped
-						? m('expenses.cards.toast.importedSkipped', { n: result.skipped })
-						: ''),
-				result.imported > 0 ? 'success' : 'info'
+					(duplicates ? m('expenses.cards.toast.importedSkipped', { n: duplicates }) : '') +
+					(refused ? m('expenses.cards.toast.importedRefused', { n: refused }) : ''),
+				refused > 0 ? 'info' : result.imported > 0 ? 'success' : 'info'
 			);
 			await loadCardTxns();
 		} catch (err) {
@@ -1360,8 +1371,10 @@
 					<div class="violation-panel">
 						<strong>{m('expenses.reports.submitBlocked')}</strong>
 						<ul>
-							{#each submitViolations as v (v.code + (v.policy_id ?? ''))}
-								<li>{v.message}</li>
+							<!-- One line can breach one policy's rule once, so the key is
+							     (line, policy, code); the same policy on two lines is two items. -->
+							{#each submitViolations as v (`${v.expense_id ?? ''}:${v.policy_id ?? ''}:${v.code}`)}
+								<li>{policyViolationText(v, m)}</li>
 							{/each}
 						</ul>
 					</div>
@@ -1635,6 +1648,27 @@
 			<KpiCard value={cardsTotal} label={m('expenses.cards.kpi.transactions')} />
 		</div>
 
+		{#if cardImportResult}
+			<!-- A plain container, not a <section>: the list inside is the one
+			     "Rows not imported" region (ui/CsvImportErrors), and a labelled
+			     section around it would announce two landmarks with one name. -->
+			<div class="card-import-errors">
+				<div class="card-import-errors-head">
+					<h2 id="card-import-errors-title">{m('csvImport.result.errorsTitle')}</h2>
+					<button type="button" class="btn-secondary" onclick={() => (cardImportResult = null)}>
+						{m('csvImport.result.dismiss')}
+					</button>
+				</div>
+				<p class="card-import-errors-summary">
+					{m('csvImport.result.summary', {
+						imported: cardImportResult.imported,
+						skipped: cardImportResult.skipped
+					})}
+				</p>
+				<CsvImportErrors errors={cardImportResult.errors} />
+			</div>
+		{/if}
+
 		<div class="filter-row">
 			<FilterChips chips={RECON_CHIPS} bind:active={reconFilter} />
 			<HelpTip term="virtual-card" />
@@ -1895,6 +1929,30 @@
 	.btn-secondary:hover {
 		border-color: var(--accent);
 		color: var(--accent);
+	}
+
+	/* The last card import's refused rows (decisions §377). */
+	.card-import-errors {
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--surface);
+		padding: 12px 14px;
+		margin-bottom: 14px;
+	}
+	.card-import-errors-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.card-import-errors-head h2 {
+		font-size: 0.95rem;
+		margin: 0;
+	}
+	.card-import-errors-summary {
+		font-size: 0.85rem;
+		margin: 8px 0;
 	}
 
 	/* Every pill on this page is `<Badge>`. The tone per status lives beside the

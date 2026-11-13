@@ -25,6 +25,10 @@
 	 * opens by itself when the platform has no app for that ERP
 	 * (`GET /api/organization/erp/oauth/status` → `providers[].available`).
 	 *
+	 * A consent that reached several companies (Xero, Sage) comes back with
+	 * `?erp_choose_company=`: the server holds the token and the panel shows
+	 * `ErpCompanyPicker` with the list it offers (decisions §355).
+	 *
 	 * The plan gate and the admin-only read-only state are decided by the
 	 * page (the same props every panel there uses) and rendered here.
 	 */
@@ -35,11 +39,15 @@
 	import { getProviderCredentials, updateProviderCredentials } from '#lib/api/providerCredentials.ts';
 	import {
 		disconnectErpOAuth,
+		discardErpPendingConnect,
 		getErpCatalog,
 		getErpOAuthStatus,
+		getErpPendingConnect,
+		selectErpCompany,
 		startErpOAuth,
 		testErpConnection
 	} from '#lib/api/erpConnection.ts';
+	import ErpCompanyPicker from '#lib/components/organization/ErpCompanyPicker.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -55,6 +63,7 @@
 		buildErpSecretUpdate,
 		buildErpTestPayload,
 		callUsageLines,
+		disconnectMessage,
 		erpTestResultText,
 		byoAppRequired,
 		fieldApplies,
@@ -65,6 +74,7 @@
 		oauthAttentionKey,
 		oauthConnectionState,
 		optionLabelKey,
+		pickRefusalKey,
 		platformConnectUrl,
 		readOAuthReturn,
 		secretIsSaved,
@@ -72,6 +82,7 @@
 		withoutOAuthReturn,
 		type ErpCatalog,
 		type ErpOAuthStatus,
+		type ErpPendingConnect,
 		type ErpProvider,
 		type ErpProviderField,
 		type OAuthReturn,
@@ -137,6 +148,22 @@
 	/** The OAuth callback's `?erp_connected=` / `?erp_error=`, read ONCE on
 	 *  mount and shown until the admin does something else. */
 	let oauthReturn = $state<OAuthReturn>(null);
+	/** A consent waiting for the admin to pick its company, and its state. */
+	let pending = $state<ErpPendingConnect | null>(null);
+	let pendingLoading = $state(false);
+	let picking = $state(false);
+	/** Whether a parked consent should be looked for: set on EVERY mount, not
+	 *  only when the callback's `?erp_choose_company=` is present. The panel
+	 *  strips that parameter on mount, so a reload, or coming back to the page
+	 *  while the consent is still parked, would otherwise lose the picker the
+	 *  server is still holding. Read once the user is known to be an admin (a
+	 *  non-admin's read would only 403). */
+	let pickRequested = $state(false);
+	/** The callback itself asked for the pick: a consent that is gone by now
+	 *  is worth saying so. On a plain mount, nothing parked is the normal case
+	 *  and says nothing. */
+	let pickExplicit = false;
+	let statusEl = $state<HTMLParagraphElement | null>(null);
 
 	const groups = $derived(catalog ? groupProviders(catalog.providers) : []);
 	const provider = $derived<ErpProvider | null>(
@@ -317,14 +344,130 @@
 	// put the message back after the admin had moved on.
 	onMount(() => {
 		const url = untrack(() => page.url);
-		oauthReturn = readOAuthReturn(url.searchParams);
+		const ret = readOAuthReturn(url.searchParams);
 		const next = withoutOAuthReturn(url);
 		if (next) stripOAuthReturn(next);
+		if (ret?.kind === 'choose') {
+			pickExplicit = true;
+		} else {
+			oauthReturn = ret;
+		}
+		pickRequested = true;
 	});
+
+	$effect(() => {
+		if (!pickRequested || !userLoaded) return;
+		pickRequested = false;
+		if (!readOnly) void loadPending(pickExplicit);
+	});
+
+	/** The picker is gone: move focus to the sentence saying what happened, so
+	 *  it does not fall to the page body (WCAG 2.4.3). */
+	function focusStatus() {
+		void tick().then(() => statusEl?.focus());
+	}
+
+	/** The name the picker and its messages use for the pending ERP. */
+	function pendingErpName(p: ErpPendingConnect): string {
+		const known = catalog?.providers.find((x) => x.key === p.provider);
+		return known ? providerLabel(known) : p.display_name;
+	}
+
+	/** A pick refusal as a sentence: this build's, else the server's. */
+	function pickFailure(err: unknown, erp: string): string {
+		const key = err instanceof ApiError ? pickRefusalKey(err.code) : null;
+		if (key) return m(key, { erp });
+		return err instanceof Error ? err.message : m('org.toast.saveFailed');
+	}
+
+	/** Nothing is parked: the server answers 409 `erp_pick_expired` (it folds
+	 *  "none", "lapsed" and "not this browser" together), and a 404 means the
+	 *  same. */
+	function isNothingPending(err: unknown): boolean {
+		return (
+			err instanceof ApiError &&
+			(err.status === 404 || (err.status === 409 && err.code === 'erp_pick_expired'))
+		);
+	}
+
+	async function loadPending(explicit: boolean) {
+		pendingLoading = true;
+		try {
+			pending = await getErpPendingConnect();
+		} catch (err) {
+			// On a plain mount nothing parked is the normal case, not a failure.
+			if (explicit || !isNothingPending(err)) {
+				setStatus(pickFailure(err, m('org.erp.oauth.yourErp')), 'failure');
+			}
+		} finally {
+			pendingLoading = false;
+		}
+	}
+
+	async function pickCompany(companyId: string) {
+		if (!pending) return;
+		const erp = pendingErpName(pending);
+		picking = true;
+		try {
+			await selectErpCompany(companyId);
+			pending = null;
+			await loadOAuthStatus();
+			setStatus(m('org.erp.oauth.returnConnected', { erp }), 'success');
+			focusStatus();
+		} catch (err) {
+			setStatus(pickFailure(err, erp), 'failure');
+			// Only `erp_pick_expired` says the pending connect is gone. Every
+			// other refusal the admin can act on leaves it parked (decisions §355,
+			// amended): a company the consent did not offer and a lost plan are
+			// refused before anything is spent, and `already_linked` and the two
+			// 503s put it back, so the admin picks again (another company, or the
+			// same one once the cause clears) without a second consent. A refusal
+			// can still have spent it (a token that could not be opened, a put-back
+			// that failed), so the server's own answer decides: re-read it, keep
+			// the picker while it offers something, close it when it does not.
+			if (isNothingPending(err)) {
+				pending = null;
+			} else if (err instanceof ApiError) {
+				await rereadPending();
+			}
+			// Anything else (the network) may have left it waiting: keep the
+			// picker for a retry.
+			if (!pending) focusStatus();
+		} finally {
+			picking = false;
+		}
+	}
+
+	/** After a refused pick: what the server still holds for this browser. A
+	 *  read that fails for any other reason keeps the list already shown. */
+	async function rereadPending() {
+		try {
+			pending = await getErpPendingConnect();
+		} catch (err) {
+			if (isNothingPending(err)) pending = null;
+		}
+	}
+
+	async function cancelPick() {
+		if (!pending) return;
+		const erp = pendingErpName(pending);
+		picking = true;
+		try {
+			await discardErpPendingConnect();
+		} catch {
+			// Nothing was linked either way, and the server lets it lapse.
+		} finally {
+			pending = null;
+			picking = false;
+			setStatus(m('org.erp.oauth.pick.cancelled', { erp }), null);
+			focusStatus();
+		}
+	}
 
 	const returnMessage = $derived.by(() => {
 		const ret = oauthReturn;
-		if (!ret) return '';
+		// `choose` never lands here: it opens the picker instead (onMount).
+		if (!ret || ret.kind === 'choose') return '';
 		if (ret.kind === 'connected') {
 			const p = catalog?.providers.find((x) => x.key === ret.provider);
 			const name =
@@ -460,9 +603,12 @@
 		confirmDisconnect = false;
 		disconnecting = true;
 		try {
-			await disconnectErpOAuth();
+			const result = await disconnectErpOAuth();
 			await loadOAuthStatus();
-			setStatus(m('org.erp.oauth.disconnected', { erp: providerLabel(p) }), 'success');
+			// Our copy is gone either way; only a confirmed revocation means the
+			// grant is gone at the provider too (decisions §371).
+			const done = disconnectMessage(result);
+			setStatus(m(done.key, { erp: providerLabel(p) }), done.tone);
 		} catch (err) {
 			setStatus(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'failure');
 		} finally {
@@ -549,6 +695,16 @@
 
 	{#if readOnly}
 		<p class="card-hint" data-testid="erp-admin-only">{m('org.readOnly.sectionAdminOnly')}</p>
+	{:else if pending}
+		<ErpCompanyPicker
+			erp={pendingErpName(pending)}
+			{pending}
+			submitting={picking}
+			onconnect={pickCompany}
+			oncancel={cancelPick}
+		/>
+	{:else if pendingLoading}
+		<p class="card-hint" aria-busy="true">{m('org.erp.oauth.pick.loading', { erp: m('org.erp.oauth.yourErp') })}</p>
 	{:else if userLoaded && !entitled}
 		<!-- Every catalogue entry is a live ERP; the local-first `mock` ERP
 		     needs no configuration. -->
@@ -788,6 +944,8 @@
 	<p
 		class="test-result"
 		role="status"
+		tabindex="-1"
+		bind:this={statusEl}
 		data-testid="erp-status"
 		class:success={shownTone === 'success'}
 		class:failure={shownTone === 'failure' && !!shownMessage}

@@ -139,13 +139,15 @@ never links one provider's vendor id onto another's vendor row.
 - OAuth token lifecycle, for any `FakeOAuthApp` (`xero`, `sage`, `blackbaud`):
   `POST /__oauth/{key}/lifetime {"seconds"}` sets the `expires_in` of every token
   issued from then on (under the backend's 120 s refresh margin, each use must
-  refresh first); `GET /__oauth/{key}/stats` → `{"refreshes"}` counts successful
-  refresh grants; `POST /__oauth/{key}/revoke-access` rejects every access token
+  refresh first); `GET /__oauth/{key}/stats` → `{"refreshes", "revocations"}` counts successful
+  refresh grants and well-formed, client-authenticated revoke requests (the Sage
+  spec reads `revocations` to prove Disconnect reached the provider); `POST /__oauth/{key}/revoke-access` rejects every access token
 issued so far while the refresh token stays good (a 401 must refresh);
 `POST /__oauth/{key}/revoke` revokes the consent — every issued
   token and the refresh token stop working, so the next refresh is
-  `invalid_grant`. Only `erp/blackbaud-fe-nxt.spec.ts` uses them, on the one
-  provider no other spec shares, so parallel workers cannot interfere.
+  `invalid_grant`. Only `erp/blackbaud-fe-nxt.spec.ts` uses the hooks that change
+  state, on the one provider no other spec shares, so parallel workers cannot
+  interfere; the Sage spec only reads `stats`, as a lower bound.
 
 ## Dependencies
 
@@ -258,7 +260,7 @@ Backs `erp_adapters/xero.py`. Auth is shape-only: any non-empty
 otherwise). Point the backend at it with
 `FEOH_ERP_XERO_API_BASE=http://localhost:12112/xero/api.xro/2.0`.
 
-- `GET /Organisation` — `Fake Xero Org` (ZAR, ZA).
+- `GET /Organisation` — `Fake Xero Org` (ZAR, ZA, ShortCode `!fAkE1`, which the adapter reads after each confirmed push for the bill's organisation-scoped deep link).
 - `GET /Contacts?where=IsSupplier==true` — `xero-contact-1` *Fake Xero
   Supplier Co* (the customer `xero-contact-2` is filtered out).
 - `GET /Accounts` — `xero-acc-6100` / `6200` (default tax type `INPUT`) and
@@ -278,6 +280,12 @@ otherwise). Point the backend at it with
   and bound to its `redirect_uri`, and rotates refresh tokens; `GET /xero/connections`
   (bearer must be one it issued) lists the one organisation, tenant
   `fake-xero-tenant-1`. Wired up by the committed `FEOH_ERP_XERO_*` dev values.
+- Test hook `POST /xero/__organisations {"state", "count"}` — the consent
+  carrying that `state` (read it from the backend's `authorize_url`) authorises
+  `count` organisations, so `GET /xero/connections` under its token also lists
+  `fake-xero-tenant-2` … `fake-xero-tenant-N` (*Fake Xero Org 2* …): the
+  backend then offers its company picker instead of linking one (decisions
+  §355). Scoped to that one consent, so parallel workers are unaffected.
 - Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
   "amount_paid"?}`. The backend reads `PAID` as paid only with `amount_paid`
   above zero; `PAID` with nothing paid is a bill settled by credit note
@@ -308,8 +316,11 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
   `POST /sage/oauth2/token` takes `client_id` / `client_secret` as **form fields**
   (Sage's shape — HTTP Basic is refused), makes each code single-use and bound to
   its `redirect_uri`, and rotates refresh tokens; `GET /sage/v3.1/businesses` (bearer
-  must be one it issued) lists the one business, `fake-sage-business`. Same
-  `FakeOAuthApp` as Xero's.
+  must be one it issued) lists the one business, `fake-sage-business`;
+  `POST /sage/oauth2/revoke` (form `token`, the client as form fields like the
+  token endpoint — a Basic header or a JSON body is refused — the shape of
+  Sage's `https://oauth.accounting.sage.com/revoke`) ends the consent, so a
+  later refresh is `invalid_grant`. Same `FakeOAuthApp` as Xero's.
 - Test hook `POST /sage/v3.1/__set-status {"id", "status",
   "outstanding_amount"?}`. `POST /__reset` clears this state too.
 

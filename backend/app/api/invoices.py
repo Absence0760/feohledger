@@ -33,6 +33,8 @@ from app.api.invoice_entry import (
     INVOICE_ENTRY_ROLES,
     INVOICE_ENTRY_WINDOW_CLOSED,
     INVOICE_IMPORT_ROLES,
+    document_lock_refusal,
+    financial_lock_refusal,
     in_entry_window,
     is_entry_only,
     may_import_history,
@@ -112,7 +114,11 @@ from app.services.gl_recode import RecodeFilter, bulk_recode_gl
 from app.services.invoice_warnings import reconcile_line_totals, refresh_warnings
 from app.services.payment_runs import live_payment_invoices
 from app.services.report_export import csv_safe_cell
-from app.services.storage import delete_file, upload_chat_file, upload_invoice_file
+from app.services.storage import (
+    invoice_file_display_name,
+    upload_chat_file,
+    upload_invoice_file,
+)
 from app.services.supplier_chat import (
     CHAT_TEMPLATES,
     attachment_url,
@@ -156,10 +162,13 @@ _PEPPOL_SENDABLE_STATUSES = {DBInvoiceStatus.approved} | IMMUTABLE_STATUSES
 # signature (services/approval_signature.py) is computed over the exact amount,
 # and the payment run reads `Invoice.amount` straight off the row — so editing
 # the amount / line items after sign-off would pay out a figure nobody approved
-# and silently invalidate the signature. `approved` was the gap: IMMUTABLE_STATUSES
-# only starts at `sending_to_erp`, so an edit in the `approved` window slipped
-# through. Financial edits past approval must go back through reject → re-approve.
-_FINANCIALLY_LOCKED_STATUSES = {DBInvoiceStatus.approved} | IMMUTABLE_STATUSES
+# and silently invalidate the signature. `approved` was the first gap:
+# IMMUTABLE_STATUSES only starts at `sending_to_erp`. `failed` after an
+# approval was the second: a failed ERP push sits there and `/retry-erp`
+# re-pushes it with no new approval. Both doors below ask the one predicate,
+# `models/invoice_status.financially_locked`, through
+# `invoice_entry.financial_lock_refusal` (409 `invoice_financially_locked`);
+# the source document freezes on the same predicate (decisions §363, §370).
 # WHO gets paid is frozen alongside HOW MUCH. `_execute_single_payment` resolves
 # the payee's `Vendor.bank_details` through `Invoice.vendor_id` at execution
 # time, and this PATCH re-runs `match_and_link_vendor` whenever the vendor name
@@ -1157,13 +1166,11 @@ async def save_invoice_line_items(
     invoice = await get_invoice_for_update(db, invoice_id)
     refuse_entry_only_outside_window(user, invoice)
     # Line items are financial content — frozen once the invoice is approved
-    # (the approved amount was signed off; payment reads it). Re-coding lines
-    # after sign-off requires reject → re-approve. See _FINANCIALLY_LOCKED_STATUSES.
-    if invoice.status in _FINANCIALLY_LOCKED_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot edit line items once the invoice is approved",
-        )
+    # (the approved amount was signed off; payment reads it), including at a
+    # failed ERP push after approval. See `invoice_entry.financial_lock_refusal`.
+    locked = financial_lock_refusal(invoice)
+    if locked is not None:
+        raise HTTPException(status_code=409, detail=locked)
 
     # Snapshot the outgoing lines. The audit row reports counts + exact Decimal
     # totals + GL codes (never a float; never the free-form line text), but the
@@ -1406,6 +1413,15 @@ async def create_invoice(
     return InvoiceResponse.from_db(invoice)
 
 
+def _refuse_locked_document(invoice: Invoice) -> None:
+    """409 ``invoice_document_locked`` from the file routes once the document is
+    frozen (`invoice_entry.document_locked`). The verdict the modal reads is
+    `invoice_entry.manage_file_refusal`, built on the same check."""
+    refused = document_lock_refusal(invoice)
+    if refused is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
+
+
 @router.post(
     "/{invoice_id}/file", response_model=InvoiceResponse, status_code=status.HTTP_201_CREATED
 )
@@ -1423,10 +1439,10 @@ async def attach_invoice_file(
     Manual entry (``create_invoice``) never runs extraction, so a caller who
     wants to keep the source document alongside a manually-keyed invoice
     attaches it as a second step. Attach-only: refuses once the invoice
-    already has a file rather than silently replacing it — replacing an
-    existing invoice file is a separate, not-yet-built feature with its own
-    role/status gating still to be decided (see docs/roadmap.md § Invoice PDF
-    Management).
+    already has a file rather than silently replacing it (`PUT` replaces).
+    Refused once the document is frozen (`invoice_document_locked`, from
+    `approved` on): a document added after sign-off is one nobody approved
+    against (decisions §363).
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     # Row-locked: the entry-window guard and the editor stamp below must not
@@ -1435,9 +1451,12 @@ async def attach_invoice_file(
     refuse_entry_only_outside_window(user, invoice)
     if invoice.file_key:
         raise HTTPException(status_code=409, detail="Invoice already has a file attached.")
+    _refuse_locked_document(invoice)
 
     try:
-        file_key, file_url = await upload_invoice_file(org_id, invoice.id, file)
+        # Versioned: a document removed earlier is kept under its own key, and a
+        # new upload of the same name must not overwrite it.
+        file_key, file_url = await upload_invoice_file(org_id, invoice.id, file, versioned=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -1452,7 +1471,11 @@ async def attach_invoice_file(
         action="invoice.file_attached",
         entity_type="invoice",
         entity_id=invoice.id,
-        details={"filename": file.filename, "content_type": file.content_type},
+        details={
+            "filename": invoice_file_display_name(file_key),
+            "file_key": file_key,
+            "content_type": file.content_type,
+        },
     )
     await db.flush()
     result = await db.execute(
@@ -1479,8 +1502,11 @@ async def replace_invoice_file(
     `attach_invoice_file` only works when the invoice has no file yet; this
     endpoint is the reverse — it requires one to already be present (404
     otherwise, pointing the caller at attach instead) and swaps it for a new
-    upload. Refused once the invoice is `done` (terminal, financially frozen)
-    to match the rest of the file-mutation gating in this file.
+    upload. Refused once the document is frozen (`invoice_document_locked`, from
+    `approved` on, with the financial fields). Before that the superseded object
+    is KEPT, under its own key, and the audit row names it
+    (``previous_file_key``): a reviewer may have read it, and a rejection may
+    have been made against it (decisions §363).
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     # Row-locked for the same reason as attach.
@@ -1490,14 +1516,13 @@ async def replace_invoice_file(
     refuse_entry_only_outside_window(user, invoice)
     if not invoice.file_key:
         raise HTTPException(status_code=404, detail="No file to replace. Use upload to attach one.")
-    if invoice.status == DBInvoiceStatus.done:
-        raise HTTPException(
-            status_code=409, detail="Cannot modify the file once the invoice is done."
-        )
+    _refuse_locked_document(invoice)
 
     old_file_key = invoice.file_key
     try:
-        file_key, file_url = await upload_invoice_file(org_id, invoice.id, file)
+        # Versioned, so the new object never lands on the key of the one it
+        # supersedes (or of any earlier version) when the filenames match.
+        file_key, file_url = await upload_invoice_file(org_id, invoice.id, file, versioned=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -1513,22 +1538,16 @@ async def replace_invoice_file(
         entity_type="invoice",
         entity_id=invoice.id,
         details={
-            "previous_filename": old_file_key.rsplit("/", 1)[-1],
-            "filename": file_key.rsplit("/", 1)[-1],
+            "previous_filename": invoice_file_display_name(old_file_key),
+            # The superseded object, kept: the audit row is its reference.
+            # Storage keys carry ids and the sanitized filename only.
+            "previous_file_key": old_file_key,
+            "filename": invoice_file_display_name(file_key),
+            "file_key": file_key,
             "content_type": file.content_type,
         },
     )
-    # Commit before touching storage — the row pointing at the new key must be
-    # durable before the old object is removed, so a failure here never leaves
-    # `file_key` referencing an object we already deleted (mirrors the
-    # commit-then-delete order in api/positive_pay.py's delete route).
     await db.commit()
-    # upload_invoice_file's S3 key is deterministic on the sanitized filename
-    # (no uniquifier) — replacing a file with one of the SAME name overwrites
-    # the old object in place, so old_file_key == file_key. Deleting it in
-    # that case would delete the file we just wrote.
-    if old_file_key != file_key:
-        await delete_file(old_file_key)
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.extraction_results))
@@ -1546,19 +1565,20 @@ async def delete_invoice_file(
     user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    """Delete an invoice's file without replacing it."""
+    """Remove an invoice's file without replacing it.
+
+    Detaches the document from the invoice; the stored object is KEPT and the
+    audit row names it (``file_key``), as for a replace (decisions §363).
+    Refused once the document is frozen (`invoice_document_locked`).
+    """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
     refuse_entry_only_outside_window(user, invoice)
     if not invoice.file_key:
         raise HTTPException(status_code=404, detail="No file to delete.")
-    if invoice.status == DBInvoiceStatus.done:
-        raise HTTPException(
-            status_code=409, detail="Cannot modify the file once the invoice is done."
-        )
+    _refuse_locked_document(invoice)
 
-    filename = invoice.file_key.rsplit("/", 1)[-1]
-    file_key_to_delete = invoice.file_key
+    detached_file_key = invoice.file_key
     invoice.file_key = None
     invoice.file_url = None
     stamp_entry_editor(user, invoice)
@@ -1570,12 +1590,12 @@ async def delete_invoice_file(
         action="invoice.file_deleted",
         entity_type="invoice",
         entity_id=invoice.id,
-        details={"filename": filename},
+        details={
+            "filename": invoice_file_display_name(detached_file_key),
+            "file_key": detached_file_key,
+        },
     )
-    # Commit before touching storage — see replace_invoice_file for why
-    # (mirrors api/positive_pay.py's commit-then-delete order).
     await db.commit()
-    await delete_file(file_key_to_delete)
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.extraction_results))
@@ -1628,17 +1648,15 @@ async def update_invoice(
                 ),
             )
     # An approved invoice is financially frozen — the signed-off amount is what
-    # the payment run pays. Non-financial edits (notes, addresses, GL coding)
-    # stay allowed in the `approved` window so AP can keep cleaning up metadata;
-    # touching a money field requires reject → re-approve. (Past ERP-send the
-    # IMMUTABLE_STATUSES check above has already blocked the whole edit.)
-    if invoice.status in _FINANCIALLY_LOCKED_STATUSES:
-        touched_financial = _FINANCIAL_FIELDS & set(update_data)
-        if touched_financial:
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot edit financial fields once the invoice is approved",
-            )
+    # the payment run pays — and so is one whose ERP push failed after approval
+    # (`/retry-erp` re-pushes it unapproved). Non-financial edits (notes,
+    # addresses, GL coding) stay allowed there so AP can keep cleaning up
+    # metadata. (Past ERP-send the IMMUTABLE_STATUSES check above has already
+    # blocked the whole edit.)
+    if _FINANCIAL_FIELDS & set(update_data):
+        locked = financial_lock_refusal(invoice)
+        if locked is not None:
+            raise HTTPException(status_code=409, detail=locked)
     # A GL code NEW to this invoice must resolve in the invoice's own chart
     # (shared ∪ its entity): not another subsidiary's, and an active account of
     # it whenever it has any (`services/gl_chart`, decisions §194/§199). Only a
@@ -2657,6 +2675,38 @@ def _skip_reason(exc: HTTPException, fallback: str) -> str:
     return detail_text(exc.detail) or fallback
 
 
+def _refused_skip(invoice_id: uuid.UUID, exc: HTTPException, fallback: str) -> BulkStatusSkip:
+    """The skip for a row a service or the engine refused with ``exc``.
+
+    A coded refusal (`api/refusals.coded_refusal`: the engine's own 409s, the
+    approval gates, the resubmit and review refusals) keeps its ``code`` and
+    ``params`` beside the English, as §357's close refusal does, so the list
+    states it in the reader's language; anything else is the plain
+    :func:`_skip_reason` row. A structured detail that is not `{code, params}`
+    (the GL-chart refusal) contributes only its sentence.
+    """
+    detail = exc.detail
+    if (
+        isinstance(detail, dict)
+        and isinstance(detail.get("code"), str)
+        and isinstance(detail.get("params"), dict)
+        and isinstance(detail.get("message"), str)
+    ):
+        return _coded_skip(invoice_id, detail)
+    return BulkStatusSkip(id=str(invoice_id), reason=_skip_reason(exc, fallback))
+
+
+def _coded_skip(invoice_id: uuid.UUID, refusal: dict) -> BulkStatusSkip:
+    """A bulk-status skip from a coded refusal (`api/refusals.coded_refusal`):
+    its English as ``reason``, its code and params for the browser to state."""
+    return BulkStatusSkip(
+        id=str(invoice_id),
+        reason=refusal["message"],
+        code=refusal["code"],
+        params=refusal["params"],
+    )
+
+
 # Targets a human may legitimately drive in bulk. Each is routed below through
 # its owning service where one exists (`approved` / `rejected` / a resubmit).
 BULK_STATUS_TARGETS: frozenset[DBInvoiceStatus] = frozenset(
@@ -2671,7 +2721,7 @@ BULK_STATUS_TARGETS: frozenset[DBInvoiceStatus] = frozenset(
 )
 
 
-@router.post("/bulk/status", response_model=BulkStatusResponse)
+@router.post("/bulk/status", response_model=BulkStatusResponse, response_model_exclude_none=True)
 async def bulk_status_change(
     body: BulkStatusRequest,
     db: AsyncSession = Depends(get_tenant_db),
@@ -2763,6 +2813,18 @@ async def bulk_status_change(
         from app.services.approval_chain import receipt_recorders_by_invoice
 
         receivers = await receipt_recorders_by_invoice(db, invoices)
+    # Closing by hand asks the rule `/complete` asks (`api/workflow.close_refusals`,
+    # decisions §357): only from `new` / `approved`, and never while a live
+    # payment or card holds the invoice — a staged or exported run, or a minted
+    # card, leaves it `approved`, and `done` would take it off the payable set
+    # with our rail still paying it. Read for the whole locked batch at once.
+    from app.services.review import holds_recallable_approval
+
+    close_refused: dict[uuid.UUID, dict] = {}
+    if target == DBInvoiceStatus.done:
+        from app.api.workflow import close_refusals
+
+        close_refused = await close_refusals(db, invoices)
     for inv in invoices:
         # A clerk's batch moves only invoices still in entry: from `new` or
         # `rejected`, never approved before (same skip-and-report contract).
@@ -2776,6 +2838,9 @@ async def bulk_status_change(
                     ),
                 )
             )
+            continue
+        if inv.id in close_refused:
+            skipped.append(_coded_skip(inv.id, close_refused[inv.id]))
             continue
         if inv.status in IMMUTABLE_STATUSES:
             skipped.append(
@@ -2826,9 +2891,7 @@ async def bulk_status_change(
                 # keep processing the rest of the batch. The service's own
                 # `detail` names WHICH control fired; that's what the caller
                 # needs to know, not a generic label.
-                skipped.append(
-                    BulkStatusSkip(id=str(inv.id), reason=_skip_reason(exc, "approval was refused"))
-                )
+                skipped.append(_refused_skip(inv.id, exc, "approval was refused"))
                 continue
             updated += 1
         elif target == DBInvoiceStatus.rejected:
@@ -2844,11 +2907,7 @@ async def bulk_status_change(
                 )
             except HTTPException as exc:
                 # Not in `ready_for_review` — skip, same as the approve branch.
-                skipped.append(
-                    BulkStatusSkip(
-                        id=str(inv.id), reason=_skip_reason(exc, "rejection was refused")
-                    )
-                )
+                skipped.append(_refused_skip(inv.id, exc, "rejection was refused"))
                 continue
             updated += 1
         elif target == DBInvoiceStatus.ready_for_review and inv.status == DBInvoiceStatus.rejected:
@@ -2860,12 +2919,29 @@ async def bulk_status_change(
             try:
                 await resubmit_invoice(db, inv, actor_id=user.id)
             except HTTPException as exc:
-                skipped.append(
-                    BulkStatusSkip(id=str(inv.id), reason=_skip_reason(exc, "resubmit was refused"))
-                )
+                skipped.append(_refused_skip(inv.id, exc, "resubmit was refused"))
                 continue
             await refresh_warnings(db, inv, org_settings=org.settings)
             updated += 1
+        elif target == DBInvoiceStatus.ready_for_review and holds_recallable_approval(inv):
+            # `approved` / `failed → ready_for_review` is a RECALL of the
+            # approval (decisions §374): one invoice at a time, with a reason,
+            # through `POST /{id}/recall-approval` and its claim / ERP gate
+            # (`review.recall_refusal`). A bare transition here would skip all
+            # of it, and the SoD stamp and chain reset with it. (The engine
+            # refuses the edge to anyone else anyway — `workflow_engine.
+            # RECALL_EDGES` — so a never-approved `failed` row falls through to
+            # the generic branch and is skipped with that refusal.)
+            skipped.append(
+                BulkStatusSkip(
+                    id=str(inv.id),
+                    reason=(
+                        "an approval is recalled one invoice at a time, with a reason: "
+                        "use Recall approval on the invoice"
+                    ),
+                )
+            )
+            continue
         else:
             if target == DBInvoiceStatus.ready_for_review:
                 # The `/complete` submit's own required-field check, so the bulk
@@ -2897,11 +2973,7 @@ async def bulk_status_change(
                     action_name="invoice.bulk_status_change",
                 )
             except HTTPException as exc:
-                skipped.append(
-                    BulkStatusSkip(
-                        id=str(inv.id), reason=_skip_reason(exc, "transition was refused")
-                    )
-                )
+                skipped.append(_refused_skip(inv.id, exc, "transition was refused"))
                 continue
             await refresh_warnings(db, inv, org_settings=org.settings)
             updated += 1

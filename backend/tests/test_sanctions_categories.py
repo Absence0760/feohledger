@@ -113,6 +113,22 @@ def test_adverse_media_reason_tolerates_a_missing_provider():
     assert "configured provider" in adverse_media_reason(None)
 
 
+def test_adverse_media_finding_keys_a_missing_provider_as_its_own_code():
+    """Decisions §358: "the configured provider" is English, so a missing name
+    selects a code rather than riding the `provider` param."""
+    from app.services.sanctions_categories import adverse_media_finding
+
+    named = adverse_media_finding("refinitiv")
+    assert named["code"] == "exception.compliance_adverse_media"
+    assert named["params"] == {"provider": "refinitiv"}
+    assert named["message"] == adverse_media_reason("refinitiv")
+
+    unnamed = adverse_media_finding(None)
+    assert unnamed["code"] == "exception.compliance_adverse_media_unnamed_provider"
+    assert unnamed["params"] == {}
+    assert unnamed["message"] == adverse_media_reason(None)
+
+
 # ---------------------------------------------------------------------------
 # Compliance verdict.
 # ---------------------------------------------------------------------------

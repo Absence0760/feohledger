@@ -301,6 +301,21 @@ def exception_segregation_enabled(org_settings: dict | None) -> bool:
     ) is not False
 
 
+def segregation_applies(exception: APException, *, action: str, org_settings: dict | None) -> bool:
+    """Is segregation of duties in force for ``action`` on this row at all?
+
+    The scope half of :func:`segregation_refusal`, split out so
+    :func:`clearance_stands` reads the same scope rather than restating it: a
+    clearing verb, on a payment-blocking type, in an org that has not opted out.
+    Outside it nobody can be refused, so who decided does not matter.
+    """
+    return (
+        action in CLEARING_ACTIONS
+        and exception_segregation_enabled(org_settings)
+        and is_payment_blocking(exception.exception_type)
+    )
+
+
 def segregation_refusal(
     exception: APException,
     invoice: Invoice | None,
@@ -352,11 +367,7 @@ def segregation_refusal(
       would make every sweep-raised and system-ingested exception permanently
       unclearable, an outage on the queue rather than a control.
     """
-    if action not in CLEARING_ACTIONS:
-        return None
-    if not exception_segregation_enabled(org_settings):
-        return None
-    if not is_payment_blocking(exception.exception_type):
+    if not segregation_applies(exception, action=action, org_settings=org_settings):
         return None
     if actor_id is None:
         return None
@@ -377,6 +388,52 @@ def segregation_refusal(
         if violates_segregation(invoice, actor_id, {}):
             return REFUSAL_IMPLICATED
     return None
+
+
+#: Closed status → the clearing verb that produced it.
+_CLEARING_VERB_FOR_STATUS: dict[str, str] = {
+    RESOLUTION_STATUSES[verb]: verb for verb in CLEARING_ACTIONS
+}
+
+
+def clearance_stands(
+    exception: APException, invoice: Invoice | None, *, org_settings: dict | None
+) -> bool:
+    """Would :func:`record_decision` accept this closed row's decision TODAY?
+
+    A person's resolve or dismiss suppresses the detector re-raising its
+    finding (``invoice_warnings._finding_cleared_by_a_person``, decisions
+    §286 / §366). That honoured the verdict whoever gave it, and never asked
+    again, so a decider who is implicated NOW kept their own clearance live:
+    the importer who dismissed a duplicate while the uploader was NULL, before
+    migration 0126 named them (§367), and the recaller of an approval who had
+    cleared a hold before the recall stamped them (§374). The check is the
+    same :func:`segregation_refusal` the decision itself met, re-asked with
+    the recorded decider (``decided_by_user_id``) against the invoice as it is
+    now; a decider nobody implicates, which is every independent reviewer,
+    still stands.
+
+    Outside segregation's scope (:func:`segregation_applies`) the decider does
+    not matter and the clearance stands. Inside it, an unknown decider (NULL:
+    closed before the column, with no single person's decision row for the
+    migration to copy) does NOT stand. It fails closed, as an unknown recorder
+    does for a typed inspection (migration 0105): the cost is one more review
+    of a finding whose clearer cannot be shown to be independent. The audit
+    log is not read here, because under ``FEOH_AUDIT_MODE=lambda`` the
+    decision's row is not yet local when the next refresh runs.
+    """
+    action = _CLEARING_VERB_FOR_STATUS.get(exception.status)
+    if action is None:
+        return False
+    if not segregation_applies(exception, action=action, org_settings=org_settings):
+        return True
+    decider = exception.decided_by_user_id
+    if decider is None:
+        return False
+    return (
+        segregation_refusal(exception, invoice, decider, action=action, org_settings=org_settings)
+        is None
+    )
 
 
 def refusal_message(code: str) -> str:
@@ -540,34 +597,43 @@ async def record_raised(
     )
 
 
-def _bind_fingerprint_to_decision(
-    exception: APException, invoice: Invoice | None, *, person: bool
+async def _bind_fingerprint_to_decision(
+    db: AsyncSession, exception: APException, invoice: Invoice | None, *, person: bool
 ) -> None:
     """Keep the row's ``finding_fingerprint`` only for a verdict on exactly it.
 
-    A closed ``duplicate`` / ``fraud_flag`` row whose fingerprint matches the
-    invoice stops the detector raising that finding again
-    (``invoice_warnings._finding_cleared_by_a_person``, decisions §286). So the
-    fingerprint survives a clearing decision only when:
+    A closed detector row whose fingerprint matches the invoice stops the
+    detector raising that finding again
+    (``invoice_warnings._finding_cleared_by_a_person``, decisions §286; every
+    type ``_ensure_exception`` raises since §366). So the fingerprint survives
+    a clearing decision only when:
 
     * a PERSON made it: a detector's auto-close (no ``actor_id``) or an agent
       (``via``) carries no verdict to honour; and
-    * the invoice still hashes as it did when the finding was raised. The stamp
-      is never refreshed while the row is open, so an edit made after it, while
-      the reviewer was reading the queue, or by a writer that skips
+    * the invoice still hashes as it did when the finding was raised, by the
+      type's own facts (``invoice_warnings.current_finding_fingerprint``: the
+      line totals, the PO match, the priced lines …). The stamp is never
+      refreshed while the row is open, so a change made after it, while the
+      reviewer was reading the queue, or by a writer that skips
       ``refresh_warnings``, leaves the two unequal. The verdict then binds
       nothing, and the next refresh raises the finding for a person to see.
 
     Escalation never reaches here: it is not a clearing decision, and the row
     stays open with its stamp.
     """
-    from app.services.invoice_warnings import finding_fingerprint
+    from app.services.invoice_warnings import current_finding_fingerprint
 
     if (
         person
         and invoice is not None
         and exception.description_code
-        and finding_fingerprint(invoice, exception.description_code, exception.description_params)
+        and await current_finding_fingerprint(
+            db,
+            invoice,
+            exception.exception_type,
+            exception.description_code,
+            exception.description_params,
+        )
         == exception.finding_fingerprint
     ):
         return
@@ -662,8 +728,14 @@ async def record_decision(
 
     old_status = exception.status
     new_status = apply_resolution(exception, action, resolution, actor_name)
+    person = actor_id is not None and not via
+    if action in CLEARING_ACTIONS:
+        # Who decided, on the row itself: `clearance_stands` re-asks the
+        # segregation question of this person whenever the closed row would
+        # suppress a re-raise. An agent's or a detector's close names nobody.
+        exception.decided_by_user_id = actor_id if person else None
     if new_status in ("resolved", "dismissed") and exception.finding_fingerprint:
-        _bind_fingerprint_to_decision(exception, invoice, person=actor_id is not None and not via)
+        await _bind_fingerprint_to_decision(db, exception, invoice, person=person)
 
     details = _base_details(exception)
     details["old_status"] = old_status

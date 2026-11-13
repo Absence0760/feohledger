@@ -33,6 +33,7 @@ from app.services.workflow_engine import (
     get_workflow_instance,
     transition_invoice,
 )
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.dates import parse_ambiguous_date, resolve_day_first_preference, utc_today
 
 logger = logging.getLogger(__name__)
@@ -1243,12 +1244,20 @@ async def run_extraction(
 
         # Create exception record (shared chokepoint → emits `exception.raised`)
         from app.services.exception_service import create_exception
+        from app.services.invoice_warning_catalog import exception_finding
 
+        # The exception CLASS, never `str(exc)`: a provider or parser error's
+        # message can quote the document it choked on (a vendor's bank line, a
+        # tax id), and this row is what every AP user reads in the exception
+        # queue (decisions §358).
+        failed = exception_finding("extraction_failed", errorClass=type(exc).__name__)
         await create_exception(
             db,
             exception_type="extraction_failed",
             severity="error",
-            description=f"Extraction failed: {str(exc)[:500]}",
+            description=failed["message"],
+            description_code=failed["code"],
+            description_params=failed["params"],
             status="open",
             organization_id=invoice_org_id,
             invoice=invoice,  # exception follows its invoice (P2)
@@ -1463,10 +1472,9 @@ def _clean_currency_code(val: str | None) -> str | None:
     cur = _clean_string(val)
     if cur is None:
         return None
-    cur_upper = cur.upper().rstrip(".").strip()
-    if len(cur_upper) == 3 and cur_upper.isalpha():
-        return cur_upper
-    return None
+    # The shared rule: three ASCII letters (decisions §381). `isalpha()` alone
+    # admitted a model's "ÄÖÜ".
+    return iso_currency_or_none(cur.rstrip(".").strip())
 
 
 @dataclass(frozen=True)

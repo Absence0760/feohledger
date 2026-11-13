@@ -31,13 +31,12 @@ oldest first. The oldest is closest to the 60-day deadline.
    ```
 
    It finds no organisation (the closure removed it), says so, and continues
-   with the Caddy and backup legs, which key off the slug alone. It removes the
-   tenant's Caddy host block if there is one and every version of
-   `pg/*/feoh_<slug>.dump` in the backup bucket.
+   with the backup leg, which keys off the slug alone. It removes every version
+   of `pg/*/feoh_<slug>.dump` in the backup bucket. (There is no host block to
+   remove: since `docs/decisions.md` §364 tenant hosts are CloudFront's.)
 
    If it stops with **"nothing found for slug"**, there was nothing to remove:
-   the workspace was closed before its first nightly backup and has no host
-   block. Go to step 2.
+   the workspace was closed before its first nightly backup. Go to step 2.
 
 2. **Mark it done**:
 
@@ -57,6 +56,29 @@ oldest first. The oldest is closest to the 60-day deadline.
    redirect URIs and invite emails would point at it. The hold is in
    `provision_tenant`, so `scripts/create_tenant.py` and `deploy/add-tenant.sh`
    refuse a held slug too (exit 2).
+
+## An ERP grant the closure could not revoke
+
+A closure reads the workspace's ERP OAuth grant before the control-plane rows
+go and revokes it at the provider just after the closure commits, so the
+provider's latency never holds the closure's row locks (`docs/decisions.md`
+§371). It never stops for it. The API log has two lines for it: one when the
+revoke is queued, and the outcome once the provider answers:
+
+```
+[tenant-deletion] <slug>: ERP OAuth grant (<provider>) to be revoked once the closure commits
+[tenant-deletion] <slug>: ERP OAuth grant (<provider>) revoked|failed|unsupported|unreadable
+```
+
+A queued line with no outcome line after it (the API restarted in between)
+counts as not revoked.
+
+Anything but `revoked` (a warning) means the grant may still be live at the
+provider. Tell the customer to remove FeohLedger from that provider's connected
+apps; for Blackbaud (`unsupported`, SKY API has no revocation endpoint) that is
+disconnecting it from the environment in Blackbaud Marketplace. An operator
+deletion (`scripts/delete_tenant.py`) prints the same outcome in its written
+confirmation.
 
 ## What stays, on purpose
 

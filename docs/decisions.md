@@ -16230,3 +16230,2343 @@ decision. Also rejected: calling joserfc directly in `deps.py` and `mfa.py` as
 python-jose was, which would duplicate the extra claim checks and the error
 mapping in two places; `security-patterns.sh`'s `bypass-decode-token` rule now
 allows `jwt.decode` only in `utils/jwt_hs256.py` and `services/sso.py`.
+
+## 352. deepmerge 4.3.1 is patched locally, and both scanners ignore it only on that basis (2026-11-12)
+
+**Decision.** Closes #695 and #689. GHSA-gcqx-w48m-w2h4 (CVE-2026-93753):
+deepmerge's `mergeObject()` copies a `"__proto__"` key with plain assignment,
+which sets the merged object's prototype when the target has no such
+property for `propertyIsUnsafe`'s `in` check to see. 4.3.1 is the last
+release and the advisory lists no patched version; its only dependent here is
+`@sveltejs/vite-plugin-svelte`, whose latest (7.3.1, already pinned) still
+declares `deepmerge ^4.3.1`, so neither a bump nor an override can remove it.
+§350 had answered it with an `osv-scanner.toml` ignore alone, and `audit.yml`'s
+`pnpm audit` kept reopening #689 because nothing told pnpm.
+
+- `frontend/patches/deepmerge@4.3.1.patch` (`pnpm patch`, listed under
+  `package.json` `pnpm.patchedDependencies`) makes `propertyIsUnsafe` refuse
+  the `"__proto__"` key in `index.js`, `dist/cjs.js` and `dist/umd.js`. It is
+  the same patch project-water-management carries.
+- `frontend/src/lib/deepmergePatch.security.test.ts` loads the copy
+  vite-plugin-svelte resolves and fails if a `"__proto__"` key still sets the
+  prototype (checked against the unpatched 4.3.1: it does). It also fails if
+  `pnpm.auditConfig.ignoreGhsas` names the advisory while the resolved version
+  has no patch entry, and if the `osv-scanner.toml` entry loses its expiry.
+- `pnpm.auditConfig.ignoreGhsas` in `frontend/package.json` carries the same
+  exception for `pnpm audit`, so `audit.yml`'s threshold and steps need no
+  change for it. The
+  `osv-scanner.toml` entry now names the patch and expires 2027-02-10, ~90
+  days, rather than §350's six months.
+
+`opentelemetry-api` (GHSA-xcq7-p3pf-p88h, fixed in 1.45.1), the issue's other
+two rows, was already at 1.45.2 in both `tools/fake-*` locks since §350.
+
+**Rejected:** the ignore alone (§350's state): it records a judgement that the
+reachable input is trusted, which holds today but is enforced by nothing.
+Replacing or forking vite-plugin-svelte for one build-time option merge.
+**Drop** the patch, both ignores and the guard once deepmerge ships a fixed
+release or vite-plugin-svelte stops depending on it. The patch is keyed to
+4.3.1, so a resolved version that moves off it leaves the copy unpatched and
+the guard red, which is the prompt to re-check.
+
+## 353. An ERP name too long for its column is stored shortened and marked; vendor names are matched case and spacing aside (2026-11-12)
+
+**Found** while closing two §287 / §284 follow-ups. `vendors.name` and
+`gl_accounts.name` are `String(255)`. The vendor sync wrote the ERP's name
+unchecked, so one QuickBooks vendor whose `DisplayName` (up to 500 characters)
+ran past the column failed the flush and rolled back the whole sync; the chart
+sync relied on three adapters (QuickBooks, NetSuite, Business Central) cutting
+the account name to 255 themselves, silently, and the others not at all.
+Separately, the vendor sync's ambiguous-name counts compared names with `==`
+while its realm evidence (`_same_vendor`) already ignored case and spacing, so
+"Acme" and "ACME" in one pull did not trip `ambiguous_name`: the manual "Acme"
+was linked to the record spelled the same and "ACME" created beside it.
+
+**The name rule, once for both syncs** (`services/erp_record_names.fit_name`).
+A name that does not fit keeps its first `max - 1` characters, trailing space
+trimmed, plus `…`, and the record syncs and links as usual; the run reports it
+(`names_shortened`, and on the vendor's audit row `name_shortened: true`), and
+the sync page shows a warning. The adapters no longer cut names. The shortening
+is deterministic, so an unchanged long name re-syncs as `unchanged`.
+
+**Why shortened, not refused.** Neither name is a key. A bill posts by the
+record's ERP id and a chart row matches by id and code; the name tells a person
+which record it is. Refusing the record would cost a payee its link (every bill
+refused `vendor_not_linked`) or a chart account its postability over a label.
+The `…` says, on every screen, that the full name is in the ERP. A code or tax
+id is the opposite case, an identifier, where a cut value names something else,
+so those stay dropped or refused (§287). The sanctions screen of a vendor so
+named runs on the stored name (its first 254 characters), as every other
+reader of the row does.
+
+**The ambiguous-name counts use the realm evidence's key.** Both the pull's
+count and the unlinked locals' count are keyed by `_norm_name` (whitespace
+collapsed, casefolded), and the name link looks the vendor up by the same key
+(by id from that count, not by `Vendor.name ==`). Casefolding stays in Python
+rather than SQL's `lower()`, which is not Unicode case folding ("ß"), so the
+one normaliser is the only one. Every comparison uses the stored (fitted) form
+of the ERP name, which is what a local row can hold.
+
+**Rejected:** a wider `name` column. It moves the limit rather than settling
+what happens past it (500 is QuickBooks' limit, not every ERP's), and costs a
+migration across every tenant for a label. Also rejected: listing each
+shortened vendor name in the toast, since each one is up to 255 characters; the
+vendor line counts them and the response carries the names.
+
+## 354. The Xero deep link names the bill's organisation by a ShortCode read at each push; QuickBooks has no such link (2026-11-12)
+
+**The gap.** §302 stored `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=`
+and QuickBooks' `app/bill?txnId=` from the bill id alone. Both open in whichever
+organisation or company the user last had open, so a user who works in several
+lands on "not found", or in another company's books.
+
+**Xero: the organisation-login redirect.** The link is
+`https://go.xero.com/organisationlogin/default.aspx?shortcode=<ShortCode>&redirecturl=/AccountsPayable/View.aspx?InvoiceID=<id>`.
+Xero switches the signed-in user to the organisation named by its `ShortCode`,
+then opens the bill. Xero's own MCP server builds the same form
+(`src/consts/deeplinks.ts` in `XeroAPI/xero-mcp-server`). The
+`ShortCode` comes from `GET /Organisation` (Xero's OpenAPI describes it as "A
+unique identifier for the organisation"). The redirect path is sent
+unencoded, as Xero's links send it. That is safe because the bill id inside it
+is already fully percent-quoted, so it holds no `&` or `#` that could end the
+query. The ShortCode is quoted with only `!` left literal. We kept the
+`View.aspx` page from §302. Xero's MCP server targets `Edit.aspx` for bills,
+but the view page is the read-only one, and it is the one already tested.
+
+**Read at each confirmed push, not stored on the connection.** After a bill is
+created, or an existing one is adopted idempotently,
+`XeroAdapter.organisation_short_code` reads `/Organisation` with the
+connection's own `Xero-Tenant-Id`. It returns the code as
+`ErpPostResult.erp_company_code`, and `deep_links.erp_document_url(…,
+company_code=)` builds the link. The link stored on the invoice is the only
+copy that persists. We considered storing the code in
+`settings.erp.oauth` when `resolve_external_tenant_id` runs at connect time,
+and rejected it for three reasons. (1) Every connection made before this
+change would have no code until someone reconnected it, so a lazy fill on the
+push path would be needed anyway, which is a control-plane write from the
+tenant push path. (2) The connect flow is being reworked separately, to choose
+among several organisations. (3) A stored code is a second copy that can go
+stale. A migration was never on the table, since the per-org JSON would have
+held it. The cost is one Xero call per confirmed push, which already makes
+three or four, against Xero's 60-per-minute limit.
+
+**Best effort, never failing the push.** The read happens after the bill is
+confirmed. A non-200 answer, an empty or missing `ShortCode`, or an exception
+means `erp_company_code=None`, and the link falls back to the bare §302 page.
+It is logged with only the status or the exception type. Turning a posted
+bill into a failed push over a link would make the next retry's idempotency
+lookup carry the whole outcome for a cosmetic field. Links stored before this
+change are not rebuilt: the tenant database does not record the code, and
+reading it now for old bills would mean assuming the connection never changed
+organisation.
+
+**QuickBooks: none exists.** We found no Intuit documentation for a web URL
+that selects a company by `realmId`. developer.intuit.com documents only the
+REST path `/v3/company/<realmId>/bill/<id>`, which is not a page a browser
+opens. Intuit's help centre's only route is Settings → Switch company
+(quickbooks.intuit.com/learn-support, "Switch company files"). Community
+answers give `qbo.intuit.com/app/<entity>?txnId=` with no company selector. So
+the QuickBooks link is unchanged, and the docs say it opens in the current
+company. An undocumented `companyId=`-style parameter would be a guess that
+could fail silently.
+
+**Mobile.** The mobile ERP panel parses `erp_document_url` and makes the
+reference a link through the shared `ExternalLink` widget, which uses
+`url_launcher` and opens the link outside the app. It accepts only an
+`https` URL. Anything else shows as plain text, the same as a provider with
+no link.
+
+## 355. A consent that reaches several companies waits, server-side, for the admin's pick (2026-11-12)
+
+**Context.** Xero (several organisations authorised in one consent) and Sage
+v3.1 (a login with several businesses) can answer one consent with more than
+one company. The callback resolved those to none and refused the connect
+(`no_external_tenant`), so such a customer could not connect at all. Picking one
+for them stays ruled out: we never choose a customer's ledger.
+
+**Decision.** The callback reads `OAuthErpAdapter.list_external_tenants`. One
+company links at once, as before; none is still `no_external_tenant`; several
+link nothing. The exchanged token is sealed (`credential_crypto`, AAD = org,
+provider, browser binding) and parked in Redis, keyed on the org and the hash of
+a FRESH nonce the callback mints once the request's cookie has matched (§336),
+with the starting admin's id and the provider's `(id, name)` list, for one
+`state` lifetime. The callback sets that new nonce as the cookie for the window
+and returns with `?erp_choose_company=<provider>`. Minting rather than renewing
+means no request value is ever written back into a cookie (CodeQL
+`py/cookie-injection`), and the nonce spent with the state is not reused.
+The settings page lists the companies (`GET …/oauth/pending`) and posts the pick
+(`POST …/oauth/pending/select`). Both are admin, bearer-authenticated and
+credentialed, and find nothing for another browser or another admin
+(`erp_pick_expired`). `select` GETDELs the record before any check, so a pick is
+single-use whatever it ends in. It links only an id from the list the provider
+returned under the new token (`erp_pick_unknown_company` otherwise, audited),
+and links through the callback's own `_claim_and_link`: the realm lock, the
+cross-tenant check, the unique index and audit-first, with `picked_from` on
+`organization.erp_connected`. QuickBooks keeps §337: its list is the default
+wrapper around its confirmed realm. A cancelled or lapsed pick revokes nothing,
+for §337's reason.
+
+**Amended in review (round PR #707): which refusals spend the pick, and why
+none revokes.** The exchanged grant stays live at the provider whatever the pick
+ends in, so a refusal that spent the record left that grant with nothing left
+to use it, and the admin a second consent to give. Revoking is still ruled out
+on every path, and §337's reason covers each of them, not only QuickBooks':
+the revoke we can send is per token, but what it ends is the provider's to
+decide (Intuit's reaches the app's whole grant for a company; Xero's removes
+the connections the token holds), and a consent that lists several companies
+can include one this workspace is already connected to (a reconnect) or one
+another FeohLedger workspace holds (`already_linked`). Cutting a live
+connection, possibly another customer's, is worse than an unused grant that
+lapses with the provider's own refresh-token lifetime. Per path:
+
+- *An id the consent did not offer* and *the plan lost since the consent* need
+  no token, so they are now checked on a peek, before the GETDEL, and refuse
+  without spending (`erp_pick_unknown_company` is still audited). The admin
+  picks again, or picks once the plan covers the ERP, within the window. The
+  plan-lost case is the one where revoking was most tempting, since the
+  workspace may never connect; but the consent may still name the company the
+  workspace is connected to now, and its plan can come back.
+- *A provider no longer configured* drops the record (`erp_pick_expired`):
+  no pick can succeed, and without its spec there is no revoke endpoint to
+  call.
+- *A claim refusal* (`already_linked`, `credentials_unavailable`,
+  `audit_unavailable`) needs the opened token, so it comes after the GETDEL,
+  and `restore_pending_connect` puts the record back: same browser, admin,
+  companies and window (never extended), the token as aged so far, and never
+  over a newer connect that browser parked meanwhile (SET NX). The consent's
+  other company may be free, and the 503s are transient. Best-effort: if it
+  cannot be put back, the pick is spent as before.
+- *Cancel* (`DELETE …/pending`) drops the record and revokes nothing, for the
+  reason above.
+- *A token that cannot be opened* (`credentials_unavailable` at the take) is
+  spent: it cannot be used or revoked, and it lapses.
+
+A pick is still single-use where it matters: two picks cannot both link (the
+GETDEL), and a successful one leaves nothing to replay.
+
+The list fails closed: one row with an unaddressable id empties it
+(`no_external_tenant`), because dropping that row could leave a single company
+of several and link it unasked. Xero's list keeps its existing fallback to every
+organisation the token reaches when none matches this consent's `authEventId`;
+each is still offered rather than linked, and the claim checks apply.
+
+**Rejected.**
+- *The pending handle in the redirect URL.* §336 rejected a URL-borne handle
+  for the confirm step, since the victim can leak it. Keying on the HttpOnly
+  cookie needs nothing in the URL.
+- *A second consent per company.* Xero's and Sage's consent screens do not let
+  us name one company, so the admin would meet the same list again.
+- *Storing the list on the grant and switching companies later.* Nobody has
+  asked to move a connection between companies, and a realm change already
+  re-judges every vendor and GL link (§284). One connect, one company.
+
+## 356. A vendor keeps its ERP link for every company it was linked in; only the current company's is ever pushed (migration 0125, 2026-11-12)
+
+**What the follow-up said, and what was left of it.** "A vendor holds one
+`erp_vendor_id`, whichever ERP set it; a tenant that switches ERP posts the old
+ERP's ids." It predates §284. Since §284 a link records its realm,
+`"<adapter>:<company>"`, and the push and the PO sync resolve only links of the
+current realm, so the posting half was already closed: a push to ERP B refuses
+an id ERP A set as `vendor_not_linked`, before any HTTP call. (The "name or code
+stored where the ERP gave no id" half was closed with it: every adapter's
+`erp_vendor_id` is the ERP's own record key, and an id-less record is skipped.)
+What remained was the single slot. The first sync under B re-judged A's link by
+evidence and dropped it, so a tenant that went back to A, or flipped QuickBooks
+sandbox → production → sandbox, re-derived its links from names. Every vendor
+whose name was ambiguous in the pull came back unlinked, and every invoice to
+it was refused until someone linked it by hand.
+
+**The shape: the row keeps the current company's link, and `vendor_erp_links`
+keeps the rest** (`services/vendor_erp_links`). The table holds one row per
+`(vendor_id, realm)` (unique, FK `ON DELETE CASCADE`), never for the realm the
+vendor row itself holds and never for a NULL realm. `services/vendor_sync` is
+its only writer:
+
+- a link leaving the row under a named realm, dropped or moved by §284's
+  evidence rule, is first filed under that realm (`change: unlinked` /
+  `realm_changed` carries `kept: true`);
+- a sync under realm R begins by putting R's kept links back on their rows
+  (`change: restored`, counted `restored`, "N relinked" in the response). Each
+  row's own named link is filed in turn, so after the sync no link for R is
+  kept. A restored link is not re-judged, because a same-company link never
+  is; it left the row only because a sync ran elsewhere;
+- the push and the PO sync read a vendor's link through one accessor,
+  `vendor_erp_ids`: the row's link when it is live in the current realm (the
+  §284 rule, legacy trust included), else the link kept for exactly that realm.
+  So a tenant back on A posts A's ids at once, before any sync.
+
+Two guards keep a restore from making two payees one ERP supplier. A kept id
+that another vendor already holds in R, or that two kept links claim, is
+dropped and reported `unlinked` (`kept: false`). And the re-judge pass no
+longer adopts a link whose id a vendor already holds in R; before, that left
+two rows on one id and the next lookup's `scalar_one_or_none` aborted the sync.
+
+**Rejected: the link table as the only store** (dropping
+`vendors.erp_vendor_id` / `erp_link_realm`). It is the more normalised design,
+but it changes what the public `erp_vendor_id` means (relative to a realm the
+serializer would have to resolve per request), touches the frontend and mobile
+mirrors, and rewrites the realm rules §284 and §287 pinned with live QuickBooks
+evidence, all to store the same facts. The row's pair is what a person sees and
+what the adapters' tests and the PO sync were written against. The kept table
+adds only what was being lost. **Rejected: keyed JSON (`{realm: id}`) on
+`vendors`.** It allows no uniqueness per realm and no index for "which vendor
+holds id X here", and the restore guard needs both. **Rejected: keying by ERP
+type.** One adapter covers many companies, and QuickBooks reuses ids across
+them (§284). The key has to be the realm, not the ERP.
+
+**Existing rows: no backfill (§141).** Every link a vendor holds today is still
+on its row with its realm, and stays there, so nothing live is lost. The links
+earlier syncs dropped are named only in `vendor.synced_from_erp` audit rows.
+Those record that a link was dropped at some moment, not that the id still names
+the supplier in that company. Filing them as live links would post on a reading
+of history nobody re-checked. A NULL-realm link (pre-0115, or made by a no-realm
+sync) is never kept either. Nothing recorded which company set it, and the org's
+ERP at migration time is not evidence of that: §284 already declined to adopt
+NULL links on a snapshot except for the push's narrow legacy trust, and a kept
+link would be restored without any re-judging. A NULL link a named sync cannot
+vouch for is dropped, as before.
+
+**Not changed.** A vendor merge moves no ERP link: the duplicate keeps its row
+link and its kept links, as it always kept `erp_vendor_id`, so the canonical
+vendor can be unlinked in a realm only the duplicate was linked in. A sync with no
+realm (`mock`, or an OAuth ERP with no consent) neither keeps nor restores,
+because it speaks for no company (§287). GL accounts still hold one link per
+row. They are matched by code, which survives a switch, so a return to A
+re-links them by code, except for rows a person confirmed (`erp_link_confirmed_at`)
+or left waiting with candidates. Both residuals are tracked in
+`docs/followups.md`.
+
+## 357. Closing an invoice by hand refuses a status it does not close from and a live claim, at both doors (§309 / §347 follow-up, 2026-11-12)
+
+**The gap.** §347 narrowed `POST /{id}/complete` to `new` / `approved` but left
+`POST /bulk/status → done` with no gate of its own, and neither door asked the
+rails. A staged run books a live `pending` payment and leaves its invoice
+`approved`; an exported NACHA run and a minted virtual card do the same. Closing
+that invoice to `done` took it off the payable set while our rail still paid it,
+and from `done` (terminal) no void puts the claim back on the queue — the
+invoice's state and its money stop agreeing. (`posted_in_erp` / `sent_to_erp` /
+`paid` rows were already skipped by bulk's `IMMUTABLE_STATUSES` check, so the
+follow-up's `posted_in_erp` case was closed in practice; it is now refused by
+the shared rule with `/complete`'s code rather than by a side effect of the
+edit lock.)
+
+**The rule.** One predicate, `api/workflow.close_refusals(db, invoices)`, beside
+`complete_status_refusal` which it calls first, then a live claim read by
+`services/erp_export_gate.live_claims` — the batch form of §309's
+`erp_export_live_claim`, which now delegates to it — through
+`payment_runs.live_payment_invoices` and `card_issuance.live_card_invoice_ids`.
+"Live" therefore has one reading for the run builder, the card mint, the ERP
+push and closing: a payment outside `LIVE_PAYMENT_TERMINAL_STATUSES`, a card not
+`cancelled`. The refusal is `payment_blocks_completion`, `params.claim`
+`payment` / `virtual_card`, payment named first.
+
+- **`/complete` asks only where its outcome is `done`** (`new` with no approval
+  step, `approved` with no ERP step). Submit-for-review moves nothing payable,
+  and the send branch already meets §309's `payment_blocks_erp_export`, so a
+  second code there would only rename the same refusal. `GET /review-actions`
+  reads the same function, so the modal's verdict and the door agree (pinned
+  by the parity matrix).
+- **Bulk asks once for the locked batch** and reports each refused row as a skip,
+  before the immutable-status check, so a closed-from-the-wrong-status row
+  carries `invoice_not_completable` too. The skip gained optional `code` /
+  `params` beside its English `reason`; the list localizes a coded skip and
+  keeps the server sentence otherwise. Other skips are unchanged.
+- **A new code, not `payment_blocks_erp_export`.** That sentence tells the reader
+  to clear the claim "before sending the invoice to the ERP"; the action here is
+  closing it. Same remedy (cancel the run, void the payment, cancel the card),
+  different verb.
+- **No race window.** Both doors read on rows locked `FOR UPDATE`, and the run
+  builder (§330) and the card mint lock the invoice too.
+- **Rejected:** letting a settled (`completed`) payment through, as "the money
+  moved, so it is done". A completed payment is what `paid → done` is for; an
+  `approved` invoice holding one is out of step already, and closing it hides
+  that. The rail's own exits apply, as §309 says for the push.
+
+## 358. The direct `create_exception` callers are keyed too, and Positive Pay de-duplicates on the code (2026-11-13)
+
+**Context.** §240 keyed every `_ensure_exception` finding and §319 the ERP
+reconciliation rows, but six sites still opened an exception through
+`exception_service.create_exception` with composed English and no
+`description_code`: extraction failure, Positive Pay returns, the bank-change
+flag, compliance holds, the reconciler / in-doubt dispatch flag and settlement
+discrepancies. The queue rendered them in server English beside localized rows.
+
+**Decision.** Each sentence is an `exception.*` catalogue code
+(`invoice_warning_catalog.DIRECT_EXCEPTION_SPECS`), built by `exception_finding`
+and passed as `description` / `description_code` / `description_params`; the
+generator covers both clients.
+
+- **`extraction_failed` carries the exception class only.** `str(exc)` used to be
+  stored (truncated to 500 characters). A provider or parser error can quote the
+  document it failed on, so the message stays on the worker's log and audit
+  detail and never reaches the row every AP user reads.
+- **A compliance hold lists its reasons as findings under an always-present
+  frame.** `ComplianceDecision` gains `findings` beside `reasons` (same order,
+  same English), filled by every reason that can produce a `hold`; the
+  exception is `exception_findings("compliance_hold_findings", …,
+  frame_single=True)`. Each reason is a lower-case clause written to follow
+  "compliance_hold: ", so a lone reason is not a description by itself.
+  `failure_reason` is unchanged in shape. Refusal-only reasons stay uncoded:
+  no exception is opened for a refusal.
+- **A word picks the code, never a param** (§157's rule): MORE / LESS for a
+  settlement variance, `failed` / `cancelled` for an interrupted dispatch, a
+  screening result with or without a list name, adverse media with or without a
+  provider name, the AML alert with or without excluded payments.
+- **Settlement figures are `number`s beside `text` currency codes**, because a
+  currency mismatch has two currencies and one `currency` param labels one side
+  (§197).
+- **Positive Pay's dedupe moves to code + `checkNumber`, with a legacy arm.** A
+  coded open row matches on `description_code` and
+  `description_params->>'checkNumber'`; an uncoded row (raised before this)
+  matches on `description`. The new English fallback is byte-identical to the
+  old description, so the legacy arm catches every row already in the queue
+  and a redelivered return file re-raises nothing.
+- **A guard keeps it that way.** `tests/test_invoice_warning_catalog.py` fails
+  on any `create_exception` call under `app/` that passes no
+  `description_code`, except `services/review.py`'s rejection, whose
+  description is the reviewer's own words.
+
+**Rejected.**
+- *Backfilling codes onto old rows* by parsing their English: the scraping the
+  catalogue exists to retire (§240's reasoning). The legacy dedupe arm is a
+  comparison against a sentence we wrote, not a parse.
+- *Dropping the legacy arm and matching on code alone*: every return already in
+  the queue would be raised again on the first redelivery after deploy.
+- *Matching coded rows on `description` too*: it would keep the English as the
+  key, and a reworded template would then silently stop de-duplicating.
+- *Keeping the payment id out of the reconciliation sentences* (moving it to
+  machine detail as the ERP rows did): `erp_report` is ERP data, and the id is
+  the only thing that tells the reader which of an invoice's payments to chase.
+
+## 359. Every SAML ACS refusal lands on the SPA bridge, coded; verification failures stay one sentence (2026-11-13)
+
+**Context.** §291 routed one ACS refusal, an address held in another workspace,
+through a refusal-only handoff code to the SPA bridge. Every other refusal still
+left the browser on `{"detail": "SAML login could not be verified."}` at the API
+origin: English only, no page chrome, no way back to sign-in. The OIDC callback
+never had that problem because the SPA posts the callback itself.
+
+**Decision.** Once the RelayState has named the tenant, the ACS answers every
+refusal the same way: audit the PII-free reason exactly as before, park a
+refusal code behind `sso.create_saml_refusal_handoff` (same prefix, TTL and
+`GETDEL` single use as a token handoff), and 303 to the bridge. `/exchange`
+maps the code to its coded refusal and no token. The table lives in
+`api/auth_saml._SAML_REFUSALS`; a code it does not know fails closed to
+`saml_login_unverified`.
+
+- **Verification failures are one code.** `assertion_invalid`, `issuer_mismatch`,
+  `unsolicited`, `replay` and `missing_email` all become `saml_login_unverified`
+  (400) with the sentence the ACS already used. Telling them apart would show
+  whoever holds a forged or captured assertion which check stopped it. The
+  bridge says no more than the ACS did, and only the audit row differs.
+  `missing_email` counts as one of them because it describes how the assertion
+  is shaped, not anything the person can act on.
+- **Identity refusals are coded the way OIDC states them.** `inactive`,
+  `domain_blocked` and `unsafe_email` become `sso_account_inactive`,
+  `sso_email_domain_blocked` and `sso_email_unusable` (403), in the English the
+  OIDC callback always answered with. The OIDC callback now answers with the
+  same coded details, so both protocols localize alike. None of them reveals
+  more than OIDC already did. The IdP has vouched for the address, and its admin
+  can already see each fact. `unsafe_email` used to be generic on SAML only, and
+  the user cannot fix it, but stating it tells the admin where to look and leaks
+  nothing.
+- **Two unaudited refusals move too.** State with no AuthnRequest binding becomes
+  `saml_login_unverified`, and SAML switched off or the plan losing `sso` since
+  `/login` (§258) becomes `saml_not_configured` (400). Neither wrote a row before,
+  and neither writes one now.
+- **What stays a 400 at the ACS.** A malformed form, an unknown or spent
+  RelayState, or a tenant gone since `/login` has no workspace origin to send
+  the browser to, and no row to scope.
+
+**Rejected.** (1) A per-reason code for each verification failure, because it
+is an oracle for assertion forgery. (2) Putting the refusal code in the bridge
+URL instead of behind a handoff code. The bridge would then render whatever an
+attacker-crafted link said, and the page would be able to tell a refusal from a
+token handoff before exchanging. (3) Redirecting the no-tenant cases to a
+global page. That needs an origin chosen without knowing the tenant, and the
+bridge would then be stating a refusal on a host the workspace's session does
+not live on.
+
+## 360. A label the server owns renders by its key, and an export's summary from its typed counts (i18n follow-up, 2026-11-13)
+
+**The gap.** The Report Builder, `/admin/privacy`, `/admin/access-review` and the
+budget dimension labels (`lib/types/budget.ts`) were literal English, so the help
+guides had to name their controls in `**bold**` rather than `{ui:}`. Two of those
+surfaces show text the *server* composed: the builder's catalog carries an
+English `label` per source and field, and the privacy page's only result summary
+was a hand-built "`Erased. ${n} field(s) redacted.`" beside a raw JSON dump.
+
+**The calls.**
+
+- **Catalog labels key on the catalog key.** `types/reports.ts` maps each source
+  and field key to a catalogue entry and composes a measure's name the way
+  `report_builder._measure_label` does; the server's `label` is the fallback for
+  a key this build predates, never the first choice. One flat field map serves
+  all four sources because a key means one thing in every source —
+  `types/reports.test.ts` reads `report_builder.py` and fails if that stops
+  holding, if a key has no label, or if the English differs from the server's.
+  Rejected: a `label_key` on the catalog response (the ERP-form pattern, §300's
+  `SERVER_NAMED`). It would be the more general shape, but the catalog is a
+  fixed whitelist of ~30 keys that the client already knows by name, and the
+  server-side change would buy nothing the drift test does not.
+- **The DSAR summary comes from typed counts the response did not have.**
+  `DSARResponse` gains `record_counts: dict[str, int]` (additive, default `{}`),
+  computed by `privacy_export.bundle_record_counts` over
+  `DSAR_COUNTED_SECTIONS`: a list counts its length, a capped collection or the
+  document manifest its true `total`. The bundle's own tallies were not usable —
+  only the vendor bundle has `counts`, the user bundle's `activity` covers two
+  sections, and the vendor-user bundle has neither. The frontend's label map is
+  pinned to the tuple by reading the Python source; `test_privacy.py` proves
+  each subject type's real bundle is covered section by section. The persisted
+  history row's `record_counts` is deliberately unchanged.
+- **The erasure toast is two ICU plurals over the typed counts**, and a
+  `documents_failed > 0` result now says the erasure is incomplete (the field
+  was on the response and the page ignored it). A 404 renders a localized "no
+  one matches" instead of the server's "Subject not found".
+- **The admin pages' keys are `admin.privacy.*` / `admin.accessReview.*` in the
+  settings slice,** not the `privacy.admin.*` the follow-up suggested: §300
+  already puts every `/admin/**` string there, `admin/+layout.ts` loads it, and
+  `/help` loads it for the guides' `{ui:}` references. A main-catalogue
+  namespace would have shipped them to every page. The builder's and budgets'
+  keys stay in the main catalogue (`reports.*`, `budgets.dimension.*`); neither
+  route loads a slice.
+- **The untranslated-copy guard reads component props and script labels.**
+  Its attribute list was the HTML five, so `KpiCard label="Dormant"`,
+  `DataTable empty="…"` and a script-side `COLUMNS = [{ label: 'User' }]`
+  passed it. `label` / `ariaLabel` / `empty` join the attribute list, and a new
+  script scan catches copy-bearing object properties, skipping values shaped
+  like message keys. Every file already on the roster passed unchanged.
+
+**Left as is.** Enum *values* inside the builder (a status filter's options, a
+status cell) are the stored codes, as on the API. Role names in the access
+review render through `roleLabelKey` (system roles translated, custom roles
+verbatim). All five non-English locales are first-pass translations pending
+native review.
+
+## 361. Expense-report and corporate-card refusals are coded at the endpoint, not only in the verdict (§348 follow-up, 2026-11-13)
+
+**Decision.** Every `services/expense_controls` gate is now `coded=True`, so
+submit, approve, reject, attach / detach, match, create-expense, unmatch and
+ignore answer with exactly the `{code, message, params}` their row's verdict
+ships, instead of a plain string beside it. The same pass codes the refusals
+the verdicts cannot hold: a line edited, deleted or moved off a locked report
+(`expense_report_locked`, the gate moved into `expense_controls` with
+`LOCKED_REPORT_STATUSES`), an attached line with no FX source or no rate
+(`expense_fx_source_missing`, `expense_fx_rate_unavailable` with both
+currency codes), deleting a reconciled expense (`expense_card_reconciled`),
+and `/match`'s expense side (`card_txn_expense_already_matched`,
+`card_txn_currency_mismatch`, one `card_match_expense_refusal`). Each
+`message` is byte for byte the English the endpoint sent before, so a client
+reading `detail` as text — `formatApiDetail`, mobile's `ApiClient.errorMessage`
+— renders the same sentence. Statuses are unchanged.
+
+**The mobile half was a non-issue.** The follow-up kept the strings plain "so
+mobile keeps working", but mobile calls no expense-report or card endpoint, and
+its client already reads a coded `detail` by its `message`
+(`test/api/api_client_test.dart`). Mobile's registry therefore gets no entries:
+its header already scopes it to the surfaces mobile ships, and ARB strings for
+codes no screen can receive would be dead text in every locale.
+
+**The web submit path needed its own fix.** `api/expenses.submitReport`
+hand-rolls its fetch to keep the violation list, so it bypassed `api.ts`'s
+`localizeApiDetail`: a coded 403 or not-draft 422 reached the toast in
+English. It now builds its errors with `apiErrorFromBody` and localizes a
+coded 422 before falling back to `message`.
+
+**Not done:** submit's two list-shaped 422s (`{message, violations}` and
+`{message, expense_ids}`) stay uncoded; stating a policy violation in the
+reader's language is the policy engine's change, tracked in
+`docs/followups.md`. The role dependency's 403 stays a plain string, as
+everywhere (`role_not_permitted` is only its verdict form).
+
+## 362. A file exported before a switch to processor mode keeps its claim; a NACHA file's bills are read concurrently and re-read before upload (§251 / §296 / §344 follow-ups, 2026-11-13)
+
+**Context.** Two gaps in the bank-file path. First, "Bank rejected the file"
+(`/nacha/void`) checked only that the run was `exported`. A tenant that
+exported a file, had it taken by its bank, and then switched `payments.mode` to
+`processor` could release the run to `draft` over the API and Execute it — or
+cancel and restage it — so the rail paid the suppliers the file already paid.
+§251 says the `exported` claim closes the switch-to-processor path; the void
+reopened it, and §344's parity test pinned that verdict. Second, the export's
+ERP-bill read (§296) happens when the file is built, but the money moves when
+a person uploads it; a bill paid in QuickBooks in between was paid twice. And
+the export read its bills one after another while holding the run lock and
+every invoice lock.
+
+**Decision.**
+
+- **The void is refused on a tenant that does not record payments**
+  (`run_nacha_void_refusal(run, record_only=…)`, 409 coded
+  `nacha_void_requires_record_only`), resolved by `payment_execution_mode` —
+  the same condition the export required. The claim stays, so `/execute`,
+  `/cancel` and re-staging keep refusing. Exits: record the run as paid, or an
+  admin switches back to record-only and voids there. Refusing the void rather
+  than the Execute after it is what closes every path: a gate on Execute (say,
+  on `nacha_export_count > 0`) still lets the released run be cancelled and its
+  invoices restaged into a fresh run, because the invoices carry no memory of
+  the file. Accepted residual: a void made on a record-only tenant is an
+  attestation, as §251 says, and a tenant can switch modes after one — the same
+  trust a regenerated second file already rests on.
+- **The export reads its bills concurrently**, at most
+  `FEOH_ERP_DISPATCH_CHECK_CONCURRENCY` (4; a `bill_report` is two QuickBooks
+  calls) at once, and only after every local check has passed.
+  `erp_status_sync.erp_bill_dispatch_refusal` is split into a database half
+  before the read, the read itself (no session), and a database half after it;
+  `erp_bill_dispatch_refusals` runs the halves sequentially on the one session
+  (an `AsyncSession` cannot be shared between tasks) and only the reads under a
+  semaphore. Verdicts are unchanged. The org-wide "unreachable" hold is checked
+  as each read starts, so after a connection failure the reads not yet started
+  hold without reading; those already in flight cost at most one timeout each.
+- **Verify before upload**, `POST /runs/{id}/nacha/verify` (`payment.execute`,
+  `run_nacha_verify_refusal`, `actions.nacha_verify`). It re-reads the bill of
+  every `pending` payment in an `exported` run. A bill no longer open takes its
+  payment out of the run — `failed` with `erp_bill_not_open:<state>`, exactly
+  what the rail dispatcher records, plus the blocking `payment_reconciliation`
+  — and answers `superseded`: do not upload the file; regenerate it
+  (`regenerate=true`, next modifier) for what is left, or, with nothing left,
+  the run is `cancelled`. A failed read takes nothing out (`held`).
+  - *"Void and regenerate" literally* was rejected. Voiding returns the run to
+    `draft` with the paid bill's payment still in it, and the next export
+    refuses it on the flag the check opened; there is no per-leg removal from a
+    draft run. Worse, it would release the claim — the path the first bullet
+    closes — and a verify run by mistake after the upload would turn "the bank
+    took it" into a draft anyone can pay again. Taking the stale payment out
+    while the run stays claimed has neither problem.
+  - *No maker-checker or CFO gate*: verify only takes money out of a file, and
+    the uploader is who should run it. *No record-only gate*: it never releases
+    the run, so it is safe on a tenant that has switched modes.
+  - *Bills only*, not `dispatch_preflight` again: the file on disk is fixed at
+    export, so a local change since (a bank-detail swap, a credit) does not
+    alter what the bank would pay; only a payment made elsewhere does. The
+    preflight's discount check also depends on the file's effective date,
+    which the run does not store.
+  - **Idempotent and audited.** A payment taken out is no longer `pending`, so
+    a repeat reads only what is left and changes nothing when those bills are
+    open; the exception is de-duplicated. Every call writes
+    `payment_run.nacha_verified` (result, counts, ids and reason codes, the
+    file-ID modifier checked) as evidence that the file was checked and when;
+    each payment taken out writes `payment.failed`. A taken-out payment is
+    retry-safe like the dispatcher's, but its run is `exported` or `cancelled`,
+    which `/retry-failed` refuses; after a later record-outside rolls the run up
+    to `partial`, a retry still meets the blocking flag, as at the rail.
+
+**Review pending.** The first bullet closes a double-payment path a Security
+Analyst asked to review; the fail-closed fix landed ahead of that review, which
+is tracked in `docs/followups.md`.
+
+## 363. An invoice's source document freezes with its financial fields, and a superseded document is kept, not deleted (§16 follow-up, 2026-11-13)
+
+**The gap.** §16 froze `PUT` / `DELETE /api/invoices/{id}/file` only at `done`.
+From `approved` through `paid` both succeeded, and the replace path deleted the
+previous object after the commit. The document the approver signed off, and the
+one the payment was made against, could be swapped or removed after the fact.
+The audit row kept the filename, but the bytes were gone. A same-name replace
+before approval overwrote the object in place, so the version a reviewer
+rejected was lost too.
+
+**The rule.** One predicate, `api/invoice_entry.document_locked`:
+`FINANCIALLY_LOCKED_STATUSES` (now owned by `models/invoice_status`, and
+`api/invoices._FINANCIALLY_LOCKED_STATUSES` is that set), plus `failed` when the
+invoice was ever approved. That is a failed ERP push, which `/retry-erp` pushes
+again without a new approval. All three file routes, attach included, answer 409
+`invoice_document_locked` (`params.status`) once it holds. The clerk's entry
+window is checked first, as before, so a clerk still sees 403
+`invoice_entry_window_closed`.
+
+- **The modal reads the server, not a list.** `GET /review-actions` gains
+  `manage_file` (`invoice_entry.manage_file_refusal`: role, entry window, lock,
+  in the doors' order), and `canManageFile` is `isAllowed` of it. A locked
+  document shows the refusal's sentence where the toolbar was.
+- **Attach is frozen too.** A document added after sign-off is one nobody
+  approved against, and adding one to a paid invoice is exactly how a fraud
+  would be papered over. A late scan for the record belongs in the supplier
+  chat or the notes, not as the invoice's document.
+- **Before the lock, nothing is destroyed.** Replace and delete detach the
+  document and keep its object. Attach, replace and the supplier-portal resubmit
+  write a versioned key, `<org>/<invoice>/<12 hex>~<filename>`. `~` cannot come
+  out of `_safe_filename`, so the marker is unambiguous and
+  `storage.invoice_file_display_name` recovers the filename. The key keeps the
+  three segments `api/file_proxy` expects, so no other reader changes. The audit
+  row names the kept key (`invoice.file_replaced.previous_file_key`,
+  `invoice.file_deleted.file_key`, `invoice.resubmitted_by_vendor.previous_file_key`).
+  It is the only reference to that key, so `privacy_documents` reads the kept
+  documents from those rows and lists them as `RETAIN` evidence beside the
+  current one. The DSAR export stays complete, and erasure treats them as it
+  treats the invoice's own document. The proxy serves only the current
+  `file_key`, so a kept version is evidence for an auditor and the export, not
+  something the modal shows.
+- **PII.** A key carries two ids and the sanitized filename the audit row
+  already held. Nothing new goes to a log.
+
+**Rejected:**
+- *Keep replacement open after approval, versioned.* It keeps the evidence but
+  leaves the invoice presenting a document nobody approved. A corrected
+  document after approval is a correction to what was approved. It goes back
+  through review, the same way the amount does.
+- *A `superseded_file_keys` column.* It would need a migration fanned out to
+  every tenant, to hold a list the append-only audit row already holds, and
+  the audit row is shipped to WORM storage besides.
+- *Destroying the object on a pre-approval delete* (a document attached to the
+  wrong invoice). Delete-then-attach would then be a replace that bypasses the
+  rule. The remedy for a document that should not be held at all is erasure,
+  which already decides invoice documents.
+
+**Also:** `POST /{id}/resubmit` answers a coded 409 `invoice_not_resubmittable`
+in place of the state machine's plain "Cannot transition". It re-runs warnings,
+as the bulk resubmit already did. `review-actions` serves its `resubmit` verdict
+(`api/workflow.resubmit_refusal`: role, status, entry window), and the modal's
+new "Resubmit for Review" reads it.
+
+**Left open:** the financial fields themselves still unlock on an approved
+invoice's failed push (`docs/followups.md`). The document predicate covers that
+case. The PATCH and line-item gates do not yet.
+
+## 364. The VM stops building and serving the SPA; Caddy keeps `api.` and vanity hosts (#582 step 4, 2026-11-13)
+
+**Context.** §278 moved the SPA to S3 + CloudFront and left the VM serving it
+too, as the one-flag rollback for the first day. The cutover ran on
+2026-10-19 (#582: `frontend_on_cloudfront = true` applied, every release since
+v0.1.2 published through CloudFront). Since then the VM's copy was cost (a Node
+build on a t4g.medium every deploy) and a slow failure: with DNS on CloudFront,
+Caddy could no longer renew the apex and tenant certificates, so a rollback
+after ~90 days would have landed on expired ones.
+
+**Decision.** Nothing on the VM builds or serves the SPA.
+
+- **Caddy** keeps `api.<domain>` and a `vanity` snippet. No `(spa)`, no apex
+  block, no site directory mount. `compose.prod.yml` loses `frontend-build`,
+  the pnpm-store volume and the `./www` mount; `deploy.sh` loses the build and
+  the release swap (`--backend-only` still parses, `--frontend-only` is
+  refused with a pointer). `add-tenant.sh` and `remove-tenant.sh` no longer
+  touch `tenants.caddy`: a tenant host is CloudFront's wildcard.
+- **Vanity hosts stay on Caddy** (§278, #582 option (b)), now as
+  `{ import vanity }`: `/api` goes to the backend under the vanity `Host`
+  (how a registered custom domain resolves to its tenant), and everything else
+  is proxied from `https://<APP_DOMAIN>` with `Host` and SNI rewritten to it,
+  because CloudFront refuses a `Host` that is not one of its alternate names.
+  Their DNS is a `CNAME` to `api.`, not the apex, which is CloudFront now.
+- **The live host list migrates itself.** `tenants.caddy` on the VM holds one
+  `{ import spa }` block per tenant, and a Caddyfile without `spa` would make
+  the Caddy the roll recreates refuse the whole config, taking `api.` down.
+  `deploy.sh` drops every apex / `*.<domain>` block before the roll (in place,
+  for the single-file mount, and listed in the log) and moves any remaining
+  `import spa` to `import vanity`. Leftovers it cannot know are safe to delete
+  (`deploy/www/`, the pnpm volume) are named in a NOTE, not deleted.
+- **The rollback guard inverts.** `feoh_sync_source` required a commit's
+  compose file to mount `./www`; that would refuse this commit. It now refuses
+  one that mounts `../frontend/build` (pre-§277, the #579 outage), so the §277
+  to §363 range stays deployable: re-deploying one of those, restoring the
+  dropped tenant blocks and flipping the flag back is the rollback.
+  `frontend_on_cloudfront = false` alone is now an outage, and `vm-deploy.yml`
+  fails its edge check when the apex lacks CloudFront's header instead of
+  reading that as "not cut over yet".
+- **`smoke.sh --vm` checks what the VM serves**: `api/health`,
+  `public-config`, and the first vanity host's TLS. The apex and a tenant host
+  are checked against CloudFront after the publish (`smoke-frontend.sh`).
+- **CI adapts the Caddyfile** with the pinned Caddy image and a vanity block
+  (`scripts/check_deploy_caddyfile.sh`, in `deploy-compose`). The Caddyfile is
+  now the API host's whole config, and the check also covers a Dependabot bump
+  of the Caddy image on its own PR, which closes the follow-up about production
+  images CI never ran (its other half, the Node build image, is gone).
+- **The SSM document's 45-minute timeout stays.** The SPA build was most of
+  the old ceiling, but the timeout only bounds a hung run, a cold image build
+  plus migrations across every tenant has no tight bound, and changing it is a
+  Terraform apply for no gain.
+
+**Rejected.** *Deleting `deploy/www/` and the pnpm volume from `deploy.sh`*: a
+deploy script removing operator state on a one-off migration is a hazard the
+next reader does not expect, and a NOTE costs one command. *Renaming
+`tenants.caddy` to match its new contents*: the file is live on the VM, and a
+rename is a second migration for a cosmetic gain. *Moving vanity hosts onto
+CloudFront*: one ACM SAN and one alternate name per customer (§278), with none
+in use yet.
+
+## 365. The two same-repository workflow calls use `$/`, and the zizmor baseline is empty (§350 follow-up, 2026-11-13)
+
+**Decision.** `ci.yml` calls `security.yml` and `web-bundle-budget.yml` as
+`$/.github/workflows/…` instead of `./.github/workflows/…`. That clears the two
+low `self-repository` findings §350 left, so zizmor 1.31.1 (regular persona)
+reports **no findings at any severity**: offline on this tree, and online on
+`origin/main` in CI run 43081175409, whose only results were those two. The
+workflows changed since §350 (the Flutter `flutter-version-file` pin in
+`ci.yml` and `mobile-release.yml`, and `audit.yml`'s tracking-issue scoping)
+add no `uses:` change and no finding. `$/` resolves to this repository at the
+running commit, the same code `./` named, without depending on the checked-out
+workspace. GitHub made it GA on github.com on 2026-07-30 and recommends it.
+It needs runner 2.336.0 or newer, and every job here runs on a GitHub-hosted
+runner.
+
+§350 deferred this on the belief that actionlint, run by the CI workflow lint,
+rejected `$/`. Nothing in this repository runs actionlint, so nothing blocked
+it. The two tools that do read these references accept `$/`. Scorecard 5.6.0,
+the release bundled in the pinned scorecard-action v2.5.0, counts `$/` as a
+local reference for Pinned-Dependencies. The repo's own guards now take both
+forms: `test_workflow_actions_are_pinned_by_full_sha` exempts `$/` like `./`,
+and `test_workflow_token_permissions` follows a `$/` call into the called
+workflow. Without that second change it would have stopped following
+`security.yml` and reported `ci.yml`'s `security-events: write` as unused.
+
+**Rejected:** an inline `# zizmor: ignore[self-repository]`. That audit has a
+fix, and §350's rule is to fix rather than waive wherever a fix exists. Also
+rejected: keeping `./` until a GHES mirror needs it. `$/` is unavailable on
+GHES, but this repository runs only on github.com.
+
+## 366. A person's clearance of any detector finding holds until that type's facts change (§286 follow-up, 2026-11-13)
+
+**Found.** §286 stopped `refresh_warnings` re-opening a `duplicate` or
+`fraud_flag` a person had resolved or dismissed while the invoice was
+unchanged. Every other type `_ensure_exception` raises deduped only against
+open rows, so the next refresh re-opened it. For the payment-blocking
+`line_total_mismatch`, `po_mismatch` and `quality_hold` that meant a reviewer
+who accepted a line variance, an over-PO bill or a failed inspection saw the
+hold come back the next time anyone saved the invoice, received a line, or
+pressed "Send to ERP" (`/complete` refreshes). A clearance that does not hold
+is not a sign-off.
+
+**The rule, once.** `_ensure_exception` stamps `finding_fingerprint` on every
+row it raises, and `invoice_warnings.current_finding_fingerprint` is the one
+definition of "the facts", read by the raise, by the stale-stamp check
+(`_void_stale_finding_stamps`, now over every stamped open row) and by a
+person's decision (`exception_lifecycle._bind_fingerprint_to_decision`, now
+async because two types need a read). §286's binding rules apply unchanged to
+every type: the stamp is fixed at raise; it survives a resolve or dismiss only
+when a person decided (an `actor_id`, no `via`) and the invoice still hashes as
+raised; any refresh that sees the facts differ voids an open row's stamp, so a
+change reverted before the click binds nothing.
+
+**What "facts" means, per type.** Each type hashes what its own rule reads,
+and nothing that drifts with no edit (the lesson of §286's second version):
+
+| Type | Hashed | Deliberately not hashed |
+|---|---|---|
+| `duplicate`, `fraud_flag`, `missing_data` | §286's header payload, byte for byte, so stamps written since 0116 still compare | — |
+| `line_total_mismatch` | header money (`amount`, `subtotal`, `tax_amount`, `shipping_amount`, `discount_amount`, `currency`) + the summed line totals | the invoice number, dates, vendor: the reconciliation reads none of them |
+| `po_mismatch`, `quality_hold` | the invoice's PO number, amount, currency, vendor, GL code, entity + the persisted `invoice.po_match` | — |
+| `price_variance` | the priced lines (item code, description, unit price), vendor, currency | the history's medians, which move as other invoices are approved |
+| `contract_noncompliant` | the invoice fields compliance reads, the contract id, and *which* terms are breached | the running spend figure, which grows with every other invoice on the contract |
+| `unverified_vendor` | the linked vendor | everything else on the invoice |
+
+`invoice.po_match` stands in for "the PO and receipts" because it already is
+their reading: the PO's total, currency and status, the summed receipt
+quantities, the inspection's id and verdict, and the tolerance the rule chose.
+Hashing the match rather than re-reading the PO tables keeps one source for
+what the matcher saw, and a match-rule change (a tighter tolerance) counts as a
+fact change, which is right: the person accepted a variance under the old rule.
+The hash reads a named subset of the match (`_PO_MATCH_FACT_FIELDS`, the
+tolerance, and each issue as `[code, params]`), not the whole dict: each issue
+carries its English `message`, so rewording a catalogue sentence or adding a
+`MatchResult` field would otherwise re-raise every cleared hold on the first
+refresh after a deploy. Numbers are canonicalized (`_canonical`) because the
+column round-trips the match through JSONB floats while the raise sees it in
+memory. The review also found the matcher's PO, receipt and inspection picks
+ordered by `created_at` alone, which is transaction time, so rows a sync wrote
+together tied and the pick (and with two inspections, the 4-way verdict
+itself) rested on physical row order. Each now breaks the tie on `id`.
+
+The non-header types are keyed on the exception type, not the row's
+`description_code`. These rows are one per type and invoice, and the code names
+only the first finding raised (a composite frame, or the first of two PO-match
+findings that folded into the open row). The person cleared the row with
+everything it held; keying on the code would re-raise a second finding that was
+there all along and ask for a second round for nothing. The header types keep
+§286's code-keyed payload so existing stamps stay valid.
+
+**Where the PO facts are read.** The stale-stamp check runs at the start of a
+refresh, before the match is recomputed, so a PO-match row compares against the
+match the previous refresh persisted. A match that moves and moves back is
+still seen one refresh later, and a decision in between compares against the
+moved match and binds nothing, so the timed variant §286 closed stays closed.
+
+**SoD is untouched.** Suppression honours only a decision `record_decision`
+accepted, so `segregation_refusal` (the invoice's implicated set and the
+recorded `raised_by_user_id`) still decides who can create one. A refused
+uploader leaves the row open and blocking. Detector auto-closes
+(`_close_cleared_po_exceptions`, `via="po_match_refresh"`) and agent decisions
+carry no verdict and clear the stamp, as before. The ERP PO sync's hold-only
+rule (§323) is unaffected: a sync that changes the PO changes the match, which
+re-raises a cleared hold rather than suppressing one.
+
+**The trail.** The person's decision writes its `exception.resolved` /
+`exception.dismissed` row as before. A refresh that suppresses writes nothing,
+because nothing is raised; the warning stays on `invoice.warnings` for the
+approver to read.
+
+**Not changed.** Rows opened by other paths through `create_exception`
+(Positive Pay, settlement, the reconciler, ERP sync, extraction's own
+duplicate, the bank-change flag) carry no stamp and keep their own dedupe;
+`payment_reconciliation` is raised only there, never by a refresh, so there is
+nothing to re-open. No migration: the column exists since 0116, and a row
+closed before this change has no stamp and never suppresses, which is how it
+behaved.
+
+**Not done** (`docs/followups.md`): a hand-entered inspection
+(`POST /api/inspections`) re-matches nothing, so `invoice.po_match` keeps
+describing the old verdict until another write refreshes the invoice. It cannot
+make a changed fact read as cleared (the next refresh recomputes the match),
+but the hold it should raise waits for that refresh.
+
+## 367. An invoice an employee created before §131 gets the uploader its own creation record names, and only that (§198 follow-up, 2026-11-13)
+
+**Decided:** 2026-11-13 · `backend/alembic/versions/0126_uploader_audit_backfill.py` ·
+`backend/app/services/exception_lifecycle.py` (`clearance_stands`) ·
+`backend/tests/test_migration_0126_uploader_audit_backfill.py` ·
+`backend/tests/test_exception_clearance_fingerprint.py`
+
+Before §131, CSV import and recurring `generate-now` built the invoice without
+`uploaded_by_id`, so `violates_segregation` read it as "no employee created this"
+and the importer or the clicker could approve it, or clear a payment-blocking
+exception on it (§169). §198's residual named the fix: both paths wrote the
+acting employee into `actor_id` on an audit row keyed to the invoice, so the
+person is recorded, not inferred, and §141's "no honest author" objection does
+not apply. Migration `0126_uploader_audit_backfill` copies them in. The other
+pre-§131 employee paths were checked at `08ae54b8c^`: manual create and file
+upload both passed `uploaded_by_id=user.id`, and the mirror was 0100's.
+
+**The rule is "every creation record agrees on one named employee", not "the
+earliest matching row".** The follow-up said to take the earliest row's actor.
+That picks a winner when two rows disagree, which is a guess with a tiebreak.
+Instead the migration reads every audit row on the invoice whose action a
+creation path writes (`invoice.created`, `invoice.imported_csv`,
+`invoice.uploaded`, `invoice.submitted_by_vendor`, `invoice.created_from_po`,
+`invoice.peppol_received`, and `invoice.intercompany_routed` with
+`role = 'mirror'`). It stamps only when all of them are evidence rows and all
+name the same employee. Two import rows naming two people, an import row beside
+a portal or PEPPOL record, or a generator row beside one with no actor: each
+leaves the invoice NULL, because the records disagree about who created it and
+the migration cannot know which is right. A human can.
+
+**An evidence row must describe its own invoice.** `invoice.imported_csv` counts
+only with `details.source = 'csv_import'` on an invoice whose
+`meta.imported.source` is `'csv_import'`; the importer writes both in one
+transaction. The operator's provenance backfill (§81) stamps a different source
+and leaves no audit row, so it never qualifies. `invoice.created` counts only
+with `details.source = 'recurring_template'` and a `recurring_template_id` equal
+to the invoice's own. The actor must be present, must belong to the invoice's
+organization, and must not be the nil-UUID sentinel email intake and PEPPOL
+write. So the system channels stay NULL: the sweep's row has no actor, and a
+template written before 0096 has no author to fall back to (§141's call stands).
+
+**Scope matches 0100:** every status with a successor in `VALID_TRANSITIONS`
+(all but `done`), because the uploader also gates clearing an exception after
+approval and `paid` can be voided. A stamped uploader is never overwritten. Each
+invoice changed gets an `invoice.segregation_backfilled` row with no actor, the
+old and new uploader, and the ids of the audit rows it read, so an approval
+given before the backfill stays legible as one the rules then allowed. The
+UPDATE and the INSERT are one statement. `downgrade` is a no-op for 0100's
+reason.
+
+**What it does not reach.** `invoice.imported_csv` was first written on
+2026-09-08 (#384), one day before §131. An import before that left no audit row
+at all, so nothing names its importer, and those invoices keep the legacy NULL
+reading. `generate-now` wrote its row from the feature's first commit, so every
+pre-§131 generate-now invoice is covered.
+
+**A clearance the backfilled uploader gave themselves stops holding.** Review
+found that stamping the uploader refuses them the next clearance but not the one
+they already gave. While the uploader was NULL, the importer could dismiss a
+`duplicate` or `fraud_flag` on their own invoice, and that dismissal kept its
+§286 fingerprint. `_finding_cleared_by_a_person` honoured any person's past
+verdict and never re-checked who gave it, so the self-clearance went on
+suppressing the finding on every refresh after 0126. Two fixes were weighed:
+
+- *(a) In 0126, clear the fingerprint on closed payment-blocking rows of each
+  stamped invoice whose decision audit row names the new uploader.* It closes
+  this case once and nothing else. A recaller (§374) who cleared a hold before
+  the recall stamped them is the same hole, and so is any later way someone
+  joins the set.
+- *(b) Re-ask segregation of the decider at suppression time.* Chosen, because it
+  is the general rule: a cleared finding stays cleared only while the person who
+  cleared it could still clear it.
+
+The rule lives in one place. `exception_lifecycle.clearance_stands` re-asks the
+same `segregation_refusal` the decision met, with the recorded decider, against
+the invoice as it stands. Its scope is `segregation_applies`, split out of
+`segregation_refusal` so the two cannot drift: a clearing verb, a
+payment-blocking type, and an org that has not opted out. Outside that scope the
+decider does not matter and the clearance holds, as before. A clearance by
+anyone the invoice does not implicate still suppresses. The org's
+`require_segregation: false` opt-out covers this check as it covers the decision.
+
+The decider has to be on the row. Reading the decision's audit row at refresh
+time was rejected for 0105's reason: under `FEOH_AUDIT_MODE=lambda` (production)
+that row goes to SQS and is not local yet, so a refresh right after a dismissal
+(`/complete` runs one) would find no decider. So 0126 also adds
+`exceptions.decided_by_user_id`, which `record_decision` writes on every resolve
+or dismiss (the person; NULL for a detector or an agent), and backfills it for
+rows already closed from their `exception.resolved` / `exception.dismissed`
+rows. The backfill uses the same rule as the uploader: every decision row on the
+exception must be a person's (an actor, not the sentinel, no `via`, its
+`new_status` equal to the row's, same organization), and all must name one
+person. It writes no audit row, because the column copies an audit row verbatim
+and changes nobody's rights. A payment-blocking row with no recorded decider
+never suppresses. That fails closed, as an unknown inspection recorder does
+(0105), and the cost is one more review of that finding. 0126 had not been
+released, so the column went into it rather than a new revision: it belongs with
+the backfill whose hole it closes. `downgrade` drops the column and keeps the
+uploaders.
+
+The migration's literals (terminal statuses, the sentinel, the import marker,
+the creation actions, the decision actions) restate app constants, and the test
+pins each to its source so a rename fails CI rather than silently narrowing the
+conflict check.
+
+## 368. Email intake reads only the per-tenant dedup claim; the legacy unscoped check is gone (PR #509 follow-up, 2026-11-13)
+
+PR #509 scoped the intake dedup claim to `email_intake:<org_id>:<message_id>`
+and kept a transitional read of the bare `email_intake:<message_id>` key
+(`_legacy_claim_live`) so a redelivery of a pre-deploy message could not create
+a second payable. That guard only mattered while a pre-#509 claim could still
+be live, i.e. for the 72h dedup TTL after #509 reached each environment. #509
+merged 2026-10-05 and shipped in v0.1.0; production's first deploy (2026-10-18)
+already carried it, so production never held an unscoped claim, and any local
+or pre-production Redis has been past the TTL for over five weeks. The check,
+its only helper `webhook_security.event_claim_exists` (no other caller), and
+their tests are deleted. `test_an_unscoped_message_id_claim_no_longer_blocks_any_tenant`
+pins the absence: a bare Message-ID claim no longer drops any tenant's invoice.
+
+## 369. A DSAR export caps every large section inline and streams the complete bundle on request; nothing is stored (privacy follow-up, 2026-11-13)
+
+**The gap.** §237 put every `.limit()` collection of the DSAR bundle behind
+`_capped`, but `services/privacy_export` still returned a vendor subject's
+invoices and payments whole. A supplier with years of volume therefore built one
+unbounded JSON document in memory, in a synchronous response, on the event loop.
+The sections that *were* capped had the opposite problem: they reported their
+true total, but the subject only ever received the first thousand rows. GDPR
+Art. 15 is a right to the data, not to a tally of what was left out.
+
+**The calls.**
+
+- **Every high-volume section is capped in the `POST /privacy/dsar` response,**
+  invoices and payments now included, and the document manifest's listing too
+  (it gains `returned` / `truncated`). **That is a shape change:**
+  `data.related_invoices` / `data.related_payments` were arrays and are now
+  `{total, returned, truncated, items}` objects like every other capped
+  section. No consumer in the repo read them as arrays (the page summarises
+  from `record_counts`), and a uniform shape was preferred over keeping two
+  sections the odd ones out. The response gains `complete`,
+  `truncated_sections` and `full_bundle_url`, so a cut is stated for the
+  export as a whole, not only per section. The routine `privacy.dsar_export`
+  audit row records `complete` and the cut section names.
+- **The complete set is `GET /privacy/dsar/{request_id}/bundle`, streamed.**
+  Every capped section is declared once as a `_Section` (a column select and its
+  serialiser); the inline reader takes the first `MAX_EXPORT_ROWS` of it and the
+  streamed reader walks all of it off a server-side cursor
+  (`yield_per=STREAM_CHUNK_ROWS`). One declaration is what keeps the preview and
+  the file from disagreeing about a section. Payments and vendor chat reach the
+  vendor's invoices by subquery, and a user's expenses join their reports, so
+  each section and its total are the same set whether or not a sibling section
+  was cut (the old code listed only the lines of the reports it had returned).
+- **The body is spooled, then audited, then sent.** Chunks go into an anonymous
+  `SpooledTemporaryFile` (1 MB in memory, then disk, writes off the loop). The
+  helpers moved from `api/audit` to `utils/spooled_export`, because the SOX
+  audit export solved exactly this problem (§105, §110). Only after the whole body is
+  rendered is `privacy.dsar_export.full_bundle` committed, and only then are the
+  sessions released and the bytes sent. A failure while rendering is a clean 500
+  with no row and no data, and every retrieval is its own row. The closing
+  braces come last, so an aborted transfer never parses as complete.
+- **The download is always masked.** The `vendor` record is the only section
+  with banking data, and it is never capped, so the step-up-gated `POST` already
+  delivers it whole when an unmasked disclosure is authorized. Re-running that
+  gate on a GET would buy nothing the POST does not, and honouring an earlier
+  request's unmasked flag would turn one step-up into a reusable grant.
+- **Any admin may download any of the org's DSAR exports by id**, the same reach
+  the `POST` has; an erasure's id, another tenant's or an unknown one is the same
+  404. The bundle is read at download time (`generated_at` says when), not
+  frozen at request time.
+
+**Rejected: an async job that writes the bundle to object storage and hands
+back a signed URL** (the follow-up's proposal). It would put a complete copy of
+the subject's PII in a bucket with a GOVERNANCE Object Lock default retention
+(`infra/s3.tf`, `invoice_retention_days`). That copy would outlive the export's
+purpose, and a later Art. 17 erasure of the same subject could not delete it:
+`privacy_documents` does not know it exists, and the lock refuses the delete.
+A signed URL is also a bearer credential that skips the tenant and role checks
+the storage module refuses to bypass (`storage.invoice_file_url`: "never a
+presigned or bucket URL"). And an in-process job that dies on a restart leaves a
+request stuck in `pending`, which then needs a recovery sweep. Streaming gives
+the subject the same complete set with none of that, at the price of a slower
+download for a very large subject: the same price the SOX audit export already
+pays (§105, §110). **Rejected: paging the response.**
+The subject is owed one whole set, and pages read at different moments are not
+one.
+
+**Left as is.** The sections are read under the session's default READ
+COMMITTED, so a write that lands mid-download can make two sections reflect
+slightly different moments, as the inline response always could. The
+`DataSubjectRequest` row's `record_counts` is still the vendor bundle's
+`counts`.
+
+## 370. An approved invoice's failed push keeps its financial fields frozen, and the clients read the lock from the server (§363 follow-up, 2026-11-13)
+
+**The gap.** `PATCH /api/invoices/{id}` (on a financial field) and
+`PUT /{id}/line-items` refused only while the status was in
+`FINANCIALLY_LOCKED_STATUSES`, `approved` onward. An approved invoice whose ERP
+push failed sits at `failed`, which is not in the set. A manager could change
+its amount, payee or lines there, and `/retry-erp` then pushed, and the payment
+run then paid, figures nobody approved. §363 had already closed the same case
+for the source document. The web modal and the mobile edit sheet each restated
+the status list, so neither would have kept up with a server-side fix: they
+would have sent the frozen fields, and every save would have 409'd.
+
+**The rule.** One predicate, `models/invoice_status.financially_locked`:
+frozen from `approved` on, and at `failed` once the invoice was ever approved
+(`was_ever_approved`, now owned by the same module and re-exported by
+`api/invoice_entry`). A `failed` extraction, never approved, stays open: its
+corrected figures still meet approval.
+
+- **Fail closed.** The predicate names the open side: the pre-approval statuses
+  and a never-approved `failed`. A status added to the enum later is frozen
+  until someone decides otherwise. `tests/test_invoice_status_groups.py` pins it
+  to "in the set, or `failed` and approved" for every status that exists.
+- **Every door asks it.** `document_locked` (the file routes) is now the same
+  call. `invoice_entry.financial_lock_refusal` gives both edit doors a coded
+  409, `invoice_financially_locked` (`params.status`). There was no coded
+  financial-lock refusal before, only two English sentences.
+- **The web modal reads the server's verdict.** `GET /review-actions` gains
+  `edit_financials` (`invoice_entry.edit_financials_refusal`: entry roles, entry
+  window, then the lock, in the doors' order). The modal's
+  `FINANCIALLY_LOCKED_STATUSES` copy is gone. `financiallyLocked` is
+  `!isAllowed(verdict)`, so it is locked until the server answers. The money
+  inputs (vendor, amount, tax rate) render **disabled** while locked, and line
+  editing is hidden. The old modal left them editable and dropped them from the
+  save without a word. With a fail-closed verdict that would also swallow a
+  typed amount on a slow load, so disabling them is what makes failing closed
+  safe. A locked invoice states the refusal's sentence above the form.
+- **The mobile app reads it off the invoice.** Mobile has no `review-actions`
+  client, and its edit sheet only needs the invoice-level fact, not the
+  caller's verdict. So `InvoiceResponse` carries `financially_locked`, and
+  `Invoice.financiallyLocked` reads it. A missing field (an older backend, an
+  old offline cache, or an `Invoice` built without saying) is locked. The
+  status getter `InvoiceStatus.isFinanciallyLocked` is gone. The web modal
+  deliberately does not use the response field: its `status` moves under it
+  (approve, reset extraction), and the verdict is re-asked when it does.
+
+**Other readers of the locked sets, one by one:**
+- `IMMUTABLE_STATUSES` (`POST_APPROVAL_LOCKED_STATUSES`) in `PATCH`'s
+  whole-edit refusal, `DELETE`, `bulk/delete`, `bulk/status` and
+  `services/gl_recode`: unchanged. `failed` after approval is treated like
+  `approved`, not like an immutable status. Its metadata, GL coding included,
+  stays editable. GL coding moves no money and names no payee (`bulk-recode-gl`
+  changes only the GL code, §253). Delete is the exit an approved invoice
+  already has, and it still refuses an invoice with a live payment.
+- `_PEPPOL_SENDABLE_STATUSES`: unchanged. A failed ERP push is not cleared for
+  e-invoice transmission any more than before.
+- Credit-memo apply (`CREDITABLE_INVOICE_STATUSES`): unchanged. A credit does
+  not edit the approved figure. The payment nets it (`net_payable_amount`), the
+  same as on `approved`.
+- `/extract`: already refused any invoice ever approved, and that refusal is
+  broader than the lock (it also covers a reworked `new`). Left as it is.
+- The exception agents that re-point `vendor_id` (`missing_po`,
+  `multi_po_split`) act only at `ready_for_review`, before approval.
+
+**Rejected:**
+- *Adding `failed` to `FINANCIALLY_LOCKED_STATUSES`.* It would lock a failed
+  extraction, whose figures are exactly what needs keying.
+- *A served frozen-field list.* The field set (`_FINANCIAL_FIELDS`) never
+  varies by invoice. Only whether it applies varies, and that is one boolean.
+  The mobile `kFinancialInvoiceFields` mirror stays, pinned by its own test.
+- *Leaving the modal's money inputs editable and only dropping them from the
+  payload.* With a verdict that fails closed, a typed amount would vanish from a
+  save made before the verdict arrived.
+
+**Left open:** a locked invoice whose approved figures are wrong has no path
+back to review, because `approved` and `failed` have no edge to `rejected`. The
+mobile notice still promises "reject, correct, approve again"
+(`docs/followups.md`).
+
+## 371. Disconnect and tenant deletion revoke every ERP OAuth grant, or say why they cannot (2026-11-13)
+
+**Context.** Two paths forgot an ERP OAuth grant without ending it. Sage
+Accounting and Blackbaud FE NXT had no `revoke_url`, so Disconnect cleared our
+tokens and answered `revoked: false`, and the page still said "Disconnected".
+Tenant deletion deleted the sealed `provider_credentials` row and never called
+the provider at all. Either way the refresh token stayed valid until it expired,
+up to five years for QuickBooks, and the customer's ERP still listed the app.
+
+**Decision.**
+
+- **Every `OAuthProviderSpec` sets exactly one of `revoke_url` and
+  `no_revoke_endpoint_reason`.** A spec with neither, or both, raises at
+  construction. A new provider cannot silently skip revocation.
+- **Sage revokes at `https://oauth.accounting.sage.com/revoke`.** The body is an
+  RFC 7009 form `token` (the refresh token), with the client as `client_id` /
+  `client_secret` form fields, the way Sage's token endpoint takes it. Never
+  HTTP Basic: `erp_oauth.revoke` now follows `spec.token_auth`.
+  `FEOH_ERP_SAGE_ACCOUNTING_REVOKE_URL` points dev at fake-erp's
+  `POST /sage/oauth2/revoke`, which refuses Basic and JSON so a wrong shape
+  fails the e2e spec. Sources: Sage's own guide answers automated fetches with
+  403, so the URL and shape come from Apideck's Sage configuration page
+  (developers.apideck.com/apis/accounting/sage-business-cloud-accounting/configuration)
+  and the sage-business-cloud-accounting-api-ts README, which cites Sage's guide
+  (`POST …/revoke` with `client_id`, `client_secret` and `token`). The
+  olsgreen/oauth2-sage-business-cloud client names the same URL. The v3.0
+  guide's regional hosts (`oauth.{na,eu}.sageone.com/revoke`) belong to the
+  retired v3.0 API. A sandbox Disconnect is on the platform-app follow-up.
+- **Blackbaud has no endpoint, and Disconnect says so.** SKY API's OAuth service
+  has `/authorization` and `/token` only. Blackbaud's SKY API team says on the
+  community forum (community.blackbaud.com/discussion/comment/262802, "Revoking
+  Tokens?") that disconnecting the application from the environment, by the
+  customer in Marketplace or the developer under My Apps, revokes that
+  connection's refresh tokens, and that regenerating the client secret does not.
+  Its 2025 announcement "Disconnect your SKY Application from Customer
+  Environments" added the developer-side disconnect. Blackbaud's developer docs
+  are a client-rendered app we could not read automatically, so the claim of
+  "no endpoint" rests on the forum. Disconnect answers
+  `revocation: "unsupported"` without calling out.
+- **Disconnect returns `revocation`** (`revoked` / `failed` / `unsupported`)
+  beside `revoked`, and audits it on `organization.erp_token_revoked`. The
+  settings page says plain "Disconnected" only on `revoked`. On `failed` it
+  says the provider did not confirm; on `unsupported` it says to disconnect
+  FeohLedger from the environment in Blackbaud. Both tell the admin to remove
+  the app on the provider's side.
+- **Tenant deletion revokes best-effort, and never under a lock.** Between the
+  document sweep and the control-plane delete, it reads `settings.erp.oauth`
+  and the sealed tokens (`_read_erp_grant`, which calls no provider). A tenant
+  holds one grant, a single block with two fixed sealed paths. Where the
+  provider is called depends on who holds the control-plane transaction:
+  - *Operator deletion* (`scripts/delete_tenant.py`, no `control_session`): the
+    read uses a short session closed before the provider is called, and the
+    control-plane delete opens its own transaction after. Nothing is locked
+    during the call.
+  - *Self-service closure* (`control_session`): the closure holds the org, user
+    and subscription rows `FOR UPDATE` until its caller commits. The read runs
+    on that session, inside a savepoint so a failed read cannot abort the
+    closure's transaction before its control-plane delete. The provider call
+    (15 s timeout at most) is queued with `post_commit` and runs once the
+    closure has committed, so no provider's latency is charged to a
+    transaction holding locks (root `CLAUDE.md`, `services/post_commit`). A
+    closure that rolls back drops the queued call: the organisation and its
+    sealed row survive, and the resumed closure reads and revokes again. An
+    outcome that needs no call (`unsupported`, `unreadable`, a read that
+    failed, an unknown provider) is decided at the read and not queued.
+  The outcome (`revoked`, `failed`, `unsupported`, or `unreadable` when the
+  store cannot be opened) is on `TenantDeletionResult`, and in
+  `format_confirmation`, with "the customer should remove FeohLedger from the
+  provider's connected apps" for anything but `revoked`. On a closure's result
+  it reads `after_commit` until the provider answers, then the outcome. A
+  closure writes no confirmation; its record is the log, a line when the call
+  is queued and one with the outcome (the runbook
+  `docs/founder-runbooks/workspace-closure.md` reads them). Nothing about it can
+  stop the deletion. The log lines name the provider and the outcome, never a
+  token.
+
+**Why after the drop and the sweep, not first.** If revocation came first and
+the drop then failed, a live workspace would be left with its ERP cut off at
+the provider while its own state still said connected. After the irreversible
+steps the workspace is already unusable, and the sealed row is still there to
+read. A re-run after a later failure revokes again. A provider may answer an
+already-revoked token with an error, and the confirmation then says "NOT
+revoked" for a grant that is gone: the error is on the safe side.
+
+**Rejected.**
+- *Calling the provider inside the closure's transaction.* This section first
+  shipped that way, on the argument that only writers to a doomed org would
+  wait. Review held it to the rule instead: up to 15 s of a third party's
+  latency on a transaction holding row locks is exactly what `post_commit`
+  exists to prevent, and the exemption would have to be re-argued at every
+  new writer to those rows.
+- *Revoking after the commit on the operator path too.* That path's commit is
+  `delete_tenant`'s own and nothing is locked during the call, and its written
+  confirmation must state the outcome. Only the closure's commit belongs to its
+  caller, so only that path needs `post_commit`.
+- *Failing the deletion when revocation fails.* A provider outage would keep a
+  terminated customer's data past the DPA's 60 days, to protect a grant the
+  customer can end themselves.
+- *Revoking a consent parked for the company picker* (§355), at deletion as at
+  cancel, for §337's reason. It lapses with its Redis TTL.
+- *Regenerating the Blackbaud client secret* as a way to revoke. Blackbaud says
+  it does not invalidate refresh tokens, and it would cut every tenant at once.
+
+## 372. CSV import resolves vendors within its entity, refuses a blank currency, and codes every row error (follow-up, 2026-11-13)
+
+Three defects in `services/csv_import`, fixed together because they share the
+row loop and the report shape.
+
+**Vendor resolution is scoped to the import's entity ∪ unstamped vendors.** The
+invoice importer resolved a row's vendor by code, then name, across the whole
+tenant, so a row imported into subsidiary A could link B's supplier record —
+the mislink the invoice matcher's scope exists to prevent
+(`docs/multi-entity.md` § Vendor matching), since `Invoice.vendor_id` is
+what the credit-memo guard compares and what the spend rollup and bank details
+are read from. The vendor importer had the mirror flaw: a row was skipped when
+*any* subsidiary held the code or name, leaving A with no vendor. Both lookups
+also used `scalar_one_or_none()`, a 500 for the whole file once the same
+supplier existed under two entities. The rule is not restated:
+`vendor_matching.scope_vendor_candidates` is now the single statement of
+`apply_entity_scope(..., include_shared=True)` plus the own-entity-first order,
+`_candidate_query` builds on it, and `csv_import._find_vendor` applies it with
+`.limit(1)`. NULL is admitted for the reason the matcher admits it: excluding an
+unstamped supplier would silently mint a duplicate. The importer keeps no status
+filter (unlike the matcher): an import has always resolved to an existing
+`inactive` / `rejected` record, and changing that would mint a fresh,
+verifiable stub beside a supplier someone deliberately retired. The exact
+`(vendor, invoice_number)` dedup moved to an ordered `.limit(1)` too, because an
+unstamped vendor can carry the same number in two entities. A repeat in the
+import's own entity (or an unstamped one) is still the silent skip; a repeat
+that exists only in another entity is now the existence-only
+`csv_invoice_number_matches_other_entity` refusal the near match already gave,
+instead of a row dropped with no reason.
+
+**A blank currency refuses the row** (`csv_currency_required`), and a cell that
+is not three letters is `csv_currency_invalid` rather than truncated by
+`upper()[:3]`. The shape check is `schemas.expense.normalize_iso_currency`, the
+one every other currency boundary uses. Considered: deriving it. Rejected,
+because nothing on hand is evidence of what a supplier billed. `Vendor` has no
+currency column, and `Entity.currency` is the entity's *reporting* currency
+(NULL means the org's): a UK subsidiary pays EUR suppliers. §160/§196/§200 say a
+missing currency stays missing, and `Invoice.currency` cannot hold "unknown"
+(it is NOT NULL; `docs/followups.md` tracks that column), so the only honest
+outcome is a refused row the operator fixes in the file. Also rejected: a
+file-level "assume currency X" form field. It would be the same default with a
+checkbox in front of it, and a Day-0 file that mixes currencies is exactly the
+one it gets wrong. The cost is real and accepted: a single-currency USD tenant's
+file now needs the column. The refusal runs before vendor resolution, so a
+refused row leaves no stub.
+
+**Every row error is coded.** The near-duplicate and GL-chart refusals already
+were; the rest were English-only `{row, message}`, so `ImportCsvModal` showed
+them in English in every locale. They now carry `{code, params}` through one
+`_coded` helper (`csv_malformed`, `csv_vendor_name_required`,
+`csv_invoice_number_required`, `csv_vendor_required`, `csv_amount_invalid`,
+`csv_currency_required`, `csv_currency_invalid`, `csv_status_invalid`,
+`csv_status_not_importable`, `csv_status_records_history`), registered in
+`codedRefusals.ts` with sentences in all six locales. `params` are the cell as
+written, not a localized label: the reader has to find and edit that cell in the
+file. `message` stays as the English fallback.
+
+**Scope.** The invoice importer (`POST /api/invoices/import-csv`) is the only
+CSV path that creates invoices; the vendor importer shared the entity flaw and
+is fixed here; there is no PO CSV import. The corporate-card feed
+(`import_corporate_card_csv`) has the same `or "USD"` default but its page shows
+no row reasons, so refusing there needs UI work too; it is tracked in
+`docs/followups.md`.
+
+Guards: `tests/test_csv_import.py` (blank / malformed / missing-column currency, an exact repeat held only by
+another entity,
+a mixed file reported per row with codes, the two-entity vendor scope at the
+service and the endpoint, the scoped vendor dedup, uploader stamped on every
+scoped row), `frontend/src/lib/api/codedRefusals.test.ts` (each code stated in
+every locale, fallback on missing params).
+
+## 373. A vendor merge moves the duplicates' ERP links, company by company, and refuses two different ids in one company (§356 follow-up, 2026-11-13)
+
+**The gap.** §356 left the merge alone: `services/vendor_merge` moved every
+`vendor_id` FK but no ERP link, neither the row's `erp_vendor_id` /
+`erp_link_realm` nor a kept `vendor_erp_links` row. Where only the duplicate
+was linked, the merged invoices were the canonical's and the push resolved the
+canonical, so they were refused `vendor_not_linked` while the id sat on a
+retired vendor. And the next sync under a kept realm restored the kept link
+onto that retired duplicate, keeping the ERP supplier pointed at a vendor
+nothing pays.
+
+**The rule** (`_plan_erp_links`, then `_apply_erp_links`). A vendor's links are
+its row link plus its kept links, one per realm. The merge plans, before any
+write, where each duplicate link goes, in request order:
+
+- the canonical (or an earlier duplicate's moved link) holds the **same** id in
+  that realm → released; the duplicate just drops it;
+- it holds a **different** id there → conflict;
+- a NULL-realm link names no company, so it may be the same company as any
+  named link: it conflicts with any differing id on the other side, in any
+  realm, and is reported as realm `null`;
+- otherwise the link moves. A duplicate's row link takes the canonical's row if
+  that row is empty (a NULL-realm link can only live on a row); every other
+  moved link is filed as the canonical's kept link.
+
+Then every duplicate's kept rows are deleted and its row link cleared, and the
+canonical gains the moved links. The duplicate ends with none, so no sync can
+restore one onto it. §356's shape holds: one link per `(vendor, realm)`, and
+the row's realm is never also kept. A merge never raises the number of vendors
+holding an id in a realm: the id leaves the duplicate as it reaches the
+canonical, and the unique `(vendor_id, realm)` constraint is never crossed
+mid-statement because the duplicate rows are deleted rather than re-pointed.
+The `vendor.merged` audit row carries `erp_links`, one
+`{realm, erp_vendor_id, from_vendor_id, placed}` per link a duplicate gave up.
+The kept rows are locked `FOR UPDATE` with the vendors, since a concurrent sync
+files and restores them. Bank details, sanctions state and the SoD sets are not
+touched; only the link columns and the kept rows move.
+
+**A conflict refuses the whole merge** (409 `vendor_merge_erp_link_conflict`,
+`params.realms` sorted, `null` last), with nothing moved. **Rejected: leave both
+links and flag the realm.** The merged invoices are the canonical's, so they
+would post to the canonical's ERP supplier while the duplicate's record (the one
+those bills were raised against) stays on a retired vendor and can be restored
+onto it. Which ERP supplier the merged vendor's bills post to would be chosen
+silently, by which vendor the steward picked as canonical, and a flag nobody
+reads before the next push does not stop that. Two ERP records for one payee
+is a fact about the ERP the steward has to settle, and refusing is the only
+option that states it before money is booked. **Rejected: pick a winner** (the
+canonical's, or the most recently synced). That is the same silent choice with
+a rule attached. **Rejected: refuse only on the realm currently connected.**
+Every kept realm is a company the tenant may return to, and §356's point is
+that those links are live the moment it does.
+
+The refusal has one way through today: leave that duplicate out. No endpoint
+lets a person clear a vendor's ERP link, and merging the suppliers in the ERP
+does not clear one either (a same-company link is never re-judged). That gap
+is tracked in `docs/followups.md` with its durable fix (an audited unlink
+action), rather than loosening the merge to work around it.
+
+**Not done here: GL accounts' single link** (the adjacent §356 follow-up). The
+durable fix is a kept-link table for `gl_accounts` mirroring `vendor_erp_links`,
+which needs a migration; repurposing an existing column (such as
+`erp_link_candidates` JSONB) would be the keyed-JSON shape §356 rejected for
+vendors, with no uniqueness per realm. It stays in `docs/followups.md`.
+
+## 374. An approval can be recalled to review, refused while a rail or the ERP holds the invoice (§370 follow-up, 2026-11-13)
+
+**The gap.** §370 froze an approved invoice's amount, payee and lines, and its
+failed push after approval with them. Nothing led back: `approved` had no edge
+into review, `failed` only `pending` / `sending_to_erp`, and `/reject` takes
+only `ready_for_review`. The mobile lock notice promised "reject the invoice,
+correct it, then approve it again", which the server refused. The one way to
+correct a signed-off figure was to delete the invoice and enter it again.
+
+**The rule.** `POST /api/invoices/{id}/recall-approval` (body `{reason}`,
+required) moves an `approved` invoice, or a `failed` one that was ever approved,
+to `ready_for_review`. The two edges are in `VALID_TRANSITIONS`, and this door
+is the only one that walks them: `POST /bulk/status` reports such a row as a
+skip. One predicate, `services/review.recall_refusal`, gates the door on the
+locked row, and `GET /review-actions` serves it as `recall_approval`. The web
+modal and the mobile detail screen both read that verdict. In order:
+
+1. `invoice.approve` — the approve and reject doors' permission.
+2. The status (409 `invoice_not_recallable`, `params.status`). The clients hide
+   the action on this code.
+3. The ERP may hold the bill (409 `invoice_recall_in_erp`): `erp_document_id`
+   is set (a confirmed push, or an invoice a void walked back to `approved` from
+   `posted_in_erp`), or the push's own record says a bill may exist
+   (`services/erp.possibly_posted`: an attempt with an unknown outcome, a queued
+   job, an orphan document, a confirmed reference). This is fail-closed: a push
+   that failed with an unknown outcome refuses. It is named before a claim
+   because nothing in FeohLedger clears it, so nobody cancels a run only to meet
+   this refusal next. Recalling a bill that is already in the ERP is the
+   `void-erp` product call in `docs/followups.md`. This change does not
+   pre-empt it.
+4. A live payment or virtual card (409 `invoice_recall_claimed`,
+   `params.claim`), read by `erp_export_gate.live_claims`, so "live" means here
+   what it means for the run builder, the card mint, the push and closing
+   (§309, §357). A payment run holds its invoices only through payment rows, so
+   a staged, approved, exported or executed run refuses. The remedy is the
+   rail's own exit.
+
+The run builder, the card mint and the push each lock the invoice, so no claim
+or push lands between the read and the transition. A late auto-send meets the
+push's own status gate.
+
+**The engine holds the two edges for the recall** (`workflow_engine.
+RECALL_EDGES`, refused unless the action is `invoice.approval_recalled`).
+Without that, a legal edge is open to every caller of `transition_invoice`. The
+extraction worker has no status precondition of its own, so a re-read
+redelivered after a human approved the invoice would have rewritten its figures
+and walked it back to review. It would have skipped the claim and ERP gate, the
+stamp and the chain reset, and a completed chain would then have let one
+approver sign past every level. Before these edges existed, the same re-read hit
+a 409 and rolled back. It does so again.
+
+**A once-approved invoice never re-enters `pending`**, for any caller. The
+recall keeps the approval stamps (below), and `failed` with a stamp is read as
+"an approved invoice whose push failed" by `/retry-erp`, `financially_locked`
+and this recall. If a recalled invoice could be re-read (reject, back to draft,
+`pending` through bulk status, then a failed extraction or `reset-extraction`),
+it would sit at `failed` posing as an approved push. `/retry-erp` would then
+post, and a run would then pay, figures nobody approved. `/extract` already
+refused a once-approved invoice. The engine now refuses one for bulk status and
+any future door too. That also closes the older form of the same hole, where an
+approved invoice's failed push was sent back to `pending` by bulk status. The
+supplier-portal resubmit skips the re-read for such an invoice: the corrected
+document goes to the reviewer, who keys any change by hand. This keeps `failed`
+plus a stamp meaning what every reader takes it to mean, without a migration. A
+separate "approval in force" column was weighed and is not needed while no
+re-read can reach `failed`.
+
+**A recall from a failed push resets the push's retry counter**, as `/retry-erp`
+does, and keeps its other keys. The instance is made `active` again (the
+escalation sweep reads only active instances). The step the approval opened is
+closed and a fresh approval step is opened, so the approval queue and the
+bottleneck panel see one open step.
+
+**Why `ready_for_review`, not `rejected`.** A recall withdraws a decision, and
+`ready_for_review` is the state that means "awaiting a decision". From there
+every exit is the existing one: approve (corrections included), or reject for
+rework when the supplier has to reissue. `rejected` would have been wrong in
+three ways:
+
+- It is the supplier portal's "action required" bucket. A supplier could then
+  resubmit, and replace the document of, an invoice AP had approved.
+- `reject_invoice` opens a `review_rejected` exception and counts toward the
+  rejection metrics, so it would record a decision nobody made.
+- It would need a resubmit step, and `rejected → new` would put the invoice back
+  in draft, where `/complete` with no approval step closes it unapproved.
+
+A manager corrects the figures with `PATCH` while the invoice sits in review.
+The lock is off there and a clerk's entry window stays shut. The approval then
+binds the version the approver loaded (§263).
+
+**Who may recall.** Holders of `invoice.approve`. Recall takes back an approval
+and moves no money, so it sits with the duty that gives approvals, not with
+`payment.void`. There is no threshold: the CFO gate applies again at
+re-approval, which is where it counts.
+
+**The recaller joins the segregation set**
+(`approval_chain.add_implicated_actor`, now shared with `stamp_entry_editor`).
+Someone who reopens signed figures is disputing them, and is usually the one who
+corrects them. Without the stamp, one person could approve, recall, re-point the
+payee and approve again, with nobody else looking after the first sign-off. A
+manager who edits before review is not stamped, because approve-with-corrections
+is the approver editing what they sign. A recall is different: it comes after a
+signature, and that is what makes the next signature need a second person. The
+org-level `require_segregation: false` opt-out covers the recaller as it covers
+the uploader, so a one-person team can still finish the loop. The original
+approver is not stamped. They may approve the corrected figures.
+
+Because the stamp joins `implicated_actors`, it reaches two more places, by
+design. The recaller can no longer clear a payment-blocking exception on the
+invoice (`exception_lifecycle.segregation_refusal`, §169); they escalate it, as
+the uploader would. And a goods receipt the recaller hand-recorded stops lifting
+a "billed beyond receipt" hold (`receipts_clear_hold`, §267) once the recall's
+`refresh_warnings` runs. A person who reopened the figures is not the
+independent receiver that rule wants.
+
+**Nothing is erased.** The `invoice.approved` row and its signature stay. The
+recall writes `invoice.approval_recalled` (`reason`, `recalled_from`,
+`recalled_approval: {approved_by, approval_date}`). The row's `approved_by` /
+`approval_date` keep naming the recalled approval until a new one overwrites
+them, so `was_ever_approved` holds: `/extract` still refuses to re-read the
+document, and a clerk cannot reopen it for entry.
+
+**Re-approval re-runs everything.** The chain state is cleared (as
+`reject_invoice` clears it), `recall_count` is bumped, and a fresh review step
+is opened. The next approval re-routes the chain from level 0 against the
+corrected figures, and meets segregation, the receiving rule and the max-amount
+and CFO gates again.
+
+**Rejected:**
+- *Keep delete-and-re-enter as the documented exit.* It loses the row's link to
+  its payments, exceptions, chat and document versions, and re-entry produces a
+  new uploader, which segregation would then measure against instead of the
+  real preparer.
+- *A bulk recall.* Each recall carries its own reason and its own claim read,
+  and a batch that silently skipped claimed rows would read as done.
+- *Clearing `approved_by` / `approval_date` on recall.* `was_ever_approved` is
+  what keeps a clerk and `/extract` away from figures that were once signed off.
+  The audit trail names who approved, and the next approval replaces the
+  display fields.
+
+**The vendor-setting exception agents stay safe on a recalled invoice**
+(money-path review, §379). §370 cleared `missing_po` and `multi_po_split`
+because they act only at `ready_for_review`, "before approval"; since the
+recall, that status no longer means before approval. Neither re-points a payee
+that is set: each only fills an empty `vendor_id` from the purchase order it
+links, and approves as the triggering human, whose segregation the coordinator
+checks first, so a run the recaller triggers escalates. The one case left, a
+recalled invoice whose vendor was cleared and which the agent would then fill
+and approve, escalates since §379: both resolvers ask
+`refuse_payee_change_after_approval` before any mutation. Recall also starts a
+new review round, so approval links sent before it stop working, and the
+engine keeps a recalled invoice out of draft (both §379).
+
+**Left open** (`docs/followups.md`): no outbound webhook says an approval was
+withdrawn; a PEPPOL transmission sent while the invoice was approved, and an
+inter-company mirror, keep the recalled figures; and the ERP dispatchers do not
+re-check `sending_to_erp` before a redelivered push.
+
+**Clients.** Web: "Recall Approval" in the invoice modal opens
+`RecallApprovalModal` (the shared `ui/Modal`, rendered beside the invoice dialog
+so its Esc and focus trap stay its own). Mobile: the same action on the detail
+screen, read through `ActionVerdict`, with a missing key failing closed. The
+financial-lock sentence now names the exit, on the server and in every locale.
+The mobile lock notice does the same.
+
+Tests: `backend/tests/test_invoice_recall_approval.py` (happy path, each
+refusal, verdict/door parity for every role, SoD after recall and the opt-out,
+the audit row, the chain and the CFO gate re-run, bulk refusal);
+`tests/test_invoice_status_groups.py` and `tests/test_workflow_state_machine.py`
+(the two edges, that nothing else goes back before approval, the engine's
+recall-only and no-re-read rules); `tests/test_invoice_uploader_stamping.py`
+(the two post-construction writers of the segregation set);
+`frontend/tests-e2e/invoices/recall-approval.spec.ts`;
+`frontend/src/lib/api/codedRefusals.test.ts`; and the mobile
+`invoice_detail_screen_test.dart`, `action_verdict_test.dart` and
+`coded_refusal_messages_test.dart`.
+
+## 375. A person can clear a vendor's ERP link in one company, never while an invoice is in flight there, and a later sync re-links it only by the ordinary rules (§373 follow-up, 2026-11-13)
+
+**The gap.** §373 refuses a merge where the canonical and a duplicate hold
+different ids in one ERP company (`vendor_merge_erp_link_conflict`), and left
+the steward one way forward: leave the duplicate out. Nothing could clear a
+vendor's link. No endpoint touched `erp_vendor_id` / `erp_link_realm` or a kept
+`vendor_erp_links` row, and merging the two suppliers in the ERP did not help,
+because a sync never re-judges a same-company link (§284, §356).
+
+**The action** (`services/vendor_erp_unlink.unlink_vendor_erp_link`, `POST
+/api/vendors/{id}/erp-links/unlink` with `{realm}`). It clears the vendor's link
+in one realm: the row link when its realm is that one, and the kept link for it.
+If both exist (§356 never makes that, but nothing in the schema forbids it), it
+clears both, so no link for that company is left for the push to read.
+`realm: null` names the row link that records no company. It is a required
+value, never a default, so an empty body cannot clear the unnamed link by
+accident. `GET /api/vendors/{id}/erp-links` lists the links for the vendor
+detail's readers, and the vendor modal's **ERP links** panel offers an armed
+two-click **Unlink** per company. The merge refusal's sentence now points at it.
+
+- **`vendor.manage`**, like every other edit to the vendor master (create,
+  edit, verify, reject, sync, merge). It is not a new permission. Clearing a link
+  moves no money and routes no bill: the vendor's next push to that company is
+  refused `vendor_not_linked` before any HTTP call. A split duty for it would
+  be one more grant with nothing to separate it from.
+- **Audited** as `vendor.erp_unlinked` with `{realm, cleared: [{placement,
+  erp_vendor_id}]}`. Ids only, the same floor as `vendor.merged`'s `erp_links`.
+- **Locks** the vendor, then its kept links, in the order a merge takes them, so
+  an unlink and a merge of the same vendor serialise rather than deadlock. The
+  vendor row is re-read under the lock (`populate_existing`), not taken from the
+  identity map.
+
+**"In flight" means anything that may still use the link, and it fails closed
+where the company is not on record.** Refused 409 `vendor_erp_unlink_in_flight`,
+`params.invoices` the count, no invoice named:
+
+- `sending_to_erp`, in **every** company. The push resolves the link when it
+  runs, under whatever connection it runs against, and no row records that
+  connection ahead of time;
+- `sent_to_erp` where the workflow state's `erp_realm` (written with the
+  confirmed push, §295) is that company, or is missing, or the realm asked for
+  is null. A link that names no company may be any company's;
+- `failed` where `services/erp.possibly_posted` is true, in every company. The
+  uncertain attempt's company is not recorded (an `erp_realm` in the state may
+  name an earlier push), and its retry or reconcile pushes again. A failure
+  that certainly posted nothing does not count: its retry meets
+  `vendor_not_linked`, which is the unlink's intended, visible consequence.
+
+From `posted_in_erp` on, a bill carries its own id. Status sync-back matches it
+by `erp_reference` within `erp_realm`, and the payment write-back posts against
+that bill id, so neither reads the vendor's link and an unlink cannot move that
+bill. **Rejected: refuse while any open bill exists** (`posted_in_erp` /
+`payment_scheduled`). It would block the unlink for as long as the vendor has
+payables, protecting nothing that reads the link. **Rejected: scope
+`sending_to_erp` to the current connection's realm.** That would need the
+control-plane config on this path and would still be wrong if the connection
+changes before the dispatch reads it. The status is transient, so refusing it
+everywhere costs a retry.
+
+A push that reaches `sending_to_erp` after the check reads the link in its own
+transaction. Before the unlink commits, it still sees the link and posts with
+it; that bill is then the in-flight one the next unlink is refused over. After
+the commit, it sees none and is refused `vendor_not_linked`. Neither posts to a
+supplier the vendor is not linked to, so the check needs no lock on the
+invoices.
+
+**A later sync follows the ordinary rules; the unlink is not a "never link"
+marker.** Nothing is kept for that company any more, so nothing is restored. The
+record is matched by id only if a vendor holds it, and it is adopted by name
+only when the name is unique among the pulled records and among the unlinked
+local vendors (§284). An ambiguous name is reported as a conflict and links
+nothing. A vendor still linked in that company is never a name candidate, so a
+sync cannot put the stale record onto the vendor a merge kept, which is the
+"wrong supplier" case that matters. The one re-attachment the rules allow is the
+same record back onto the vendor it was cleared from, by a unique name. It is
+audited `linked` and reported by the sync. A record that should never link
+again is made inactive (or merged) in the ERP, and inactive records are never
+linked or created. **Rejected: a tombstone the sync honours** (do not re-adopt
+this id onto this vendor). It needs a new column or table and so a migration,
+and it would block the legitimate re-link of a link cleared by mistake. The ERP
+is the place the stale record lives, and it already has the switch that keeps
+it out. **Rejected: reading the `vendor.erp_unlinked` audit rows as that
+tombstone.** The trail is evidence, not state. In `lambda` audit mode it is not
+written in the request's transaction either.
+
+## 376. A GL account keeps its ERP link state for every company it was synced under, restored before rule 0 (§356/§373 follow-up, migration 0127, 2026-11-13)
+
+**The gap.** §356 gave vendors a link per company; `gl_accounts` still held
+one. A chart sync under another ERP company dropped a row's link (rule 0, §284),
+cleared a person's confirmation of it, and cleared an open decision
+(`erp_link_candidates` from another realm). A return to the first company
+re-linked most rows by code, but a link a person had confirmed among
+candidates had to be confirmed again, and a row waiting for a decision under a
+code that is only a legacy key there came back unlinked with nothing to decide:
+rule 2 visits rows by the pull's current codes, so it never reached the row.
+
+**The decision.** A kept-state table, `gl_account_erp_links` (migration 0127),
+mirroring `vendor_erp_links`: one row per `(gl_account_id, realm)`, `realm`
+never NULL, holding what the row held in that company — the link with its
+confirmation, or the open decision with its candidates. A CHECK refuses a row
+holding neither, or a confirmation with no link. `services/gl_account_erp_links`
+owns it, and `services/gl_account_sync` calls it on every pull with a named
+realm, before rule 0: first every row's state from another named company is
+filed under that company (so rule 0 moving or dropping a link loses nothing,
+including a link rule 0 moves by evidence), then the state kept for the pull's
+own company is put back on its row and removed from the table.
+
+A restored state is **restored before re-judging, not instead of it.** A
+restored unconfirmed link meets rules 3 and 4 like any same-company link; a
+confirmed one is exempt from them, as it was before it left; a restored
+decision is refreshed against the pull (candidates the ERP no longer has are
+dropped, a row the rules can now link is linked). Restoring is not a new
+judgement, so nothing here weakens a rule.
+
+**No two rows hold one account on the rules' own judgement.** The sync never
+leaves two unconfirmed rows linked to one ERP account, so an unconfirmed kept
+link whose id another unconfirmed row holds there, or that two unconfirmed kept
+links claim, is dropped (`restore_dropped`) and the row is judged as it stands;
+which row the account belongs to would be a guess. A confirmed link always comes
+back: the one sanctioned share is a person's choice of an account that the row
+named after it also holds (§284's "Truck:Depreciation" case), and dropping it
+would undo exactly the decision this exists to keep.
+
+**The push still reads only the row.** Vendors post a kept link at once on
+reconnecting (§356). GL accounts do not: a restored unconfirmed link is
+re-judged by rules 3 and 4 first, and the push cannot run them, so after a
+reconnect the chart needs one sync before restored links post. Until then the
+push refuses `account_not_linked`, which fails closed.
+
+**Only a named realm is kept, and nothing is backfilled** — §356's reasoning:
+a NULL-realm link names no company, and the links earlier syncs dropped exist
+only in `gl_account.synced_from_erp` audit rows, which are history, not live
+state. A no-realm (`mock`) pull neither keeps nor restores.
+
+**Rejected: candidates or kept links in a JSONB column on `gl_accounts`.** The
+keyed-JSON shape §356 and §373 already turned down: no uniqueness per realm, and
+every reader has to parse it. **Rejected: restore after rule 0.** Rule 0 would
+first judge the row's other-company link against this company's pull and could
+move it by evidence, so the kept state and the row would disagree about which
+link is this company's.
+
+## 377. The corporate-card feed and the statement uploads refuse a blank currency too (§372 follow-up, 2026-11-13)
+
+§372 stopped the invoice importer stamping `USD` on a blank currency cell. The
+corporate-card feed (`csv_import.import_corporate_card_csv`) still wrote
+`(currency or "USD").upper()[:3]`, so a GBP card statement with no currency
+column reconciled as dollars, and a long cell was truncated. That matters more
+here than it looks: match suggestions and `/match` compare currencies exactly,
+so every such line became a candidate for USD expenses and for no GBP one.
+
+**The card feed refuses the row with §372's codes and helper.** A blank cell,
+or no `currency` column, is `csv_currency_required`; a malformed one is
+`csv_currency_invalid` with `params.value`, both through `_parse_currency`, so
+there is one rule and one shape check (`normalize_iso_currency`). A refused row
+does not claim its `external_txn_id`, so a corrected repeat later in the file
+still imports. The feed's other row errors are coded in the same change
+(`csv_card_amount_invalid`, distinct from `csv_amount_invalid` because a
+negative amount is a refund on a card feed and imports; `csv_date_invalid`;
+`csv_malformed`), since the page that now shows them would otherwise show
+server English for those in five locales. **Rejected: default to the entity's
+or the organization's currency.** It is what the entity reports in, not what a
+card was charged in, which is §372's reason and the same here; a card programme
+billed in one currency is exactly when the column is easiest to add.
+
+**The Cards tab lists refused rows.** It used to toast only imported / skipped
+counts, so a refused row would have vanished, and the toast called every
+skipped row a duplicate. The list `ImportCsvModal` rendered is now a shared
+component (`components/ui/CsvImportErrors.svelte`), used by the modal and by a
+dismissible panel above the card table; the toast counts duplicates and
+refused rows separately. `refusal.csvCurrencyRequired` now says "the row's"
+currency rather than "the invoice's", since a card row shares the sentence.
+
+**The two statement uploads have the same default at the statement level.**
+`POST /api/bank-reconciliation/upload` and `POST /api/vendor-statements/upload`
+took `currency: str = Form("USD")`, and passed any string through (an `EURO`
+overflowed the `String(3)` column). Both now go through
+`api/refusals.statement_currency`: absent or blank is 422
+`statement_currency_required`, malformed is 422 `statement_currency_invalid`,
+before the file is read, and a lowercase code is stored uppercased;
+`bank_reconciliation.parse_csv_statement` no longer defaults it either. These are
+new codes, not §372's, because the field is one per file and §372's sentences
+say "this row was not imported". The vendor-statement modal's free-text
+currency (which sent a blank as "use the default") became the same ISO list the
+bank-statement modal already used, defaulted to the organization's currency.
+
+The other CSV ingest paths checked: budgets and catalogs have no CSV import
+(their `currency` defaults are JSON create schemas). The pasted-lines vendor
+statement create (`ReconciliationCreate.currency`, `default="USD"`) is not a
+CSV path but has the same default; it is tracked in `docs/followups.md`, since
+making it required touches every caller that omits it.
+
+## 378. Each policy violation is coded by the engine, and submit's two list-shaped 422s are coded refusals that keep their lists (§361 follow-up, 2026-11-13)
+
+**Context.** §361 coded every expense-report and card refusal except
+`POST /expense-reports/{id}/submit`'s two list-shaped 422s: `{message,
+violations}` for blocking policy violations and `{message, expense_ids}` for
+lines with no rate locked into the report currency. Each violation carried a
+`code` but its figures only inside a server-English `message`, so the web
+toast and the violation panel were English in every locale.
+
+**Decision.**
+
+- **The policy engine builds the params, per violation.** `_violation` adds
+  `params` from the same values the English sentence is composed from, and
+  `expense_policy.VIOLATION_PARAMS` is the catalogue of which keys each code
+  carries: `amount` + `amount_currency`, `limit` + `currency`, `comparison`
+  for all; `category` for `category_limit`; `miles`, `rate`, `direction` for
+  `mileage_amount_mismatch`. Money is `str(Decimal)` beside its ISO code.
+  `amount_currency` is explicit rather than derived from `comparison`, so a
+  client never has to know that a fell-closed comparison quotes the face
+  amount in the expense's own currency. Building them at the call site that
+  already composes the sentence, rather than parsing the sentence or
+  re-deriving figures in the endpoint, is what keeps the two from drifting.
+- **The params are a nested object; the flat keys stay.** `limit`, `actual`,
+  `currency`, `comparison`, `miles`, `rate` were already top-level, and
+  `expenses.policy_violations` stores them in JSONB. Moving them would break
+  the badge and every stored row; adding `params` beside them gives the
+  violation the same `{code, message, params}` shape as a coded refusal at
+  the cost of duplicating a few strings. A row stored before this has no
+  `params` and states its English `message` until its next write refreshes it
+  — no backfill, because the refresh is already on every write path and a
+  migration recomputing violations would need the live policies and FX state.
+- **Direction is a param, not a code.** Over- and under-claimed mileage stay
+  one code (`mileage_amount_mismatch`), so `BLOCKING_CODES`, the badge count
+  and every consumer that keys on the code are unchanged; the sentence picks
+  its variant from `params.direction` (and from `comparison` for the
+  fell-closed variants of every rule).
+- **The envelopes are coded refusals that keep their lists.**
+  `expense_controls.report_policy_blocked_detail` and
+  `report_lines_unconverted_detail` return `coded_refusal(...)` plus the
+  original `violations` / `expense_ids` key, with byte-identical English
+  `message`s. Codes: `expense_report_policy_blocked` (`count`) and
+  `expense_report_lines_unconverted` (`count`, `currency`). `count` on the
+  latter is the rollup's `unconverted_count`, not the id list's length, since a
+  line with no id still counts. Status 422 unchanged. The no-locked-rate list
+  holds ids, not per-line reasons (every entry has the same reason), so only
+  its envelope is coded.
+- **The web states each violation in a module of its own**,
+  `api/policyViolations.ts`, not in the `codedRefusals.ts` registry: a
+  violation is advisory data shown in a panel and a badge, not an error
+  `detail`, and its function always returns a sentence (the localized one, or
+  `message`) where the registry returns `null`. `miles` and `rate` are shown
+  as sent: `formatMoney` would round a four-place per-mile rate to two places.
+  A free-text category is named verbatim.
+
+**Mobile.** No change: §361 confirmed mobile calls no expense-report endpoint.
+
+**Also fixed.** The submit panel's `{#each}` key was `code + policy_id`, which
+collides when one policy blocks two lines (Svelte throws on a duplicate key);
+it now includes `expense_id`.
+
+## 379. A once-approved invoice reaches approval again only through a person, and nothing changes its payee unseen (§374 follow-up, money-path review, 2026-11-13)
+
+**Found** (the round's money-path review of §374):
+
+1. **Recall → reject → `POST /bulk/status → new`** put a once-approved invoice
+   in draft. The financial lock is off there, so anyone outside the
+   segregation set could re-point the vendor and amount, and `/complete`'s
+   amount floor then approved it (`invoice.auto_approved`, approved_by
+   "system (below threshold)"). Nobody independent signed the corrected payee.
+   With no approval step, `/complete` closed it `new → done` unapproved. §374
+   named this risk for `rejected → new` and did not close it.
+2. **Email, Slack and Teams Approve links outlived their round.** The digest
+   they bind holds eight displayed and payment facts, not line items, tax or
+   the review round, so a first-round link still approved after a recall with
+   those facts unchanged. The pair consume (`ActionToken.consume_key`) only retires a
+   message whose own link was clicked, so an in-app reject and resubmit left
+   the old link working too.
+3. **§370 called the vendor-repointing agents safe because they act "before
+   approval"**, at `ready_for_review`. Since §374 that status can hold a
+   recalled invoice.
+4. **A vendor merge re-pointed `Invoice.vendor_id` on approved, financially
+   locked invoices** without asking `financially_locked`. The payment run and
+   the ERP push read the bank details of whichever vendor the invoice names,
+   so an approved invoice signed for the duplicate's payee would be paid to the
+   canonical's account, outside the bank-change dual control.
+
+**The rule.** A once-approved invoice gets back to an approval only through a
+human approval at `ready_for_review` (resubmit from `rejected`, or the recall),
+and nothing unattended changes its payee.
+
+- **The engine keeps it out of draft** (`workflow_engine.
+  _refuse_outside_the_recall`, beside §374's "never re-enters `pending`"): an
+  invoice that was ever approved never enters `new`, and never leaves `new` for
+  `done`. Draft is where every unattended exit starts (`/complete`'s floor
+  `new → approved`, its `new → done`, and extraction's auto-approve after
+  `→ pending`), so holding the edge in covers every door that reaches it:
+  bulk status today, any future one. The portal resubmit already went straight
+  to review for such an invoice. From `rejected` the way back is resubmit.
+- **`new → approved` cannot be held at the engine**: every approval site sets
+  `approved_by` / `approval_date` before its transition, so the engine cannot
+  tell this approval's stamp from an earlier one. `/complete` therefore reads
+  `was_ever_approved` before anything stamps the row, never fires the floor for
+  it, and treats it as needing approval whatever the workflow says
+  (`api/workflow.approval_applies`, which `GET /review-actions` reads too, so
+  the verdict and the door agree). After the engine rule only a row written
+  with a stamp at `new` before it can reach this; it lands in review.
+- **A token belongs to its review round.** The digest appends the round
+  (`email_action_token.round_from_state_data`: `rejection_count` +
+  `recall_count` from the invoice's workflow instance, both only growing) when
+  it is above 0. Both sides read it one way: `services/review.
+  approval_message_facts` when a message is minted (the guard test now
+  requires it at every `invoice_assigned` sender), and `review_round_of` at
+  the three doors, against the locked row. A stale round reads as "This
+  invoice changed after this message was sent", which is the reviewer's
+  remedy either way. **Chosen over spending a round's outstanding pairs** when
+  it ends: that needs a registry of every pair minted per invoice in Redis,
+  and a Redis outage at the recall would leave the old links live; the round
+  needs no state that can be lost. **Round 0 is the old digest byte for byte**,
+  so links already in inboxes for an invoice never rejected or recalled kept
+  working across the deploy; a link for an invoice already in a later round
+  stopped then, which costs one sign-in. Reject stays unbound, as before. An
+  invoice with no workflow instance reads round 0, and a recall or rejection
+  of one bumps nothing (both bump only an existing instance), so its links are
+  retired only by the eight facts, as before.
+- **Agents never set the payee of a once-approved invoice.**
+  `exception_agents/resolvers/amount_mismatch.refuse_payee_change_after_approval`
+  raises `PayeeFixedByApproval` (a `NotApprovable`) when a resolver would write
+  a different `vendor_id` onto an invoice ever approved; `missing_po` and
+  `multi_po_split` ask it before any mutation, and the coordinator escalates
+  with its own rationale. Agents may still approve a recalled invoice as the
+  triggering human when the payee is untouched: the coordinator's segregation
+  check already refuses the recaller, and the corrected figures meet the chain
+  and money gates again. Refusing agent approval outright was weighed and not
+  needed for the payee risk this closes.
+- **A vendor merge refuses while a duplicate holds an approved invoice still to
+  be paid**, 409 `vendor_merge_approved_unpaid`, `params.count` across every
+  duplicate, with nothing written. "Approved and unpaid" is
+  `vendor_merge.approved_unpaid_clause`: `financially_locked` minus `paid` /
+  `done`, in SQL, naming the open side so a new status is held (the
+  population the bank-change flag covers, §286). The Invoice reassignment also
+  excludes such rows and recounts, so an approval that lands while the merge
+  runs refuses it rather than moving. The way through is to let them be paid,
+  or to recall their approvals, after which they move and their next approval
+  signs the canonical payee. A live virtual card on an approved invoice
+  therefore refuses the merge too (`tests/test_vendor_card_revocation.py`).
+
+**Rejected for the merge:**
+- *Refusing on any financially locked invoice*, as the review first put it.
+  That includes `paid` and `done`, so no vendor with a payment history could
+  ever be merged. Their payee is history, and folding history is the point of
+  a merge.
+- *Leaving locked invoices on the retired duplicate.* The duplicate's ERP links
+  move to the canonical (§373), so those invoices would stop posting, and a
+  retired vendor fails the payment path's `vendor_not_active` check. They
+  would be stuck rather than safe.
+- *Moving them and raising the bank-change `fraud_flag` on each.* It keeps
+  merges unblocked, but it re-points a signed payee and leans on a second look
+  to undo it. A refusal changes nothing that was approved. It also leaves the
+  ERP side clean: a bill already posted names the duplicate's ERP supplier.
+
+**Left open** (`docs/followups.md`): a `paid` invoice moved by a merge and
+then voided is re-paid to the canonical's bank details with no flag, because
+`Payment` records no payee to compare against (needs a migration); and the new
+merge code and the engine's two once-approved sentences read in English only.
+
+Tests: `tests/test_workflow_state_machine.py` (the two engine edges refused
+with a stamp and open without, resubmit still allowed);
+`tests/test_invoice_recall_approval.py` (recall → reject → bulk `new` skipped
+then resubmit; the floor fires for a never-approved draft and never for a
+once-approved one; no approval step: review, not `done`, verdict and bulk
+alike; the `pending` rule on a stamped draft);
+`tests/test_email_action_token.py` (round 0 is the old digest, each round its
+own, a first-round link refused later, the counters, every sender binding
+`approval_message_facts`); `tests/test_email_actions.py` (a recall, and an
+in-app reject and resubmit, retire the first round's link; a new-round link
+approves); `tests/test_exception_agents_missing_po.py` and
+`tests/test_exception_agents_multi_po_split.py` (the agent fills an empty payee
+only before any approval); `tests/test_vendor_merge.py` (each approved-unpaid
+status refuses, nothing moves; paid, done, failed extraction, recalled and
+rejected move; the count across duplicates; recall clears the way).
+
+## 380. The state machine's refusals are coded, every coded bulk skip keeps its code, and the company picker asks the server whether to stay open (§379 / §355 follow-up, 2026-11-13)
+
+**Context.** §379 left `vendor_merge_approved_unpaid` and the engine's
+once-approved sentences English-only, and §355's amendment kept the parked
+consent through most pick refusals while the settings page still closed its
+picker on every coded one and told the admin to "connect again".
+
+**Decision.**
+
+- **Every 409 `workflow_engine` raises is a `coded_refusal`**, not only the
+  once-approved ones: `invoice_transition_invalid` (no edge;
+  `params.status` / `params.target`), `invoice_transition_recall_only` (a
+  recall edge, same params), `invoice_once_approved_not_reread` /
+  `_not_to_draft` / `_not_closed_from_draft`. The generic "Cannot transition"
+  sentence reaches people through every door that transitions, and the bulk
+  skip is where they meet it most; coding three of the engine's five sentences
+  would leave the commonest one in English. Each `message` is the old English
+  byte for byte, so every client that reads `detail` as text (mobile's
+  `errorMessage`, `utils/http.detail_text`, `refusal_of`) reads the same
+  sentence.
+- **A bulk-status skip keeps the code of any coded refusal it carries**
+  (`api/invoices._refused_skip`), not only §357's close refusal: the approval
+  gates, resubmit and the engine now reach the list localized. A structured
+  detail without `params` (the GL-chart refusal) contributes its sentence only,
+  as before. The endpoint's own skip sentences stay English, tracked in
+  `docs/followups.md`.
+- **The picker closes only when the server holds nothing to pick.** After a
+  refused pick other than `erp_pick_expired`, the panel re-reads
+  `GET …/oauth/pending`: the record decides, not a client list of which codes
+  spend it. One code cannot say: `credentials_unavailable` is put back after a
+  claim refusal and spent when the token cannot be opened at the take, and a
+  put-back is best-effort. A failed re-read keeps the list already shown. The
+  picker drops a selection the re-read list no longer holds (a newer consent
+  from the same browser).
+
+**Rejected.**
+- *Branching the picker on the code* (close on the two that can spend, keep on
+  the rest): wrong for `credentials_unavailable` either way, and wrong for any
+  put-back that failed.
+- *A new code for the 409 a bulk row gets for each status pair*: the pair is
+  params; one sentence names both statuses by their labels.
+
+Tests: `tests/test_workflow_state_machine.py` (each engine code and its
+params); `tests/test_invoice_recall_approval.py` and
+`tests/test_bulk_status_controls.py` (the skip rows carry the engine codes,
+the recall-only edge on a never-approved `failed` row, a segregation skip's
+code); `frontend/src/lib/api/codedRefusals.test.ts` (every engine and merge
+code the backend defines has a sentence, each in six locales, the count and the
+statuses named, malformed params fall back);
+`frontend/tests-e2e/erp/xero-company-picker.spec.ts` (an unoffered company and
+`already_linked` keep the picker, and the same consent then links).
+
+## 381. One currency shape rule, ASCII first, and no shortlist pickers left (§377 follow-up, 2026-11-13)
+
+§377 moved the statement uploads off a `<select>` over `COMMON_CURRENCIES`.
+Two more pickers had the same limit: the `/credit-memos` create / edit dialog
+(the shortlist), and `/organization`'s Invoice Defaults currency (six
+hardcoded options), which is also a rung of the reporting currency. A PLN
+credit memo, or a ZAR organization's own default, could not be entered from
+the web at all. **Both now use `ui/CurrencyInput`.** It gained a bindable
+`touched`: an edit (and a loaded setting) opens the field touched, so the
+record's own code is never re-seeded from the org currency, and the credit-memo
+dialog resets it for each new memo, as its select did. A linked credit memo's
+currency stays a disabled one-option display, because it is the invoice's and
+asserting any other is a 409. The other create forms (invoice, expense,
+budget, recurring, contract, requisition, intake, entity) already took a plain
+text input, so nothing limited them to a list; `utils/currencyPickers.test.ts`
+fails on any `.svelte` that builds options from the shortlist or hardcodes a
+common code as an `<option value>`.
+
+**The rule is three ASCII letters, checked before uppercasing.**
+`normalize_iso_currency` checked `len == 3 and isalpha()`, which is true for
+`"ÄÖÜ"`, and the browser cannot format such a code (`Intl.NumberFormat`
+throws, so the figure renders bare). Uppercasing first is not safe either:
+`"uß".upper()` is the ASCII `"USS"` (and `"ﬀ"` is `"FF"`), in Python and in
+JavaScript alike. So the rule strips, refuses non-ASCII, then uppercases and
+requires `[A-Z]{3}` in full. It lives in `app/utils/currency_code.py`
+(`normalize_iso_currency` raising, `iso_currency_or_none` not), and the
+frontend's `normalizeCurrencyCode` applies the same order; `CurrencyInput`
+uppercases only ASCII letters as typed, so a typed `ß` stays visibly invalid
+instead of becoming `SS`.
+
+**Every request schema's currency field shares it.** They checked four ways: a
+bare `max_length=3` (invoices, contracts, intake, budgets, catalogs,
+requisitions), `min_length=3, max_length=3` (entities, discount offers,
+recurring templates, pasted vendor statements), two copies of an `isalpha()`
+validator (`threshold_currency`), and the shared helper (expenses, credit
+memos). An API client could store `""`, `"us"`, `"usd"` or `"ÄÖÜ"`. They now
+use `app/schemas/currency.py`, whose four types differ only in what blank
+means: `CurrencyCode` (required), `OptionalCurrencyCode` (`None` = not sent,
+blank refused), `CurrencyCodeOrUnset` (blank = `None`, for the credit memo's
+"resolve it for me" and the policy's "use the reporting currency"), and
+`BlankableCurrencyCode`, the invoice PATCH only, where `""` is the legacy "no
+currency" value the credit-memo currency guard answers with a 409, not a 422.
+Defaults are unchanged (several create schemas still default `USD`; the pasted
+vendor statement's is tracked in `docs/followups.md`). The non-schema checks
+call the same rule: the statement uploads, the CSV `_parse_currency`, the
+organization `invoice_defaults.currency` PATCH (now stored uppercased),
+`models.procurement.po_currency_code`, the punch-out cart, and the extraction
+normaliser. **Rejected: validate against the full ISO 4217 list.** The
+backend has no maintained list to pin, a list rejects a code issued after it
+was cut, and the shape is what the formatters and grouping keys need.
+
+## 382. The server says whether a run's bank-file panel applies; a run exported before a switch to processor mode keeps it (§362 follow-up, 2026-11-13)
+
+**The gap.** §362 keeps "Verify before upload" open in either mode, since it
+never releases the run, and refuses "Bank rejected the file" on a tenant that no
+longer records payments. The run dialog hid the whole bank-file panel unless the
+tenant's execution mode was `record_only` (`canDownloadBankFile`). On a tenant
+switched to processor mode with a run still `exported`, the reader holding the
+file could not verify it before uploading and was not told why the run could not
+be released. Only Record was left. Nothing was paid twice, because the server
+keeps the claim, but the dialog restated a client condition where it should have
+read a server verdict.
+
+**Decision.**
+
+- **`GET /runs/{id}` carries `bank_file_applies`**, from
+  `payment_controls.run_bank_file_applies(run, record_only=…)`. It is `true` on
+  every run of a record-only tenant, and on a processor tenant only while the
+  run's stored status is `exported`, which is the claim §251 / §362 keep. A
+  processor tenant's draft has no file and never gets one, so the panel does
+  not apply to it. The field says only whether the panel is the right place to
+  look. Which controls it offers stays each control's own `actions.nacha_*`
+  verdict, and those already answered coherently in processor mode: Download is
+  hidden (`nacha_already_exported`), Regenerate is refused
+  `nacha_requires_record_only`, Bank rejected the file is refused
+  `nacha_void_requires_record_only`, and Verify is `null`. The dialog renders
+  the refused ones disabled beside their sentences, so the reader learns why
+  the run cannot be released or redone.
+- **The client mode check is gone.** `canDownloadBankFile` was removed. A
+  verify result already on screen stays there whatever the run became, because
+  a superseded file must not be uploaded even after the run is cancelled.
+
+**Rejected:**
+- *Hide Download on `nacha_requires_record_only` and drop the mode check, with
+  no new field.* It works today, but it gives one code two meanings: hidden on
+  Download, explained on Regenerate. It also makes the panel's presence an
+  accident of which refusals happen to be hidden. One server fact is plainer
+  and has a parity test of its own.
+- *Gate on `nacha_export_count > 0`.* A run released back to `draft` after the
+  bank rejected its file keeps its count but no longer holds a file. The
+  stored `exported` status is what the `nacha_*` verdicts compare, so the
+  panel reads the same thing.
+
+**Tests.** `backend/tests/test_payment_action_verdicts.py`
+(`test_run_bank_file_applies`, `test_the_bank_file_panel_verdict_in_each_mode`:
+the field and the four verdicts on a run exported before the switch, Verify
+accepted in both modes with the claim kept, no panel on a processor draft);
+`frontend/tests-e2e/payments/nacha-verify.spec.ts` (an exported run, switched
+to processor: the panel shows Verify enabled and the two refusals' sentences).
+
+## 383. A payment records the payee it paid, and a void flags a re-payment to another one (§379 follow-up, migration 0128, 2026-11-13)
+
+**The gap.** §379 lets a merge move `paid` invoices (their payee is history),
+and `POST /api/payments/{id}/void` sends one back to `approved`. The re-payment
+reads the bank details of whichever vendor the invoice names now, so a paid
+invoice merged onto another vendor and voided was re-paid to the canonical's
+account with no flag. `reflag_voided_invoice_for_bank_change` (§286) only asked
+about approved bank changes on the invoice's current vendor, and `Payment`
+recorded no payee to compare against.
+
+**The rule.** Every payment records, at the step that releases its money, the
+payee it pays: `payee_vendor_id`, `payee_bank_fingerprint` and
+`payee_recorded_at` (`services/payee_stamp.stamp_payee`). The steps are:
+
+- the rail and card dispatch (`_execute_single_payment`), from the read the
+  order is built from, after every refusal and compliance hold and immediately
+  before the processor or card call, so a stamp means money was instructed.
+  It is carried in `_ORDER_FIELDS`, so a rolled-back attempt that reached the
+  processor keeps it;
+- the NACHA export, after every refusal, so the commit the ERP check keeps
+  never holds a stamp for an unbuilt file;
+- a payment recorded outside FeohLedger (`external_payment._complete`, which
+  serves the user's record, the run record and the ERP-reported payment). An
+  entry of an `exported` file keeps the payee its file carried; a rejected
+  file's stamp is replaced, since it paid nobody.
+
+A merge records, on each duplicate it retires for the first time, where it went
+and who merged it (`vendors.merged_into_vendor_id` / `merged_by_user_id` /
+`merged_at`), in its own transaction.
+
+The void reads the invoice's vendor `FOR SHARE` and asks
+`flag_repayment_payee_change`. A different vendor, or the same vendor with a
+different bank fingerprint, opens the `fraud_flag` `payee_changed_since_paid`.
+That type already blocks every run, dispatch, record-outside and ERP push, and
+its clearing already runs the payment-blocking segregation rule. One flag is
+opened **per person whose act re-pointed the payee**, each with that person as
+its raiser, so none of them can clear their own:
+
+- vendor differs → every steward on the merge chain from the paid vendor to the
+  current one, walked through the retired vendors' own records (only a merge
+  moves a paid invoice's vendor; an approved one is financially locked);
+- bank differs → every approver of a bank change since the stamp.
+
+**Why per person, along the chain.** The money-path review found that "the
+latest merge into the current vendor" names the wrong person: a later,
+unrelated merge into the same canonical (or a no-op re-run of the same merge)
+took over the raiser, and the steward who actually moved the invoice could then
+clear the flag. A chain D → B → C by two stewards moved the payee twice. A merge
+has no dual control of its own, so this flag is the only independent look at it.
+One `raised_by_user_id` names one person, so each gets a row; a person can
+still clear someone else's, which takes two people acting together.
+**Rejected: reading the merge from its `vendor.merged` audit row.** In `lambda`
+audit mode that row lands asynchronously or not at all, and a money gate must
+not wait on audit delivery; the record on the vendor is written with the merge.
+The audit row is read only for a merge from before 0128, which has no record:
+the earliest row naming the vendor a duplicate, so a re-run never re-attributes
+it.
+
+**Why `FOR SHARE`.** A bank-change approval updates the vendor and then flags
+the vendor's payable invoices, which the voided one is not until the void
+commits. Without the lock each side read the other's state from before it and
+neither flagged, which was already true of §286's re-flag. With it, whichever
+runs second sees the first: the void reads the new details, or the approval
+sees an `approved` invoice.
+
+- **The fingerprint** is HMAC-SHA256 over the canonical JSON of the whole
+  `bank_details` blob and the tenant id, keyed by its own secret,
+  `FEOH_PAYEE_FINGERPRINT_KEY`, and tagged `v2:<kid>:<hmac>`. Whole blob,
+  because the dual control already treats any change to it as a bank change
+  and an allowlist would miss the next key that steers money
+  (`counterparty_id`, a cheque's `mailing_address`). Keyed, because an unkeyed
+  hash of a routing and an account number is brute-forceable. Tenant in the
+  message, so one account paid by two tenants does not fingerprint alike.
+  **Rejected: storing the last four digits** (already shown everywhere): two
+  accounts sharing a last-4 would compare equal, which is the BEC case.
+- **Its own key, rotated through a keyring.** The first cut derived the key
+  from `FEOH_SECRET_KEY` to avoid provisioning a secret, accepting "one extra
+  flag" per rotation. That cost was misjudged: the JWT key rotates every 90
+  days (`docs/secrets-rotation.md`), so every quarter each void of an older
+  payment would open a false `payee_changed_since_paid` flag for a person to
+  clear. Fail-closed, but recurring noise built into a routine operation, and
+  it trains people to clear fraud flags without looking, which defeats the
+  flag. So the fingerprint has a dedicated key, and each stamp names the key
+  that made it: `kid` is the first 8 hex of a domain-separated SHA-256 of the
+  key. Retired keys live in `FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS`
+  (comma-separated), and the void recomputes a stamp under the key its `kid`
+  names (`payee_stamp.fingerprint_matches`), so a rotation through the
+  keyring flags nothing. The column (`varchar(80)`) holds the 76 characters
+  unchanged. **The `kid` is derived, not configured beside the key**, so an
+  operator cannot pair an id with the wrong key or reuse one for a new key.
+  Thirty-two bits of a hash of a 256-bit random key say nothing about it.
+  **Rotation by replacement is the one wrong move**, and it is fail-closed: a
+  `kid` in neither setting compares as changed, flags, and logs the id. A
+  deployed environment refuses to boot with the key empty, under 32 chars,
+  equal to the committed dev value or equal to `FEOH_SECRET_KEY` (the last
+  would bring the quarterly noise back), and `deploy/decrypt-env.sh` refuses
+  the same before compose restarts anything. **`v1` is not read.** `v1` stamps
+  existed only on this PR's branch before it merged (migration 0128 was not on
+  `main`), so nothing deployed carries one. A stray `v1` in a local database
+  compares as changed and flags, like any unknown scheme.
+- **An empty key stamps the payee without a fingerprint, and its void flags.**
+  There is no fallback key. With the key empty (local dev only, given the boot
+  refusal), `stamp_payee` still records `payee_vendor_id` and
+  `payee_recorded_at` with a `NULL` fingerprint and logs a warning. A void then
+  still catches a merge on the vendor id, and the bank comparison, which cannot
+  run, fails closed: `payee_changed_since_paid`, raised by any bank-change
+  approver since the stamp, else `NULL`. That differs from the unstamped rule
+  below on purpose. An unstamped payment predates the stamp, so nothing can
+  honestly be compared and flagging every one would flag "for no fact at
+  all". A stamped payment released money while the stamp existed, and a
+  missing fingerprint there is a configuration fault, not history.
+  **Rejected: refusing to stamp** (`payee_recorded_at` left NULL): the void
+  would then treat the payment as pre-0128 and compare nothing, the silent
+  direction. **Rejected: falling back to §286's re-flag** for the bank
+  question: it misses any route that changes bank details without a change
+  request, which is the gap the fingerprint closes. **Rejected: refusing the
+  payment** when the key is missing: it would stop money in dev over a
+  comparison that only matters at a void. pytest does not load
+  `.env.development`, so `tests/conftest.py` gives the suite a test key; the
+  empty-key path is pinned by monkeypatching it away.
+- **`payee_vendor_id` is not a `vendor_id` FK.** It is history: the merge must
+  never move it (its name keeps it out of `VENDOR_FK_CHILDREN`'s drift guard on
+  purpose), and nothing should tie a vendor row's lifecycle to the payments
+  that once paid it.
+- **The comparison runs at the void, not in the run builder.** The void is the
+  one moment a paid invoice re-enters the queue, and a flag raised there stops
+  the ERP push too (`fraud_flag` is in `ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`),
+  which a run-builder check would not: a bill pushed after the void can be paid
+  from the ERP. After the void the invoice is approved and unpaid, so a later
+  merge is refused (§379) and a later bank change flags it (§286); nothing else
+  re-points it between the void and the re-payment. A second comparison in the
+  builder would have to re-decide a flag a person already cleared (§366), for no
+  case the void misses. The run builder is unchanged.
+- **A stamped payment no longer runs the §286 re-flag**: its fingerprint
+  answers "did the bank details change" for every route, including one that
+  bypasses a change request, and running both raised two flags for one cause.
+- **De-duplicated on the finding and the raiser, not on the type**
+  (`flag_invoice_for_bank_change`, which now takes the finding code). The old
+  type-wide count let an open Positive Pay or detector `fraud_flag`, raised by
+  nobody, absorb a bank-change flag, so a person clearing that unrelated row
+  cleared a payee change they never saw. Folding a second approver's change
+  into the first approver's open row did the same for the second approver. This
+  applies to `vendor_bank_changed` too, and §286's re-flag now flags once per
+  approver since the payment. A pre-§358 row with no code is matched on its
+  English.
+
+**A payment with no stamp** (paid before 0128) is never compared, and nothing is
+backfilled. §141's reasoning holds exactly: the vendor's details today are what
+may differ from the ones paid, so stamping them would absolve every change made
+since, and there is no honest record to recover. **Rejected: fail closed on
+every unstamped void.** It would flag every void of a pre-migration payment
+for no fact at all. The one fact on record is a merge into the invoice's vendor
+after the payment was booked (a retired vendor's record, or for an older merge
+its audit row, if it moved anything). Then the invoice may have moved, and the
+void raises `payee_unrecorded_after_merge`, once per steward of those merges. A
+canonical's own invoice voided after an unrelated merge is flagged too; that
+costs one look and is the price of not inventing a payee. For a pre-0128 merge
+the audit row is the only evidence, so in `lambda` mode a row that never landed
+means no flag. That residue shrinks to nothing as pre-0128 payments age out, and
+every merge since is on the vendor. The §286 re-flag still answers an unstamped
+payment's bank change. A raiser that cannot be found is `NULL`: the flag still
+blocks, and anyone outside the invoice's implicated set clears it.
+
+Tests: `tests/test_payment_payee_stamp.py`:
+- the fingerprint; it does not change with the JWT key; a rotation through the
+  keyring keeps an old stamp equal (unit and through a real void); a stamp
+  whose key is in neither setting, another scheme or a malformed value does
+  not match and its void flags; with no key nothing is fingerprinted, the
+  payee vendor is still recorded and the void flags;
+- the stamp at the rail, card, NACHA, single and run record-outside and
+  ERP-reported steps; none on booking, a compliance hold or a refused export;
+  an exported entry's payee kept and a rejected file's replaced;
+- the merge record, first merge wins; the merge leaves the payment's stamp;
+- merge → void flags, blocks the run and the ERP gate, the steward is refused
+  the clear and an independent person clears it;
+- a later unrelated merge or a re-run does not take over the flag; both
+  stewards of a chain are each refused their own;
+- same payee raises nothing; bank changes raise one flag per approver;
+- a bank change racing the void is flagged;
+- an unrelated fraud flag does not absorb the payee flag, and another person's
+  change gets its own row;
+- the unstamped cases.
+
+Also `tests/test_config_boot_guards.py` and `tests/test_deploy_decrypt_env.py`
+(a deployed env refuses a missing, short, dev or JWT-equal fingerprint key, and
+the day-one rehearsal env boots with its own),
+`tests/test_payment_dispatch_db_error.py` (the stamp survives a
+post-processor rollback and is absent when nothing was sent),
+`tests/test_migration_0128_payee_and_merge_stamp.py`, and
+`tests/test_payment_run_actions.py` / `tests/test_exception_raiser_stamping.py`
+updated for the new call.
+
+## 384. While a modal dialog is open, everything outside the topmost one is inert (a11y, 2026-11-13)
+
+**Context.** Every dialog rendered in place with `role="dialog"
+aria-modal="true"` and the shared focus trap, and nothing more. `aria-modal`
+only asks assistive tech to stay inside; the trap only holds Tab. A screen
+reader's virtual cursor, a pointer and a touch still reached the page behind,
+and axe's WCAG 2.2 `target-size` rule reported the `/invoices` sort buttons
+behind the invoice dialog and the recall dialog stacked over it as "partially
+obscured" targets at 320px (`tests-e2e/a11y/recall-import-verify.spec.ts`).
+The phone sidebar overlay had already solved the same problem for itself with
+`inert` (`routes/+layout.svelte`).
+
+**Decision.** `lib/actions/modalInert.ts` marks `inert` on everything that
+neither is the topmost open modal dialog nor contains it, walked down from
+`<body>` along that dialog's ancestor path. It is driven by the open-modal
+registry `actions/focusTrap.ts` already keeps (the one the toast region hosts
+itself by), synchronously on every open and close:
+
+- **Home: the focus trap's registry, not a new action per shell.** Every modal
+  here, `ui/Modal` and the four hand-rolled shells (`InvoiceModal`,
+  `RunDetailModal`, `BulkRecodeGLModal`, the portal discount-accept dialog),
+  already registers there by carrying `aria-modal="true"` and `use:focusTrap`,
+  so all five get it with no edit, and a new dialog cannot opt out by
+  forgetting a second action. The marking itself lives in its own module so
+  the walk unit-tests without a DOM. A shell-level `$effect` (where `ui/Modal`
+  keeps its scroll lock) was rejected: it would cover one shell of five.
+- **Stacking is a recompute, not a nest of saved states.** Each sync takes off
+  every mark it made and marks afresh for the current top. The recall dialog
+  over the invoice dialog therefore makes the invoice dialog inert, and closing
+  either, in either order, leaves exactly what the remaining stack needs.
+- **Never clobber.** An element already `inert` when a sync marks (the layout's
+  `<main>` and skip link behind the sidebar overlay) is skipped and not
+  recorded, so no sync ever removes it.
+- **Live regions stay live.** An inert subtree is pruned from the accessibility
+  tree, so the toast region (`data-dialog-satellite`) and SvelteKit's route
+  announcer are keepers wherever they are, and no attribute is ever written
+  onto the region itself (it would travel with it into the dialog). The region
+  normally lives inside the topmost dialog anyway; `ui/Toast.svelte` re-syncs
+  after each move, so the marks follow it. A toast raised while the region was
+  still outside the new top dialog is re-inserted after the move, as before.
+- **Focus.** The sync runs before the closing dialog's deferred focus restore,
+  so the trigger is focusable again by then. A dialog with another stacked over
+  it no longer reclaims focus when inert drops its focused control
+  (`onFocusOut` acts only for the topmost).
+- **Portals.** Nothing in the app moves a picker, menu or listbox out of a
+  dialog to `<body>` (the only `body.appendChild` calls are transient download
+  links; native datalists are browser UI). A node inserted at `<body>` level
+  after a dialog opened is not marked, so a future portal would keep working;
+  content inserted inside a marked subtree inherits its inertness.
+
+**Rejected: `aria-hidden` on the background** (the `aria-hidden` library's
+pattern). It hides from assistive tech only, so pointer, touch and focus still
+reach the page and axe's target-size finding stands. **Rejected: native
+`<dialog>` + `showModal()`.** It gives top-layer inertness for free, but every
+shell, the toast hosting and its band placement (§313, #635/#636) are built on
+an in-place fixed backdrop; converting five shells is a larger, riskier change
+for the same result.
+
+Tests: `src/lib/actions/modalInert.test.ts` (open, nested open, close in both
+orders, a pre-existing `inert` preserved, the exempt regions, the region
+following the top dialog); `tests-e2e/a11y/modal-inert.spec.ts` (the page and
+then the under-dialog go inert, the toast region stays live, closing restores
+each and returns focus); `tests-e2e/a11y/recall-import-verify.spec.ts` at 320px
+is the axe guard that was red.

@@ -12,9 +12,9 @@
 # Each mode gets a placeholder deploy/.env holding only what that mode's sops
 # env must provide for compose (prod.sops.yaml.example), and the compose
 # command comes from deploy/lib.sh's feoh_load_db_mode — the same array every
-# deploy script runs — so the mode is selected exactly as on the VM. Every
-# profile is activated on top (`tools`, `build`), since deploy.sh and backup.sh
-# run those services with `run`.
+# deploy script runs — so the mode is selected exactly as on the VM. The
+# `tools` profile is activated on top, since backup.sh and restore.sh run
+# `pgtools` with `run`.
 #
 # It works on a scratch copy of deploy/ (beside a link to backend/, which the
 # compose file references), so it never touches a real deploy/.env.
@@ -75,9 +75,9 @@ ${COMMON}"
 			echo "the ${mode}-mode placeholder env selected ${DB_MODE} mode" >&2
 			exit 1
 		fi
-		echo "==> ${mode}: ${COMPOSE[*]} --profile tools --profile build config"
+		echo "==> ${mode}: ${COMPOSE[*]} --profile tools config"
 		rc=0
-		"${COMPOSE[@]}" --profile tools --profile build config -q 2>"../stderr" || rc=$?
+		"${COMPOSE[@]}" --profile tools config -q 2>"../stderr" || rc=$?
 		if [ "$rc" -ne 0 ] || [ -s ../stderr ]; then
 			echo "FAIL ${mode} mode: compose exited ${rc} and wrote to stderr:" >&2
 			cat ../stderr >&2

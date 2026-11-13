@@ -1,7 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 
@@ -17,7 +19,16 @@ typedef InvoiceEditResult = Map<String, dynamic>;
 class InvoiceEditSheet extends StatefulWidget {
   final Invoice invoice;
 
-  const InvoiceEditSheet({super.key, required this.invoice});
+  /// The server's `recall_approval` verdict for this invoice (backend
+  /// decisions §374), which decides how the lock notice names the way out.
+  /// Unanswered (the default) names none.
+  final ActionVerdict recall;
+
+  const InvoiceEditSheet({
+    super.key,
+    required this.invoice,
+    this.recall = ActionVerdict.unanswered,
+  });
 
   @override
   State<InvoiceEditSheet> createState() => _InvoiceEditSheetState();
@@ -26,9 +37,9 @@ class InvoiceEditSheet extends StatefulWidget {
 class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
   final _formKey = GlobalKey<FormState>();
 
-  /// Mirrors the backend `_FINANCIALLY_LOCKED_STATUSES` gate — see
-  /// [InvoiceStatus.isFinanciallyLocked].
-  late final bool _locked = widget.invoice.status.isFinanciallyLocked;
+  /// The server's financial-lock verdict for this invoice — see
+  /// [Invoice.financiallyLocked].
+  late final bool _locked = widget.invoice.financiallyLocked;
   late final TextEditingController _vendor;
   late final TextEditingController _invoiceNumber;
   late final TextEditingController _amount;
@@ -122,8 +133,9 @@ class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
           _dueDate == null ? null : formatIsoDate(_dueDate!);
     }
 
-    // An approved (or later) invoice is financially frozen server-side: the
-    // backend 409s the WHOLE PATCH if it carries any of `kFinancialInvoiceFields`
+    // A financially locked invoice (approved or later, or a failed ERP push
+    // after approval) is frozen server-side: the backend 409s the WHOLE PATCH
+    // if it carries any of `kFinancialInvoiceFields`
     // (`_FINANCIAL_FIELDS` in `backend/app/api/invoices.py`). Dropping them here
     // is what lets a mixed edit through — a combined description + amount save
     // used to lose the description too, because the rejected request took the
@@ -241,8 +253,27 @@ class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
   }
 
   /// Why the money + payee fields below can't be edited. Rendered only on a
-  /// financially locked invoice, and worded as the way *out* (reject → correct
-  /// → re-approve) rather than a bare refusal.
+  /// financially locked invoice. It names the way out only when the server
+  /// says it is open: "recall the approval" while the `recall_approval`
+  /// verdict is allowed (backend decisions §374). A recall refused for a
+  /// reason the reader can act on (a bill the ERP may hold, a live payment or
+  /// card) adds that refusal's own sentence, since this sheet covers the
+  /// detail screen's recall bar where it is otherwise stated. Anything else —
+  /// past the recall (`sent_to_erp` on), no verdict, a role that can't
+  /// recall — gets the plain freeze sentence.
+  String _lockedNoticeText(AppLocalizations l) {
+    final recall = widget.recall;
+    if (recall.allowed) return l.invoiceEditLockedNoticeRecall;
+    if (recall.isOffered(hiddenCodes: const {'invoice_not_recallable'})) {
+      final reason = localizeCodedRefusal(l, recall.refusal) ??
+          recall.refusal?['message'] as String?;
+      if (reason != null && reason.isNotEmpty) {
+        return '${l.invoiceEditLockedNotice} $reason';
+      }
+    }
+    return l.invoiceEditLockedNotice;
+  }
+
   Widget _lockedNotice() {
     final l = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
@@ -267,7 +298,8 @@ class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                l.invoiceEditLockedNotice,
+                _lockedNoticeText(l),
+                key: const ValueKey('invoice-edit-locked-notice'),
                 style: TextStyle(color: scheme.onSecondaryContainer),
               ),
             ),
@@ -356,12 +388,13 @@ class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
 /// changed" — the caller can skip the PATCH.
 Future<InvoiceEditResult?> showInvoiceEditSheet(
   BuildContext context,
-  Invoice invoice,
-) {
+  Invoice invoice, {
+  ActionVerdict recall = ActionVerdict.unanswered,
+}) {
   return showModalBottomSheet<InvoiceEditResult>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (_) => InvoiceEditSheet(invoice: invoice),
+    builder: (_) => InvoiceEditSheet(invoice: invoice, recall: recall),
   );
 }

@@ -1222,7 +1222,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             out.append(
                 GLAccountPayload(
                     code=code,
-                    name=_account_display_name(a)[:255],
+                    name=_account_display_name(a),
                     account_type=_CLASSIFICATION.get(str(a.get("Classification") or "").lower()),
                     erp_account_id=str(a["Id"]),
                     parent_code=code_by_id.get(parent_id) if parent_id else None,

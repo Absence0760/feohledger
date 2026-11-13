@@ -358,10 +358,48 @@ async def test_upload_csv_malformed_returns_422(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/vendor-statements/upload",
-            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat(), "currency": "USD"},
             files={"file": ("bad.csv", bad, "text/csv")},
         )
     assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.parametrize(
+    ("currency", "code", "params"),
+    [
+        (None, "statement_currency_required", {}),
+        ("  ", "statement_currency_required", {}),
+        ("EURO", "statement_currency_invalid", {"value": "EURO"}),
+    ],
+)
+async def test_upload_refuses_a_blank_or_malformed_statement_currency(
+    realdb, currency, code, params
+):
+    """An uploaded statement's currency is never defaulted to USD (decisions
+    §377): the run would be matched against the USD ledger only. Refused before
+    the file is read, so no run is created and no document is archived."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    data = {"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()}
+    if currency is not None:
+        data["currency"] = currency
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/vendor-statements/upload",
+            data=data,
+            files={"file": ("s.csv", b"invoice_number,amount\r\nINV-1,10.00\r\n", "text/csv")},
+        )
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert (detail["code"], detail["params"]) == (code, params)
+    async with mk() as s:
+        runs = await s.execute(
+            select(VendorStatementReconciliation).where(
+                VendorStatementReconciliation.vendor_id == uuid.UUID(vendor_id)
+            )
+        )
+        assert runs.scalars().all() == []
 
 
 # ---------------------------------------------------------------------------
@@ -836,7 +874,7 @@ async def test_clerk_cannot_upload_a_statement(realdb):
     async with realdb.client(key="a", role="ap_clerk") as c:
         resp = await c.post(
             "/api/vendor-statements/upload",
-            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat(), "currency": "USD"},
             files={"file": ("s.csv", b"invoice,amount\nX,1\n", "text/csv")},
         )
     assert resp.status_code == 403
@@ -890,7 +928,7 @@ async def test_upload_pdf_routes_through_extraction_and_reconciles(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/vendor-statements/upload",
-            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat(), "currency": "USD"},
             files={"file": ("statement.pdf", pdf, "application/pdf")},
         )
     assert resp.status_code == 201, resp.text
@@ -936,7 +974,11 @@ async def test_upload_pdf_archives_the_source_document_for_download(realdb):
         run_id = (
             await c.post(
                 "/api/vendor-statements/upload",
-                data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+                data={
+                    "vendor_id": vendor_id,
+                    "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
+                },
                 files={"file": ("statement.pdf", pdf, "application/pdf")},
             )
         ).json()["id"]
@@ -965,7 +1007,7 @@ async def test_storage_failure_does_not_cost_the_clerk_the_reconciliation(realdb
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/vendor-statements/upload",
-            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat(), "currency": "USD"},
             files={"file": ("statement.csv", csv_body, "text/csv")},
         )
     assert resp.status_code == 201, resp.text
@@ -1022,7 +1064,11 @@ async def test_source_download_is_tenant_scoped(realdb):
         run_id = (
             await c.post(
                 "/api/vendor-statements/upload",
-                data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+                data={
+                    "vendor_id": vendor_id,
+                    "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
+                },
                 files={"file": ("statement.pdf", pdf, "application/pdf")},
             )
         ).json()["id"]
@@ -1043,7 +1089,11 @@ async def test_deleting_a_run_removes_its_archived_document(realdb):
         created = (
             await c.post(
                 "/api/vendor-statements/upload",
-                data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+                data={
+                    "vendor_id": vendor_id,
+                    "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
+                },
                 files={"file": ("statement.pdf", pdf, "application/pdf")},
             )
         ).json()
@@ -1070,7 +1120,7 @@ async def test_upload_unreadable_pdf_refuses_instead_of_inventing_lines(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/vendor-statements/upload",
-            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat(), "currency": "USD"},
             files={"file": ("scan.pdf", unreadable, "application/pdf")},
         )
     assert resp.status_code == 422, resp.text
@@ -1093,7 +1143,7 @@ async def test_upload_pdf_refused_when_provider_cannot_read_statements(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/vendor-statements/upload",
-            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat(), "currency": "USD"},
             files={"file": ("statement.pdf", pdf, "application/pdf")},
         )
     assert resp.status_code == 422, resp.text
@@ -1119,7 +1169,7 @@ async def test_oversized_upload_is_refused_before_any_extraction_call(realdb, mo
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/vendor-statements/upload",
-            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat(), "currency": "USD"},
             files={"file": ("big.pdf", b"%PDF-1.4" + b"x" * 512, "application/pdf")},
         )
     assert resp.status_code == 413, resp.text
@@ -1137,7 +1187,7 @@ async def test_pdf_posted_as_octet_stream_is_still_routed_to_extraction(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/vendor-statements/upload",
-            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat()},
+            data={"vendor_id": vendor_id, "statement_date": _TODAY.isoformat(), "currency": "USD"},
             files={"file": ("statement.bin", pdf, "application/octet-stream")},
         )
     assert resp.status_code == 201, resp.text

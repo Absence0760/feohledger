@@ -7,7 +7,6 @@ import {
 	NACHA_FIELD_LABEL_KEYS,
 	NACHA_SEC_CODES,
 	canDispatchPayments,
-	canDownloadBankFile,
 	isBusinessDay,
 	isExternalPayment,
 	isValidAbaRouting,
@@ -48,14 +47,6 @@ describe('execution mode', () => {
 		expect(canDispatchPayments(null)).toBe(false);
 		expect(canDispatchPayments(undefined)).toBe(false);
 		expect(canDispatchPayments('something_new')).toBe(false);
-	});
-
-	it('offers the bank file only on a confirmed record-only tenant', () => {
-		// The server refuses it anywhere else (`nacha_requires_record_only`):
-		// on a processor tenant the file plus an Execute would pay twice.
-		expect(canDownloadBankFile('record_only')).toBe(true);
-		expect(canDownloadBankFile('processor')).toBe(false);
-		expect(canDownloadBankFile(null)).toBe(false);
 	});
 
 	it('recognises a payment recorded outside FeohLedger by its provider', () => {

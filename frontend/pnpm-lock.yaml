@@ -8,6 +8,11 @@ overrides:
   cookie@<0.7.0: '>=0.7.0 <0.8.0'
   undici@<7.28.0: '>=7.28.0'
 
+patchedDependencies:
+  deepmerge@4.3.1:
+    hash: 9861552b3da34399d013c7fbb3c726342cd57e38938832dbdfa53f5bb2be4cfb
+    path: patches/deepmerge@4.3.1.patch
+
 importers:
 
   .:
@@ -1127,7 +1132,7 @@ snapshots:
 
   '@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.3(@typescript-eslint/types@8.58.0))(vite@8.3.6(@types/node@26.6.6))':
     dependencies:
-      deepmerge: 4.3.1
+      deepmerge: 4.3.1(patch_hash=9861552b3da34399d013c7fbb3c726342cd57e38938832dbdfa53f5bb2be4cfb)
       magic-string: 1.4.2
       obug: 2.2.1
       svelte: 5.57.3(@typescript-eslint/types@8.58.0)
@@ -1213,7 +1218,7 @@ snapshots:
   decimal.js@10.6.0:
     optional: true
 
-  deepmerge@4.3.1: {}
+  deepmerge@4.3.1(patch_hash=9861552b3da34399d013c7fbb3c726342cd57e38938832dbdfa53f5bb2be4cfb): {}
 
   detect-libc@2.1.2: {}
 

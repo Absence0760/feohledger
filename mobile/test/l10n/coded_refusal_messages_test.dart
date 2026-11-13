@@ -47,6 +47,32 @@ void main() {
     }
   });
 
+  test('the recall refusals are stated in the reader\'s language', () {
+    // `services/review.recall_refusal` (backend decisions §374).
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_not_recallable', {'status': 'paid'})),
+      de.codedRefusalInvoiceNotRecallable,
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_recall_in_erp')),
+      de.codedRefusalInvoiceRecallInErp,
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_recall_claimed', {'claim': 'payment'})),
+      de.codedRefusalPaymentBlocksRecall,
+    );
+    expect(
+      localizeCodedRefusal(en, refusal('invoice_recall_claimed', {'claim': 'virtual_card'})),
+      en.codedRefusalCardBlocksRecall,
+    );
+    // A claim this build does not know keeps the caller's generic failure.
+    expect(localizeCodedRefusal(en, refusal('invoice_recall_claimed')), isNull);
+    expect(
+      localizeCodedRefusal(en, refusal('invoice_recall_claimed', {'claim': 'cheque'})),
+      isNull,
+    );
+  });
+
   test('the fixed sentences are stated in the reader\'s language', () {
     expect(
       localizeCodedRefusal(de, refusal('approval_segregation')),

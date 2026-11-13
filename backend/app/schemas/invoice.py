@@ -3,7 +3,11 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.models.invoice_status import InvoiceStatus  # the one enum; see that module
+from app.models.invoice_status import (
+    InvoiceStatus,  # the one enum; see that module
+    financially_locked,
+)
+from app.schemas.currency import BlankableCurrencyCode, CurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
@@ -51,7 +55,7 @@ class InvoiceBase(BaseModel):
     invoice_number: str = Field(..., max_length=100)
     # Digits match `invoices.amount` Numeric(15, 2).
     amount: Decimal = Field(..., ge=0, max_digits=15, decimal_places=2)
-    currency: str = Field(default="USD", max_length=3)
+    currency: CurrencyCode = "USD"
     invoice_date: date | None = None
     received_date: date | None = None
     due_date: date | None = None
@@ -105,7 +109,7 @@ class InvoiceUpdate(BaseModel):
     vendor: str | None = Field(default=None, max_length=255)
     invoice_number: str | None = Field(default=None, max_length=100)
     amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str | None = Field(default=None, max_length=3)
+    currency: BlankableCurrencyCode = None
     invoice_date: date | None = None
     received_date: date | None = None
     due_date: date | None = None
@@ -243,6 +247,13 @@ class InvoiceResponse(BaseModel):
     # this on load and echoes it back as `expected_updated_at` on the next
     # `PATCH` — the client-side half of the optimistic-concurrency guard.
     updated_at: str
+    # Whether the amount, payee, line items and document are frozen
+    # (`models/invoice_status.financially_locked`: from `approved` on, and at
+    # a failed ERP push after approval — decisions §370). The server's answer,
+    # so a client strips the frozen fields from a save without restating the
+    # status list; the mobile edit sheet reads it. No default: every response
+    # states it, and a client treats its absence as locked.
+    financially_locked: bool
 
     model_config = {"from_attributes": True}
 
@@ -305,6 +316,7 @@ class InvoiceResponse(BaseModel):
             erp_document_id=inv.erp_document_id,
             erp_document_url=inv.erp_document_url,
             priors_summary=_priors_summary(inv),
+            financially_locked=financially_locked(inv),
         )
 
 
@@ -385,10 +397,17 @@ class BulkStatusSkip(BaseModel):
     frozen"; `reason` carries the real cause (the underlying service's own
     `HTTPException.detail`) so the caller isn't misled into treating an
     authorization refusal as a data problem.
+
+    A skip from a coded refusal (`api/refusals.coded_refusal`) also carries its
+    ``code`` and ``params``, so the browser states it in the reader's language
+    and falls back to ``reason`` for a code it does not know. Both are left out
+    of an uncoded skip (the route drops ``None``), whose shape is unchanged.
     """
 
     id: str
     reason: str
+    code: str | None = None
+    params: dict | None = None
 
 
 class BulkStatusResponse(BaseModel):

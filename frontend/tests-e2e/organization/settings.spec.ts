@@ -223,14 +223,20 @@ test.describe('/organization settings', () => {
 		await page.goto('/organization?section=defaults');
 		const before = await getOrg(page);
 		const originalCurrency = before.settings.invoice_defaults?.currency ?? 'USD';
-		// Pick a non-current currency so we know the value flipped.
-		const next = originalCurrency === 'EUR' ? 'GBP' : 'EUR';
+		// Pick a non-current currency so we know the value flipped. PLN is off
+		// the six options the old <select> hardcoded, so it could not be chosen
+		// before free entry (decisions §381).
+		const next = originalCurrency === 'PLN' ? 'GBP' : 'PLN';
 
 		try {
 			const defaultsCard = page.locator('section.card', {
 				has: page.getByRole('heading', { name: 'Invoice Defaults' })
 			});
-			await defaultsCard.locator('select').first().selectOption(next);
+			const field = defaultsCard.getByTestId('org-default-currency');
+			await expect(field).toHaveValue(originalCurrency);
+			// Typed lowercase, uppercased as typed and stored uppercase.
+			await field.fill(next.toLowerCase());
+			await expect(field).toHaveValue(next);
 
 			const saved = page.waitForResponse(
 				(r) =>
@@ -502,7 +508,7 @@ test.describe('/organization settings — non-admin read-only mode', () => {
 		await expect(name).toBeDisabled();
 
 		await page.goto('/organization?section=defaults');
-		await expect(card(page, 'Invoice Defaults').locator('select').first()).toHaveValue(
+		await expect(card(page, 'Invoice Defaults').getByTestId('org-default-currency')).toHaveValue(
 			org.settings.invoice_defaults?.currency ?? 'USD'
 		);
 

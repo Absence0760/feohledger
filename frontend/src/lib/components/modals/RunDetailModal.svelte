@@ -17,7 +17,9 @@
 		downloadRunNacha,
 		recordRunOutside,
 		retryFailedRunPayments,
-		voidRunNachaExport
+		verifyRunNacha,
+		voidRunNachaExport,
+		type NachaVerifyResult
 	} from '#lib/api/payments.ts';
 	import {
 		isRunRetryOffered,
@@ -28,6 +30,7 @@
 		BANK_FILE_DOWNLOAD_HIDDEN,
 		BANK_FILE_REGENERATE_HIDDEN,
 		BANK_FILE_REJECT_HIDDEN,
+		BANK_FILE_VERIFY_HIDDEN,
 		RUN_RECORD_HIDDEN,
 		isRunControlOffered
 	} from '#lib/types/runOutside.ts';
@@ -40,7 +43,6 @@
 	import {
 		NACHA_SEC_CODES,
 		canDispatchPayments,
-		canDownloadBankFile,
 		isBusinessDay,
 		isExternalPayment,
 		localToday,
@@ -171,7 +173,16 @@
 			nacha_export?: ActionRefusal;
 			nacha_regenerate?: ActionRefusal;
 			nacha_void?: ActionRefusal;
+			/** "Verify before upload" — `POST /runs/{id}/nacha/verify`
+			 *  (`.run_nacha_verify_refusal`, decisions §362). */
+			nacha_verify?: ActionRefusal;
 		};
+		/** Whether the bank-file panel applies to this run
+		 *  (`payment_controls.run_bank_file_applies`): on a record-only tenant
+		 *  always, on a processor tenant only while the run still holds an
+		 *  exported file. Optional so an older backend parses; absent shows no
+		 *  panel (decisions §382). */
+		bank_file_applies?: boolean;
 		/** Failures `/retry-failed` would actually send again (retry-safe,
 		 *  latest attempt). Only used to word the armed note — the verdict, not
 		 *  this count, decides whether the control is offered. */
@@ -285,11 +296,26 @@
 	const showReject = $derived(
 		isRunControlOffered(run?.actions?.nacha_void, BANK_FILE_REJECT_HIDDEN)
 	);
-	// The bank-file panel: only on a confirmed record-only tenant (org
-	// configuration, read once from `/execution-mode` — not a row verdict),
-	// and only while one of its controls is offered.
+	const showVerify = $derived(
+		isRunControlOffered(run?.actions?.nacha_verify, BANK_FILE_VERIFY_HIDDEN)
+	);
+	// What the last "verify before upload" found, kept on screen after the
+	// reload: a superseded file must not be uploaded, and the reader needs to
+	// see which payments were taken out even once the run is cancelled.
+	let verifyResult = $state<NachaVerifyResult | null>(null);
+	let verifying = $state(false);
+	let verifyError = $state('');
+	// The bank-file panel: where the server says it applies to this run
+	// (`bank_file_applies` — every run of a record-only tenant, and a run
+	// still holding a file exported before a switch to processor mode, whose
+	// Verify stays allowed and whose Regenerate / Bank rejected the file state
+	// why they are refused; decisions §382), and only while one of its
+	// controls is offered. A verify result stays on screen whatever the run
+	// became: a superseded file must not be uploaded.
 	const showBankFile = $derived(
-		canDownloadBankFile(executionMode) && (showDownload || showRegenerate || showReject)
+		(run?.bank_file_applies === true &&
+			(showDownload || showRegenerate || showReject || showVerify)) ||
+			verifyResult !== null
 	);
 	// Presentation only: once the run's file is out, recording it is THE next
 	// step, so that control becomes the primary one. Whether anything is
@@ -321,6 +347,8 @@
 		try {
 			await downloadRunNacha(run.id, nachaEffectiveDate, nachaSecCode, regenerate);
 			if (!regenerate) toast(m('paymentRuns.runDetail.nachaExportedToast'), 'success');
+			// A new file: the last verify was about the one it replaces.
+			verifyResult = null;
 			// The first export moved the run to `exported`; a regenerate bumped
 			// its file-ID modifier. Either way the server's view is the truth.
 			await load();
@@ -332,6 +360,26 @@
 		} finally {
 			downloadingNacha = false;
 			confirmRegenerate = false;
+		}
+	}
+
+	// "Verify before upload" (decisions §362): re-read the ERP bill of every
+	// payment still in the exported file. A bill paid there since the export is
+	// taken out of the run server-side; the file on disk is then superseded.
+	async function verifyBankFile() {
+		if (!run || !isAllowed(run.actions?.nacha_verify)) return;
+		confirmRegenerate = false;
+		verifying = true;
+		verifyError = '';
+		try {
+			verifyResult = await verifyRunNacha(run.id);
+			await load();
+			onchange?.();
+		} catch (err) {
+			// In the panel (role="alert"), not also a toast: one error, one signal.
+			verifyError = errorMessage(err, m('paymentRuns.runDetail.nachaVerifyFailed'));
+		} finally {
+			verifying = false;
 		}
 	}
 
@@ -704,6 +752,48 @@
 						{#if nachaError}
 							<p class="panel-error" role="alert" data-testid="nacha-error">{nachaError}</p>
 						{/if}
+						{#if showVerify && !verifyResult}
+							<p class="panel-hint">{m('paymentRuns.runDetail.nachaVerifyHint')}</p>
+						{/if}
+						{#if verifyError}
+							<p class="panel-error" role="alert" data-testid="nacha-verify-error">{verifyError}</p>
+						{/if}
+						{#if verifyResult}
+							<div data-testid="nacha-verify-result" data-result={verifyResult.result}>
+								{#if verifyResult.result === 'verified'}
+									<p class="panel-hint" role="status">
+										{verifyResult.erp_checked
+											? m('paymentRuns.runDetail.nachaVerifyOk')
+											: m('paymentRuns.runDetail.nachaVerifyNoErp')}
+									</p>
+								{/if}
+								{#if verifyResult.removed.length > 0}
+									<p class="panel-error" role="alert">
+										{m('paymentRuns.runDetail.nachaVerifySuperseded')}
+									</p>
+									<ul class="verify-list">
+										{#each verifyResult.removed as item (item.payment_id)}
+											<li class="mono">{item.invoice_number ?? item.invoice_id}</li>
+										{/each}
+									</ul>
+									<p class="panel-hint warn">
+										{verifyResult.remaining > 0
+											? m('paymentRuns.runDetail.nachaVerifyRegenerate')
+											: m('paymentRuns.runDetail.nachaVerifyCancelled')}
+									</p>
+								{/if}
+								{#if verifyResult.held.length > 0}
+									<p class="panel-hint warn" role="status">
+										{m('paymentRuns.runDetail.nachaVerifyHeld')}
+									</p>
+									<ul class="verify-list">
+										{#each verifyResult.held as item (item.payment_id)}
+											<li class="mono">{item.invoice_number ?? item.invoice_id}</li>
+										{/each}
+									</ul>
+								{/if}
+							</div>
+						{/if}
 						{#if rejectOpen}
 							<form class="reject-form" onsubmit={(e) => { e.preventDefault(); rejectExport(); }}>
 								<p class="panel-hint">{m('paymentRuns.runDetail.nachaRejectIntro')}</p>
@@ -755,11 +845,31 @@
 											: m('paymentRuns.runDetail.nachaDownload')}
 									</button>
 								{/if}
+								{#if showVerify}
+									<button
+										type="button"
+										class="btn-secondary"
+										disabled={verifying || downloadingNacha || !isAllowed(run.actions?.nacha_verify)}
+										aria-describedby={run.actions?.nacha_verify
+											? 'run-nacha-verify-refusal'
+											: undefined}
+										data-testid="nacha-verify"
+										onclick={verifyBankFile}
+									>
+										{verifying
+											? m('paymentRuns.runDetail.nachaVerifying')
+											: m('paymentRuns.runDetail.nachaVerify')}
+									</button>
+								{/if}
 								{#if showReject}
 									<button
 										type="button"
 										class="btn-discard"
 										disabled={downloadingNacha || !isAllowed(run.actions?.nacha_void)}
+										aria-describedby={run.actions?.nacha_void
+											? 'run-nacha-void-refusal'
+											: undefined}
+										data-testid="nacha-reject"
 										onclick={openReject}
 									>
 										{m('paymentRuns.runDetail.nachaReject')}
@@ -807,6 +917,24 @@
 									data-testid="run-nacha-export-refusal"
 								>
 									{refusalText(run.actions.nacha_export, m)}
+								</p>
+							{/if}
+							{#if showVerify && run.actions?.nacha_verify}
+								<p
+									class="panel-hint warn"
+									id="run-nacha-verify-refusal"
+									data-testid="run-nacha-verify-refusal"
+								>
+									{refusalText(run.actions.nacha_verify, m)}
+								</p>
+							{/if}
+							{#if showReject && run.actions?.nacha_void}
+								<p
+									class="panel-hint warn"
+									id="run-nacha-void-refusal"
+									data-testid="run-nacha-void-refusal"
+								>
+									{refusalText(run.actions.nacha_void, m)}
 								</p>
 							{/if}
 							{#if showRegenerate && run.actions?.nacha_regenerate}
@@ -1423,6 +1551,13 @@
 
 	.panel-hint.warn {
 		color: var(--danger);
+	}
+
+	.verify-list {
+		margin: 6px 0 8px;
+		padding-left: 20px;
+		font-size: 0.82rem;
+		overflow-wrap: anywhere;
 	}
 
 	.reject-form {

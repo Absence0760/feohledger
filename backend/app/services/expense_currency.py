@@ -59,8 +59,14 @@ class ExpenseConversionError(ValueError):
     """A line could not be converted into the report's currency.
 
     Carries no PII — only the two currency codes — so the router can put the
-    message straight into the HTTP error body.
+    message straight into the HTTP error body, and the codes themselves into
+    the coded refusal's params (``expense_fx_rate_unavailable``).
     """
+
+    def __init__(self, message: str, *, source_currency: str, target_currency: str) -> None:
+        super().__init__(message)
+        self.source_currency = source_currency
+        self.target_currency = target_currency
 
 
 def _quantize_money(value: Decimal) -> Decimal:
@@ -143,7 +149,9 @@ async def lock_expense_conversion(
         )
     except Exception as exc:  # provider outage, unknown currency, zero rate
         raise ExpenseConversionError(
-            f"No FX rate available to convert {src} into the report currency {tgt}."
+            f"No FX rate available to convert {src} into the report currency {tgt}.",
+            source_currency=src,
+            target_currency=tgt,
         ) from exc
 
     expense.converted_currency = converted.reporting_currency

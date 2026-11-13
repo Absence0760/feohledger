@@ -703,6 +703,49 @@ async def test_sync_erp_ignores_an_id_link_made_in_another_erp_company(realdb, m
     assert await _vendor_of(realdb, "QBO-1") == by_name_id
 
 
+async def test_sync_erp_links_a_po_by_the_vendors_kept_link_in_this_company(realdb, monkeypatch):
+    """Acme's row holds its sandbox link; its production "56" is kept in
+    `vendor_erp_links` from an earlier production connection (decisions §356).
+    A production PO naming "56" is Acme's, as the push would post "56" for it;
+    the row's sandbox "56"-alike on another vendor is not."""
+    from app.api import purchase_orders
+    from app.models.vendor import VendorErpLink
+    from app.services.erp_adapters.base import PoPayload
+
+    monkeypatch.setattr(purchase_orders, "connection_realm", lambda _cfg: "qbo:prod")
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        acme = Vendor(
+            name="Acme",
+            erp_vendor_id="9",
+            erp_link_realm="qbo:sandbox",
+            organization_id=org_id,
+        )
+        sandbox_56 = Vendor(
+            name="Sandbox Fifty-Six",
+            erp_vendor_id="56",
+            erp_link_realm="qbo:sandbox",
+            organization_id=org_id,
+        )
+        s.add_all([acme, sandbox_56])
+        await s.flush()
+        s.add(
+            VendorErpLink(
+                organization_id=org_id, vendor_id=acme.id, realm="qbo:prod", erp_vendor_id="56"
+            )
+        )
+        await s.commit()
+        acme_id = acme.id
+
+    await _sync_with_payloads(
+        realdb,
+        monkeypatch,
+        [PoPayload(po_number="QBO-K", vendor_name="Other", vendor_erp_id="56", total=Decimal("1"))],
+    )
+
+    assert await _vendor_of(realdb, "QBO-K") == acme_id
+
+
 async def test_sync_erp_fills_a_missing_vendor_on_resync_and_never_repoints(realdb, monkeypatch):
     """A PO synced before its supplier gets linked by the next sync once the
     vendor exists; a vendor already on a PO is left alone."""

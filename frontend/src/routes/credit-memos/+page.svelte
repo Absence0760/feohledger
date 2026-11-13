@@ -25,7 +25,9 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatDate } from '#lib/utils/time.ts';
-	import { DEFAULT_CURRENCY, currencyOptions } from '#lib/utils/money.ts';
+	import { DEFAULT_CURRENCY } from '#lib/utils/money.ts';
+	import { normalizeCurrencyCode } from '#lib/utils/currencyCode.ts';
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { listInvoicesEligibleForMemo, listInvoicesEligibleForNewMemo } from '#lib/api/creditMemos.ts';
 	import type { EligibleInvoice } from '#lib/types/creditMemo.ts';
@@ -203,32 +205,11 @@
 	// newer one and leave the chips describing a set the table isn't showing.
 	const summarySequence = createRequestSequencer();
 
-	// The shortlist always contains the org's own reporting currency, so the
-	// picker can never be unable to express the currency the tenant reports in.
-	// An edit adds the memo's own currency, so a memo keyed in something off the
-	// shortlist still shows what it holds rather than silently offering a
-	// different value.
-	const CURRENCY_OPTIONS = $derived.by(() => {
-		const options = currencyOptions(orgCurrency.currency ?? DEFAULT_CURRENCY);
-		const own = editTarget?.currency;
-		return own && !options.includes(own) ? [own, ...options] : options;
-	});
-
 	$effect(() => {
 		orgCurrency.ensureLoaded().catch(() => {
 			/* stays unresolved by design — see orgSettings.svelte.ts; the form
 			   below then starts from DEFAULT_CURRENCY, named explicitly */
 		});
-	});
-
-	// Seed the select once the org currency resolves, unless the user already
-	// picked. `untrack` on the write so this effect depends on the store, not
-	// on its own output. A select needs A value, so an unresolved store seeds
-	// the platform default — here, explicitly, never inside the store.
-	$effect(() => {
-		const ccy = orgCurrency.currency ?? DEFAULT_CURRENCY;
-		if (untrack(() => currencyTouched)) return;
-		formCurrency = ccy;
 	});
 
 	// The mount effect loads the list ONCE. It must not depend on
@@ -504,7 +485,7 @@
 				// credit against a USD-reporting org needs to say so here.
 				...(formInvoiceId
 					? { invoice_id: formInvoiceId }
-					: { currency: formCurrency || orgCurrency.currency || DEFAULT_CURRENCY }),
+					: { currency: normalizeCurrencyCode(formCurrency) ?? formCurrency }),
 				reason: formReason.trim() || null
 			});
 			toast(m('creditMemos.toast.created'), 'success');
@@ -531,7 +512,8 @@
 		// Compared as numbers only to decide WHETHER to send; what is sent is
 		// the decimal string the field holds.
 		if (Number(formAmount) !== Number(target.amount)) changes.amount = String(formAmount);
-		if (formCurrency !== target.currency) changes.currency = formCurrency;
+		const currency = normalizeCurrencyCode(formCurrency) ?? formCurrency;
+		if (currency !== target.currency) changes.currency = currency;
 		const reason = formReason.trim() || null;
 		if (reason !== (target.reason ?? null)) changes.reason = reason;
 		if (Object.keys(changes).length === 0) {
@@ -836,19 +818,17 @@
 					<option>{linkedCurrency}</option>
 				</select>
 			{:else}
-				<select
-					value={formCurrency}
-					onchange={(e) => {
-						currencyTouched = true;
-						formCurrency = (e.currentTarget as HTMLSelectElement).value;
-					}}
-					required
-					aria-describedby="cm-currency-hint"
-				>
-					{#each CURRENCY_OPTIONS as ccy (ccy)}
-						<option value={ccy}>{ccy}</option>
-					{/each}
-				</select>
+				<!-- Free entry over any ISO 4217 code: a select over the shortlist
+				     could not express a PLN or HKD memo at all (decisions §381).
+				     It follows the org currency until the user types; an edit
+				     opens touched, so the memo's own code is never re-seeded. -->
+				<CurrencyInput
+					bind:value={formCurrency}
+					bind:touched={currencyTouched}
+					preferred={orgCurrency.currency}
+					describedby="cm-currency-hint"
+					testid="cm-currency"
+				/>
 			{/if}
 			<!-- `aria-describedby`, not a bare child of the `<label>`: a hint
 			     inside the label is folded into the control's accessible NAME, so

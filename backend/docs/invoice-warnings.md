@@ -227,6 +227,16 @@ English fallback), its `code` and its `params`. Which code:
   localized on its own code; the server no longer joins localized text, which
   also retired the `$` the price-variance summary stamped on every figure.
 
+A refresh re-derives the warnings every time, but it does not re-open an
+exception a person has resolved or dismissed while the facts that type's rule
+reads are unchanged. `_ensure_exception` stamps every row it raises with
+`finding_fingerprint` (`current_finding_fingerprint`, one rule per type), and
+a caller that already holds those facts (the line-total sum, the priced lines,
+the compliance findings) passes the stamp in. The per-type table and the
+binding rules are in [exception-lifecycle.md](exception-lifecycle.md); the
+reasoning is decisions §286 and §366. The warning itself stays on the invoice,
+so the reviewer still reads it at approval.
+
 Both columns stay **NULL** for a human-authored description (a rejection
 reason) and for every row raised before 0103 — no backfill, because the
 `$`-prefixed historical sentences recorded no currency, and parsing English back
@@ -288,23 +298,54 @@ into the English.
 refusal-chosen codes and the `_unnamed` twins have no literal call site for the
 generic call-site scan to find.
 
+### The direct `create_exception` sites (`exception.*`, decisions §358)
+
+The callers that open an exception through `exception_service.create_exception`
+themselves, rather than through `_ensure_exception`, pass a finding's
+`message` / `code` / `params` as `description` / `description_code` /
+`description_params` too (`DIRECT_EXCEPTION_SPECS`):
+
+| Site | Exception type | Codes |
+|------|----------------|-------|
+| `services/extraction.py` | `extraction_failed` | `extraction_failed` — `errorClass` is the exception's CLASS name; `str(exc)` never reaches the row, because a provider or parser message can quote the document |
+| `api/positive_pay.py` | `fraud_flag` | `positive_pay_altered_amount`, `positive_pay_not_on_file` — `checkNumber` |
+| `api/vendors.flag_invoice_for_bank_change` | `fraud_flag` | `vendor_bank_changed` |
+| `api/payments._open_compliance_hold_exception` | `payment_compliance_hold` | the `compliance_hold_findings` frame over the hold's reasons, below |
+| `services/payment_reconciler.flag_payment_for_reconciliation` (the reconciler's age-out, and `api/payments`' two in-doubt dispatch paths) | `payment_reconciliation` | `payment_aged_out`, `payment_dispatch_in_doubt`, `payment_dispatch_interrupted_failed`, `payment_dispatch_interrupted_cancelled` |
+| `services/payment_settlement_record.open_settlement_mismatch_exception` | `fraud_flag` | `settlement_currency_mismatch`, `settlement_amount_over`, `settlement_amount_under` (`payment_settlement.discrepancy_finding`) |
+
+- **A compliance hold is always framed.** `ComplianceDecision.findings` carries
+  every hold-capable reason as an `exception.compliance_*` finding (no
+  screenable vendor, the provider unavailable, `review_required` with or
+  without a list, an unrecognised result, adverse media with or without a
+  provider name, the AML spend alert with or without excluded payments) in the
+  same order as the English `reasons` that `payment.failure_reason` still
+  joins. The description is `exception_findings("compliance_hold_findings",
+  findings, frame_single=True)`: even one reason sits under the frame, because
+  each reason is a clause written to follow it. Refusal-only reasons (a block,
+  a sanctions match, a KYC gap) have no code — no exception is opened for a
+  refusal.
+- **A settlement discrepancy's figures are `number`s beside `text` currency
+  codes**, not `money`: a currency mismatch has two currencies, and one
+  `currency` param could label only one side (the §197 reasoning). A code the
+  processor did not report is `?`.
+- **Positive Pay's dedupe moved to code + `checkNumber`.** It used to compare
+  `description` (the English, which carried the cheque number and the
+  verdict). An open row with a `description_code` now matches only on code +
+  `description_params.checkNumber`; a row raised before §358 has no code and
+  matches on its `description`, which is still byte-identical to the new
+  fallback. A redelivered return file after the upgrade therefore re-raises
+  nothing already in the queue (`tests/test_positive_pay_api.py` pins both
+  arms).
+- **The no-code guard.** `tests/test_invoice_warning_catalog.py` AST-scans
+  every `create_exception` call under `app/` and fails on one that passes no
+  `description_code`, except the declared human-authored sites.
+
 ## What is NOT localized
 
-Exceptions raised outside `_ensure_exception` (and outside extraction's
-duplicate path and the ERP reconciliation paths above) still call `exception_service.create_exception` with composed
-English and no code, so the queue renders them raw:
-
-| Site | Exception type | Description |
-|------|----------------|-------------|
-| `services/extraction.py` | `extraction_failed` | `Extraction failed: <error>` |
-| `api/positive_pay.py` | `fraud_flag` | `Positive Pay return: check <number> <reason>` — also the dedupe key (`description ==`), so keying it must move the dedupe too |
-| `api/vendors.py` (bank change) | `fraud_flag` | `Vendor bank details changed; verify before payment.` |
-| `api/payments.py` | `payment_compliance_hold` | the payment's `failure_reason` |
-| `services/payment_reconciler.py` | `payment_reconciliation` | the aged-out in-flight payment paragraph |
-| `services/payment_settlement_record.py` | `fraud_flag` | `describe_discrepancy(...)` |
-
-`services/review.py`'s `review_rejected` exception is not on this list on
-purpose: its description is the reviewer's own words, which have no code by
-nature. Keying any of the others means a catalogue spec per sentence and passing
-`description_code` / `description_params` through `create_exception`, exactly as
-the extraction duplicate site does.
+`services/review.py`'s `review_rejected` exception: its description is the
+reviewer's own words, which have no code by nature. It is the one direct
+`create_exception` caller the guard above exempts. Every row raised before its
+site was keyed (0103 for `_ensure_exception`, §319 for the ERP paths, §358 for
+the sites above) keeps its English `description` and no code; nothing
+backfills them.

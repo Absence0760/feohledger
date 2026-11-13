@@ -242,6 +242,15 @@ async def test_over_settlement_opens_a_blocking_fraud_flag_and_skips_the_discoun
     assert kwargs["exception_type"] == "fraud_flag"
     assert kwargs["severity"] == "error"
     assert "50000.00" in kwargs["description"] and "5000.00" in kwargs["description"]
+    # Keyed (decisions §358): MORE picks the code, the figures are params.
+    assert kwargs["description_code"] == "exception.settlement_amount_over"
+    assert kwargs["description_params"] == {
+        "settledAmount": "50000.00",
+        "settledCurrency": "USD",
+        "authorizedAmount": "5000.00",
+        "authorizedCurrency": "USD",
+        "variance": "45000.00",
+    }
 
 
 @pytest.mark.asyncio
@@ -274,6 +283,10 @@ async def test_under_settlement_is_also_flagged():
 
     mocks["exception"].assert_awaited_once()
     assert mocks["audit"].call_args.kwargs["details"]["settlement"]["variance"] == "-250.00"
+    assert (
+        mocks["exception"].call_args.kwargs["description_code"]
+        == "exception.settlement_amount_under"
+    )
 
 
 @pytest.mark.asyncio
@@ -289,6 +302,10 @@ async def test_settlement_in_an_unauthorized_currency_is_flagged():
     assert (
         mocks["audit"].call_args.kwargs["details"]["settlement"]["outcome"] == "currency_mismatch"
     )
+    kwargs = mocks["exception"].call_args.kwargs
+    assert kwargs["description_code"] == "exception.settlement_currency_mismatch"
+    assert kwargs["description_params"]["settledCurrency"] == "EUR"
+    assert kwargs["description_params"]["authorizedCurrency"] == "USD"
 
 
 # ---------------------------------------------------------------------------

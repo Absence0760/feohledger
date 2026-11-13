@@ -25,7 +25,7 @@ from app.models.expense import (
     PreapprovalStatus,
     ReconciliationStatus,
 )
-from app.models.gl_account import GLAccount
+from app.models.gl_account import GLAccount, GLAccountErpLink
 from app.models.international_tax import IntlTaxRecord, TaxKind
 from app.models.invoice import Invoice, InvoiceExtractionResult, InvoiceLineItem
 from app.models.invoice_embedding import InvoiceEmbedding
@@ -67,7 +67,7 @@ from app.models.supplier_chat import (
 )
 from app.models.tax_filing import Tax1099Filing
 from app.models.user import Role, User, UserRole
-from app.models.vendor import Vendor
+from app.models.vendor import Vendor, VendorErpLink
 from app.models.vendor_change_request import VendorChangeRequest
 from app.models.vendor_priors import VendorExtractionPrior
 from app.models.vendor_statement_recon import (
@@ -138,6 +138,7 @@ __all__ = [
     "ExpenseReportStatus",
     "ExpenseStatus",
     "GLAccount",
+    "GLAccountErpLink",
     "GoodsReceipt",
     "GRLineItem",
     "IntakeRequest",
@@ -172,6 +173,7 @@ __all__ = [
     "Tax1099Filing",
     "Vendor",
     "VendorChangeRequest",
+    "VendorErpLink",
     "VendorExtractionPrior",
     "VendorStatementReconciliation",
     "VendorStatementReconLine",

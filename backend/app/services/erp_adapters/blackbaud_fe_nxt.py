@@ -318,6 +318,17 @@ BLACKBAUD_OAUTH = register_oauth_provider(
         scopes=(),
         client_id_setting="erp_blackbaud_client_id",
         client_secret_setting="erp_blackbaud_client_secret",
+        # SKY API's OAuth service has /authorization and /token and no
+        # revocation endpoint. A grant ends when the application is
+        # disconnected from the environment: by the customer in Blackbaud
+        # Marketplace, or by the developer under My Applications, which
+        # Blackbaud says revokes that connection's refresh tokens (decisions
+        # §371). Regenerating the client secret does NOT revoke them.
+        no_revoke_endpoint_reason=(
+            "Blackbaud SKY API has no token-revocation endpoint. The grant ends "
+            "when the environment's admin disconnects the app in Blackbaud "
+            "Marketplace."
+        ),
     )
 )
 

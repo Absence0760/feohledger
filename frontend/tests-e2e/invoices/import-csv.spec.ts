@@ -35,9 +35,9 @@ test.describe('/invoices — Import CSV', () => {
 		// bypassing the workflow engine would drop a payable invoice into
 		// the queue with no audit trail (issue #174, per the backend doc).
 		const csv =
-			'invoice_number,vendor_name,amount,status\n' +
-			`${goodInvoiceNumber},${vendorName},1250.00,done\n` +
-			`${badInvoiceNumber},${vendorName},500.00,approved\n`;
+			'invoice_number,vendor_name,amount,currency,status\n' +
+			`${goodInvoiceNumber},${vendorName},1250.00,USD,done\n` +
+			`${badInvoiceNumber},${vendorName},500.00,USD,approved\n`;
 
 		await modal.locator('input[type="file"]').setInputFiles({
 			name: 'invoices.csv',

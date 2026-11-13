@@ -20,7 +20,9 @@
 		unblockVendor,
 		recomputeVendorRisk,
 		enrichVendor,
-		applyVendorEnrichment
+		applyVendorEnrichment,
+		getVendorErpLinks,
+		unlinkVendorErpLink
 	} from '#lib/api/vendors.ts';
 	import {
 		riskLevelLabelKey,
@@ -28,6 +30,7 @@
 		type Vendor,
 		type SanctionsCheck,
 		type ScreeningStatus,
+		type VendorErpLink,
 		type EnrichmentFieldSuggestion
 	} from '#lib/types/vendor.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -222,6 +225,72 @@
 		}
 	}
 
+	// --- ERP links (decisions §356 / §375) -------------------------------------
+	// One link per ERP company: the row link (last synced) and the kept ones.
+	// Unlink is `vendor.manage`, an armed two-click: it makes the vendor's next
+	// bill in that company refused `vendor_not_linked` until it is linked again.
+	// It is the way through a merge refused `vendor_merge_erp_link_conflict`.
+	const canUnlinkErp = $derived(auth.can(PERM_VENDOR_MANAGE));
+	let erpLinks = $state<VendorErpLink[]>([]);
+	let loadingErpLinks = $state(true);
+	let erpLinksError = $state(false);
+	/** The realm whose Unlink is armed (`''` stands for the unnamed row link),
+	 *  or null. A realm is never the empty string. */
+	let unlinkArmed = $state<string | null>(null);
+	let unlinking = $state<string | null>(null);
+
+	const realmKey = (realm: string | null) => realm ?? '';
+
+	$effect(() => {
+		const id = vendor.id;
+		loadingErpLinks = true;
+		erpLinksError = false;
+		unlinkArmed = null;
+		getVendorErpLinks(id)
+			.then((res) => {
+				erpLinks = res.links;
+			})
+			.catch(() => {
+				erpLinks = [];
+				erpLinksError = true;
+			})
+			.finally(() => {
+				loadingErpLinks = false;
+			});
+	});
+
+	// Outside-click un-arms (ui-patterns § Per-row actions). A click on any
+	// Unlink in this panel is left to `unlinkErp`, which arms or confirms it;
+	// any other click — another panel's button, the modal body — clears it, so
+	// a "Confirm unlink" is never left armed for a later stray click.
+	function disarmUnlinkOnOutsideClick(e: MouseEvent) {
+		if (unlinkArmed === null) return;
+		const target = e.target as Element | null;
+		if (!target?.closest('[data-testid="vendor-erp-links"] .row-action')) unlinkArmed = null;
+	}
+
+	async function unlinkErp(link: VendorErpLink) {
+		const key = realmKey(link.realm);
+		if (unlinkArmed !== key) {
+			unlinkArmed = key;
+			return;
+		}
+		unlinkArmed = null;
+		unlinking = key;
+		busy = 'unlink';
+		try {
+			const res = await unlinkVendorErpLink(vendor.id, link.realm);
+			erpLinks = res.links;
+			onupdated(res.vendor);
+			toast(m('vendors.modal.erp.unlinkedToast', { id: link.erp_vendor_id }), 'success');
+		} catch (err) {
+			toast(errMsg(err, m('vendors.modal.erp.unlinkFailed')), 'error');
+		} finally {
+			unlinking = null;
+			busy = '';
+		}
+	}
+
 	// --- External enrichment (advisory firmographics + steward apply) ---------
 	// `enrichRun` holds the last enrich result; `selected` is the steward's
 	// per-field pick (defaults to all suggested fields checked). `enriched`
@@ -292,6 +361,8 @@
 		}
 	}
 </script>
+
+<svelte:window onclick={disarmUnlinkOnOutsideClick} />
 
 <Modal open ariaLabel={m('vendors.modal.dialogAria')} width="lg" {onclose}>
 	<h2>{vendor.name}</h2>
@@ -366,6 +437,78 @@
 				<span class="muted">{m('vendors.modal.noPermission')}</span>
 			{/if}
 		</div>
+	</section>
+
+	<section class="panel" data-testid="vendor-erp-links">
+		<h3 id="vendor-erp-links-heading">{m('vendors.modal.erp.heading')}</h3>
+		<p class="hint muted">{m('vendors.modal.erp.hint')}</p>
+
+		{#if loadingErpLinks}
+			<p class="muted">{m('common.loading')}</p>
+		{:else if erpLinksError}
+			<!-- Its own state: a failed read is not a vendor with no links. -->
+			<p class="muted" data-testid="vendor-erp-links-error">{m('vendors.modal.erp.loadFailed')}</p>
+		{:else if erpLinks.length === 0}
+			<p class="muted" data-testid="vendor-erp-links-empty">{m('vendors.modal.erp.none')}</p>
+		{:else}
+			<!-- Four columns (an uppercase header, a raw supplier id, the Unlink
+			     button) do not fit a 320px dialog: the table pans inside this
+			     named, focusable region instead of the page scrolling sideways
+			     (WCAG 1.4.10 + 2.1.1; ui-patterns § tables). -->
+			<div
+				class="table-scroll"
+				role="region"
+				aria-labelledby="vendor-erp-links-heading"
+				tabindex="0"
+				data-testid="vendor-erp-links-scroll"
+			>
+				<table class="score-table erp-links-table">
+					<thead>
+						<tr>
+							<th scope="col">{m('vendors.modal.erp.colCompany')}</th>
+							<th scope="col">{m('vendors.modal.erp.colSupplier')}</th>
+							<th scope="col">{m('vendors.modal.erp.colLink')}</th>
+							{#if canUnlinkErp}
+								<th scope="col" class="actions-col"><span class="visually-hidden">{m('vendors.modal.erp.colAction')}</span></th>
+							{/if}
+						</tr>
+					</thead>
+					<tbody>
+						{#each erpLinks as link (link.placement + ':' + realmKey(link.realm))}
+							{@const company = link.realm ?? m('vendors.modal.erp.noCompany')}
+							<tr data-testid="vendor-erp-link">
+								<th scope="row" class="erp-company">{company}</th>
+								<td>{link.erp_vendor_id}</td>
+								<td class="muted">
+									{link.placement === 'row'
+										? m('vendors.modal.erp.placementRow')
+										: m('vendors.modal.erp.placementKept')}
+								</td>
+								{#if canUnlinkErp}
+									<td class="actions">
+										<RowAction
+											variant="danger"
+											armed={unlinkArmed === realmKey(link.realm)}
+											disabled={busy !== ''}
+											ariaLabel={m('vendors.modal.erp.unlinkAria', { id: link.erp_vendor_id, company })}
+											onclick={() => unlinkErp(link)}
+										>
+											{#if unlinking === realmKey(link.realm)}
+												{m('vendors.modal.erp.unlinking')}
+											{:else if unlinkArmed === realmKey(link.realm)}
+												{m('vendors.modal.erp.confirmUnlink')}
+											{:else}
+												{m('vendors.modal.erp.unlink')}
+											{/if}
+										</RowAction>
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 	</section>
 
 	{#if canSeeScore}
@@ -626,6 +769,26 @@
 	}
 	.score-basis {
 		line-height: 1.4;
+	}
+	.erp-company {
+		font-weight: 500;
+		word-break: break-all;
+	}
+	.table-scroll {
+		overflow-x: auto;
+		max-width: 100%;
+	}
+	.erp-links-table {
+		min-width: 30rem;
+	}
+	.erp-links-table td {
+		overflow-wrap: anywhere;
+	}
+	.actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		white-space: nowrap;
 	}
 	.enrich-empty {
 		margin-top: 12px;

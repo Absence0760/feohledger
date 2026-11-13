@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, EntityMixin, TimestampMixin
+from app.utils.currency_code import iso_currency_or_none
 
 #: PO statuses that no longer represent a live commitment. `PurchaseOrder.status`
 #: is a free-form `String(30)` written by the ERP feed and the requisition
@@ -50,10 +51,7 @@ def po_currency_code(value: object) -> str | None:
     §197). ``po_matching`` normalises the invoice side the same way before it
     compares the two.
     """
-    if not isinstance(value, str):
-        return None
-    code = value.strip().upper()
-    return code if len(code) == 3 and code.isascii() and code.isalpha() else None
+    return iso_currency_or_none(value)
 
 
 class PurchaseOrder(Base, EntityMixin, TimestampMixin):

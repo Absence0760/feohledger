@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.contract import ContractType
+from app.schemas.currency import CurrencyCode, OptionalCurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # Bulk lifecycle actions a human may legitimately drive over a hand-picked
@@ -40,7 +41,7 @@ class ContractBase(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     description: str | None = None
     contract_type: ContractType = ContractType.purchase
-    currency: str = Field(default="USD", max_length=3)
+    currency: CurrencyCode = "USD"
     # Digits match `contracts.total_value` / `.spend_limit` Numeric(15, 2). A
     # contract value / spend cap is never negative.
     total_value: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
@@ -71,7 +72,7 @@ class ContractUpdate(BaseModel):
     description: str | None = None
     contract_type: ContractType | None = None
     vendor_id: str | None = None
-    currency: str | None = Field(default=None, max_length=3)
+    currency: OptionalCurrencyCode = None
     total_value: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
     spend_limit: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
     not_to_exceed: bool | None = None

@@ -302,6 +302,32 @@ _WORKFLOW_SCENARIOS = {
     "approved_duplicate": (InvoiceStatus.approved, True, _WITH_ERP, "duplicate"),
     "approved_live_payment": (InvoiceStatus.approved, True, _WITH_ERP, "payment"),
     "approved_blocked_vendor": (InvoiceStatus.approved, True, _WITH_ERP, "blocked_vendor"),
+    # `/complete` closes these to `done` (no ERP step): refused while our rails
+    # hold the invoice (decisions §357), closed once the claim is dead.
+    "approved_no_erp_live_payment": (
+        InvoiceStatus.approved,
+        True,
+        [_STEP_APPROVAL, _STEP_NO_ERP],
+        "payment",
+    ),
+    "approved_no_erp_exported_run": (
+        InvoiceStatus.approved,
+        True,
+        [_STEP_APPROVAL, _STEP_NO_ERP],
+        "exported_payment",
+    ),
+    "approved_no_erp_live_card": (
+        InvoiceStatus.approved,
+        True,
+        [_STEP_APPROVAL, _STEP_NO_ERP],
+        "card",
+    ),
+    "approved_no_erp_voided_payment": (
+        InvoiceStatus.approved,
+        True,
+        [_STEP_APPROVAL, _STEP_NO_ERP],
+        "voided_payment",
+    ),
     "failed_push": (InvoiceStatus.failed, True, _WITH_ERP, None),
     "failed_push_duplicate": (InvoiceStatus.failed, True, _WITH_ERP, "duplicate"),
     "failed_extraction": (InvoiceStatus.failed, False, _WITH_ERP, None),
@@ -377,10 +403,10 @@ async def _workflow_invoice(realdb, scenario: str) -> uuid.UUID:
                 organization_id=org_id,
                 invoice=inv,
             )
-        elif arrangement == "payment":
+        elif arrangement in ("payment", "exported_payment", "voided_payment"):
             run = PaymentRun(
                 organization_id=org_id,
-                status="draft",
+                status="exported" if arrangement == "exported_payment" else "draft",
                 total_amount=inv.amount,
                 requires_cfo_approval=False,
             )
@@ -392,8 +418,23 @@ async def _workflow_invoice(realdb, scenario: str) -> uuid.UUID:
                     payment_run_id=run.id,
                     amount=inv.amount,
                     method="ach",
-                    status="pending",
+                    status="voided" if arrangement == "voided_payment" else "pending",
                     correlation_id=inv.correlation_id,
+                )
+            )
+        elif arrangement == "card":
+            from app.models.virtual_card import VirtualCard
+
+            s.add(
+                VirtualCard(
+                    organization_id=org_id,
+                    invoice_id=inv.id,
+                    card_provider="mock",
+                    provider_card_id=f"mock-{uuid.uuid4().hex[:8]}",
+                    amount_limit=inv.amount,
+                    currency="USD",
+                    status="active",
+                    last_four="4242",
                 )
             )
         elif arrangement == "blocked_vendor":
@@ -488,7 +529,12 @@ async def test_the_workflow_verdicts_match_what_complete_send_and_retry_answer(
         assert seen["send_to_erp"] == {"role_not_permitted"}
         assert seen["retry_erp"] == {"role_not_permitted"}
     else:
-        assert seen["complete"] == {None, "invoice_not_completable", *export_codes}, seen
+        assert seen["complete"] == {
+            None,
+            "invoice_not_completable",
+            "payment_blocks_completion",
+            *export_codes,
+        }, seen
         assert seen["send_to_erp"] == {None, "invoice_not_erp_sendable", *export_codes}, seen
         assert seen["retry_erp"] == {
             None,
@@ -569,3 +615,155 @@ async def test_complete_no_longer_closes_a_posted_or_paid_invoice(realdb):
             "params": {"status": before.value},
         }
         assert await _status_of(realdb, invoice_id) == before
+
+
+@pytest.mark.parametrize(
+    ("scenario", "claim"),
+    [
+        ("approved_no_erp_live_payment", "payment"),
+        ("approved_no_erp_exported_run", "payment"),
+        ("approved_no_erp_live_card", "virtual_card"),
+    ],
+)
+async def test_complete_does_not_close_an_invoice_our_rails_hold(realdb, scenario, claim):
+    """A staged or exported run, or a minted card, leaves the invoice
+    `approved`; `/complete` with no ERP step used to close it to `done` while
+    our rail still paid it (decisions §357)."""
+    invoice_id = await _workflow_invoice(realdb, scenario)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/complete")
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "payment_blocks_completion"
+    assert detail["params"] == {"claim": claim}
+    assert await _status_of(realdb, invoice_id) == InvoiceStatus.approved
+
+
+@pytest.mark.parametrize("scenario", ["approved_no_erp", "approved_no_erp_voided_payment"])
+async def test_complete_closes_an_unclaimed_approved_invoice(realdb, scenario):
+    """No claim, or one the rails no longer count as live: closes as before,
+    with its `invoice.completed` audit row."""
+    invoice_id = await _workflow_invoice(realdb, scenario)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/complete")
+    assert resp.status_code == 200, resp.text
+    assert await _status_of(realdb, invoice_id) == InvoiceStatus.done
+    async with realdb.sessionmaker(TENANT)() as s:
+        rows = (
+            await s.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_id == invoice_id, AuditLog.action == "invoice.completed"
+                )
+            )
+        ).all()
+    assert len(rows) == 1
+
+
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_resubmit_verdict_matches_what_resubmit_answers(realdb, role):
+    """`resubmit` (the modal's "Resubmit for review") is null exactly when
+    `POST /resubmit` succeeds, and otherwise carries its code — from a
+    rejected invoice, a rejected one that was once approved (the clerk's
+    window), and statuses resubmit does not start from."""
+    scenarios = {
+        "rejected": ({"status": InvoiceStatus.rejected}, None),
+        "rejected_after_approval": ({"status": InvoiceStatus.rejected}, "Approver"),
+        "in_review": ({"status": InvoiceStatus.ready_for_review}, None),
+        "approved": ({"status": InvoiceStatus.approved}, "Approver"),
+    }
+    seen: set[str | None] = set()
+    for name, (kwargs, approved_by) in scenarios.items():
+        invoice_id = await _invoice(realdb, **kwargs)
+        if approved_by:
+            async with realdb.sessionmaker(TENANT)() as s:
+                (await s.get(Invoice, invoice_id)).approved_by = approved_by
+                await s.commit()
+        verdict = (await _verdict(realdb, role, invoice_id))["resubmit"]
+        async with realdb.client(key=TENANT, role=role) as c:
+            resp = await c.post(f"/api/invoices/{invoice_id}/resubmit")
+        _assert_parity(verdict, resp, (role, name, "resubmit"))
+        if verdict is None:
+            assert resp.json()["status"] == "ready_for_review"
+        else:
+            assert await _status_of(realdb, invoice_id) == kwargs["status"], (role, name)
+        seen.add(verdict and verdict["code"])
+
+    expected = {None, "invoice_not_resubmittable"}
+    if role == "ap_clerk":
+        expected.add("invoice_entry_window_closed")
+    assert seen == expected, (role, seen)
+
+
+#: name → (status, approved before?) for the financial lock (decisions §370).
+_LOCK_ROWS = {
+    "new": (InvoiceStatus.new, False),
+    "in_review": (InvoiceStatus.ready_for_review, False),
+    "reworked_after_approval": (InvoiceStatus.rejected, True),
+    "failed_extraction": (InvoiceStatus.failed, False),
+    "failed_push_after_approval": (InvoiceStatus.failed, True),
+    "approved": (InvoiceStatus.approved, True),
+    "paid": (InvoiceStatus.paid, True),
+    "imported_done": (InvoiceStatus.done, False),
+}
+_ONE_LINE = [{"description": "line", "quantity": "1", "unit_price": "9.00", "total": "9.00"}]
+
+
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_edit_financials_verdict_matches_both_doors(realdb, role):
+    """`edit_financials` (the modal's "may I edit and send the amount, payee and
+    lines?") is null exactly when `PATCH` with a financial field and
+    `PUT /line-items` succeed, and otherwise carries their code. The modal used
+    to restate the locked statuses and missed a failed ERP push after approval,
+    so it would have sent the frozen fields and 409'd every save. The
+    response's `financially_locked` states the same lock for the mobile app."""
+    seen: set[str | None] = set()
+    for name, (status, approved) in _LOCK_ROWS.items():
+        patch_id = await _invoice(realdb, status=status)
+        lines_id = await _invoice(realdb, status=status)
+        if approved:
+            async with realdb.sessionmaker(TENANT)() as s:
+                for invoice_id in (patch_id, lines_id):
+                    (await s.get(Invoice, invoice_id)).approved_by = "Approver"
+                await s.commit()
+        verdict = (await _verdict(realdb, role, patch_id))["edit_financials"]
+        async with realdb.client(key=TENANT, role=role) as c:
+            read = (await c.get(f"/api/invoices/{patch_id}")).json()
+            patch = await c.patch(f"/api/invoices/{patch_id}", json={"amount": "501.00"})
+            lines = await c.put(f"/api/invoices/{lines_id}/line-items", json=_ONE_LINE)
+        label = (role, name)
+        locked = status not in {
+            InvoiceStatus.new,
+            InvoiceStatus.ready_for_review,
+            InvoiceStatus.rejected,
+        } and (status is not InvoiceStatus.failed or approved)
+        assert read["financially_locked"] is locked, label
+        _assert_parity(verdict, lines, (*label, "line-items"))
+        if status in {InvoiceStatus.paid, InvoiceStatus.done}:
+            # `PATCH` refuses an immutable status outright, before the lock and
+            # in plain text; the verdict refuses there too.
+            assert verdict is not None and patch.status_code == 409, (label, patch.text)
+        else:
+            _assert_parity(verdict, patch, (*label, "patch"))
+        if locked and role != "ap_clerk":
+            assert verdict["code"] == "invoice_financially_locked", (label, verdict)
+        async with realdb.sessionmaker(TENANT)() as s:
+            row = await s.get(Invoice, patch_id)
+            assert (row.amount == Decimal("501.00")) is (verdict is None), label
+        seen.add(verdict and verdict["code"])
+
+    expected = {None, "invoice_financially_locked"}
+    if role == "ap_clerk":
+        # A clerk hears the closed entry window first on anything past entry,
+        # the doors' own order — the lock itself never reaches them.
+        expected = {None, "invoice_entry_window_closed"}
+    assert seen == expected, (role, seen)
+
+
+async def test_resubmit_refuses_a_non_rejected_invoice_with_a_code(realdb):
+    """It used to surface the state machine's plain "Cannot transition" text."""
+    invoice_id = await _invoice(realdb, status=InvoiceStatus.new)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/resubmit")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "invoice_not_resubmittable"
+    assert resp.json()["detail"]["params"] == {"status": "new"}

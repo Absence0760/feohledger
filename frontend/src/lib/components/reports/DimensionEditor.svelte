@@ -3,7 +3,8 @@
 	// catalog source's `dimensions` — no hardcoded field list. Date dimensions
 	// expose a grain selector (day/month/quarter/year).
 	import type { CatalogDimension, DateGrain, SpecDimension } from '#lib/types/reports.ts';
-	import { GRAIN_LABELS } from '#lib/types/reports.ts';
+	import { GRAIN_LABEL_KEYS, fieldLabel } from '#lib/types/reports.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 
 	interface Props {
@@ -22,6 +23,10 @@
 		return available.find((d) => d.key === key);
 	}
 
+	function label(key: string): string {
+		return fieldLabel(m, key, meta(key)?.label);
+	}
+
 	function add(key: string) {
 		const d = meta(key);
 		if (!d) return;
@@ -35,42 +40,43 @@
 
 <div class="editor" data-testid="dimension-editor">
 	<div class="editor-head">
-		<h3>Group by</h3>
+		<h3>{m('reports.dims.title')}</h3>
 		{#if unused.length}
 			<select
-				aria-label="Add dimension"
+				aria-label={m('reports.dims.add')}
 				value=""
 				onchange={(e) => {
 					add(e.currentTarget.value);
 					e.currentTarget.value = '';
 				}}
 			>
-				<option value="" disabled selected>+ Add dimension…</option>
+				<option value="" disabled selected>{m('reports.dims.addOption')}</option>
 				{#each unused as d (d.key)}
-					<option value={d.key}>{d.label}</option>
+					<option value={d.key}>{fieldLabel(m, d.key, d.label)}</option>
 				{/each}
 			</select>
 		{/if}
 	</div>
 
 	{#if selected.length === 0}
-		<p class="hint">No dimensions — the report aggregates across the whole set.</p>
+		<p class="hint">{m('reports.dims.empty')}</p>
 	{:else}
 		<ul class="rows">
 			{#each selected as dim (dim.key)}
 				<li class="row">
-					<span class="field-label">{meta(dim.key)?.label ?? dim.key}</span>
+					<span class="field-label">{label(dim.key)}</span>
 					{#if meta(dim.key)?.type === 'date'}
-						<select aria-label="Grain for {meta(dim.key)?.label}" bind:value={dim.grain}>
+						<select aria-label={m('reports.dims.grainFor', { field: label(dim.key) })} bind:value={dim.grain}>
 							{#each GRAINS as g (g)}
-								<option value={g}>{GRAIN_LABELS[g]}</option>
+								<option value={g}>{m(GRAIN_LABEL_KEYS[g])}</option>
 							{/each}
 						</select>
 					{/if}
 					<RowAction
 						variant="danger"
 						onclick={() => remove(dim.key)}
-						ariaLabel="Remove dimension {meta(dim.key)?.label ?? dim.key}">Remove</RowAction
+						ariaLabel={m('reports.dims.removeAria', { field: label(dim.key) })}
+						>{m('reports.remove')}</RowAction
 					>
 				</li>
 			{/each}

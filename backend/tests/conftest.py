@@ -11,8 +11,18 @@ the local ``fake_redis`` fixture and override this one.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi import Request
+
+# The payee bank-fingerprint key (decisions §383). pytest does not load
+# backend/.env.development, and with no key every payment records no
+# fingerprint and every void of one flags a payee change, which is right for a
+# misconfigured deployment and wrong as the suite's baseline. Set before any test
+# module builds `app.config.settings`; a value already in the environment wins.
+# tests/test_payment_payee_stamp.py pins the empty-key behaviour on its own.
+os.environ.setdefault("FEOH_PAYEE_FINGERPRINT_KEY", "test-payee-fingerprint-key-not-a-secret")
 
 
 class _FakeSortedSet:

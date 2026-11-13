@@ -47,7 +47,7 @@ from app.models.payment import Payment
 from app.services.international_payments import realized_fx_gain_loss_for_settlement
 from app.services.payment_settlement import (
     SettlementVerification,
-    describe_discrepancy,
+    discrepancy_finding,
     persistable_settled_amount,
     verify_settlement,
 )
@@ -258,10 +258,13 @@ async def open_settlement_mismatch_exception(
     if already > 0:
         return
 
+    finding = discrepancy_finding(verification)
     await create_exception(
         db,
         exception_type="fraud_flag",
-        description=describe_discrepancy(verification),
+        description=finding["message"],
+        description_code=finding["code"],
+        description_params=finding["params"],
         organization_id=org.id,
         severity="error",
         invoice=invoice,

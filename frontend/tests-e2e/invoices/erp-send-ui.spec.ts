@@ -12,8 +12,8 @@ import {
  * API-level lifecycle spec doesn't cover.
  *
  * Regression: an approved invoice is financially frozen server-side — a
- * `PATCH /api/invoices/{id}` that touches any `_FINANCIALLY_LOCKED_STATUSES`
- * financial field (amount / tax_rate / …) 409s. The modal's submit handler
+ * `PATCH /api/invoices/{id}` that touches any financial field (amount /
+ * tax_rate / …) of a financially locked invoice 409s. The modal's submit handler
  * (`submitDone`) pre-saved the WHOLE field set — including the frozen `amount`
  * — before calling `/complete`, so on an approved invoice the pre-save 409'd
  * and the "Send to ERP" click silently did nothing (the invoice never left

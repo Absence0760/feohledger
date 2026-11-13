@@ -330,6 +330,53 @@ def test_describe_discrepancy_covers_the_currency_case():
     assert "EUR" in text and "USD" in text
 
 
+@pytest.mark.parametrize(
+    ("reported", "currency", "code", "variance"),
+    [
+        (Decimal("600.00"), "USD", "exception.settlement_amount_over", "100.00"),
+        (Decimal("400.00"), "USD", "exception.settlement_amount_under", "-100.00"),
+        (Decimal("500.00"), "EUR", "exception.settlement_currency_mismatch", None),
+    ],
+)
+def test_the_discrepancy_is_a_catalogue_finding(reported, currency, code, variance):
+    """Decisions §358: the exception is keyed, MORE / LESS picks the code, and
+    each side's figure rides beside its own currency code (a currency mismatch
+    has two)."""
+    from app.services.payment_settlement import discrepancy_finding
+
+    v = verify_settlement(
+        reported_amount=reported,
+        reported_currency=currency,
+        target_amount=Decimal("500.00"),
+        target_currency="USD",
+    )
+    finding = discrepancy_finding(v)
+    assert finding["code"] == code
+    expected = {
+        "settledAmount": str(reported),
+        "settledCurrency": currency,
+        "authorizedAmount": "500.00",
+        "authorizedCurrency": "USD",
+    }
+    if variance is not None:
+        expected["variance"] = variance
+    assert finding["params"] == expected
+    assert finding["message"] == describe_discrepancy(v)
+
+
+def test_a_matched_settlement_has_no_discrepancy_finding():
+    from app.services.payment_settlement import discrepancy_finding
+
+    v = verify_settlement(
+        reported_amount=Decimal("500.00"),
+        reported_currency="USD",
+        target_amount=Decimal("500.00"),
+        target_currency="USD",
+    )
+    with pytest.raises(ValueError):
+        discrepancy_finding(v)
+
+
 def test_description_carries_no_pii():
     """The Exception row already holds the invoice FK — the description must
     stay to amounts + currency codes (PII-out-of-error-bodies invariant)."""

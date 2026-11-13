@@ -252,7 +252,9 @@ async def _apply_slack_action(
         return False, "This invoice is no longer awaiting review."
     # The message's figures, checked against the row under the lock — an edit
     # since the post was sent is re-reviewed in the app, not approved from chat.
-    if approval_facts_changed(decoded, invoice):
+    if approval_facts_changed(
+        decoded, invoice, review_round=await review_svc.review_round_of(db, invoice.id)
+    ):
         return False, FACTS_CHANGED_MESSAGE
 
     if decoded.action == ACTION_APPROVE:

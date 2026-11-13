@@ -21,8 +21,11 @@ from app.api.invoice_entry import (
     INVOICE_ENTRY_ROLES,
     INVOICE_ENTRY_WINDOW_CLOSED,
     INVOICE_MANAGE_ROLES,
+    edit_financials_refusal,
+    entry_window_refusal,
     in_entry_window,
     is_entry_only,
+    manage_file_refusal,
     missing_required_fields,
     refuse_entry_only_outside_window,
     stamp_entry_editor,
@@ -45,6 +48,7 @@ from app.schemas.workflow import (
     ApproveRequest,
     AssignReviewerRequest,
     AuditLogEntryResponse,
+    RecallApprovalRequest,
     RejectRequest,
     WorkflowInstanceResponse,
 )
@@ -92,9 +96,8 @@ def complete_status_refusal(invoice: Invoice) -> dict | None:
     four outcomes start from `new` or `approved`. Every other status used to
     fall through to `→ done`, so `sent_to_erp`, `posted_in_erp` and `paid`
     could be closed by this door although the modal never offered it there —
-    `posted_in_erp → done` skipping the payment. `POST /bulk/status` can still
-    set `done` from them, as a deliberate manager action with its own audit
-    row; whether it should gate the source status too is an open follow-up.
+    `posted_in_erp → done` skipping the payment. `POST /bulk/status → done`
+    asks it too, through :func:`close_refusals` (decisions §357).
     """
     if invoice.status in _COMPLETABLE_STATUSES:
         return None
@@ -103,6 +106,112 @@ def complete_status_refusal(invoice: Invoice) -> dict | None:
         "Only a new or approved invoice can be submitted or completed.",
         status=invoice.status.value,
     )
+
+
+#: Closing an invoice to `done` refused because one of our rails is already
+#: paying it (decisions §357). ``params.claim`` is ``payment`` / ``virtual_card``
+#: (`services/erp_export_gate.CLAIM_*`).
+INVOICE_NOT_RESUBMITTABLE = "invoice_not_resubmittable"
+
+
+def resubmit_refusal(user: User, invoice: Invoice) -> dict | None:
+    """What `POST /{id}/resubmit` would answer ``user`` for ``invoice``: the
+    route's role list, then the status (only a `rejected` invoice goes back to
+    review), then the entry window — the door's own order, so
+    ``GET /review-actions``' ``resubmit`` verdict cannot disagree with it.
+    Status before the window: a clerk looking at an approved invoice is told
+    nothing about a resubmit that was never on offer."""
+    from app.api.deps import holds_any_role
+    from app.api.refusals import role_not_permitted
+
+    if not holds_any_role(user, INVOICE_ENTRY_ROLES):
+        return role_not_permitted()
+    if invoice.status is not InvoiceStatus.rejected:
+        return coded_refusal(
+            INVOICE_NOT_RESUBMITTABLE,
+            "Only a rejected invoice can be resubmitted for review.",
+            status=invoice.status.value,
+        )
+    return entry_window_refusal(user, invoice)
+
+
+PAYMENT_BLOCKS_COMPLETION = "payment_blocks_completion"
+
+_CLAIM_BLOCKS_COMPLETION_MESSAGES = {
+    "payment": (
+        "FeohLedger is already paying this invoice: it has a live payment. Cancel its "
+        "payment run or void the payment before closing the invoice."
+    ),
+    "virtual_card": (
+        "A virtual card has been issued to pay this invoice. Cancel the card before "
+        "closing the invoice."
+    ),
+}
+
+
+def claim_close_refusal(claim: str) -> dict:
+    """The coded 409 for closing an invoice one of our rails holds."""
+    return coded_refusal(
+        PAYMENT_BLOCKS_COMPLETION, _CLAIM_BLOCKS_COMPLETION_MESSAGES[claim], claim=claim
+    )
+
+
+async def close_refusals(db: AsyncSession, invoices) -> dict[uuid.UUID, dict]:
+    """Why each of ``invoices`` may not be closed to `done` now → its coded
+    refusal; an invoice that may be closed is absent.
+
+    The one rule both doors that close an invoice by hand ask:
+    `POST /{id}/complete` (where its outcome is `done`) and
+    `POST /bulk/status → done`. First the source status
+    (:func:`complete_status_refusal`: only `new` and `approved`), then a live
+    claim — a payment not voided / failed / cancelled, or a card not
+    cancelled, read by `erp_export_gate.live_claims` through the rails' own
+    predicates. A staged or exported run, and a minted card, all leave the
+    invoice `approved`; closing it then takes it out of the payable set while
+    our rail still pays it, and from `done` nothing can void the claim back
+    onto the queue. Call it on rows locked for update, as both doors do: the
+    run builder and the card mint lock the invoice too, so no claim lands
+    between this read and the transition.
+    """
+    refusals: dict[uuid.UUID, dict] = {}
+    candidates = []
+    for invoice in invoices:
+        refused = complete_status_refusal(invoice)
+        if refused is not None:
+            refusals[invoice.id] = refused
+        else:
+            candidates.append(invoice.id)
+    from app.services.erp_export_gate import live_claims
+
+    for invoice_id, claim in (await live_claims(db, candidates)).items():
+        refusals[invoice_id] = claim_close_refusal(claim)
+    return refusals
+
+
+async def approval_applies(db: AsyncSession, org_id: uuid.UUID, invoice: Invoice) -> bool:
+    """Whether `/complete` must send ``invoice`` to a person for approval: its
+    frozen workflow has an approval step, or it was approved once before,
+    whatever the workflow says (decisions §379).
+
+    A once-approved invoice reaches approval again only through a human
+    approval at `ready_for_review`. The engine keeps it out of `new` since §379
+    (`workflow_engine._refuse_outside_the_recall`), so this reads only a row
+    that got to draft with its stamp before that rule. For one, `/complete`
+    submits it for review instead of closing it unapproved (`new → done`, which
+    the engine refuses for it too), and the amount floor stays off (the door's
+    own check, since the floor stamps the row before its transition)."""
+    if was_ever_approved(invoice):
+        return True
+    return await is_step_enabled(db, org_id, "approval", invoice_id=invoice.id)
+
+
+def _completes_to_done(invoice: Invoice, *, approval_enabled: bool, erp_enabled: bool) -> bool:
+    """Whether `/complete` on this (completable) invoice closes it to `done`:
+    a `new` one with no approval step, or an `approved` one with no ERP step.
+    The other two outcomes submit for review or start the ERP send."""
+    if invoice.status == InvoiceStatus.new:
+        return not approval_enabled
+    return invoice.status == InvoiceStatus.approved and not erp_enabled
 
 
 def complete_entry_refusal(user: User, invoice: Invoice, *, approval_enabled: bool) -> dict | None:
@@ -136,8 +245,10 @@ async def workflow_action_refusals(
 
     Built from the gates those doors raise from, in their order: the route's
     role list (``holds_any_role``, the predicate ``require_roles`` enforces),
-    :func:`complete_status_refusal`, :func:`complete_entry_refusal`, and for
-    the pushes ``erp_send.erp_send_refusal`` (plan, status, export gate).
+    :func:`complete_status_refusal`, :func:`complete_entry_refusal`, then,
+    where `/complete` closes the invoice, :func:`close_refusals`' live-claim
+    check, and for the pushes ``erp_send.erp_send_refusal`` (plan, status,
+    export gate).
     Reads only. Not covered: `/complete`'s required-fields check, which judges
     what the reader types into the form before the pre-save, and the
     ``refresh_warnings`` it runs, which can open a duplicate the POST then
@@ -169,18 +280,20 @@ async def workflow_action_refusals(
     else:
         complete = complete_status_refusal(invoice)
         if complete is None:
-            approval_enabled = await is_step_enabled(db, org.id, "approval", invoice_id=invoice.id)
+            approval_enabled = await approval_applies(db, org.id, invoice)
             complete = complete_entry_refusal(actor, invoice, approval_enabled=approval_enabled)
-        if (
-            complete is None
-            and invoice.status == InvoiceStatus.approved
-            and await is_step_enabled(db, org.id, "erp_export", invoice_id=invoice.id)
-        ):
-            # `/complete` on an approved invoice with the ERP step IS the send,
-            # through the same `start_erp_send`; the entry gate above has
-            # already refused anyone without a manage role, so the send's
-            # verdict is this one.
-            complete = send_to_erp
+            if complete is None:
+                erp_enabled = await is_step_enabled(db, org.id, "erp_export", invoice_id=invoice.id)
+                if invoice.status == InvoiceStatus.approved and erp_enabled:
+                    # `/complete` on an approved invoice with the ERP step IS
+                    # the send, through the same `start_erp_send`; the entry
+                    # gate above has already refused anyone without a manage
+                    # role, so the send's verdict is this one.
+                    complete = send_to_erp
+                elif _completes_to_done(
+                    invoice, approval_enabled=approval_enabled, erp_enabled=erp_enabled
+                ):
+                    complete = (await close_refusals(db, [invoice])).get(invoice.id)
     return {"complete": complete, "send_to_erp": send_to_erp, "retry_erp": retry_erp}
 
 
@@ -327,7 +440,7 @@ async def trigger_extraction(
             status_code=409,
             detail=(
                 "This invoice has already been approved, so its document can't be read "
-                "again. Retry the ERP push, or reject it for rework."
+                "again. Retry the ERP push, or recall its approval to correct it."
             ),
         )
 
@@ -480,12 +593,18 @@ async def review_actions(
 ):
     """Would each of the invoice modal's workflow actions accept the CALLER
     on this invoice right now? ``{"approve", "reject", "complete",
-    "send_to_erp", "retry_erp"}`` — each ``null`` or the coded ``{code,
-    message, params}`` refusal its endpoint would answer with:
-    ``review.review_refusals`` runs `/approve` and `/reject`'s gates and
-    :func:`workflow_action_refusals` runs `/complete`, `/send-to-erp` and
-    `/retry-erp`'s. The modal offers an action exactly when its verdict is
-    ``null`` and states the refusal otherwise, so it never restates a rule.
+    "send_to_erp", "retry_erp", "resubmit", "manage_file", "edit_financials",
+    "recall_approval"}``
+    — each ``null`` or the coded ``{code, message, params}`` refusal its
+    endpoint would answer with: ``review.review_refusals`` runs `/approve` and
+    `/reject`'s gates, :func:`workflow_action_refusals` runs `/complete`,
+    `/send-to-erp` and `/retry-erp`'s, :func:`resubmit_refusal` `/resubmit`'s,
+    ``invoice_entry.manage_file_refusal`` the `/file` routes',
+    ``invoice_entry.edit_financials_refusal`` what `PATCH` (on a financial
+    field) and `PUT /line-items` would answer (decisions §370), and
+    ``review.recall_refusal`` `/recall-approval`'s (decisions §374). The modal offers
+    an action exactly when its verdict is ``null`` and states the refusal
+    otherwise, so it never restates a rule.
 
     Any signed-in reader of the invoice may ask: the answer is about the caller
     and names nobody else, and a caller whose role the endpoint turns away gets
@@ -499,7 +618,14 @@ async def review_actions(
     workflow = await workflow_action_refusals(
         db, invoice, actor=user, org=org, control_db=control_db
     )
-    return {**review, **workflow}
+    return {
+        **review,
+        **workflow,
+        "resubmit": resubmit_refusal(user, invoice),
+        "manage_file": manage_file_refusal(user, invoice),
+        "edit_financials": edit_financials_refusal(user, invoice),
+        "recall_approval": await review_svc.recall_refusal(db, invoice, actor=user),
+    }
 
 
 @router.post("/{invoice_id}/approve", response_model=InvoiceResponse)
@@ -575,22 +701,86 @@ async def reject_invoice(
     return InvoiceResponse.from_db(invoice)
 
 
+@router.post("/{invoice_id}/recall-approval", response_model=InvoiceResponse)
+async def recall_approval(
+    invoice_id: uuid.UUID,
+    body: RecallApprovalRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_permission(PERM_INVOICE_APPROVE)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Take back the approval of an `approved` invoice, or of one whose ERP
+    push failed after approval, and return it to `ready_for_review` so its
+    figures can be corrected and approved again (decisions §374).
+
+    Refused from ``review.recall_refusal`` — the rule ``GET /review-actions``
+    serves as ``recall_approval`` — on the locked row: 403 without
+    `invoice.approve`; 409
+    ``invoice_not_recallable`` from any other status; 409
+    ``invoice_recall_in_erp`` when the ERP may hold the bill; 409
+    ``invoice_recall_claimed`` while a live payment or virtual card holds it.
+    The permission is the approve and reject doors' (`invoice.approve`), so
+    whoever may sign an approval may take one back; the predicate re-reads it
+    for the verdict. Writes an `invoice.approval_recalled` audit row; the
+    recalled approval's own row and signature are untouched. The recaller joins
+    the invoice's segregation set, and the approval chain re-runs from its
+    first level. Not money-moving, and a repeat is refused by the status gate.
+    """
+    from app.api.refusals import ROLE_NOT_PERMITTED
+
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
+    invoice = await get_invoice_for_update(db, invoice_id)
+    refused = await review_svc.recall_refusal(db, invoice, actor=user)
+    if refused is not None:
+        code = (
+            status.HTTP_403_FORBIDDEN
+            if refused["code"] == ROLE_NOT_PERMITTED
+            else status.HTTP_409_CONFLICT
+        )
+        raise HTTPException(status_code=code, detail=refused)
+
+    await review_svc.recall_approval(db, invoice, actor_id=user.id, reason=body.reason)
+    # The reviewer reads findings for the version in front of them, as after a
+    # resubmit.
+    await refresh_warnings(db, invoice, org_settings=org.settings)
+    return InvoiceResponse.from_db(invoice)
+
+
 @router.post("/{invoice_id}/resubmit", response_model=InvoiceResponse)
 async def resubmit_invoice(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    """Send a `rejected` invoice back to review (the modal's "Resubmit for
+    review", and the bulk bar's `rejected → ready_for_review`).
+
+    Refused, in :func:`resubmit_refusal`'s order, with 409
+    ``invoice_not_resubmittable`` from any other status and 403
+    ``invoice_entry_window_closed`` for an entry-only caller on an invoice that
+    was ever approved. Warnings are re-run as the bulk resubmit does, so the
+    reviewer reads findings for the version in front of them.
+    """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
-    refuse_entry_only_outside_window(user, invoice)
+    refused = resubmit_refusal(user, invoice)
+    if refused is not None:
+        code = (
+            status.HTTP_409_CONFLICT
+            if refused["code"] == INVOICE_NOT_RESUBMITTABLE
+            else status.HTTP_403_FORBIDDEN
+        )
+        raise HTTPException(status_code=code, detail=refused)
 
     await review_svc.resubmit_invoice(
         db,
         invoice,
         actor_id=user.id,
     )
+    await refresh_warnings(db, invoice, org_settings=org.settings)
     return InvoiceResponse.from_db(invoice)
 
 
@@ -678,6 +868,10 @@ async def complete_invoice(
     - approved + ERP enabled → triggers ERP dispatch
     - approved + no ERP → done
 
+    An invoice that was ever approved counts as "approval enabled" and never
+    meets the amount floor (:func:`approval_applies`, decisions §379): its
+    figures were reopened after a sign-off, so a person signs them again.
+
     An entry-only caller (an AP clerk) may take only the first: submitting a
     `new` invoice for review is the end of entry, while closing an invoice with
     no approval step, or pushing an approved one to the ERP, is past it. Their
@@ -696,7 +890,11 @@ async def complete_invoice(
     refused = complete_status_refusal(invoice)
     if refused is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
-    approval_enabled = await is_step_enabled(db, org_id, "approval", invoice_id=invoice.id)
+    # Read before anything below stamps the row: the floor sets `approved_by`
+    # ahead of its transition. A once-approved invoice goes to a person
+    # whatever the workflow says (decisions §379).
+    once_approved = was_ever_approved(invoice)
+    approval_enabled = await approval_applies(db, org_id, invoice)
     entry_only = is_entry_only(user)
     refused = complete_entry_refusal(user, invoice, approval_enabled=approval_enabled)
     if refused is not None:
@@ -719,6 +917,13 @@ async def complete_invoice(
 
     # Check workflow config for this invoice
     erp_enabled = await is_step_enabled(db, org_id, "erp_export", invoice_id=invoice.id)
+
+    if _completes_to_done(invoice, approval_enabled=approval_enabled, erp_enabled=erp_enabled):
+        # Closing it: refused while our rails hold a live payment or card on it
+        # (decisions §357). The send branch below has its own claim gate (§309).
+        refused = (await close_refusals(db, [invoice])).get(invoice.id)
+        if refused is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
 
     await refresh_warnings(db, invoice, org_settings=org.settings)
 
@@ -791,6 +996,9 @@ async def complete_invoice(
                 ),
             )
             and not entry_only
+            # An approval was given once and recalled (or the row predates
+            # §379): the corrected figures need a person, never the floor.
+            and not once_approved
             and not violates_segregation(invoice, user.id, approval_config)
             and not violates_receiving_segregation(
                 user.id, await receipt_recorders(db, invoice), approval_config

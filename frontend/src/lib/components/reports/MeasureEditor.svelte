@@ -3,7 +3,8 @@
 	// catalog source's `measures` — each measure exposes the aggregations it
 	// allows. The same field may be added under more than one aggregation.
 	import type { AggFn, CatalogMeasure, SpecMeasure } from '#lib/types/reports.ts';
-	import { AGG_LABELS, measureColumnKey } from '#lib/types/reports.ts';
+	import { AGG_LABEL_KEYS, fieldLabel, measureColumnKey } from '#lib/types/reports.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 
 	interface Props {
@@ -13,15 +14,19 @@
 	let { available, selected = $bindable() }: Props = $props();
 
 	function meta(key: string): CatalogMeasure | undefined {
-		return available.find((m) => m.key === key);
+		return available.find((x) => x.key === key);
+	}
+
+	function label(key: string): string {
+		return fieldLabel(m, key, meta(key)?.label);
 	}
 
 	function add(key: string) {
-		const m = meta(key);
-		if (!m) return;
+		const field = meta(key);
+		if (!field) return;
 		// Default to the first allowed aggregation; skip if that exact
 		// (field, agg) pair is already chosen.
-		const agg = m.aggs[0];
+		const agg = field.aggs[0];
 		if (!agg || selected.some((s) => s.key === key && s.agg === agg)) return;
 		selected = [...selected, { key, agg }];
 	}
@@ -37,40 +42,41 @@
 
 <div class="editor" data-testid="measure-editor">
 	<div class="editor-head">
-		<h3>Measures</h3>
+		<h3>{m('reports.measures.title')}</h3>
 		{#if available.length}
 			<select
-				aria-label="Add measure"
+				aria-label={m('reports.measures.add')}
 				value=""
 				onchange={(e) => {
 					add(e.currentTarget.value);
 					e.currentTarget.value = '';
 				}}
 			>
-				<option value="" disabled selected>+ Add measure…</option>
-				{#each available as m (m.key)}
-					<option value={m.key}>{m.label}</option>
+				<option value="" disabled selected>{m('reports.measures.addOption')}</option>
+				{#each available as field (field.key)}
+					<option value={field.key}>{fieldLabel(m, field.key, field.label)}</option>
 				{/each}
 			</select>
 		{/if}
 	</div>
 
 	{#if selected.length === 0}
-		<p class="hint">Add at least one measure to summarise (e.g. Sum of Amount).</p>
+		<p class="hint">{m('reports.measures.empty')}</p>
 	{:else}
 		<ul class="rows">
 			{#each selected as row (measureColumnKey(row))}
 				<li class="row">
-					<span class="field-label">{meta(row.key)?.label ?? row.key}</span>
-					<select aria-label="Aggregation for {meta(row.key)?.label}" bind:value={row.agg}>
+					<span class="field-label">{label(row.key)}</span>
+					<select aria-label={m('reports.measures.aggFor', { field: label(row.key) })} bind:value={row.agg}>
 						{#each aggsFor(row.key) as agg (agg)}
-							<option value={agg}>{AGG_LABELS[agg]}</option>
+							<option value={agg}>{m(AGG_LABEL_KEYS[agg])}</option>
 						{/each}
 					</select>
 					<RowAction
 						variant="danger"
 						onclick={() => remove(row)}
-						ariaLabel="Remove measure {meta(row.key)?.label ?? row.key}">Remove</RowAction
+						ariaLabel={m('reports.measures.removeAria', { field: label(row.key) })}
+						>{m('reports.remove')}</RowAction
 					>
 				</li>
 			{/each}

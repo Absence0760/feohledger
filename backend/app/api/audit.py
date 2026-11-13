@@ -15,7 +15,6 @@ the audit trail GET-only.
 
 import asyncio
 import io
-import tempfile
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, time, timedelta
@@ -52,6 +51,12 @@ from app.services.branding import get_brand_context
 from app.services.report_export import safe_csv_writer
 from app.tenant import ensure_in_entity_scope, get_entity_id, get_tenant_db
 from app.utils.dates import utc_today
+from app.utils.spooled_export import (
+    SPOOL_MAX_MEMORY_BYTES,
+    SPOOL_READ_BYTES,
+    drain_spool,
+    spool_body,
+)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -202,51 +207,13 @@ async def _json_body(
     yield "".join(parts)
 
 
-# The spool keeps at most this much of a rendered export in memory; past it
-# `SpooledTemporaryFile` rolls the rest onto disk, so peak RSS is bounded by
-# this number no matter how large the range is. A per-invoice trail or a short
-# date range never touches the filesystem at all.
-_SPOOL_MAX_MEMORY_BYTES = 1024 * 1024
-
-# Block size the finished export is handed back to the transport in. Small
-# enough that the response is genuinely chunked (an aborted body has no
-# terminating chunk — see the route docstring), large enough that a 40k-row
-# export is a few hundred reads rather than a few hundred thousand.
-_SPOOL_READ_BYTES = 64 * 1024
-
-
-async def _spool_body(chunks: AsyncIterator[str]) -> tempfile.SpooledTemporaryFile:
-    """Render an export body into a spool file, positioned at its start.
-
-    This is what releases the tenant DB connection before transmission begins.
-    Streaming the cursor straight into the response bounded the *memory* but
-    extended the *connection hold* from "while the rows are read" to "until the
-    last byte reaches the client" — and the per-tenant pool is
-    ``pool_size=5, max_overflow=10``, so a handful of concurrent annual exports
-    over slow links could exhaust it. Draining into a spool first restores the
-    short hold without giving back the memory bound: the file is
-    ``_SPOOL_MAX_MEMORY_BYTES`` of RAM and then disk.
-
-    A database error part-way through therefore surfaces as a clean 500 *before*
-    any byte is sent, instead of truncating a body the client had already begun
-    to save — which is the same principle the un-terminated chunk and the
-    missing JSON ``]`` serve: an incomplete SOX export must never look complete.
-
-    Writes go through ``asyncio.to_thread`` because a spool that has rolled over
-    is a real file and a synchronous ``write`` would sit on the event loop for
-    its duration (project invariant: no blocking work on the loop).
-    """
-    spool = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY_BYTES, mode="w+b")
-    try:
-        async for chunk in chunks:
-            await asyncio.to_thread(spool.write, chunk.encode("utf-8"))
-        await asyncio.to_thread(spool.seek, 0)
-    except BaseException:
-        # Includes cancellation: nothing downstream will ever be handed this
-        # file, so it is this frame's job to unlink it.
-        spool.close()
-        raise
-    return spool
+# The spool primitives live in `utils/spooled_export` (shared with the DSAR
+# complete-bundle download); the private names are kept because this module's
+# tests and docstrings address them.
+_SPOOL_MAX_MEMORY_BYTES = SPOOL_MAX_MEMORY_BYTES
+_SPOOL_READ_BYTES = SPOOL_READ_BYTES
+_spool_body = spool_body
+_drain_spool = drain_spool
 
 
 async def _spooled_response(
@@ -265,24 +232,6 @@ async def _spooled_response(
         spool.close()
         raise
     return StreamingResponse(_drain_spool(spool), **response_kwargs)
-
-
-async def _drain_spool(spool: tempfile.SpooledTemporaryFile) -> AsyncIterator[bytes]:
-    """Emit a spooled body in bounded blocks, deleting the file when done.
-
-    The ``finally`` covers both exits that matter: the last block being read,
-    and the client disconnecting mid-download — Starlette closes the body
-    generator, which raises ``GeneratorExit`` here, so the temp file is unlinked
-    on the abandoned path too rather than waiting for garbage collection.
-    """
-    try:
-        while True:
-            block = await asyncio.to_thread(spool.read, _SPOOL_READ_BYTES)
-            if not block:
-                return
-            yield block
-    finally:
-        spool.close()
 
 
 @router.get("/export")

@@ -100,9 +100,10 @@ is **entry-only**:
   the row and records `auto_approve_suppressed` on the audit row);
 - `import-csv` takes open AP only.
 
-Approve / reject are gated on the `invoice.approve` permission
-(`require_permission`), which admin, AP manager and CFO hold by default and a
-clerk does not (`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`).
+Approve / reject, and recalling an approval back to review
+(`POST /recall-approval`, decisions §374), are gated on the `invoice.approve`
+permission (`require_permission`), which admin, AP manager and CFO hold by
+default and a clerk does not (`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`).
 The detail modal mirrors this with `canWrite` (a manage role, or an entry role
 inside the entry window) for Save, the line-item editor, the file controls,
 Extract and Reset; an entry-only caller's Submit is offered on a `new` invoice

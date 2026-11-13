@@ -36,7 +36,7 @@ from app.api.pagination import (
     PaginationParams,
     pagination_params,
 )
-from app.api.refusals import role_not_permitted
+from app.api.refusals import coded_refusal, role_not_permitted
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.expense import (
     CorporateCardTransaction,
@@ -74,13 +74,19 @@ from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.expense_controls import (
+    EXPENSE_CARD_RECONCILED,
+    EXPENSE_FX_RATE_UNAVAILABLE,
+    EXPENSE_FX_SOURCE_MISSING,
     report_approve_check,
     report_approve_refusal,
     report_compose_refusal,
     report_draft_refusal,
+    report_lines_unconverted_detail,
     report_owner_refusal,
+    report_policy_blocked_detail,
     report_reject_refusal,
     report_submit_refusal,
+    report_unlocked_refusal,
 )
 from app.services.expense_currency import (
     ExpenseConversionError,
@@ -316,21 +322,6 @@ async def _lock_reports(db: AsyncSession, report_ids) -> None:
         await _get_report_or_404(db, rid, for_update=True)
 
 
-# Report states whose ``total_amount`` is locked in for an approval decision —
-# the CFO-threshold gate + approval signature were evaluated against that total,
-# so its composition/amount must not change afterwards. ``draft`` is freely
-# editable; ``rejected`` / ``cancelled`` are terminal and their (draft-status)
-# expenses may be detached to be re-reported elsewhere.
-_LOCKED_REPORT_STATUSES = frozenset(
-    {
-        ExpenseReportStatus.submitted,
-        ExpenseReportStatus.pending_approval,
-        ExpenseReportStatus.approved,
-        ExpenseReportStatus.reimbursed,
-    }
-)
-
-
 def _require_draft_report(report: ExpenseReport) -> None:
     """A report can only be *built up* (attach new expenses) while it's a draft
     (`expense_controls.report_draft_refusal`, issue #155)."""
@@ -345,11 +336,9 @@ def _require_report_unlocked(report: ExpenseReport) -> None:
     moving an expense off a submitted-or-approved report would silently bypass
     the CFO gate and stale-sign the approval. Terminal (rejected/cancelled)
     reports stay editable so their expenses can be corrected + re-reported."""
-    if report.status in _LOCKED_REPORT_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot modify a report in '{report.status}' state; its total is locked.",
-        )
+    refusal = report_unlocked_refusal(report)
+    if refusal is not None:
+        raise refusal.http()
 
 
 def _require_report_owner(report: ExpenseReport, user: User) -> None:
@@ -471,14 +460,25 @@ async def _lock_line_conversion(expense: Expense, report: ExpenseReport, org: Or
         # outage on work that has no FX question in it.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="No FX rate source is configured, so this line cannot be converted.",
+            detail=coded_refusal(
+                EXPENSE_FX_SOURCE_MISSING,
+                "No FX rate source is configured, so this line cannot be converted.",
+            ),
         )
     try:
         await lock_expense_conversion(
             expense, target_currency=report.currency, fx_adapter=fx_adapter
         )
     except ExpenseConversionError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=coded_refusal(
+                EXPENSE_FX_RATE_UNAVAILABLE,
+                str(exc),
+                source_currency=exc.source_currency,
+                report_currency=exc.target_currency,
+            ),
+        ) from exc
 
 
 async def _active_policies(db: AsyncSession, entity_id: uuid.UUID | None) -> list[ExpensePolicy]:
@@ -1297,9 +1297,11 @@ async def delete_expense(
     if linked_txn_id is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
+            detail=coded_refusal(
+                EXPENSE_CARD_RECONCILED,
                 f"Expense is reconciled to card transaction {linked_txn_id}; "
-                "unmatch it before deleting."
+                "unmatch it before deleting.",
+                card_transaction_id=str(linked_txn_id),
             ),
         )
     await dispatch_audit(
@@ -1734,14 +1736,9 @@ async def submit_report(
     if rollup.unconverted_count:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "message": (
-                    f"{rollup.unconverted_count} expense(s) have no exchange rate locked "
-                    f"into the report currency {rollup.currency} and cannot be totalled. "
-                    "Re-attach them to lock a rate."
-                ),
-                "expense_ids": list(rollup.unconverted_ids),
-            },
+            detail=report_lines_unconverted_detail(
+                rollup.unconverted_count, list(rollup.unconverted_ids), rollup.currency
+            ),
         )
 
     cover: dict[str, Decimal] = {}
@@ -1776,10 +1773,7 @@ async def submit_report(
     if blocking:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "message": "Report has blocking policy violations and cannot be submitted.",
-                "violations": blocking,
-            },
+            detail=report_policy_blocked_detail(blocking),
         )
 
     report.status = ExpenseReportStatus.submitted

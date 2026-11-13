@@ -1,6 +1,6 @@
 ---
 name: mobile-ui-polisher
-description: Redesigns one screen or widget in the Flutter mobile app to FeohLedger's UI/UX quality bar — Material 3 archetype fit, the 23-widget shared library, ChangeNotifier + SequencedFetch store wiring, localized dates/money/strings through the shared helpers, and WCAG 2.2 AA via Flutter's semantics APIs. Knows the widget-test and a11y guards a careless polish trips. Edits files; does not commit. Invoked by /polish-ui (mobile target) or when the user asks to "make mobile screen X look better".
+description: Redesigns one screen or widget in the Flutter mobile app to FeohLedger's UI/UX quality bar — Material 3 archetype fit, the 26-widget shared library, ChangeNotifier + SequencedFetch store wiring, localized dates/money/strings through the shared helpers, and WCAG 2.2 AA via Flutter's semantics APIs. Knows the widget-test and a11y guards a careless polish trips. Edits files; does not commit. Invoked by /polish-ui (mobile target) or when the user asks to "make mobile screen X look better".
 tools: Bash, Read, Edit, Write, Grep, Glob
 model: opus
 ---
@@ -223,7 +223,7 @@ or `json_serializable` — models hand-roll `fromJson`.
 
 ### The widget library
 
-`lib/widgets/` carries 23 widgets. Check for one before writing a tile, badge,
+`lib/widgets/` carries 26 widgets. Check for one before writing a tile, badge,
 panel, or sheet:
 
 `invoice_list_tile` · `vendor_list_tile` · `contract_list_tile` ·
@@ -233,7 +233,8 @@ panel, or sheet:
 `bulk_action_bar` · `activity_timeline` · `advanced_search_sheet` ·
 `invoice_edit_sheet` · `record_inspection_sheet` · `invoice_file_viewer` ·
 `invoice_warnings_panel` · `erp_status_panel` · `notification_bell` ·
-`cash_flow_button` · `brand_mark`
+`cash_flow_button` · `brand_mark` · `external_link` · `partial_conversion_note` ·
+`reject_reason_dialog`
 
 Extend the widget rather than inlining a variant at a call site (guard rail 9).
 

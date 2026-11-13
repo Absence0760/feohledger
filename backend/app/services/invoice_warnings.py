@@ -721,23 +721,12 @@ async def _refresh_line_total_reconciliation(
     must never break saving an invoice. Mutates ``warnings`` in place.
     """
     try:
-        from app.models.invoice import InvoiceLineItem
-
-        # Sum in the DB so a large invoice doesn't materialise every row. NULL
-        # totals are excluded by SUM; a set of lines with no totals at all
-        # yields NULL and is treated as "nothing to reconcile against".
-        line_total = (
-            await db.execute(
-                select(func.sum(InvoiceLineItem.total)).where(
-                    InvoiceLineItem.invoice_id == invoice.id,
-                    InvoiceLineItem.total.isnot(None),
-                )
-            )
-        ).scalar_one_or_none()
+        # A set of lines with no totals at all is "nothing to reconcile against".
+        line_total = await _line_items_total(db, invoice)
         if line_total is None:
             return
 
-        mismatch = reconcile_line_totals(invoice, _dec(line_total))
+        mismatch = reconcile_line_totals(invoice, line_total)
         if mismatch is None:
             return
 
@@ -756,6 +745,7 @@ async def _refresh_line_total_reconciliation(
             "error",
             flag,
             org_settings=org_settings,
+            fingerprint=line_total_fingerprint(invoice, line_total),
         )
     except Exception:  # noqa: BLE001 — best-effort; never break the save path
         logger.warning("line-total reconciliation failed for invoice; skipped")
@@ -790,22 +780,8 @@ async def _refresh_price_variance(
         # Draft (this invoice's) line items, in line order. The draft's own
         # currency tags every line so it's compared only against same-currency
         # history (matches the enrichment endpoint).
-        draft_q = (
-            select(
-                InvoiceLineItem.item_code,
-                InvoiceLineItem.description,
-                InvoiceLineItem.unit_price,
-            )
-            .where(InvoiceLineItem.invoice_id == invoice.id)
-            .order_by(
-                InvoiceLineItem.line_number.asc().nulls_last(),
-                InvoiceLineItem.id.asc(),
-            )
-        )
-        draft_lines = [
-            {**dict(r._mapping), "currency": invoice.currency}
-            for r in (await db.execute(draft_q)).all()
-        ]
+        priced_lines = await _draft_price_lines(db, invoice)
+        draft_lines = [{**line, "currency": invoice.currency} for line in priced_lines]
         if not draft_lines:
             return
 
@@ -872,6 +848,7 @@ async def _refresh_price_variance(
             worst,
             exception_findings("price_variance_findings", line_flags),
             org_settings=org_settings,
+            fingerprint=price_variance_fingerprint(invoice, priced_lines),
         )
     except Exception:  # noqa: BLE001 — best-effort; never break the save path
         logger.warning("price-variance check failed for invoice; skipped")
@@ -1617,6 +1594,7 @@ async def _refresh_contract_compliance(
         worst,
         exception_findings("contract_noncompliant_findings", findings),
         org_settings=org_settings,
+        fingerprint=contract_fingerprint(invoice, findings),
     )
 
 
@@ -1735,9 +1713,11 @@ _EXTERNAL_FINDING_PARAMS: dict[str, tuple[str, ...]] = {
 
 
 def finding_fingerprint(invoice: Invoice, code: str, params: dict | None = None) -> str:
-    """What a person judges when they clear a ``duplicate`` / ``fraud_flag``.
+    """What a person judges when they clear a header-level finding.
 
-    A SHA-256 of the finding's code and :data:`_FINDING_INPUT_FIELDS`. Not the
+    The facts of a ``duplicate`` / ``fraud_flag`` (decisions §286), and of the
+    ``missing_data`` row (decisions §366). A SHA-256 of the finding's code and
+    :data:`_FINDING_INPUT_FIELDS`. Not the
     finding's display params: three findings have none
     (``duplicate_invoice_number``, ``remit_to_changed``, ``future_invoice_date``),
     so matching on them exempted the invoice from the same finding after an
@@ -1745,9 +1725,10 @@ def finding_fingerprint(invoice: Invoice, code: str, params: dict | None = None)
     (a vendor's age in days, a vendor mean, an LLM's wording), so matching on
     them re-raised what nobody had changed. Hashed, so the stored value carries
     no address or vendor detail.
+
+    The payload is unchanged since migration 0116, so stamps written before
+    §366 still compare equal.
     """
-    import hashlib
-    import json
 
     def _plain(value: object) -> object:
         # `Decimal("1234.5")` from a PATCH and `Decimal("1234.50")` from the
@@ -1760,8 +1741,260 @@ def finding_fingerprint(invoice: Invoice, code: str, params: dict | None = None)
     }
     for name in _EXTERNAL_FINDING_PARAMS.get(code, ()):
         payload[f"param:{name}"] = (params or {}).get(name)
+    return _digest(payload)
+
+
+def _digest(payload: dict) -> str:
+    import hashlib
+    import json
+
     raw = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _canonical(value: object) -> object:
+    """One spelling per fact, so a value read back from a column hashes as it
+    did in memory: every number (a ``Decimal`` from ``Numeric``, a float from
+    the ``po_match`` JSONB) as its normalized plain decimal, so ``1234.5``,
+    ``1234.50`` and ``Decimal("1234.5")`` are one amount; ids and dates as text."""
+    if value is None or isinstance(value, (bool, str)):
+        return value
+    if isinstance(value, (Decimal, int, float)):
+        number = value if isinstance(value, Decimal) else Decimal(str(value))
+        return format(number.normalize(), "f") if number.is_finite() else str(number)
+    if isinstance(value, dict):
+        return {str(k): _canonical(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonical(v) for v in value]
+    return str(value)
+
+
+def _typed_fingerprint(exception_type: str, facts: dict) -> str:
+    """A fingerprint over one exception TYPE's facts (decisions §366).
+
+    Keyed on the type, not on the finding's code: these rows are one per type
+    and invoice, and their code names only the first finding raised (the
+    composite frame, or the first of several PO-match findings that folded into
+    the open row). The person cleared the row, with every finding it held, so a
+    second finding that was already there is not news and must not re-raise.
+    """
+    return _digest({"type": exception_type, **_canonical(facts)})
+
+
+#: Header money a line-total reconciliation reads (``line_total_reconciles``).
+_LINE_TOTAL_HEADER_FIELDS = (
+    "amount",
+    "subtotal",
+    "tax_amount",
+    "shipping_amount",
+    "discount_amount",
+    "currency",
+)
+
+#: Invoice fields the PO match reads beside the match result itself: the PO it
+#: cites, the figure and unit compared, the vendor and GL code that select the
+#: match rule (``resolve_match_rule``) and the entity the PO lookup is scoped to.
+_PO_MATCH_INVOICE_FIELDS = (
+    "po_number",
+    "vendor_id",
+    "amount",
+    "currency",
+    "gl_account",
+    "entity_id",
+)
+
+#: Invoice fields ``contract_compliance.evaluate_contract_compliance`` reads.
+_CONTRACT_INVOICE_FIELDS = (
+    "contract_id",
+    "vendor_id",
+    "amount",
+    "currency",
+    "invoice_date",
+    "gl_account",
+)
+
+
+def line_total_fingerprint(invoice: Invoice, line_total: Decimal | None) -> str:
+    """``line_total_mismatch``: the header money and the summed line totals —
+    the two sides the person accepted as disagreeing. Editing a line, or any
+    header money field, re-raises it."""
+    return _typed_fingerprint(
+        "line_total_mismatch",
+        {
+            **{f: getattr(invoice, f, None) for f in _LINE_TOTAL_HEADER_FIELDS},
+            "line_items_total": line_total,
+        },
+    )
+
+
+#: The ``invoice.po_match`` fields that state what the matcher found: the PO,
+#: the comparison, the receipt leg and the inspection leg. Named rather than
+#: hashing the whole dict, so a field added to ``MatchResult`` or a reworded
+#: issue sentence (``issues[].message``) does not re-raise every cleared hold
+#: on the first refresh after a deploy, with nothing changed.
+_PO_MATCH_FACT_FIELDS = (
+    "match_type",
+    "status",
+    "po_id",
+    "po_number",
+    "po_total",
+    "po_currency",
+    "currency_check",
+    "po_total_unverifiable_reason",
+    "po_cancelled",
+    "gr_id",
+    "amount_variance",
+    "amount_variance_pct",
+    "within_tolerance",
+    "inspection_id",
+    "inspection_result",
+    "inspection_accepted_quantity",
+    "inspection_required",
+    "over_receipt",
+    "ordered_quantity",
+    "received_quantity",
+    "received_value",
+    "billed_beyond_receipt",
+)
+
+
+def _po_match_facts(po_match: dict | None) -> dict | None:
+    if not isinstance(po_match, dict):
+        return None
+    issues = po_match.get("issues") or []
+    return {
+        **{f: po_match.get(f) for f in _PO_MATCH_FACT_FIELDS},
+        "tolerance_pct": (po_match.get("details") or {}).get("tolerance_pct"),
+        # A pre-catalogue match holds bare strings; they are their own code.
+        "issues": [
+            [i.get("code"), i.get("params")] if isinstance(i, dict) else [i, None] for i in issues
+        ],
+    }
+
+
+def po_match_fingerprint(invoice: Invoice, exception_type: str) -> str:
+    """``po_mismatch`` / ``quality_hold``: the invoice's PO-match inputs and what
+    the persisted match result (``invoice.po_match``) found: the PO's total,
+    currency and status, the receipt quantities, the inspection's id and
+    verdict, the tolerance the rule applied, and each issue by code and params.
+    A new receipt, an inspection, a PO edit (an ERP sync included) or a rule
+    change moves it."""
+    return _typed_fingerprint(
+        exception_type,
+        {
+            **{f: getattr(invoice, f, None) for f in _PO_MATCH_INVOICE_FIELDS},
+            "po_match": _po_match_facts(getattr(invoice, "po_match", None)),
+        },
+    )
+
+
+def price_variance_fingerprint(invoice: Invoice, draft_lines: list[dict]) -> str:
+    """``price_variance``: this invoice's priced lines, in line order, with the
+    vendor and currency that pick the history they are compared against. Not
+    the history's medians, which move as other invoices are approved: the
+    person accepted these prices, and nothing they judged has changed."""
+    return _typed_fingerprint(
+        "price_variance",
+        {
+            "vendor_id": getattr(invoice, "vendor_id", None),
+            "currency": getattr(invoice, "currency", None),
+            "lines": [
+                [ln.get("item_code"), ln.get("description"), ln.get("unit_price")]
+                for ln in draft_lines
+            ],
+        },
+    )
+
+
+def contract_fingerprint(invoice: Invoice, findings: list[dict]) -> str:
+    """``contract_noncompliant``: the invoice fields the compliance check reads
+    and WHICH terms it breaches. A newly breached term (the contract terminated
+    after the person accepted an overrun) re-raises; the running spend figure,
+    which grows with every other invoice on the contract, does not."""
+    return _typed_fingerprint(
+        "contract_noncompliant",
+        {
+            **{f: getattr(invoice, f, None) for f in _CONTRACT_INVOICE_FIELDS},
+            "codes": sorted({f.get("code") or "" for f in findings}),
+        },
+    )
+
+
+def vendor_fingerprint(invoice: Invoice) -> str:
+    """``unverified_vendor``: the vendor the invoice is linked to. Re-linking
+    it to another unverified vendor re-raises; an amount edit does not."""
+    return _typed_fingerprint(
+        "unverified_vendor", {"vendor_id": getattr(invoice, "vendor_id", None)}
+    )
+
+
+async def _line_items_total(db: AsyncSession, invoice: Invoice) -> Decimal | None:
+    """The summed line totals, or None when no line carries one. Summed in the
+    DB so a large invoice doesn't materialise every row; SUM skips NULL."""
+    from app.models.invoice import InvoiceLineItem
+
+    total = (
+        await db.execute(
+            select(func.sum(InvoiceLineItem.total)).where(
+                InvoiceLineItem.invoice_id == invoice.id,
+                InvoiceLineItem.total.isnot(None),
+            )
+        )
+    ).scalar_one_or_none()
+    return None if total is None else _dec(total)
+
+
+async def _draft_price_lines(db: AsyncSession, invoice: Invoice) -> list[dict]:
+    """This invoice's lines as the price-variance check reads them, in line
+    order: ``item_code``, ``description``, ``unit_price``."""
+    from app.models.invoice import InvoiceLineItem
+
+    rows = await db.execute(
+        select(
+            InvoiceLineItem.item_code,
+            InvoiceLineItem.description,
+            InvoiceLineItem.unit_price,
+        )
+        .where(InvoiceLineItem.invoice_id == invoice.id)
+        .order_by(
+            InvoiceLineItem.line_number.asc().nulls_last(),
+            InvoiceLineItem.id.asc(),
+        )
+    )
+    return [dict(r._mapping) for r in rows.all()]
+
+
+async def current_finding_fingerprint(
+    db: AsyncSession,
+    invoice: Invoice,
+    exception_type: str,
+    code: str,
+    params: dict | None = None,
+) -> str:
+    """The fingerprint the invoice has NOW for an exception of this type
+    (decisions §366): THE one rule for what "the facts changed" means, read by
+    the raise (``_ensure_exception``), the stale-stamp check
+    (``_void_stale_finding_stamps``) and a person's decision
+    (``exception_lifecycle._bind_fingerprint_to_decision``), so the three can
+    never disagree.
+
+    Each type hashes what its own rule reads. A type not listed falls back to
+    the header fingerprint, which over-includes: an unrelated edit re-raises
+    the finding for a person to clear again, never the reverse.
+    """
+    if exception_type == "line_total_mismatch":
+        return line_total_fingerprint(invoice, await _line_items_total(db, invoice))
+    if exception_type in PO_MATCH_EXCEPTION_TYPES:
+        return po_match_fingerprint(invoice, exception_type)
+    if exception_type == "price_variance":
+        return price_variance_fingerprint(invoice, await _draft_price_lines(db, invoice))
+    if exception_type == "contract_noncompliant":
+        from app.services.contract_compliance import evaluate_contract_compliance
+
+        return contract_fingerprint(invoice, await evaluate_contract_compliance(db, invoice))
+    if exception_type == "unverified_vendor":
+        return vendor_fingerprint(invoice)
+    return finding_fingerprint(invoice, code, params)
 
 
 async def _void_stale_finding_stamps(db: AsyncSession, invoice: Invoice) -> None:
@@ -1777,9 +2010,12 @@ async def _void_stale_finding_stamps(db: AsyncSession, invoice: Invoice) -> None
     voided and that row's verdict can never bind; the next refresh after it is
     closed raises a fresh row for a person to judge. Checked whether or not the
     rule still fires, since a clean-looking S2 is exactly when it does not.
-    """
-    from app.api.payments import ERP_EXPORT_BLOCKING_EXCEPTION_TYPES
 
+    Every stamped type (decisions §366). A PO-match row compares against the
+    match the PREVIOUS refresh persisted, since this runs before the match is
+    recomputed; a match that moved and moved back is still seen, one refresh
+    later, and a decision in between compares against the moved match.
+    """
     if invoice.id is None:
         return
     rows = (
@@ -1787,7 +2023,6 @@ async def _void_stale_finding_stamps(db: AsyncSession, invoice: Invoice) -> None
             await db.execute(
                 select(APException).where(
                     APException.invoice_id == invoice.id,
-                    APException.exception_type.in_(ERP_EXPORT_BLOCKING_EXCEPTION_TYPES),
                     APException.status.in_(["open", "escalated"]),
                     APException.finding_fingerprint.is_not(None),
                 )
@@ -1797,36 +2032,62 @@ async def _void_stale_finding_stamps(db: AsyncSession, invoice: Invoice) -> None
         .all()
     )
     for row in rows:
-        current = finding_fingerprint(invoice, row.description_code or "", row.description_params)
+        current = await current_finding_fingerprint(
+            db, invoice, row.exception_type, row.description_code or "", row.description_params
+        )
         if current != row.finding_fingerprint:
             row.finding_fingerprint = None
 
 
 async def _finding_cleared_by_a_person(
-    db: AsyncSession, invoice: Invoice, exception_type: str, fingerprint: str
+    db: AsyncSession,
+    invoice: Invoice,
+    exception_type: str,
+    fingerprint: str,
+    *,
+    org_settings: dict | None,
 ) -> bool:
     """Has a person already resolved or dismissed THIS finding on this invoice,
-    as it stands now? (decisions §286)
+    as it stands now, and could they still? (decisions §286, §366, §367)
 
-    Only for ``api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES``, whose rows
-    carry a fingerprint. Re-opening one a reviewer had judged undid their
-    verdict on the next refresh, and ``POST /complete`` refreshes on every
-    "Send to ERP", so a legitimate invoice that shares a vendor's number could
-    never be posted. A closed row suppresses only while the invoice still
-    hashes as it did when the person decided; an edit to any field the rules
-    read re-raises it. ``exception_lifecycle.record_decision`` clears the
-    fingerprint on a decision no person made (a detector, an agent), and a row
-    closed before migration 0116 has none, so neither ever suppresses.
+    Re-opening a row a reviewer had judged undid their verdict on the next
+    refresh: ``POST /complete`` refreshes on every "Send to ERP", so a
+    legitimate invoice that shares a vendor's number could never be posted, and
+    an accepted line variance or PO hold came back to block the payment run. A
+    closed row suppresses only while the invoice still hashes as it did when
+    the person decided (``current_finding_fingerprint``); a change to any fact
+    the type's rule reads re-raises it. ``exception_lifecycle.record_decision``
+    clears the fingerprint on a decision no person made (a detector, an agent),
+    and a row closed before its type was stamped has none, so neither ever
+    suppresses.
+
+    A matching verdict also has to be one segregation would accept from its
+    decider TODAY (``exception_lifecycle.clearance_stands``, the same
+    ``segregation_refusal`` the decision met). Someone implicated after they
+    decided, an uploader migration 0126 named (§367) or an approval's
+    recaller (§374), no longer keeps their own clearance live; the finding is
+    raised again for someone independent. A clearance by anyone the invoice
+    does not implicate still suppresses. ``org_settings`` carries the queue's
+    opt-out; omitted, segregation is enforced, so the error is an extra
+    review, never a bypass.
     """
-    rows = await db.execute(
-        select(func.count()).where(
-            APException.invoice_id == invoice.id,
-            APException.exception_type == exception_type,
-            APException.status.in_(["resolved", "dismissed"]),
-            APException.finding_fingerprint == fingerprint,
+    from app.services.exception_lifecycle import clearance_stands
+
+    rows = (
+        (
+            await db.execute(
+                select(APException).where(
+                    APException.invoice_id == invoice.id,
+                    APException.exception_type == exception_type,
+                    APException.status.in_(["resolved", "dismissed"]),
+                    APException.finding_fingerprint == fingerprint,
+                )
+            )
         )
+        .scalars()
+        .all()
     )
-    return (rows.scalar() or 0) > 0
+    return any(clearance_stands(row, invoice, org_settings=org_settings) for row in rows)
 
 
 async def _ensure_exception(
@@ -1837,8 +2098,10 @@ async def _ensure_exception(
     finding: dict,
     *,
     org_settings: dict | None = None,
+    fingerprint: str | None = None,
 ) -> None:
-    """Create an exception if one doesn't already exist for this invoice + type.
+    """Create an exception if one doesn't already exist for this invoice + type,
+    and no person has already cleared it while the facts stand as they do now.
 
     ``finding`` is a catalogue dict — the warning raised beside it
     (`invoice_warning_catalog.warning`), an exception-only sentence
@@ -1853,45 +2116,38 @@ async def _ensure_exception(
         # A programming error at a literal call site, not a data condition —
         # raising beats persisting an unkeyed description nobody can localize.
         raise TypeError("_ensure_exception needs a catalogue finding, not composed prose")
-    from app.api.payments import ERP_EXPORT_BLOCKING_EXCEPTION_TYPES
 
-    fingerprint = (
-        finding_fingerprint(invoice, finding["code"], finding.get("params"))
-        if exception_type in ERP_EXPORT_BLOCKING_EXCEPTION_TYPES
-        else None
-    )
+    # Every type is stamped (decisions §366), so a person's resolve or dismiss
+    # holds until the facts its rule reads change. A caller that already holds
+    # those facts (the summed line totals, the priced lines, the compliance
+    # findings) passes the fingerprint rather than paying a second read.
     if fingerprint is None:
-        existing = await db.execute(
-            select(func.count()).where(
-                APException.invoice_id == invoice.id,
-                APException.exception_type == exception_type,
-                APException.status.in_(["open", "escalated"]),
-            )
+        fingerprint = await current_finding_fingerprint(
+            db, invoice, exception_type, finding["code"], finding.get("params")
         )
-        if (existing.scalar() or 0) > 0:
-            return  # already exists
-    else:
-        open_rows = (
-            (
-                await db.execute(
-                    select(APException).where(
-                        APException.invoice_id == invoice.id,
-                        APException.exception_type == exception_type,
-                        APException.status.in_(["open", "escalated"]),
-                    )
+    open_rows = (
+        (
+            await db.execute(
+                select(APException).where(
+                    APException.invoice_id == invoice.id,
+                    APException.exception_type == exception_type,
+                    APException.status.in_(["open", "escalated"]),
                 )
             )
-            .scalars()
-            .all()
         )
-        if open_rows:
-            # Never restamped. The stamp is the invoice as the finding was
-            # raised; `record_decision` keeps it only if the invoice still
-            # hashes the same when a person clears the row, so an edit made
-            # while someone was deciding cannot ride their verdict.
-            return  # already exists
-        if await _finding_cleared_by_a_person(db, invoice, exception_type, fingerprint):
-            return
+        .scalars()
+        .all()
+    )
+    if open_rows:
+        # Never restamped. The stamp is the invoice as the finding was
+        # raised; `record_decision` keeps it only if the invoice still
+        # hashes the same when a person clears the row, so an edit made
+        # while someone was deciding cannot ride their verdict.
+        return  # already exists
+    if await _finding_cleared_by_a_person(
+        db, invoice, exception_type, fingerprint, org_settings=org_settings
+    ):
+        return
 
     # Auto-routing: org settings can map exception_type → user UUID
     # (and a default-SLA-hours per type). Both are optional — when
@@ -1944,8 +2200,7 @@ async def _ensure_exception(
         # `uploaded_by_id` / `segregation_actor_ids` is the axis that binds here.
         raised_by_user_id=None,
     )
-    if fingerprint is not None:
-        raised.finding_fingerprint = fingerprint
+    raised.finding_fingerprint = fingerprint
 
 
 async def _llm_anomaly_check(

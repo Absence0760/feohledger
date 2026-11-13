@@ -44,6 +44,72 @@ test.describe('/expenses — Cards tab (WF4)', () => {
 		}
 	});
 
+	// A blank or malformed currency is refused per row, never read as USD
+	// (decisions §377), and the Cards tab lists each refused row with its
+	// reason in the reader's language, not just a "skipped" count.
+	test('lists each refused row with its localized reason (de)', async ({ page }) => {
+		const stamp = Date.now();
+		const ok = `e2e-ccy-ok-${stamp}`;
+		const blank = `e2e-ccy-blank-${stamp}`;
+		const bad = `e2e-ccy-bad-${stamp}`;
+		const csv = [
+			CSV_HEADER,
+			`${ok},2026-02-07,,E2E Ccy Pret,12.40,gbp,4242,corp`,
+			`${blank},2026-02-07,,E2E Ccy Uber,8.00,,4242,corp`,
+			`${bad},2026-02-07,,E2E Ccy Lyft,9.00,EURO,4242,corp`
+		].join('\n');
+		try {
+			await page.addInitScript(() => {
+				localStorage.setItem('feoh_locale', 'de');
+			});
+			await page.goto('/expenses?tab=cards');
+			const imported = page.waitForResponse(
+				(r) =>
+					new URL(r.url()).pathname === '/api/corporate-card-transactions/import-csv' &&
+					r.request().method() === 'POST'
+			);
+			await page.locator('input[type="file"][accept=".csv"]').setInputFiles({
+				name: 'cards.csv',
+				mimeType: 'text/csv',
+				buffer: Buffer.from(csv)
+			});
+			const body = (await (await imported).json()) as {
+				imported: number;
+				skipped: number;
+				errors: { row: number; code?: string; params?: Record<string, unknown> }[];
+			};
+			// The wire contract: each refused row's code + params beside it.
+			expect(body.imported).toBe(1);
+			expect(body.errors.map((e) => [e.row, e.code])).toEqual([
+				[3, 'csv_currency_required'],
+				[4, 'csv_currency_invalid']
+			]);
+			expect(body.errors[1].params?.value).toBe('EURO');
+
+			const panel = page.getByRole('region', { name: 'Nicht importierte Zeilen' });
+			const rows = panel.locator('li');
+			await expect(rows).toHaveCount(2);
+			await expect(rows.nth(0)).toContainText('3');
+			await expect(rows.nth(0)).toContainText('Die Spalte currency ist leer');
+			await expect(rows.nth(1)).toContainText('EURO ist kein dreistelliger Währungscode');
+			await expect(panel).not.toContainText('currency is required');
+
+			// The one good row landed, normalized; the refused ones left nothing.
+			expect(
+				tenantPsql(
+					`SELECT currency FROM corporate_card_transactions WHERE external_txn_id='${ok}'`
+				).trim()
+			).toBe('GBP');
+			expect(
+				tenantPsql(
+					`SELECT count(*) FROM corporate_card_transactions WHERE external_txn_id IN ('${blank}','${bad}')`
+				).trim()
+			).toBe('0');
+		} finally {
+			deleteCardTxnByExternalId(ok);
+		}
+	});
+
 	test('syncs charged virtual cards into card transactions (idempotent)', async ({ page }) => {
 		const resp = await page.request.post(
 			`${API_BASE}/api/corporate-card-transactions/sync-virtual-cards`,

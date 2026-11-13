@@ -2,20 +2,22 @@
 # Deploy / update the minimal single-VM stack (docs/minimal-deployment.md).
 # Run ON the VM from anywhere: preflight → pull main (or check out a release's
 # commit, --ref) → hand over to the deploy.sh just checked out → decrypt
-# secrets → build frontend (compose.prod.yml's one-shot `frontend-build` service, a
-# node:24 container — no Node/pnpm needed on the VM) →
-# build backend → run migrations BEFORE the new code serves traffic (control
-# plane + every tenant DB — same ordering contract as the future ECS
-# pipeline) → roll containers and wait for the API healthcheck → publish the
-# frontend build as the live release (an atomic symlink swap under deploy/www/,
-# which is what Caddy mounts) → reload Caddy → smoke-check the site and the API
-# through this VM's own Caddy.
+# secrets → build the backend → run migrations BEFORE the new code serves
+# traffic (control plane + every tenant DB — same ordering contract as the
+# future ECS pipeline) → roll containers and wait for the API healthcheck →
+# reload Caddy → smoke-check the API through this VM's own Caddy.
 #
-# Usage: deploy.sh [--no-pull | --ref <sha>] [--backend-only|--frontend-only]
+# The VM builds and serves no SPA (docs/decisions.md §364). The release
+# workflow builds it in CI and publishes it to S3 + CloudFront after this
+# script succeeds (.github/workflows/vm-deploy.yml, deploy/publish-frontend.sh).
+#
+# Usage: deploy.sh [--no-pull | --ref <sha>] [--backend-only]
 #
 # --ref <sha> deploys exactly that commit, which must be on origin/main — what a
 # published release runs over SSM (.github/workflows/vm-deploy.yml,
-# infra/deploy.tf). Without it, main's tip.
+# infra/deploy.tf). Without it, main's tip. --backend-only is what every deploy
+# is now; it is still accepted, and handed on when the script re-runs itself,
+# so a rollback to an older commit keeps the meaning it had there.
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO_ROOT=$(cd .. && pwd)
@@ -28,8 +30,8 @@ die() {
 	exit 1
 }
 
-USAGE="usage: deploy.sh [--no-pull | --ref <sha>] [--backend-only|--frontend-only]"
-DO_PULL=1 DO_BACKEND=1 DO_FRONTEND=1 REF=""
+USAGE="usage: deploy.sh [--no-pull | --ref <sha>] [--backend-only]"
+DO_PULL=1 REF=""
 SCOPE=() # the build-scope flags, handed on unchanged when the script re-runs itself
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -40,13 +42,9 @@ while [ $# -gt 0 ]; do
 		shift
 		;;
 	--ref=*) REF=${1#--ref=} ;;
-	--backend-only)
-		DO_FRONTEND=0
-		SCOPE+=("$1")
-		;;
+	--backend-only) SCOPE+=("$1") ;;
 	--frontend-only)
-		DO_BACKEND=0
-		SCOPE+=("$1")
+		die "--frontend-only: the VM no longer builds or serves the SPA (docs/decisions.md §364). It ships to S3 + CloudFront from the release workflow; to publish one by hand, see deploy/README.md § The SPA on S3 + CloudFront."
 		;;
 	*) die "$USAGE" ;;
 	esac
@@ -100,93 +98,31 @@ umask 077
 feoh_load_db_mode || die "could not determine the database mode from deploy/.env."
 echo "==> database: ${DB_MODE}"
 
-# Per-VM tenant host list for Caddy (gitignored) — seed from the example so
-# the Caddyfile's `import tenants.caddy` always resolves.
+# Per-VM vanity host list for Caddy (gitignored) — seed from the example so
+# the Caddyfile's `import tenants.caddy` always resolves. Then take out any
+# platform host block an older add-tenant.sh wrote: CloudFront serves those
+# names, and their `import spa` names a snippet the Caddyfile no longer has, so
+# the Caddy the roll below recreates would refuse the whole config (lib.sh).
 [ -f tenants.caddy ] || cp tenants.caddy.example tenants.caddy
-
-# The SPA Caddy serves is the release `www/current` points at (deploy/lib.sh
-# § The SPA Caddy serves). A backend-only deploy publishes none, so it needs one
-# to exist already — on a VM moving to this layout, run a full deploy first.
-WWW=www
-# Created here, before any compose call, so it is this user's: a bind-mount
-# source that does not exist yet is created by the Docker daemon, as root, and
-# the publish step could then never write into it.
-(umask 022 && mkdir -p "$WWW")
-# "Live" means the link resolves to a page — a dangling `current` (its release
-# deleted by hand) passes `[ -L ]` and serves nothing.
-www_is_live() { [ -e "$WWW/current/index.html" ]; }
-[ "$DO_FRONTEND" = 1 ] || www_is_live ||
-	die "no live frontend release under deploy/${WWW}/ (www/current is missing or points at nothing) — run a full ./deploy.sh (not --backend-only) first."
-
-API_DOMAIN=$(feoh_env API_DOMAIN)
 APP_DOMAIN=$(feoh_env APP_DOMAIN)
-
-# ── Frontend ─────────────────────────────────────────────────────────────────
-if [ "$DO_FRONTEND" = 1 ]; then
-	# PUBLIC_API_URL is baked into the static build (declared `static` in frontend/src/env.ts).
-	# PUBLIC_SITE_URL prefixes the absolute og:image URL in src/app.html (link
-	# previews); SvelteKit would substitute an empty string for it silently, which
-	# is why it comes from APP_DOMAIN, which decrypt-env.sh refuses empty.
-	# pnpm's version is declared once, as `packageManager` in package.json
-	# (frontend/CLAUDE.md § The lockfile) — the field CI's pnpm/action-setup
-	# reads, so this builds with the pnpm that wrote the lockfile. Read after the
-	# pull so a bump lands on the next deploy. `npm i -g` rejects corepack's
-	# `+sha512.<hash>` integrity suffix, so the pattern stops before it.
-	PNPM_SPEC=$(sed -nE 's/^[[:space:]]*"packageManager":[[:space:]]*"(pnpm@[^"+]+).*/\1/p' "$REPO_ROOT/frontend/package.json")
-	[ -n "$PNPM_SPEC" ] || die "frontend/package.json declares no pnpm packageManager, so there is no pnpm version to build with."
-	echo "==> building frontend (${PNPM_SPEC}, PUBLIC_API_URL=https://${API_DOMAIN}, PUBLIC_SITE_URL=https://${APP_DOMAIN})"
-	# The container, its pinned Node image, the repo mount and the pnpm-store
-	# cache are the `frontend-build` service in compose.prod.yml, where the
-	# docker-compose Dependabot entry keeps the image current — nothing here
-	# restates an image ref (docs/decisions.md §203). Naming the service
-	# activates its `build` profile.
-	"${COMPOSE[@]}" run --rm -T \
-		-e PNPM_SPEC="$PNPM_SPEC" \
-		-e PUBLIC_API_URL="https://${API_DOMAIN}" \
-		-e PUBLIC_SITE_URL="https://${APP_DOMAIN}" \
-		frontend-build
-	# The build lands in frontend/build, which nothing serves — it is the
-	# staging copy. It goes live as a release after the roll below, so a failed
-	# migration or an API that never comes healthy leaves the old SPA in front
-	# of the old API. Unique per run (the lock above serialises deploys).
-	RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD)"
-	publish_frontend() {
-		# The site is public static files: world-readable, unlike the secrets
-		# this script's umask exists for.
-		(umask 022 && feoh_publish_frontend "$REPO_ROOT/frontend/build" "$WWW" "$RELEASE_ID") ||
-			die "could not publish the frontend build as release ${RELEASE_ID}. If the error above is a permission error, deploy/${WWW}/ is probably root's: the Docker daemon creates a missing bind-mount source as root, which happens when compose started Caddy before deploy.sh created the directory. Fix it once with: sudo chown -R $(id -un): $(pwd)/${WWW}"
-	}
-	# A VM with no live release (a first deploy, the first on this layout, or a
-	# dangling `current`): nothing useful is being served from www/, so publish
-	# now and a Caddy the roll recreates starts with a site, not a 404 window.
-	if ! www_is_live; then
-		publish_frontend
-		PUBLISHED=1
-	fi
-fi
+feoh_prune_platform_hosts "$APP_DOMAIN" || die "could not prune the platform hosts from deploy/tenants.caddy."
 
 # ── Backend ──────────────────────────────────────────────────────────────────
-if [ "$DO_BACKEND" = 1 ]; then
-	echo "==> building backend image"
-	"${COMPOSE[@]}" build api
-	# Local mode starts the Postgres container here; with an external database
-	# there is none to start — the migration below is the first thing to reach it.
-	"${COMPOSE[@]}" up -d "${DB_SERVICES[@]}" redis
-	echo "==> running migrations (control plane + every tenant DB)"
-	# init_control_plane.py, then alembic upgrade head, then
-	# migrate_all_tenants.py — the sequence lives in that one file, which CI's
-	# day-one job also runs against an empty database (#575), so the rehearsal
-	# cannot drift from this step.
-	"${COMPOSE[@]}" run --rm api sh scripts/deploy_migrate.sh
-fi
+echo "==> building backend image"
+"${COMPOSE[@]}" build api
+# Local mode starts the Postgres container here; with an external database
+# there is none to start — the migration below is the first thing to reach it.
+"${COMPOSE[@]}" up -d "${DB_SERVICES[@]}" redis
+echo "==> running migrations (control plane + every tenant DB)"
+# init_control_plane.py, then alembic upgrade head, then
+# migrate_all_tenants.py — the sequence lives in that one file, which CI's
+# day-one job also runs against an empty database (#575), so the rehearsal
+# cannot drift from this step.
+"${COMPOSE[@]}" run --rm api sh scripts/deploy_migrate.sh
 
 # ── Roll + verify ────────────────────────────────────────────────────────────
 echo "==> rolling containers"
 "${COMPOSE[@]}" up -d --wait --wait-timeout 300
-
-if [ "$DO_FRONTEND" = 1 ] && [ "${PUBLISHED:-0}" = 0 ]; then
-	publish_frontend
-fi
 
 # Pick up Caddyfile / tenants.caddy edits — a reload, or a recreate when the
 # container's single-file mounts are stale (lib.sh). A failure here is a real
@@ -211,12 +147,23 @@ if [ "$DB_MODE" = external ] &&
 	echo "NOTE: the local postgres container is still running, but the API now uses the external database. Once the cut-over is verified: ./compose.sh --profile localdb stop postgres" >&2
 fi
 
-# Prove the site actually serves, from outside the containers: the API's own
+# What the VM served before §364, and nothing reads now. A rollback to an older
+# commit builds and publishes its own release, so none of it is needed; it is
+# left for the operator to delete rather than removed by a deploy.
+if [ -e www ]; then
+	echo "NOTE: deploy/www/ still holds SPA releases from before the VM stopped serving the SPA (docs/decisions.md §364). Once this deploy is verified: rm -rf $(pwd)/www" >&2
+fi
+if docker volume inspect feoh-prod_pnpm-store >/dev/null 2>&1; then
+	echo "NOTE: the frontend build's pnpm cache volume is unused since the VM stopped building the SPA. Drop it once: docker volume rm feoh-prod_pnpm-store" >&2
+fi
+
+# Prove the stack actually serves, from outside the containers: the API's own
 # healthcheck stays green through a Caddy that serves nothing (#579). smoke.sh
-# checks the apex, api.<domain>/api/health, a tenant host's TLS and that
-# /api/public-config matches deploy/.env (#575) — the same script the ECS
-# release workflow ends with.
+# checks api.<domain>/api/health, that /api/public-config matches deploy/.env
+# (#575) and, when the VM serves one, a vanity host's TLS — the same script the
+# ECS release workflow ends with. The SPA's own check runs after the publish,
+# against CloudFront (deploy/smoke-frontend.sh).
 ./smoke.sh --vm ||
-	die "post-deploy smoke check failed (above) — the stack is up but not serving as configured. See docs/troubleshooting.md § Every page 404s while the API is healthy; to roll the SPA back, deploy/README.md § Rolling the frontend back."
+	die "post-deploy smoke check failed (above) — the stack is up but not serving as configured."
 
 echo "deploy complete — API healthcheck and smoke check passed."

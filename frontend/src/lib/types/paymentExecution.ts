@@ -32,12 +32,6 @@ export function canDispatchPayments(mode: string | null | undefined): boolean {
 	return mode === 'processor';
 }
 
-/** The run's NACHA bank file is offered only on a confirmed record-only
- *  tenant — the server refuses it anywhere else (`nacha_requires_record_only`). */
-export function canDownloadBankFile(mode: string | null | undefined): boolean {
-	return mode === 'record_only';
-}
-
 /**
  * The rails a payment made outside FeohLedger can be recorded on — every rail
  * except `virtual_card`, which is FeohLedger's own card programme and never a

@@ -17,6 +17,8 @@
 		type ProviderCredentialStatus
 	} from '#lib/types/providerCredentials.ts';
 	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import { normalizeCurrencyCode, currencyCodeProblem } from '#lib/utils/currencyCode.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
@@ -136,6 +138,9 @@
 	let vatNumber = $state('');
 	let companiesHouseNumber = $state('');
 	let currency = $state('USD');
+	// The stored default is the user's choice, never re-seeded; marking it
+	// touched once loaded also shows a malformed stored code as an error.
+	let currencyTouched = $state(false);
 	let paymentTerms = $state('Net 30');
 	let numberPrefix = $state('INV-');
 	let defaultGl = $state('');
@@ -493,6 +498,7 @@
 			vatNumber = data.settings.company.vat_registration_number ?? '';
 			companiesHouseNumber = data.settings.company.companies_house_number ?? '';
 			currency = data.settings.invoice_defaults.currency;
+			currencyTouched = true;
 			paymentTerms = data.settings.invoice_defaults.payment_terms;
 			numberPrefix = data.settings.invoice_defaults.number_prefix;
 			defaultGl = data.settings.invoice_defaults.default_gl_account;
@@ -753,6 +759,20 @@
 	}
 
 	async function saveDefaults() {
+		// The section has no <form>, so the field's own validity cannot block
+		// the save: refuse here with the same words the field shows.
+		const code = normalizeCurrencyCode(currency);
+		if (code === null) {
+			currencyTouched = true;
+			toast(
+				currencyCodeProblem(currency) === 'required'
+					? m('common.currencyCode.required')
+					: m('common.currencyCode.invalid', { value: currency.trim() }),
+				'error'
+			);
+			return;
+		}
+		currency = code;
 		savingDefaults = true;
 		try {
 			await patchSettings(m('org.section.defaultsSaved'), {
@@ -1772,14 +1792,14 @@
 						<div class="form-grid">
 							<label>
 								<span>{m('org.defaults.currency')}</span>
-								<select bind:value={currency}>
-									<option value="USD">USD — US Dollar</option>
-									<option value="EUR">EUR — Euro</option>
-									<option value="GBP">GBP — British Pound</option>
-									<option value="CAD">CAD — Canadian Dollar</option>
-									<option value="AUD">AUD — Australian Dollar</option>
-									<option value="JPY">JPY — Japanese Yen</option>
-								</select>
+								<!-- Any ISO 4217 code: six hardcoded options left a PLN or
+								     ZAR organization unable to set its own default, which is
+								     also a rung of the reporting currency (decisions §381). -->
+								<CurrencyInput
+									bind:value={currency}
+									bind:touched={currencyTouched}
+									testid="org-default-currency"
+								/>
 							</label>
 							<label>
 								<span>{m('org.defaults.paymentTerms')}</span>

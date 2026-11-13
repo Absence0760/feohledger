@@ -743,10 +743,10 @@ export const PAYMENT_GUIDES: Guide[] = [
 					{
 						type: 'steps',
 						items: [
-							'Open [[page:/reports]] and pick a **Data source**: Invoices, Payments, Vendors or Expenses.',
-							'Add **Group by** dimensions, at least one measure (a sum, count or average), and any filters.',
-							'Click **Run report**.',
-							'Click **Save report** to keep it. A saved report can be run again or exported with **Export CSV** or **Export PDF**.'
+							'Open [[page:/reports]] and pick a {ui:reports.dataSource}: {ui:reports.source.invoices}, {ui:reports.source.payments}, {ui:reports.source.vendors} or {ui:reports.source.expenses}.',
+							'Add {ui:reports.dims.title} dimensions, at least one measure (a sum, count or average), and any filters.',
+							'Click {ui:reports.action.run}.',
+							'Click {ui:reports.action.save} to keep it. A saved report can be run again or exported with {ui:reports.action.exportCsv} or {ui:reports.action.exportPdf}.'
 						]
 					},
 					{

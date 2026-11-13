@@ -82,17 +82,31 @@ class Exception(Base, EntityMixin, TimestampMixin):
     # `tests/test_exception_raiser_stamping.py` is the guard that keeps every
     # `create_exception` call site answering the question explicitly.
     raised_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    # What a person judged, for a `duplicate` / `fraud_flag` detector row
-    # (migration 0116, decisions §286): a SHA-256 of the finding's code and the
-    # invoice fields those rules read (`invoice_warnings.finding_fingerprint`),
-    # stamped once, when the row is raised. A row a PERSON resolved or
-    # dismissed with a fingerprint equal to the invoice's current one stops the
-    # refresh re-raising that finding; an edit to any of those fields re-raises
-    # it. `exception_lifecycle.record_decision` keeps it only when a person
-    # clears the row AND the invoice still hashes as it was raised, so neither a
+    # What a person judged, for every row `invoice_warnings._ensure_exception`
+    # raises (migration 0116, decisions §286 for `duplicate` / `fraud_flag`,
+    # §366 for the rest): a SHA-256 of the facts that type's rule reads
+    # (`invoice_warnings.current_finding_fingerprint`: header fields, line
+    # totals, the PO match, priced lines …), stamped once, when the row is
+    # raised. A row a PERSON resolved or dismissed with a fingerprint equal to
+    # the invoice's current one stops the refresh re-raising that finding; a
+    # change to any of those facts re-raises it.
+    # `exception_lifecycle.record_decision` keeps it only when a person clears
+    # the row AND the invoice still hashes as it was raised, so neither a
     # detector or agent close nor an edit made mid-decision ever suppresses.
-    # NULL everywhere else, and on every row closed before 0116.
+    # NULL on rows other paths open, and on rows closed before their type was
+    # stamped.
     finding_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    # The control-plane user whose resolve or dismiss closed this row
+    # (migration 0126, decisions §367). `record_decision` writes it on every
+    # clearing decision: the person, or NULL when no person decided (a detector
+    # auto-close, an agent). A closed row suppresses a re-raise only while
+    # `exception_lifecycle.clearance_stands` says segregation would still let
+    # this person clear it, so a decider who became implicated afterwards (an
+    # uploader backfilled by 0126, a recaller, §374) no longer keeps their own
+    # verdict live. Not read from the audit log, which under
+    # `FEOH_AUDIT_MODE=lambda` is not local yet when the next refresh runs. No
+    # FK: control-plane id, as `raised_by_user_id` above.
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     # What the ERP reported, kept as data rather than prose (migration 0121,
     # decisions §319). Set only on the reconciliation rows the ERP paths open
     # (`services/erp_status_sync`, `api/erp_webhook`): PII-free ids, a status,

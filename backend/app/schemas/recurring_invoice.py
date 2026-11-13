@@ -14,6 +14,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from app.schemas.currency import CurrencyCode, OptionalCurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.schemas.percent import PercentNumber
 
@@ -35,7 +36,7 @@ class RecurringTemplateCreate(BaseModel):
     vendor_id: str | None = None
     description: str | None = Field(default=None, max_length=500)
     amount: MoneyAmount | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: CurrencyCode = "USD"
     gl_account: str | None = Field(default=None, max_length=100)
     cost_center: str | None = Field(default=None, max_length=100)
     department: str | None = Field(default=None, max_length=100)
@@ -60,7 +61,7 @@ class RecurringTemplateUpdate(BaseModel):
     vendor_id: str | None = None
     description: str | None = Field(default=None, max_length=500)
     amount: MoneyAmount | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    currency: OptionalCurrencyCode = None
     gl_account: str | None = Field(default=None, max_length=100)
     cost_center: str | None = Field(default=None, max_length=100)
     department: str | None = Field(default=None, max_length=100)

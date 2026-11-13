@@ -24,7 +24,7 @@ mobile/
 │   │   ├── inspection.dart      # Inspection + InspectionResult enum (pass/fail/partial + unknown for a free-form/QMS value) + InspectionDraft (quantities sent as raw strings) + quantityToDisplay
 │   │   ├── audit_entry.dart     # AuditEntry + AuditFieldChange (invoice activity timeline; details.changes diff)
 │   │   ├── contract.dart        # Contract + ContractStatus enum (draft/active/expired/terminated/cancelled; isActionable gate on the lifecycle buttons)
-│   │   ├── invoice.dart         # Invoice, InvoiceStatus enum (12 states); isEditable mirrors backend IMMUTABLE_STATUSES, isFinanciallyLocked mirrors the narrower _FINANCIALLY_LOCKED_STATUSES ({approved} ∪ immutable) + kFinancialInvoiceFields / stripFinancialFields
+│   │   ├── invoice.dart         # Invoice, InvoiceStatus enum (12 states); isEditable mirrors backend IMMUTABLE_STATUSES; `Invoice.financiallyLocked` is the server's `financially_locked` verdict (missing = locked; decisions §370) + kFinancialInvoiceFields / stripFinancialFields
 │   │   ├── mfa_challenge.dart    # MFAChallenge (login MFA-challenge response) — challengeToken + offered methods (totp/email) + mustEnroll
 │   │   ├── exception.dart       # ApException, ApExceptionStatus + ApExceptionSeverity enums
 │   │   ├── notification.dart    # AppNotification (in-app notification center row); eventLabel + linksToInvoice helper; copyMarkedRead for optimistic mark-read
@@ -94,7 +94,8 @@ mobile/
 │       ├── bulk_action_bar.dart  # Bottom bar shown in invoice multi-select mode — selected count + bulk export / status-change / delete actions (each action omitted when its callback is null; reusable shape)
 │       ├── advanced_search_sheet.dart # Modal bottom-sheet advanced search (vendor, PO, amount range, due-date range); seeded from live filters; min≤max + decimal validation; returns InvoiceSearchFilters (Apply) / empty (Clear) / null (dismiss)
 │       ├── invoice_warnings_panel.dart # Detail-screen warnings/fraud flags (severity-coloured) + PO-match panel (match type, status, variance %, issues); one merged Semantics label per warning
-│       ├── erp_status_panel.dart # Detail-screen ERP status — ErpInfo.fromAuditLog derives ERP reference / document id / send error from the audit log; shown for ERP-bound + ERP-failed statuses
+│       ├── erp_status_panel.dart # Detail-screen ERP status — the invoice's ERP reference (a tappable ExternalLink to the bill when the backend sent `erp_document_url`), plus ErpInfo.fromAuditLog's document id / send error from the audit log; shown for ERP-bound + ERP-failed statuses and any invoice naming its bill
+│       ├── external_link.dart # ExternalLink — text that opens a backend-supplied https URL outside the app via url_launcher (anything else renders as plain text); one link-role Semantics node, 48-dp target, snackbar when no app can open it; injectable UrlOpener for tests
 │       ├── invoice_file_viewer.dart # Full-screen uploaded-file viewer — images via Image.network (auth headers), PDFs fetched as bytes via ApiClient.getBytes + rendered with pdfx; isPdf/absoluteUrl helpers; loading/error/Retry states
 │       ├── invoice_edit_sheet.dart # Modal bottom-sheet edit form (vendor, invoice #, amount, PO, GL, description, due date); returns the partial diff; amount sent as string-Decimal; vendor + amount render read-only (with a lock notice) and are stripped from the diff once the invoice is financially locked
 │       ├── inspection_list_tile.dart  # Inspection row — number + outcome badge, goods receipt (or "Not linked"), inspected date; one merged Semantics label

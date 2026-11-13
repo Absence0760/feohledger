@@ -83,6 +83,19 @@ class DSARResponse(BaseModel):
     # The portable bundle: every PII field + related-record summary held about
     # the subject, grouped by source. Loosely typed by design.
     data: dict
+    # Typed per-section record counts of ``data`` (section name → count), from
+    # ``privacy_export.bundle_record_counts``. What a client summarises the
+    # export from, so it never has to walk the bundle or quote server prose.
+    record_counts: dict[str, int] = Field(default_factory=dict)
+    # Whether ``data`` is everything held. The response caps each high-volume
+    # section at ``privacy_export.MAX_EXPORT_ROWS``; ``complete`` is false when
+    # any of them was cut, ``truncated_sections`` names which, and the whole set
+    # — every section uncapped — is the download at ``full_bundle_url``
+    # (``GET /api/privacy/dsar/{request_id}/bundle``). Art. 15 owes the subject
+    # the whole set, so a cut is never the end of the answer (decisions §369).
+    complete: bool = True
+    truncated_sections: list[str] = Field(default_factory=list)
+    full_bundle_url: str | None = None
 
 
 class ErasureRequest(BaseModel):

@@ -1226,17 +1226,88 @@ the same function, so the button and the endpoint cannot disagree
 **Accept settlement** works the same way (`accept_settlement_refusal`, from
 `payment_controls.settlement_accept_refusal` — see § Settlement verification).
 
-### A void re-flags the invoice if the vendor's bank details changed since
+### A payment records the payee it paid, and a void flags a re-payment to anyone else
 
-A void that returns the invoice to `approved` also calls
-`api/vendors.reflag_voided_invoice_for_bank_change`: if a `bank_details`
-change for the vendor was approved after the voided payment was created, the
-invoice gets the same de-duped `fraud_flag` the change raises on unpaid
-invoices, stamped with that change's approver as its raiser. The change could
-not flag the invoice while it was `paid`, and without the flag the re-payment
-would go to the new account with no second look (decisions §286).
+Every payment records, at the step that releases its money, the payee it pays:
+`payee_vendor_id` (the invoice's vendor then), `payee_bank_fingerprint` (a keyed
+HMAC of that vendor's whole `bank_details`, `v2:<key id>:<hex>`, never a number) and
+`payee_recorded_at` (migration 0128, `services/payee_stamp.py`, decisions §383).
+The steps that stamp it are the ones that move money:
 
-**Tests:** `tests/test_erp_export_blocking_exceptions.py`.
+- the rail or card dispatch (`_execute_single_payment`), from the same read the
+  order is built from, once every refusal and compliance hold has passed and
+  immediately before the processor or card call. A held or refused attempt
+  records no payee; each attempt re-stamps; and the stamp is restored with the
+  order after a database error (`_ORDER_FIELDS`);
+- the NACHA export (`GET /runs/{id}/nacha`), once the file is certain; a
+  regenerated file re-stamps, since the latest file is the one the customer is
+  told to upload (if an earlier file was uploaded too, the record names only the
+  latest file's payee);
+- a payment recorded as paid outside FeohLedger (`external_payment._complete`:
+  the single and run-level records, and an ERP-reported payment). An entry of an
+  `exported` file keeps the payee its file carried; a file the bank rejected
+  (`/nacha/void`) paid nobody, and its stamp is replaced.
+
+The fingerprint covers the whole blob because the bank-change dual control
+treats any change to it as a bank change, and a key allowlist would miss the
+next key that steers money. It is keyed with its own secret,
+`FEOH_PAYEE_FINGERPRINT_KEY`, and the tenant id is in its message, so it cannot
+be brute-forced from a routing number, and one account paid by two tenants does
+not fingerprint alike. It is not keyed by `FEOH_SECRET_KEY`, which rotates every
+90 days and would turn each older void into a false flag. Each fingerprint names
+the key that made it (an id derived from the key), and the void recomputes it
+under that key, current or retired (`FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS`), so
+a rotation through the keyring flags nothing (`docs/secrets-rotation.md`
+§ `FEOH_PAYEE_FINGERPRINT_KEY`). A fingerprint that cannot be recomputed does not
+match, and flags: its key is in neither setting (replaced instead of rotated), or
+there is none because the key was empty when the payment was stamped. A deployed
+environment refuses to boot without the key, so the second is local dev only. A
+card payment is fingerprinted too, so a bank change after it flags its void:
+noise, in the fail-closed direction.
+
+A merge also records, on each duplicate it retires for the first time, where it
+went and who merged it (`vendors.merged_into_vendor_id` / `merged_by_user_id` /
+`merged_at`, same migration), in the merge's own transaction.
+
+`POST /payments/{id}/void` returns a scheduled or paid invoice to `approved`,
+then asks `payee_stamp.flag_repayment_payee_change`. A re-payment would pay
+whoever the invoice names now, and two things change that while an invoice is
+paid without flagging it: a **vendor merge** moves paid invoices to the
+canonical vendor (§379), and a **bank change** skips paid invoices (§286). The
+void reads the invoice's vendor `FOR SHARE`, so a bank-change approval racing it
+is seen by whichever of the two runs second.
+
+| The voided payment | The invoice now | Flag (`fraud_flag`, blocks the run and the ERP push) | Raisers (one flag each; none can clear their own) |
+|---|---|---|---|
+| stamped | another vendor | `payee_changed_since_paid` | every steward on the merge chain from the paid vendor to the current one |
+| stamped | same vendor, other bank fingerprint, or one that cannot be recomputed (no fingerprint, or its key in neither setting) | `payee_changed_since_paid` | every approver of a bank change since the stamp |
+| stamped | same vendor, same fingerprint | none | |
+| unstamped (paid before 0128) | a merge into its vendor since the payment was booked | `payee_unrecorded_after_merge` | the stewards of those merges |
+| unstamped | a bank change approved since the payment was booked | `vendor_bank_changed` (`api/vendors.reflag_voided_invoice_for_bank_change`) | every approver of those changes |
+
+The merge chain follows each retired vendor's own record; a merge from before
+0128 is read from its `vendor.merged` audit row (the earliest one naming the
+vendor a duplicate, so a re-run never re-attributes it). When no person can be
+named (bank details cleared by an erasure, an old merge whose audit row has not
+landed in `lambda` mode) the raiser is `NULL`: the stamped flag still blocks,
+and anyone outside the invoice's implicated set may clear it. For an
+**unstamped** payment the merge evidence for a pre-0128 merge is that audit row
+alone, so in `lambda` mode a lost row means no flag; every merge since 0128 is
+on the vendor itself. The clearing rules are the payment-blocking set's
+(`exception_lifecycle.segregation_refusal`, decisions §169). Flags are
+de-duplicated by finding **and raiser**: an open Positive Pay or detector
+`fraud_flag` no longer absorbs a payee-change flag, and a second approver's
+change gets its own row rather than one its approver could clear.
+
+Nothing is backfilled: today's details are exactly what cannot stand in for the
+ones an old payment paid (§141). `payments.payee_vendor_id` is not a
+`vendor_id` FK and a merge never moves it.
+
+**Tests:** `tests/test_payment_payee_stamp.py`,
+`tests/test_payment_dispatch_db_error.py` (the stamp survives a post-processor
+rollback, and is absent when nothing was sent),
+`tests/test_erp_export_blocking_exceptions.py` (the unstamped bank-change
+re-flag), `tests/test_migration_0128_payee_and_merge_stamp.py`.
 
 ### Payment processor adapters
 
@@ -2247,7 +2318,13 @@ dispatch step:
   `payment_runs.nacha_export_count`, migration 0106), so the bank's
   duplicate-file check can tell them apart. If the bank rejected the file,
   `POST /runs/{id}/nacha/void {reason}` (`payment.execute`, audited
-  `payment_run.nacha_export_voided`) returns the run to `draft`.
+  `payment_run.nacha_export_voided`) returns the run to `draft` — **on a
+  record-only tenant only** (409 `nacha_void_requires_record_only`, decisions
+  §362). On a tenant switched to processor mode since the export, the released
+  run could be executed, or cancelled and restaged, and the rail would pay the
+  suppliers the bank's file already paid; refusing the void keeps the claim
+  that all three doors refuse. The exits there are recording the run as paid,
+  or an admin switching back to record-only to release it.
 - **Every dispatch-time check runs** — `payment_runs.dispatch_preflight`, the
   same function `/execute` calls before each payment: still payable, no
   payment-blocking exception raised since staging (a BEC bank-detail swap's
@@ -2255,7 +2332,12 @@ dispatch step:
   vendor still active, no live card, applied credits still pairing, and the
   staged amount still exactly what the invoice owes on the effective date.
   A failure refuses the file as `nacha_payment_not_payable` with the
-  dispatcher's reason code.
+  dispatcher's reason code. The live ERP-bill read (decisions §296) comes last,
+  once every local check (here and below) has passed, and reads the file's
+  bills **concurrently** — at most `FEOH_ERP_DISPATCH_CHECK_CONCURRENCY` (4) at
+  once, each within the read timeout — because the run and every invoice lock
+  are held across the reads (`erp_status_sync.erp_bill_dispatch_refusals`;
+  the database work around the reads stays sequential on the one session).
 - Maker-checker and CFO sign-off apply, as for `/execute`.
 - The originator comes from `settings.payments.nacha`
   `{company_name ≤16, company_id (10 chars, as the bank assigned it — usually
@@ -2281,6 +2363,47 @@ dispatch step:
   `payment_controls.run_nacha_void_refusal` as `actions.nacha_void`), which the
   run dialog's bank-file panel reads. The per-payment checks above stay in the
   endpoint, so a `null` verdict can still meet a refusal that names an invoice.
+
+**Verify before upload** — `POST /api/payments/runs/{id}/nacha/verify`
+(`payment.execute`, decisions §362). The export reads each bill when it builds
+the file, but the money moves when a person uploads it, possibly days later.
+Verify re-reads the ERP bill of every payment still `pending` in an `exported`
+run, under the run and invoice locks, concurrently as above:
+
+- every bill still open (or none posted to an ERP that reports payments back,
+  `erp_checked: false`) → `result: "verified"`, nothing changes;
+- a bill no longer open → that payment is taken out: `failed` with
+  `erp_bill_not_open:<state>` (what the rail dispatcher records for the same
+  verdict) and the blocking `payment_reconciliation` opened → `result:
+  "superseded"`: the downloaded file must not be uploaded. With payments
+  left the run stays `exported` and `regenerate=true` writes a file of only
+  those (next modifier); with none left the run is `cancelled`. The claim is
+  never released, so verify is available on a processor tenant too;
+- a read that fails → the payment is listed under `held` and left in, `result:
+  "held"` when nothing was taken out: verify again.
+
+Gate: `payment_controls.run_nacha_verify_refusal` (`nacha_verify_not_exported`,
+`nacha_nothing_to_verify`), shipped as `actions.nacha_verify`. No maker-checker
+or CFO gate — it only takes money out of the file. Idempotent: a payment taken
+out is no longer `pending`, so a second verify reads only what is left; the
+exception is de-duplicated. Each call audits `payment_run.nacha_verified`
+(result, counts, ids and reason codes, the file-ID modifier checked), and each
+payment taken out `payment.failed` (`source: "nacha_verify"`). The run dialog's
+bank-file panel offers **Verify before upload** from the verdict and keeps the
+result on screen. Not checked again: the local facts `dispatch_preflight` read
+at export — they cannot change the file already on disk, only a bill paid
+elsewhere makes it pay twice.
+
+**Where the panel applies** — `GET /runs/{id}`'s `bank_file_applies`
+(`payment_controls.run_bank_file_applies`, decisions §382): `true` on every run
+of a record-only tenant, and on a processor tenant only while the run's stored
+status is `exported` (a file exported before the switch). The dialog renders
+the panel from that and its controls from their own verdicts, never from the
+tenant's mode. On such a switched run Verify stays allowed; Download is hidden
+(`nacha_already_exported`); Regenerate (`nacha_requires_record_only`) and "Bank
+rejected the file" (`nacha_void_requires_record_only`) render disabled beside
+those refusals' sentences, so the reader learns why the run cannot be released.
+A processor tenant's draft has no file and gets no panel.
 
 Once the bank has taken the file, `POST /api/payments/runs/{id}/record-outside`
 `{reference, paid_on}` records every pending payment of the `exported` (or
@@ -2424,7 +2547,8 @@ minted virtual card is spendable, so it is a payment by another door.
 | `POST` | `/api/payments/record-outside` | Record one invoice as paid outside FeohLedger (`payment.record_external`). 201 new / 200 idempotent replay. See § Recording a payment made outside FeohLedger. |
 | `POST` | `/api/payments/runs/{id}/record-outside` | Record a whole `exported` (or `draft`) run as paid through the customer's bank (`payment.record_external`). All-or-nothing; maker-checker + CFO sign-off; refuses a changed amount. |
 | `GET` | `/api/payments/runs/{id}/nacha` | NACHA ACH credit file for a run (`payment.execute`, record-only tenants only). Claims the run (`draft → exported`); a second file needs `regenerate=true`. Runs `dispatch_preflight`. Audited `payment_run.nacha_exported`. See § The bank file. |
-| `POST` | `/api/payments/runs/{id}/nacha/void` | The bank rejected the file: `exported → draft`, required `{reason}`, `payment.execute`, audited `payment_run.nacha_export_voided`. |
+| `POST` | `/api/payments/runs/{id}/nacha/void` | The bank rejected the file: `exported → draft`, required `{reason}`, `payment.execute`, record-only tenants only (`nacha_void_requires_record_only`, §362), audited `payment_run.nacha_export_voided`. |
+| `POST` | `/api/payments/runs/{id}/nacha/verify` | Verify before upload: re-read the file's ERP bills; a bill no longer open is taken out of the run (`failed`, blocking `payment_reconciliation`), the run stays `exported` (or `cancelled` with nothing left). `payment.execute`, idempotent, audited `payment_run.nacha_verified`. See § The bank file. |
 
 **Query parameters for `GET /api/payments`:**
 
@@ -2478,7 +2602,8 @@ invoices
   |       due_date, discount_date, discount_percent, payment_terms
   |
   |-- payments (invoice_id FK)
-          amount, method, status, reference
+          amount, method, status, reference,
+          payee_vendor_id, payee_bank_fingerprint, payee_recorded_at
           |-- payment_runs (payment_run_id FK)
                   status, total_amount, initiated_by, executed_at
 ```

@@ -20,6 +20,7 @@ This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Secrets management).
 | `FEOH_HCAPTCHA_SECRET` (signup) | sops — `infra-secrets` (`feohledger/`) | **365 days** (or on suspected leak) | Bypass signup captcha |
 | `POSTGRES_PASSWORD` (single-VM Postgres superuser) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **365 days** (or on suspected leak) | Full read/write of the control plane and every tenant DB — reachable only on the compose network, which publishes no host port |
 | `FEOH_APPROVAL_SIGNING_KEY` (invoice approval signatures) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **On suspected leak only** — rotating breaks verification of every signature made under the old key | Forge an approval signature that verifies |
+| `FEOH_PAYEE_FINGERPRINT_KEY` (payee bank fingerprint a payment records, decisions §383) + `FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS` (its keyring) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **365 days**, or on suspected leak — **only through the keyring**, never by replacement ([procedure](#feoh_payee_fingerprint_key-payee-bank-fingerprint)) | With a database copy, brute-force which routing + account number each payment paid (the fingerprint is all that stands between the two); with database write access too, forge a fingerprint so a void of a re-pointed payment raises no flag |
 | `FEOH_EMAIL_ACTION_SIGNING_KEY` (approve-by-email links, Slack / Teams buttons) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **180 days** | Mint an approve/reject link for any reviewer (the action still runs that reviewer's segregation, threshold and CFO checks) |
 | `FEOH_PARTNER_LINK_SIGNING_KEY` (partner / reseller link codes) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **180 days** | Forge a link code that attaches a tenant to a partner without its admin's consent |
 | `FEOH_EMAIL_INTAKE_SIGNING_SECRET` (inbound email-to-invoice webhook) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **365 days**, changed at the email provider in the same step | Post forged inbound mail, creating invoices in any tenant whose intake address is known |
@@ -54,9 +55,50 @@ The riskiest secret in the system — leaks let an attacker forge any user's ses
    ```
    Update `FEOH_SECRET_KEY` (flat key `secret_key`) to the new value, and the same key in the VM's encrypted deploy env.
 3. Deploy. **Every existing JWT becomes invalid immediately** — all users are forced to re-login. This is the intended behaviour.
+   The payee bank fingerprint a payment records does **not** use this key (it has its own, `FEOH_PAYEE_FINGERPRINT_KEY`, below), so a JWT rotation changes no fingerprint and flags no void.
 4. Record the rotation in the compliance vendor's evidence locker (date, who rotated, ticket if any).
 
 If you need a graceful rollover, support two keys (current + previous) for one rotation cycle. Not implemented today — accepted because forced re-login is acceptable for the user count.
+
+### `FEOH_PAYEE_FINGERPRINT_KEY` (payee bank fingerprint)
+
+Every payment records an HMAC of the bank details it paid, and a void compares
+it with the vendor's details now (`services/payee_stamp.py`, decisions §383).
+Each fingerprint names the key that made it (`v2:<key id>:<hmac>`, the id
+derived from the key), and the void recomputes it under that key. So the old
+key must stay readable for as long as any payment it stamped may be voided.
+
+**Never rotate it by replacing the value.** Every payment stamped under the old
+key would then fail its comparison, and each of its voids would open a
+`payee_changed_since_paid` fraud flag that a person has to clear: false flags
+that teach people to clear fraud flags without looking.
+
+1. Generate the new key in your own terminal: `openssl rand -hex 32`.
+2. From your `infra-secrets` clone, `AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml`,
+   and in the one edit:
+   - add the **current** `FEOH_PAYEE_FINGERPRINT_KEY` value to the front of
+     `FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS` (comma-separated, no spaces needed;
+     uncomment the key on the first rotation);
+   - set `FEOH_PAYEE_FINGERPRINT_KEY` to the new value.
+   The new key must differ from `FEOH_SECRET_KEY`; the app refuses to boot
+   otherwise.
+3. Commit in `infra-secrets`, copy the file onto the VM as `deploy/prod.sops.yaml`,
+   and run `./deploy.sh --no-pull --backend-only`. New payments stamp under the
+   new key; voids of older ones still compare under the key that stamped them.
+4. Record the rotation (date, who) in the evidence locker. Name the secret in
+   the `infra-secrets` commit message, never a value.
+
+**Retiring a key from the keyring.** A void has no time limit, so keep retired
+keys unless there is a reason to drop one. Dropping one is fail-closed, not
+silent: a void of a payment it stamped flags (and logs the unknown key id), and
+a person clears it.
+
+**After a suspected leak**, rotate as above, so no new fingerprint is made under
+the leaked key. That does not protect the fingerprints already stored: anyone
+holding both the leaked key and a copy of the database can still brute-force
+them, and they cannot be re-keyed, because the bank details they were made from
+are not kept. Treat a leak of the key together with a database copy as a breach
+of those bank details (`docs/founder-runbooks/breach-notification.md`).
 
 ### AWS KMS key (SOPS encryption)
 

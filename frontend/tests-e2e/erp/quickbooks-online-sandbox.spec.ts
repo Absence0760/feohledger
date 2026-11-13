@@ -327,6 +327,15 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 			// Reported since the live run; every sandbox parent path fits.
 			parent_code_dropped: [],
 			parent_code_dropped_count: 0,
+			// Likewise every sandbox account name fits `gl_accounts.name`.
+			names_shortened: [],
+			names_shortened_count: 0,
+			// No other company is on record for this tenant, so nothing is kept
+			// for one or restored from one (decisions §376).
+			kept: 0,
+			restored: 0,
+			restore_dropped: [],
+			restore_dropped_count: 0,
 			link_changes: expect.any(Array),
 			success: true,
 			adapter: PROVIDER
@@ -565,7 +574,7 @@ test.describe('/erp quickbooks_online against the recorded sandbox company', () 
 		const [refresh] = (await stats()).refresh_tokens;
 		const resp = await post(page, '/api/organization/erp/oauth/disconnect');
 		expect(resp.ok()).toBe(true);
-		expect(await resp.json()).toEqual({ disconnected: true, revoked: true });
+		expect(await resp.json()).toEqual({ disconnected: true, revoked: true, revocation: 'revoked' });
 		const now = await stats();
 		expect(now.revocations).toEqual([refresh]);
 		expect(now.refresh_tokens).toEqual([]);

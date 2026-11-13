@@ -720,7 +720,7 @@ export const SETUP_GUIDES: Guide[] = [
 						items: [
 							'Go through the list, starting with the people marked dormant.',
 							'Remove access nobody needs on [[page:/admin?tab=users]].',
-							'Click **Acknowledge review** to record that the review was done for this period.'
+							'Click {ui:admin.accessReview.action.acknowledge} to record that the review was done for this period.'
 						]
 					}
 				]
@@ -739,8 +739,8 @@ export const SETUP_GUIDES: Guide[] = [
 					{
 						type: 'list',
 						items: [
-							'**Export data (DSAR)** gathers everything held about that person into one bundle. Bank details are masked unless you tick {ui:privacyDsar.includeBanking}, which needs a written reason, permission to approve vendor bank changes, and an authenticator code or passkey.',
-							'**Erase data…** permanently redacts the person’s personal details. Invoice and payment amounts and the audit trail are kept, so your financial records stay complete. Erasure cannot be undone.'
+							'{ui:admin.privacy.action.export} gathers everything held about that person into one bundle. Bank details are masked unless you tick {ui:privacyDsar.includeBanking}, which needs a written reason, permission to approve vendor bank changes, and an authenticator code or passkey. The on-screen result lists at most a thousand of any one kind of record; when it had to cut a list it says so, and {ui:admin.privacy.export.download} saves the whole bundle, every record included, as a file to send the person.',
+							'{ui:admin.privacy.action.erase} permanently redacts the person’s personal details. Invoice and payment amounts and the audit trail are kept, so your financial records stay complete. Erasure cannot be undone.'
 						]
 					}
 				]

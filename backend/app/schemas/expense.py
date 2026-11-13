@@ -22,9 +22,8 @@ endpoints are wired in WF1.
 
 from datetime import date
 from decimal import Decimal
-from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.expense import (
@@ -35,6 +34,7 @@ from app.models.expense import (
     ReconciliationStatus,
 )
 from app.schemas.action_verdict import CodedRefusal
+from app.schemas.currency import CurrencyCode, CurrencyCodeOrUnset
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
@@ -42,40 +42,13 @@ from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 # ---------------------------------------------------------------------------
 
 
-def normalize_iso_currency(value: str) -> str:
-    """Uppercase + shape-check an ISO 4217 code on the way in.
-
-    ``ExpensePolicy.threshold_currency`` was validated this way from the day it
-    landed; the older ``currency`` columns it has to be compared against were
-    not, and ``max_length=3`` alone accepts ``""``, ``"e"``, ``"us"`` and
-    ``"usd"``. Each is a real defect downstream, because a currency code is only
-    ever a *label* until something groups or compares on it:
-
-    * ``""`` is silently read as the target currency by
-      ``expense_currency.normalize_currency(code, default=...)`` — so a blank
-      code became "whatever this report/threshold is in", the quiet
-      assume-the-default that locked-FX exists to eliminate;
-    * ``"usd"`` and ``"USD"`` are two ``GROUP BY`` keys, so
-      ``GET /api/expenses/summary`` emitted two ``by_currency`` buckets both
-      labelled ``USD`` after the response uppercased them; and
-    * the card-reconciliation candidate query compares
-      ``Expense.currency == txn.currency`` in SQL, while the card CSV importer
-      already uppercases — so a lowercase expense was invisible to the
-      suggestions for a transaction it exactly matched.
-
-    Normalising at the boundary fixes all three at the source and keeps what is
-    stored comparable with the codes every other surface writes.
-    """
-    code = (value or "").strip().upper()
-    if len(code) != 3 or not code.isalpha():
-        raise ValueError("currency must be a 3-letter ISO 4217 code")
-    return code
-
-
-#: A NOT NULL ``currency`` column's request-side type. Carries its own shape
-#: check instead of a bare ``max_length=3``, which would reject `" USD"` before
-#: the strip could rescue it and accept `""` / `"usd"` after.
-CurrencyCode = Annotated[str, AfterValidator(normalize_iso_currency)]
+# The rule (and why ``max_length=3`` alone was not one) lives in
+# ``utils/currency_code``; the request-side types in ``schemas/currency``.
+# Normalising at the boundary is what fixed the expense defects it was written
+# for: ``""`` silently read as the target currency by
+# ``expense_currency.normalize_currency``, ``"usd"`` and ``"USD"`` as two
+# ``GROUP BY`` buckets on ``/api/expenses/summary``, and a lowercase expense
+# invisible to the card-reconciliation candidate query.
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +349,7 @@ class ExpensePolicyBase(BaseModel):
     category: str | None = Field(default=None, max_length=100)
     # The currency every money threshold on this policy is denominated in.
     # None = "the org's reporting currency", resolved at evaluation time.
-    threshold_currency: str | None = None
+    threshold_currency: CurrencyCodeOrUnset = None
     # Every money threshold is non-negative: a negative allowance / limit /
     # threshold has no meaning the engine can act on (`0` already expresses
     # "always require"). Digits match the `expense_policies` columns.
@@ -391,20 +364,6 @@ class ExpensePolicyBase(BaseModel):
         default=None, ge=0, max_digits=15, decimal_places=2
     )
     rules: dict | None = None
-
-    @field_validator("threshold_currency")
-    @classmethod
-    def _normalize_threshold_currency(cls, v: str | None) -> str | None:
-        """Uppercase + shape-check the ISO 4217 code (3 letters). Blank → None
-        ("unset" = fall back to the org's reporting currency)."""
-        if v is None:
-            return None
-        code = v.strip().upper()
-        if not code:
-            return None
-        if not code.isalpha() or len(code) != 3:
-            raise ValueError("threshold_currency must be a 3-letter ISO 4217 code")
-        return code
 
 
 class ExpensePolicyCreate(ExpensePolicyBase):
@@ -423,7 +382,7 @@ class ExpensePolicyUpdate(BaseModel):
     name: str = Field(default=None, max_length=255)  # type: ignore[assignment]
     active: bool = Field(default=None)  # type: ignore[assignment]
     category: str | None = Field(default=None, max_length=100)
-    threshold_currency: str | None = None
+    threshold_currency: CurrencyCodeOrUnset = None
     per_diem_amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
     per_diem_currency: CurrencyCode = Field(default=None)  # type: ignore[assignment]
     mileage_rate: Decimal | None = Field(default=None, ge=0, max_digits=10, decimal_places=4)
@@ -435,20 +394,6 @@ class ExpensePolicyUpdate(BaseModel):
         default=None, ge=0, max_digits=15, decimal_places=2
     )
     rules: dict | None = None
-
-    @field_validator("threshold_currency")
-    @classmethod
-    def _normalize_threshold_currency(cls, v: str | None) -> str | None:
-        """Uppercase + shape-check the ISO 4217 code (3 letters). Blank → None
-        ("unset" = fall back to the org's reporting currency)."""
-        if v is None:
-            return None
-        code = v.strip().upper()
-        if not code:
-            return None
-        if not code.isalpha() or len(code) != 3:
-            raise ValueError("threshold_currency must be a 3-letter ISO 4217 code")
-        return code
 
 
 class ExpensePolicyResponse(BaseModel):

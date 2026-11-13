@@ -54,7 +54,8 @@ Neither leg carries `ON DELETE`, so **the cycle constrains deletion**:
 `DELETE /api/expenses/{id}` is refused by Postgres while a card transaction
 still points at that expense. That refusal used to escape as an unhandled
 `ForeignKeyViolationError` — a 500 for an ordinary user action. The route now
-checks for a referencing transaction first and answers **409** naming it. It
+checks for a referencing transaction first and answers **409**
+`expense_card_reconciled` naming it. It
 deliberately does *not* unmatch on the caller's behalf: silently clearing a
 reconciliation as a side effect of deleting the row on the other side of the
 link is exactly the invisible state change `/ignore` refuses to make.
@@ -166,14 +167,34 @@ enforces) followed by the same gate the endpoint raises from, in
 | unmatch | `card_txn_unmatch_refusal` | `card_txn_not_matched` (409) |
 | ignore | `card_txn_ignore_refusal`: not matched, not already ignored | `card_txn_matched_not_ignorable`, `card_txn_already_ignored` (409) |
 
-A caller outside the role set gets `role_not_permitted`. The HTTP refusals keep
-the `detail` they always had (plain strings for the status / card ones, coded
-for owner, segregation and CFO); only the verdict carries a code for every one.
+A caller outside the role set gets `role_not_permitted`. The endpoints answer
+with the verdict's coded `detail` exactly — the `message` is the English the
+status and card refusals used to send as a plain string, so a client that reads
+`detail.message` as text still shows it (decisions §361). Only the role
+dependency's own 403 stays a plain string.
 
 Not in the verdicts, because they depend on input the row does not hold:
 submit's blocking policy violations and unconvertible lines (its own 422 with
-the list), attach's per-line refusals, and match's expense-side refusals (that
-expense already matched, a currency mismatch). Mutation responses carry no
+the list), attach's per-line refusals, and match's expense-side refusals. All
+of them are coded too, from the same module:
+
+| Refusal | Raised by | Code (status) · params |
+|---|---|---|
+| A line edited, deleted, re-receipted or moved off a locked report, or a locked report's own fields | `report_unlocked_refusal` (`LOCKED_REPORT_STATUSES`) | `expense_report_locked` (409) · `status` |
+| An attached line in another currency with no FX rate source configured | `api/expenses._lock_line_conversion` | `expense_fx_source_missing` (422) |
+| An attached line the FX source has no rate for | `api/expenses._lock_line_conversion` (`ExpenseConversionError`) | `expense_fx_rate_unavailable` (422) · `source_currency`, `report_currency` |
+| Deleting an expense a card transaction is reconciled to | `DELETE /api/expenses/{id}` | `expense_card_reconciled` (409) · `card_transaction_id` |
+| `/match` onto an expense already reconciled to a card line | `card_match_expense_refusal` | `card_txn_expense_already_matched` (409) |
+| `/match` across currencies | `card_match_expense_refusal` | `card_txn_currency_mismatch` (409) · `transaction_currency`, `expense_currency` |
+| Submit with blocking policy violations | `report_policy_blocked_detail` | `expense_report_policy_blocked` (422) · `count`; `detail.violations` kept beside the coded keys, each entry coded by the policy engine ([Policy engine](#policy-engine-wf3)) |
+| Submit with attached lines that have no rate locked into the report currency | `report_lines_unconverted_detail` | `expense_report_lines_unconverted` (422) · `count`, `currency` (the report's); `detail.expense_ids` kept |
+
+The web registry (`frontend/src/lib/api/codedRefusals.ts`) states every one in
+the reader's language; mobile ships no expense or card screen, so it has no
+entries for them. The two submit 422s keep their lists and their English
+`message` (decisions §378): `api/expenses.submitReport` localizes the toast from
+the envelope's code, and the violation panel states each entry through
+`api/policyViolations.ts`. Mutation responses carry no
 `actions` (decisions §305), so the page re-reads the report after a decision.
 Parity per role × row state, owner and non-owner, is
 `tests/test_expense_action_verdicts.py`.
@@ -205,7 +226,7 @@ string-Decimal amounts — never PII.
 | GET | `/api/expense-reports/{id}/summary` | **(WF2)** Aggregate the report's attached expenses: `{ total, count, by_category: [{category, total, count}], by_status: [{status, total, count}] }`. SUMs run in Postgres over the `Numeric` column (exact); serialised as float to match `ExpenseResponse.amount` (read-only display rollup). Read RBAC (incl. CFO). |
 | PATCH | `/api/expense-reports/{id}` | Update mutable report fields. Owner only (**403** `expense_report_not_owner`). **409** once the report is locked (submitted/pending_approval/approved/reimbursed) — report-level fields (currency in particular) reinterpret a total the approval already ran against. |
 | POST | `/api/expense-reports/{id}/expenses` | Attach (or `detach: true`) expense ids; recomputes `total_amount`. Owner only — of the target, and of any report a line is moved off (**403** `expense_report_not_owner`). Each id is looked up in this tenant's `expenses` table, so a cross-tenant/unknown id is a 404. Detaching nulls `report_id` (the expense outlives the report). Composition is only mutable while the **target** report is a `draft` (**409** otherwise), and an expense can't be moved off a **locked** source report (**409**) — terminal `rejected`/`cancelled` reports stay detachable so their expenses can be re-reported. Every attached/detached line's `policy_violations` is re-evaluated, as every other expense write does: the attach locks a conversion that may resolve a threshold comparison, and it sets the line's owner, which pre-approval cover depends on (a report-currency change re-evaluates its lines for the same reason). |
-| POST | `/api/expense-reports/{id}/submit` | **(WF3)** `draft → submitted`. Runs the policy engine over the report's expenses; if any BLOCKING violation (missing required receipt, or required pre-approval absent) is present, returns **422** with `{ detail: { message, violations: [...] } }` and does NOT transition. On success stamps `submitted_at` and moves every child expense to `submitted`. Invalid source status → 422. RBAC `admin`/`ap_manager`/`ap_clerk`, and **only the owner** — anyone else is **403** `expense_report_not_owner`, checked before the status guard. Audited `expense_report.submitted`. |
+| POST | `/api/expense-reports/{id}/submit` | **(WF3)** `draft → submitted`. Runs the policy engine over the report's expenses; if any BLOCKING violation (missing required receipt, or required pre-approval absent) is present, returns **422** with `{ detail: { code: "expense_report_policy_blocked", message, params: { count }, violations: [...] } }` and does NOT transition. A line with no rate locked into the report currency is refused first, **422** `expense_report_lines_unconverted` with `params: { count, currency }` and `expense_ids`. On success stamps `submitted_at` and moves every child expense to `submitted`. Invalid source status → 422. RBAC `admin`/`ap_manager`/`ap_clerk`, and **only the owner** — anyone else is **403** `expense_report_not_owner`, checked before the status guard. Audited `expense_report.submitted`. |
 | POST | `/api/expense-reports/{id}/approve` | **(WF3)** `submitted → approved`. Segregation of duties: the approver must differ from the report's `employee_user_id` (reuses `approval_chain.check_segregation` → **403**) — the complete author set, because only the owner can compose, edit or submit a report. CFO gate: when `total_amount` exceeds `Organization.settings.expense_approval.cfo_threshold` (default `5000`, Decimal math), only `cfo`/`admin` may approve (else 403, coded `expense_cfo_required` with params `amount` — the report total in the reporting currency, `null` when it could not be expressed — `currency`, `limit` — `null` for a malformed or non-finite threshold — and `report_currency`; the SoD 403 is `approval_segregation`). Stamps `approved_at` + `approved_by` (the approver's user id) and moves child expenses to `approved`. Invalid source status → 422. RBAC `admin`/`ap_manager`/`cfo`. Gates: `expense_controls.report_approve_refusal` (the row's `actions.approve`). Audited `expense_report.approved`. |
 | POST | `/api/expense-reports/{id}/reject` | **(WF3)** `submitted → rejected`. Body `{ reason? }`. Returns each child expense to `draft` so they can be corrected and re-reported (`rejected` is terminal for the report row). Invalid source status → 422. **The report's owner is refused** (403 `expense_report_self_reject`, the same segregation rule as approve under its own sentence) — the decider is never the submitting employee, for reject as for approve; the endpoint used to accept it, so an owner with a manager role could record a review decision on their own claim and unlock its lines, and only the page stopped it. RBAC `admin`/`ap_manager` — deliberately NARROWER than approve, which also allows `cfo`. The frontend used one predicate for both, so a CFO saw no Approve button on exactly the over-threshold reports the CFO gate escalates TO them; the two are now split there as well. Audited `expense_report.rejected`. |
 
@@ -248,10 +269,10 @@ mutating handler can't reopen the hole.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/corporate-card-transactions` | List, paginated, entity-scoped; `?reconciliation_status=&virtual_card_id=&date_from=&date_to=` filters. Ordered by `txn_date` desc. Each item carries the caller's `actions` verdicts (`match` / `create_expense` / `unmatch` / `ignore`). |
-| POST | `/api/corporate-card-transactions/import-csv` | Import a card-feed CSV (`import_corporate_card_csv`). Columns: `external_txn_id,date,posted_date,merchant,amount,currency,card_last_four,card_ref`. Dedupes on `(org, external_txn_id)` — already-imported and in-file duplicate rows are skipped (counted). **Negative amounts are kept** (a refund / merchant credit / chargeback is a real feed line — same call as `CorporateCardTransactionBase.amount`, which omits `ge=0`); only an unparseable amount is a row error. All rows in one upload share an `import_batch`. Returns `ImportResult.to_dict()` (`{imported, skipped, errors}`). Audited `card_txn.imported`. Mutate `admin`/`ap_manager`. Declared before `/{txn_id}`. |
+| POST | `/api/corporate-card-transactions/import-csv` | Import a card-feed CSV (`import_corporate_card_csv`). Columns: `external_txn_id,date,posted_date,merchant,amount,currency,card_last_four,card_ref`. Dedupes on `(org, external_txn_id)` — already-imported and in-file duplicate rows are skipped (counted). **Negative amounts are kept** (a refund / merchant credit / chargeback is a real feed line — same call as `CorporateCardTransactionBase.amount`, which omits `ge=0`); only an unparseable amount is a row error. **`currency` is required per row**: a blank cell, or no `currency` column, refuses the row (`csv_currency_required`), and a malformed one is refused rather than truncated (`csv_currency_invalid`, `params.value`) — never `USD` (decisions §377; the invoice importer's rule, §372). All rows in one upload share an `import_batch`. Returns `ImportResult.to_dict()` (`{imported, skipped, errors}`); `skipped` counts duplicates and refused rows, and every error carries `{row, code, params, message}` (`csv-import.md` § Every row error is coded), which the Cards tab lists above the table in the reader's language. Audited `card_txn.imported`. Mutate `admin`/`ap_manager`. Declared before `/{txn_id}`. |
 | POST | `/api/corporate-card-transactions/sync-virtual-cards` | **(item 5)** Create card-transaction rows from this tenant's charged `VirtualCard` rows (`status in (charged, completed)` with `amount_charged`). Idempotent via the synthetic `external_txn_id = vc:<provider_card_id>`; already-synced cards are skipped. `virtual_card_id`/`amount`/`merchant`/`entity_id` carried over. Returns `{created, skipped}`. Audited `card_txn.virtual_cards_synced`. Mutate `admin`/`ap_manager`. Declared before `/{txn_id}`. |
 | GET | `/api/corporate-card-transactions/{id}/match-suggestions` | Ranked candidate expenses: `amount` exact (`Decimal ==`) + **`currency` equal** + `card_transaction_id IS NULL` + `expense_date` within ±5d of `txn_date`, ranked by fuzzy merchant similarity (token Jaccard) then date proximity. Returns `[{expense, score}]`. Read all roles. |
-| POST | `/api/corporate-card-transactions/{id}/match` | Body `{ expense_id }`. Reconcile: sets `txn.matched_expense_id` + `reconciliation_status=matched` AND `expense.card_transaction_id` + `expense.payment_method` (`virtual_card` when `txn.virtual_card_id` set, else `corporate_card`). **409** if either side already matched, or on a **currency mismatch**. Audited both sides (`card_txn.matched` + `expense.card_matched`). Mutate `admin`/`ap_manager`. |
+| POST | `/api/corporate-card-transactions/{id}/match` | Body `{ expense_id }`. Reconcile: sets `txn.matched_expense_id` + `reconciliation_status=matched` AND `expense.card_transaction_id` + `expense.payment_method` (`virtual_card` when `txn.virtual_card_id` set, else `corporate_card`). **409** if either side already matched (`card_txn_already_matched` / `card_txn_expense_already_matched`), or on a **currency mismatch** (`card_txn_currency_mismatch`). Audited both sides (`card_txn.matched` + `expense.card_matched`). Mutate `admin`/`ap_manager`. |
 | POST | `/api/corporate-card-transactions/{id}/unmatch` | Clear both sides; `reconciliation_status=unmatched`; **restore `expense.payment_method` from `payment_method_before_match`**. Audited both sides (`expense.card_unmatched` records the restored value, PII-free). Mutate `admin`/`ap_manager`. |
 | POST | `/api/corporate-card-transactions/{id}/ignore` | `reconciliation_status=ignored` (deliberately not reconciled — refunds/fees). **409** on a matched transaction (unmatch it first), and on one already ignored (a repeat used to write a second audit row for nothing). An ignored transaction can still be matched or turned into an expense — that is how an ignore is undone. Audited `card_txn.ignored`. Mutate `admin`/`ap_manager`. |
 | POST | `/api/corporate-card-transactions/{id}/create-expense` | Mint an `Expense` from the txn (`expense_date=txn_date`, merchant, amount, currency, `payment_method` per `virtual_card_id`, entity carried over), **refresh its `policy_violations`** (best-effort, same as every other expense write path), then match it both sides. **409** if the txn is already matched. Audited `expense.created` + the match pair. Mutate `admin`/`ap_manager`/`ap_clerk`. |
@@ -326,9 +347,25 @@ approved `ExpensePreapproval` coverage) from the tenant DB and hands them in:
 - `blocking_violations(violations)` filters to the `BLOCKING_CODES` subset
   (`receipt_required`, `preapproval_required`) — the ones that block submission.
 
-Each violation dict is `{code, message, policy_id?, limit?, actual?, currency?,
-comparison?, expense_currency?, expense_id?}` (advisory, PII-free — amounts and
-ISO codes only). `evaluate_expense` is wired into expense **create**, **PATCH**,
+Each violation dict is `{code, message, params, policy_id?, limit?, actual?,
+currency?, comparison?, expense_currency?, expense_id?}` (PII-free — amounts,
+ISO codes and the expense's own category only).
+
+`params` is what a client states the violation from, in the reader's language
+(decisions §378); `VIOLATION_PARAMS` is the catalogue, and every figure is an
+exact decimal string beside its ISO code, never a float:
+
+| Code | Params |
+|---|---|
+| every code | `amount` + `amount_currency` (the figure compared: converted into `currency` when the comparison resolved, the expense's face amount in its own currency when it fell closed), `limit` + `currency` (the threshold and its unit), `comparison` (`resolved` / `unresolved`) |
+| `category_limit` | + `category` — the expense's category, `null` when it has none |
+| `mileage_amount_mismatch` | + `miles`, `rate` (per mile, in `currency`), `direction` (`over` / `under`; `null` when unresolved) |
+
+`message` stays the server's English sentence and the flat keys stay as they
+were: the web falls back to `message` for a code it predates, a malformed
+param, or a row stored in `expenses.policy_violations` before `params` existed
+(the next write to the line refreshes it). The violation badge's title and the
+submit panel both read through `frontend/src/lib/api/policyViolations.ts`. `evaluate_expense` is wired into expense **create**, **PATCH**,
 and **receipt upload** as a best-effort refresh of `Expense.policy_violations`
 (a policy-engine error never breaks the write).
 
@@ -497,7 +534,13 @@ were not — `max_length=3` alone accepts `""`, `"us"` and `"usd"` — so
 `Expense`, `ExpenseReport`, `ExpensePreapproval`, `CorporateCardTransaction` and
 `ExpensePolicy.per_diem_currency` all took whatever the client sent. They now
 share one `CurrencyCode` annotated type (`normalize_iso_currency`): stripped,
-uppercased, and a 422 unless it is exactly three letters.
+uppercased, and a 422 unless it is exactly three ASCII letters. The rule lives in
+`app/utils/currency_code.py` and the request-side types in
+`app/schemas/currency.py`, which every request schema's currency field now uses
+(invoices, credit memos, contracts, intake, budgets, catalogs, requisitions,
+recurring templates, entities, discount offers, vendor statements): non-ASCII is
+refused before uppercasing, since `"ÄÖÜ".isalpha()` is true and `"uß".upper()`
+is the ASCII `"USS"` (`docs/decisions.md` §381).
 
 A currency code is only a *label* until something groups or compares on it, and
 two things did:
@@ -793,7 +836,14 @@ report aggregation, the blocking-subset filter, and the **currency dimension**:
 100 limit that bare numbers would have flagged, a lock into a third currency not
 reused, the per-threshold fail-closed table above (receipt demanded, receipt
 still clears it, pre-approval cover in the expense currency still satisfies,
-advisory limits flagged not blocking), and a PII-free violation payload.
+advisory limits flagged not blocking), a PII-free violation payload, and the
+coded `params` of every violation code against `VIOLATION_PARAMS` (resolved,
+fell closed, mileage over / under; decisions §378). The two coded submit 422s
+are pinned end to end in `test_expense_approval.py` (policy-blocked) and
+`test_expense_currency.py` (no locked rate); the web half is
+`frontend/src/lib/api/policyViolations.test.ts`, `codedRefusals.test.ts`,
+`expenses.test.ts` and the `de` e2e
+`tests-e2e/i18n/expense-submit-violation-localization.spec.ts`.
 
 `backend/tests/test_expense_preapprovals.py` (WF3, `realdb`) — pre-approval
 create (requester stamped from the caller), list + status filter, manager

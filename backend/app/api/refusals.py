@@ -5,7 +5,9 @@ the employee and supplier-portal auth routers (`api/auth.py`,
 `api/portal_auth.py`), the approval path (`services/approval_chain.py`,
 `services/review.py`), the exception queue's segregation refusal
 (`services/exception_lifecycle.py`), credit-memo application
-(`api/credit_memos.py`), the invoice stale-edit 409 (`api/invoices.py`), self-service signup
+(`api/credit_memos.py`), expense reports and card reconciliation
+(`services/expense_controls.py`, `api/expenses.py`), the invoice stale-edit 409
+(`api/invoices.py`), self-service signup
 (`api/signup.py`), vendor merge (`services/vendor_merge.py`) and the shared
 rate limiter's 429 (`services/rate_limit.py`).
 A server-side catcher that turns one back into text reads it through
@@ -203,6 +205,48 @@ def refuse_due_before_invoice_date(invoice_date, due_date) -> None:
         )
 
 
+#: A statement upload (bank reconciliation, vendor statement) whose
+#: ``currency`` form field is blank or absent. The statement's currency is one
+#: field for the whole file, so it is refused for the upload, never defaulted to
+#: ``USD``: a GBP statement read as dollars matches the wrong payments
+#: (decisions §377, the statement-level twin of §372's per-row codes).
+STATEMENT_CURRENCY_REQUIRED = "statement_currency_required"
+#: The same field holding something that is not a three-letter ISO 4217 code.
+#: Params: ``value``.
+STATEMENT_CURRENCY_INVALID = "statement_currency_invalid"
+
+
+def statement_currency(raw: str | None) -> str:
+    """The normalized currency of an uploaded statement, or a coded 422.
+
+    Shape-checked by ``utils.currency_code.normalize_iso_currency``, the one check
+    every currency boundary uses, so ``"usd"`` is stored ``USD`` and ``"EURO"``
+    is refused rather than overflowing the ``String(3)`` column.
+    """
+    from app.utils.currency_code import normalize_iso_currency
+
+    value = (raw or "").strip()
+    if not value:
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(
+                STATEMENT_CURRENCY_REQUIRED,
+                "Choose the statement's currency (a three-letter code such as USD or EUR).",
+            ),
+        )
+    try:
+        return normalize_iso_currency(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(
+                STATEMENT_CURRENCY_INVALID,
+                f"{value!r} is not a three-letter currency code such as USD or EUR.",
+                value=value,
+            ),
+        ) from None
+
+
 #: An employee token presented on another workspace's page (``tenant.get_tenant``:
 #: the token's ``org`` claim is not the requested tenant). Still a 403 and still
 #: refused; coded so the SPA can tell this from an ordinary permission refusal
@@ -230,6 +274,49 @@ SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL = coded_refusal(
     "This email address already belongs to an account in another workspace, so it "
     "can't sign in here. Sign in on your own workspace's page, or ask this "
     "workspace's administrator to have your identity provider use a different address.",
+)
+
+#: The other SSO sign-in refusals a person can act on, stated by the OIDC
+#: callback (``api/auth_sso.py``) and by the SAML bridge's ``/exchange`` alike,
+#: in the same English the OIDC callback has always answered with. Each is
+#: exactly as specific as that English: the IdP has already vouched for the
+#: address, so none says anything the IdP's own admin cannot already see.
+#: ``sso_account_inactive`` — the IdP vouched, but the account is deactivated
+#: (``DeactivatedAccount``); ``sso_email_domain_blocked`` — the address is
+#: outside ``allowed_email_domains``; ``sso_email_unusable`` — the asserted
+#: address carries a control character (``UnsafeEmailAddress``). All 403.
+SSO_ACCOUNT_INACTIVE = "sso_account_inactive"
+SSO_ACCOUNT_INACTIVE_DETAIL = coded_refusal(
+    SSO_ACCOUNT_INACTIVE, "This account has been deactivated. Contact your administrator."
+)
+SSO_EMAIL_DOMAIN_BLOCKED = "sso_email_domain_blocked"
+SSO_EMAIL_DOMAIN_BLOCKED_DETAIL = coded_refusal(
+    SSO_EMAIL_DOMAIN_BLOCKED, "Your email domain isn't allowed to sign in to this workspace."
+)
+SSO_EMAIL_UNUSABLE = "sso_email_unusable"
+SSO_EMAIL_UNUSABLE_DETAIL = coded_refusal(
+    SSO_EMAIL_UNUSABLE, "The identity provider supplied an unusable email address."
+)
+
+#: Every SAML response the ACS could not verify — a bad or foreign signature,
+#: an unparseable document, an issuer that is not this workspace's IdP, an
+#: unsolicited response, a replayed assertion, an assertion naming no subject
+#: or address, a login session missing its AuthnRequest binding. ONE code for
+#: all of them, deliberately: telling them apart would tell whoever holds a
+#: forged or captured assertion which check stopped it. The audit row keeps the
+#: precise reason (``auth.saml.login.failure`` ``details.reason``). A 400.
+SAML_LOGIN_UNVERIFIED = "saml_login_unverified"
+SAML_LOGIN_UNVERIFIED_DETAIL = coded_refusal(
+    SAML_LOGIN_UNVERIFIED, "SAML login could not be verified."
+)
+
+#: The workspace's SAML configuration stopped resolving between ``/login`` and
+#: the ACS — an admin turned it off, broke it, or the plan lost ``sso``
+#: (decisions §258). The same sentence ``/login`` answers an unconfigured
+#: workspace with. A 400.
+SAML_NOT_CONFIGURED = "saml_not_configured"
+SAML_NOT_CONFIGURED_DETAIL = coded_refusal(
+    SAML_NOT_CONFIGURED, "SAML SSO is not configured for this tenant."
 )
 
 #: ``POST`` / ``PATCH /api/admin/users`` with an address an account in THIS

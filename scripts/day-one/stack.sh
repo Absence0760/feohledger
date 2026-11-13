@@ -103,6 +103,7 @@ FEOH_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:${PG_PORT}/fe
 FEOH_REDIS_URL=redis://127.0.0.1:${REDIS_PORT}
 FEOH_SECRET_KEY=$(openssl rand -hex 32)
 FEOH_APPROVAL_SIGNING_KEY=$(openssl rand -hex 32)
+FEOH_PAYEE_FINGERPRINT_KEY=$(openssl rand -hex 32)
 FEOH_CREDENTIAL_KMS_KEY_ID=${KMS_ALIAS}
 FEOH_AWS_ENDPOINT_URL=http://127.0.0.1:${AWS_PORT}
 AWS_ACCESS_KEY_ID=test

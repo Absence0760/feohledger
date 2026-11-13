@@ -413,6 +413,46 @@
   "invoiceDetailRejectTitle": "Reject Invoice",
   "invoiceDetailRejectReason": "Reason",
   "invoiceDetailReject": "Reject",
+  "invoiceDetailRecall": "Recall approval",
+  "@invoiceDetailRecall": {
+    "description": "Button on an approved invoice that recalls its approval back to review (POST /recall-approval)."
+  },
+  "invoiceDetailRecallTitle": "Recall this approval?",
+  "@invoiceDetailRecallTitle": {
+    "description": "Title of the reason prompt shown before recalling an approval."
+  },
+  "invoiceDetailRecallBody": "The invoice goes back to review so its figures can be corrected, then needs a fresh approval through the full approval chain. Segregation of duties will count you as involved in this invoice, as it does its uploader. The original approval stays in the audit trail.",
+  "@invoiceDetailRecallBody": {
+    "description": "Explanation in the recall prompt: what a recall does and its segregation-of-duties consequence."
+  },
+  "invoiceDetailRecallReason": "Why are you recalling it?",
+  "@invoiceDetailRecallReason": {
+    "description": "Label of the reason field in the recall prompt."
+  },
+  "invoiceDetailRecalled": "Approval recalled. The invoice is back in review.",
+  "@invoiceDetailRecalled": {
+    "description": "Snackbar after an approval was recalled."
+  },
+  "invoiceDetailRecallFailed": "Could not recall the approval — please try again",
+  "@invoiceDetailRecallFailed": {
+    "description": "Snackbar when a recall failed for a reason the app cannot state from its code."
+  },
+  "codedRefusalInvoiceNotRecallable": "Only an approved invoice, or one whose ERP push failed after approval, can have its approval recalled.",
+  "@codedRefusalInvoiceNotRecallable": {
+    "description": "Coded refusal `invoice_not_recallable` on recalling an approval."
+  },
+  "codedRefusalInvoiceRecallInErp": "The ERP may already hold a bill for this invoice, and a bill there can be paid there. Correct or void it in the ERP; its approval can't be recalled from FeohLedger.",
+  "@codedRefusalInvoiceRecallInErp": {
+    "description": "Coded refusal `invoice_recall_in_erp`: the ERP may hold the bill."
+  },
+  "codedRefusalPaymentBlocksRecall": "FeohLedger is already paying this invoice: it has a live payment. Cancel its payment run or void the payment before recalling the approval.",
+  "@codedRefusalPaymentBlocksRecall": {
+    "description": "Coded refusal `invoice_recall_claimed` with claim `payment`."
+  },
+  "codedRefusalCardBlocksRecall": "A virtual card has been issued to pay this invoice. Cancel the card before recalling the approval.",
+  "@codedRefusalCardBlocksRecall": {
+    "description": "Coded refusal `invoice_recall_claimed` with claim `virtual_card`."
+  },
   "invoicesBulkRejectTitle": "Reject {count, plural, one {{count} invoice} other {{count} invoices}}",
   "@invoicesBulkRejectTitle": {
     "description": "Title of the reason prompt shown before bulk-rejecting the selected invoices.",
@@ -635,7 +675,14 @@
   "invoiceEditNotSet": "Not set",
   "invoiceEditInvalidAmount": "Enter a valid amount (e.g. 1234.56)",
   "invoiceEditClearDueDate": "Clear due date",
-  "invoiceEditLockedNotice": "Approved — the payee and amount are frozen. To change them, reject the invoice, correct it, then approve it again.",
+  "invoiceEditLockedNotice": "Approved — the payee and amount are frozen.",
+  "@invoiceEditLockedNotice": {
+    "description": "Edit sheet notice on a financially locked invoice whose approval cannot be recalled from here (past the recall, or no recall verdict)."
+  },
+  "invoiceEditLockedNoticeRecall": "Approved — the payee and amount are frozen. To change them, recall the approval, correct the invoice, then have it approved again.",
+  "@invoiceEditLockedNoticeRecall": {
+    "description": "Edit sheet notice on a financially locked invoice when the server says this user may recall its approval (review-actions recall_approval allowed)."
+  },
   "invoiceEditLockedHelper": "Frozen after approval",
   "invoiceEditDueDateHint": "Due date, currently {value}. Double tap to change.",
   "@invoiceEditDueDateHint": {
@@ -668,7 +715,17 @@
   "erpStatusDocumentId": "Document ID",
   "erpStatusError": "Error",
   "erpStatusLastUpdate": "Last update",
+  "erpStatusActionBy": "{action} by {actor}",
+  "@erpStatusActionBy": {
+    "description": "ERP panel last-update value: the audit action and who performed it.",
+    "placeholders": {
+      "action": { "type": "String" },
+      "actor": { "type": "String" }
+    }
+  },
   "erpStatusStatus": "Status",
+  "erpStatusOpensInErp": "opens the bill in the ERP",
+  "externalLinkOpenFailed": "Couldn't open the link",
 
   "fileViewerPdfTitle": "Invoice PDF",
   "fileViewerImageTitle": "Invoice Image",
@@ -2397,6 +2454,212 @@
   },
   "exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed": "Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.",
   "exceptionDescriptionErpSyncBackFailed": "This invoice's payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment's run in Payments.",
+  "exceptionDescriptionExtractionFailed": "Extraction failed: {errorClass}",
+  "@exceptionDescriptionExtractionFailed": {
+    "placeholders": {
+      "errorClass": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPositivePayAlteredAmount": "Positive Pay return: check {checkNumber} altered amount",
+  "@exceptionDescriptionPositivePayAlteredAmount": {
+    "placeholders": {
+      "checkNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPositivePayNotOnFile": "Positive Pay return: check {checkNumber} not on issued file",
+  "@exceptionDescriptionPositivePayNotOnFile": {
+    "placeholders": {
+      "checkNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionVendorBankChanged": "Vendor bank details changed; verify before payment.",
+  "exceptionDescriptionPayeeChangedSincePaid": "Payee changed since this invoice was last paid; verify before paying again.",
+  "exceptionDescriptionPayeeUnrecordedAfterMerge": "Vendor merged since this invoice was last paid, and that payment recorded no payee; verify before paying again.",
+  "exceptionDescriptionComplianceHoldFindings": "Payment held for compliance review ({count, plural, one {{count} reason} other {{count} reasons}})",
+  "@exceptionDescriptionComplianceHoldFindings": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceNoScreenableVendor": "No screenable vendor on the invoice",
+  "exceptionDescriptionComplianceProviderUnavailable": "Sanctions screening could not run: no adapter for the configured provider “{provider}”",
+  "@exceptionDescriptionComplianceProviderUnavailable": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceReviewRequired": "Vendor screening via {provider} requires review ({matchedList})",
+  "@exceptionDescriptionComplianceReviewRequired": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      },
+      "matchedList": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceReviewRequiredUnlisted": "Vendor screening via {provider} requires review (see the screening record)",
+  "@exceptionDescriptionComplianceReviewRequiredUnlisted": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceUnrecognisedResult": "Vendor screening via {provider} returned an unrecognised result “{result}”; treated as requiring review",
+  "@exceptionDescriptionComplianceUnrecognisedResult": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      },
+      "result": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceAdverseMedia": "Vendor screening via {provider} found adverse media (negative news); AP review required",
+  "@exceptionDescriptionComplianceAdverseMedia": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceAdverseMediaUnnamedProvider": "Vendor screening found adverse media (negative news); AP review required",
+  "exceptionDescriptionComplianceAmlSpend": "Trailing 12-month spend with this vendor would reach {projected} (threshold {threshold}); AP review required",
+  "@exceptionDescriptionComplianceAmlSpend": {
+    "placeholders": {
+      "projected": {
+        "type": "String"
+      },
+      "threshold": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceAmlSpendPartial": "Trailing 12-month spend with this vendor would reach at least {projected} (threshold {threshold}); AP review required. {excluded, plural, one {{excluded} payment was} other {{excluded} payments were}} left out for having no figure in the home currency, so the real total is higher",
+  "@exceptionDescriptionComplianceAmlSpendPartial": {
+    "placeholders": {
+      "projected": {
+        "type": "String"
+      },
+      "threshold": {
+        "type": "String"
+      },
+      "excluded": {
+        "type": "int"
+      }
+    }
+  },
+  "exceptionDescriptionPaymentAgedOut": "Payment {paymentId} was still in flight after {hours}h and the reconciler marked it failed; the rail never confirmed, so the money may or may not have moved. The invoice is “{invoiceStatus}”. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.",
+  "@exceptionDescriptionPaymentAgedOut": {
+    "placeholders": {
+      "paymentId": {
+        "type": "String"
+      },
+      "hours": {
+        "type": "String"
+      },
+      "invoiceStatus": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPaymentDispatchInDoubt": "Payment {paymentId} failed during dispatch ({failureCode}) after the processor may already have accepted it, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.",
+  "@exceptionDescriptionPaymentDispatchInDoubt": {
+    "placeholders": {
+      "paymentId": {
+        "type": "String"
+      },
+      "failureCode": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPaymentDispatchInterruptedFailed": "Payment {paymentId} failed, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.",
+  "@exceptionDescriptionPaymentDispatchInterruptedFailed": {
+    "placeholders": {
+      "paymentId": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPaymentDispatchInterruptedCancelled": "Payment {paymentId} was cancelled, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.",
+  "@exceptionDescriptionPaymentDispatchInterruptedCancelled": {
+    "placeholders": {
+      "paymentId": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionSettlementCurrencyMismatch": "Settlement currency mismatch: the processor reported {settledAmount} {settledCurrency} but this payment authorizes {authorizedAmount} {authorizedCurrency}. Money moved in a currency AP did not authorize — reconcile with the processor before releasing this invoice.",
+  "@exceptionDescriptionSettlementCurrencyMismatch": {
+    "placeholders": {
+      "settledAmount": {
+        "type": "String"
+      },
+      "settledCurrency": {
+        "type": "String"
+      },
+      "authorizedAmount": {
+        "type": "String"
+      },
+      "authorizedCurrency": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionSettlementAmountOver": "Settlement amount mismatch: the processor reported {settledAmount} {settledCurrency}, MORE than the authorized {authorizedAmount} {authorizedCurrency} (variance {variance}). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.",
+  "@exceptionDescriptionSettlementAmountOver": {
+    "placeholders": {
+      "settledAmount": {
+        "type": "String"
+      },
+      "settledCurrency": {
+        "type": "String"
+      },
+      "authorizedAmount": {
+        "type": "String"
+      },
+      "authorizedCurrency": {
+        "type": "String"
+      },
+      "variance": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionSettlementAmountUnder": "Settlement amount mismatch: the processor reported {settledAmount} {settledCurrency}, LESS than the authorized {authorizedAmount} {authorizedCurrency} (variance {variance}). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.",
+  "@exceptionDescriptionSettlementAmountUnder": {
+    "placeholders": {
+      "settledAmount": {
+        "type": "String"
+      },
+      "settledCurrency": {
+        "type": "String"
+      },
+      "authorizedAmount": {
+        "type": "String"
+      },
+      "authorizedCurrency": {
+        "type": "String"
+      },
+      "variance": {
+        "type": "String"
+      }
+    }
+  },
   "warningsPoMatchStatusMatched": "Matched",
   "warningsPoMatchStatusMismatch": "Mismatch",
   "warningsPoMatchStatusPartial": "Partial",

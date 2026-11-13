@@ -22,6 +22,7 @@ Tests:
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -84,6 +85,9 @@ def test_no_outgoing_edges_target_a_predecessor_other_than_explicit_resets():
         # the invoice back at draft for manual entry instead of calling the
         # model. Refused to humans by `POST /bulk/status`.
         (InvoiceStatus.pending, InvoiceStatus.new),
+        # Recalling an approval (decisions §374): only through
+        # `POST /{id}/recall-approval`, refused by `POST /bulk/status`.
+        (InvoiceStatus.approved, InvoiceStatus.ready_for_review),
     }
 
     # Build a notion of "linear progress" order. Anything that goes
@@ -168,6 +172,10 @@ def test_validate_transition_rejects_illegal_paths(src, tgt):
     with pytest.raises(HTTPException) as exc:
         validate_transition(src, tgt)
     assert exc.value.status_code == 409
+    # Coded, so the browser names both statuses in the reader's language.
+    assert exc.value.detail["code"] == "invoice_transition_invalid"
+    assert exc.value.detail["params"] == {"status": src.value, "target": tgt.value}
+    assert exc.value.detail["message"] == f"Cannot transition from '{src.value}' to '{tgt.value}'"
 
 
 def test_validate_transition_accepts_legal_paths():
@@ -246,6 +254,166 @@ async def test_transition_invoice_does_not_apply_change_on_illegal_path():
     assert invoice.status == InvoiceStatus.done
     # Audit not written — only legal transitions get a row.
     mk_audit.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "src", [InvoiceStatus.approved, InvoiceStatus.failed], ids=["approved", "failed"]
+)
+async def test_the_recall_edges_refuse_every_action_but_the_recall(src):
+    """`approved` / `failed → ready_for_review` exist for the recall alone
+    (decisions §374): a bulk transition or a redelivered extraction is refused
+    at the engine, with nothing changed or audited."""
+    from app.services.workflow_engine import RECALL_ACTION
+
+    for action, allowed in (("invoice.extraction_completed", False), (RECALL_ACTION, True)):
+        invoice = SimpleNamespace(
+            id=uuid.uuid4(),
+            status=src,
+            correlation_id=uuid.uuid4(),
+            organization_id=uuid.uuid4(),
+            approved_by="Approver",
+            approval_date=None,
+        )
+        with patch("app.services.workflow_engine.dispatch_audit", AsyncMock()) as mk_audit:
+            if allowed:
+                await transition_invoice(
+                    db=AsyncMock(),
+                    invoice=invoice,
+                    target_status=InvoiceStatus.ready_for_review,
+                    action_name=action,
+                )
+                assert invoice.status == InvoiceStatus.ready_for_review
+            else:
+                with pytest.raises(HTTPException) as exc:
+                    await transition_invoice(
+                        db=AsyncMock(),
+                        invoice=invoice,
+                        target_status=InvoiceStatus.ready_for_review,
+                        action_name=action,
+                    )
+                assert exc.value.status_code == 409
+                assert exc.value.detail["code"] == "invoice_transition_recall_only"
+                assert exc.value.detail["params"] == {
+                    "status": src.value,
+                    "target": "ready_for_review",
+                }
+                assert invoice.status == src
+                mk_audit.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("src", [InvoiceStatus.new, InvoiceStatus.failed], ids=["new", "failed"])
+async def test_an_invoice_once_approved_never_reenters_extraction(src):
+    """A re-read rewrites signed-off figures, and a once-approved invoice that
+    then failed extraction would read as an approved push failure that
+    `/retry-erp` re-pushes. Refused for every caller; a never-approved invoice
+    is read as before."""
+    for approved_by, refused in (("Approver", True), (None, False)):
+        invoice = SimpleNamespace(
+            id=uuid.uuid4(),
+            status=src,
+            correlation_id=uuid.uuid4(),
+            organization_id=uuid.uuid4(),
+            approved_by=approved_by,
+            approval_date=None,
+        )
+        with patch("app.services.workflow_engine.dispatch_audit", AsyncMock()):
+            if refused:
+                with pytest.raises(HTTPException) as exc:
+                    await transition_invoice(
+                        db=AsyncMock(),
+                        invoice=invoice,
+                        target_status=InvoiceStatus.pending,
+                        action_name="invoice.bulk_status_change",
+                    )
+                assert exc.value.status_code == 409
+                assert exc.value.detail["code"] == "invoice_once_approved_not_reread"
+                assert exc.value.detail["params"] == {}
+                assert invoice.status == src
+            else:
+                await transition_invoice(
+                    db=AsyncMock(),
+                    invoice=invoice,
+                    target_status=InvoiceStatus.pending,
+                    action_name="invoice.bulk_status_change",
+                )
+                assert invoice.status == InvoiceStatus.pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("src", "target", "code"),
+    [
+        # Recall → reject → `bulk/status → new`: draft, the lock off, the floor
+        # and the unapproved close waiting (decisions §379).
+        (InvoiceStatus.rejected, InvoiceStatus.new, "invoice_once_approved_not_to_draft"),
+        # A row at draft with a stamp from before the rule: closed only by an
+        # approval, never `new → done`.
+        (InvoiceStatus.new, InvoiceStatus.done, "invoice_once_approved_not_closed_from_draft"),
+    ],
+    ids=["rejected-to-new", "new-to-done"],
+)
+async def test_an_invoice_once_approved_never_reaches_an_unattended_exit(src, target, code):
+    """A once-approved invoice gets back to approval only through a person at
+    `ready_for_review`. Each edge is refused for it, with nothing changed or
+    audited, and stays open for a never-approved invoice."""
+    for approved_by, approval_date, refused in (
+        ("Approver", None, True),
+        (None, date(2026, 11, 1), True),
+        (None, None, False),
+    ):
+        invoice = SimpleNamespace(
+            id=uuid.uuid4(),
+            status=src,
+            correlation_id=uuid.uuid4(),
+            organization_id=uuid.uuid4(),
+            approved_by=approved_by,
+            approval_date=approval_date,
+        )
+        with patch("app.services.workflow_engine.dispatch_audit", AsyncMock()) as mk_audit:
+            if refused:
+                with pytest.raises(HTTPException) as exc:
+                    await transition_invoice(
+                        db=AsyncMock(),
+                        invoice=invoice,
+                        target_status=target,
+                        action_name="invoice.bulk_status_change",
+                    )
+                assert exc.value.status_code == 409
+                assert exc.value.detail["code"] == code
+                assert exc.value.detail["params"] == {}
+                assert invoice.status == src
+                mk_audit.assert_not_called()
+            else:
+                await transition_invoice(
+                    db=AsyncMock(),
+                    invoice=invoice,
+                    target_status=target,
+                    action_name="invoice.bulk_status_change",
+                )
+                assert invoice.status == target
+
+
+@pytest.mark.asyncio
+async def test_a_once_approved_rejection_still_resubmits_to_review():
+    """`rejected → ready_for_review` (resubmit) is the way back, to a person."""
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(),
+        status=InvoiceStatus.rejected,
+        correlation_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        approved_by="Approver",
+        approval_date=None,
+    )
+    with patch("app.services.workflow_engine.dispatch_audit", AsyncMock()):
+        await transition_invoice(
+            db=AsyncMock(),
+            invoice=invoice,
+            target_status=InvoiceStatus.ready_for_review,
+            action_name="invoice.resubmitted",
+        )
+    assert invoice.status == InvoiceStatus.ready_for_review
 
 
 # ---------------------------------------------------------------------------

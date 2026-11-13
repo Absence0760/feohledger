@@ -22,6 +22,15 @@ The rules, in the order they apply (docs/decisions.md §284):
    link into the same company. A move between two NAMED companies needs the
    current code; a row whose code is only a legacy key there keeps the
    accounts that key names as ``erp_link_candidates`` for a person.
+
+   **Before rule 0 judges anything, each company's state is kept and
+   restored** (``services/gl_account_erp_links``, docs/decisions.md §376).
+   A row's state from another named company — its link, a person's
+   confirmation of it, or the decision it waits for — is filed under that
+   company, and the state kept for THIS pull's company is put back on its row.
+   So a tenant that switches company and back gets back what a person
+   decided there instead of deciding it again. A restored link is judged like
+   any same-company link (rules 3 and 4 re-judge it unless it is confirmed).
 1. **By the ERP's id first.** An account whose ``erp_account_id`` a row already
    holds updates that row — its name, type and parent — so a rename in the ERP
    renames our row instead of creating a second one. The row's **code is never
@@ -53,8 +62,9 @@ over the chart being synced into.
 **A person settles what the rules will not guess.** A row left unlinked by rule
 3 or 4 keeps the ERP accounts it could mean (``erp_link_candidates``); an admin
 or AP manager picks one through ``POST /api/gl-accounts/{id}/erp-link``, and
-rules 3 and 4 never re-judge that confirmed link (it still dies with its realm,
-or when its account leaves the ERP). Nothing here ever picks a candidate.
+rules 3 and 4 never re-judge that confirmed link (it still leaves the row with
+its realm — kept for that company, and restored on a return — and dies when its
+account leaves the ERP). Nothing here ever picks a candidate.
 
 **Inactive accounts** arrive with ``active=False``: they still exist (a row
 linked to one is not dead), a matched row is marked inactive in our chart, and
@@ -91,6 +101,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gl_account import GL_CODE_MAX_LENGTH, GLAccount
 from app.services.erp_adapters.base import GLAccountPayload
+from app.services.erp_record_names import fit_name
+from app.services.gl_account_erp_links import keep_states, restore_states
 
 #: Why an ERP account was not linked (a stable code; the browser localizes it).
 DUPLICATE_CODE = "duplicate_code"  # two accounts in this pull resolve to the code
@@ -99,6 +111,11 @@ CODE_TAKEN = "code_taken"  # our row with the code is linked to another live acc
 AMBIGUOUS_LEGACY = "ambiguous_legacy"  # our row's code is a legacy key two accounts share
 CODE_TOO_LONG = "code_too_long"  # longer than GL_CODE_MAX_LENGTH; never truncated
 MISSING_ERP_ID = "missing_erp_id"  # the ERP sent no id: nothing could post to it
+
+#: ``gl_accounts.name``'s length. A longer ERP name is stored shortened and
+#: marked (``services/erp_record_names``): the name is descriptive, nothing
+#: posts by it, so it never costs the account its link.
+_NAME_LENGTH = GLAccount.__table__.c.name.type.length
 
 #: Cap on the entries a sync RESPONSE lists; the counts are always exact, and
 #: the audit row lists everything.
@@ -131,12 +148,24 @@ class ChartSyncResult:
     #: Links made before realms were recorded that this pull confirmed (the
     #: same id still holds the row's code) and stamped with ``realm``.
     realm_adopted: int = 0
+    #: States from another named company this run filed in
+    #: ``gl_account_erp_links`` (§376): a link, its confirmation, a decision.
+    kept: int = 0
+    #: Rows whose state kept for THIS company was put back before rule 0.
+    restored: int = 0
+    #: Codes of rows whose kept link was dropped, not restored: another row
+    #: already held its account here, or two kept links claimed it.
+    restore_dropped: list[str] = field(default_factory=list)
     #: Codes of rows marked inactive because the ERP made their account inactive.
     deactivated: list[str] = field(default_factory=list)
     #: Codes of accounts whose ERP ``parent_code`` is longer than the column
     #: (``GL_CODE_MAX_LENGTH``): the account is synced, its parent is not
     #: recorded (never truncated — a cut code names nothing).
     parent_code_dropped: list[str] = field(default_factory=list)
+    #: Codes of accounts whose ERP name is longer than ``gl_accounts.name``:
+    #: the account syncs, its name stored shortened and marked
+    #: (``erp_record_names.fit_name``).
+    names_shortened: list[str] = field(default_factory=list)
 
     def summary(self, *, capped: bool = True) -> dict:
         """The response projection (lists capped at :data:`MAX_LISTED`; counts
@@ -161,10 +190,16 @@ class ChartSyncResult:
             "link_changes": listed(self.link_changes),
             "realm": self.realm,
             "realm_adopted": self.realm_adopted,
+            "kept": self.kept,
+            "restored": self.restored,
+            "restore_dropped_count": len(self.restore_dropped),
+            "restore_dropped": listed(self.restore_dropped),
             "deactivated_count": len(self.deactivated),
             "deactivated": listed(self.deactivated),
             "parent_code_dropped_count": len(self.parent_code_dropped),
             "parent_code_dropped": listed(self.parent_code_dropped),
+            "names_shortened_count": len(self.names_shortened),
+            "names_shortened": listed(self.names_shortened),
         }
 
 
@@ -322,6 +357,43 @@ async def sync_chart_from_erp(
         pending_realm = (row.erp_link_candidates or {}).get("realm")
         return row.erp_link_realm is not None or pending_realm is not None
 
+    # -- each company's state: kept, and this company's restored (§376) ----
+    # Before rule 0, so a restored link is never judged as another company's,
+    # and a row's link from another company is filed before rule 0 moves or
+    # drops it. A pull with no realm speaks for no company: neither.
+    if realm is not None:
+        result.kept = await keep_states(db, all_rows, realm=realm)
+        for back in await restore_states(db, organization_id, all_rows, realm=realm):
+            row = back.row
+            if not back.restored:
+                result.restore_dropped.append(row.code)
+                continue
+            result.restored += 1
+            if row.erp_account_id is not None:
+                result.link_changes.append(
+                    {
+                        "code": row.code,
+                        "from": back.from_id,
+                        "to": row.erp_account_id,
+                        "from_realm": back.from_realm,
+                        "to_realm": realm,
+                        "restored": True,
+                    }
+                )
+            elif back.from_id is not None:
+                # The company's open decision came back; the other company's
+                # link it replaced is kept, not lost.
+                result.link_changes.append(
+                    {
+                        "code": row.code,
+                        "from": back.from_id,
+                        "to": None,
+                        "from_realm": back.from_realm,
+                        "restored": True,
+                    }
+                )
+                result.unlinked.append(row.code)
+
     # -- rule 0: a link made under another connection is not trusted --------
     # Kept only when this pull shows the SAME id holding the row's own code:
     # then the id names the account the row's invoices meant in this company
@@ -456,7 +528,7 @@ async def sync_chart_from_erp(
         db.add(
             GLAccount(
                 code=code,
-                name=acct.name,
+                name=_stored_name(code, acct, result),
                 account_type=acct.account_type,
                 parent_code=_parent_code(code, acct, result, our_code_of_id),
                 organization_id=organization_id,
@@ -519,9 +591,21 @@ async def sync_chart_from_erp(
         for code, reason in sorted(refused.items())
     ]
     result.unlinked.sort()
+    result.restore_dropped.sort()
     result.deactivated.sort()
     result.parent_code_dropped.sort()
+    result.names_shortened.sort()
     return result
+
+
+def _stored_name(code: str, acct: GLAccountPayload, result: ChartSyncResult) -> str:
+    """``acct``'s name as ``gl_accounts.name`` holds it — shortened and
+    marked when the ERP's does not fit, which is recorded in
+    ``names_shortened`` under ``code`` (our row's code for the account)."""
+    name, cut = fit_name(acct.name or "", _NAME_LENGTH)
+    if cut:
+        result.names_shortened.append(code)
+    return name
 
 
 def _same_account(code: str, acct: GLAccountPayload, *, legacy_ok: bool) -> bool:
@@ -567,8 +651,9 @@ def _apply(
     """Refresh a matched row's descriptive fields. Counts as updated only when
     something actually changed, so a re-run of an unchanged chart reports 0."""
     changed = False
-    if acct.name and row.name != acct.name:
-        row.name = acct.name
+    name = _stored_name(row.code, acct, result) if acct.name else None
+    if name and row.name != name:
+        row.name = name
         changed = True
     if acct.account_type and row.account_type != acct.account_type:
         row.account_type = acct.account_type

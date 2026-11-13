@@ -11,16 +11,24 @@
 	import StepUpPrompt from '#lib/components/ui/StepUpPrompt.svelte';
 	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
-	import { submitDsar, submitErasure, listPrivacyRequests } from '#lib/api/privacy.ts';
+	import {
+		submitDsar,
+		submitErasure,
+		listPrivacyRequests,
+		downloadDsarBundle
+	} from '#lib/api/privacy.ts';
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
 	import type { StepUpProof } from '#lib/stores/auth.svelte.ts';
+	import { ApiError } from '#lib/api.ts';
 	import {
 		SUBJECT_TYPES,
-		SUBJECT_TYPE_LABELS,
-		SUBJECT_IDENTIFIER_HINTS,
+		SUBJECT_TYPE_LABEL_KEYS,
+		SUBJECT_IDENTIFIER_HINT_KEYS,
+		dsarCountLines,
+		subjectTypeLabelKey,
 		type SubjectType
 	} from '#lib/types/privacy.ts';
 	import type { DataSubjectRequestSummary, DSARResponse } from '#lib/types/privacy.ts';
@@ -34,13 +42,27 @@
 		if (userLoaded && !allowed) goto('/');
 	});
 
-	const COLUMNS = [
-		{ label: 'Type' },
-		{ label: 'Subject' },
-		{ label: 'Status' },
-		{ label: 'Requested' },
-		{ label: 'Completed' }
-	];
+	const COLUMNS = $derived([
+		{ label: m('admin.privacy.col.type') },
+		{ label: m('admin.privacy.col.subject') },
+		{ label: m('admin.privacy.col.status') },
+		{ label: m('admin.privacy.col.requested') },
+		{ label: m('admin.privacy.col.completed') }
+	]);
+
+	/** A stored subject type in the reader's language; one this build
+	 *  predates shows verbatim (it is data, not copy). */
+	function subjectLabel(t: string): string {
+		const key = subjectTypeLabelKey(t);
+		return key ? m(key) : t;
+	}
+
+	/** The server answers an unknown subject with a bare 404 sentence; say it
+	 *  in the reader's language instead. Anything else keeps its own message. */
+	function privacyError(e: unknown, fallback: string): string {
+		if (e instanceof ApiError && e.status === 404) return m('admin.privacy.error.notFound');
+		return e instanceof Error ? authErrorMessage(e, m, 'stepUpPrompt.failed') : fallback;
+	}
 
 	// ── Request form ─────────────────────────────────────────────────────
 	let subjectType = $state<SubjectType>('user');
@@ -59,7 +81,7 @@
 			const res = await listPrivacyRequests();
 			requests = res.requests;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load the request history.';
+			error = e instanceof Error ? e.message : m('admin.privacy.error.loadHistory');
 		} finally {
 			loading = false;
 		}
@@ -136,12 +158,7 @@
 				// A coded refusal this build can state renders in the reader's
 				// language (`sensitive_step_up_unavailable`); anything else is the
 				// error's own message, exactly as before.
-				toast(
-					e instanceof Error
-						? authErrorMessage(e, m, 'stepUpPrompt.failed')
-						: 'Failed to export the subject’s data.',
-					'error'
-				);
+				toast(privacyError(e, m('admin.privacy.error.export')), 'error');
 			}
 		} finally {
 			dsarSubmitting = false;
@@ -153,9 +170,27 @@
 		try {
 			await navigator.clipboard.writeText(JSON.stringify(dsarResult.data, null, 2));
 			dsarCopied = true;
-			toast('Copied to clipboard.', 'success');
+			toast(m('admin.privacy.toast.copied'), 'success');
 		} catch {
-			toast('Could not copy — the value is still selectable above.', 'error');
+			toast(m('admin.privacy.toast.copyFailed'), 'error');
+		}
+	}
+
+	// ── Complete bundle (every section uncapped) ─────────────────────────
+	// The inline result caps each large section; when one was cut the page
+	// says so and offers the whole set as a file, which the server streams
+	// and audits per download (decisions §369).
+	let bundleDownloading = $state(false);
+
+	async function downloadFullBundle() {
+		if (!dsarResult?.full_bundle_url) return;
+		bundleDownloading = true;
+		try {
+			await downloadDsarBundle(dsarResult.full_bundle_url, `dsar-${dsarResult.request_id}.json`);
+		} catch (e) {
+			toast(privacyError(e, m('admin.privacy.error.bundle')), 'error');
+		} finally {
+			bundleDownloading = false;
 		}
 	}
 
@@ -195,15 +230,27 @@
 				note: erasureNote.trim() || undefined
 			});
 			erasing = false;
+			// Summarised from the response's typed counts — never a server sentence.
 			if (res.already_erased) {
-				toast('This subject was already erased — no further change was made.', 'info');
+				toast(m('admin.privacy.toast.alreadyErased'), 'info');
 			} else {
-				toast(`Erased. ${res.fields_redacted} field(s) redacted.`, 'success');
+				toast(
+					m('admin.privacy.toast.erased', {
+						fields: res.fields_redacted,
+						documents: res.documents_deleted ?? 0
+					}),
+					'success'
+				);
+			}
+			// A storage object that could not be deleted leaves the erasure
+			// incomplete; say so rather than let the success toast stand alone.
+			if ((res.documents_failed ?? 0) > 0) {
+				toast(m('admin.privacy.toast.erasureIncomplete', { failed: res.documents_failed }), 'error');
 			}
 			identifier = '';
 			await loadRequests();
 		} catch (e) {
-			toast(e instanceof Error ? e.message : 'Failed to erase the subject’s data.', 'error');
+			toast(privacyError(e, m('admin.privacy.error.erase')), 'error');
 		} finally {
 			erasureSubmitting = false;
 			erasureArmed = false;
@@ -211,16 +258,15 @@
 	}
 
 	function requestTypeLabel(t: string): string {
-		return t === 'erasure' ? 'Erasure' : 'DSAR export';
+		return t === 'erasure' ? m('admin.privacy.requestType.erasure') : m('admin.privacy.requestType.dsarExport');
 	}
+
+	const dsarLines = $derived(dsarCountLines(dsarResult?.record_counts));
 </script>
 
-<PageHeader title="Privacy & DSAR">
+<PageHeader title={m('admin.privacy.title')}>
 	<p class="page-hint">
-		GDPR / CCPA data-subject rights. <HelpTip term="dsar" /> <strong>Export</strong> assembles a portable
-		bundle of everything held about a subject (safe to re-run).
-		<strong>Erase</strong> irreversibly redacts their PII while preserving the
-		money trail and the append-only audit log — it cannot be undone.
+		{m('admin.privacy.hint')} <HelpTip term="dsar" />
 	</p>
 
 	<div class="request-card">
@@ -231,23 +277,25 @@
 			}}
 		>
 			<div class="form-row">
-				<label for="privacy-subject-type">Subject type</label>
+				<label for="privacy-subject-type">{m('admin.privacy.field.subjectType')}</label>
 				<select id="privacy-subject-type" bind:value={subjectType}>
 					{#each SUBJECT_TYPES as t (t)}
-						<option value={t}>{SUBJECT_TYPE_LABELS[t]}</option>
+						<option value={t}>{m(SUBJECT_TYPE_LABEL_KEYS[t])}</option>
 					{/each}
 				</select>
 			</div>
 			<div class="form-row">
-				<label for="privacy-identifier">Identifier</label>
+				<label for="privacy-identifier">{m('admin.privacy.field.identifier')}</label>
 				<input
 					id="privacy-identifier"
 					type="text"
 					bind:value={identifier}
-					placeholder={subjectType === 'vendor_contact' ? 'Vendor UUID' : 'name@example.com'}
+					placeholder={subjectType === 'vendor_contact'
+						? m('admin.privacy.placeholder.vendorUuid')
+						: m('admin.privacy.placeholder.email')}
 					required
 				/>
-				<p class="field-hint">{SUBJECT_IDENTIFIER_HINTS[subjectType]}</p>
+				<p class="field-hint">{m(SUBJECT_IDENTIFIER_HINT_KEYS[subjectType])}</p>
 			</div>
 			{#if canUnmask}
 				<div class="form-row unmask-row">
@@ -293,7 +341,7 @@
 						!identifier.trim() ||
 						(unmasking && !bankingJustification.trim())}
 				>
-					{dsarSubmitting ? 'Exporting…' : 'Export data (DSAR)'}
+					{dsarSubmitting ? m('admin.privacy.action.exporting') : m('admin.privacy.action.export')}
 				</button>
 				<button
 					type="button"
@@ -301,19 +349,19 @@
 					onclick={openErasureConfirm}
 					disabled={!identifier.trim()}
 				>
-					Erase data…
+					{m('admin.privacy.action.erase')}
 				</button>
 			</div>
 		</form>
 	</div>
 
-	<h2 class="section-heading">Request history</h2>
+	<h2 class="section-heading">{m('admin.privacy.history.title')}</h2>
 	{#if loading}
-		<p class="state" data-testid="privacy-loading">Loading…</p>
+		<p class="state" data-testid="privacy-loading">{m('common.loading')}</p>
 	{:else if error}
 		<LoadError message={error} onretry={loadRequests} testId="privacy-error" />
 	{:else}
-		<DataTable columns={COLUMNS} isEmpty={requests.length === 0} empty="No requests yet.">
+		<DataTable columns={COLUMNS} isEmpty={requests.length === 0} empty={m('admin.privacy.history.empty')}>
 			{#snippet body()}
 				{#each requests as r (r.id)}
 					<tr>
@@ -324,7 +372,7 @@
 						</td>
 						<td>
 							<div class="subject-cell">
-								<span>{SUBJECT_TYPE_LABELS[r.subject_type as SubjectType] ?? r.subject_type}</span>
+								<span>{subjectLabel(r.subject_type)}</span>
 								{#if r.subject_id}
 									<span class="mono subject-id" title={r.subject_id}
 										>{r.subject_id.slice(0, 8)}…</span
@@ -334,11 +382,11 @@
 						</td>
 						<td>
 							{#if r.status === 'completed'}
-								<Badge tone="success">Completed</Badge>
+								<Badge tone="success">{m('admin.privacy.status.completed')}</Badge>
 							{:else if r.status === 'noop'}
-								<Badge tone="muted">Already erased</Badge>
+								<Badge tone="muted">{m('admin.privacy.status.noop')}</Badge>
 							{:else}
-								<Badge tone="danger">Failed</Badge>
+								<Badge tone="danger">{m('admin.privacy.status.failed')}</Badge>
 							{/if}
 						</td>
 						<td>{formatDate(r.created_at)}</td>
@@ -353,19 +401,45 @@
 <!-- DSAR export result -->
 <Modal
 	open={dsarResult !== null}
-	ariaLabel="Data export"
+	ariaLabel={m('admin.privacy.export.title')}
 	width="lg"
 	onclose={() => (dsarResult = null)}
 >
 	{#if dsarResult}
-		<h2>Data export</h2>
+		<h2>{m('admin.privacy.export.title')}</h2>
 		<p class="modal-hint">
-			{SUBJECT_TYPE_LABELS[dsarResult.subject_type as SubjectType] ?? dsarResult.subject_type} —
-			generated {formatDate(dsarResult.generated_at, undefined, {
-				hour: 'numeric',
-				minute: 'numeric'
-			})}. This bundle is not stored — copy it now if you need it.
+			{m('admin.privacy.export.generated', {
+				subject: subjectLabel(dsarResult.subject_type),
+				when: formatDate(dsarResult.generated_at, undefined, { hour: 'numeric', minute: 'numeric' })
+			})}
 		</p>
+		{#if dsarResult.record_counts}
+			<section class="export-summary" data-testid="dsar-summary">
+				<h3>{m('admin.privacy.export.summaryTitle')}</h3>
+				{#if dsarLines.length === 0}
+					<p class="modal-hint">{m('admin.privacy.export.summaryProfileOnly')}</p>
+				{:else}
+					<ul>
+						{#each dsarLines as line (line.section)}
+							<li data-section={line.section}>{m(line.key, { n: line.n })}</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+		{/if}
+		{#if dsarResult.complete === false}
+			<p class="truncated-notice" role="status" data-testid="dsar-truncated-notice">
+				<!-- The bundle download is always masked (decisions §369), so after an
+				     unmasked disclosure it is not "everything held": say where the
+				     unmasked bank details are. -->
+				{m(
+					dsarResult.banking_disclosure === 'unmasked'
+						? 'admin.privacy.export.truncatedUnmasked'
+						: 'admin.privacy.export.truncated',
+					{ sections: dsarResult.truncated_sections?.length ?? 0 }
+				)}
+			</p>
+		{/if}
 		{#if dsarResult.banking_disclosure === 'unmasked'}
 			<p class="unmask-refusal" data-testid="dsar-unmasked-notice">
 				{m('privacyDsar.unmaskedNotice')}
@@ -374,10 +448,37 @@
 		<div class="json-view-wrap">
 			<pre class="json-view" data-testid="dsar-bundle">{JSON.stringify(dsarResult.data, null, 2)}</pre>
 		</div>
-		<div class="modal-footer">
-			<button type="button" class="btn-cancel" onclick={() => (dsarResult = null)}>Close</button>
-			<button type="button" class="btn-primary" onclick={copyDsarJson}>
-				{dsarCopied ? 'Copied' : 'Copy JSON'}
+		<div class="modal-footer export-footer">
+			<button type="button" class="btn-cancel" onclick={() => (dsarResult = null)}
+				>{m('admin.privacy.export.close')}</button
+			>
+			{#if dsarResult.full_bundle_url}
+				{#if dsarResult.banking_disclosure === 'unmasked'}
+					<small class="bundle-masked-note" id="dsar-bundle-masked" data-testid="dsar-bundle-masked">
+						{m('admin.privacy.export.bundleMasked')}
+					</small>
+				{/if}
+				<button
+					type="button"
+					class={dsarResult.complete === false ? 'btn-primary' : 'btn-cancel'}
+					onclick={downloadFullBundle}
+					disabled={bundleDownloading}
+					aria-describedby={dsarResult.banking_disclosure === 'unmasked'
+						? 'dsar-bundle-masked'
+						: undefined}
+					data-testid="dsar-download-bundle"
+				>
+					{bundleDownloading
+						? m('admin.privacy.export.downloading')
+						: m('admin.privacy.export.download')}
+				</button>
+			{/if}
+			<button
+				type="button"
+				class={dsarResult.complete === false ? 'btn-cancel' : 'btn-primary'}
+				onclick={copyDsarJson}
+			>
+				{dsarCopied ? m('admin.privacy.export.copied') : m('admin.privacy.export.copy')}
 			</button>
 		</div>
 	{/if}
@@ -398,21 +499,24 @@
 />
 
 <!-- Erasure confirm-then-act (irreversible) -->
-<Modal open={erasing} ariaLabel="Erase subject data" width="md" onclose={closeErasureConfirm}>
-	<h2>Erase subject data</h2>
+<Modal
+	open={erasing}
+	ariaLabel={m('admin.privacy.erase.title')}
+	width="md"
+	onclose={closeErasureConfirm}
+>
+	<h2>{m('admin.privacy.erase.title')}</h2>
 	<div class="erase-warning" role="alert">
-		<strong>This is permanent.</strong> PII text fields are redacted in place —
-		email, name, bank details, tax id, address — while every invoice / payment
-		amount and the append-only audit log are preserved untouched. This cannot
-		be undone.
+		<strong>{m('admin.privacy.erase.warningLead')}</strong>
+		{m('admin.privacy.erase.warningBody')}
 	</div>
 	<dl class="erase-meta">
 		<div>
-			<dt>Subject type</dt>
-			<dd>{SUBJECT_TYPE_LABELS[subjectType]}</dd>
+			<dt>{m('admin.privacy.field.subjectType')}</dt>
+			<dd>{m(SUBJECT_TYPE_LABEL_KEYS[subjectType])}</dd>
 		</div>
 		<div>
-			<dt>Identifier</dt>
+			<dt>{m('admin.privacy.field.identifier')}</dt>
 			<dd class="mono">{identifier}</dd>
 		</div>
 	</dl>
@@ -423,7 +527,8 @@
 		}}
 	>
 		<label class="note-label" for="erasure-note">
-			Note <span class="optional">(optional — legal basis / ticket reference, kept PII-free)</span>
+			{m('admin.privacy.erase.note')}
+			<span class="optional">{m('admin.privacy.erase.noteHint')}</span>
 		</label>
 		<textarea
 			id="erasure-note"
@@ -439,7 +544,7 @@
 				onchange={() => (erasureArmed = false)}
 				disabled={erasureSubmitting}
 			/>
-			<span>I understand this action is permanent and cannot be undone.</span>
+			<span>{m('admin.privacy.erase.acknowledge')}</span>
 		</label>
 		<div class="modal-footer">
 			<button
@@ -448,7 +553,7 @@
 				onclick={closeErasureConfirm}
 				disabled={erasureSubmitting}
 			>
-				Cancel
+				{m('common.cancel')}
 			</button>
 			<RowAction
 				variant="danger"
@@ -456,7 +561,11 @@
 				disabled={!erasureAcknowledged || erasureSubmitting}
 				type="submit"
 			>
-				{erasureSubmitting ? 'Erasing…' : erasureArmed ? 'Click again to confirm' : 'Erase permanently'}
+				{erasureSubmitting
+					? m('admin.privacy.erase.erasing')
+					: erasureArmed
+						? m('admin.privacy.erase.confirmAgain')
+						: m('admin.privacy.erase.confirm')}
 			</RowAction>
 		</div>
 	</form>
@@ -556,6 +665,22 @@
 		margin: 0 0 1rem;
 	}
 
+	.export-summary {
+		margin: 0 0 1rem;
+	}
+
+	.export-summary h3 {
+		font-size: 0.85rem;
+		margin: 0 0 0.35rem;
+	}
+
+	.export-summary ul {
+		margin: 0;
+		padding-left: 1.1rem;
+		font-size: 0.85rem;
+		columns: 2 14rem;
+	}
+
 	.json-view-wrap {
 		max-height: 50vh;
 		overflow: auto;
@@ -641,10 +766,35 @@
 		margin-top: 0.75rem;
 	}
 
+	/* An inline export that was cut short. Warning tint + its on-tint text, the
+	   pair app.css measures for contrast (not the bare --warning hue). */
+	.truncated-notice {
+		margin: 0.5rem 0 0;
+		padding: 0.5rem 0.75rem;
+		border-radius: 4px;
+		background: var(--warning-tint);
+		color: var(--warning-on-tint);
+		font-size: 0.85rem;
+	}
+
 	.unmask-refusal {
 		margin: 0.5rem 0 0;
 		color: var(--danger);
 		font-size: 0.85rem;
+	}
+
+	/* The masked-bundle note sits beside the download button it describes, and
+	   wraps onto its own line rather than squeezing the buttons at 320px. */
+	.export-footer {
+		flex-wrap: wrap;
+		align-items: center;
+	}
+	.bundle-masked-note {
+		flex: 1 1 14rem;
+		color: var(--text-muted);
+		font-size: 0.8rem;
+		line-height: 1.4;
+		text-align: right;
 	}
 
 	/* The request-form fields live in the page body, outside `.modal` (which

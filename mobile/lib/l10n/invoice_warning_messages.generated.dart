@@ -280,6 +280,68 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'exception.erp_dispatch_stopped_unconfirmed': {},
   'exception.erp_reported_payment_voided': {},
   'exception.erp_sync_back_failed': {},
+  'exception.extraction_failed': {'errorClass': 'text'},
+  'exception.positive_pay_altered_amount': {'checkNumber': 'text'},
+  'exception.positive_pay_not_on_file': {'checkNumber': 'text'},
+  'exception.vendor_bank_changed': {},
+  'exception.payee_changed_since_paid': {},
+  'exception.payee_unrecorded_after_merge': {},
+  'exception.compliance_hold_findings': {'count': 'count'},
+  'exception.compliance_no_screenable_vendor': {},
+  'exception.compliance_provider_unavailable': {'provider': 'text'},
+  'exception.compliance_review_required': {
+    'matchedList': 'text',
+    'provider': 'text',
+  },
+  'exception.compliance_review_required_unlisted': {'provider': 'text'},
+  'exception.compliance_unrecognised_result': {
+    'result': 'text',
+    'provider': 'text',
+  },
+  'exception.compliance_adverse_media': {'provider': 'text'},
+  'exception.compliance_adverse_media_unnamed_provider': {},
+  'exception.compliance_aml_spend': {
+    'projected': 'money',
+    'threshold': 'money',
+    'currency': 'currency',
+  },
+  'exception.compliance_aml_spend_partial': {
+    'projected': 'money',
+    'threshold': 'money',
+    'currency': 'currency',
+    'excluded': 'count',
+  },
+  'exception.payment_aged_out': {
+    'paymentId': 'text',
+    'hours': 'number',
+    'invoiceStatus': 'text',
+  },
+  'exception.payment_dispatch_in_doubt': {
+    'paymentId': 'text',
+    'failureCode': 'text',
+  },
+  'exception.payment_dispatch_interrupted_failed': {'paymentId': 'text'},
+  'exception.payment_dispatch_interrupted_cancelled': {'paymentId': 'text'},
+  'exception.settlement_currency_mismatch': {
+    'settledAmount': 'number',
+    'settledCurrency': 'text',
+    'authorizedAmount': 'number',
+    'authorizedCurrency': 'text',
+  },
+  'exception.settlement_amount_over': {
+    'settledAmount': 'number',
+    'settledCurrency': 'text',
+    'authorizedAmount': 'number',
+    'authorizedCurrency': 'text',
+    'variance': 'number',
+  },
+  'exception.settlement_amount_under': {
+    'settledAmount': 'number',
+    'settledCurrency': 'text',
+    'authorizedAmount': 'number',
+    'authorizedCurrency': 'text',
+    'variance': 'number',
+  },
 };
 
 /// The localized sentence for [warningCode], or `null` when this build does
@@ -1043,6 +1105,185 @@ String? _localizeWarningCode(
     // This invoice's payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment's run in Payments.
     case 'exception.erp_sync_back_failed':
       return l.exceptionDescriptionErpSyncBackFailed;
+    // Extraction failed: {errorClass}
+    case 'exception.extraction_failed':
+      final errorClass = _text(p['errorClass'], currency);
+      if (errorClass == null) return null;
+      return l.exceptionDescriptionExtractionFailed(errorClass);
+    // Positive Pay return: check {checkNumber} altered amount
+    case 'exception.positive_pay_altered_amount':
+      final checkNumber = _text(p['checkNumber'], currency);
+      if (checkNumber == null) return null;
+      return l.exceptionDescriptionPositivePayAlteredAmount(checkNumber);
+    // Positive Pay return: check {checkNumber} not on issued file
+    case 'exception.positive_pay_not_on_file':
+      final checkNumber = _text(p['checkNumber'], currency);
+      if (checkNumber == null) return null;
+      return l.exceptionDescriptionPositivePayNotOnFile(checkNumber);
+    // Vendor bank details changed; verify before payment.
+    case 'exception.vendor_bank_changed':
+      return l.exceptionDescriptionVendorBankChanged;
+    // Payee changed since this invoice was last paid; verify before paying again.
+    case 'exception.payee_changed_since_paid':
+      return l.exceptionDescriptionPayeeChangedSincePaid;
+    // Vendor merged since this invoice was last paid, and that payment recorded no payee; verify before paying again.
+    case 'exception.payee_unrecorded_after_merge':
+      return l.exceptionDescriptionPayeeUnrecordedAfterMerge;
+    // Payment held for compliance review ({count, plural, one {# reason} other {# reasons}})
+    case 'exception.compliance_hold_findings':
+      final count = _count(p['count']);
+      if (count == null) return null;
+      return l.exceptionDescriptionComplianceHoldFindings(count);
+    // no screenable vendor on invoice
+    case 'exception.compliance_no_screenable_vendor':
+      return l.exceptionDescriptionComplianceNoScreenableVendor;
+    // sanctions screening could not run: no adapter for configured provider '{provider}'
+    case 'exception.compliance_provider_unavailable':
+      final provider = _text(p['provider'], currency);
+      if (provider == null) return null;
+      return l.exceptionDescriptionComplianceProviderUnavailable(provider);
+    // vendor screening returned review_required ({matchedList}) via {provider}
+    case 'exception.compliance_review_required':
+      final provider = _text(p['provider'], currency);
+      if (provider == null) return null;
+      final matchedList = _text(p['matchedList'], currency);
+      if (matchedList == null) return null;
+      return l.exceptionDescriptionComplianceReviewRequired(
+        provider,
+        matchedList,
+      );
+    // vendor screening returned review_required (see audit row) via {provider}
+    case 'exception.compliance_review_required_unlisted':
+      final provider = _text(p['provider'], currency);
+      if (provider == null) return null;
+      return l.exceptionDescriptionComplianceReviewRequiredUnlisted(provider);
+    // vendor screening returned an unrecognised result '{result}' via {provider}; treating as review_required
+    case 'exception.compliance_unrecognised_result':
+      final provider = _text(p['provider'], currency);
+      if (provider == null) return null;
+      final result = _text(p['result'], currency);
+      if (result == null) return null;
+      return l.exceptionDescriptionComplianceUnrecognisedResult(
+        provider,
+        result,
+      );
+    // vendor screening returned an adverse-media (negative news) hit via {provider}; AP review required
+    case 'exception.compliance_adverse_media':
+      final provider = _text(p['provider'], currency);
+      if (provider == null) return null;
+      return l.exceptionDescriptionComplianceAdverseMedia(provider);
+    // vendor screening returned an adverse-media (negative news) hit via the configured provider; AP review required
+    case 'exception.compliance_adverse_media_unnamed_provider':
+      return l.exceptionDescriptionComplianceAdverseMediaUnnamedProvider;
+    // trailing 12-month spend with vendor would reach {projected} {currency} (threshold {threshold} {currency}); AP review required
+    case 'exception.compliance_aml_spend':
+      final projected = _money(p['projected'], currency);
+      if (projected == null) return null;
+      final threshold = _money(p['threshold'], currency);
+      if (threshold == null) return null;
+      return l.exceptionDescriptionComplianceAmlSpend(projected, threshold);
+    // trailing 12-month spend with vendor would reach {projected} {currency} (threshold {threshold} {currency}); AP review required — at least, on {excluded, plural, one {# payment} other {# payments}} excluded for having no figure in the home currency, so the real total is higher
+    case 'exception.compliance_aml_spend_partial':
+      final projected = _money(p['projected'], currency);
+      if (projected == null) return null;
+      final threshold = _money(p['threshold'], currency);
+      if (threshold == null) return null;
+      final excluded = _count(p['excluded']);
+      if (excluded == null) return null;
+      return l.exceptionDescriptionComplianceAmlSpendPartial(
+        projected,
+        threshold,
+        excluded,
+      );
+    // Payment {paymentId} was still in flight after {hours}h and the reconciler marked it failed; the rail never confirmed, so the money may or may not have moved. The invoice is '{invoiceStatus}'. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.
+    case 'exception.payment_aged_out':
+      final paymentId = _text(p['paymentId'], currency);
+      if (paymentId == null) return null;
+      final hours = _number(p['hours'], currency);
+      if (hours == null) return null;
+      final invoiceStatus = _text(p['invoiceStatus'], currency);
+      if (invoiceStatus == null) return null;
+      return l.exceptionDescriptionPaymentAgedOut(
+        paymentId,
+        hours,
+        invoiceStatus,
+      );
+    // Payment {paymentId} failed during dispatch ({failureCode}) after the processor may already have accepted it, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.
+    case 'exception.payment_dispatch_in_doubt':
+      final paymentId = _text(p['paymentId'], currency);
+      if (paymentId == null) return null;
+      final failureCode = _text(p['failureCode'], currency);
+      if (failureCode == null) return null;
+      return l.exceptionDescriptionPaymentDispatchInDoubt(
+        paymentId,
+        failureCode,
+      );
+    // Payment {paymentId} failed, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.
+    case 'exception.payment_dispatch_interrupted_failed':
+      final paymentId = _text(p['paymentId'], currency);
+      if (paymentId == null) return null;
+      return l.exceptionDescriptionPaymentDispatchInterruptedFailed(paymentId);
+    // Payment {paymentId} was cancelled, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.
+    case 'exception.payment_dispatch_interrupted_cancelled':
+      final paymentId = _text(p['paymentId'], currency);
+      if (paymentId == null) return null;
+      return l.exceptionDescriptionPaymentDispatchInterruptedCancelled(
+        paymentId,
+      );
+    // Settlement currency mismatch: the processor reported {settledAmount} {settledCurrency} but this payment authorizes {authorizedAmount} {authorizedCurrency}. Money moved on a currency AP did not authorize — reconcile with the processor before releasing this invoice.
+    case 'exception.settlement_currency_mismatch':
+      final settledAmount = _number(p['settledAmount'], currency);
+      if (settledAmount == null) return null;
+      final settledCurrency = _text(p['settledCurrency'], currency);
+      if (settledCurrency == null) return null;
+      final authorizedAmount = _number(p['authorizedAmount'], currency);
+      if (authorizedAmount == null) return null;
+      final authorizedCurrency = _text(p['authorizedCurrency'], currency);
+      if (authorizedCurrency == null) return null;
+      return l.exceptionDescriptionSettlementCurrencyMismatch(
+        settledAmount,
+        settledCurrency,
+        authorizedAmount,
+        authorizedCurrency,
+      );
+    // Settlement amount mismatch: the processor reported {settledAmount} {settledCurrency}, MORE than the authorized {authorizedAmount} {authorizedCurrency} (variance {variance}). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.
+    case 'exception.settlement_amount_over':
+      final settledAmount = _number(p['settledAmount'], currency);
+      if (settledAmount == null) return null;
+      final settledCurrency = _text(p['settledCurrency'], currency);
+      if (settledCurrency == null) return null;
+      final authorizedAmount = _number(p['authorizedAmount'], currency);
+      if (authorizedAmount == null) return null;
+      final authorizedCurrency = _text(p['authorizedCurrency'], currency);
+      if (authorizedCurrency == null) return null;
+      final variance = _number(p['variance'], currency);
+      if (variance == null) return null;
+      return l.exceptionDescriptionSettlementAmountOver(
+        settledAmount,
+        settledCurrency,
+        authorizedAmount,
+        authorizedCurrency,
+        variance,
+      );
+    // Settlement amount mismatch: the processor reported {settledAmount} {settledCurrency}, LESS than the authorized {authorizedAmount} {authorizedCurrency} (variance {variance}). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.
+    case 'exception.settlement_amount_under':
+      final settledAmount = _number(p['settledAmount'], currency);
+      if (settledAmount == null) return null;
+      final settledCurrency = _text(p['settledCurrency'], currency);
+      if (settledCurrency == null) return null;
+      final authorizedAmount = _number(p['authorizedAmount'], currency);
+      if (authorizedAmount == null) return null;
+      final authorizedCurrency = _text(p['authorizedCurrency'], currency);
+      if (authorizedCurrency == null) return null;
+      final variance = _number(p['variance'], currency);
+      if (variance == null) return null;
+      return l.exceptionDescriptionSettlementAmountUnder(
+        settledAmount,
+        settledCurrency,
+        authorizedAmount,
+        authorizedCurrency,
+        variance,
+      );
   }
   return null;
 }

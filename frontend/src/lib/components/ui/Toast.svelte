@@ -33,6 +33,7 @@
 		onModalDialogsChange,
 		topModalDialog
 	} from '#lib/actions/focusTrap.ts';
+	import { syncModalInert } from '#lib/actions/modalInert.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { placeToasts, TOAST_MARGIN } from '#lib/utils/toastPlacement.ts';
 
@@ -130,6 +131,10 @@
 		focusInside = false;
 		returnTo = null;
 		parent.insertBefore(el, before);
+		// The page outside the topmost dialog is inert, the region excepted
+		// (`actions/modalInert.ts`); re-mark for where the region now is, so
+		// the dialog it left (one now under a stacked dialog) goes inert whole.
+		syncModalInert(topModalDialog());
 		for (const t of toasts) {
 			if (!unheard.has(t.id)) continue;
 			unheard.delete(t.id);

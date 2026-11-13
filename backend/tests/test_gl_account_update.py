@@ -294,10 +294,17 @@ async def test_every_gl_foreign_key_is_no_action_in_the_real_database(realdb):
     assert rows, "no FKs point at gl_accounts — re-evaluate the no-DELETE rule"
     # `confdeltype` is Postgres's internal `"char"`, which asyncpg hands back as
     # a one-byte `bytes`. 'a' = NO ACTION.
+    # The one deliberate CASCADE: `gl_account_erp_links` is the account's own
+    # kept ERP link state per company (decisions §376, migration 0127), not a
+    # money row that references it, so it dies with its account exactly as
+    # `vendor_erp_links` dies with its vendor. It is named, never patterned, so
+    # a CASCADE on any money table still fails here.
+    owned_state = {"gl_account_erp_links": "c"}
     offenders = {
         name: deltype
         for name, deltype in rows
-        if (deltype.decode() if isinstance(deltype, bytes) else deltype) != "a"
+        if (deltype.decode() if isinstance(deltype, bytes) else deltype)
+        != owned_state.get(name, "a")
     }
     assert not offenders, (
         "an ON DELETE rule appeared on a gl_accounts FK. CASCADE would delete "

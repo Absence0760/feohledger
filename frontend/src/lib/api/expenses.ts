@@ -1,7 +1,9 @@
 // Typed helpers for the expense + expense-report endpoints. All requests route
 // through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
 // 401-bounce). Mirrors the pattern of `src/lib/api/contracts.ts`.
-import { api, endSessionIfRejected, formatApiDetail } from '#lib/api.ts';
+import { api, apiErrorFromBody, endSessionIfRejected } from '#lib/api.ts';
+import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
+import { m } from '#lib/i18n/store.svelte.ts';
 import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
 import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
@@ -326,9 +328,16 @@ function parseSubmitViolations(body: unknown): { violations: PolicyViolation[]; 
 	if (detail && typeof detail === 'object') {
 		const obj = detail as { message?: string; violations?: PolicyViolation[] };
 		const violations = Array.isArray(obj.violations) ? obj.violations : [];
+		// A coded refusal (`expense_report_not_draft` on a report submitted
+		// from another tab) is stated in the reader's language, as the shared
+		// client states every other one (decisions §361) — and so are the two
+		// list-shaped ones, `expense_report_policy_blocked` and
+		// `expense_report_lines_unconverted`, whose lists are kept (§378).
+		const localized = localizeApiDetail(detail, m);
 		return {
 			violations,
-			message: obj.message ?? violations.map((v) => v.message).join('; ') ?? 'Submit blocked'
+			message:
+				localized ?? obj.message ?? violations.map((v) => v.message).join('; ') ?? 'Submit blocked'
 		};
 	}
 	if (typeof detail === 'string') {
@@ -365,7 +374,7 @@ export async function submitReport(id: string): Promise<SubmitReportResult> {
 		if ((token && endSessionIfRejected(res.status, body.detail)) || res.status === 401) {
 			throw new Error('Unauthorized');
 		}
-		throw new Error(formatApiDetail(body.detail, `API error ${res.status}`));
+		throw apiErrorFromBody(body, `API error ${res.status}`, res.status);
 	}
 
 	if (res.status === 422) {
@@ -375,7 +384,7 @@ export async function submitReport(id: string): Promise<SubmitReportResult> {
 
 	if (!res.ok) {
 		const body = (await res.json().catch(() => ({}))) as { detail?: unknown };
-		throw new Error(formatApiDetail(body.detail, `API error ${res.status}`));
+		throw apiErrorFromBody(body, `API error ${res.status}`, res.status);
 	}
 
 	const report = (await res.json()) as ExpenseReport;

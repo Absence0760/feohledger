@@ -618,8 +618,14 @@ async def merge_vendor_consolidation(
     per-table reassigned counts; no ``tax_id`` / bank / address). Refuses
     self-merge, an empty duplicate set, an unknown vendor (404), a
     cross-entity merge and a payments-blocked duplicate into an unblocked
-    canonical (422) — each a coded refusal (``services/vendor_merge``'s
-    ``VENDOR_MERGE_*``) a client states in the reader's language.
+    canonical (422), a duplicate holding approved invoices still to be paid
+    (409, ``params.count`` — merged, they would pay the canonical's bank
+    details, which their approver never saw; decisions §379), and an ERP
+    company where the canonical and a duplicate are
+    linked to different supplier records (409, ``params.realms``) — each a
+    coded refusal (``services/vendor_merge``'s ``VENDOR_MERGE_*``) a client
+    states in the reader's language. Each duplicate's ERP links (row and kept)
+    move to the canonical wherever it has none in that company (§373).
 
     RBAC: ``vendor.manage`` (admin / ap_manager by default) — vendor master-data
     control is a splittable SoD duty. Tenant-scoped via ``get_tenant_db`` +
@@ -640,12 +646,13 @@ async def merge_vendor_consolidation(
             db,
             canonical_vendor_id=canonical_id,
             duplicate_vendor_ids=duplicate_ids,
+            merged_by_user_id=user.id,
         )
     except VendorMergeError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     # Append-only audit row — a vendor merge re-homes spend + retires vendors, a
-    # material master-data change (invariant #3). PII-free: ids + counts only.
+    # material master-data change (invariant #3). PII-free: ids, counts and ERP record keys only.
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),
@@ -660,6 +667,9 @@ async def merge_vendor_consolidation(
             "deactivated_vendor_ids": [str(d) for d in result.deactivated_vendor_ids],
             "reassigned": result.reassigned,
             "total_reassigned": result.total_reassigned,
+            # Every ERP link a duplicate gave up and where it went (§373):
+            # realm + the ERP's own record key, never a vendor's tax id or bank.
+            "erp_links": result.erp_links,
         },
     )
 

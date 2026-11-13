@@ -21,8 +21,11 @@ import {
 	CONNECT_FROM_PLATFORM_HOST,
 	platformConnectUrl,
 	destinationChanged,
+	disconnectMessage,
 	erpTestResultText,
 	readOAuthReturn,
+	pickRefusalKey,
+	PICK_REFUSAL_KEYS,
 	secretIsSaved,
 	selectedProviderKey,
 	type ErpProvider
@@ -331,6 +334,44 @@ describe('readOAuthReturn', () => {
 		const long = readOAuthReturn(new URLSearchParams(`erp_error=${'x'.repeat(500)}`));
 		expect(long?.kind === 'error' && long.code.length).toBe(64);
 		expect(readOAuthReturn(new URLSearchParams('section=erp'))).toBeNull();
+	});
+});
+
+describe('readOAuthReturn: the company picker', () => {
+	it('reads erp_choose_company as a pick to make, and strips it', () => {
+		expect(readOAuthReturn(new URLSearchParams('section=erp&erp_choose_company=xero'))).toEqual({
+			kind: 'choose',
+			provider: 'xero'
+		});
+		expect(
+			withoutOAuthReturn(new URL('https://acme.test/organization?section=erp&erp_choose_company=xero'))
+		).toBe('/organization?section=erp');
+	});
+
+	it('lets an error win over a pick', () => {
+		expect(
+			readOAuthReturn(new URLSearchParams('erp_choose_company=xero&erp_error=state_expired'))
+		).toEqual({ kind: 'error', code: 'state_expired' });
+	});
+});
+
+describe('pickRefusalKey', () => {
+	it('states every pick refusal the server codes', () => {
+		for (const code of [
+			'erp_pick_expired',
+			'erp_pick_unknown_company',
+			'already_linked',
+			'credentials_unavailable',
+			'audit_unavailable'
+		]) {
+			expect(pickRefusalKey(code)).toBe(PICK_REFUSAL_KEYS[code as keyof typeof PICK_REFUSAL_KEYS]);
+		}
+	});
+
+	it('leaves an unknown code to the server sentence', () => {
+		expect(pickRefusalKey('something_new')).toBeNull();
+		expect(pickRefusalKey('toString')).toBeNull();
+		expect(pickRefusalKey(null)).toBeNull();
 	});
 });
 
@@ -743,6 +784,46 @@ describe('callUsageLines', () => {
 		for (const locale of SUPPORTED_LOCALES) {
 			const messages = await loadAllMessages(locale);
 			for (const key of keys) expect(messages[key], `${locale}: ${key}`).toBeTruthy();
+		}
+	});
+});
+
+describe('disconnectMessage', () => {
+	it('is plain success only when the provider confirmed the revocation', () => {
+		expect(
+			disconnectMessage({ disconnected: true, revoked: true, revocation: 'revoked' })
+		).toEqual({ key: 'org.erp.oauth.disconnected', tone: 'success' });
+	});
+
+	it('tells the admin to remove the app at a provider with no revoke endpoint', () => {
+		// Blackbaud SKY API (decisions §371).
+		expect(
+			disconnectMessage({ disconnected: true, revoked: false, revocation: 'unsupported' })
+		).toEqual({ key: 'org.erp.oauth.disconnectedRemoveAtProvider', tone: 'failure' });
+	});
+
+	it('reads a failed or unknown outcome as not revoked, never as success', () => {
+		const notRevoked = { key: 'org.erp.oauth.disconnectedNotRevoked', tone: 'failure' };
+		expect(
+			disconnectMessage({ disconnected: true, revoked: false, revocation: 'failed' })
+		).toEqual(notRevoked);
+		expect(
+			disconnectMessage({ disconnected: true, revoked: true, revocation: null })
+		).toEqual(notRevoked);
+		expect(disconnectMessage(null)).toEqual(notRevoked);
+	});
+
+	it('has every sentence, naming the ERP, in every locale', async () => {
+		const { loadAllMessages } = await import('#lib/i18n/allMessages.ts');
+		for (const locale of SUPPORTED_LOCALES) {
+			const messages = await loadAllMessages(locale);
+			for (const key of [
+				'org.erp.oauth.disconnected',
+				'org.erp.oauth.disconnectedNotRevoked',
+				'org.erp.oauth.disconnectedRemoveAtProvider'
+			] as const) {
+				expect(messages[key], `${locale}: ${key}`).toContain('{erp}');
+			}
 		}
 	});
 });

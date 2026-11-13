@@ -385,7 +385,10 @@ exact altered/fraud case Positive Pay exists to catch). It raises a deduped
 `fraud_flag`
 Exception for **every** fraud signal (`exception_type="fraud_flag"`,
 `severity="error"`, `status="open"`, description `"Positive Pay return: check
-<num> <reason>"` — no account numbers):
+<num> <reason>"` with no account numbers, keyed as `exception.positive_pay_altered_amount`
+or `exception.positive_pay_not_on_file` with the cheque number as `checkNumber` so
+the queue reads it in the reviewer's language — see `backend/docs/invoice-warnings.md`
+§ The direct `create_exception` sites):
 
 - **`amount_mismatch`** (an *altered* cheque whose number we did issue) maps to
   its invoice → an invoice-scoped `fraud_flag`.
@@ -394,11 +397,15 @@ Exception for **every** fraud signal (`exception_type="fraud_flag"`,
   a **standalone `fraud_flag` with `invoice_id = None`**, so it's a first-class,
   queryable item in the exception queue rather than a buried JSON field.
 
-**The dedupe key is the description, not the invoice.** Both branches skip only
-when an open/escalated `fraud_flag` with the **same description** already exists
-(narrowed by `invoice_id` when there is one) — and the description carries this
-cheque's number and its verdict, so a bank redelivery of the same return still
-creates nothing.
+**The dedupe key is this cheque's verdict and number, not the invoice.** Both
+branches skip only when an open/escalated `fraud_flag` already states the **same
+verdict for the same cheque** (narrowed by `invoice_id` when there is one), so a
+bank redelivery of the same return still creates nothing. Since decisions §358
+that is the `description_code` plus `description_params.checkNumber`; a row
+raised before §358 carries no code and is matched on its `description` instead,
+which is byte-identical to the new English fallback — so a redelivery processed
+after the upgrade does not re-raise a return already in the queue. A coded row is
+never matched on its English.
 
 It used to be `(invoice_id, "fraud_flag")` on the invoice-scoped branch,
 mirroring `invoice_warnings._ensure_exception`. That is the right key for a

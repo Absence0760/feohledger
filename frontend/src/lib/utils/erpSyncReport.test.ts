@@ -44,6 +44,14 @@ describe('glSyncReportLines — parents', () => {
 			tone: 'warning'
 		});
 	});
+
+	it('names accounts synced with a shortened name', () => {
+		const lines = glSyncReportLines({ created: 1, updated: 0, names_shortened: ['6100'] }, t);
+		expect(lines[1]).toEqual({
+			text: "Synced with a shortened name, because the ERP's name is too long to store: 6100.",
+			tone: 'warning'
+		});
+	});
 });
 
 describe('vendorSyncReportLines', () => {
@@ -90,5 +98,16 @@ describe('vendorSyncReportLines', () => {
 				tone: 'warning'
 			}
 		]);
+	});
+
+	it('counts the vendors stored under a shortened name', () => {
+		const lines = vendorSyncReportLines(
+			{ created: 2, updated: 0, unchanged: 0, names_shortened: [{ name: 'A…' }, { name: 'B…' }] },
+			t
+		);
+		expect(lines[1]).toEqual({
+			text: "2 vendors synced with a shortened name, because the ERP's name is too long to store.",
+			tone: 'warning'
+		});
 	});
 });

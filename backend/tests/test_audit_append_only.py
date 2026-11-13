@@ -370,6 +370,9 @@ _TENANT_MUTATORS_WITHOUT_DIRECT_AUDIT: dict[tuple[str, str], str] = {
     ("app.api.workflow", "approve_invoice"): "audits via services/review.approve_invoice",
     ("app.api.workflow", "assign_reviewer"): "audits via services/review.assign_reviewer",
     ("app.api.workflow", "reject_invoice"): "audits via services/review.reject_invoice",
+    ("app.api.workflow", "recall_approval"): (
+        "audits via services/review.recall_approval (invoice.approval_recalled, decisions §374)"
+    ),
     ("app.api.workflow", "resubmit_invoice"): "audits via services/review.resubmit_invoice",
     ("app.api.workflow", "complete_invoice"): "audits via workflow_engine.transition_invoice",
     ("app.api.workflow", "reset_extraction"): "audits via workflow_engine.transition_invoice",

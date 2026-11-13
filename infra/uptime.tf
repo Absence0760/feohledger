@@ -11,12 +11,10 @@
 #
 # Three hosts, one per way the product can be down:
 #
-#   - the apex         — the marketing/sign-in SPA (CloudFront, or Caddy until
-#                        frontend_on_cloudfront)
-#   - one tenant host  — <uptime_tenant_slug>.<domain>: the wildcard record,
-#                        the wildcard certificate SAN and (before the cutover)
-#                        that tenant's Caddy site block. Skipped while the slug
-#                        is unset.
+#   - the apex         — the marketing/sign-in SPA (CloudFront)
+#   - one tenant host  — <uptime_tenant_slug>.<domain>: the wildcard record
+#                        and the wildcard certificate SAN. Skipped while the
+#                        slug is unset.
 #   - the API          — api.<domain>/api/health, through Caddy to the API
 #                        container, matched on the body the liveness probe
 #                        returns
@@ -30,7 +28,8 @@
 # What these checks cannot see: whether the certificate is valid. Route 53
 # completes the TLS handshake but does not validate the certificate, so an
 # expired one still passes. The ACM certificate has its own expiry alarm below;
-# the Let's Encrypt certificates Caddy holds on the VM are a tracked follow-up
+# the Let's Encrypt certificates Caddy holds on the VM (api.<domain> since
+# docs/decisions.md §364, plus any vanity host) are a tracked follow-up
 # (docs/followups.md).
 
 locals {

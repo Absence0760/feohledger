@@ -36,12 +36,13 @@ from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.erp_adapters.base import PoSkipReason
-from app.services.erp_link_realm import connection_realm, legacy_links_trusted, link_is_live
+from app.services.erp_link_realm import connection_realm, legacy_links_trusted
 from app.services.goods_receipts import received_quantities
 from app.services.provider_credentials import (
     CREDENTIALS_UNAVAILABLE_DETAIL,
     provider_config,
 )
+from app.services.vendor_erp_links import vendor_erp_ids
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -561,19 +562,16 @@ async def sync_pos_from_erp(
             found[key] = vendor_id
         return {k: v for k, v in found.items() if k not in ambiguous}, ambiguous
 
+    # Each vendor's link in this company, a kept one included
+    # (services/vendor_erp_links, §356) — the push's lookup.
+    erp_ids = await vendor_erp_ids(db, org_id, vendors, realm=realm, trust_legacy=trust_legacy)
     vendor_by_erp_id, ambiguous_erp_ids = _unique(
-        (v.erp_vendor_id, v.id)
-        for v in vendors
-        if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
+        (erp_ids[v.id], v.id) for v in vendors if v.id in erp_ids
     )
     vendor_by_name, _ = _unique((v.name.lower(), v.id) for v in vendors)
     # Vendors linked to an ERP id in this realm: a name match must not land on
     # one of them when the PO names a different id (see `resolve_vendor`).
-    erp_linked = {
-        v.id
-        for v in vendors
-        if v.erp_vendor_id and link_is_live(v.erp_link_realm, realm, trust_legacy=trust_legacy)
-    }
+    erp_linked = set(erp_ids)
 
     def resolve_vendor(erp_po) -> uuid.UUID | None:
         if erp_po.vendor_erp_id in ambiguous_erp_ids:

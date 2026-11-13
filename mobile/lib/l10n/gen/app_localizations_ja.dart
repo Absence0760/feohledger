@@ -720,6 +720,41 @@ class AppLocalizationsJa extends AppLocalizations {
   String get invoiceDetailReject => '却下';
 
   @override
+  String get invoiceDetailRecall => '承認を取り消す';
+
+  @override
+  String get invoiceDetailRecallTitle => 'この承認を取り消しますか？';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      '請求書はレビューに戻り、金額を修正できるようになった後、承認チェーン全体による新たな承認が必要になります。職務分掌上、あなたはアップロードした人と同様に、この請求書の関係者として扱われます。元の承認は監査証跡に残ります。';
+
+  @override
+  String get invoiceDetailRecallReason => '取り消す理由';
+
+  @override
+  String get invoiceDetailRecalled => '承認を取り消しました。請求書はレビューに戻りました。';
+
+  @override
+  String get invoiceDetailRecallFailed => '承認を取り消せませんでした。もう一度お試しください';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      '承認を取り消せるのは、承認済みの請求書、または承認後にERPへの送信が失敗した請求書のみです。';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'ERPにこの請求書の支払請求がすでに登録されている可能性があり、ERP上で支払われる可能性があります。ERPで修正または無効化してください。FeohLedgerから承認を取り消すことはできません。';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'FeohLedgerはすでにこの請求書を支払い中です（有効な支払いがあります）。承認を取り消す前に、支払いランを取り消すか、支払いを無効にしてください。';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'この請求書の支払いにバーチャルカードが発行されています。承認を取り消す前に、カードを取り消してください。';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     return '$count件の請求書を却下';
   }
@@ -944,8 +979,11 @@ class AppLocalizationsJa extends AppLocalizations {
   String get invoiceEditClearDueDate => '支払期日をクリア';
 
   @override
-  String get invoiceEditLockedNotice =>
-      '承認済み — 支払先と金額は固定されています。変更するには請求書を却下し、修正してから再承認してください。';
+  String get invoiceEditLockedNotice => '承認済み — 支払先と金額は固定されています。';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
+      '承認済み — 支払先と金額は固定されています。変更するには承認を取り消し、請求書を修正してから、改めて承認を受けてください。';
 
   @override
   String get invoiceEditLockedHelper => '承認後は変更不可';
@@ -999,7 +1037,18 @@ class AppLocalizationsJa extends AppLocalizations {
   String get erpStatusLastUpdate => '最終更新';
 
   @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action（$actor）';
+  }
+
+  @override
   String get erpStatusStatus => 'ステータス';
+
+  @override
+  String get erpStatusOpensInErp => 'ERP で請求書を開きます';
+
+  @override
+  String get externalLinkOpenFailed => 'リンクを開けませんでした';
 
   @override
   String get fileViewerPdfTitle => '請求書PDF';
@@ -3174,6 +3223,167 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get exceptionDescriptionErpSyncBackFailed =>
       'この請求書の支払いは決済されましたが、FeohLedger が記録を完了できなかったため、資金は出金済みにもかかわらず請求書は「支払済み」になっていません。自動では再試行されません。「支払い」でこの支払いの支払実行にある「ERP連携を再実行」を使用してください。';
+
+  @override
+  String exceptionDescriptionExtractionFailed(String errorClass) {
+    return '抽出に失敗しました: $errorClass';
+  }
+
+  @override
+  String exceptionDescriptionPositivePayAlteredAmount(String checkNumber) {
+    return 'Positive Pay の返却: 小切手 $checkNumber の金額が改ざんされています';
+  }
+
+  @override
+  String exceptionDescriptionPositivePayNotOnFile(String checkNumber) {
+    return 'Positive Pay の返却: 小切手 $checkNumber は発行ファイルにありません';
+  }
+
+  @override
+  String get exceptionDescriptionVendorBankChanged =>
+      '仕入先の銀行口座情報が変更されました。支払い前に確認してください。';
+
+  @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      '前回の支払い以降、この請求書の支払先が変更されました。再度支払う前に確認してください。';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      '前回の支払い以降に仕入先が統合されましたが、その支払いには支払先が記録されていません。再度支払う前に確認してください。';
+
+  @override
+  String exceptionDescriptionComplianceHoldFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count件の理由',
+    );
+    return 'コンプライアンス審査のため支払いを保留中（$_temp0）';
+  }
+
+  @override
+  String get exceptionDescriptionComplianceNoScreenableVendor =>
+      '請求書に審査可能な仕入先がありません';
+
+  @override
+  String exceptionDescriptionComplianceProviderUnavailable(String provider) {
+    return '制裁スクリーニングを実行できませんでした: 設定されたプロバイダー「$provider」のアダプターがありません';
+  }
+
+  @override
+  String exceptionDescriptionComplianceReviewRequired(
+    String provider,
+    String matchedList,
+  ) {
+    return '$provider による仕入先スクリーニングで確認が必要です（$matchedList）';
+  }
+
+  @override
+  String exceptionDescriptionComplianceReviewRequiredUnlisted(String provider) {
+    return '$provider による仕入先スクリーニングで確認が必要です（スクリーニング記録を参照）';
+  }
+
+  @override
+  String exceptionDescriptionComplianceUnrecognisedResult(
+    String provider,
+    String result,
+  ) {
+    return '$provider による仕入先スクリーニングが不明な結果「$result」を返しました。確認が必要なものとして扱います';
+  }
+
+  @override
+  String exceptionDescriptionComplianceAdverseMedia(String provider) {
+    return '$provider による仕入先スクリーニングで否定的な報道が見つかりました。買掛金担当の確認が必要です';
+  }
+
+  @override
+  String get exceptionDescriptionComplianceAdverseMediaUnnamedProvider =>
+      '仕入先スクリーニングで否定的な報道が見つかりました。買掛金担当の確認が必要です';
+
+  @override
+  String exceptionDescriptionComplianceAmlSpend(
+    String projected,
+    String threshold,
+  ) {
+    return 'この仕入先への過去12か月の支出が $projected（しきい値 $threshold）に達します。買掛金担当の確認が必要です';
+  }
+
+  @override
+  String exceptionDescriptionComplianceAmlSpendPartial(
+    String projected,
+    String threshold,
+    int excluded,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      excluded,
+      locale: localeName,
+      other: '$excluded件の支払い',
+    );
+    return 'この仕入先への過去12か月の支出が少なくとも $projected（しきい値 $threshold）に達します。買掛金担当の確認が必要です。本拠通貨の金額がない$_temp0は除外されているため、実際の合計はこれより多くなります';
+  }
+
+  @override
+  String exceptionDescriptionPaymentAgedOut(
+    String paymentId,
+    String hours,
+    String invoiceStatus,
+  ) {
+    return '支払い $paymentId は $hours 時間後も処理中のままだったため、照合処理が失敗としてマークしました。決済網から確認がなく、資金が移動したかどうかは不明です。請求書のステータスは「$invoiceStatus」です。決済代行会社に確認し、取消または再支払いを行ってください。解決するまで、この請求書は新しい支払実行の対象外です。';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInDoubt(
+    String paymentId,
+    String failureCode,
+  ) {
+    return '支払い $paymentId は送信中に失敗しました（$failureCode）。決済代行会社がすでに受け付けていた可能性があり、資金が移動したかどうかは不明です。決済代行会社に確認し、取消または再支払いを行ってください。解決するまで、この請求書は新しい支払実行の対象外です。';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInterruptedFailed(
+    String paymentId,
+  ) {
+    return '支払い $paymentId は失敗しましたが、以前の送信試行が決済代行会社に届いた可能性がある時点で中断されたため、資金が移動したかどうかは不明です。決済代行会社に確認し、取消または再支払いを行ってください。解決するまで、この請求書は新しい支払実行の対象外です。';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInterruptedCancelled(
+    String paymentId,
+  ) {
+    return '支払い $paymentId はキャンセルされましたが、以前の送信試行が決済代行会社に届いた可能性がある時点で中断されたため、資金が移動したかどうかは不明です。決済代行会社に確認し、取消または再支払いを行ってください。解決するまで、この請求書は新しい支払実行の対象外です。';
+  }
+
+  @override
+  String exceptionDescriptionSettlementCurrencyMismatch(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+  ) {
+    return '決済通貨の不一致: 決済代行会社の報告は $settledAmount $settledCurrency ですが、この支払いの承認額は $authorizedAmount $authorizedCurrency です。承認されていない通貨で資金が移動しました。この請求書を解放する前に決済代行会社と照合してください。';
+  }
+
+  @override
+  String exceptionDescriptionSettlementAmountOver(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  ) {
+    return '決済金額の不一致: 決済代行会社の報告は $settledAmount $settledCurrency で、承認額 $authorizedAmount $authorizedCurrency を上回っています（差異 $variance）。承認されていない金額で資金が移動しました。この請求書を解放する前に決済代行会社と照合してください。';
+  }
+
+  @override
+  String exceptionDescriptionSettlementAmountUnder(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  ) {
+    return '決済金額の不一致: 決済代行会社の報告は $settledAmount $settledCurrency で、承認額 $authorizedAmount $authorizedCurrency を下回っています（差異 $variance）。承認されていない金額で資金が移動しました。この請求書を解放する前に決済代行会社と照合してください。';
+  }
 
   @override
   String get warningsPoMatchStatusMatched => '一致';

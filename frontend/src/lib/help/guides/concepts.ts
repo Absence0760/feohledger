@@ -33,7 +33,7 @@ export const CONCEPT_GUIDES: Guide[] = [
 							'{ui:invoices.status.new}: the invoice record exists but nothing has been read from it yet. An invoice entered by hand can go straight to review from here.',
 							'{ui:invoices.status.pending}: a file was attached and [[extraction]] is reading it. This usually takes seconds. If it has not finished within a few minutes, the invoice is marked failed so it never sits silently.',
 							'{ui:invoices.status.readyForReview}: the data is in and waiting for a person. A reviewer checks and corrects the fields, looks at any warnings and the PO match, then approves or rejects.',
-							'{ui:invoices.status.approved}: the invoice has been signed off. Its amount and other financial fields are now locked, because the approval was given for exactly those figures.'
+							'{ui:invoices.status.approved}: the invoice has been signed off. Its amount and other financial fields are now locked, because the approval was given for exactly those figures. To correct them, the approval is recalled, which sends the invoice back for review.'
 						]
 					},
 					{

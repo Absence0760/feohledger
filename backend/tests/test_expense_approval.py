@@ -125,6 +125,14 @@ async def _make_policy(c, **kw):
     return (await c.post("/api/expense-policies", json=body)).json()
 
 
+def _assert_coded(resp, status_code: int, code: str, message: str, **params) -> None:
+    """A refusal through `refusals.coded_refusal` (decisions §361): its status,
+    its code, its params, and the English it answered with as a plain string
+    before, kept as `message` so a client reading text still shows it."""
+    assert resp.status_code == status_code, resp.text
+    assert resp.json()["detail"] == {"code": code, "message": message, "params": params}
+
+
 async def _make_report_with_expense(c, amount="100.00", category="travel", receipt=False):
     eid = (
         await c.post(
@@ -150,7 +158,13 @@ async def _make_report_with_expense(c, amount="100.00", category="travel", recei
 async def test_submit_blocks_on_missing_receipt(realdb):
     # Manager creates the receipt-required policy; clerk builds + submits.
     async with realdb.client(key="a", role="ap_manager") as c:
-        await _make_policy(c, name="ReceiptReq", category="travel", requires_receipt_above="10.00")
+        await _make_policy(
+            c,
+            name="ReceiptReq",
+            category="travel",
+            requires_receipt_above="10.00",
+            threshold_currency="USD",
+        )
     async with realdb.client(key="a", role="ap_clerk") as c:
         rid, eid = await _make_report_with_expense(c, amount="50.00", receipt=False)
         resp = await c.post(f"/api/expense-reports/{rid}/submit")
@@ -158,6 +172,22 @@ async def test_submit_blocks_on_missing_receipt(realdb):
     detail = resp.json()["detail"]
     codes = [v["code"] for v in detail["violations"]]
     assert "receipt_required" in codes
+    # Coded (decisions §378): the envelope is a `{code, message, params}`
+    # refusal that keeps its English `message` and its `violations` list, and
+    # each entry is itself coded with the figures its sentence needs.
+    assert detail["code"] == "expense_report_policy_blocked"
+    assert detail["message"] == "Report has blocking policy violations and cannot be submitted."
+    assert detail["params"] == {"count": len(detail["violations"])}
+    receipt = next(v for v in detail["violations"] if v["code"] == "receipt_required")
+    assert receipt["expense_id"] == eid
+    assert receipt["message"].startswith("A receipt is required")
+    assert receipt["params"] == {
+        "amount": "50.00",
+        "amount_currency": "USD",
+        "limit": "10.00",
+        "currency": "USD",
+        "comparison": "resolved",
+    }
 
     # Report did NOT transition.
     async with realdb.client(key="a", role="ap_clerk") as c:
@@ -422,7 +452,42 @@ async def test_approve_invalid_state_422(realdb):
         rid, _ = await _make_report_with_expense(c, amount="10.00", receipt=True)
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(f"/api/expense-reports/{rid}/approve")
-    assert resp.status_code == 422
+    _assert_coded(
+        resp,
+        422,
+        "expense_report_not_submitted",
+        "Cannot approve a report in 'draft' state",
+        status="draft",
+    )
+
+
+async def test_reject_invalid_state_422(realdb):
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        rid, _ = await _make_report_with_expense(c, amount="10.00", receipt=True)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(f"/api/expense-reports/{rid}/reject", json={"reason": "early"})
+    _assert_coded(
+        resp,
+        422,
+        "expense_report_not_submitted",
+        "Cannot reject a report in 'draft' state",
+        status="draft",
+    )
+
+
+async def test_submit_twice_is_a_coded_422(realdb):
+    """The race §361 codes: a report submitted from another tab."""
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        rid, _ = await _make_report_with_expense(c, amount="10.00", receipt=True)
+        assert (await c.post(f"/api/expense-reports/{rid}/submit")).status_code == 200
+        resp = await c.post(f"/api/expense-reports/{rid}/submit")
+    _assert_coded(
+        resp,
+        422,
+        "expense_report_not_draft",
+        "Cannot submit a report in 'submitted' state",
+        status="submitted",
+    )
 
 
 async def test_policy_money_exact_numeric(realdb):
@@ -462,7 +527,13 @@ async def test_cannot_attach_to_approved_report(realdb):
             await c.post("/api/expenses", json={"expense_date": "2026-06-02", "amount": "50000.00"})
         ).json()["id"]
         resp = await c.post(f"/api/expense-reports/{rid}/expenses", json={"expense_ids": [new_eid]})
-        assert resp.status_code == 409, resp.text
+        _assert_coded(
+            resp,
+            409,
+            "expense_report_not_draft",
+            "Cannot modify a report in 'approved' state; it has left draft.",
+            status="approved",
+        )
         # Total unchanged — the $50k line never landed.
         report = (await c.get(f"/api/expense-reports/{rid}")).json()
     assert report["status"] == "approved"
@@ -496,7 +567,13 @@ async def test_cannot_edit_amount_of_expense_on_approved_report(realdb):
     rid, eid = await _submit_and_approve(realdb)
     async with realdb.client(key="a", role="ap_clerk") as c:
         resp = await c.patch(f"/api/expenses/{eid}", json={"amount": "1.00"})
-        assert resp.status_code == 409, resp.text
+        _assert_coded(
+            resp,
+            409,
+            "expense_report_locked",
+            "Cannot modify a report in 'approved' state; its total is locked.",
+            status="approved",
+        )
         report = (await c.get(f"/api/expense-reports/{rid}")).json()
     assert report["total_amount"] == 100.0
 
@@ -505,7 +582,13 @@ async def test_cannot_delete_expense_on_approved_report(realdb):
     rid, eid = await _submit_and_approve(realdb)
     async with realdb.client(key="a", role="ap_clerk") as c:
         resp = await c.delete(f"/api/expenses/{eid}")
-        assert resp.status_code == 409, resp.text
+        _assert_coded(
+            resp,
+            409,
+            "expense_report_locked",
+            "Cannot modify a report in 'approved' state; its total is locked.",
+            status="approved",
+        )
         report = (await c.get(f"/api/expense-reports/{rid}")).json()
     assert report["total_amount"] == 100.0
 
@@ -520,7 +603,13 @@ async def test_cannot_detach_expense_from_submitted_report(realdb):
             f"/api/expense-reports/{rid}/expenses",
             json={"expense_ids": [eid], "detach": True},
         )
-        assert resp.status_code == 409, resp.text
+        _assert_coded(
+            resp,
+            409,
+            "expense_report_not_draft",
+            "Cannot modify a report in 'submitted' state; it has left draft.",
+            status="submitted",
+        )
 
 
 async def test_cannot_update_submitted_report_fields(realdb):
@@ -528,7 +617,13 @@ async def test_cannot_update_submitted_report_fields(realdb):
         rid, _ = await _make_report_with_expense(c, amount="100.00", receipt=True)
         assert (await c.post(f"/api/expense-reports/{rid}/submit")).status_code == 200
         resp = await c.patch(f"/api/expense-reports/{rid}", json={"currency": "EUR"})
-        assert resp.status_code == 409, resp.text
+        _assert_coded(
+            resp,
+            409,
+            "expense_report_locked",
+            "Cannot modify a report in 'submitted' state; its total is locked.",
+            status="submitted",
+        )
 
 
 async def test_rejected_report_expenses_can_be_re_reported(realdb):
@@ -576,7 +671,13 @@ async def test_patch_cannot_attach_an_expense_to_a_terminal_report(realdb):
             await c.post("/api/expenses", json={"expense_date": "2026-06-02", "amount": "25.00"})
         ).json()["id"]
         refused = await c.patch(f"/api/expenses/{loose}", json={"report_id": rid})
-        assert refused.status_code == 409, refused.text
+        _assert_coded(
+            refused,
+            409,
+            "expense_report_not_draft",
+            "Cannot modify a report in 'rejected' state; it has left draft.",
+            status="rejected",
+        )
 
         # The rejected report is untouched, and the loose expense is still free.
         assert (await c.get(f"/api/expense-reports/{rid}")).json()["total_amount"] == 100.0

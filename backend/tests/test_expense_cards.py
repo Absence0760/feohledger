@@ -216,9 +216,10 @@ async def test_sync_virtual_cards_creates_and_dedupes(realdb):
 
 
 async def _make_txn(realdb, *, merchant="Uber", amount="42.50", txn_date="2026-06-01"):
+    external_id = f"t-{uuid.uuid4().hex[:8]}"
     csv_bytes = _csv(
         _HEADER,
-        f"t-{uuid.uuid4().hex[:8]},{txn_date},,{merchant},{amount},USD,1234,c",
+        f"{external_id},{txn_date},,{merchant},{amount},USD,1234,c",
     )
     async with realdb.client(key="a", role="ap_manager") as c:
         await c.post(
@@ -226,7 +227,10 @@ async def _make_txn(realdb, *, merchant="Uber", amount="42.50", txn_date="2026-0
             files={"file": ("cards.csv", csv_bytes, "text/csv")},
         )
         rows = (await c.get("/api/corporate-card-transactions")).json()["items"]
-    return rows[0]["id"]
+    # The row this call imported, not whichever sorts first: two identical
+    # card lines in one test would otherwise both resolve to the same id.
+    (row,) = [r for r in rows if r["external_txn_id"] == external_id]
+    return row["id"]
 
 
 async def _make_expense(realdb, *, amount="42.50", expense_date="2026-06-01", merchant="Uber"):
@@ -318,7 +322,11 @@ async def test_match_refuses_a_cross_currency_pair(realdb):
             json={"expense_id": eur_expense},
         )
     assert resp.status_code == 409, resp.text
-    assert "Currency mismatch" in resp.json()["detail"]
+    assert resp.json()["detail"] == {
+        "code": "card_txn_currency_mismatch",
+        "message": "Currency mismatch: transaction is USD, expense is EUR.",
+        "params": {"transaction_currency": "USD", "expense_currency": "EUR"},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +439,39 @@ async def test_match_already_matched_rejected(realdb):
         dup = await c.post(
             f"/api/corporate-card-transactions/{txn_id}/match", json={"expense_id": e2}
         )
-    assert dup.status_code == 409
+        # Every refusal on this router is coded, with the English it answered
+        # with as a plain string kept as `message` (decisions §361).
+        assert dup.status_code == 409
+        assert dup.json()["detail"] == {
+            "code": "card_txn_already_matched",
+            "message": "Transaction is already matched",
+            "params": {},
+        }
+        again = await c.post(f"/api/corporate-card-transactions/{txn_id}/create-expense")
+        assert again.status_code == 409
+        assert again.json()["detail"]["code"] == "card_txn_already_matched"
+
+
+async def test_match_refuses_an_expense_already_matched_elsewhere(realdb):
+    """The expense side: an expense reconciled to one card line cannot be
+    matched to a second."""
+    first = await _make_txn(realdb)
+    second = await _make_txn(realdb)
+    expense_id = await _make_expense(realdb)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        ok = await c.post(
+            f"/api/corporate-card-transactions/{first}/match", json={"expense_id": expense_id}
+        )
+        assert ok.status_code == 200, ok.text
+        dup = await c.post(
+            f"/api/corporate-card-transactions/{second}/match", json={"expense_id": expense_id}
+        )
+    assert dup.status_code == 409, dup.text
+    assert dup.json()["detail"] == {
+        "code": "card_txn_expense_already_matched",
+        "message": "Expense is already matched",
+        "params": {},
+    }
 
 
 async def test_unmatch_on_unmatched_rejected(realdb):
@@ -441,6 +481,11 @@ async def test_unmatch_on_unmatched_rejected(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(f"/api/corporate-card-transactions/{txn_id}/unmatch")
     assert resp.status_code == 409
+    assert resp.json()["detail"] == {
+        "code": "card_txn_not_matched",
+        "message": "Transaction is not matched",
+        "params": {},
+    }
 
     async with mk() as s:
         actions = (
@@ -503,7 +548,11 @@ async def test_ignore_refuses_a_matched_transaction(realdb):
 
         ignored = await c.post(f"/api/corporate-card-transactions/{txn_id}/ignore")
         assert ignored.status_code == 409, ignored.text
-        assert "unmatch" in ignored.json()["detail"].lower()
+        assert ignored.json()["detail"] == {
+            "code": "card_txn_matched_not_ignorable",
+            "message": "Transaction is matched — unmatch it before ignoring.",
+            "params": {},
+        }
 
         # Still matched, and still reversible.
         unmatched = await c.post(f"/api/corporate-card-transactions/{txn_id}/unmatch")
@@ -553,6 +602,41 @@ async def test_import_csv_still_rejects_an_unparseable_amount(realdb):
     body = resp.json()
     assert body["imported"] == 0
     assert body["errors"]
+
+
+async def test_import_csv_reports_each_refused_currency_row_with_code_and_params(realdb):
+    """A blank currency is refused per row, never stored as USD, and the
+    response carries each refused row's `{code, params}` beside its English
+    message so the Cards tab can state it in the reader's language (§377)."""
+    csv_bytes = _csv(
+        _HEADER,
+        "ccy-ok,2026-06-05,,Pret,12.40,gbp,1234,c",
+        "ccy-blank,2026-06-05,,Pret,8.00,,1234,c",
+        "ccy-bad,2026-06-05,,Pret,9.00,EURO,1234,c",
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/corporate-card-transactions/import-csv",
+            files={"file": ("cards.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert (body["imported"], body["skipped"]) == (1, 2)
+    assert [{k: e[k] for k in ("row", "code", "params")} for e in body["errors"]] == [
+        {"row": 3, "code": "csv_currency_required", "params": {}},
+        {"row": 4, "code": "csv_currency_invalid", "params": {"value": "EURO"}},
+    ]
+    assert all(e["message"] for e in body["errors"])
+
+    async with realdb.sessionmaker("a")() as s:
+        rows = (
+            await s.execute(
+                select(
+                    CorporateCardTransaction.external_txn_id, CorporateCardTransaction.currency
+                ).where(CorporateCardTransaction.external_txn_id.like("ccy-%"))
+            )
+        ).all()
+    assert [tuple(r) for r in rows] == [("ccy-ok", "GBP")]
 
 
 # ---------------------------------------------------------------------------
@@ -743,7 +827,13 @@ async def test_deleting_a_reconciled_expense_is_refused_not_a_500(realdb):
 
         refused = await c.delete(f"/api/expenses/{expense_id}")
         assert refused.status_code == 409, refused.text
-        assert txn_id in refused.json()["detail"]
+        assert refused.json()["detail"] == {
+            "code": "expense_card_reconciled",
+            "message": (
+                f"Expense is reconciled to card transaction {txn_id}; unmatch it before deleting."
+            ),
+            "params": {"card_transaction_id": txn_id},
+        }
 
     # Nothing was destroyed, and both legs of the link still hold.
     async with mk() as s:

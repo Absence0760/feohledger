@@ -72,7 +72,8 @@ export interface UploadStatementFields {
 	account_identifier: string;
 	period_start: string;
 	period_end: string;
-	currency?: string;
+	/** Required: the upload refuses a blank currency, never assumes USD (decisions §377). */
+	currency: string;
 }
 
 /**

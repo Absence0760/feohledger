@@ -15,6 +15,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.currency import OptionalCurrencyCode
 from app.schemas.money import MoneyAmount, OptionalExactMoneyInput, OptionalMoneyAmount
 from app.schemas.percent import OptionalPercentNumber, PercentNumber
 
@@ -92,7 +93,7 @@ class DiscountOfferCreate(BaseModel):
     tiers: list[DiscountTier] = Field(..., min_length=1)
     # Digits match `discount_offers.base_amount` Numeric(15, 2).
     base_amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    currency: OptionalCurrencyCode = None
     valid_from: date | None = None
     valid_until: date | None = None
     notes: str | None = Field(default=None, max_length=500)

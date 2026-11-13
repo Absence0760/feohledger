@@ -90,7 +90,28 @@ def _candidate_query(entity_id: uuid.UUID | None) -> Select:
     The ordering makes the pick deterministic and prefers the caller's own
     subsidiary over an unstamped row when both could match.
     """
-    query = select(Vendor).where(Vendor.status.in_(_MATCHABLE_STATUSES))
+    return scope_vendor_candidates(
+        select(Vendor).where(Vendor.status.in_(_MATCHABLE_STATUSES)), entity_id
+    )
+
+
+def scope_vendor_candidates(query: Select, entity_id: uuid.UUID | None) -> Select:
+    """Confine a vendor lookup to ``entity_id`` ∪ unstamped rows, own rows first.
+
+    The one statement of the entity rule :func:`_candidate_query` documents, for
+    every lookup that resolves a supplier *for* a row in one subsidiary — the
+    invoice matcher here, and the CSV importers (``services/csv_import``), which
+    resolve a row's vendor by code or name and dedup a vendor file the same way.
+    ``query`` keeps its own filters (status, code, name); this adds the scope and
+    the order that makes ``.limit(1)`` deterministic, preferring the entity's own
+    row over an unstamped one.
+
+    ``entity_id is None`` skips the filter (the whole tenant is in scope) but not
+    the order, so a ``.limit(1)`` lookup then prefers *any* stamped row over an
+    unstamped one, oldest first. No HTTP caller reaches that case — both CSV
+    endpoints resolve a write entity, and the matcher's ``None`` comes from an
+    unstamped invoice, where the pick among equal fuzzy scores is all it decides.
+    """
     query = apply_entity_scope(query, Vendor, entity_id, include_shared=True)
     return query.order_by(Vendor.entity_id.is_(None), Vendor.created_at, Vendor.id)
 

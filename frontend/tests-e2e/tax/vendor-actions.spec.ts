@@ -27,7 +27,7 @@ async function importCsvInvoice(
 	amount: string
 ) {
 	const headers = await authedTenantHeaders(page);
-	const csv = `invoice_number,vendor_name,amount,status\n${invoiceNumber},${vendorName},${amount},done`;
+	const csv = `invoice_number,vendor_name,amount,currency,status\n${invoiceNumber},${vendorName},${amount},USD,done`;
 	const res = await page.request.post(`${API_BASE}/api/invoices/import-csv`, {
 		headers,
 		multipart: { file: { name: 'invoices.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) } }

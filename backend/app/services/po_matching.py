@@ -304,7 +304,9 @@ async def match_invoice_to_po(
     # the lookup at a single deterministic row — newest first — rather than
     # `scalar_one_or_none()`, which raises MultipleResultsFound on >1 PO and
     # takes down the whole matcher / refresh_warnings pipeline.
-    po_query = po_query.order_by(PurchaseOrder.created_at.desc()).limit(1)
+    # `id` breaks a `created_at` tie (transaction time: rows a sync wrote in one
+    # transaction share it), so the pick never rests on physical row order.
+    po_query = po_query.order_by(PurchaseOrder.created_at.desc(), PurchaseOrder.id.desc()).limit(1)
 
     po_result = await db.execute(po_query)
     po = po_result.scalar_one_or_none()
@@ -425,7 +427,7 @@ async def match_invoice_to_po(
             func.lower(func.coalesce(GoodsReceipt.status, "")).notin_(CANCELLED_GR_STATUSES),
         )
         .options(selectinload(GoodsReceipt.line_items))
-        .order_by(GoodsReceipt.created_at.desc())
+        .order_by(GoodsReceipt.created_at.desc(), GoodsReceipt.id.desc())
     )
     # Same strict entity scope as the PO lookup — a receipt booked under a
     # different subsidiary must never satisfy this invoice's 3-way leg.
@@ -527,7 +529,7 @@ async def match_invoice_to_po(
         q = (
             select(QualityInspection)
             .where(*conditions)
-            .order_by(QualityInspection.created_at.desc())
+            .order_by(QualityInspection.created_at.desc(), QualityInspection.id.desc())
             .limit(1)
         )
         return (await db.execute(q)).scalar_one_or_none()

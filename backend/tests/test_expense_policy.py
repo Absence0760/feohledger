@@ -14,10 +14,17 @@ import uuid
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.expense_policy import (
+    BLOCKING_CODES,
+    COMPARISON_RESOLVED,
     COMPARISON_UNRESOLVED,
+    MILEAGE_OVER,
+    MILEAGE_UNDER,
     VIOLATION_CATEGORY_LIMIT,
     VIOLATION_MILEAGE_MISMATCH,
+    VIOLATION_PARAMS,
     VIOLATION_PER_DIEM_EXCEEDED,
     VIOLATION_PREAPPROVAL_REQUIRED,
     VIOLATION_RECEIPT_REQUIRED,
@@ -556,3 +563,136 @@ def test_evaluate_report_forwards_the_default_threshold_currency():
     assert [x["code"] for x in agg] == [VIOLATION_CATEGORY_LIMIT]
     assert agg[0]["currency"] == "EUR"
     assert "comparison" not in agg[0]
+
+
+# --- coded params: what a client states each violation from (decisions §378) --
+
+
+@pytest.mark.parametrize(
+    ("code", "policy_kw", "expense_kw", "limit", "extra"),
+    [
+        (
+            VIOLATION_CATEGORY_LIMIT,
+            {"category": "travel", "category_limit": Decimal("50.00")},
+            {"amount": Decimal("75.00")},
+            "50.00",
+            {"category": "travel"},
+        ),
+        (
+            VIOLATION_RECEIPT_REQUIRED,
+            {"requires_receipt_above": Decimal("25.00")},
+            {"amount": Decimal("75.00")},
+            "25.00",
+            {},
+        ),
+        (
+            VIOLATION_PREAPPROVAL_REQUIRED,
+            {"requires_preapproval_above": Decimal("50.00")},
+            {"amount": Decimal("75.00")},
+            "50.00",
+            {},
+        ),
+        (
+            VIOLATION_PER_DIEM_EXCEEDED,
+            {"per_diem_amount": Decimal("60.00")},
+            {"amount": Decimal("75.00")},
+            "60.00",
+            {},
+        ),
+        (
+            VIOLATION_MILEAGE_MISMATCH,
+            {"mileage_rate": Decimal("0.6700")},
+            {"amount": Decimal("75.00"), "mileage_miles": Decimal("10.00")},
+            # 10.00 mi x 0.6700, half-up to the claim's 2 dp.
+            "6.70",
+            {"miles": "10.00", "rate": "0.6700", "direction": MILEAGE_OVER},
+        ),
+    ],
+)
+def test_each_violation_carries_its_coded_params(code, policy_kw, expense_kw, limit, extra):
+    """Every code ships exactly the params its catalogue entry names, money as
+    exact decimal strings beside the ISO code — never a float — and keeps its
+    English ``message`` for a client that predates the code."""
+    pol = _policy(threshold_currency="USD", **policy_kw)
+    v = evaluate_expense(_expense(**expense_kw), [pol], default_threshold_currency="USD")
+    assert [x["code"] for x in v] == [code]
+    params = v[0]["params"]
+    assert set(params) == set(VIOLATION_PARAMS[code])
+    assert params == {
+        "amount": "75.00",
+        "amount_currency": "USD",
+        "limit": limit,
+        "currency": "USD",
+        "comparison": COMPARISON_RESOLVED,
+        **extra,
+    }
+    for key in ("amount", "limit"):
+        assert isinstance(params[key], str)
+    # The English sentence and the flat keys stay for old clients and badges.
+    assert isinstance(v[0]["message"], str) and v[0]["message"]
+    assert v[0]["limit"] == params["limit"]
+    assert v[0]["actual"] == params["amount"]
+    assert v[0]["currency"] == params["currency"]
+
+
+def test_the_catalogue_names_every_violation_code_and_both_blocking_ones():
+    assert set(VIOLATION_PARAMS) == {
+        VIOLATION_CATEGORY_LIMIT,
+        VIOLATION_RECEIPT_REQUIRED,
+        VIOLATION_PREAPPROVAL_REQUIRED,
+        VIOLATION_PER_DIEM_EXCEEDED,
+        VIOLATION_MILEAGE_MISMATCH,
+    }
+    assert BLOCKING_CODES <= set(VIOLATION_PARAMS)
+
+
+def test_an_unresolved_violation_states_the_face_amount_in_its_own_currency():
+    """Fail closed: no conversion existed, so ``amount`` is the expense's face
+    figure and ``amount_currency`` its own currency, not the threshold's."""
+    pol = _policy(
+        threshold_currency="USD",
+        category_limit=Decimal("10.00"),
+        requires_receipt_above=Decimal("5000.00"),
+    )
+    v = evaluate_expense(
+        _expense(amount=Decimal("10000.00"), currency="JPY", category=None),
+        [pol],
+        default_threshold_currency="USD",
+    )
+    assert [x["code"] for x in v] == [VIOLATION_CATEGORY_LIMIT, VIOLATION_RECEIPT_REQUIRED]
+    for violation in v:
+        params = violation["params"]
+        assert params["comparison"] == COMPARISON_UNRESOLVED
+        assert params["amount"] == "10000.00"
+        assert params["amount_currency"] == "JPY"
+        assert params["currency"] == "USD"
+    # An uncategorised expense names no category; the client says "category".
+    assert v[0]["params"]["category"] is None
+
+
+def test_mileage_direction_is_coded_both_ways_and_absent_when_unresolved():
+    pol = _policy(threshold_currency="USD", mileage_rate=Decimal("0.6700"))
+    under = evaluate_expense(
+        _expense(amount=Decimal("8.04"), mileage_miles=Decimal("120.00")),
+        [pol],
+        default_threshold_currency="USD",
+    )
+    assert under[0]["params"]["direction"] == MILEAGE_UNDER
+    assert under[0]["params"]["limit"] == "80.40"
+    unresolved = evaluate_expense(
+        _expense(amount=Decimal("500.00"), currency="EUR", mileage_miles=Decimal("10")),
+        [pol],
+        default_threshold_currency="USD",
+    )
+    assert unresolved[0]["params"]["direction"] is None
+    assert unresolved[0]["params"]["comparison"] == COMPARISON_UNRESOLVED
+    assert unresolved[0]["params"]["amount_currency"] == "EUR"
+
+
+def test_report_aggregation_keeps_each_violations_params():
+    pol = _policy(requires_receipt_above=Decimal("25.00"))
+    e1 = _expense(amount=Decimal("50.00"))
+    agg = evaluate_report(SimpleNamespace(id=uuid.uuid4()), [e1], [pol])
+    assert agg[0]["expense_id"] == str(e1.id)
+    assert agg[0]["params"]["limit"] == "25.00"
+    assert blocking_violations(agg)[0]["params"] == agg[0]["params"]

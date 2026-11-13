@@ -180,6 +180,7 @@ CASES = [
     # reject, and a custom role from which `invoice.approve` was stripped must
     # not be able to reject through the back door. Same permission as approve.
     ("/api/invoices/{invoice_id}/reject", "POST", _INVOICE_APPROVE),
+    ("/api/invoices/{invoice_id}/recall-approval", "POST", _INVOICE_APPROVE),
     # --- payment.execute: the routes that actually move money, or that decide
     # an already-moved payment's fate in AP's favour. These are the reason the
     # SoD layer exists at all, so they are pinned individually rather than left
@@ -275,6 +276,8 @@ CASES = [
     # the money moving — so it gates on `payment.execute`, not on recording.
     ("/api/payments/runs/{run_id}/nacha", "GET", _EXECUTE),
     ("/api/payments/runs/{run_id}/nacha/void", "POST", _EXECUTE),
+    # Verify before upload (decisions §362): the step before the money moves.
+    ("/api/payments/runs/{run_id}/nacha/verify", "POST", _EXECUTE),
     # --- vendor.manage: create / edit / verify / reject / delete a vendor, and
     # the bulk-import paths that do the same thing at volume. ---
     ("/api/vendors", "POST", _VENDOR_MANAGE),
@@ -290,6 +293,9 @@ CASES = [
     # or the bulk endpoint becomes the way around it.
     ("/api/vendors/bulk/status", "POST", _VENDOR_MANAGE),
     ("/api/enrichment/vendors/consolidation/merge", "POST", _VENDOR_MANAGE),
+    # Clearing a vendor's ERP link in one company (decisions §375) — an edit to
+    # the vendor master like every other one here.
+    ("/api/vendors/{vendor_id}/erp-links/unlink", "POST", _VENDOR_MANAGE),
     # --- vendor.block: sticky payment block/unblock. ---
     ("/api/vendors/{vendor_id}/block", "POST", _VENDOR_BLOCK),
     # `cancel-cards` retries the card revocation a reject / deactivate (vendor

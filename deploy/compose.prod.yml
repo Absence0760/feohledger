@@ -177,16 +177,14 @@ services:
       # recreated. deploy/lib.sh::feoh_caddy_reload checks for exactly that and
       # recreates instead of reloading a stale copy.
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # Per-VM tenant host list (gitignored; deploy.sh seeds it from the
-      # committed .example). Add a block per tenant subdomain + reload.
+      # Per-VM vanity host list (gitignored; deploy.sh seeds it from the
+      # committed .example). One `import vanity` block per customer domain.
+      # The SPA itself is not here: since docs/decisions.md §364 the VM serves
+      # only the API, and the SPA is S3 + CloudFront (§278). Nothing mounts
+      # ../frontend/build, which a rebuild deletes and recreates under a live
+      # bind mount (#579, §277); deploy/lib.sh refuses to deploy a commit whose
+      # compose file does.
       - ./tenants.caddy:/etc/caddy/tenants.caddy:ro
-      # The static SPA: deploy/www/ (gitignored), whose `current` symlink
-      # deploy.sh swaps to each newly published release; the Caddyfile serves
-      # /srv/current. NEVER mount ../frontend/build here: the build deletes and
-      # recreates that directory, a bind mount pins the old inode, and Caddy is
-      # left serving an orphaned empty directory — every page 404 and `exec`
-      # refused (#579, docs/decisions.md §277). www/ itself is never replaced.
-      - ./www:/srv:ro
       # Certificates + ACME account state — must persist across restarts or
       # Let's Encrypt rate limits will bite.
       - caddy_data:/data
@@ -221,44 +219,11 @@ services:
     volumes:
       - ../backend/certs/rds-global-bundle.pem:/certs/rds-global-bundle.pem:ro
 
-  # The one-shot production frontend build: deploy.sh runs it as
-  # `docker compose run --rm frontend-build`, and the `build` profile keeps
-  # `up` from ever starting it. It is a service rather than a `docker run` in
-  # deploy.sh so that its Node image sits where the `docker-compose` Dependabot
-  # entry reads it — a ref in a shell variable has no reader and rots
-  # (docs/decisions.md §203). The Node MAJOR moves only with CI's `setup-node`
-  # (Dependabot ignores node majors, and backend/tests/
-  # test_container_supply_chain.py fails when the two part): production must
-  # build on the runtime CI tests. No Node or pnpm is installed on the VM.
-  frontend-build:
-    image: node:24.22.2-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8
-    profiles: [build]
-    working_dir: /repo/frontend
-    volumes:
-      - ..:/repo
-      - pnpm-store:/pnpm-store
-    # deploy.sh passes PNPM_SPEC (read from frontend/package.json's
-    # `packageManager`), PUBLIC_API_URL and PUBLIC_SITE_URL with `run -e`; `$$`
-    # leaves the expansion to the container's shell.
-    environment:
-      npm_config_store_dir: /pnpm-store
-    command:
-      - sh
-      - -ec
-      - 'npm i -g "$$PNPM_SPEC" >/dev/null 2>&1 && pnpm install --frozen-lockfile && pnpm build'
-
 volumes:
   pgdata:
   redisdata:
   caddy_data:
   caddy_config:
-  # Caches the pnpm store across deploys so a rebuild does not re-download the
-  # world. Compose-managed (`feoh-prod_pnpm-store`), not the
-  # `feoh-prod-pnpm-store` deploy.sh's old `docker run -v` made: adopting that
-  # one by name draws a "not created by Docker Compose" warning on every deploy.
-  # A cache costs one cold build to replace; deploy/README.md says how to drop
-  # the old volume.
-  pnpm-store:
 
 networks:
   # Pinned so FEOH_TRUSTED_PROXY_CIDRS (api service above) can name the

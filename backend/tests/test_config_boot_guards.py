@@ -21,6 +21,8 @@ from app.config import Settings
 
 # A throwaway 32+ char key for the "good config" cases.
 _GOOD_KEY = "x" * 48
+# Its own key, distinct from the JWT key (decisions §383).
+_GOOD_FINGERPRINT_KEY = "f" * 48
 
 
 def test_deployed_env_refuses_default_secret_key():
@@ -178,6 +180,7 @@ _DEPLOYED = {
     "hcaptcha_secret": "hc",
     "hcaptcha_sitekey": "site-key",
     "secret_key": _GOOD_KEY,
+    "payee_fingerprint_key": _GOOD_FINGERPRINT_KEY,
     "subprocessor_notices_enabled": True,
 }
 
@@ -255,6 +258,43 @@ def test_local_dev_keeps_the_subprocessor_notice_sweep_off():
     assert Settings(environment="development").subprocessor_notices_enabled is False
 
 
+# ── Payee bank-fingerprint key (deployed-env boot guard, decisions §383) ──
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "",  # unset: no fingerprint, every void flags
+        "   ",
+        "f" * 31,  # too short
+        "dev-payee-fingerprint-key-not-a-secret",  # the committed dev value
+        _GOOD_KEY,  # the JWT key itself, which rotates every 90 days
+    ],
+)
+def test_deployed_env_refuses_a_missing_weak_or_shared_fingerprint_key(key):
+    with pytest.raises(ValidationError, match="FEOH_PAYEE_FINGERPRINT_KEY"):
+        Settings(**{**_DEPLOYED, "payee_fingerprint_key": key}, email_provider="ses")
+
+
+def test_deployed_env_accepts_its_own_fingerprint_key():
+    s = Settings(**_DEPLOYED, email_provider="ses")
+    assert s.payee_fingerprint_key == _GOOD_FINGERPRINT_KEY
+
+
+def test_the_dev_fingerprint_key_constant_matches_the_committed_env():
+    # The guard refuses the value .env.development commits; the two must agree
+    # or the guard refuses nothing.
+    from app.config import _DEV_PAYEE_FINGERPRINT_KEY
+
+    committed = (Path(__file__).resolve().parents[1] / ".env.development").read_text()
+    assert f"FEOH_PAYEE_FINGERPRINT_KEY={_DEV_PAYEE_FINGERPRINT_KEY}\n" in committed
+
+
+def test_local_dev_runs_without_a_fingerprint_key():
+    s = Settings(environment="development", payee_fingerprint_key="")
+    assert s.payee_fingerprint_key == ""
+
+
 # ── The day-one rehearsal's env must boot (it is production-shaped) ──────
 
 
@@ -266,9 +306,11 @@ def test_the_day_one_rehearsal_env_passes_every_deployed_boot_guard(monkeypatch)
     body = re.search(r'cat >"\$STATE_DIR/api\.env" <<EOF\n(.*?)\nEOF', stack.read_text(), re.S)
     assert body, "stack.sh no longer writes api.env with a heredoc"
     env: dict[str, str] = {}
-    for line in body.group(1).splitlines():
+    for n, line in enumerate(body.group(1).splitlines()):
         key, _, value = line.partition("=")
-        value = value.replace("$(openssl rand -hex 32)", "a" * 64)
+        # Each `openssl rand` is its own key, as in the real run: the payee
+        # fingerprint key is refused when it equals the JWT key.
+        value = value.replace("$(openssl rand -hex 32)", f"{n:02d}" * 32)
         env[key] = re.sub(r"\$\{[A-Z_]+\}", "1", value)
     assert env["FEOH_ENVIRONMENT"] == "production"
     for key in [k for k in os.environ if k.startswith("FEOH_")]:

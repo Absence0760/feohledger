@@ -42,6 +42,11 @@ SARIF_ACTIONS_BY_INPUT = {
     "zizmorcore/zizmor-action": ("advanced-security", True),
 }
 
+# A same-repository reusable-workflow call. `$/` is GitHub's self-repository
+# form, the one zizmor's `self-repository` audit asks for and ci.yml uses
+# (decisions §365); `./` is the older workspace-relative form, still valid.
+LOCAL_WORKFLOW_PREFIXES = ("$/.github/workflows/", "./.github/workflows/")
+
 TOP_LEVEL_EXCEPTIONS = {
     # One job, and gitleaks-action uploads its own SARIF. A job-level grant
     # would be the same token on the same job, and Scorecard does not
@@ -85,8 +90,9 @@ def _job_grant_problems(
         if not _grants_security_events(job.get("permissions")):
             continue
         called = job.get("uses", "")
-        if called.startswith("./.github/workflows/"):
-            target = called.removeprefix("./.github/workflows/")
+        prefix = next((p for p in LOCAL_WORKFLOW_PREFIXES if called.startswith(p)), None)
+        if prefix is not None:
+            target = called.removeprefix(prefix)
             if target in seen:
                 continue
             problems.extend(_job_grant_problems(target, root, seen | {workflow}))
@@ -171,3 +177,45 @@ def test_zizmor_action_uploads_sarif_only_with_advanced_security(tmp_path, with_
         else ["scan.yml: job 'zizmor' grants security-events: write but uploads no SARIF"]
     )
     assert _job_grant_problems("scan.yml", tmp_path) == expected
+
+
+@pytest.mark.parametrize("prefix", LOCAL_WORKFLOW_PREFIXES)
+def test_guard_follows_a_local_reusable_workflow_call(tmp_path, prefix):
+    # Both same-repository call forms are followed into the called file, so the
+    # caller's grant is judged by what the callee's jobs do, not reported as unused.
+    (tmp_path / "called.yml").write_text(
+        yaml.safe_dump(
+            {
+                "permissions": {"contents": "read"},
+                "jobs": {
+                    "scan": {
+                        "permissions": {"security-events": "write"},
+                        "runs-on": "ubuntu-latest",
+                        "steps": [{"run": "true"}],
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "caller.yml").write_text(
+        yaml.safe_dump(
+            {
+                "permissions": {"contents": "read"},
+                "jobs": {
+                    "security": {
+                        "permissions": {"security-events": "write"},
+                        "uses": prefix + "called.yml",
+                    }
+                },
+            }
+        )
+    )
+    assert _job_grant_problems("caller.yml", tmp_path) == [
+        "called.yml: job 'scan' grants security-events: write but uploads no SARIF"
+    ]
+
+
+def test_ci_calls_security_yml_with_the_self_repository_form():
+    # The call this guard exists to follow. If it moved off both local forms the
+    # guard would silently stop following it and report the caller instead.
+    assert _load("ci.yml")["jobs"]["security"]["uses"] == "$/.github/workflows/security.yml"

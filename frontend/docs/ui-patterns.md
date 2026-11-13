@@ -723,6 +723,24 @@ centred dialog with backdrop-click + Esc to close:
   feature-specific — the shell, backdrop, and close behaviour are not.
   If you find yourself writing `position: fixed; inset: 0` or
   `role="dialog"` in a component, stop and use `<Modal>`.
+- **The page behind an open dialog is `inert`** (decisions §384). While any
+  modal dialog is open, everything outside the topmost one carries `inert`:
+  no focus, no pointer or touch, nothing in the accessibility tree. A dialog
+  opened over another (the recall dialog over the invoice dialog) makes the
+  first inert as well, and closing it gives back exactly the state before.
+  `actions/modalInert.ts` does this off `focusTrap`'s open-modal registry, so a
+  dialog gets it by being a `role="dialog"` with `aria-modal="true"` and
+  `use:focusTrap` — which `<Modal>` already is; a dialog needs nothing more.
+  It never removes an `inert` it did not set (the sidebar overlay's), and it
+  never makes the toast region or SvelteKit's route announcer inert, since an
+  inert live region announces nothing — a new app-level live region outside the
+  routed page joins `INERT_EXEMPT_SELECTOR`. **Don't portal a dialog's popup to
+  `<body>`**: nothing does today, and a node added there after the dialog
+  opened is left usable, but keep pickers, menus and listboxes inside the
+  dialog's own subtree. Guards: `src/lib/actions/modalInert.test.ts`,
+  `tests-e2e/a11y/modal-inert.spec.ts`, and axe's `target-size` in
+  `tests-e2e/a11y/recall-import-verify.spec.ts` (the page's sort buttons
+  behind two stacked dialogs at 320px).
 
 ### Unsaved changes (`guardUnsavedChanges`)
 
@@ -828,8 +846,13 @@ Where each verdict lives (backend gate → field):
 | Payment runs list | `actions.sync_erp` | `payment_controls.run_sync_erp_refusal` |
 | Run dialog | `actions.{approve,execute,cancel,retry_failed}` | `payment_controls.run_{approve,execute,cancel,retry_failed}_refusal` |
 | Run dialog (paying outside) | `actions.{record_outside,nacha_export,nacha_regenerate,nacha_void}` | `payment_controls.run_record_outside_refusal`, `.run_nacha_export_refusal`, `.run_nacha_void_refusal` |
+| Run dialog (Verify before upload) | `actions.nacha_verify` | `payment_controls.run_nacha_verify_refusal`. `nacha_verify_not_exported` / `nacha_nothing_to_verify` hide the control (no file to check); any other refusal disables it beside its reason (`run-nacha-verify-refusal`), as Download, Regenerate and Bank rejected the file do (decisions §362) |
+| Run dialog (whether the bank-file panel shows at all) | `bank_file_applies` | `payment_controls.run_bank_file_applies`: every run of a record-only tenant, and a processor tenant's run still holding an exported file. Read instead of the tenant's execution mode, so a run exported before a switch to processor mode keeps Verify and states why Regenerate and Bank rejected the file are refused (decisions §382) |
 | Invoice modal | `GET /api/invoices/{id}/review-actions` → `approve`, `reject` | `review.review_refusals` (the approve gates, on a scratch chain) |
+| Invoice modal (Resubmit for Review, file toolbar) | same read → `resubmit`, `manage_file` | `api/workflow.resubmit_refusal`, `api/invoice_entry.manage_file_refusal`. `invoice_not_resubmittable` hides Resubmit; `invoice_document_locked` replaces the toolbar with its sentence (decisions §363) |
+| Invoice modal (amount / vendor / tax rate inputs, line-item editing) | same read → `edit_financials` | `api/invoice_entry.edit_financials_refusal`. Anything but `null` (including no answer yet) disables the money inputs and line editing and keeps them out of the save payload; `invoice_financially_locked` also states its sentence above the form (decisions §370) |
 | Invoice modal (Submit / Send to ERP, Retry ERP) | same read → `complete`, `retry_erp` (and `send_to_erp`) | `api/workflow.workflow_action_refusals`: `complete_status_refusal`, `complete_entry_refusal`, `erp_send.erp_send_refusal` (plan, status, ERP export gate). `invoice_not_completable` / `invoice_not_erp_retryable` hide the control (about the status); the required-fields check stays a form check |
+| Invoice modal (Recall Approval) | same read → `recall_approval` | `services/review.recall_refusal`. `invoice_not_recallable` hides the control (about the status); any other refusal (a bill the ERP may hold, a live payment or card) disables it with its sentence (`recall-refusal`). The reason dialog (`modals/RecallApprovalModal.svelte`) states a refusal the door raises in between (decisions §374) |
 | Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
 | Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
@@ -1158,6 +1181,9 @@ inherit it for free. Reuse these; don't re-solve them per page.
   synchronously is then lost to `<body>` when it unmounts. If the trigger is
   gone or now disabled, focus lands on `<main id="main-content">` instead; if
   something else already took focus (a second dialog), it is left alone.
+  The page outside the topmost dialog is `inert` while it is open (§ Modals,
+  decisions §384), and that is taken off before the restore runs, so the
+  trigger can take focus again.
   Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` uses it, and so do the four pre-existing hand-rolled
   feature shells (`InvoiceModal`, `RunDetailModal`, `BulkRecodeGLModal`,
   portal discount-accept) so every dialog gets identical focus management.

@@ -79,6 +79,10 @@ from app.schemas.vendor import (
     VendorChangeRequestResponse,
     VendorChangeReviewRequest,
     VendorCreate,
+    VendorErpLinkItem,
+    VendorErpLinksResponse,
+    VendorErpUnlinkRequest,
+    VendorErpUnlinkResponse,
     VendorResponse,
     VendorStatusCounts,
     VendorUpdate,
@@ -100,6 +104,11 @@ from app.services.sanctions_categories import (
     has_adverse_media,
 )
 from app.services.vendor_card_revocation import revoke_vendor_cards
+from app.services.vendor_erp_unlink import (
+    ErpUnlinkError,
+    unlink_vendor_erp_link,
+    vendor_erp_links,
+)
 from app.services.vendor_screening import screen_best_effort, screen_vendor_record
 from app.services.vendor_sync import sync_vendors_from_erp
 from app.services.vendor_tax_id import rekey_tax_id
@@ -371,20 +380,47 @@ async def _flag_payable_invoices_for_bank_change(
 
 
 async def flag_invoice_for_bank_change(
-    db: AsyncSession, *, invoice: Invoice, actor_id: uuid.UUID | None
+    db: AsyncSession,
+    *,
+    invoice: Invoice,
+    actor_id: uuid.UUID | None,
+    code: str = "vendor_bank_changed",
 ) -> None:
-    """Open the bank-change ``fraud_flag`` on ONE invoice, unless an open or
-    escalated one is already there. ``actor_id`` is the bank change's approver
-    (``raised_by_user_id`` — see `_flag_payable_invoices_for_bank_change`)."""
+    """Open a payee-change ``fraud_flag`` on ONE invoice, unless an open or
+    escalated one with the same finding AND the same raiser is already there.
+
+    ``code`` is the finding: ``vendor_bank_changed`` for a bank-detail change,
+    or one of the re-payment findings of ``services/payee_stamp`` (decisions
+    §383). ``actor_id`` is the person whose act changed the payee — the bank
+    change's approver, or the merge's actor (``raised_by_user_id``, see
+    `_flag_payable_invoices_for_bank_change`).
+
+    De-duplicated on the finding and the raiser, not on any fraud flag: a person
+    clearing an unrelated fraud flag (a Positive Pay return, a detector's
+    finding, raised by nobody) must not thereby clear a payee change they never
+    saw, which is what the type-wide count allowed. And a second approver's bank
+    change (or a second steward's merge) gets its own row: folded into the
+    first person's open flag, it could be cleared by the second person, who is
+    not that row's raiser (decisions §383). A row raised before §358 has no
+    code and is matched on its English.
+    """
     from app.models.exception import Exception as APException
     from app.services.exception_service import create_exception
+    from app.services.invoice_warning_catalog import exception_finding
 
+    finding = exception_finding(code)
     existing = (
         await db.execute(
             select(func.count()).where(
                 APException.invoice_id == invoice.id,
                 APException.exception_type == "fraud_flag",
                 APException.status.in_(["open", "escalated"]),
+                APException.raised_by_user_id.is_not_distinct_from(actor_id),
+                or_(
+                    APException.description_code == finding["code"],
+                    (APException.description_code.is_(None))
+                    & (APException.description == finding["message"]),
+                ),
             )
         )
     ).scalar() or 0
@@ -394,7 +430,9 @@ async def flag_invoice_for_bank_change(
         db,
         exception_type="fraud_flag",
         severity="error",
-        description="Vendor bank details changed; verify before payment.",
+        description=finding["message"],
+        description_code=finding["code"],
+        description_params=finding["params"],
         status="open",
         organization_id=invoice.organization_id,
         invoice=invoice,
@@ -410,26 +448,17 @@ async def reflag_voided_invoice_for_bank_change(
     made, the original payment went to the OLD account and the re-payment
     would go to the new one — with no flag, because the change skipped the
     invoice while it was ``paid`` / out of reach (`_MONEY_MOVED_STATUSES`).
-    Raise the same flag the change would have raised, stamped with that
-    change's approver (decisions §286)."""
-    if invoice.vendor_id is None:
-        return
-    change = (
-        await db.execute(
-            select(VendorChangeRequest)
-            .where(
-                VendorChangeRequest.vendor_id == invoice.vendor_id,
-                VendorChangeRequest.change_type == "bank_details",
-                VendorChangeRequest.status == "approved",
-                VendorChangeRequest.reviewed_at > paid_since,
-            )
-            .order_by(VendorChangeRequest.reviewed_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if change is None:
-        return
-    await flag_invoice_for_bank_change(db, invoice=invoice, actor_id=change.reviewed_by_user_id)
+    Raise the same flag the change would have raised, once per approver of a
+    change since, each stamped as its raiser (decisions §286, §383).
+
+    Asked only for a payment with no payee stamp (paid before migration 0128):
+    a stamped one carries the fingerprint of the details it paid, which
+    `services/payee_stamp.payee_changes_since` compares directly (§383)."""
+    from app.services.payee_stamp import bank_change_approvers_since
+
+    approvers = await bank_change_approvers_since(db, invoice.vendor_id, since=paid_since)
+    for approver in dict.fromkeys(approvers):
+        await flag_invoice_for_bank_change(db, invoice=invoice, actor_id=approver)
 
 
 # `sort=` allowlist for `GET /vendors` — see `api/sorting.py`. `.id` is
@@ -1799,6 +1828,83 @@ async def cancel_vendor_cards(
     return VendorCardRevocationResponse.from_result(revocation)
 
 
+def _erp_link_items(links) -> list[VendorErpLinkItem]:
+    return [
+        VendorErpLinkItem(realm=x.realm, erp_vendor_id=x.erp_vendor_id, placement=x.placement)
+        for x in links
+    ]
+
+
+@router.get("/{vendor_id}/erp-links", response_model=VendorErpLinksResponse)
+async def list_vendor_erp_links(
+    vendor_id: uuid.UUID,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: User = Depends(_VENDOR_READ),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """The vendor's ERP links, one per company: the row link (the company it was
+    last synced in) and each link kept for another company (decisions §356).
+    The same readers as the vendor detail."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    links = await vendor_erp_links(db, vendor)
+    return VendorErpLinksResponse(vendor_id=str(vendor.id), links=_erp_link_items(links))
+
+
+@router.post("/{vendor_id}/erp-links/unlink", response_model=VendorErpUnlinkResponse)
+async def unlink_vendor_erp(
+    vendor_id: uuid.UUID,
+    body: VendorErpUnlinkRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
+    org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Clear the vendor's link to a supplier record in one ERP company
+    (decisions §375, `services/vendor_erp_unlink`): the row link and the kept
+    link for that company. The way through a merge refused
+    `vendor_merge_erp_link_conflict` — unlink the stale record, then merge.
+
+    `vendor.manage`, like every other edit to the vendor master. 404
+    `vendor_erp_link_not_found` when the vendor holds no link there; 409
+    `vendor_erp_unlink_in_flight` (`params.invoices`) while one of its invoices
+    is in flight to that company. Writes `vendor.erp_unlinked` naming the realm
+    and every id cleared. The vendor's next push to that company is refused
+    `vendor_not_linked`, and a later sync may re-link it only by the normal
+    unique-name rule.
+    """
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
+    await _get_vendor_or_404(db, vendor_id)
+    try:
+        result = await unlink_vendor_erp_link(db, vendor_id=vendor_id, realm=body.realm)
+    except ErpUnlinkError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org_id,
+        actor_id=user.id,
+        action="vendor.erp_unlinked",
+        entity_type="vendor",
+        entity_id=vendor_id,
+        details={"realm": result.realm, "cleared": result.cleared},
+    )
+    await db.commit()
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    await db.refresh(vendor)
+    links = await vendor_erp_links(db, vendor)
+    return VendorErpUnlinkResponse(
+        realm=result.realm,
+        cleared=result.cleared,
+        vendor=VendorResponse.from_db(vendor),
+        links=_erp_link_items(links),
+    )
+
+
 @router.post("/sync-erp")
 async def sync_vendors_from_erp_endpoint(
     db: AsyncSession = Depends(get_tenant_db),
@@ -1873,6 +1979,10 @@ async def sync_vendors_from_erp_endpoint(
         )
     if result["unlinked"]:
         message += f"; {len(result['unlinked'])} unlinked (linked under another ERP company)"
+    if result["restored"]:
+        message += (
+            f"; {result['restored']} relinked (linked when this ERP company was connected before)"
+        )
     return {"success": True, "message": message, **result}
 
 

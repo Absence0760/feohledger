@@ -106,6 +106,11 @@ describe('codedRefusalText', () => {
 		['erp_not_connected', 'erpRefusal.notConnected'],
 		['invoice_due_before_date', 'refusal.invoiceDueBeforeDate'],
 		['sso_email_in_other_workspace', 'refusal.ssoEmailInOtherWorkspace'],
+		['sso_account_inactive', 'refusal.ssoAccountInactive'],
+		['sso_email_domain_blocked', 'refusal.ssoEmailDomainBlocked'],
+		['sso_email_unusable', 'refusal.ssoEmailUnusable'],
+		['saml_login_unverified', 'refusal.samlLoginUnverified'],
+		['saml_not_configured', 'refusal.samlNotConfigured'],
 		['email_in_this_workspace', 'refusal.emailInThisWorkspace'],
 		['email_in_other_workspace', 'refusal.emailInOtherWorkspace'],
 		['email_check_throttled', 'refusal.emailCheckThrottled'],
@@ -636,6 +641,60 @@ describe('the ERP send refused because FeohLedger is already paying the invoice'
 	});
 });
 
+describe('closing an invoice refused because FeohLedger is already paying it', () => {
+	it('states the /complete 409 and the bulk-done skip, per rail', () => {
+		expect(
+			localizeApiDetail(detail('payment_blocks_completion', { claim: 'payment' }), enT)
+		).toBe(EN_ALL['refusal.paymentBlocksCompletion']);
+		expect(codedRefusalText('payment_blocks_completion', { claim: 'virtual_card' }, deT)).toBe(
+			de['refusal.cardBlocksCompletion']
+		);
+		// A `POST /bulk/status` skip row carries the same code beside its reason.
+		expect(
+			localizeApiDetail(
+				{ id: 'x', reason: 'English', code: 'payment_blocks_completion', params: { claim: 'payment' } },
+				deT
+			)
+		).toBe(de['refusal.paymentBlocksCompletion']);
+	});
+
+	it('falls back to the server sentence for a claim this build does not know', () => {
+		expect(codedRefusalText('payment_blocks_completion', {}, enT)).toBeNull();
+		expect(codedRefusalText('payment_blocks_completion', { claim: 'cheque' }, enT)).toBeNull();
+	});
+});
+
+describe('recalling an approval (decisions §374)', () => {
+	const locales = { en, de, fr, es, 'pt-BR': ptBR, ja } as const;
+
+	it('states every refusal the recall door and its verdict answer with, in all six locales', () => {
+		for (const [loc, catalogue] of Object.entries(locales)) {
+			const t = translator(catalogue as typeof en, loc);
+			const cat = catalogue as Record<string, string>;
+			expect(codedRefusalText('invoice_not_recallable', { status: 'paid' }, t)).toBe(
+				cat['refusal.invoiceNotRecallable']
+			);
+			expect(codedRefusalText('invoice_recall_in_erp', {}, t)).toBe(
+				cat['refusal.invoiceRecallInErp']
+			);
+			expect(codedRefusalText('invoice_recall_claimed', { claim: 'payment' }, t)).toBe(
+				cat['refusal.paymentBlocksRecall']
+			);
+			expect(codedRefusalText('invoice_recall_claimed', { claim: 'virtual_card' }, t)).toBe(
+				cat['refusal.cardBlocksRecall']
+			);
+		}
+		expect(localizeApiDetail(detail('invoice_recall_in_erp', {}), deT)).toBe(
+			de['refusal.invoiceRecallInErp']
+		);
+	});
+
+	it('falls back to the server sentence for a claim this build does not know', () => {
+		expect(codedRefusalText('invoice_recall_claimed', {}, enT)).toBeNull();
+		expect(codedRefusalText('invoice_recall_claimed', { claim: 'cheque' }, enT)).toBeNull();
+	});
+});
+
 describe('the ERP send refused because of the vendor', () => {
 	it('states the 409 the send doors answer with, per hold', () => {
 		expect(
@@ -804,7 +863,8 @@ describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
 		['vendor_merge_duplicate_not_found', 'refusal.vendorMergeDuplicateNotFound'],
 		['vendor_merge_invalid_id', 'refusal.vendorMergeInvalidId'],
 		['vendor_merge_cross_entity', 'refusal.vendorMergeCrossEntity'],
-		['vendor_merge_blocked_duplicate', 'refusal.vendorMergeBlockedDuplicate']
+		['vendor_merge_blocked_duplicate', 'refusal.vendorMergeBlockedDuplicate'],
+		['vendor_merge_erp_link_conflict', 'refusal.vendorMergeErpLinkConflict']
 	];
 
 	it.each(MERGE)('%s is the fixed sentence %s in every shipped locale', (code, key) => {
@@ -835,6 +895,200 @@ describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
 	});
 });
 
+describe('a merge refused while a duplicate holds approved unpaid invoices (decisions §379)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+
+	it('counts them, in every shipped locale', () => {
+		expect(CODED_REFUSAL_CODES).toContain('vendor_merge_approved_unpaid');
+		for (const [locale, messages] of LOCALES) {
+			const t = translator(messages, locale);
+			const one = codedRefusalText('vendor_merge_approved_unpaid', { count: 1 }, t);
+			const three = codedRefusalText('vendor_merge_approved_unpaid', { count: 3 }, t);
+			expect(one, locale).toBeTruthy();
+			expect(three, `${locale} names the count`).toContain('3');
+			expect(one, locale).not.toBe(three);
+			expect(three, locale).not.toMatch(/[{}]/);
+		}
+		expect(
+			localizeApiDetail(detail('vendor_merge_approved_unpaid', { count: 2 }), deT)
+		).toContain('2 genehmigte Rechnungen');
+	});
+
+	it.each([[{}], [{ count: 0 }], [{ count: '2' }], [{ count: 1.5 }]])(
+		'falls back to the server sentence for malformed params %j',
+		(params) => {
+			expect(codedRefusalText('vendor_merge_approved_unpaid', params, deT)).toBeNull();
+		}
+	);
+
+	it('states every merge code the backend defines — the reverse of the literal pin', () => {
+		const source = readFileSync(
+			new URL('../../../../backend/app/services/vendor_merge.py', import.meta.url).pathname,
+			'utf8'
+		);
+		const codes = [...source.matchAll(/= "(vendor_merge_[a-z_]+)"/g)].map((x) => x[1]);
+		expect(codes).toContain('vendor_merge_approved_unpaid');
+		for (const code of codes) {
+			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
+		}
+	});
+});
+
+describe('the invoice state machine’s own refusals (`services/workflow_engine.py`)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+	const engineSource = () =>
+		readFileSync(
+			new URL('../../../../backend/app/services/workflow_engine.py', import.meta.url).pathname,
+			'utf8'
+		);
+
+	it('states every code the engine defines — the reverse of the literal pin', () => {
+		const codes = [...engineSource().matchAll(/^INVOICE_[A-Z_]+ = "(invoice_[a-z_]+)"/gm)].map(
+			(x) => x[1]
+		);
+		expect(codes).toHaveLength(5);
+		for (const code of codes) {
+			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
+		}
+	});
+
+	const FIXED: [string, MainMessageKey][] = [
+		['invoice_once_approved_not_reread', 'refusal.invoiceOnceApprovedNotReread'],
+		['invoice_once_approved_not_to_draft', 'refusal.invoiceOnceApprovedNotToDraft'],
+		[
+			'invoice_once_approved_not_closed_from_draft',
+			'refusal.invoiceOnceApprovedNotClosedFromDraft'
+		]
+	];
+
+	it.each(FIXED)('%s is the fixed sentence %s in every shipped locale', (code, key) => {
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, `${locale} ${code}`).toBe((messages as Record<string, string>)[key]);
+			expect(text, `${locale} ${code}`).toBeTruthy();
+		}
+	});
+
+	it.each([['invoice_transition_invalid'], ['invoice_transition_recall_only']])(
+		'%s names both statuses by their labels, in every shipped locale',
+		(code) => {
+			for (const [locale, messages] of LOCALES) {
+				const text = codedRefusalText(
+					code,
+					{ status: 'failed', target: 'ready_for_review' },
+					translator(messages, locale)
+				);
+				const labels = messages as Record<string, string>;
+				expect(text, `${locale} ${code}`).toContain(labels['invoices.status.failed']);
+				expect(text, `${locale} ${code}`).toContain(labels['invoices.status.readyForReview']);
+				expect(text, `${locale} ${code}`).not.toMatch(/[{}]/);
+				expect(text, `${locale} ${code}`).not.toContain('ready_for_review');
+			}
+		}
+	);
+
+	it.each([[{}], [{ status: 'new' }], [{ target: 'done' }], [{ status: '', target: 'done' }]])(
+		'an edge with a status missing falls back to the server sentence %j',
+		(params) => {
+			expect(codedRefusalText('invoice_transition_invalid', params, deT)).toBeNull();
+			expect(codedRefusalText('invoice_transition_recall_only', params, deT)).toBeNull();
+		}
+	);
+
+	it('states a `POST /bulk/status` skip row carrying the engine code', () => {
+		// The skip is `coded_refusal`'s shape with the invoice id and the English
+		// as `reason` (`api/invoices._refused_skip`).
+		expect(
+			localizeApiDetail(
+				{
+					id: 'x',
+					reason: "This invoice has already been approved, so it can't go back to draft.",
+					code: 'invoice_once_approved_not_to_draft',
+					params: {}
+				},
+				deT
+			)
+		).toBe(de['refusal.invoiceOnceApprovedNotToDraft']);
+		expect(
+			localizeApiDetail(
+				{
+					id: 'x',
+					reason: "Cannot transition from 'ready_for_review' to 'done'",
+					code: 'invoice_transition_invalid',
+					params: { status: 'ready_for_review', target: 'done' }
+				},
+				enT
+			)
+		).toBe(
+			`This invoice can't move from ${EN_ALL['invoices.status.readyForReview']} to ${EN_ALL['invoices.status.done']}.`
+		);
+	});
+});
+
+describe('the vendor ERP unlink refusals (`services/vendor_erp_unlink.py`, decisions §375)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+
+	it('states the not-found refusal as a fixed sentence in every shipped locale', () => {
+		expect(CODED_REFUSAL_CODES).toContain('vendor_erp_link_not_found');
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText('vendor_erp_link_not_found', {}, translator(messages, locale));
+			expect(text, locale).toBe(messages['refusal.vendorErpLinkNotFound']);
+			expect(text, locale).toBeTruthy();
+		}
+	});
+
+	it('counts the in-flight invoices, in every shipped locale', () => {
+		expect(CODED_REFUSAL_CODES).toContain('vendor_erp_unlink_in_flight');
+		for (const [locale, messages] of LOCALES) {
+			const t = translator(messages, locale);
+			const one = codedRefusalText('vendor_erp_unlink_in_flight', { invoices: 1 }, t);
+			const three = codedRefusalText('vendor_erp_unlink_in_flight', { invoices: 3 }, t);
+			expect(one, locale).toBeTruthy();
+			expect(three, `${locale} names the count`).toContain('3');
+			expect(one, locale).not.toBe(three);
+		}
+		expect(codedRefusalText('vendor_erp_unlink_in_flight', { invoices: 2 }, deT)).toContain(
+			'2 Rechnungen'
+		);
+	});
+
+	it.each([[{}], [{ invoices: 0 }], [{ invoices: '2' }], [{ invoices: 1.5 }]])(
+		'falls back to the server sentence for malformed params %j',
+		(params) => {
+			expect(codedRefusalText('vendor_erp_unlink_in_flight', params, deT)).toBeNull();
+		}
+	);
+
+	it('the merge conflict now points the steward at the unlink, in every locale', () => {
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText('vendor_merge_erp_link_conflict', {}, translator(messages, locale));
+			// The unlink action's own section heading is named in the sentence.
+			expect(text, locale).toContain(messages['vendors.modal.erp.heading']);
+		}
+	});
+});
+
 describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', () => {
 	const LOCALES = [
 		['en', en],
@@ -855,7 +1109,7 @@ describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', 
 			...backendSource('services/csv_import.py').matchAll(/"(csv_invoice_number_[a-z_]+)"/g)
 		].map((x) => x[1]);
 		expect(skipCodes.length).toBeGreaterThan(10);
-		expect(csvCodes).toHaveLength(3);
+		expect(csvCodes).toHaveLength(4);
 		for (const code of [...skipCodes, ...csvCodes]) {
 			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
 		}
@@ -960,5 +1214,194 @@ describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', 
 				enT
 			)
 		).toBeNull();
+	});
+
+	// Every other CSV-import row error is coded too (decisions §372), so the
+	// import modal never shows the server's English in another locale.
+	const CSV_ROW_ERRORS = [
+		['csv_malformed', {}, 'refusal.csvMalformed', {}],
+		['csv_vendor_name_required', {}, 'refusal.csvVendorNameRequired', {}],
+		['csv_invoice_number_required', {}, 'refusal.csvInvoiceNumberRequired', {}],
+		['csv_vendor_required', {}, 'refusal.csvVendorRequired', {}],
+		['csv_amount_invalid', { value: 'ten' }, 'refusal.csvAmountInvalid', { value: 'ten' }],
+		['csv_amount_invalid', { value: '' }, 'refusal.csvAmountMissing', {}],
+		['csv_currency_required', {}, 'refusal.csvCurrencyRequired', {}],
+		['csv_currency_invalid', { value: 'EURO' }, 'refusal.csvCurrencyInvalid', { value: 'EURO' }],
+		['csv_status_invalid', { value: 'lost' }, 'refusal.csvStatusInvalid', { value: 'lost' }],
+		[
+			'csv_status_not_importable',
+			{ status: 'approved' },
+			'refusal.csvStatusNotImportable',
+			{ status: 'approved' }
+		],
+		[
+			'csv_status_records_history',
+			{ status: 'paid' },
+			'refusal.csvStatusRecordsHistory',
+			{ status: 'paid' }
+		],
+		// The corporate-card feed's own row errors and the statement uploads'
+		// currency field (decisions §377).
+		['csv_card_amount_invalid', { value: 'n/a' }, 'refusal.csvCardAmountInvalid', { value: 'n/a' }],
+		['csv_card_amount_invalid', { value: '' }, 'refusal.csvAmountMissing', {}],
+		['csv_date_invalid', { value: '31/31/2026' }, 'refusal.csvDateInvalid', { value: '31/31/2026' }],
+		['csv_date_invalid', { value: '' }, 'refusal.csvDateMissing', {}],
+		['statement_currency_required', {}, 'refusal.statementCurrencyRequired', {}],
+		['statement_currency_invalid', { value: 'EURO' }, 'refusal.statementCurrencyInvalid', { value: 'EURO' }]
+	] as const;
+
+	it.each(CSV_ROW_ERRORS)(
+		'states CSV row error %s from its params in every shipped locale',
+		(code, params, key, vars) => {
+			expect(CODED_REFUSAL_CODES).toContain(code);
+			for (const [locale, messages] of [
+				['en', en],
+				['de', de],
+				['fr', fr],
+				['es', es],
+				['pt-BR', ptBR],
+				['ja', ja]
+			] as const) {
+				const table = messages as Record<string, string>;
+				const out = localizeApiDetail(
+					{ row: 4, message: 'server English', code, params },
+					translator(table, locale)
+				);
+				expect(out, `${locale} ${code}`).toBe(interpolate(table[key], vars, locale));
+				expect(out, `${locale} ${code}`).not.toContain('{');
+			}
+		}
+	);
+
+	it('falls back to the server English when a CSV row error lacks the cell it names', () => {
+		expect(codedRefusalText('csv_amount_invalid', {}, enT)).toBeNull();
+		expect(codedRefusalText('csv_currency_invalid', { value: ' ' }, enT)).toBeNull();
+		expect(codedRefusalText('csv_status_invalid', {}, enT)).toBeNull();
+		expect(codedRefusalText('csv_status_not_importable', { status: 3 }, enT)).toBeNull();
+		expect(codedRefusalText('csv_status_records_history', {}, enT)).toBeNull();
+	});
+});
+
+describe('the expense report and card reconciliation refusals (decisions §348, §361)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+	const controls = readFileSync(
+		new URL('../../../../backend/app/services/expense_controls.py', import.meta.url).pathname,
+		'utf8'
+	);
+
+	it('states every code `expense_controls` defines', () => {
+		const codes = [...controls.matchAll(/^[A-Z_]+ = "([a-z_]+)"$/gm)].map((x) => x[1]);
+		expect(codes).toContain('expense_report_locked');
+		expect(codes).toContain('card_txn_currency_mismatch');
+		for (const code of codes) {
+			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
+		}
+	});
+
+	it.each([
+		['expense_fx_source_missing', 'refusal.expenseFxSourceMissing'],
+		['expense_card_reconciled', 'refusal.expenseCardReconciled'],
+		['card_txn_expense_already_matched', 'refusal.cardTxnExpenseAlreadyMatched']
+	] as [string, MainMessageKey][])('%s is the fixed sentence %s in every locale', (code, key) => {
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, `${locale} ${code}`).toBe((messages as Record<string, string>)[key]);
+			expect(text, `${locale} ${code}`).toBeTruthy();
+		}
+	});
+
+	it.each([
+		['expense_report_locked', { status: 'approved' }, ['expenses.reports.status.approved']],
+		['expense_fx_rate_unavailable', { source_currency: 'xyz', report_currency: 'USD' }, []],
+		['card_txn_currency_mismatch', { transaction_currency: 'USD', expense_currency: 'EUR' }, []]
+	] as [string, Record<string, unknown>, MessageKey[]][])(
+		'%s fills its params in every locale',
+		(code, params, labels) => {
+			for (const [locale, messages] of LOCALES) {
+				const text = codedRefusalText(code, params, translator(messages, locale));
+				expect(text, `${locale} ${code}`).toBeTruthy();
+				expect(text, `${locale} ${code}`).not.toContain('{');
+				for (const v of Object.values(params)) {
+					if (labels.length === 0) expect(text).toContain(String(v).toUpperCase());
+				}
+			}
+			for (const label of labels) {
+				expect(codedRefusalText(code, params, enT)).toContain(EN_ALL[label]);
+			}
+		}
+	);
+
+	it.each([
+		['expense_report_locked', {}],
+		['expense_fx_rate_unavailable', { source_currency: 'XYZ' }],
+		['expense_fx_rate_unavailable', { source_currency: 'XYZ', report_currency: 'dollars' }],
+		['card_txn_currency_mismatch', { transaction_currency: 'USD', expense_currency: null }]
+	] as [string, Record<string, unknown>][])(
+		'%s with params %j falls back to the server English',
+		(code, params) => {
+			expect(codedRefusalText(code, params, enT)).toBeNull();
+			expect(localizeApiDetail(detail(code, params), deT)).toBeNull();
+		}
+	);
+
+	it.each([
+		['expense_report_policy_blocked', { count: 2 }, 'refusal.expenseReportPolicyBlocked'],
+		[
+			'expense_report_lines_unconverted',
+			{ count: 1, currency: 'eur' },
+			'refusal.expenseReportLinesUnconverted'
+		]
+	] as [string, Record<string, unknown>, MainMessageKey][])(
+		'states submit’s list-shaped 422 %s in every locale (decisions §378)',
+		(code, params, key) => {
+			const values = { count: params.count as number, currency: 'EUR' };
+			for (const [locale, messages] of LOCALES) {
+				const text = codedRefusalText(code, params, translator(messages, locale));
+				expect(text, `${locale} ${code}`).toBe(
+					interpolate((messages as Record<string, string>)[key], values, locale)
+				);
+				expect(text, `${locale} ${code}`).not.toMatch(/[{}#]/);
+				expect(text, `${locale} ${code}`).toContain(String(params.count));
+				if (params.currency) expect(text).toContain('EUR');
+			}
+		}
+	);
+
+	it.each([
+		['expense_report_policy_blocked', {}],
+		['expense_report_policy_blocked', { count: 0 }],
+		['expense_report_policy_blocked', { count: '2' }],
+		['expense_report_lines_unconverted', { count: 1 }],
+		['expense_report_lines_unconverted', { count: 1, currency: 'dollars' }],
+		['expense_report_lines_unconverted', { count: 1.5, currency: 'EUR' }]
+	] as [string, Record<string, unknown>][])(
+		'%s with params %j falls back to the server English',
+		(code, params) => {
+			expect(codedRefusalText(code, params, enT)).toBeNull();
+		}
+	);
+
+	it('reaches the transport from the raw endpoint detail, in the reader’s language', () => {
+		const raw = detail(
+			'card_txn_currency_mismatch',
+			{ transaction_currency: 'USD', expense_currency: 'EUR' },
+			'Currency mismatch: transaction is USD, expense is EUR.'
+		);
+		const out = localizeApiDetail(raw, deT);
+		expect(out).toBe(
+			interpolate(
+				de['refusal.cardTxnCurrencyMismatch'],
+				{ transactionCurrency: 'USD', expenseCurrency: 'EUR' },
+				'de'
+			)
+		);
+		expect(out).not.toContain('Currency mismatch');
 	});
 });

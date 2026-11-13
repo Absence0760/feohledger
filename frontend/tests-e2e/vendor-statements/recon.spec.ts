@@ -298,6 +298,132 @@ test.describe('/vendor-statements (admin)', () => {
 	});
 });
 
+test.describe('/vendor-statements (admin) — statement currency', () => {
+	// The currency field used to be a <select> over the sixteen-code shortlist,
+	// so a PLN statement could not be entered at all (decisions §377 follow-up).
+	// It is free entry over any ISO 4217 code, never blank, seeded from the
+	// org's currency whenever that lands.
+
+	test('a currency outside the common shortlist (PLN) can be entered and is stored', async ({
+		page
+	}) => {
+		await page.goto('/vendor-statements');
+		const vendor = await getFirstVendor(page);
+		let id: string | null = null;
+		try {
+			await page.getByRole('button', { name: '+ New reconciliation' }).click();
+			const dialog = page.getByRole('dialog', { name: 'New vendor statement reconciliation' });
+
+			await selectVendorInPicker(vendorPicker(dialog), vendor.name);
+			await dialog.getByLabel('Statement Date').fill('2026-04-30');
+			const currency = dialog.getByTestId('statement-currency');
+			// Typed in lowercase: the field uppercases as it goes.
+			await currency.fill('pln');
+			await expect(currency).toHaveValue('PLN');
+			await expect(dialog.getByTestId('statement-currency-error')).toHaveCount(0);
+
+			await dialog.getByRole('radio', { name: 'Upload a file' }).check();
+			await dialog.locator('input[type="file"]').setInputFiles({
+				name: 'pln-statement.csv',
+				mimeType: 'text/csv',
+				buffer: Buffer.from(`Invoice Number,Amount,Date\nE2E-PLN-${Date.now()},410.00,2026-04-15\n`)
+			});
+
+			const uploadResp = page.waitForResponse(
+				(r) =>
+					r.url().includes('/api/vendor-statements/upload') && r.request().method() === 'POST'
+			);
+			await dialog.getByRole('button', { name: 'Reconcile' }).click();
+			const resp = await uploadResp;
+			expect(resp.status()).toBe(201);
+			const created = (await resp.json()) as { id: string; currency: string };
+			id = created.id;
+			expect(created.currency).toBe('PLN');
+		} finally {
+			if (id) await deleteUploadedReconciliation(page, id);
+		}
+	});
+
+	test('a malformed code is refused on the form, in words, before any request', async ({
+		page
+	}) => {
+		await page.goto('/vendor-statements');
+		await page.getByRole('button', { name: '+ New reconciliation' }).click();
+		const dialog = page.getByRole('dialog', { name: 'New vendor statement reconciliation' });
+		const currency = dialog.getByTestId('statement-currency');
+
+		await currency.fill('EU');
+		const error = dialog.getByTestId('statement-currency-error');
+		await expect(error).toHaveText(
+			'“EU” is not a three-letter currency code. Use an ISO 4217 code such as USD or PLN.'
+		);
+		await expect(currency).toHaveAttribute('aria-invalid', 'true');
+		await expect(currency).toHaveAttribute('aria-describedby', /.+/);
+
+		// Blank is refused too: "never blank" is the point of §377.
+		await currency.fill('');
+		await expect(error).toHaveText(
+			'Enter the currency as a three-letter ISO 4217 code, such as USD or PLN.'
+		);
+		await expect(dialog.getByRole('button', { name: 'Reconcile' })).toBeDisabled();
+	});
+
+	test("the field follows the org's currency when it loads after the modal opened", async ({
+		page
+	}) => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		await page.route(
+			(url) => url.pathname === '/api/organization',
+			async (route) => {
+				await gate;
+				await route.fulfill({
+					json: { resolved_reporting_currency: 'GBP', settings: { reporting_currency: 'GBP' } }
+				});
+			}
+		);
+
+		await page.goto('/vendor-statements');
+		await page.getByRole('button', { name: '+ New reconciliation' }).click();
+		const dialog = page.getByRole('dialog', { name: 'New vendor statement reconciliation' });
+		const currency = dialog.getByTestId('statement-currency');
+
+		// Unresolved: the platform default, explicitly, so the field is never blank.
+		await expect(currency).toHaveValue('USD');
+		release();
+		// Seeding only at mount left a GBP organization's statement on USD.
+		await expect(currency).toHaveValue('GBP');
+	});
+
+	test('a code the user typed is not overwritten when the org currency lands', async ({
+		page
+	}) => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		await page.route(
+			(url) => url.pathname === '/api/organization',
+			async (route) => {
+				await gate;
+				await route.fulfill({
+					json: { resolved_reporting_currency: 'GBP', settings: { reporting_currency: 'GBP' } }
+				});
+			}
+		);
+
+		await page.goto('/vendor-statements');
+		await page.getByRole('button', { name: '+ New reconciliation' }).click();
+		const dialog = page.getByRole('dialog', { name: 'New vendor statement reconciliation' });
+		const currency = dialog.getByTestId('statement-currency');
+
+		await currency.fill('HKD');
+		release();
+		// The suggestion list leads with the org's code once the store resolved,
+		// which is the signal that the seeding effect has had its chance to run.
+		await expect(dialog.locator('datalist option').first()).toHaveAttribute('value', 'GBP');
+		await expect(currency).toHaveValue('HKD');
+	});
+});
+
 test.describe('/vendor-statements (clerk — read-only)', () => {
 	// Opt out of the default admin storage state so we can sign in as the clerk.
 	test.use({ storageState: { cookies: [], origins: [] } });

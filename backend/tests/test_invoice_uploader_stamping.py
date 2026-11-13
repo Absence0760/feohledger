@@ -42,10 +42,13 @@ is implicated in the mirror). At either site, omitting the kwarg *would*
 silently drop a real implicated actor. A third site that starts writing the
 set has to join the list, so the claim "two writers" cannot quietly go stale.
 
-This file pins CONSTRUCTION sites only. The one post-construction writer —
-``api/invoice_entry.stamp_entry_editor``, which adds an entry-only caller who
-edits an invoice they did not upload — is pinned by behaviour in
-``test_invoice_clerk_entry.py``.
+Construction sites are pinned first. After construction the set grows only
+through ``approval_chain.add_implicated_actor``, and its callers are pinned at
+the end of this file: ``api/invoice_entry.stamp_entry_editor`` (an entry-only
+caller who edits an invoice they did not upload, behaviour in
+``test_invoice_clerk_entry.py``) and ``services/review.recall_approval`` (who
+recalls an approval, decisions §374, behaviour in
+``test_invoice_recall_approval.py``).
 """
 
 from __future__ import annotations
@@ -345,3 +348,62 @@ def test_no_undeclared_site_writes_the_implicated_actor_set():
         f"undeclared writers: {sorted(writers - set(_SEGREGATION_SET_WRITERS))}; "
         f"declared but not writing: {sorted(set(_SEGREGATION_SET_WRITERS) - writers)}"
     )
+
+
+#: The functions allowed to grow ``segregation_actor_ids`` after construction,
+#: as ``(module under app/, enclosing function)``. Each is a claim about who
+#: shaped a payable, argued for where it is made.
+_POST_CONSTRUCTION_WRITERS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("api/invoice_entry.py", "stamp_entry_editor"),
+        ("services/review.py", "recall_approval"),
+    }
+)
+
+
+def _enclosing_functions(tree: ast.AST) -> dict[ast.AST, str]:
+    """Every node → the name of the innermost function defining it."""
+    owner: dict[ast.AST, str] = {}
+
+    def visit(node: ast.AST, current: str | None) -> None:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            current = node.name
+        for child in ast.iter_child_nodes(node):
+            if current is not None:
+                owner[child] = current
+            visit(child, current)
+
+    visit(tree, None)
+    return owner
+
+
+def test_the_set_grows_after_construction_only_through_its_declared_writers():
+    """``add_implicated_actor`` is called only from the declared functions, and
+    nothing outside ``services/approval_chain.py`` assigns the column — so a
+    third post-construction writer has to be argued for here, not slipped in."""
+    callers: set[tuple[str, str]] = set()
+    assignments: list[str] = []
+    for path in sorted(APP_ROOT.rglob("*.py")):
+        rel = path.relative_to(APP_ROOT).as_posix()
+        tree = ast.parse(path.read_text(), filename=str(path))
+        owner = _enclosing_functions(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+                if name == "add_implicated_actor":
+                    callers.add((rel, owner.get(node, "<module>")))
+            elif isinstance(node, ast.Assign | ast.AugAssign | ast.AnnAssign):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    if (
+                        isinstance(target, ast.Attribute)
+                        and target.attr == "segregation_actor_ids"
+                        and rel != "services/approval_chain.py"
+                    ):
+                        assignments.append(f"{rel}:{node.lineno}")
+    assert callers == set(_POST_CONSTRUCTION_WRITERS), (
+        f"undeclared: {sorted(callers - _POST_CONSTRUCTION_WRITERS)}; "
+        f"declared but not calling: {sorted(_POST_CONSTRUCTION_WRITERS - callers)}"
+    )
+    assert not assignments, f"segregation_actor_ids assigned outside approval_chain: {assignments}"

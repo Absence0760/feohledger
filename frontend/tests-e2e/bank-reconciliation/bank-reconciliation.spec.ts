@@ -51,6 +51,7 @@ function unmatchableCsv(reference: string): string {
 interface ImportedStatement {
 	id: string;
 	account_identifier: string;
+	currency: string;
 	transaction_count: number;
 	transactions: { id: string; direction: string; matched_payment_id: string | null }[] | null;
 }
@@ -383,6 +384,71 @@ test.describe('/bank-reconciliation (admin)', () => {
 				await deleteStatement(page, id);
 			}
 		}
+	});
+});
+
+test.describe('/bank-reconciliation (admin) — statement currency', () => {
+	test('a statement in a currency outside the common shortlist (PLN) imports in PLN', async ({
+		page
+	}) => {
+		// The import's currency was a <select> over sixteen codes, so a PLN
+		// statement could not be entered at all (decisions §377 follow-up).
+		const account = uniqueAccount();
+		let id: string | null = null;
+		try {
+			await page.goto('/bank-reconciliation');
+			await page.getByRole('button', { name: '+ Import statement' }).first().click();
+			const dialog = page.getByRole('dialog', { name: 'Import bank statement' });
+
+			await dialog.locator('input[type="file"]').setInputFiles({
+				name: 'statement.csv',
+				mimeType: 'text/csv',
+				buffer: Buffer.from(unmatchableCsv(`E2E-${account}`))
+			});
+			await dialog.getByLabel('Account identifier').fill(account);
+			await dialog.getByLabel('Period start').fill('2019-03-01');
+			await dialog.getByLabel('Period end').fill('2019-03-31');
+			const currency = dialog.getByTestId('bank-statement-currency');
+			await currency.fill('pln');
+			await expect(currency).toHaveValue('PLN');
+
+			const uploadResp = page.waitForResponse(
+				(r) =>
+					r.url().includes('/api/bank-reconciliation/upload') && r.request().method() === 'POST'
+			);
+			await dialog.getByRole('button', { name: 'Import', exact: true }).click();
+			const resp = await uploadResp;
+			expect(resp.status()).toBe(201);
+			// What the server stored is the typed code, uppercased. (Playwright's
+			// `postData()` cannot be used: a multipart body with a file part is a
+			// Blob it does not expose, so it reads null whatever was sent.)
+			const statement = (await resp.json()) as ImportedStatement;
+			id = statement.id;
+			expect(statement.currency).toBe('PLN');
+		} finally {
+			if (id) await deleteStatement(page, id);
+		}
+	});
+
+	test('a blank currency cannot be submitted', async ({ page }) => {
+		await page.goto('/bank-reconciliation');
+		await page.getByRole('button', { name: '+ Import statement' }).first().click();
+		const dialog = page.getByRole('dialog', { name: 'Import bank statement' });
+
+		await dialog.locator('input[type="file"]').setInputFiles({
+			name: 'statement.csv',
+			mimeType: 'text/csv',
+			buffer: Buffer.from(unmatchableCsv('E2E-blank-currency'))
+		});
+		await dialog.getByLabel('Account identifier').fill(uniqueAccount());
+		await dialog.getByLabel('Period start').fill('2019-03-01');
+		await dialog.getByLabel('Period end').fill('2019-03-31');
+		await dialog.getByTestId('bank-statement-currency').fill('');
+
+		await expect(dialog.getByTestId('bank-statement-currency-error')).toHaveText(
+			'Enter the currency as a three-letter ISO 4217 code, such as USD or PLN.'
+		);
+		await expect(dialog.getByRole('button', { name: 'Import', exact: true })).toBeDisabled();
 	});
 });
 
