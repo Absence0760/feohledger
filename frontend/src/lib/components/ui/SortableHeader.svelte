@@ -77,6 +77,10 @@
 		letter-spacing: inherit;
 		color: inherit;
 		cursor: pointer;
+		/* WCAG 2.5.8: a 24px target on its own, not only by spacing — at narrow
+		   widths the header buttons sit close enough that axe's spacing exception
+		   no longer applies, and 14px of text height is all the button had. */
+		min-height: 24px;
 	}
 	.sort-btn:hover,
 	.sort-btn.active {
