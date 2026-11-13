@@ -2244,11 +2244,16 @@ user-visible halves still open.
       refusal-localization path (ARB strings per code). **Durable fix:** that
       path, then both screens on the verdict, with widget tests. **Trigger:** the
       next change to mobile approval.
-- [ ] **(c) Expense status and card refusals are English in the HTTP body.**
-      §348's verdicts carry codes, but the endpoints' own 409 texts (hit only in
-      a race) are plain strings, kept so mobile keeps working. **Durable fix:**
-      coded refusals with the English kept as `message`, and the mobile reader
-      updated. **Trigger:** the next change to those endpoints.
+- [ ] **(c) Expense submit's two list-shaped 422s are uncoded English.**
+      §361 coded every other expense-report and card refusal, but `POST
+      /expense-reports/{id}/submit`'s `{message, violations}` (blocking policy
+      violations, each with a server-English `message`) and `{message,
+      expense_ids}` (lines with no locked rate) carry no `code`, so the web
+      toast and violation panel show English in every locale. **Durable fix:**
+      a `code` on each (keeping the list keys), a localized sentence per
+      violation `code` in `codedRefusals.ts` (the violation already carries
+      one), and the panel stating it. **Trigger:** the next change to the
+      expense policy engine or the submit panel.
 - [ ] **(c) The deploy-script tests fail on macOS.** `test_deploy_release.py`,
       `test_frontend_publish.py` and `test_deploy_script_failures.py` (30 tests)
       run scripts using GNU `cp` / `date -d` flags that macOS rejects (`cp:
