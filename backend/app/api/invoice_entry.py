@@ -177,8 +177,7 @@ def financial_lock_refusal(invoice: Invoice) -> dict | None:
     return coded_refusal(
         INVOICE_FINANCIALLY_LOCKED,
         "The amount, payee and line items cannot be changed once the invoice is "
-        "approved: they are what the approver signed off and what will be paid. "
-        "To correct them, recall the approval: the invoice goes back to review.",
+        "approved: they are what the approver signed off and what will be paid.",
         status=invoice.status.value,
     )
 
