@@ -18377,18 +18377,60 @@ runs second sees the first: the void reads the new details, or the approval
 sees an `approved` invoice.
 
 - **The fingerprint** is HMAC-SHA256 over the canonical JSON of the whole
-  `bank_details` blob and the tenant id, keyed by a domain-separated derivation
-  of `FEOH_SECRET_KEY`, tagged `v1:`. Whole blob, because the dual control
-  already treats any change to it as a bank change and an allowlist would miss
-  the next key that steers money (`counterparty_id`, a cheque's
-  `mailing_address`). Keyed, because an unkeyed hash of a routing and an
-  account number is brute-forceable. Tenant in the message, so one account paid
-  by two tenants does not fingerprint alike. **Rejected: storing the last four
-  digits** (already shown everywhere): two accounts sharing a last-4 would
-  compare equal, which is the BEC case. **Rejected: a dedicated key**: a new
-  secret to provision for a comparison whose failure mode is one extra flag. A
-  key rotation changes every fingerprint, so a void after it flags once: the
-  fail-closed direction (`docs/secrets-rotation.md`).
+  `bank_details` blob and the tenant id, keyed by its own secret,
+  `FEOH_PAYEE_FINGERPRINT_KEY`, and tagged `v2:<kid>:<hmac>`. Whole blob,
+  because the dual control already treats any change to it as a bank change
+  and an allowlist would miss the next key that steers money
+  (`counterparty_id`, a cheque's `mailing_address`). Keyed, because an unkeyed
+  hash of a routing and an account number is brute-forceable. Tenant in the
+  message, so one account paid by two tenants does not fingerprint alike.
+  **Rejected: storing the last four digits** (already shown everywhere): two
+  accounts sharing a last-4 would compare equal, which is the BEC case.
+- **Its own key, rotated through a keyring.** The first cut derived the key
+  from `FEOH_SECRET_KEY` to avoid provisioning a secret, accepting "one extra
+  flag" per rotation. That cost was misjudged: the JWT key rotates every 90
+  days (`docs/secrets-rotation.md`), so every quarter each void of an older
+  payment would open a false `payee_changed_since_paid` flag for a person to
+  clear. Fail-closed, but recurring noise built into a routine operation, and
+  it trains people to clear fraud flags without looking, which defeats the
+  flag. So the fingerprint has a dedicated key, and each stamp names the key
+  that made it: `kid` is the first 8 hex of a domain-separated SHA-256 of the
+  key. Retired keys live in `FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS`
+  (comma-separated), and the void recomputes a stamp under the key its `kid`
+  names (`payee_stamp.fingerprint_matches`), so a rotation through the
+  keyring flags nothing. The column (`varchar(80)`) holds the 76 characters
+  unchanged. **The `kid` is derived, not configured beside the key**, so an
+  operator cannot pair an id with the wrong key or reuse one for a new key.
+  Thirty-two bits of a hash of a 256-bit random key say nothing about it.
+  **Rotation by replacement is the one wrong move**, and it is fail-closed: a
+  `kid` in neither setting compares as changed, flags, and logs the id. A
+  deployed environment refuses to boot with the key empty, under 32 chars,
+  equal to the committed dev value or equal to `FEOH_SECRET_KEY` (the last
+  would bring the quarterly noise back), and `deploy/decrypt-env.sh` refuses
+  the same before compose restarts anything. **`v1` is not read.** `v1` stamps
+  existed only on this PR's branch before it merged (migration 0128 was not on
+  `main`), so nothing deployed carries one. A stray `v1` in a local database
+  compares as changed and flags, like any unknown scheme.
+- **An empty key stamps the payee without a fingerprint, and its void flags.**
+  There is no fallback key. With the key empty (local dev only, given the boot
+  refusal), `stamp_payee` still records `payee_vendor_id` and
+  `payee_recorded_at` with a `NULL` fingerprint and logs a warning. A void then
+  still catches a merge on the vendor id, and the bank comparison, which cannot
+  run, fails closed: `payee_changed_since_paid`, raised by any bank-change
+  approver since the stamp, else `NULL`. That differs from the unstamped rule
+  below on purpose. An unstamped payment predates the stamp, so nothing can
+  honestly be compared and flagging every one would flag "for no fact at
+  all". A stamped payment released money while the stamp existed, and a
+  missing fingerprint there is a configuration fault, not history.
+  **Rejected: refusing to stamp** (`payee_recorded_at` left NULL): the void
+  would then treat the payment as pre-0128 and compare nothing, the silent
+  direction. **Rejected: falling back to §286's re-flag** for the bank
+  question: it misses any route that changes bank details without a change
+  request, which is the gap the fingerprint closes. **Rejected: refusing the
+  payment** when the key is missing: it would stop money in dev over a
+  comparison that only matters at a void. pytest does not load
+  `.env.development`, so `tests/conftest.py` gives the suite a test key; the
+  empty-key path is pinned by monkeypatching it away.
 - **`payee_vendor_id` is not a `vendor_id` FK.** It is history: the merge must
   never move it (its name keeps it out of `VENDOR_FK_CHILDREN`'s drift guard on
   purpose), and nothing should tie a vendor row's lifecycle to the payments
@@ -18433,7 +18475,11 @@ payment's bank change. A raiser that cannot be found is `NULL`: the flag still
 blocks, and anyone outside the invoice's implicated set clears it.
 
 Tests: `tests/test_payment_payee_stamp.py`:
-- the fingerprint;
+- the fingerprint; it does not change with the JWT key; a rotation through the
+  keyring keeps an old stamp equal (unit and through a real void); a stamp
+  whose key is in neither setting, another scheme or a malformed value does
+  not match and its void flags; with no key nothing is fingerprinted, the
+  payee vendor is still recorded and the void flags;
 - the stamp at the rail, card, NACHA, single and run record-outside and
   ERP-reported steps; none on booking, a compliance hold or a refused export;
   an exported entry's payee kept and a rejected file's replaced;
@@ -18448,7 +18494,10 @@ Tests: `tests/test_payment_payee_stamp.py`:
   change gets its own row;
 - the unstamped cases.
 
-Also `tests/test_payment_dispatch_db_error.py` (the stamp survives a
+Also `tests/test_config_boot_guards.py` and `tests/test_deploy_decrypt_env.py`
+(a deployed env refuses a missing, short, dev or JWT-equal fingerprint key, and
+the day-one rehearsal env boots with its own),
+`tests/test_payment_dispatch_db_error.py` (the stamp survives a
 post-processor rollback and is absent when nothing was sent),
 `tests/test_migration_0128_payee_and_merge_stamp.py`, and
 `tests/test_payment_run_actions.py` / `tests/test_exception_raiser_stamping.py`

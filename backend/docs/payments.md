@@ -1230,7 +1230,7 @@ the same function, so the button and the endpoint cannot disagree
 
 Every payment records, at the step that releases its money, the payee it pays:
 `payee_vendor_id` (the invoice's vendor then), `payee_bank_fingerprint` (a keyed
-HMAC of that vendor's whole `bank_details`, `v1:<hex>`, never a number) and
+HMAC of that vendor's whole `bank_details`, `v2:<key id>:<hex>`, never a number) and
 `payee_recorded_at` (migration 0128, `services/payee_stamp.py`, decisions §383).
 The steps that stamp it are the ones that move money:
 
@@ -1250,13 +1250,20 @@ The steps that stamp it are the ones that move money:
 
 The fingerprint covers the whole blob because the bank-change dual control
 treats any change to it as a bank change, and a key allowlist would miss the
-next key that steers money. It is keyed with a domain-separated derivation of
-`FEOH_SECRET_KEY` and the tenant id is in its message, so it cannot be
-brute-forced from a routing number, and one account paid by two tenants does
-not fingerprint alike. Rotating that key changes every fingerprint, so the next
-void of an older payment flags once (`docs/secrets-rotation.md`). A card payment
-is fingerprinted too, so a bank change after it flags its void: noise, in the
-fail-closed direction.
+next key that steers money. It is keyed with its own secret,
+`FEOH_PAYEE_FINGERPRINT_KEY`, and the tenant id is in its message, so it cannot
+be brute-forced from a routing number, and one account paid by two tenants does
+not fingerprint alike. It is not keyed by `FEOH_SECRET_KEY`, which rotates every
+90 days and would turn each older void into a false flag. Each fingerprint names
+the key that made it (an id derived from the key), and the void recomputes it
+under that key, current or retired (`FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS`), so
+a rotation through the keyring flags nothing (`docs/secrets-rotation.md`
+§ `FEOH_PAYEE_FINGERPRINT_KEY`). A fingerprint that cannot be recomputed does not
+match, and flags: its key is in neither setting (replaced instead of rotated), or
+there is none because the key was empty when the payment was stamped. A deployed
+environment refuses to boot without the key, so the second is local dev only. A
+card payment is fingerprinted too, so a bank change after it flags its void:
+noise, in the fail-closed direction.
 
 A merge also records, on each duplicate it retires for the first time, where it
 went and who merged it (`vendors.merged_into_vendor_id` / `merged_by_user_id` /
@@ -1273,7 +1280,7 @@ is seen by whichever of the two runs second.
 | The voided payment | The invoice now | Flag (`fraud_flag`, blocks the run and the ERP push) | Raisers (one flag each; none can clear their own) |
 |---|---|---|---|
 | stamped | another vendor | `payee_changed_since_paid` | every steward on the merge chain from the paid vendor to the current one |
-| stamped | same vendor, other bank fingerprint | `payee_changed_since_paid` | every approver of a bank change since the stamp |
+| stamped | same vendor, other bank fingerprint, or one that cannot be recomputed (no fingerprint, or its key in neither setting) | `payee_changed_since_paid` | every approver of a bank change since the stamp |
 | stamped | same vendor, same fingerprint | none | |
 | unstamped (paid before 0128) | a merge into its vendor since the payment was booked | `payee_unrecorded_after_merge` | the stewards of those merges |
 | unstamped | a bank change approved since the payment was booked | `vendor_bank_changed` (`api/vendors.reflag_voided_invoice_for_bank_change`) | every approver of those changes |

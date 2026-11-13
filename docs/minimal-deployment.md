@@ -305,6 +305,7 @@ Beyond the committed defaults, the deployed env sets at minimum:
 | `FEOH_DEPLOYED_REGION` | the region this VM runs in (`us`/`eu`/`uk`/`ca`/`au`) — advisory only, but empty makes every tenant's data-residency `alignment` report `unknown` / `aligned: null` ("cannot attest") |
 | `FEOH_EMAIL_PROVIDER` / `FEOH_EMAIL_FROM` | `ses` / verified sender |
 | `FEOH_ANTHROPIC_API_KEY` **or** `FEOH_EXTRACTION_PROVIDER` | **Decide before first boot.** A real key (Claude Vision; Anthropic becomes a sub-processor of tenant invoices), `mock` (fabricated fields — a demo box only), or neither (invoices keyed in by hand; every upload's extraction fails and `deploy.sh` warns). Extraction is the one adapter that does not fall back to `mock` in a deployed env — `backend/docs/ai-extraction.md` § Platform provider precedence |
+| `FEOH_PAYEE_FINGERPRINT_KEY` | **Required.** `openssl rand -hex 32`, its own value (never `FEOH_SECRET_KEY`'s): the key of the payee bank fingerprint each payment records and its void compares (decisions §383). The API refuses to boot without it and `decrypt-env.sh` refuses first. Rotate only through `FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS`, never by replacement (`docs/secrets-rotation.md`) |
 | `FEOH_APPROVAL_SIGNING_KEY` + the other HMAC signing keys | real values (each key's presence is its feature's on-switch; leave unset = feature off) |
 
 Everything else keeps its safe default: mock adapters (extraction excepted,

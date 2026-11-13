@@ -2301,6 +2301,22 @@ as oversights.
 
 ## (b) Operator steps on merged code
 
+- [ ] **Provision `FEOH_PAYEE_FINGERPRINT_KEY` before the first deploy of
+      PR #707.** Built (decisions §383): every payment records a payee bank
+      fingerprint under its own key, and with `FEOH_ENVIRONMENT=production` the
+      API refuses to boot without it (`config.py`
+      `_require_payee_fingerprint_key_in_deployed_envs`), as does
+      `deploy/decrypt-env.sh` before compose restarts anything. **Durable fix:**
+      in your own terminal, generate the key (`openssl rand -hex 32`, never
+      pasted into a Claude session); from your `infra-secrets` clone run
+      `AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml` and add
+      `FEOH_PAYEE_FINGERPRINT_KEY: "<new key>"` (its own value, not
+      `FEOH_SECRET_KEY`'s; leave `FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS` unset);
+      commit with the secret's name only, copy the file onto the VM as
+      `deploy/prod.sops.yaml`, and run `./decrypt-env.sh` there to see it
+      accepted before the deploy. Rotate it later only through the keyring
+      (`docs/secrets-rotation.md` § `FEOH_PAYEE_FINGERPRINT_KEY`). **Trigger:**
+      the deploy that ships PR #707.
 - [ ] **⚠️ SECURITY ANALYST REVIEW — fix landed, review pending: "Bank
       rejected the file" on a run exported before a switch to processor mode.**
       Built (decisions §362): `/nacha/void` is now refused
