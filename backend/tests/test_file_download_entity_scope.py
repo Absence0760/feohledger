@@ -17,6 +17,7 @@ the bytes. Runs against the opt-in `realdb` fixture (skips without
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -94,7 +95,11 @@ async def test_invoice_file_download_is_entity_scoped(realdb):
         )
         assert up.status_code == 201, up.text
         url = up.json()["file_url"]
-        assert url == f"/api/invoices/file/{org_id}/{inv_id}/doc.pdf"
+        # Attach writes a versioned key, `<12 hex>~<name>`, so a same-name
+        # re-upload never overwrites an earlier version (decisions §363).
+        assert re.fullmatch(
+            rf"/api/invoices/file/{org_id}/{inv_id}/[0-9a-f]{{12}}~doc\.pdf", url
+        ), url
 
         await _assert_entity_scoped_download(
             c,

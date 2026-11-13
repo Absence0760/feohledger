@@ -177,7 +177,8 @@ async def _add_audit(mk, invoice: Invoice, *, action: str, actor_id, details: di
 
 async def _import_csv(realdb, number: str, *, role: str = "ap_manager", status: str = "new"):
     csv_text = (
-        f"invoice_number,vendor_name,amount,status\n{number},Backfill Supplier,125.00,{status}\n"
+        f"invoice_number,vendor_name,amount,currency,status\n"
+        f"{number},Backfill Supplier,125.00,USD,{status}\n"
     )
     async with realdb.client(key="a", role=role) as c:
         resp = await c.post(
@@ -372,14 +373,34 @@ async def test_a_recurring_row_for_another_template_stays_null(realdb):
     mk = realdb.sessionmaker("a")
     invoice_id = await _generate_now(realdb, "Backfill wrong-template rent")
     await _rewind(mk, invoice_id)
+    # audit_log is append-only, so the mismatch is made on the invoice side:
+    # its creation row names template A while the invoice now points at B, a
+    # copy of A that has generated nothing.
     async with mk() as s:
+        source = (
+            await s.execute(
+                select(RecurringInvoiceTemplate)
+                .join(Invoice, Invoice.recurring_template_id == RecurringInvoiceTemplate.id)
+                .where(Invoice.id == invoice_id)
+            )
+        ).scalar_one()
+        other = RecurringInvoiceTemplate(
+            organization_id=source.organization_id,
+            entity_id=source.entity_id,
+            name=f"{source.name} (copy)",
+            vendor_id=source.vendor_id,
+            amount=source.amount,
+            currency=source.currency,
+            cadence=source.cadence,
+            day_of_period=source.day_of_period,
+            start_date=source.start_date,
+            next_run_on=source.next_run_on,
+        )
+        s.add(other)
+        await s.flush()
         await s.execute(
-            text(
-                "UPDATE audit_log SET details = jsonb_set(details, '{recurring_template_id}', "
-                "to_jsonb(CAST(:other AS text))) "
-                "WHERE entity_id = :id AND action = 'invoice.created'"
-            ),
-            {"id": invoice_id, "other": str(uuid.uuid4())},
+            text("UPDATE invoices SET recurring_template_id = :other WHERE id = :id"),
+            {"id": invoice_id, "other": other.id},
         )
         await s.commit()
 
@@ -438,6 +459,11 @@ async def test_a_system_sentinel_actor_is_never_an_employee(realdb):
     invoice_id = await _import_csv(realdb, "UPL-BF-SENTINEL-1")
     await _rewind(mk, invoice_id)
     async with mk() as s:
+        # A pre-§131 row written by a system channel cannot be produced through
+        # today's code, and audit_log's append-only trigger refuses the edit, so
+        # this test forges it with triggers off for its own transaction (the
+        # same tool test_schema_build_parity uses).
+        await s.execute(text("SET LOCAL session_replication_role = replica"))
         await s.execute(
             text(
                 "UPDATE audit_log SET actor_id = CAST(:nil AS uuid) "

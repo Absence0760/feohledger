@@ -216,9 +216,10 @@ async def test_sync_virtual_cards_creates_and_dedupes(realdb):
 
 
 async def _make_txn(realdb, *, merchant="Uber", amount="42.50", txn_date="2026-06-01"):
+    external_id = f"t-{uuid.uuid4().hex[:8]}"
     csv_bytes = _csv(
         _HEADER,
-        f"t-{uuid.uuid4().hex[:8]},{txn_date},,{merchant},{amount},USD,1234,c",
+        f"{external_id},{txn_date},,{merchant},{amount},USD,1234,c",
     )
     async with realdb.client(key="a", role="ap_manager") as c:
         await c.post(
@@ -226,7 +227,10 @@ async def _make_txn(realdb, *, merchant="Uber", amount="42.50", txn_date="2026-0
             files={"file": ("cards.csv", csv_bytes, "text/csv")},
         )
         rows = (await c.get("/api/corporate-card-transactions")).json()["items"]
-    return rows[0]["id"]
+    # The row this call imported, not whichever sorts first: two identical
+    # card lines in one test would otherwise both resolve to the same id.
+    (row,) = [r for r in rows if r["external_txn_id"] == external_id]
+    return row["id"]
 
 
 async def _make_expense(realdb, *, amount="42.50", expense_date="2026-06-01", merchant="Uber"):
