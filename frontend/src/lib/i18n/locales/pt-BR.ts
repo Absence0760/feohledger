@@ -106,6 +106,8 @@ export const messages = {
 	'common.loadFailed': 'Não foi possível carregar esta lista. Atualize para tentar novamente.',
 	'common.amountInvalid': 'Informe o valor como um número simples, por exemplo 1200 ou 1200.50',
 	'common.reportingCurrencyUnresolved': 'moeda de relatório',
+	'common.currencyCode.required': 'Informe a moeda como um código ISO 4217 de três letras, como USD ou PLN.',
+	'common.currencyCode.invalid': '“{value}” não é um código de moeda de três letras. Use um código ISO 4217 como USD ou PLN.',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 

@@ -108,6 +108,8 @@ export const messages = {
 	'common.loadFailed': 'このリストを読み込めませんでした。更新して再試行してください。',
 	'common.amountInvalid': '金額は 1200 や 1200.50 のような数値で入力してください',
 	'common.reportingCurrencyUnresolved': '報告通貨',
+	'common.currencyCode.required': '通貨は USD や PLN のような 3 文字の ISO 4217 コードで入力してください。',
+	'common.currencyCode.invalid': '「{value}」は 3 文字の通貨コードではありません。USD や PLN のような ISO 4217 コードを使用してください。',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 

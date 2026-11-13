@@ -28,7 +28,8 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
-	import { DEFAULT_CURRENCY, currencyOptions } from '#lib/utils/money.ts';
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import { normalizeCurrencyCode } from '#lib/utils/currencyCode.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import {
@@ -63,11 +64,12 @@
 	let vendor_id = $state('');
 	let statement_date = $state('');
 	let statement_reference = $state('');
-	// The statement's currency is chosen, never typed blank and never assumed:
-	// the upload refuses a blank or malformed code (decisions §377), and this
-	// list is the same ISO set the bank-statement import offers.
-	let currency = $state(orgCurrency.currency ?? DEFAULT_CURRENCY);
-	const currencies = $derived(currencyOptions(orgCurrency.currency ?? DEFAULT_CURRENCY));
+	// The statement's currency is never blank and never assumed: the upload
+	// refuses a blank or malformed code (decisions §377). `CurrencyInput` takes
+	// any ISO 4217 code, not only the common shortlist, and follows the org's
+	// currency until the user types (the same field the bank-statement import
+	// uses).
+	let currency = $state('');
 	let notes = $state('');
 	// Intake choice, explicit rather than inferred. Both paths used to be visible
 	// at once with "a file wins" as the tiebreak, so a user who typed lines AND
@@ -149,14 +151,17 @@
 			}))
 	);
 
+	const statementCurrency = $derived(normalizeCurrencyCode(currency));
+
 	const canSubmit = $derived(
 		!!vendor_id &&
 			!!statement_date &&
+			statementCurrency !== null &&
 			(intakeMode === 'file' ? file !== null : payloadLines.length > 0)
 	);
 
 	async function handleCreate() {
-		if (!canSubmit) return;
+		if (!canSubmit || statementCurrency === null) return;
 		// A typed statement amount goes to the wire as the exact decimal text —
 		// it is the figure a mismatch is classified against, so an amount we
 		// cannot read is REFUSED, never quietly sent as `null` (which the
@@ -174,14 +179,14 @@
 					vendor_id,
 					statement_date,
 					statement_reference: statement_reference.trim() || undefined,
-					currency
+					currency: statementCurrency
 				});
 			} else {
 				saved = await createReconciliation({
 					vendor_id,
 					statement_date,
 					statement_reference: statement_reference.trim() || null,
-					currency,
+					currency: statementCurrency,
 					notes: notes.trim() || null,
 					lines: payloadLines
 				});
@@ -309,12 +314,13 @@
 					<input type="text" bind:value={statement_reference} disabled={!canEdit} />
 				</label>
 				<label>
-					<span>{m('vendorStatements.modal.currency')}</span>
-					<select bind:value={currency} disabled={!canEdit}>
-						{#each currencies as code (code)}
-							<option value={code}>{code}</option>
-						{/each}
-					</select>
+					<span>{m('vendorStatements.modal.currency')} <em class="required">*</em></span>
+					<CurrencyInput
+						bind:value={currency}
+						preferred={orgCurrency.currency}
+						disabled={!canEdit}
+						testid="statement-currency"
+					/>
 				</label>
 			</div>
 
