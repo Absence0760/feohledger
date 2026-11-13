@@ -26,9 +26,17 @@ The ACS / exchange split keeps the JWT out of every URL — it is only ever
 returned in a POST response body, like the OIDC callback.
 
 The trust anchor is the per-tenant `idp_x509_cert` from settings (the SAML
-analog of OIDC JWKS pinning + webhook HMAC). Every rejection path fails closed
-to ONE generic error + a PII-safe audit row — no raw assertion / NameID /
-attribute value ever enters a log or the audit trail.
+analog of OIDC JWKS pinning + webhook HMAC). Every verification failure fails
+closed to ONE generic refusal + a PII-safe audit row — no raw assertion /
+NameID / attribute value ever enters a log or the audit trail.
+
+Every refusal decided once the tenant is known is answered on the SPA bridge,
+not as JSON at the ACS: the ACS parks the refusal's code behind a one-time
+handoff code (`create_saml_refusal_handoff`) and 303s there, and `/exchange`
+answers that code with the coded refusal, so the callback page states it in
+the reader's language with a way back to sign-in (decisions §359). Only a POST
+with no recoverable tenant (malformed form, unknown RelayState) still answers
+400 at the ACS — there is no workspace origin to send the browser to.
 """
 
 from __future__ import annotations
@@ -48,7 +56,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import create_access_token_with_jti
-from app.api.refusals import SSO_EMAIL_IN_OTHER_WORKSPACE, SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL
+from app.api.refusals import (
+    SAML_LOGIN_UNVERIFIED,
+    SAML_LOGIN_UNVERIFIED_DETAIL,
+    SAML_NOT_CONFIGURED,
+    SAML_NOT_CONFIGURED_DETAIL,
+    SSO_ACCOUNT_INACTIVE,
+    SSO_ACCOUNT_INACTIVE_DETAIL,
+    SSO_EMAIL_DOMAIN_BLOCKED,
+    SSO_EMAIL_DOMAIN_BLOCKED_DETAIL,
+    SSO_EMAIL_IN_OTHER_WORKSPACE,
+    SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL,
+    SSO_EMAIL_UNUSABLE,
+    SSO_EMAIL_UNUSABLE_DETAIL,
+)
 from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
@@ -84,6 +105,18 @@ from app.services.webhook_security import is_event_already_processed
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth/saml", tags=["auth-saml"])
+
+#: What `/exchange` answers each parked refusal with: (status, coded detail).
+#: A refusal this table does not name (a record written by a newer build)
+#: is answered as unverified — fail closed, never a token.
+_SAML_REFUSALS: dict[str, tuple[int, dict]] = {
+    SAML_LOGIN_UNVERIFIED: (400, SAML_LOGIN_UNVERIFIED_DETAIL),
+    SAML_NOT_CONFIGURED: (400, SAML_NOT_CONFIGURED_DETAIL),
+    SSO_ACCOUNT_INACTIVE: (403, SSO_ACCOUNT_INACTIVE_DETAIL),
+    SSO_EMAIL_DOMAIN_BLOCKED: (403, SSO_EMAIL_DOMAIN_BLOCKED_DETAIL),
+    SSO_EMAIL_UNUSABLE: (403, SSO_EMAIL_UNUSABLE_DETAIL),
+    SSO_EMAIL_IN_OTHER_WORKSPACE: (403, SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL),
+}
 
 # SAML binding / format / algorithm URIs
 _REDIRECT_BINDING = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
@@ -377,7 +410,11 @@ async def saml_login(
 async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db)):
     """Assertion Consumer Service. Verifies the signed SAMLResponse, recovers
     the tenant from server-minted RelayState, blocks replay, JIT-provisions,
-    mints our JWT, and 303-redirects to the SPA bridge with a one-time code."""
+    mints our JWT, and 303-redirects to the SPA bridge with a one-time code.
+
+    A refusal once the tenant is known is ALSO a 303 to the bridge, with a
+    refusal-only code (`_refuse`); only a POST with no recoverable tenant is
+    answered here as a 400."""
     ip = resolve_client_ip(request)
     form = await request.form()
     saml_response = form.get("SAMLResponse")
@@ -395,26 +432,39 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
 
     tenant_slug = bound["tenant"]
     request_id = bound.get("request_id")
-    # A missing request_id would let python3-saml skip the InResponseTo check —
-    # hard-reject rather than ever calling process_response(request_id=None).
-    if not request_id:
-        raise HTTPException(status_code=400, detail="Login session was incomplete. Try again.")
-
     org = await _fetch_org_by_slug(tenant_slug, db)
-    # Through the plan at the ACS too: a plan that lost `sso` after /login
-    # must not complete the sign-in (decisions §258).
-    config = _resolve_saml_or_none(await sign_in_settings(db, org), tenant_slug)
-    if config is None:
-        raise HTTPException(status_code=400, detail="SAML SSO is not configured for this tenant.")
 
-    async def _fail(reason: str) -> HTTPException:
+    async def _to_bridge(refusal: str) -> RedirectResponse:
+        """Park `refusal` behind a one-time code and send the browser to the
+        SPA bridge, which states it — never raw JSON at the ACS."""
+        code = await create_saml_refusal_handoff(refusal, tenant_slug)
+        bridge = saml_bridge_url(tenant_slug, org.settings)
+        return RedirectResponse(f"{bridge}?{urlencode({'code': code})}", status_code=303)
+
+    async def _refuse(reason: str, refusal: str = SAML_LOGIN_UNVERIFIED) -> RedirectResponse:
+        """Audit the PII-free `reason` and answer with `refusal` on the bridge.
+        Every verification failure takes the default, so the bridge cannot
+        tell a forged signature from a replay any more than the ACS could."""
         await dispatch_auth_audit(
             organization_id=org.id,
             actor_id=None,
             action="auth.saml.login.failure",
             details={"tenant": tenant_slug, "ip": ip, "reason": reason},
         )
-        return HTTPException(status_code=400, detail="SAML login could not be verified.")
+        return await _to_bridge(refusal)
+
+    # A missing request_id would let python3-saml skip the InResponseTo check —
+    # hard-reject rather than ever calling process_response(request_id=None).
+    # Server-minted state that lacks it was never a real login; unaudited, as
+    # before, and stated as the one unverified refusal.
+    if not request_id:
+        return await _to_bridge(SAML_LOGIN_UNVERIFIED)
+
+    # Through the plan at the ACS too: a plan that lost `sso` after /login
+    # must not complete the sign-in (decisions §258).
+    config = _resolve_saml_or_none(await sign_in_settings(db, org), tenant_slug)
+    if config is None:
+        return await _to_bridge(SAML_NOT_CONFIGURED)
 
     # --- Signature + conditions + audience + destination + InResponseTo ------
     try:
@@ -425,7 +475,7 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
         auth.process_response(request_id=request_id)
     except Exception:  # noqa: BLE001 — any parse/verify error fails closed to one generic error
         logger.warning("SAML ACS: response processing raised for tenant %s", tenant_slug)
-        raise await _fail("assertion_invalid")
+        return await _refuse("assertion_invalid")
 
     if auth.get_errors() or not auth.is_authenticated():
         # get_last_error_reason() is python3-saml's own reason string (e.g.
@@ -433,7 +483,7 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
         logger.warning(
             "SAML ACS rejected for tenant %s: %s", tenant_slug, auth.get_last_error_reason()
         )
-        raise await _fail("assertion_invalid")
+        return await _refuse("assertion_invalid")
 
     # --- Defence-in-depth: pin the Issuer to the configured IdP --------------
     # python3-saml validates Audience (== sp_entity_id), Destination, Conditions
@@ -442,13 +492,13 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
     # tenant's IdP can't be cross-replayed. Extracted with python3-saml's own
     # DTD/entity-hardened parser (forbid_dtd/forbid_entities) — never raw lxml.
     if _assertion_issuer(auth) != config.idp_entity_id:
-        raise await _fail("issuer_mismatch")
+        return await _refuse("issuer_mismatch")
 
     # Require an InResponseTo that matches the AuthnRequest we issued — rejects
     # unsolicited / IdP-initiated responses (python3-saml only checks it when
     # present, so presence is enforced here).
     if _response_in_response_to(auth) != request_id:
-        raise await _fail("unsolicited")
+        return await _refuse("unsolicited")
 
     # --- Replay protection: dedupe both Assertion + Response IDs --------------
     # Scoped per-tenant (assertion IDs are only unique within an issuer, so a
@@ -458,50 +508,37 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
     dedup_scope = f"saml:{tenant_slug}"
     for event_id in (assertion_id, message_id):
         if event_id and await is_event_already_processed(dedup_scope, event_id):
-            raise await _fail("replay")
+            return await _refuse("replay")
 
     # --- Identity ------------------------------------------------------------
     email_raw, name = _extract_email_and_name(auth.get_nameid(), auth.get_attributes())
     sub = auth.get_nameid()
     if not email_raw or not sub:
-        raise await _fail("missing_email")
+        return await _refuse("missing_email")
 
     try:
         # NOTE: unlike the OIDC path, the SAML failure audit deliberately omits
         # the email (PII-out-of-logs — tighter than the OIDC precedent).
         email = extract_and_check_email(email_raw, config.allowed_email_domains)
-    except UnsafeEmailAddress as exc:
+    except UnsafeEmailAddress:
         # A control character in an asserted address — never legitimate, and
         # the value would become a login and a mail destination.
-        raise await _fail("unsafe_email") from exc
-    except EmailDomainNotAllowed as exc:
-        raise await _fail("domain_blocked") from exc
+        return await _refuse("unsafe_email", SSO_EMAIL_UNUSABLE)
+    except EmailDomainNotAllowed:
+        return await _refuse("domain_blocked", SSO_EMAIL_DOMAIN_BLOCKED)
 
     try:
         user = await jit_provision(db, org, email, sub, config.provider, {"name": name})
-    except DeactivatedAccount as exc:
+    except DeactivatedAccount:
         # The IdP vouched for them, but the app account is offboarded. Refuse
         # rather than minting a token `get_current_user` would reject on every
-        # subsequent call. `_fail` keeps the PII-free audit + the one generic
-        # error this endpoint returns for every rejection.
-        raise await _fail("inactive") from exc
+        # subsequent call — stated as the OIDC callback states it.
+        return await _refuse("inactive", SSO_ACCOUNT_INACTIVE)
     except EmailInOtherWorkspace:
         # The address names an account in another workspace (decisions §291).
         # Audited in THIS workspace — the one whose IdP asserted it — with the
-        # same PII-free details as every other SAML failure row. Unlike the
-        # generic rejections above, this one is the user's to act on, so it is
-        # not answered here as raw JSON at the ACS: the browser is sent to the
-        # SPA bridge with a one-time code that `/exchange` answers with the
-        # coded refusal, so the callback page states it in the reader's language.
-        await dispatch_auth_audit(
-            organization_id=org.id,
-            actor_id=None,
-            action="auth.saml.login.failure",
-            details={"tenant": tenant_slug, "ip": ip, "reason": SSO_EMAIL_IN_OTHER_WORKSPACE},
-        )
-        code = await create_saml_refusal_handoff(SSO_EMAIL_IN_OTHER_WORKSPACE, tenant_slug)
-        bridge = saml_bridge_url(tenant_slug, org.settings)
-        return RedirectResponse(f"{bridge}?{urlencode({'code': code})}", status_code=303)
+        # same PII-free details as every other SAML failure row.
+        return await _refuse(SSO_EMAIL_IN_OTHER_WORKSPACE, SSO_EMAIL_IN_OTHER_WORKSPACE)
 
     token, jti = create_access_token_with_jti(user.id, user.organization_id)
     await register_session(
@@ -533,10 +570,13 @@ async def saml_exchange(body: SAMLExchangeRequest):
         data = await consume_saml_handoff(body.code)
     except SSOValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if data.get("refusal") == SSO_EMAIL_IN_OTHER_WORKSPACE:
+    if "refusal" in data or "access_token" not in data:
         # The ACS refused the sign-in and parked the refusal behind this code
         # (`create_saml_refusal_handoff`); there is no token to hand over.
-        raise HTTPException(status_code=403, detail=SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL)
+        status, detail = _SAML_REFUSALS.get(
+            str(data.get("refusal")), _SAML_REFUSALS[SAML_LOGIN_UNVERIFIED]
+        )
+        raise HTTPException(status_code=status, detail=detail)
     return SAMLExchangeResponse(
         access_token=data["access_token"],
         must_change_password=data["must_change_password"],

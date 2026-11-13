@@ -59,3 +59,68 @@ test.describe('an SSO address held by another workspace', () => {
 		expect(await page.evaluate(() => localStorage.getItem('auth_token'))).toBeNull();
 	});
 });
+
+/**
+ * Every other SAML ACS refusal lands on the bridge too (docs/decisions.md §359),
+ * and the OIDC callback's identity refusals carry the same codes. Each page
+ * must state the refusal from its code, never echo the server's fallback, and
+ * leave a way back to sign-in. `saml_login_unverified` is the ONE sentence for
+ * every response the ACS could not verify — a forged signature, a replay, an
+ * unsolicited response — so the page can say no more than that.
+ */
+const IDENTITY_REFUSALS: [code: string, stated: string][] = [
+	['sso_account_inactive', 'This account has been deactivated. Contact your administrator.'],
+	['sso_email_domain_blocked', "Your email domain isn't allowed to sign in to this workspace."],
+	['sso_email_unusable', "Your identity provider sent an email address that can't be used to sign in."]
+];
+const SAML_ONLY_REFUSALS: [code: string, status: number, stated: string][] = [
+	['saml_login_unverified', 400, 'Your SAML sign-in could not be verified. Try signing in again.'],
+	['saml_not_configured', 400, "SAML sign-in isn't set up for this workspace."]
+];
+
+test.describe('every other SSO refusal is stated from its code', () => {
+	for (const [code, status, stated] of [
+		...IDENTITY_REFUSALS.map(([c, s]) => [c, 403, s] as const),
+		...SAML_ONLY_REFUSALS
+	]) {
+		test(`the SAML bridge states ${code}`, async ({ page }) => {
+			await page.route(
+				(url) => url.pathname === '/api/auth/saml/exchange',
+				(route) =>
+					route.fulfill({
+						status,
+						json: { detail: { code, message: 'server fallback text', params: {} } }
+					})
+			);
+			await page.goto('/login/saml-callback?code=stub-handoff');
+
+			const error = page.getByRole('alert');
+			await expect(error).toContainText(stated);
+			await expect(error).not.toContainText('server fallback text');
+			await expect(page.getByRole('link', { name: 'Back to sign in' })).toHaveAttribute(
+				'href',
+				'/login'
+			);
+			expect(await page.evaluate(() => localStorage.getItem('auth_token'))).toBeNull();
+		});
+	}
+
+	for (const [code, stated] of IDENTITY_REFUSALS) {
+		test(`the OIDC callback page states ${code}`, async ({ page }) => {
+			await page.route(
+				(url) => url.pathname === '/api/auth/sso/callback',
+				(route) =>
+					route.fulfill({
+						status: 403,
+						json: { detail: { code, message: 'server fallback text', params: {} } }
+					})
+			);
+			await page.goto('/login/sso-callback?code=stub-code&state=stub-state');
+
+			const error = page.getByRole('alert');
+			await expect(error).toContainText(stated);
+			await expect(error).not.toContainText('server fallback text');
+			expect(await page.evaluate(() => localStorage.getItem('auth_token'))).toBeNull();
+		});
+	}
+});

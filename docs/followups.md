@@ -1842,19 +1842,6 @@ scope (§260) — do not fold them into any of these.
       partner/reseller programme onboards an accountant serving several
       tenants. Full plan, security risks and the
       cross-tenant test matrix: #614.
-- [ ] **(c) The SAML ACS still answers its other refusals as raw JSON at the
-      API origin.** Only the address-in-another-workspace refusal is routed to
-      the SPA bridge (`sso.create_saml_refusal_handoff`); `inactive`,
-      `domain_blocked`, `unsafe_email`, a replay or a bad assertion still leave
-      the browser on `{"detail": "SAML login could not be verified."}` from the
-      ACS URL, in English, with no way back — the OIDC callback page states its
-      refusals because the SPA posts the callback itself. **Durable fix:** send
-      every ACS refusal through the same refusal handoff, keeping the one
-      generic sentence (and its PII-free audit reasons) for the verification
-      failures so the bridge says no more than the ACS does today, and coded
-      `inactive` / `domain_blocked` the OIDC path already states. **Trigger:**
-      the first SAML tenant in production, or a support report of a blank JSON
-      page after an IdP sign-in.
 
 ### Surfaced by fixing signup's dead ends (2026-10-20, decisions §292)
 

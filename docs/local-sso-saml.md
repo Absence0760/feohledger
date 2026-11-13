@@ -102,6 +102,6 @@ after the OIDC specs (SAML seeding rewrites acme's `settings.sso`).
 | Symptom | Cause / fix |
 |---------|-------------|
 | Login button doesn't render | `pnpm saml:seed` not run, or wrong tenant — it seeds `acme` by default (`--slug`). |
-| "SAML login could not be verified" after Keycloak login | Cert drift — Keycloak was restarted; re-run `pnpm saml:seed`. |
+| "Your SAML sign-in could not be verified" on `/login/saml-callback` after Keycloak login | Cert drift — Keycloak was restarted; re-run `pnpm saml:seed`. The audit row's `details.reason` (`auth.saml.login.failure`) says which check refused it; the page deliberately does not. |
 | Seed errors reading the descriptor | Keycloak not up yet — `pnpm idp:up` and wait for `:8088` to answer. |
 | Both OIDC and SAML buttons show | A prior `idp:seed` + a `saml:seed` shouldn't coexist (each overwrites `settings.sso`); re-run one. |

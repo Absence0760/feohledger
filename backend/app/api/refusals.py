@@ -234,6 +234,49 @@ SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL = coded_refusal(
     "workspace's administrator to have your identity provider use a different address.",
 )
 
+#: The other SSO sign-in refusals a person can act on, stated by the OIDC
+#: callback (``api/auth_sso.py``) and by the SAML bridge's ``/exchange`` alike,
+#: in the same English the OIDC callback has always answered with. Each is
+#: exactly as specific as that English: the IdP has already vouched for the
+#: address, so none says anything the IdP's own admin cannot already see.
+#: ``sso_account_inactive`` — the IdP vouched, but the account is deactivated
+#: (``DeactivatedAccount``); ``sso_email_domain_blocked`` — the address is
+#: outside ``allowed_email_domains``; ``sso_email_unusable`` — the asserted
+#: address carries a control character (``UnsafeEmailAddress``). All 403.
+SSO_ACCOUNT_INACTIVE = "sso_account_inactive"
+SSO_ACCOUNT_INACTIVE_DETAIL = coded_refusal(
+    SSO_ACCOUNT_INACTIVE, "This account has been deactivated. Contact your administrator."
+)
+SSO_EMAIL_DOMAIN_BLOCKED = "sso_email_domain_blocked"
+SSO_EMAIL_DOMAIN_BLOCKED_DETAIL = coded_refusal(
+    SSO_EMAIL_DOMAIN_BLOCKED, "Your email domain isn't allowed to sign in to this workspace."
+)
+SSO_EMAIL_UNUSABLE = "sso_email_unusable"
+SSO_EMAIL_UNUSABLE_DETAIL = coded_refusal(
+    SSO_EMAIL_UNUSABLE, "The identity provider supplied an unusable email address."
+)
+
+#: Every SAML response the ACS could not verify — a bad or foreign signature,
+#: an unparseable document, an issuer that is not this workspace's IdP, an
+#: unsolicited response, a replayed assertion, an assertion naming no subject
+#: or address, a login session missing its AuthnRequest binding. ONE code for
+#: all of them, deliberately: telling them apart would tell whoever holds a
+#: forged or captured assertion which check stopped it. The audit row keeps the
+#: precise reason (``auth.saml.login.failure`` ``details.reason``). A 400.
+SAML_LOGIN_UNVERIFIED = "saml_login_unverified"
+SAML_LOGIN_UNVERIFIED_DETAIL = coded_refusal(
+    SAML_LOGIN_UNVERIFIED, "SAML login could not be verified."
+)
+
+#: The workspace's SAML configuration stopped resolving between ``/login`` and
+#: the ACS — an admin turned it off, broke it, or the plan lost ``sso``
+#: (decisions §258). The same sentence ``/login`` answers an unconfigured
+#: workspace with. A 400.
+SAML_NOT_CONFIGURED = "saml_not_configured"
+SAML_NOT_CONFIGURED_DETAIL = coded_refusal(
+    SAML_NOT_CONFIGURED, "SAML SSO is not configured for this tenant."
+)
+
 #: ``POST`` / ``PATCH /api/admin/users`` with an address an account in THIS
 #: workspace already holds. A 409.
 EMAIL_IN_THIS_WORKSPACE = "email_in_this_workspace"

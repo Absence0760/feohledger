@@ -16597,6 +16597,55 @@ generator covers both clients.
   machine detail as the ERP rows did): `erp_report` is ERP data, and the id is
   the only thing that tells the reader which of an invoice's payments to chase.
 
+## 359. Every SAML ACS refusal lands on the SPA bridge, coded; verification failures stay one sentence (2026-11-13)
+
+**Context.** §291 routed one ACS refusal, an address held in another workspace,
+through a refusal-only handoff code to the SPA bridge. Every other refusal still
+left the browser on `{"detail": "SAML login could not be verified."}` at the API
+origin: English only, no page chrome, no way back to sign-in. The OIDC callback
+never had that problem because the SPA posts the callback itself.
+
+**Decision.** Once the RelayState has named the tenant, the ACS answers every
+refusal the same way: audit the PII-free reason exactly as before, park a
+refusal code behind `sso.create_saml_refusal_handoff` (same prefix, TTL and
+`GETDEL` single use as a token handoff), and 303 to the bridge. `/exchange`
+maps the code to its coded refusal and no token. The table lives in
+`api/auth_saml._SAML_REFUSALS`; a code it does not know fails closed to
+`saml_login_unverified`.
+
+- **Verification failures are one code.** `assertion_invalid`, `issuer_mismatch`,
+  `unsolicited`, `replay` and `missing_email` all become `saml_login_unverified`
+  (400) with the sentence the ACS already used. Telling them apart would show
+  whoever holds a forged or captured assertion which check stopped it. The
+  bridge says no more than the ACS did, and only the audit row differs.
+  `missing_email` counts as one of them because it describes how the assertion
+  is shaped, not anything the person can act on.
+- **Identity refusals are coded the way OIDC states them.** `inactive`,
+  `domain_blocked` and `unsafe_email` become `sso_account_inactive`,
+  `sso_email_domain_blocked` and `sso_email_unusable` (403), in the English the
+  OIDC callback always answered with. The OIDC callback now answers with the
+  same coded details, so both protocols localize alike. None of them reveals
+  more than OIDC already did. The IdP has vouched for the address, and its admin
+  can already see each fact. `unsafe_email` used to be generic on SAML only, and
+  the user cannot fix it, but stating it tells the admin where to look and leaks
+  nothing.
+- **Two unaudited refusals move too.** State with no AuthnRequest binding becomes
+  `saml_login_unverified`, and SAML switched off or the plan losing `sso` since
+  `/login` (§258) becomes `saml_not_configured` (400). Neither wrote a row before,
+  and neither writes one now.
+- **What stays a 400 at the ACS.** A malformed form, an unknown or spent
+  RelayState, or a tenant gone since `/login` has no workspace origin to send
+  the browser to, and no row to scope.
+
+**Rejected.** (1) A per-reason code for each verification failure, because it
+is an oracle for assertion forgery. (2) Putting the refusal code in the bridge
+URL instead of behind a handoff code. The bridge would then render whatever an
+attacker-crafted link said, and the page would be able to tell a refusal from a
+token handoff before exchanging. (3) Redirecting the no-tenant cases to a
+global page. That needs an origin chosen without knowing the tenant, and the
+bridge would then be stating a refusal on a host the workspace's session does
+not live on.
+
 ## 360. A label the server owns renders by its key, and an export's summary from its typed counts (i18n follow-up, 2026-11-13)
 
 **The gap.** The Report Builder, `/admin/privacy`, `/admin/access-review` and the

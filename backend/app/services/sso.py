@@ -750,7 +750,12 @@ async def create_saml_refusal_handoff(refusal: str, tenant_slug: str) -> str:
     the browser lands on the SPA bridge (which can state it, localized) rather
     than on the ACS's raw JSON. `/exchange` answers the code with the coded
     refusal and no token. Same TTL, prefix and single-use consume as a token
-    handoff — the bridge cannot tell them apart until it exchanges."""
+    handoff — the bridge cannot tell them apart until it exchanges.
+
+    `refusal` is a code from `api/refusals.py` (every ACS refusal once the
+    tenant is known comes through here, decisions §359) — never a reason
+    string, never anything from the assertion: the record holds the code and
+    the tenant slug, nothing else."""
     code = secrets.token_urlsafe(32)
     r = await get_redis()
     payload = json.dumps({"refusal": refusal, "tenant": tenant_slug})

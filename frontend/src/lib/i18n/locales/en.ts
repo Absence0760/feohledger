@@ -5286,6 +5286,14 @@ export const en = {
 	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "This email address already belongs to an account in another workspace, so it can't sign in here. Sign in on your own workspace's page, or ask this workspace's administrator to have your identity provider use a different address.",
+	// The other SSO / SAML sign-in refusals (decisions §359): the identity refusals the
+	// OIDC callback and the SAML bridge both state, and the SAML bridge's one sentence for
+	// every response it could not verify (never more specific than that).
+	'refusal.ssoAccountInactive': "This account has been deactivated. Contact your administrator.",
+	'refusal.ssoEmailDomainBlocked': "Your email domain isn't allowed to sign in to this workspace.",
+	'refusal.ssoEmailUnusable': "Your identity provider sent an email address that can't be used to sign in. Ask your administrator to check how the identity provider sends your address.",
+	'refusal.samlLoginUnverified': "Your SAML sign-in could not be verified. Try signing in again.",
+	'refusal.samlNotConfigured': "SAML sign-in isn't set up for this workspace.",
 	'refusal.emailInThisWorkspace': "A user with this email address already exists in this workspace.",
 	'refusal.emailInOtherWorkspace': "This email address already has an account in another workspace. An address can belong to only one workspace, so use a different address for this person. If they no longer use that other workspace, its administrator can close it, which frees the address.",
 	'refusal.emailCheckThrottled': "Too many addresses entered in this workspace recently already belonged to other workspaces, so adding users or changing their email is paused for up to an hour. Try again later.",

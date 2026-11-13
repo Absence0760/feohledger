@@ -521,7 +521,7 @@ Action names:
 | Successful SSO login | `auth.sso.login.success` |
 | Failed SSO login (code exchange / ID token / domain blocked) | `auth.sso.login.failure` |
 | Successful SAML login | `auth.saml.login.success` |
-| Failed SAML login (assertion invalid / issuer / unsolicited / replay / domain blocked) | `auth.saml.login.failure` |
+| Failed SAML login (assertion invalid / issuer / unsolicited / replay / missing or unsafe email / domain blocked / inactive / address in another workspace) | `auth.saml.login.failure` |
 
 Login-failure rows for unknown emails are dropped — without an `organization_id` there is no tenant DB to route to. Failures for known users carry the email, IP (when the client is reachable), and a machine-readable `reason`. (The supplier-portal twin, `portal.login.failure`, deliberately omits the address — see the action table above.)
 
@@ -697,10 +697,36 @@ pinned to an explicit hardened posture (the library defaults are unsafe):
 - All IdP XML parsed with python3-saml's DTD/entity-hardened parser (no raw lxml
   → no XXE).
 
-Every rejection fails closed to one generic error + a PII-safe
-`auth.saml.login.failure` audit row (reason code only — the email is **omitted**,
-tighter than the OIDC `domain_blocked` precedent). The IdP owns MFA, so the app's
-MFA challenge is skipped (same as OIDC).
+Every rejection writes a PII-safe `auth.saml.login.failure` audit row (reason
+code only — the email is **omitted**, tighter than the OIDC `domain_blocked`
+precedent). The IdP owns MFA, so the app's MFA challenge is skipped (same as OIDC).
+
+**Every refusal lands on the SPA bridge, coded (decisions §359).** Once the
+RelayState has named the tenant, the ACS never answers a refusal as JSON at the
+API origin: it parks the refusal's code behind a one-time handoff code
+(`sso.create_saml_refusal_handoff` — same Redis prefix, TTL and `GETDEL`
+single use as a token handoff, and the record holds only the code and the
+slug), 303s to `/login/saml-callback?code=<once>`, and `/auth/saml/exchange`
+answers that code with the coded refusal and no token. The callback page states
+it in the reader's language (`api/codedRefusals.ts`) with "Back to sign in".
+
+| Audit `reason` | Coded refusal on the bridge | Status |
+|---|---|---|
+| `assertion_invalid`, `issuer_mismatch`, `unsolicited`, `replay`, `missing_email` | `saml_login_unverified` — "SAML login could not be verified." | 400 |
+| *(no row)* state without an AuthnRequest binding | `saml_login_unverified` | 400 |
+| *(no row)* SAML switched off / plan lost `sso` since `/login` | `saml_not_configured` | 400 |
+| `unsafe_email` | `sso_email_unusable` | 403 |
+| `domain_blocked` | `sso_email_domain_blocked` | 403 |
+| `inactive` | `sso_account_inactive` | 403 |
+| `sso_email_in_other_workspace` | `sso_email_in_other_workspace` (§291) | 403 |
+
+Every verification failure is **one** code, status and sentence, exactly as
+indistinguishable as the ACS's single JSON error was; only the audit row tells
+them apart. The identity refusals use the same codes and English the OIDC
+callback answers with (`api/refusals.py`), so the two protocols state them
+alike. A POST with no recoverable tenant — a malformed form, an unknown or
+spent RelayState, a tenant gone since `/login` — still answers 400 at the ACS:
+there is no workspace origin to send the browser to, and no row to scope.
 
 **Provider-discriminated matching.** JIT match is `(sso_provider,
 sso_provider_id)` then `(org, email)`. SAML uses `provider="saml"`,
@@ -2045,7 +2071,8 @@ same refusal. The callbacks turn it into:
   (`sso.create_saml_refusal_handoff`, same store, TTL and single use as a token
   handoff), and `POST /api/auth/saml/exchange` answers that code with the same
   coded `403` and no token — so the browser lands on the callback page rather
-  than on raw JSON at the ACS.
+  than on raw JSON at the ACS. Every other ACS refusal now takes the same route
+  (see [SAML SSO](#saml-sso), decisions §359).
 
 Both callback pages state it in the reader's language
 (`refusal.ssoEmailInOtherWorkspace`, through `api/codedRefusals.ts`): the
@@ -2074,8 +2101,8 @@ either.
 
 The asserted address is normalised (lower-cased, stripped) and then checked for
 **control characters** before anything is stored — `utils/emails.is_header_safe`,
-raising `UnsafeEmailAddress`, which both callbacks turn into their existing
-generic refusal (SAML `unsafe_email`, OIDC a 403 + a PII-free audit reason).
+raising `UnsafeEmailAddress`, which both callbacks turn into the coded 403
+`sso_email_unusable` with a PII-free audit reason `unsafe_email`.
 `strip()` already removed a trailing newline, but an interior one survived it,
 and `User.email` is both a login and the destination of every notification the
 app sends that person — a newline reaching an SMTP header is the

@@ -656,6 +656,14 @@ const BUILDERS: Record<string, Builder> = {
 	// on the callback page, deliberately with no link (`api/refusals.py`) — and
 	// a user-manager's create / rename onto a taken address.
 	sso_email_in_other_workspace: fixed('refusal.ssoEmailInOtherWorkspace'),
+	// The other SSO sign-in refusals, stated by the OIDC callback and the SAML
+	// bridge alike, and the SAML bridge's one sentence for every response it
+	// could not verify (`api/refusals.py`, decisions §359).
+	sso_account_inactive: fixed('refusal.ssoAccountInactive'),
+	sso_email_domain_blocked: fixed('refusal.ssoEmailDomainBlocked'),
+	sso_email_unusable: fixed('refusal.ssoEmailUnusable'),
+	saml_login_unverified: fixed('refusal.samlLoginUnverified'),
+	saml_not_configured: fixed('refusal.samlNotConfigured'),
 	email_in_this_workspace: fixed('refusal.emailInThisWorkspace'),
 	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
 	// The admin path's other-workspace budget is spent (`api/admin.py`).

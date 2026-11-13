@@ -5097,6 +5097,14 @@ export const messages = {
 	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Esta dirección de correo ya pertenece a una cuenta de otro espacio de trabajo, por lo que no puede iniciar sesión aquí. Inicie sesión en la página de su propio espacio de trabajo o pida al administrador de este espacio de trabajo que su proveedor de identidad use otra dirección.",
+	// The other SSO / SAML sign-in refusals (decisions §359): the identity refusals the
+	// OIDC callback and the SAML bridge both state, and the SAML bridge's one sentence for
+	// every response it could not verify (never more specific than that).
+	'refusal.ssoAccountInactive': "Esta cuenta ha sido desactivada. Póngase en contacto con su administrador.",
+	'refusal.ssoEmailDomainBlocked': "Su dominio de correo no tiene permitido iniciar sesión en este espacio de trabajo.",
+	'refusal.ssoEmailUnusable': "Su proveedor de identidad envió una dirección de correo que no se puede usar para iniciar sesión. Pida a su administrador que revise cómo el proveedor de identidad envía su dirección.",
+	'refusal.samlLoginUnverified': "No se pudo verificar su inicio de sesión SAML. Vuelva a intentarlo.",
+	'refusal.samlNotConfigured': "El inicio de sesión SAML no está configurado para este espacio de trabajo.",
 	'refusal.emailInThisWorkspace': "Ya existe un usuario con esta dirección de correo en este espacio de trabajo.",
 	'refusal.emailInOtherWorkspace': "Esta dirección de correo ya tiene una cuenta en otro espacio de trabajo. Una dirección solo puede pertenecer a un espacio de trabajo, así que use otra dirección para esta persona. Si ya no usa ese otro espacio de trabajo, su administrador puede cerrarlo, lo que libera la dirección.",
 	'refusal.emailCheckThrottled': "Demasiadas direcciones introducidas recientemente en este espacio de trabajo ya pertenecían a otros espacios de trabajo, así que añadir usuarios o cambiar su correo está en pausa durante un máximo de una hora. Vuelva a intentarlo más tarde.",
