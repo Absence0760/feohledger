@@ -53,7 +53,9 @@ class PaymentRunStatus(StrEnum):
     # A record-only tenant's run whose NACHA file has been handed to the
     # customer (`GET /runs/{id}/nacha`). A claim: the money may be moving at
     # the customer's bank, so nothing may execute, cancel or re-stage it. Exits
-    # are `/record-outside` (paid) and `/nacha/void` (the bank rejected it).
+    # are `/record-outside` (paid), `/nacha/void` (the bank rejected it; on a
+    # record-only tenant only, decisions §362), and `/nacha/verify` cancelling
+    # it when every bill in the file was paid in the ERP since the export.
     exported = "exported"
     executing = "executing"
     submitted = "submitted"

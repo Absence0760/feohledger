@@ -614,6 +614,11 @@ const BUILDERS: Record<string, Builder> = {
 	nacha_nothing_to_regenerate: fixed('refusal.nachaNothingToRegenerate'),
 	nacha_nothing_to_export: fixed('refusal.nachaNothingToExport'),
 	nacha_run_not_exported: fixed('refusal.nachaRunNotExported'),
+	// `run_nacha_void_refusal` on a tenant switched to processor mode since
+	// the export, and `run_nacha_verify_refusal` (decisions §362)
+	nacha_void_requires_record_only: fixed('refusal.nachaVoidRequiresRecordOnly'),
+	nacha_verify_not_exported: fixed('refusal.nachaVerifyNotExported'),
+	nacha_nothing_to_verify: fixed('refusal.nachaNothingToVerify'),
 	// `api/deps.py::plan_feature_refusal` — every plan-feature gate (decisions
 	// §258). `params.feature` is a `FEATURE_*` key; one this build does not
 	// know (a newer backend) falls back to the server's sentence.

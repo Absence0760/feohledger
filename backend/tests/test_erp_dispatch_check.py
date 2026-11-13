@@ -636,3 +636,257 @@ async def test_a_nacha_export_with_an_unreadable_bill_says_retry_and_commits_not
             await s.execute(select(PaymentRun.status).where(PaymentRun.id == run_id))
         ).scalar_one()
     assert run_status == "draft"  # nothing exported, nothing committed
+
+
+# ---------------------------------------------------------------------------
+# A NACHA file's bills: read concurrently, and re-read before upload (§362)
+# ---------------------------------------------------------------------------
+
+
+class SlowQbo(FakeQbo):
+    """A QuickBooks whose reads take a moment, counting how many overlap."""
+
+    def __init__(self, states: dict[str, ErpBillState] | None = None):
+        super().__init__(states)
+        self.in_flight = 0
+        self.peak = 0
+
+    async def bill_report(self, bill_id: str) -> ErpBillReport:
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        try:
+            # Yield so the other admitted reads start before this one ends:
+            # a stand-in for a network round trip, not a wait on a signal.
+            await asyncio.sleep(0.02)
+            return await super().bill_report(bill_id)
+        finally:
+            self.in_flight -= 1
+
+
+async def _nacha_run(realdb, bill_ids: list[str]) -> tuple[str, list[str]]:
+    """A record-only tenant connected to QuickBooks, with a draft run of one
+    ACH payment per bill, each to a vendor with usable bank details."""
+    from tests.test_nacha import NACHA_CFG, RDFI, _settings
+
+    info = realdb.info("a")
+    await _connect(realdb)
+    await _settings(realdb, info.org_id, {"mode": "record_only", "nacha": NACHA_CFG})
+    invoices = [await _posted_invoice(realdb, bill_id=b) for b in bill_ids]
+    async with realdb.sessionmaker("a")() as s:
+        for invoice_id in invoices:
+            invoice = await s.get(Invoice, uuid.UUID(invoice_id))
+            vendor = await s.get(Vendor, invoice.vendor_id)
+            vendor.status = "active"
+            vendor.bank_details = {"routing_number": RDFI, "account_number": "55501234"}
+        await s.commit()
+    return await _run(realdb, invoices), invoices
+
+
+async def _export(realdb, run_id: str, **params) -> httpx.Response:
+    from tests.test_nacha import _business_day
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        return await c.get(
+            f"/api/payments/runs/{run_id}/nacha",
+            params={"effective_date": _business_day(2).isoformat(), **params},
+        )
+
+
+async def _verify(realdb, run_id: str) -> httpx.Response:
+    async with realdb.client(key="a", role="ap_manager") as c:
+        return await c.post(f"/api/payments/runs/{run_id}/nacha/verify")
+
+
+def _entries(nacha_file: str) -> list[str]:
+    return [line for line in nacha_file.split("\r\n") if line.startswith("6")]
+
+
+async def _run_row(realdb, run_id: str) -> PaymentRun:
+    async with realdb.sessionmaker("a")() as s:
+        return await s.get(PaymentRun, uuid.UUID(run_id))
+
+
+async def _audit_actions(realdb, entity_id) -> list[str]:
+    from app.models.workflow import AuditLog
+
+    async with realdb.sessionmaker("a")() as s:
+        return list(
+            (
+                await s.execute(
+                    select(AuditLog.action).where(AuditLog.entity_id == uuid.UUID(str(entity_id)))
+                )
+            ).scalars()
+        )
+
+
+async def test_a_nacha_export_reads_its_bills_concurrently_within_the_bound(realdb, monkeypatch):
+    """Read one after another under the run and every invoice lock, a large
+    file held them for minutes. The reads now overlap — never more than
+    `FEOH_ERP_DISPATCH_CHECK_CONCURRENCY` at once — and every bill is still
+    read, and the file still carries every payment."""
+    monkeypatch.setattr(settings, "erp_dispatch_check_concurrency", 2)
+    run_id, _ = await _nacha_run(realdb, [f"81{i}" for i in range(5)])
+    qbo = SlowQbo()
+    with patch_adapter(qbo):
+        resp = await _export(realdb, run_id)
+    assert resp.status_code == 200, resp.text
+    assert sorted(qbo.reads) == [f"81{i}" for i in range(5)]
+    assert qbo.peak == 2
+    assert len(_entries(resp.text)) == 5
+
+
+async def test_concurrent_reads_still_refuse_the_one_bill_that_was_paid(realdb, monkeypatch):
+    """Overlapping reads change nothing about the verdicts: the paid bill
+    refuses the file naming ITS invoice, opens the blocking flag on it alone,
+    and nothing is exported."""
+    monkeypatch.setattr(settings, "erp_dispatch_check_concurrency", 3)
+    run_id, invoices = await _nacha_run(realdb, ["821", "822", "823", "824"])
+    qbo = SlowQbo({"823": ErpBillState.paid})
+    with patch_adapter(qbo):
+        resp = await _export(realdb, run_id)
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["params"]["reason"] == "erp_bill_not_open:paid"
+    async with realdb.sessionmaker("a")() as s:
+        paid_number = (await s.get(Invoice, uuid.UUID(invoices[2]))).invoice_number
+    assert detail["params"]["invoice_number"] == paid_number
+    assert qbo.peak <= 3
+    assert await _blocking(realdb, invoices[2]) == ["payment_reconciliation"]
+    for other in (invoices[0], invoices[1], invoices[3]):
+        assert await _blocking(realdb, other) == []
+    assert (await _run_row(realdb, run_id)).status == "draft"
+
+
+async def test_erp_bill_dispatch_refusals_keeps_item_order_and_the_single_verdicts(realdb):
+    """The batch is the single check over many items: same verdict per item,
+    in the order given, whatever order the reads finish in."""
+    await _connect(realdb)
+    invoices = [await _posted_invoice(realdb, bill_id=b) for b in ("831", "832", "833")]
+    info = realdb.info("a")
+    qbo = SlowQbo({"832": ErpBillState.deleted})
+    async with realdb.control_sessionmaker()() as cs:
+        org = await cs.get(Organization, info.org_id)
+    async with realdb.sessionmaker("a")() as s:
+        rows = [await s.get(Invoice, uuid.UUID(i)) for i in invoices]
+        with patch_adapter(qbo):
+            verdicts = await erp_status_sync.erp_bill_dispatch_refusals(
+                s, [(row, None) for row in rows], org=org
+            )
+        await s.commit()
+    assert verdicts == [None, "erp_bill_not_open:deleted", None]
+
+
+async def test_verify_before_upload_takes_out_a_bill_paid_since_the_export(realdb):
+    """Decisions §362. The export read every bill, but the money moves when a
+    person uploads the file — later. A bill paid in QuickBooks in between is
+    taken out of the run by "verify before upload": its payment fails with the
+    dispatcher's own reason, the blocking flag opens, the run keeps its claim,
+    and the regenerated file carries only what is still owed."""
+    run_id, invoices = await _nacha_run(realdb, ["841", "842"])
+    qbo = FakeQbo()
+    with patch_adapter(qbo):
+        first = await _export(realdb, run_id)
+        assert first.status_code == 200, first.text
+        assert len(_entries(first.text)) == 2
+
+        qbo.states["842"] = ErpBillState.paid  # a bookkeeper pays it in QuickBooks
+        resp = await _verify(realdb, run_id)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["result"] == "superseded"
+    assert body["status"] == "exported"
+    assert body["remaining"] == 1
+    assert [r["invoice_id"] for r in body["removed"]] == [invoices[1]]
+    assert body["removed"][0]["reason"] == "erp_bill_not_open:paid"
+    assert body["held"] == []
+
+    taken_out = await _payment(realdb, invoices[1])
+    assert taken_out.status == "failed"
+    assert taken_out.failure_reason == "erp_bill_not_open:paid"
+    assert (
+        classify_payment_failure(failure_reason=taken_out.failure_reason, provider_payment_id=None)
+        == RETRY_SAFE
+    )
+    assert (await _payment(realdb, invoices[0])).status == "pending"
+    assert await _blocking(realdb, invoices[1]) == ["payment_reconciliation"]
+    assert await _blocking(realdb, invoices[0]) == []
+    assert "payment.failed" in await _audit_actions(realdb, taken_out.id)
+
+    with patch_adapter(qbo):
+        regenerated = await _export(realdb, run_id, regenerate="true")
+    assert regenerated.status_code == 200, regenerated.text
+    assert len(_entries(regenerated.text)) == 1
+    assert regenerated.text.split("\r\n")[0][33] == "B"
+
+
+async def test_verify_before_upload_is_idempotent(realdb):
+    """A second verify re-reads only what is still in the file: with those
+    bills open it changes nothing — no payment moves, no second flag, no
+    second `payment.failed` — and records the check it made."""
+    run_id, invoices = await _nacha_run(realdb, ["851", "852"])
+    qbo = FakeQbo()
+    with patch_adapter(qbo):
+        assert (await _export(realdb, run_id)).status_code == 200
+        qbo.states["852"] = ErpBillState.partially_paid
+        first = await _verify(realdb, run_id)
+        second = await _verify(realdb, run_id)
+    assert first.status_code == 200, first.text
+    assert first.json()["result"] == "superseded"
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["result"] == "verified"
+    assert body["removed"] == [] and body["held"] == []
+    assert body["checked"] == 1 and body["remaining"] == 1
+    assert body["status"] == "exported"
+
+    assert (await _payment(realdb, invoices[0])).status == "pending"
+    taken_out = await _payment(realdb, invoices[1])
+    assert taken_out.status == "failed"
+    assert taken_out.failure_reason == "erp_bill_not_open:partially_paid"
+    assert await _blocking(realdb, invoices[1]) == ["payment_reconciliation"]  # one, not two
+    assert (await _audit_actions(realdb, taken_out.id)).count("payment.failed") == 1
+    assert (await _audit_actions(realdb, run_id)).count("payment_run.nacha_verified") == 2
+
+
+async def test_verify_with_every_bill_paid_cancels_the_run(realdb):
+    """Nothing of the file left to pay: the run is `cancelled` — a claim no
+    execute, retry or re-export reaches — never rolled back to draft."""
+    run_id, invoices = await _nacha_run(realdb, ["861"])
+    qbo = FakeQbo()
+    with patch_adapter(qbo):
+        assert (await _export(realdb, run_id)).status_code == 200
+        qbo.states["861"] = ErpBillState.paid
+        resp = await _verify(realdb, run_id)
+        again = await _verify(realdb, run_id)
+        regenerate = await _export(realdb, run_id, regenerate="true")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["result"] == "superseded"
+    assert resp.json()["status"] == "cancelled"
+    assert (await _run_row(realdb, run_id)).status == "cancelled"
+    assert again.status_code == 409, again.text
+    assert again.json()["detail"]["code"] == "nacha_verify_not_exported"
+    assert regenerate.status_code == 409, regenerate.text
+    async with realdb.client(key="a", role="ap_manager") as c:
+        execute = await c.post(f"/api/payments/runs/{run_id}/execute")
+    assert execute.status_code == 409, execute.text
+
+
+async def test_verify_takes_nothing_out_on_a_failed_read(realdb):
+    """An Intuit outage says nothing about any bill: every payment is listed
+    as held, none is taken out, and the run is unchanged."""
+    run_id, invoices = await _nacha_run(realdb, ["871", "872"])
+    qbo = FakeQbo()
+    with patch_adapter(qbo):
+        assert (await _export(realdb, run_id)).status_code == 200
+        qbo.fail = httpx.ConnectError("QuickBooks unreachable")
+        resp = await _verify(realdb, run_id)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["result"] == "held"
+    assert body["removed"] == []
+    assert {h["reason"] for h in body["held"]} == {"erp_bill_unverified"}
+    assert len(body["held"]) == 2
+    for invoice_id in invoices:
+        assert (await _payment(realdb, invoice_id)).status == "pending"
+        assert await _blocking(realdb, invoice_id) == []
+    assert (await _run_row(realdb, run_id)).status == "exported"

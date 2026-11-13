@@ -42,6 +42,7 @@ import asyncio
 import logging
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
@@ -1125,7 +1126,81 @@ async def erp_bill_dispatch_refusal(
       outside, or re-post) has an owner.
 
     Idempotent: a read, plus a de-duplicated exception. Never commits.
+    :func:`erp_bill_dispatch_refusals` is the same check over many invoices
+    with the reads made concurrently.
     """
+    pending = await _bill_to_read(db, invoice=invoice, org=org, payment=payment)
+    if not isinstance(pending, _BillRead):
+        return pending
+    report = await _read_bill(pending, org.id)
+    return await _verdict_from_report(db, pending, report, org_id=org.id)
+
+
+async def erp_bill_dispatch_refusals(
+    db: AsyncSession,
+    items: Sequence[tuple[Invoice, Payment | None]],
+    *,
+    org: Organization,
+    concurrency: int | None = None,
+) -> list[str | None]:
+    """:func:`erp_bill_dispatch_refusal` for each ``(invoice, payment)`` of
+    ``items``, in order — the verdicts are the same; only the reads overlap.
+
+    For a caller holding MANY invoice locks at once (the NACHA export and its
+    verify step, decisions §362): read one after another, a file of 200 bills
+    held the run and every invoice lock for minutes. The database work — what
+    to read, and the exception a verdict opens — stays sequential on the one
+    session (an ``AsyncSession`` is not safe to share between tasks); only the
+    ERP reads run together, at most ``concurrency`` at a time
+    (``FEOH_ERP_DISPATCH_CHECK_CONCURRENCY``), each still bounded by
+    ``FEOH_ERP_DISPATCH_CHECK_TIMEOUT_SECONDS``. The org-wide "unreachable"
+    hold is checked as each read starts, so a connection-level failure stops
+    the reads not yet started; the ones already in flight finish or time out.
+    """
+    bound = max(1, int(concurrency or settings.erp_dispatch_check_concurrency))
+    staged = [
+        await _bill_to_read(db, invoice=invoice, org=org, payment=payment)
+        for invoice, payment in items
+    ]
+    gate = asyncio.Semaphore(bound)
+
+    async def _one(item: _BillRead) -> ErpBillReport | None:
+        async with gate:
+            return await _read_bill(item, org.id)
+
+    reads = [_one(x) for x in staged if isinstance(x, _BillRead)]
+    reports = iter(await asyncio.gather(*reads))
+    verdicts: list[str | None] = []
+    for x in staged:
+        if isinstance(x, _BillRead):
+            verdicts.append(await _verdict_from_report(db, x, next(reports), org_id=org.id))
+        else:
+            verdicts.append(x)
+    return verdicts
+
+
+@dataclass
+class _BillRead:
+    """A bill :func:`_bill_to_read` decided must be read live."""
+
+    invoice: Invoice
+    payment: Payment | None
+    adapter: ErpAdapter
+    erp_config: dict
+    bill_id: str
+    state: dict
+
+
+async def _bill_to_read(
+    db: AsyncSession,
+    *,
+    invoice: Invoice,
+    org: Organization,
+    payment: Payment | None,
+) -> _BillRead | str | None:
+    """The database half before the read: no bill to check (``None``), a
+    verdict reached without reading (a refusal string — opening the unlinked
+    exception here), or the :class:`_BillRead` to read."""
     from app.services.erp_link_realm import connection_realm
 
     erp_config = (org.settings or {}).get("erp")
@@ -1164,24 +1239,52 @@ async def erp_bill_dispatch_refusal(
         )
         return f"{ERP_BILL_UNLINKED}:{unlinked}"
     adapter = _adapter_or_none(erp_config)
-    if adapter is None or _org_unreachable(org.id):
+    if adapter is None:
         return ERP_BILL_UNVERIFIED
-    subject = payment.id if payment is not None else invoice.id
+    return _BillRead(
+        invoice=invoice,
+        payment=payment,
+        adapter=adapter,
+        erp_config=erp_config,
+        bill_id=bill_id,
+        state=state,
+    )
+
+
+async def _read_bill(item: _BillRead, org_id: uuid.UUID) -> ErpBillReport | None:
+    """The live read, with no database access (so several can run at once);
+    ``None`` when the bill cannot be vouched for right now."""
+    if _org_unreachable(org_id):
+        return None
+    subject = item.payment.id if item.payment is not None else item.invoice.id
     try:
-        report = await _bounded_bill_report(adapter, bill_id)
+        return await _bounded_bill_report(item.adapter, item.bill_id)
     except Exception as exc:  # noqa: BLE001 — any failure to read is "unknown", never "open"
         if _connection_level(exc):
-            _mark_unreachable(org.id)
+            _mark_unreachable(org_id)
         logger.warning(
             "[erp-dispatch-check] bill for %s unverified: %s", subject, exc.__class__.__name__
         )
+        return None
+
+
+async def _verdict_from_report(
+    db: AsyncSession,
+    item: _BillRead,
+    report: ErpBillReport | None,
+    *,
+    org_id: uuid.UUID,
+) -> str | None:
+    """The database half after the read: the verdict, opening the blocking
+    ``payment_reconciliation`` for a bill no longer open."""
+    if report is None:
         return ERP_BILL_UNVERIFIED
     if report.state is ErpBillState.open and not report.reduced_outside:
         return None
     if (
         report.state in (ErpBillState.paid, ErpBillState.partially_paid)
         and not report.reduced_outside
-        and state.get("erp_payment_voids_pending")
+        and item.state.get("erp_payment_voids_pending")
     ):
         # Paid only by our own write-back, whose void a FeohLedger void has
         # recorded and the sweep has not yet finished: nothing outside us paid
@@ -1190,8 +1293,8 @@ async def erp_bill_dispatch_refusal(
         return ERP_BILL_VOID_PENDING
     await open_erp_reconciliation_exception(
         db,
-        invoice,
-        org_id=org.id,
+        item.invoice,
+        org_id=org_id,
         exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
         finding=exception_finding(
             "erp_dispatch_stopped_"
@@ -1204,10 +1307,10 @@ async def erp_bill_dispatch_refusal(
         ),
         erp_report={
             "kind": ERP_REPORT_DISPATCH_STOPPED,
-            "erp_type": erp_config.get("type"),
-            "erp_document_id": bill_id,
+            "erp_type": item.erp_config.get("type"),
+            "erp_document_id": item.bill_id,
             "bill_state": report.state.value,
-            "payment_id": str(payment.id) if payment is not None else None,
+            "payment_id": str(item.payment.id) if item.payment is not None else None,
         },
     )
     return f"{ERP_BILL_NOT_OPEN}:{report.state.value}"

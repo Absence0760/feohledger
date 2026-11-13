@@ -275,6 +275,8 @@ CASES = [
     # the money moving — so it gates on `payment.execute`, not on recording.
     ("/api/payments/runs/{run_id}/nacha", "GET", _EXECUTE),
     ("/api/payments/runs/{run_id}/nacha/void", "POST", _EXECUTE),
+    # Verify before upload (decisions §362): the step before the money moves.
+    ("/api/payments/runs/{run_id}/nacha/verify", "POST", _EXECUTE),
     # --- vendor.manage: create / edit / verify / reject / delete a vendor, and
     # the bulk-import paths that do the same thing at volume. ---
     ("/api/vendors", "POST", _VENDOR_MANAGE),

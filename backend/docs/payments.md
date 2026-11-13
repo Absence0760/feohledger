@@ -2247,7 +2247,13 @@ dispatch step:
   `payment_runs.nacha_export_count`, migration 0106), so the bank's
   duplicate-file check can tell them apart. If the bank rejected the file,
   `POST /runs/{id}/nacha/void {reason}` (`payment.execute`, audited
-  `payment_run.nacha_export_voided`) returns the run to `draft`.
+  `payment_run.nacha_export_voided`) returns the run to `draft` — **on a
+  record-only tenant only** (409 `nacha_void_requires_record_only`, decisions
+  §362). On a tenant switched to processor mode since the export, the released
+  run could be executed, or cancelled and restaged, and the rail would pay the
+  suppliers the bank's file already paid; refusing the void keeps the claim
+  that all three doors refuse. The exits there are recording the run as paid,
+  or an admin switching back to record-only to release it.
 - **Every dispatch-time check runs** — `payment_runs.dispatch_preflight`, the
   same function `/execute` calls before each payment: still payable, no
   payment-blocking exception raised since staging (a BEC bank-detail swap's
@@ -2255,7 +2261,12 @@ dispatch step:
   vendor still active, no live card, applied credits still pairing, and the
   staged amount still exactly what the invoice owes on the effective date.
   A failure refuses the file as `nacha_payment_not_payable` with the
-  dispatcher's reason code.
+  dispatcher's reason code. The live ERP-bill read (decisions §296) comes last,
+  once every local check (here and below) has passed, and reads the file's
+  bills **concurrently** — at most `FEOH_ERP_DISPATCH_CHECK_CONCURRENCY` (4) at
+  once, each within the read timeout — because the run and every invoice lock
+  are held across the reads (`erp_status_sync.erp_bill_dispatch_refusals`;
+  the database work around the reads stays sequential on the one session).
 - Maker-checker and CFO sign-off apply, as for `/execute`.
 - The originator comes from `settings.payments.nacha`
   `{company_name ≤16, company_id (10 chars, as the bank assigned it — usually
@@ -2281,6 +2292,36 @@ dispatch step:
   `payment_controls.run_nacha_void_refusal` as `actions.nacha_void`), which the
   run dialog's bank-file panel reads. The per-payment checks above stay in the
   endpoint, so a `null` verdict can still meet a refusal that names an invoice.
+
+**Verify before upload** — `POST /api/payments/runs/{id}/nacha/verify`
+(`payment.execute`, decisions §362). The export reads each bill when it builds
+the file, but the money moves when a person uploads it, possibly days later.
+Verify re-reads the ERP bill of every payment still `pending` in an `exported`
+run, under the run and invoice locks, concurrently as above:
+
+- every bill still open (or none posted to an ERP that reports payments back,
+  `erp_checked: false`) → `result: "verified"`, nothing changes;
+- a bill no longer open → that payment is taken out: `failed` with
+  `erp_bill_not_open:<state>` (what the rail dispatcher records for the same
+  verdict) and the blocking `payment_reconciliation` opened → `result:
+  "superseded"`: the downloaded file must not be uploaded. With payments
+  left the run stays `exported` and `regenerate=true` writes a file of only
+  those (next modifier); with none left the run is `cancelled`. The claim is
+  never released, so verify is available on a processor tenant too;
+- a read that fails → the payment is listed under `held` and left in, `result:
+  "held"` when nothing was taken out: verify again.
+
+Gate: `payment_controls.run_nacha_verify_refusal` (`nacha_verify_not_exported`,
+`nacha_nothing_to_verify`), shipped as `actions.nacha_verify`. No maker-checker
+or CFO gate — it only takes money out of the file. Idempotent: a payment taken
+out is no longer `pending`, so a second verify reads only what is left; the
+exception is de-duplicated. Each call audits `payment_run.nacha_verified`
+(result, counts, ids and reason codes, the file-ID modifier checked), and each
+payment taken out `payment.failed` (`source: "nacha_verify"`). The run dialog's
+bank-file panel offers **Verify before upload** from the verdict and keeps the
+result on screen. Not checked again: the local facts `dispatch_preflight` read
+at export — they cannot change the file already on disk, only a bill paid
+elsewhere makes it pay twice.
 
 Once the bank has taken the file, `POST /api/payments/runs/{id}/record-outside`
 `{reference, paid_on}` records every pending payment of the `exported` (or
@@ -2424,7 +2465,8 @@ minted virtual card is spendable, so it is a payment by another door.
 | `POST` | `/api/payments/record-outside` | Record one invoice as paid outside FeohLedger (`payment.record_external`). 201 new / 200 idempotent replay. See § Recording a payment made outside FeohLedger. |
 | `POST` | `/api/payments/runs/{id}/record-outside` | Record a whole `exported` (or `draft`) run as paid through the customer's bank (`payment.record_external`). All-or-nothing; maker-checker + CFO sign-off; refuses a changed amount. |
 | `GET` | `/api/payments/runs/{id}/nacha` | NACHA ACH credit file for a run (`payment.execute`, record-only tenants only). Claims the run (`draft → exported`); a second file needs `regenerate=true`. Runs `dispatch_preflight`. Audited `payment_run.nacha_exported`. See § The bank file. |
-| `POST` | `/api/payments/runs/{id}/nacha/void` | The bank rejected the file: `exported → draft`, required `{reason}`, `payment.execute`, audited `payment_run.nacha_export_voided`. |
+| `POST` | `/api/payments/runs/{id}/nacha/void` | The bank rejected the file: `exported → draft`, required `{reason}`, `payment.execute`, record-only tenants only (`nacha_void_requires_record_only`, §362), audited `payment_run.nacha_export_voided`. |
+| `POST` | `/api/payments/runs/{id}/nacha/verify` | Verify before upload: re-read the file's ERP bills; a bill no longer open is taken out of the run (`failed`, blocking `payment_reconciliation`), the run stays `exported` (or `cancelled` with nothing left). `payment.execute`, idempotent, audited `payment_run.nacha_verified`. See § The bank file. |
 
 **Query parameters for `GET /api/payments`:**
 

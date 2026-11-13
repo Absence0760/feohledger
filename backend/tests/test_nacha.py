@@ -444,7 +444,9 @@ async def test_an_export_claims_the_run_until_recorded_or_voided(realdb):
     assert execute.status_code == 409, execute.text
     assert await _run_status(realdb, run_id) == "exported"
 
-    # The bank rejected it: the audited exit back to draft.
+    # The bank rejected it: the audited exit back to draft — on a tenant that
+    # records payments, as when the file was made (decisions §362).
+    await _settings(realdb, info.org_id, {"mode": "record_only", "nacha": NACHA_CFG})
     async with realdb.client(key="a", role="admin") as c:
         blank = await c.post(f"/api/payments/runs/{run_id}/nacha/void", json={"reason": " "})
         voided = await c.post(
@@ -462,6 +464,61 @@ async def test_an_export_claims_the_run_until_recorded_or_voided(realdb):
         )
     assert actions.count("payment_run.nacha_exported") == 2
     assert "payment_run.nacha_export_voided" in actions
+
+
+@pytest.mark.asyncio
+async def test_a_file_exported_before_a_switch_to_processor_mode_keeps_its_claim(realdb):
+    """Decisions §362. A tenant exports a file, its bank takes it, and the
+    tenant then switches `payments.mode` to `processor`. "Bank rejected the
+    file" used to release the run to draft there, and one Execute — or a
+    cancel and a restage — paid every supplier in the file a second time. The
+    void is refused while the tenant sends payments, so the `exported` claim
+    that execute, cancel and re-staging refuse stays in place."""
+    info = realdb.info("a")
+    await _settings(realdb, info.org_id, {"mode": "record_only", "nacha": NACHA_CFG})
+    run_id, inv_id = await _seed_run(realdb, initiated_by=info.users["ap_manager"])
+    async with realdb.client(key="a", role="admin") as c:
+        assert (await c.get(f"/api/payments/runs/{run_id}/nacha")).status_code == 200
+
+    await _settings(realdb, info.org_id, {"provider": "mock", "nacha": NACHA_CFG})
+    async with realdb.client(key="a", role="admin") as c:
+        detail = (await c.get(f"/api/payments/runs/{run_id}")).json()
+        void = await c.post(
+            f"/api/payments/runs/{run_id}/nacha/void", json={"reason": "the bank rejected it"}
+        )
+        execute = await c.post(f"/api/payments/runs/{run_id}/execute")
+        cancel = await c.post(f"/api/payments/runs/{run_id}/cancel")
+        restage = await c.post(
+            "/api/payments/runs",
+            json={"items": [{"invoice_id": str(inv_id), "method": "ach"}]},
+        )
+    assert void.status_code == 409, void.text
+    assert void.json()["detail"]["code"] == "nacha_void_requires_record_only"
+    assert detail["actions"]["nacha_void"]["code"] == "nacha_void_requires_record_only"
+    assert execute.status_code == 409, execute.text
+    assert cancel.status_code == 409, cancel.text
+    assert restage.status_code == 409, restage.text  # the invoice still has its live payment
+    assert await _run_status(realdb, run_id) == "exported"
+    async with realdb.sessionmaker("a")() as s:
+        payments = (
+            (await s.execute(select(Payment).where(Payment.invoice_id == inv_id))).scalars().all()
+        )
+        actions = (
+            (await s.execute(select(AuditLog.action).where(AuditLog.entity_id == run_id)))
+            .scalars()
+            .all()
+        )
+    assert [p.status for p in payments] == ["pending"]  # nothing executed, nothing restaged
+    assert "payment_run.nacha_export_voided" not in actions
+
+    # The exit for a file the bank really rejected: back to record-only first.
+    await _settings(realdb, info.org_id, {"mode": "record_only", "nacha": NACHA_CFG})
+    async with realdb.client(key="a", role="admin") as c:
+        voided = await c.post(
+            f"/api/payments/runs/{run_id}/nacha/void", json={"reason": "the bank rejected it"}
+        )
+    assert voided.status_code == 200, voided.text
+    assert await _run_status(realdb, run_id) == "draft"
 
 
 @pytest.mark.asyncio

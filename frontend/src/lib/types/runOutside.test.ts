@@ -5,6 +5,7 @@ import {
 	BANK_FILE_DOWNLOAD_HIDDEN,
 	BANK_FILE_REGENERATE_HIDDEN,
 	BANK_FILE_REJECT_HIDDEN,
+	BANK_FILE_VERIFY_HIDDEN,
 	RUN_RECORD_HIDDEN,
 	isRunControlOffered
 } from './runOutside';
@@ -25,6 +26,7 @@ const HIDDEN_SETS: [string, readonly string[]][] = [
 	['download', BANK_FILE_DOWNLOAD_HIDDEN],
 	['regenerate', BANK_FILE_REGENERATE_HIDDEN],
 	['reject', BANK_FILE_REJECT_HIDDEN],
+	['verify', BANK_FILE_VERIFY_HIDDEN],
 	['record', RUN_RECORD_HIDDEN]
 ];
 
@@ -57,6 +59,17 @@ describe('isRunControlOffered', () => {
 		for (const [, hidden] of HIDDEN_SETS) {
 			expect(isRunControlOffered({ code, message: 'x' }, hidden)).toBe(true);
 		}
+	});
+
+	it('“bank rejected the file” stays shown, disabled, on a tenant now in processor mode', () => {
+		// The reason is the reader's next step (record the run, or an admin
+		// switches back to record-only), so it is stated, not hidden (§362).
+		expect(
+			isRunControlOffered(
+				{ code: 'nacha_void_requires_record_only', message: 'x' },
+				BANK_FILE_REJECT_HIDDEN
+			)
+		).toBe(true);
 	});
 
 	it('the first-file download is hidden once the run’s file is out', () => {
