@@ -1102,38 +1102,64 @@ D365_VENDOR_FIXTURES: list[dict] = [
         "id": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
         "number": "V0001",
         "displayName": "Fake BC Vendor A",
+        "paymentTermsId": "6a4f1d2e-0000-0000-0000-000000000030",
     },
 ]
+
+# BC `paymentTerms`. A vendor names its term by `paymentTermsId` (a GUID); the
+# code is only on the term, reached through the vendor's `paymentTerm`
+# navigation (`$expand=paymentTerm`).
+D365_PAYMENT_TERMS: dict[str, dict] = {
+    "6a4f1d2e-0000-0000-0000-000000000030": {
+        "id": "6a4f1d2e-0000-0000-0000-000000000030",
+        "code": "30 DAYS",
+        "displayName": "Net 30 days",
+        "dueDateCalculation": "30D",
+    },
+}
 
 
 @d365.get("/{environment}/api/v2.0/companies({company_id})/vendors")
 async def d365_list_vendors(request: Request, environment: str, company_id: str) -> dict:
     _require_d365_auth(request)
-    return {"value": copy.deepcopy(D365_VENDOR_FIXTURES)}
+    rows = copy.deepcopy(D365_VENDOR_FIXTURES)
+    if "paymentTerm" in request.query_params.get("$expand", ""):
+        for row in rows:
+            row["paymentTerm"] = copy.deepcopy(D365_PAYMENT_TERMS.get(row.get("paymentTermsId")))
+    return {"value": rows}
 
 
-_D365_EXTERNAL_DOC_FILTER = re.compile(r"externalDocumentNumber\s+eq\s+'([^']*)'", re.IGNORECASE)
+# The pre-create lookup's `$filter`: `vendorId eq <guid> and vendorInvoiceNumber
+# eq '<number>'` (a quote in the number doubled, OData's escape). API v2.0's
+# purchaseInvoice has no `externalDocumentNumber` — that is a salesInvoice
+# field — so, like BC, a filter on it is not supported here.
+_D365_VENDOR_INVOICE_FILTER = re.compile(
+    r"vendorId\s+eq\s+([0-9a-fA-F-]{36})\s+and\s+vendorInvoiceNumber\s+eq\s+'((?:[^']|'')*)'",
+    re.IGNORECASE,
+)
 
 
 @d365.get("/{environment}/api/v2.0/companies({company_id})/purchaseInvoices")
 async def d365_list_purchase_invoices(
     request: Request, environment: str, company_id: str
 ) -> dict:
-    """Collection query — only supports the ``externalDocumentNumber eq '...'``
-    ``$filter`` shape our own adapter sends. Backs the pre-create idempotency
-    lookup (issue #143): a retried push after a lost response finds the
-    already-created invoice here instead of creating a second one via POST."""
+    """Collection query — only supports the ``vendorId eq <id> and
+    vendorInvoiceNumber eq '...'`` ``$filter`` shape our own adapter sends.
+    Backs the pre-create idempotency lookup (issue #143): a retried push after
+    a lost response finds the already-created invoice here instead of creating
+    a second one via POST. Any other filter is a 400, as BC answers a filter
+    on a field the entity does not have."""
     _require_d365_auth(request)
     filter_expr = request.query_params.get("$filter", "")
-    values: list[dict] = []
-    match = _D365_EXTERNAL_DOC_FILTER.match(filter_expr.strip())
-    if match:
-        external_doc_number = match.group(1)
-        values = [
-            rec
-            for rec in STATE["d365_invoices"].values()
-            if rec.get("externalDocumentNumber") == external_doc_number
-        ]
+    match = _D365_VENDOR_INVOICE_FILTER.fullmatch(filter_expr.strip())
+    if not match:
+        raise _d365_error(400, "BadRequest", "Could not find a property named in the filter.")
+    vendor_id, number = match.group(1), match.group(2).replace("''", "'")
+    values = [
+        rec
+        for rec in STATE["d365_invoices"].values()
+        if rec.get("vendorId") == vendor_id and rec.get("vendorInvoiceNumber") == number
+    ]
     return {"value": [copy.deepcopy(v) for v in values]}
 
 
@@ -1165,8 +1191,8 @@ async def d365_create_purchase_invoice(
         **totals,
         "vendorId": vendor["id"],
         "vendorNumber": vendor["number"],
-        "vendorInvoiceNumber": body.get("vendorInvoiceNumber"),
-        "externalDocumentNumber": body.get("externalDocumentNumber"),
+        # `Vendor Invoice No.` is a Code[35] field: BC stores it upper-cased.
+        "vendorInvoiceNumber": str(body.get("vendorInvoiceNumber") or "").upper(),
         "invoiceDate": body.get("invoiceDate"),
         "dueDate": body.get("dueDate"),
         "currencyCode": body.get("currencyCode"),
@@ -1187,6 +1213,12 @@ async def d365_post_purchase_invoice(
     if record.get("status") != "Draft":
         # Like BC: only an unposted invoice can be posted.
         raise _d365_error(400, "Application_DialogException", "The invoice is already posted.")
+    extra = D365_EDITED_BEFORE_POST_COMPANIES.get(company_id)
+    if extra is not None:
+        # A BC user added a line to the draft after the adapter checked its
+        # total and before the post ran (the BC block at the end).
+        for key in ("totalAmountExcludingTax", "totalAmountIncludingTax"):
+            record[key] = float(Decimal(str(record[key])) + extra)
     record["status"] = "Open"  # posted/finalized → Open (unpaid)
     # Like BC: any change to the record moves its etag, so a DELETE carrying
     # the draft's etag is refused once the invoice has been posted.
@@ -3562,6 +3594,12 @@ def _d365_check_invoice_lines(lines: list[dict]) -> None:
 # untaxed (total = the lines).
 D365_VAT_COMPANIES: dict[str, Decimal] = {"fake-vat-co": Decimal("20")}
 
+# A BC company whose staff edit purchase drafts: posting a draft here first
+# adds this much to it, as a line a BC user added between the adapter's total
+# check and its `Microsoft.NAV.post`. Keyed by company like the VAT one, so a
+# spec opts in by `company_id` without touching shared state.
+D365_EDITED_BEFORE_POST_COMPANIES: dict[str, Decimal] = {"fake-edit-co": Decimal("10.00")}
+
 
 def _d365_invoice_totals(raw_body: bytes, company_id: str) -> dict:
     """`totalAmountExcludingTax` / `totalTaxAmount` / `totalAmountIncludingTax`
@@ -3609,6 +3647,32 @@ d365_sync = APIRouter(prefix="/d365")
 async def d365_list_accounts(request: Request, environment: str, company_id: str) -> dict:
     _require_d365_auth(request)
     return _d365_page(request, D365_ACCOUNT_FIXTURES)
+
+
+@d365_sync.get("/{environment}/api/v2.0/companies({company_id})/accounts({account_id})")
+async def d365_get_account(
+    request: Request, environment: str, company_id: str, account_id: str
+) -> dict:
+    """One account by id, as the adapter reads it back to code a refused post
+    (`blocked`, `directPosting`). Unknown → 404, like BC."""
+    _require_d365_auth(request)
+    account = next((a for a in D365_ACCOUNT_FIXTURES if a["id"] == account_id), None)
+    if account is None:
+        raise _d365_error(404, "BadRequest_NotFound", f"No account with id {account_id}.")
+    return copy.deepcopy(account)
+
+
+@d365_sync.get("/{environment}/api/v2.0/companies({company_id})/vendors({vendor_id})")
+async def d365_get_vendor(
+    request: Request, environment: str, company_id: str, vendor_id: str
+) -> dict:
+    """One vendor by id, as the adapter reads it back to code a refused post
+    (`blocked`). Unknown → 404, like BC."""
+    _require_d365_auth(request)
+    vendor = next((v for v in D365_VENDOR_FIXTURES if v["id"] == vendor_id), None)
+    if vendor is None:
+        raise _d365_error(404, "BadRequest_NotFound", f"No vendor with id {vendor_id}.")
+    return copy.deepcopy(vendor)
 
 
 @d365_sync.get("/{environment}/api/v2.0/companies({company_id})/purchaseOrders")

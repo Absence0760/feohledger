@@ -19105,3 +19105,102 @@ registration was dropped: §385 had already added the code to
 Tests: `backend/tests/test_erp_sage_accounting_adapter.py`,
 `frontend/tests-e2e/erp/sage-accounting.spec.ts` (lockdown → `period_closed`,
 Start → `purchases_not_permitted`), `frontend/src/lib/api/erpRefusals.test.ts`.
+
+## 391. Business Central posts on its own duplicate key, reprices only its own VAT draft, and reads the posted total back (issue #655 BC, drafted 2026-10-23, landed 2026-11-14)
+
+**Context.** The 2026-10-23 docs-versus-code audit of
+`erp_adapters/dynamics_365_bc.py` found the adapter would fail its first live
+push: the pre-create idempotency lookup filtered `purchaseInvoices` on
+`externalDocumentNumber`, which API v2.0's purchaseInvoice does not have (it
+is a salesInvoice field;
+https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/api-reference/v2.0/resources/dynamics_purchaseinvoice).
+Three `docs/followups.md` entries were open against the same adapter: a
+VAT-registered company could not post at all, a draft edited in BC between our
+total check and our post was booked unchecked, and the vendor sync stored the
+`paymentTermsId` GUID as the terms text. BC's `blocked` / `directPosting` were
+not read as inactive. The fix was drafted on `fix/erp-bc-netsuite` and ported
+onto main after #670, which had since introduced `tax_not_itemised` and
+`posted_total_mismatch` as shared codes.
+
+**Decision.**
+- **The lookup key is BC's own duplicate key**: `vendorId` and
+  `vendorInvoiceNumber`, upper-cased (it is a `Code[35]` field) with a quote
+  doubled. More than one hit refuses `duplicate_document_number`; an invoice
+  number over 35 characters refuses `doc_number_too_long` before any call.
+  `company_id` and `vendor_erp_id` must be GUIDs, since both are spliced into a
+  URL or a `$filter`.
+- **What the lookup finds is never deleted, so never repriced.** The new key
+  also catches the same bill keyed by hand in BC. A found draft at the
+  approved total is posted; at any other total it is refused
+  `posted_total_mismatch` and left in BC with the message saying so. The
+  drafted branch repriced a found gross draft taxed on top (a DELETE first);
+  the port does not, because it cannot tell our lost-response draft from a BC
+  user's; for the same reason a coded post refusal (`period_closed`, say) of
+  a found draft leaves it in BC. The cost: a VAT-company push whose create
+  response, or the read after it, was lost needs its draft removed in BC
+  before the retry. Accepted, because the alternative deletes a person's work
+  silently; the failed read names the draft so the push records it as an
+  orphan, and recognising that recorded id as ours is a follow-up.
+- **A found `Paid` invoice is refused, not reported posted**
+  (`existing_invoice_not_open`). With the new key it may be the same bill
+  keyed and paid by hand in BC; success would move it to our payment run and
+  pay it twice. A found `Open` one at the approved total is the idempotent
+  success it always was. A lookup BC answers 200 with no readable collection
+  is a retryable failure, never a miss.
+- **A VAT company gets one net reprice of a draft we created.** When the gross
+  draft's `totalAmountExcludingTax` is the approved amount and BC added
+  non-zero tax (`pricesIncludeTax` false), that draft is deleted (real etag,
+  never `*`) and one is created at each line's net from
+  `bill_allocation.allocate_bill_lines`. It goes through the same total check
+  and is never repriced again. **Reconciling with #670:** `tax_not_itemised`
+  keeps #670's meaning — the invoice gives no exact per-line tax, so a split
+  would be invented — and BC raises it only in the one case that matters for
+  BC: a taxed company and several tax-inclusive lines with header-only tax. An
+  untaxed BC company still posts those lines at their gross, which is exact.
+  `posted_total_mismatch` keeps its base meaning (the ERP's own total differs
+  from the approved one) for every BC outcome: a rate other than the
+  supplier's, a draft edited in BC, an untaxed invoice that BC taxes. No new
+  code was minted for either.
+- **The posted invoice is read back** at the same id (BC carries a draft's id
+  to the posted invoice in the API). A different total is
+  `posted_total_mismatch` with the posted invoice left for an accountant's
+  corrective credit memo; a failed read is retryable, since the retry's
+  lookup finds the posted invoice and checks it.
+- **Refusals are coded from facts** (§285's rule): vendor blocked `All` or
+  gone → `vendor_inactive`; an account blocked, not direct-posting or gone →
+  `account_inactive` with our codes; BC's allowed-posting-dates dialog →
+  `period_closed`. A refused create is `not_posted`; a coded post refusal
+  deletes the draft first.
+- **Listings read inactive as inactive.** A vendor `blocked` `Payment` or
+  `All` is `active=False` (a vendor BC will not pay is not one our runs pay);
+  a Posting account with `directPosting: false` is `active=False`. Payment
+  terms are the expanded `paymentTerm.code`, never the GUID. `Corrective`
+  status maps to `unknown`, not `cancelled`: it is a live document BC made by
+  cancelling a credit memo, never one we pushed.
+
+**Left open.** BC purchase-approval workflows (an invoice left `In Review`,
+refused `existing_invoice_not_open`) need a product decision — submit for
+approval and poll, or support only companies without workflows — and stay in
+`docs/followups.md`. NetSuite's N1–N5 from the same branch are a separate,
+unstarted lane. Nothing here has run against a live BC tenant (#654).
+
+**Rejected:**
+- *Keeping `externalDocumentNumber`.* The filter is refused by BC on every
+  push.
+- *Pro-rating a header-only tax across tax-inclusive lines* to get a net per
+  line. It invents a split the supplier never stated (`erp_adapters/bill_allocation.py`).
+- *Repricing again after a second mismatch.* There is no rate to converge to;
+  it loops.
+- *Deleting a posted invoice whose total moved.* Reversing a posted document
+  is an accountant's corrective credit memo in BC.
+
+Tests: `tests/test_erp_adapter_idempotency.py` (the lookup filter, several
+hits, an unreadable lookup, the GUID and length preflights, the VAT reprice
+and its refusals, a found taxed draft left not repriced, a found Paid invoice
+refused, a found draft's coded post refusal left in BC, the post read-back, coded create and post
+refusals, `Corrective` → unknown); `tests/test_erp_adapter_money_exact.py`;
+`tests/test_erp_vendor_sync_adapter.py` (terms code, blocked vendor);
+`tests/test_erp_gl_sync.py` (`directPosting`);
+`tests/test_erp_base_url_overrides.py`; `tests/test_erp_adapter_error_pii.py`;
+`frontend/tests-e2e/erp/dynamics.spec.ts` (VAT net post, edited-draft
+refusal, terms code, against fake-erp).
