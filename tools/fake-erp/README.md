@@ -292,6 +292,15 @@ otherwise). Point the backend at it with
   "date"?}` (a person pays the bill in Xero, from the bank unless
   `account_id` says `xero-acc-800`) and `__credit {"id", "amount"}` (a credit
   note allocated to the bill, counted in `AmountCredited`).
+- Test hook `POST /xero/api.xro/2.0/__webhook {"id", "tenant_id"?,
+  "event_type"?, "key"?}` returns `{"body", "signature"}`: one INVOICE event for
+  the bill in Xero's own envelope, signed as `x-xero-signature` with the
+  committed dev key (`dev-xero-webhook-key`, `FEOH_ERP_XERO_WEBHOOK_KEY`) or
+  `key`. The caller POSTs `body` verbatim to `/api/erp/webhook/xero`; the fake
+  never calls the backend. `{"intent_to_receive": true}` builds Xero's
+  handshake (no events). Built by `xero_webhooks.py` (stdlib only, so
+  `backend/tests/test_xero_webhook.py` loads it in-process and proves the
+  route accepts what the fake signs). Decisions §392.
 - OAuth (the backend's real connect flow): `GET /xero/identity/connect/authorize`
   302s to a **registered** `redirect_uri` with a `code` (client `fake-xero-client`,
   `response_type=code`; anything else is a 400); `POST /xero/identity/connect/token`

@@ -2323,6 +2323,31 @@ async def xero_credit(body: dict) -> dict:
     return {"status": "ok"}
 
 
+import xero_webhooks  # noqa: E402 — kept beside the hook that uses it
+
+
+@xero.post("/__webhook")
+async def xero_webhook_delivery(body: dict) -> dict:
+    """A webhook delivery as Xero would send it, for the caller to POST to
+    the backend's `/api/erp/webhook/xero` (decisions §392): `{"body",
+    "signature"}`, the body sent verbatim with the signature in
+    `x-xero-signature`. `{"id"}` names the bill (one INVOICE UPDATE event in
+    `tenant_id`, default the organisation this fake connects); `{"intent_to_receive":
+    true}` is Xero's handshake (no events). `key` signs with another key than
+    the committed dev one (a forged delivery)."""
+    key = str(body.get("key") or xero_webhooks.DEV_WEBHOOK_KEY)
+    if body.get("intent_to_receive"):
+        return xero_webhooks.signed_delivery([], key=key)
+    invoice_id = str(body.get("id") or "")
+    if invoice_id not in _xero_state()["invoices"]:
+        raise ProviderError(404, {"detail": "unknown id"})
+    event = xero_webhooks.invoice_event(
+        str(body.get("tenant_id") or XERO_TENANT_ID),
+        invoice_id,
+        event_type=str(body.get("event_type") or "UPDATE"),
+    )
+    return xero_webhooks.signed_delivery([event], key=key)
+
 
 # Xero identity (FakeOAuthApp, client by HTTP Basic) + GET /connections, which
 # lists the one organisation this consent connected (the backend reads
