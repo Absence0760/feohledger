@@ -25,6 +25,13 @@ export type InvoiceActionVerdicts = {
 	send_to_erp: ActionRefusal;
 	/** `POST /retry-erp` — the same push gates, from `failed`. */
 	retry_erp: ActionRefusal;
+	/** `POST /resubmit` ("Resubmit for review") — `api/workflow.resubmit_refusal`:
+	 *  the entry roles, a `rejected` invoice only, the clerk's entry window. */
+	resubmit: ActionRefusal;
+	/** `POST` / `PUT` / `DELETE /file` (Upload / Replace / Delete) —
+	 *  `api/invoice_entry.manage_file_refusal`: the entry roles, the entry
+	 *  window, and the document lock from `approved` on (decisions §363). */
+	manage_file: ActionRefusal;
 };
 
 /** `invoice_not_completable` — `/complete` from a status it does not advance
@@ -36,6 +43,11 @@ export const INVOICE_NOT_ERP_SENDABLE = 'invoice_not_erp_sendable';
 /** `invoice_not_erp_retryable` — `/retry-erp` on anything but an approved
  *  invoice's failed push. Hidden, like {@link INVOICE_NOT_COMPLETABLE}. */
 export const INVOICE_NOT_ERP_RETRYABLE = 'invoice_not_erp_retryable';
+/** `invoice_not_resubmittable` — `/resubmit` on anything but a `rejected`
+ *  invoice. Hidden, like {@link INVOICE_NOT_COMPLETABLE}. */
+export const INVOICE_NOT_RESUBMITTABLE = 'invoice_not_resubmittable';
+/** `invoice_document_locked` — the `/file` routes on an approved invoice. */
+export const INVOICE_DOCUMENT_LOCKED = 'invoice_document_locked';
 
 /**
  * The server's verdicts on the caller's workflow actions for this invoice
