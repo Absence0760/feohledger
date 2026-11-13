@@ -69,7 +69,9 @@ who edits an invoice someone else entered (or nobody did — email intake,
 PEPPOL) is added to `segregation_actor_ids`, so a clerk later given approval
 can still never approve figures they keyed. Receiving is separated the same
 way: whoever hand-recorded a live goods receipt on the invoice's PO is refused
-as its approver (`approval_segregation_receiver`; decisions §267).
+as its approver (`approval_segregation_receiver`; decisions §267), and a
+receipt an approver records afterwards does not lift that invoice's payment
+hold (decisions §389).
 
 The gates live in `backend/app/api/invoice_entry.py`: `INVOICE_ENTRY_ROLES`
 (admin, AP manager, AP clerk, CFO) on `POST /api/invoices`,

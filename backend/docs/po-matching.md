@@ -435,7 +435,7 @@ receipt**.
 | `received_date` no later than the server's UTC date + 1 day | A user east of UTC is already on tomorrow; a future receipt would satisfy the 3-way leg for goods not yet here |
 | `gr_number` optional (the delivery-note number), unique per org case-folded; blank → `GR-<po_number>-<n>` | 409 `goods_receipt_number_taken` |
 | `Idempotency-Key` header: a replay of the **same** request (PO, date, lines) returns the same receipt with **200**; the key reused for anything else is a 409 `goods_receipt_idempotency_reused` — including the same key raced onto two POs, which the partial unique index `uq_goods_receipts_org_idempotency_key` catches inside a SAVEPOINT | A duplicate receipt doubles the received quantity and could lift a hold; a reused key answered with a receipt that says something else would be a lie |
-| `source = "manual"`, `recorded_by_user_id` stamped | The auto-close's segregation check above, and approval's: the recorder of a live manual receipt on an invoice's PO cannot approve that invoice (403 `approval_segregation_receiver`, decisions §267) |
+| `source = "manual"`, `recorded_by_user_id` stamped | The auto-close's segregation check above, and approval's: the recorder of a live manual receipt on an invoice's PO cannot approve that invoice (403 `approval_segregation_receiver`, decisions §267), and a receipt recorded by someone who already approved an invoice on the PO does not lift that invoice's hold (decisions §389) |
 | Audit `goods_receipt.created` — number, PO number, line count, total quantity, date; no free text | The procurement audit shape |
 | Every invoice citing the PO is re-matched **in the same transaction, not best-effort** | A receipt that landed without the holds it should raise (or lift) would be worse than no receipt; the QMS sync's rematch stays best-effort because it is a batch |
 
@@ -613,6 +613,36 @@ where somebody could:
   predates receipt entry (before migration 0109 no app user could type one
   in), so it is trusted as it always was; `tests/test_goods_receipt_source_stamping.py`
   fails on an in-app construction site that forgets the stamp.
+- **A receipt does not release the invoice its own recorder approved.**
+  Receiving and approving are separate duties in either order (decisions
+  §389). §267 refuses a receiver at approval; here, while anyone who approved
+  the invoice also hand-recorded a live receipt it is billed against, its
+  `po_mismatch` rows stay for a person. "Approved" is the approval of record,
+  by id (`invoices.approved_by_user_id`, migration 0129 — the approver, the
+  `/complete` floor's caller, or the reader whose extraction auto-approved),
+  plus every level signed on its approval chain, even with later levels still
+  open (`approval_chain.approver_ids`). "Billed against" is the approval door's
+  own receipt set (`approval_chain.receipt_recorders`: every PO the invoice
+  names), and the two are compared by one rule,
+  `approval_chain.receiving_conflicts`, so the orders cannot disagree. The
+  receipt itself is recorded and counts towards the 3-way leg — for this
+  invoice and every other on the PO, whose holds it lifts as before; it is only
+  not evidence that releases its recorder's own approval. **The way through is
+  an independent person:** cancel the approver's receipt (cancelling can only
+  raise a hold) and have someone else record the delivery, which lifts the hold
+  in that request, or have someone else resolve the held row in the queue after
+  checking the delivery. (The queue does not yet refuse the approver of record
+  resolving it by hand: `exception_lifecycle.segregation_refusal` refuses the
+  implicated set and the raiser, not approvers — `docs/followups.md`.) The
+  approval step's `require_segregation: false` lifts it, as it lifts §267, and
+  so does `settings.exceptions.require_segregation: false`, which lifts every
+  auto-close limit here. Receipt entry re-matches the PO's invoices under
+  `FOR UPDATE`, so a receipt and an approval of one of them serialise on the
+  invoice row and neither order can be raced past. A recall keeps the approver's id until the next
+  approval replaces it (as it keeps `approved_by`), so a receipt the recalled
+  approver typed in meanwhile still does not release the invoice; an approval
+  naming nobody (an unattended auto-approve, or one before 0129 that its audit
+  row could not name) has nobody to refuse.
 - **An exception agent is held to the same receipt rule.** The agent
   coordinator's own segregation gate only vets the human who triggered the
   run, so after a resolver's change it re-matches under the org's rules and,

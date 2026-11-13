@@ -18570,3 +18570,144 @@ following the top dialog); `tests-e2e/a11y/modal-inert.spec.ts` (the page and
 then the under-dialog go inert, the toast region stays live, closing restores
 each and returns focus); `tests-e2e/a11y/recall-import-verify.spec.ts` at 320px
 is the axe guard that was red.
+
+## 389. A receipt its own approver records after approving does not release the invoice (§267 follow-up, migration 0129, 2026-11-13)
+
+**The gap.** §267 refuses a receiver at approval. The reverse order was open:
+a manager approves an invoice held "billed beyond receipt", then records the
+goods receipt that lifts the hold, and the payment run pays it. One person
+both signed the invoice and counted the delivery in. `receipts_clear_hold`
+(and the agent coordinator's `_receipts_implicated`, which reads it) measured a
+recorder against the implicated set only, and nothing recorded a single-level
+approver by id: `approved_by` is a display name, and the audit log is not
+local under `FEOH_AUDIT_MODE=lambda` when the refresh runs. A chain's level
+approvals were already recorded by id in its state.
+
+**The two options, and the one taken.** The follow-up offered refusing the
+recorder at the receipt door, or letting the receipt stand but not count
+towards that invoice's hold. The hold is the fail-closed one, so it was
+chosen:
+
+- *It holds in any order of events.* The door sees only receipts recorded
+  after an approval through itself; the hold is re-asked at every refresh, so
+  it also catches a `po_number` re-pointed after approval onto a PO the
+  approver had already received, and a level approver whose chain is still
+  open.
+- *It refuses nothing that is true.* A receipt serves every invoice on its PO.
+  Refused at the door, an approver of one invoice could not book a delivery
+  for any of them, and the PO's other invoices, and the commerce sync, would
+  wait on someone else typing in a fact. Recorded, it counts towards the 3-way
+  leg and lifts the holds of every invoice its recorder did not approve; it is
+  only not evidence that releases their own approval.
+- *A wrong input leaves a hold for a person*, never a payment.
+
+**One rule, read in both orders.** `approval_chain.receiving_conflicts(
+receipt_recorders, approvers)` is the intersection. The approval door passes
+the would-be approver (`violates_receiving_segregation` now calls it); the
+hold passes the invoice's recorded approvers (`receiving_conflict_on`, read by
+`receipts_clear_hold` after its §262 check). The receipt side is always
+`receipt_recorders`, the approval door's own set (live, `manual`, a named
+recorder, every PO the invoice names, its own entity), so the two orders
+cannot disagree about which receipts count. The approval step's
+`require_segregation: false` lifts both, as §267 said. The queue's
+`settings.exceptions.require_segregation: false` also lifts the reverse order,
+because it switches off the auto-close's segregation limits altogether and the
+queue then lets anyone clear the row by hand: holding it in the auto-close
+would be a refusal nothing enforces, which is §267's own argument for not
+refusing receivers at the queue. The hold is read only when a `po_mismatch`
+row is open, so a refresh with nothing to release pays no extra queries.
+
+**The two orders serialise.** Without that, one person could send the approval
+and the receipt at once: the approval reads no receipt yet, the receipt's
+re-match reads the invoice as not yet approved, and both commit. Every human
+approval door already locks the invoice row (single and bulk approve, the
+email / Slack / Teams links, `/complete`), so the receipt's re-match now takes
+the invoices citing its PO `FOR UPDATE`, in id order, before re-reading them
+(`refresh_invoices_citing_pos(lock_invoices=True)`, set only by receipt entry).
+Whichever commits second sees the other. There is no lock cycle: the receipt
+holds its PO and then the invoices; the approval holds the invoice and reads
+receipts without a lock. The batch callers (QMS, ERP PO sync) do not lock: the
+ERP sync never clears a hold (§323), and neither adds a hand-typed receipt.
+The exception agents approve without the invoice lock; they act for the human
+who triggered the run, re-check `receipts_clear_hold` themselves, and a
+concurrent receipt by that same human is the residue left there.
+
+**Who approved, by id.** `approved_by` and the chain state were checked first.
+The chain state records every level approver by id and is reset exactly where
+an approval stops being in force (reject, recall), so it is read as is. A
+single-level approval recorded no id anywhere local, so migration 0129 adds
+`invoices.approved_by_user_id` (uuid, no FK). `approval_chain.
+record_final_approval` is now the one writer of an invoice's `approval_date`,
+`approved_by` and the id together (a source-scan test fails on any other
+write under `app/`, so a fourth approval site cannot set the display fields
+and forget the id); it is called at each of the three final approval sites: the
+approving person (`review.approve_invoice`, every door); `/complete`'s amount
+floor, whose caller §267 already treats as the effective approver; and
+extraction's auto-approve, whose reader asked for the approving read (§268).
+The nil-UUID system actor and NULL stamp NULL, never a sentinel a comparison
+could match. `approver_ids` is the stamp ∪ every chain approval.
+
+**A recall keeps the stamp**, as it keeps `approved_by` (§374): the next
+approval replaces it. A receipt the recalled approver types in meanwhile still
+does not release the invoice; once someone else approves, the hold is
+re-judged against them at the next refresh. That can leave a hold for a person
+a little longer than strictly needed, which is the safe error.
+
+**History is filled from evidence only (§141, §367).** The invoice's approval
+of record already names its approver: every final approval writes
+`invoice.approved` or `invoice.auto_approved` with the actor in the same
+transaction as `approved_by`, and `audit_log` is append-only. 0129 copies the
+actor of the latest such row (the one `approved_by` names, since each approval
+overwrites it), only when that row is alone at its instant and names a person
+of the invoice's organization, on invoices approved and not `done`. An earlier
+row is never a fallback for a latest one that names nobody. An invoice is only
+approved twice through a recall, and under `FEOH_AUDIT_MODE=lambda` a row's
+`created_at` is when the worker inserted it, not when the approval happened, so
+once a recall is on the record and two different people approved, nothing is
+stamped: "latest" is trusted only when there is nobody else it could have
+meant. **The backfill runs once.** An approval given by the previous release
+while the migration runs (before the new code serves) is not stamped and reads
+as "no approver known"; `BACKFILL_SQL` only fills NULLs and can be re-run
+safely after the deploy if that window mattered. No audit row is
+written for it: the column restates the row it was read from (0126's
+`decided_by_user_id` reasoning). What stays NULL, an unattended
+auto-approval or an approval whose row is missing, has nobody to refuse, and
+the receipt rule reads it as before.
+
+**What an independent person does.** The held row says the delivery has not
+been vouched for by anyone outside the approval. Either the approver's receipt
+is cancelled (cancelling can only raise a hold, so anyone with receipt entry
+may) and someone else records the delivery, which lifts the hold in that
+request; or someone else checks the delivery and resolves the row in the queue.
+
+**Left open** (`docs/followups.md`): the queue does not refuse the approver of
+record resolving the held `po_mismatch` by hand. `segregation_refusal` refuses
+the implicated set and the raiser, and §169 deliberately left approvers able to
+clear; adding an approver axis widens that policy for every door the predicate
+serves, so it is tracked rather than slipped in here.
+
+**Rejected:**
+- *Stamping the approver into `segregation_actor_ids`.* That set is who shaped
+  the payable's terms; it would refuse the approver their own re-approval
+  after a recall, which §374 allows.
+- *Failing closed on a NULL approver of a human approval.* NULL cannot tell an
+  unattended auto-approval from an unrecorded person without parsing the
+  display name, and refusing every auto-approved invoice's receipts would make
+  that channel's holds permanently manual.
+- *Reading the audit log at refresh time.* It fails open in lambda mode,
+  which is why the column exists.
+
+Tests: `tests/test_goods_receipt_entry.py` (approve then receipt holds; an
+independent recorder releases; cancel and re-record by someone else releases;
+one receipt over two invoices holds only its recorder's; a chain level
+approver; the approval-step and the queue opt-outs; an approval naming nobody;
+approving and receiving at once);
+`tests/test_approval_receiver_segregation.py` (receipt then approve still 403;
+the door and the floor stamp the approver; `receiving_conflicts`,
+`stamp_approver`, `approver_ids`; `record_final_approval` is the only writer); `tests/test_exception_agent_receipt_segregation.py`
+(the agent escalates on the approver's receipt, clears on an independent one);
+`tests/test_invoice_recall_approval.py` (the stamp survives a recall);
+`tests/test_invoice_clerk_entry.py` (extraction's auto-approve stamps its
+reader); `tests/test_migration_0129_invoice_approver_id.py` (literals pinned to
+the app, chain, parity, each backfill case including the two recall cases,
+idempotence, Alembic on a tenant and on the control plane).

@@ -1673,6 +1673,25 @@ receipt's recorder against, so folding them in would make every typed receipt
 implicate its own recorder. They are not refused clearing exceptions either.
 See [decisions.md](decisions.md) §267.
 
+**The reverse order: approving first, receiving second.** The same person may
+not approve an invoice and then hand-record the receipt that lifts its "billed
+beyond receipt" hold. Every final approval stamps who gave it by id
+(`invoices.approved_by_user_id`, `approval_chain.stamp_approver`, migration
+0129), a chain records each level's approver in its state, and the PO-match
+auto-close (`invoice_warnings.receipts_clear_hold`) leaves the hold for a
+person while `approval_chain.receiving_conflicts` finds anyone in both the
+invoice's approvers (`approver_ids`) and `receipt_recorders`, the set the
+approval door reads. The exception agents read the same check. The receipt is
+not refused: it is recorded and lifts the holds of every other invoice on the
+PO; an independent person releases this one. The approval step's
+`require_segregation: false` lifts it, and so does the queue's
+`settings.exceptions.require_segregation: false`, which turns off the
+auto-close's segregation limits altogether. Receipt entry's re-match locks the
+invoices on the PO, which the approval doors lock too, so approving and
+receiving at once cannot slip past both orders. Every final approval writes its
+fields through `approval_chain.record_final_approval`. See
+[decisions.md](decisions.md) §389.
+
 `check_segregation` is driven by the approval step's own
 `require_segregation` flag, and **the default is ON everywhere**:
 `app/schemas/workflow.py` declares `require_segregation: bool = True`, and
