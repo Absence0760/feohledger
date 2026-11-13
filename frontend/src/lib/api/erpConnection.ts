@@ -10,6 +10,7 @@
 import { api } from '#lib/api.ts';
 import type {
 	ErpCatalog,
+	ErpDisconnectResult,
 	ErpOAuthStatus,
 	ErpPendingConnect,
 	ErpTestResult
@@ -58,7 +59,8 @@ export const discardErpPendingConnect = () =>
 		credentials: 'include'
 	});
 
-export const disconnectErpOAuth = () => api.post<unknown>(`${BASE}/oauth/disconnect`, {});
+export const disconnectErpOAuth = () =>
+	api.post<ErpDisconnectResult>(`${BASE}/oauth/disconnect`, {});
 
 export const testErpConnection = (erp: Record<string, unknown>) =>
 	api.post<ErpTestResult>('/api/organization/test-erp', erp);

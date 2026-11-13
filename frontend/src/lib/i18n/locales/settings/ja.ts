@@ -310,6 +310,10 @@ export const messages = {
 	'org.erp.oauth.disconnect': '接続を解除',
 	'org.erp.oauth.disconnecting': '接続を解除しています…',
 	'org.erp.oauth.disconnected': '{erp} との接続を解除しました。',
+	'org.erp.oauth.disconnectedNotRevoked':
+		'{erp} との接続を解除しましたが、{erp} がアクセスの取り消しを確認しませんでした。アクセスを終了するには、{erp} の連携アプリから FeohLedger を削除してください。',
+	'org.erp.oauth.disconnectedRemoveAtProvider':
+		'{erp} との接続を解除しました。{erp} にはこちらからアクセスを取り消す方法がありません。アクセスを終了するには、{erp} の環境（Blackbaud Marketplace の接続済みアプリケーション）から FeohLedger の接続を解除してください。',
 	'org.erp.test.connected': "{erp} に接続しました。接続テストに成功しました。",
 	'org.erp.test.failed': "{erp} に接続できませんでした。接続情報を確認してから、もう一度テストしてください。",
 	'org.erp.test.failedOAuth': "保存済みの接続で {erp} に到達できませんでした。{erp} を再接続してから、もう一度テストしてください。",

@@ -317,6 +317,10 @@ export const enSettings = {
 	'org.erp.oauth.disconnect': 'Disconnect',
 	'org.erp.oauth.disconnecting': 'Disconnecting…',
 	'org.erp.oauth.disconnected': 'Disconnected from {erp}.',
+	'org.erp.oauth.disconnectedNotRevoked':
+		'Disconnected from {erp}, but {erp} did not confirm the access was revoked. To end it, remove FeohLedger from the connected apps in {erp}.',
+	'org.erp.oauth.disconnectedRemoveAtProvider':
+		'Disconnected from {erp}. {erp} has no way for us to revoke the access: to end it, disconnect FeohLedger from your {erp} environment (Blackbaud Marketplace, connected applications).',
 	'org.erp.test.connected': "Connected to {erp}. The connection test succeeded.",
 	'org.erp.test.failed': "Couldn't connect to {erp}. Check the connection details, then test again.",
 	'org.erp.test.failedOAuth': "Couldn't reach {erp} with the saved connection. Reconnect {erp}, then test again.",

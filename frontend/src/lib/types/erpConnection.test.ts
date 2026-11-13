@@ -21,6 +21,7 @@ import {
 	CONNECT_FROM_PLATFORM_HOST,
 	platformConnectUrl,
 	destinationChanged,
+	disconnectMessage,
 	erpTestResultText,
 	readOAuthReturn,
 	pickRefusalKey,
@@ -783,6 +784,46 @@ describe('callUsageLines', () => {
 		for (const locale of SUPPORTED_LOCALES) {
 			const messages = await loadAllMessages(locale);
 			for (const key of keys) expect(messages[key], `${locale}: ${key}`).toBeTruthy();
+		}
+	});
+});
+
+describe('disconnectMessage', () => {
+	it('is plain success only when the provider confirmed the revocation', () => {
+		expect(
+			disconnectMessage({ disconnected: true, revoked: true, revocation: 'revoked' })
+		).toEqual({ key: 'org.erp.oauth.disconnected', tone: 'success' });
+	});
+
+	it('tells the admin to remove the app at a provider with no revoke endpoint', () => {
+		// Blackbaud SKY API (decisions §371).
+		expect(
+			disconnectMessage({ disconnected: true, revoked: false, revocation: 'unsupported' })
+		).toEqual({ key: 'org.erp.oauth.disconnectedRemoveAtProvider', tone: 'failure' });
+	});
+
+	it('reads a failed or unknown outcome as not revoked, never as success', () => {
+		const notRevoked = { key: 'org.erp.oauth.disconnectedNotRevoked', tone: 'failure' };
+		expect(
+			disconnectMessage({ disconnected: true, revoked: false, revocation: 'failed' })
+		).toEqual(notRevoked);
+		expect(
+			disconnectMessage({ disconnected: true, revoked: true, revocation: null })
+		).toEqual(notRevoked);
+		expect(disconnectMessage(null)).toEqual(notRevoked);
+	});
+
+	it('has every sentence, naming the ERP, in every locale', async () => {
+		const { loadAllMessages } = await import('#lib/i18n/allMessages.ts');
+		for (const locale of SUPPORTED_LOCALES) {
+			const messages = await loadAllMessages(locale);
+			for (const key of [
+				'org.erp.oauth.disconnected',
+				'org.erp.oauth.disconnectedNotRevoked',
+				'org.erp.oauth.disconnectedRemoveAtProvider'
+			] as const) {
+				expect(messages[key], `${locale}: ${key}`).toContain('{erp}');
+			}
 		}
 	});
 });
