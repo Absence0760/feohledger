@@ -198,8 +198,7 @@ below surfaced.
   merge — pgvector's `-pg16` suffix already holds it on 16) and
   `localstack/localstack` (from 2026.03.0 the image is calendar-versioned and
   refuses to start without a `LOCALSTACK_AUTH_TOKEN`, which neither a
-  contributor's laptop nor CI's service-e2e job has) and `node` (the
-  production frontend-build image, below — its major moves with CI's).
+  contributor's laptop nor CI's service-e2e job has).
 - **A ref is written once, in a compose file, and everything else reads it**
   (`docs/decisions.md` §203). No Dependabot ecosystem reads a workflow's
   service images (`github-actions` reads only `uses:`) or a ref in a shell
@@ -219,12 +218,6 @@ below surfaced.
     would otherwise read as a pass. The Keycloak / Mailpit / LocalStack /
     stripe-mock / fake-erp containers CI starts come up through `docker
     compose` itself, so they were never restated.
-  - **Production's frontend build** — the Node image is the one-shot
-    `frontend-build` service in `deploy/compose.prod.yml`, behind a `build`
-    profile so `up` never starts it; `deploy.sh` runs it with
-    `docker compose run --rm frontend-build`. Dependabot bumps its minor and
-    patch and ignores its major, which moves only with every `setup-node`
-    `node-version:` in the workflows (`frontend/CLAUDE.md` § The Node floor).
   - **Production's Postgres client tools** — the one-shot `pgtools` service
     in `deploy/compose.prod.yml` (`tools` profile), which `backup.sh` /
     `restore.sh` run against RDS. It pins the `postgres` service's exact ref,
@@ -236,8 +229,11 @@ below surfaced.
   The payoff is that **a Dependabot compose PR is tested by its own CI run on
   the images it bumps**, which is what makes `dependabot-auto-merge.yml`
   merging a green minor/patch one safe. What CI never starts is still merged
-  untested: the Authentik stack and Ollama (local-only profiles), and
-  `compose.prod.yml`'s Caddy and Node images, first run by the next deploy.
+  untested: the Authentik stack and Ollama (local-only profiles). Production's
+  Caddy image is never started by CI either, but `deploy-compose` adapts
+  `deploy/Caddyfile` with it (`scripts/check_deploy_caddyfile.sh`), so a Caddy
+  bump that refuses the config fails its own PR. (Production builds no Node
+  image since `docs/decisions.md` §364: the SPA builds in CI.)
   CI's Redis is the same alpine image as dev and production (it used to be the
   Debian `redis:7`; same Redis release, smaller base).
 - **Enforced, not described.** `backend/tests/test_container_supply_chain.py`
@@ -246,8 +242,8 @@ below surfaced.
   `repo:tag`; when a `services:` / `container:` image is anything but
   `${{ needs.<job>.outputs.<service> }}` from a job, in that job's `needs`,
   that runs the compose reader for that service; when `compose.prod.yml`'s
-  Postgres or Redis ref differs from the dev file's (CI tests the dev file's);
-  and when the `frontend-build` Node major differs from any `setup-node`.
+  and when `compose.prod.yml`'s Postgres or Redis ref differs from the dev
+  file's (CI tests the dev file's).
   Comments may name images freely — only YAML values and non-comment shell
   lines are scanned.
 - **To re-pin by hand**, read the digest off the registry, never off a local

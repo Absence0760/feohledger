@@ -131,7 +131,7 @@ The record's target depends on your shape.
 
 | Shape | Record the customer creates |
 |---|---|
-| **Minimal (Caddy on one VM)** | `acme.acmecorp.com` → `CNAME` to your app host (`feohledger.com`), or an `A` record to the VM's IP. Either is fine — Caddy follows DNS for the HTTP-01 challenge. |
+| **Minimal (Caddy on one VM)** | `acme.acmecorp.com` → `CNAME` to your API host (`api.feohledger.com`), or an `A` record to the VM's IP. Either is fine — Caddy follows DNS for the HTTP-01 challenge. **Not** a `CNAME` to the apex `feohledger.com`: since `docs/decisions.md` §364 that is CloudFront, which neither serves the vanity name nor lets Caddy answer its challenge. |
 | **AWS (CloudFront)** | `acme.acmecorp.com` → `CNAME` to the CloudFront distribution's domain name (`dxxxxxxxxxxxxx.cloudfront.net`, from the distribution's General tab). **CONFIRM ON FIRST RUN** — the distribution does not exist yet; nothing in `infra/` creates it. |
 
 Because the vanity host lives in the *customer's* zone, your own
@@ -161,9 +161,16 @@ There is **no separate validation record**. The `A`/`CNAME` from Step 2
 
    ```caddy
    acme.acmecorp.com {
-   	import spa
+   	import vanity
    }
    ```
+
+   The `vanity` snippet (`deploy/Caddyfile`) sends `/api` to the backend
+   under the vanity `Host`, which is how the backend finds the tenant, and
+   proxies everything else from CloudFront with `Host` rewritten to the
+   platform domain, because CloudFront refuses a `Host` that isn't one of
+   its alternate names. The page is the same build every host serves; the
+   SPA reads the tenant from the browser's location.
 
 2. Reload without downtime (the command from
    `deploy/tenants.caddy.example`):
@@ -194,24 +201,21 @@ Constraints worth knowing:
   `docs/minimal-deployment.md` (xcaddy + the Route 53 DNS plugin) does
   **not** help here — it can only cover zones you control in Route 53,
   not the customer's.
-- The `spa` snippet in `deploy/Caddyfile` sets
-  `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
+- CloudFront's response-headers policy sets
+  `Strict-Transport-Security: max-age=31536000; includeSubDomains`, and the
+  `vanity` proxy passes it through.
   Serving that on `acme.acmecorp.com` commits every subdomain *of that
   host* to HTTPS for a year in visitors' browsers. That is normally
   fine and desirable — but tell the customer, because it is their
   namespace, not yours.
 
-> **Once the SPA is off the VM.** Since `docs/decisions.md` §278 the platform's
-> own hosts (`feohledger.com`, `*.feohledger.com`) are served from S3 +
-> CloudFront. Vanity hosts stay on Caddy (issue #582, option (b)): each needs
-> its own certificate, and CloudFront would need one per customer. While
-> `deploy.sh` still builds the SPA on the VM, the `import spa` block above
-> works as written. After the step-4 cleanup removes that local build, a
-> vanity block must **proxy the SPA from CloudFront and rewrite `Host` to the
-> platform domain**, because CloudFront refuses a `Host` that isn't one of its
-> alternate names. `/api` keeps the vanity `Host`, since that is how the backend
-> finds the tenant. The step-4 change ships the snippet for this; don't
-> hand-roll one before then.
+> **Why vanity hosts stay on Caddy.** Since `docs/decisions.md` §278 the
+> platform's own hosts (`feohledger.com`, `*.feohledger.com`) are served from
+> S3 + CloudFront, and since §364 the VM serves no SPA itself. Vanity hosts
+> stay on Caddy (issue #582, option (b)): each needs its own certificate, and
+> CloudFront would need one per customer (§ 3b). A block written from an
+> older copy of this runbook (`import spa`) is moved to `import vanity` by the
+> next `deploy.sh`.
 
 ### 3b. AWS shape — ACM + CloudFront
 
@@ -344,8 +348,9 @@ openssl s_client -connect acme.acmecorp.com:443 \
   -servername acme.acmecorp.com </dev/null 2>/dev/null \
   | openssl x509 -noout -subject -dates -ext subjectAltName
 
-# 3. The SPA is served (not a 404 from the default host)
+# 3. The SPA is served (proxied from CloudFront), and /api reaches the backend
 curl -sS https://acme.acmecorp.com/ | grep -i '<title'
+curl -sS https://acme.acmecorp.com/api/health
 ```
 
 4. **The tenant resolves by `Host`, with no header.** This is the one
@@ -538,7 +543,8 @@ resolves to nothing while DNS still points at you.
 | Host registered, but `GET /api/portal/branding` with `Host:` still 400s | Stored form differs from what you sent — `normalize_custom_domain` lowercases and strips `:port`, and rejects anything with a `/` or a space outright. | `GET /api/organization/branding/custom-domains` and compare the stored string byte-for-byte with the `Host` you're testing. |
 | Browser shows a certificate warning / `ERR_CERT_COMMON_NAME_INVALID` | *Minimal*: the host isn't in `tenants.caddy`, or DNS didn't resolve when Caddy tried HTTP-01. *AWS*: the hostname isn't a SAN on the certificate attached to the distribution. | Fix DNS first, then re-run Step 3. Check Caddy's logs for the ACME error rather than reloading in a loop — repeated failed validations are themselves rate-limited. |
 | Page loads, then every request fails in the console with a CORS error | Step 5 missed, or the redeploy didn't happen. | Add the registrable domain to `FEOH_CORS_PRODUCTION_DOMAIN` and redeploy. Remember it covers only **one** leading label. |
-| Vanity host serves the *platform* login page with default branding | *Minimal*: the request fell through to the bare `{$APP_DOMAIN}` site block because no vanity block exists. *AWS*: the alternate domain name isn't on the distribution, so the edge served the default. | Add the host block / alternate domain name and reload. |
+| Vanity host serves the *platform* login page with default branding | *Minimal*: the branding lookup (`/api/portal/branding`) did not resolve the vanity `Host` — usually the host is not registered in the app (Step 4). *AWS*: the alternate domain name isn't on the distribution, so the edge served the default. | Register the host / add the alternate domain name. |
+| *Minimal*: vanity host answers an empty page, or CloudFront's 403 "The request could not be satisfied" | The `import vanity` line is missing (a block with no directives serves nothing), or the SPA half reached CloudFront under the vanity `Host`, which CloudFront refuses. | Use the block exactly as in Step 3a and reload; check `deploy/Caddyfile`'s `vanity` snippet still rewrites `Host` and SNI to `{$APP_DOMAIN}`. |
 | Login page themes correctly, supplier portal doesn't | Almost always a brand config issue, not a domain one — the two read the same endpoint through the same resolver. | Check `GET /api/organization/branding` for the tenant; then `docs/white-label.md` § Supplier-portal theming. |
 | Passkey enrollment or login fails only on the vanity host | Expected — `FEOH_WEBAUTHN_RP_ID` is bound to your domain. | Use TOTP on vanity hosts. See *Known limitations*. |
 | Renewal fails ~13 months in (AWS) | The customer deleted the ACM validation `CNAME` after issuance. | Recreate it from the ACM console. Then add "never delete this record" to the handover email you send at Step 2. |

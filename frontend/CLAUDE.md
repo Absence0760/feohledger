@@ -202,16 +202,12 @@ project actually uses.
 
 Two consequences worth knowing before you touch either half:
 
-- **Bumping the floor is a two-file-set edit**, not one. Raising
-  `node-version:` means checking every other place a Node version is written
-  down. There is no `.nvmrc`, no `engines` block in either `package.json`, and
-  no Node Dockerfile in the app tree — but the production frontend builds in
-  `deploy/compose.prod.yml`'s `frontend-build` service, a
-  `node:<major>-alpine` image (`docs/minimal-deployment.md`). **Both halves
-  move together**: Dependabot ignores that image's majors, and
-  `backend/tests/test_container_supply_chain.py` fails when its major differs
-  from any `node-version:`, because a deploy image behind CI builds production
-  on a runtime CI never tested.
+- **Bumping the floor is a workflow-set edit**: every `node-version:` above,
+  and nowhere else. There is no `.nvmrc`, no `engines` block in either
+  `package.json`, and no Node image in the app tree. The production SPA builds
+  in CI too (`vm-deploy.yml`'s `build-frontend` job, on `setup-node`); the VM's
+  `node:<major>-alpine` build service went in `docs/decisions.md` §364, so
+  there is no second Node version to keep in step.
 - **The `# vN.N.N` comment beside a `setup-node@<sha>` pin is documentation,
   not the pin.** Eight of the nine sites carried `# v6.0.0` against a SHA that
   is really `v7.0.0`; Scorecard's PinnedDependencies check reads the SHA and

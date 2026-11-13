@@ -16464,3 +16464,63 @@ push and closing: a payment outside `LIVE_PAYMENT_TERMINAL_STATUSES`, a card not
   moved, so it is done". A completed payment is what `paid → done` is for; an
   `approved` invoice holding one is out of step already, and closing it hides
   that. The rail's own exits apply, as §309 says for the push.
+
+## 364. The VM stops building and serving the SPA; Caddy keeps `api.` and vanity hosts (#582 step 4, 2026-11-13)
+
+**Context.** §278 moved the SPA to S3 + CloudFront and left the VM serving it
+too, as the one-flag rollback for the first day. The cutover ran on
+2026-10-19 (#582: `frontend_on_cloudfront = true` applied, every release since
+v0.1.2 published through CloudFront). Since then the VM's copy was cost (a Node
+build on a t4g.medium every deploy) and a slow failure: with DNS on CloudFront,
+Caddy could no longer renew the apex and tenant certificates, so a rollback
+after ~90 days would have landed on expired ones.
+
+**Decision.** Nothing on the VM builds or serves the SPA.
+
+- **Caddy** keeps `api.<domain>` and a `vanity` snippet. No `(spa)`, no apex
+  block, no site directory mount. `compose.prod.yml` loses `frontend-build`,
+  the pnpm-store volume and the `./www` mount; `deploy.sh` loses the build and
+  the release swap (`--backend-only` still parses, `--frontend-only` is
+  refused with a pointer). `add-tenant.sh` and `remove-tenant.sh` no longer
+  touch `tenants.caddy`: a tenant host is CloudFront's wildcard.
+- **Vanity hosts stay on Caddy** (§278, #582 option (b)), now as
+  `{ import vanity }`: `/api` goes to the backend under the vanity `Host`
+  (how a registered custom domain resolves to its tenant), and everything else
+  is proxied from `https://<APP_DOMAIN>` with `Host` and SNI rewritten to it,
+  because CloudFront refuses a `Host` that is not one of its alternate names.
+  Their DNS is a `CNAME` to `api.`, not the apex, which is CloudFront now.
+- **The live host list migrates itself.** `tenants.caddy` on the VM holds one
+  `{ import spa }` block per tenant, and a Caddyfile without `spa` would make
+  the Caddy the roll recreates refuse the whole config, taking `api.` down.
+  `deploy.sh` drops every apex / `*.<domain>` block before the roll (in place,
+  for the single-file mount, and listed in the log) and moves any remaining
+  `import spa` to `import vanity`. Leftovers it cannot know are safe to delete
+  (`deploy/www/`, the pnpm volume) are named in a NOTE, not deleted.
+- **The rollback guard inverts.** `feoh_sync_source` required a commit's
+  compose file to mount `./www`; that would refuse this commit. It now refuses
+  one that mounts `../frontend/build` (pre-§277, the #579 outage), so the §277
+  to §363 range stays deployable: re-deploying one of those, restoring the
+  dropped tenant blocks and flipping the flag back is the rollback.
+  `frontend_on_cloudfront = false` alone is now an outage, and `vm-deploy.yml`
+  fails its edge check when the apex lacks CloudFront's header instead of
+  reading that as "not cut over yet".
+- **`smoke.sh --vm` checks what the VM serves**: `api/health`,
+  `public-config`, and the first vanity host's TLS. The apex and a tenant host
+  are checked against CloudFront after the publish (`smoke-frontend.sh`).
+- **CI adapts the Caddyfile** with the pinned Caddy image and a vanity block
+  (`scripts/check_deploy_caddyfile.sh`, in `deploy-compose`). The Caddyfile is
+  now the API host's whole config, and the check also covers a Dependabot bump
+  of the Caddy image on its own PR, which closes the follow-up about production
+  images CI never ran (its other half, the Node build image, is gone).
+- **The SSM document's 45-minute timeout stays.** The SPA build was most of
+  the old ceiling, but the timeout only bounds a hung run, a cold image build
+  plus migrations across every tenant has no tight bound, and changing it is a
+  Terraform apply for no gain.
+
+**Rejected.** *Deleting `deploy/www/` and the pnpm volume from `deploy.sh`*: a
+deploy script removing operator state on a one-off migration is a hazard the
+next reader does not expect, and a NOTE costs one command. *Renaming
+`tenants.caddy` to match its new contents*: the file is live on the VM, and a
+rename is a second migration for a cosmetic gain. *Moving vanity hosts onto
+CloudFront*: one ACM SAN and one alternate name per customer (§278), with none
+in use yet.

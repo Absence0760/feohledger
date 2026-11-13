@@ -684,31 +684,6 @@ honestly be folded into the slice that surfaced it.
       left there is dispatching `AWS OIDC preflight` to prove the assume, which
       does not need this policy.
 
-### Surfaced by moving the SPA to S3 + CloudFront (2026-10-19, issue #582, decisions §278)
-
-- [ ] **(c) Remove the SPA from the VM once CloudFront has served it for a day
-      (#582 cut-over step 4).** After `frontend_on_cloudfront = true`, the VM
-      still builds and serves the SPA. `deploy/deploy.sh` runs the
-      `frontend-build` service (minutes of CPU credits per deploy) and swaps
-      releases under `deploy/www/` (§277), `deploy/Caddyfile` keeps the
-      `(spa)` snippet and the apex block, and `deploy/add-tenant.sh` still
-      writes a `tenants.caddy` host block per tenant. That is the rollback path
-      for the first day, which is why it was not removed in the same change.
-      After that it is cost, and a slow failure: once DNS points at CloudFront,
-      Caddy cannot renew those Let's Encrypt certificates, so a rollback after
-      ~90 days would land on expired ones. **Durable fix:** Caddy keeps only
-      `api.<domain>`. Drop `frontend-build`, the pnpm-store volume, the
-      `./www` mount and the release swap from `compose.prod.yml` and
-      `deploy.sh`, and stop `add-tenant.sh` /
-      `remove-tenant.sh` touching `tenants.caddy` for platform hosts. Ship the
-      vanity-host block that proxies the SPA from CloudFront with
-      `header_up Host <platform domain>` and keeps `/api` on the vanity `Host`
-      (`docs/founder-runbooks/custom-domain-provisioning.md` § 3a). Update
-      `docs/minimal-deployment.md` § Key decisions 2 and the SSM document's
-      timeout comment. Rollback after this means re-deploying the old commit.
-      **Trigger:** one day of clean CloudFront traffic after the DNS cutover,
-      and no later than ~30 days after it.
-
 ### Surfaced by the round-26 parallel batch (2026-09-17)
 
 Five agents, each in its own worktree, closed eleven entries and issue #432's
@@ -856,31 +831,6 @@ or is a sibling of a fix that needs its own pass.
       templates so the operator can re-code them in bulk.
       **Trigger:** the first tenant that retires an account a live template codes to,
       or the next change to recurring generation.
-
-- [ ] **(c) Dependabot auto-merges bumps to production images that no CI job runs.**
-      Since §203, a `docker-compose` PR is tested on the images it bumps *when CI starts
-      them*: pgvector, Redis and MinIO through `compose-images`, and Keycloak / Mailpit /
-      LocalStack / stripe-mock through `docker compose up` in `service-e2e`. No CI job
-      starts `deploy/compose.prod.yml`'s `caddy` or `frontend-build` (Node alpine) image.
-      `dependabot-auto-merge.yml` still squash-merges a green minor/patch bump to either,
-      so the first thing to run the new digest is the next production deploy. A
-      Caddyfile directive that a Caddy minor changes, or a musl-only install failure under
-      the new Node alpine image, would surface there. `deploy.sh` does fail loudly
-      (`caddy reload` rejects a bad config, and the build step exits non-zero before
-      anything rolls), but it fails on the VM rather than on the PR. The same is true of
-      the local-only Authentik and Ollama images, which matter much less because they
-      never reach production.
-      **Durable fix:** a small CI job, path-filtered on `deploy/**` and `frontend/**`,
-      that runs what the PR bumped against `deploy/compose.prod.yml` with a dummy `.env`:
-      `docker compose -f deploy/compose.prod.yml run --rm --no-deps caddy caddy validate
-      --config /etc/caddy/Caddyfile` (after seeding `tenants.caddy` from the example the
-      way `deploy.sh` does), and the real `frontend-build` service
-      (`docker compose run --rm -T -e PNPM_SPEC=… frontend-build`). Both read their refs
-      from the compose file, so nothing is restated. A cheaper alternative is to stop
-      auto-merging `/deploy` compose PRs (`dependabot/fetch-metadata` reports the
-      directory), which trades the test for a human review of every Caddy and Node patch.
-      **Trigger:** before the minimal VM serves its first customer, or the first
-      auto-merged Dependabot compose PR that touches `deploy/compose.prod.yml`.
 
 ### Surfaced by retiring the stale archive PRs (2026-09-18, PRs #453/#454)
 

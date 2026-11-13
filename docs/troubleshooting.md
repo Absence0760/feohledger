@@ -43,11 +43,11 @@ recreated — as the SvelteKit build does to `frontend/build` — the container 
 the orphaned, emptied original, so every file is missing, and runc refuses
 `docker exec` because the container's working directory (`/srv`) is outside the
 mount namespace. This was the v0.1.0 outage (#579), when Caddy mounted
-`frontend/build` directly; Caddy now mounts `deploy/www/`, which is never
-replaced, and serves the release its `current` symlink names
-(`deploy/README.md` § How the SPA is served, `docs/decisions.md` §277). Seeing it
-again means something replaced `deploy/www/` itself or Caddy is back on a
-directory that gets rebuilt.
+`frontend/build` directly. §277 moved Caddy onto a stable `deploy/www/`, and
+since `docs/decisions.md` §364 the VM serves no SPA at all: the pages are S3 +
+CloudFront, and Caddy mounts no site directory. On the VM this can only come
+back by rolling back to a pre-§364 commit; on CloudFront, see
+`deploy/README.md` § Frontend rollback.
 
 **Recovery** (on the VM; starting the container again re-resolves its bind
 mounts by path):
@@ -55,9 +55,6 @@ mounts by path):
 ```bash
 docker restart feoh-prod-caddy-1
 ```
-
-If `www/current` is missing or points at a bad build, roll the SPA back from
-`deploy/` first: `ln -sfn "$(readlink www/previous)" www/current.new && mv -T www/current.new www/current`.
 
 **A related, quieter case:** a Caddyfile or `tenants.caddy` change that "reloads
 fine" but changes nothing — a single-file mount keeps a file replaced by rename
