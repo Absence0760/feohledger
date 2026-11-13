@@ -19474,3 +19474,69 @@ outcomes); `tests/test_erp_reported_payment_recovery.py` (rows now carry the
 stated figure); `tests/test_qbo_recorded_replay.py` (the paid amount per
 recorded scenario); `frontend/src/lib/api/codedRefusals.test.ts` (the 409's
 sentence).
+
+## 394. An ERP purchase order nobody has approved syncs as `unissued`, and the matcher refuses it (issue #655 PO status, drafted 2026-10-23, landed 2026-11-14)
+
+**Context.** `PurchaseOrder.status` had three values (open / closed /
+cancelled), so every adapter mapped a draft or awaiting-approval order to
+`open`: Xero and Merge.dev `DRAFT` / `SUBMITTED`, NetSuite Pending Supervisor
+Approval (`A`), Business Central `Draft` / `In Review` (the adapter wrote
+`open` for every BC order), Intacct drafts and in-approval states, SYSPRO's
+in-process `OrderStatus 0`. In the Xero Demo Company a Draft PO showed as OPEN,
+and an invoice could pass 2- or 3-way match against an order nobody in the ERP
+had approved (issue #655: Xero X7, Merge.dev M6, Intacct #12, the Sage SA
+strings; the `docs/followups.md` entry from the live Xero test).
+
+**Decision.** A fourth status, `unissued` (`models/procurement.UNISSUED_PO_STATUS`),
+treated the way §326 treats a cancelled PO:
+
+- **Adapters map, they do not skip.** Skipping a not-yet-issued PO in each
+  `list_pos` was the other option the follow-up named. It was rejected: the
+  sync never deletes, so a PO an earlier build stored as `open` would keep
+  matching for good, and an invoice citing a skipped draft would read
+  `po_not_found` and send the missing-PO agent looking for some other PO. The
+  mapping lines are per adapter (listed in `erp-integration.md`); an unknown
+  value still maps to `open`, the existing default. Adapters write the literal
+  `"unissued"` as they write `"open"`, without importing the model, and the
+  adapter tests pin each one to the constant. Sage SA's real PO strings are
+  unconfirmed (#654), so it reads words (draft, approval) as `_po_status`
+  already read "cancel". QuickBooks Online has only Open / Closed; Blackbaud
+  FE NXT maps nothing yet, pending its live-system check
+  (`docs/followups.md`).
+- **The matcher refuses it.** `po_matching` sets `po_not_issued`, `mismatch`,
+  no variance (a 0 would read as a perfect match), issue
+  `po_match.issue.po_not_issued`, whatever the amount or receipts say.
+  `refresh_warnings` raises the `po_not_issued` warning and a payment-blocking
+  `po_mismatch` at `warning`, the cancelled PO's severity (the 2026-10-23 draft
+  used `error`, as for a missing PO; the cancelled precedent landed since and
+  is the closer case: the order exists and a person decides).
+- **The sync holds at sync time.** The re-match trigger moves from
+  `CANCELLED_PO_STATUSES` to `UNMATCHABLE_PO_STATUSES` (cancelled, voided,
+  unissued), so a PO taken back to draft holds its invoices when the sync
+  runs. The ERP approving it re-matches too, but under §323 (amended) the
+  sync never clears a hold: the finding goes and the `po_mismatch` row stays
+  open for a person.
+- **Elsewhere.** `DEAD_PO_STATUSES` gains `unissued`, so budgets and the CFO
+  open-PO accrual stop counting an order that is not a commitment yet;
+  workspace closure treats it as untouched, like `draft`. The supplier portal
+  no longer lists, shows or flips an unissued PO: a draft has not been sent to
+  the supplier, and before this it showed there as `open`. The
+  purchase-orders page gets a "Not issued" chip and a warning-toned badge.
+- **The fingerprint does not name the new flag.** `_PO_MATCH_FACT_FIELDS`
+  leaves `po_not_issued` out: a match stored before this lacks the key, so
+  naming it would move every cleared finding's fingerprint (§366) on the first
+  refresh after the deploy. The issue code it raises carries the same fact.
+
+**Not ported.** The branch's two vendor-gate commits (`35739b4d`,
+`74ff4dfb`): §333 decided the push vendor gate differently in #679.
+
+Tests: `test_po_matching_algorithm.py` (an unissued PO refused at an exact
+amount and with full receipts; the same PO `open` matches),
+`test_po_matching_wiring.py` (the warning and blocking `po_mismatch`; the
+pure `blocking_finding_types` agrees), `test_purchase_orders.py` (a sync taking
+an approved invoice's PO back to unissued holds it and the run refuses it; the
+ERP issuing it re-matches without clearing), `test_portal_self_service.py`
+(hidden from list, detail and flip), and the adapter mappings in
+`test_erp_po_sync.py` (BC, NetSuite, Merge.dev), `test_erp_xero_adapter.py`,
+`test_erp_sage_intacct_adapter.py`, `test_erp_syspro_adapter.py` and
+`test_erp_sage_accounting_za_adapter.py`.
