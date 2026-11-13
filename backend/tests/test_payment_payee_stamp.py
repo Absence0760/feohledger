@@ -7,6 +7,9 @@ stamp, a paid invoice merged onto another vendor and voided was re-paid to the
 canonical's bank details with no flag. Pinned here:
 
 * the fingerprint is keyed, canonical, tenant-scoped and carries no number;
+  its key is its own (a JWT key rotation changes nothing), it rotates through
+  the keyring without a false flag, and a stamp nobody can recompute (an
+  unknown key id, or no key configured) flags;
 * every step that releases money stamps the payee: the rail dispatch, the card
   dispatch, the NACHA export, the single and run-level record of a payment made
   outside FeohLedger, and an ERP-reported payment; an already-stamped payment
@@ -35,6 +38,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import select
 
+from app.config import settings
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentRun
@@ -43,6 +47,8 @@ from app.services.payee_stamp import (
     PAYEE_CHANGED_SINCE_PAID,
     PAYEE_UNRECORDED_AFTER_MERGE,
     bank_fingerprint,
+    fingerprint_key_id,
+    fingerprint_matches,
 )
 from app.utils.dates import utc_today
 
@@ -64,7 +70,10 @@ def test_the_fingerprint_is_keyed_canonical_and_carries_no_number():
 
     org = uuid.uuid4()
     fp = bank_fingerprint(BANK_A, organization_id=org)
-    assert fp.startswith("v1:") and len(fp) == len("v1:") + 64
+    kid = fingerprint_key_id(settings.payee_fingerprint_key)
+    assert fp.startswith(f"v2:{kid}:") and len(fp) == len(f"v2:{kid}:") + 64
+    # Fits the column migration 0128 made.
+    assert len(fp) <= Payment.__table__.columns["payee_bank_fingerprint"].type.length
     # Not an unkeyed hash of the blob, which a routing + account number
     # brute-forces.
     plain = hashlib.sha256(json.dumps(BANK_A, sort_keys=True).encode()).hexdigest()
@@ -80,6 +89,83 @@ def test_the_fingerprint_is_keyed_canonical_and_carries_no_number():
     # No bank details is one value, however it is spelled.
     assert bank_fingerprint(None, organization_id=org) == bank_fingerprint({}, organization_id=org)
     assert bank_fingerprint(None, organization_id=org) != fp
+
+
+KEY_1 = "1" * 64
+KEY_2 = "2" * 64
+
+
+def test_the_fingerprint_does_not_depend_on_the_jwt_key(monkeypatch):
+    """FEOH_SECRET_KEY rotates every 90 days (docs/secrets-rotation.md). Keyed
+    by it, every void after a rotation read as a bank change and opened a false
+    fraud flag; the fingerprint has its own key now."""
+    org = uuid.uuid4()
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_1)
+    monkeypatch.setattr(settings, "secret_key", "j" * 64)
+    before = bank_fingerprint(BANK_A, organization_id=org)
+    monkeypatch.setattr(settings, "secret_key", "k" * 64)
+    assert bank_fingerprint(BANK_A, organization_id=org) == before
+    assert fingerprint_matches(before, BANK_A, organization_id=org)
+
+
+def test_a_rotation_through_the_keyring_keeps_old_stamps_equal(monkeypatch):
+    org = uuid.uuid4()
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_1)
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", "")
+    old = bank_fingerprint(BANK_A, organization_id=org)
+
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_2)
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", f" {KEY_1} ,")
+    new = bank_fingerprint(BANK_A, organization_id=org)
+    # New stamps name the new key...
+    assert new != old
+    assert new.split(":")[1] == fingerprint_key_id(KEY_2) != fingerprint_key_id(KEY_1)
+    # ...and old ones still compare under the key that made them, both ways.
+    assert fingerprint_matches(old, BANK_A, organization_id=org)
+    assert fingerprint_matches(new, BANK_A, organization_id=org)
+    assert not fingerprint_matches(old, BANK_B, organization_id=org)
+    assert not fingerprint_matches(old, BANK_A, organization_id=uuid.uuid4())
+
+
+def test_a_stamp_that_cannot_be_recomputed_does_not_match(monkeypatch):
+    """Fail closed: an unknown key id (a retired key dropped from the keyring
+    too early), another scheme, a malformed value or no fingerprint at all."""
+    org = uuid.uuid4()
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_1)
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", "")
+    old = bank_fingerprint(BANK_A, organization_id=org)
+
+    # Replaced, not rotated: the old key is in neither setting.
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_2)
+    assert not fingerprint_matches(old, BANK_A, organization_id=org)
+
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_1)
+    digest = old.split(":")[2]
+    for stored in (
+        None,
+        "",
+        f"v1:{digest}",
+        f"v3:{fingerprint_key_id(KEY_1)}:{digest}",
+        "v2:",
+        "v2::" + digest,
+    ):
+        assert not fingerprint_matches(stored, BANK_A, organization_id=org), stored
+
+
+def test_no_key_means_no_fingerprint(monkeypatch):
+    """No hardcoded fallback: with FEOH_PAYEE_FINGERPRINT_KEY empty nothing is
+    fingerprinted, and nothing matches (a deployed env refuses to boot)."""
+    org = uuid.uuid4()
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_1)
+    stored = bank_fingerprint(BANK_A, organization_id=org)
+    monkeypatch.setattr(settings, "payee_fingerprint_key", "  ")
+    assert bank_fingerprint(BANK_A, organization_id=org) is None
+    # Even with the old key still in the keyring, the stamp compares; without
+    # any key at all it cannot.
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", KEY_1)
+    assert fingerprint_matches(stored, BANK_A, organization_id=org)
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", "")
+    assert not fingerprint_matches(stored, BANK_A, organization_id=org)
 
 
 def test_the_stamp_rides_the_order_restored_after_a_database_error():
@@ -522,6 +608,79 @@ async def test_the_same_vendor_and_bank_details_raise_nothing(realdb):
     assert await _fraud_flags(mk, inv_id) == []
     staged = await _stage_run(realdb, inv_id)
     assert staged.status_code == 201, staged.text
+
+
+async def test_a_fingerprint_key_rotation_through_the_keyring_raises_nothing(realdb, monkeypatch):
+    """The rotation docs/secrets-rotation.md prescribes: the old key moves to
+    the keyring, and a void of a payment stamped under it is still compared
+    under it. The JWT key changing at the same time is irrelevant."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_1)
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", "")
+    vendor_id = await _vendor(mk, info.org_id, name="Rotated Key Payee Co", bank=BANK_A)
+    inv_id = await _invoice(mk, info.org_id, vendor_id)
+    payment_id = await _record_outside(realdb, inv_id)
+    stamped = (await _payment(mk, inv_id)).payee_bank_fingerprint
+    assert stamped.split(":")[1] == fingerprint_key_id(KEY_1)
+
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_2)
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", KEY_1)
+    await _void(realdb, payment_id)
+
+    async with mk() as s:
+        assert (await s.get(Invoice, inv_id)).status == InvoiceStatus.approved
+    assert await _fraud_flags(mk, inv_id) == []
+
+
+async def test_a_stamp_under_a_key_no_longer_held_flags_the_void(realdb, monkeypatch):
+    """The key replaced instead of rotated: the void cannot recompute the
+    stamp, so it fails closed and flags, as for a bank change."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_1)
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", "")
+    vendor_id = await _vendor(mk, info.org_id, name="Dropped Key Payee Co", bank=BANK_A)
+    inv_id = await _invoice(mk, info.org_id, vendor_id)
+    payment_id = await _record_outside(realdb, inv_id)
+
+    monkeypatch.setattr(settings, "payee_fingerprint_key", KEY_2)
+    await _void(realdb, payment_id)
+
+    [flag] = await _fraud_flags(mk, inv_id)
+    assert flag.description_code == "exception." + PAYEE_CHANGED_SINCE_PAID
+    # No bank change on record names a person; anyone outside the invoice's
+    # implicated set may clear it.
+    assert flag.raised_by_user_id is None
+    staged = await _stage_run(realdb, inv_id)
+    assert staged.status_code == 409, staged.text
+
+
+async def test_with_no_fingerprint_key_the_payee_is_recorded_and_the_void_flags(
+    realdb, monkeypatch
+):
+    """Empty key (local dev only; a deployed env refuses to boot): the payment
+    still records its payee vendor and when, so a merge is still caught, but no
+    fingerprint. A stamp says money moved, so a bank comparison that cannot run
+    fails closed and flags; it is not treated as a pre-0128 unstamped payment."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    monkeypatch.setattr(settings, "payee_fingerprint_key", "")
+    monkeypatch.setattr(settings, "payee_fingerprint_previous_keys", "")
+    vendor_id = await _vendor(mk, info.org_id, name="Keyless Payee Co", bank=BANK_A)
+    inv_id = await _invoice(mk, info.org_id, vendor_id)
+    payment_id = await _record_outside(realdb, inv_id)
+
+    payment = await _payment(mk, inv_id)
+    assert payment.payee_recorded_at is not None
+    assert payment.payee_vendor_id == vendor_id
+    assert payment.payee_bank_fingerprint is None
+
+    await _void(realdb, payment_id)
+
+    [flag] = await _fraud_flags(mk, inv_id)
+    assert flag.description_code == "exception." + PAYEE_CHANGED_SINCE_PAID
+    assert flag.raised_by_user_id is None
 
 
 async def test_other_bank_details_on_the_same_vendor_flag_once_raised_by_the_approver(realdb):

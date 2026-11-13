@@ -23,6 +23,11 @@ _EXTRACTION_PROVIDERS = frozenset(
 )
 
 
+# The non-secret payee-fingerprint key committed in backend/.env.development. A
+# deployed environment refuses it (`_require_payee_fingerprint_key_in_deployed_envs`).
+_DEV_PAYEE_FINGERPRINT_KEY = "dev-payee-fingerprint-key-not-a-secret"
+
+
 class Settings(BaseSettings):
     model_config = {"env_prefix": "FEOH_"}
 
@@ -1075,6 +1080,25 @@ class Settings(BaseSettings):
     # the child's admin and the partner's admin, not a long-lived invite.
     partner_link_ttl_minutes: int = 30
 
+    # Payee bank fingerprint (decisions §383). The HMAC-SHA256 key over a
+    # vendor's whole `bank_details` that every payment records as the payee it
+    # paid (`services/payee_stamp.py`), compared when the payment is voided.
+    # Its own secret, not a derivation of `secret_key`: the JWT key rotates
+    # every 90 days, and each rotation turned every older void into a false
+    # `payee_changed_since_paid` fraud flag. Empty by default (no hardcoded
+    # fallback): a payment then records no fingerprint and its void flags, and a
+    # deployed environment refuses to boot (validator below). The committed
+    # .env.development sets a NON-secret dev value. Rotate ONLY through the
+    # keyring below, never by replacing the value alone
+    # (docs/secrets-rotation.md § FEOH_PAYEE_FINGERPRINT_KEY).
+    payee_fingerprint_key: str = ""
+    # Retired fingerprint keys, comma-separated. A stamp names the id of the
+    # key that made it (`v2:<kid>:<hmac>`, the id derived from the key), and a
+    # void recomputes it under that key, so a retired key stays here for as
+    # long as any payment it stamped may still be voided. A stamp whose key is
+    # in neither setting is compared as changed, which flags.
+    payee_fingerprint_previous_keys: str = ""
+
     # Retention policies (SOX records management). The enforcement sweep is a
     # long-lived loop (like contract renewal / qms sync) that finds records past
     # their configured retention window and archives them via a privileged,
@@ -1231,6 +1255,26 @@ class Settings(BaseSettings):
                 "FEOH_SECRET_KEY must be set to a cryptographically random value of "
                 f"at least 32 chars when FEOH_ENVIRONMENT is deployed ({self.environment!r}); "
                 "refusing to boot with the default / weak JWT signing key."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_payee_fingerprint_key_in_deployed_envs(self) -> "Settings":
+        # Without the key every payment records no bank fingerprint and every
+        # void of one raises a payee-change fraud flag a person must clear, so
+        # a deploy that forgot it would bury real flags in false ones. Refuse to
+        # boot instead. The committed dev value and the JWT key are refused too:
+        # the first is public, and the second rotates every 90 days, which is
+        # exactly what this key exists to be independent of.
+        if not self.is_deployed:
+            return self
+        key = self.payee_fingerprint_key.strip()
+        if len(key) < 32 or key == _DEV_PAYEE_FINGERPRINT_KEY or key == self.secret_key.strip():
+            raise ValueError(
+                "FEOH_PAYEE_FINGERPRINT_KEY must be set to its own cryptographically random "
+                "value of at least 32 chars (not FEOH_SECRET_KEY, not the committed dev value) "
+                f"when FEOH_ENVIRONMENT is deployed ({self.environment!r}); refusing to boot "
+                "with payee bank fingerprints off."
             )
         return self
 

@@ -58,6 +58,7 @@ REQUIRED = {
     "FEOH_HCAPTCHA_SITEKEY": "dummy-captcha-sitekey",
     "FEOH_CREDENTIAL_KMS_KEY_ID": "alias/feohledger-app-prod",
     "FEOH_EMAIL_PROVIDER": "ses",
+    "FEOH_PAYEE_FINGERPRINT_KEY": "c" * 64,
 }
 
 SOPS_STUB = """#!/bin/sh
@@ -238,6 +239,24 @@ def test_refuses_a_weak_jwt_key_without_printing_it(deploy: Deploy, weak_key: st
     _assert_refused_and_kept(deploy, result)
     assert "FEOH_SECRET_KEY" in result.stderr
     if weak_key != "change-me-in-production":
+        assert weak_key not in result.stderr + result.stdout
+
+
+@pytest.mark.parametrize(
+    "weak_key",
+    ["d" * 31, "dev-payee-fingerprint-key-not-a-secret", SECRET_KEY],
+)
+def test_refuses_a_weak_or_shared_fingerprint_key_without_printing_it(
+    deploy: Deploy, weak_key: str
+) -> None:
+    # The app refuses to boot on each (config.py
+    # _require_payee_fingerprint_key_in_deployed_envs, decisions §383); the JWT
+    # key's value is refused because it rotates every 90 days.
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_dotenv({"FEOH_PAYEE_FINGERPRINT_KEY": weak_key}))
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_PAYEE_FINGERPRINT_KEY" in result.stderr
+    if weak_key != "dev-payee-fingerprint-key-not-a-secret":
         assert weak_key not in result.stderr + result.stdout
 
 

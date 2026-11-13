@@ -11,7 +11,13 @@ Every payment now records, at the moment it releases money, who it paid:
 
 * ``payee_vendor_id`` — the invoice's vendor at that moment;
 * ``payee_bank_fingerprint`` — a keyed HMAC over that vendor's whole
-  ``bank_details`` blob, never the numbers themselves (the PII invariant);
+  ``bank_details`` blob, never the numbers themselves (the PII invariant),
+  tagged with the id of the key that made it (``v2:<kid>:<hmac>``). The key is
+  its own secret, ``FEOH_PAYEE_FINGERPRINT_KEY``, and rotates through a keyring
+  (``FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS``) so a stamp made under a retired key
+  is still compared under that key: rotating it never flags an honest void.
+  ``NULL`` on a stamped payment means no key was configured (local dev only; a
+  deployed environment refuses to boot without one), and its void flags;
 * ``payee_recorded_at`` — when. A payment with no stamp never released money
   after migration 0128, or predates it.
 
@@ -39,6 +45,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import uuid
 from datetime import datetime
 
@@ -52,31 +59,58 @@ from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
 from app.models.workflow import AuditLog
 
+logger = logging.getLogger(__name__)
+
 #: Finding codes (``invoice_warning_catalog``, ``exception.`` prefix) of the two
 #: re-payment flags. Both are ``fraud_flag`` rows.
 PAYEE_CHANGED_SINCE_PAID = "payee_changed_since_paid"
 PAYEE_UNRECORDED_AFTER_MERGE = "payee_unrecorded_after_merge"
 
 #: The scheme tag a fingerprint carries, so a later scheme never compares equal
-#: to this one by accident: an unequal tag reads as "changed", which flags.
-_FINGERPRINT_VERSION = "v1"
+#: to this one by accident: an unknown tag reads as "changed", which flags. `v1`
+#: (keyed by a derivation of FEOH_SECRET_KEY) existed only on the unmerged branch
+#: that introduced the stamp and is not read (decisions §383).
+_FINGERPRINT_VERSION = "v2"
 
 #: The audit action a vendor merge writes (``api/enrichment``), naming the
 #: canonical vendor as its entity.
 _VENDOR_MERGED = "vendor.merged"
 
 
-def _fingerprint_key() -> bytes:
-    # Domain-separated from every other use of the app key (the OAuth state MAC
-    # derives its own the same way). Rotating FEOH_SECRET_KEY changes every
-    # fingerprint, so a void after a rotation flags once — the fail-closed
-    # direction, cleared by a person (docs/secrets-rotation.md).
-    return hashlib.sha256(
-        b"feoh-payee-bank-fingerprint\x00" + settings.secret_key.encode()
-    ).digest()
+def fingerprint_key_id(key: str) -> str:
+    """The id a fingerprint carries for the key that made it.
+
+    Derived from the key, not configured beside it, so a key and its id can
+    never be paired wrongly: an operator cannot reuse an id for a new key and
+    make old stamps compare under the wrong one. 32 bits of a domain-separated
+    hash of a 256-bit random key say nothing about the key.
+    """
+    return hashlib.sha256(b"feoh-payee-fingerprint-kid\x00" + key.encode()).hexdigest()[:8]
 
 
-def bank_fingerprint(bank_details: dict | None, *, organization_id: uuid.UUID) -> str:
+def _current_key() -> str:
+    return settings.payee_fingerprint_key.strip()
+
+
+def _keyring() -> dict[str, str]:
+    """Every key a stored fingerprint may have been made under, by id: the
+    current key, then each retired one. The current key wins an id collision."""
+    ring: dict[str, str] = {}
+    previous = settings.payee_fingerprint_previous_keys.split(",")
+    for key in [_current_key(), *(k.strip() for k in previous)]:
+        if key:
+            ring.setdefault(fingerprint_key_id(key), key)
+    return ring
+
+
+def _digest(key: str, bank_details: dict | None, organization_id: uuid.UUID) -> str:
+    canonical = json.dumps(bank_details or None, sort_keys=True, separators=(",", ":"), default=str)
+    return hmac.new(
+        key.encode(), f"{organization_id}\x00{canonical}".encode(), hashlib.sha256
+    ).hexdigest()
+
+
+def bank_fingerprint(bank_details: dict | None, *, organization_id: uuid.UUID) -> str | None:
     """A keyed, non-reversible fingerprint of a vendor's ``bank_details``.
 
     The whole blob, canonicalised (sorted keys, no whitespace), because the
@@ -87,14 +121,44 @@ def bank_fingerprint(bank_details: dict | None, *, organization_id: uuid.UUID) -
     force. The tenant is in the message, so one account paid by two tenants
     does not fingerprint the same. No bank details at all (``None`` or ``{}``)
     is a value too, and fingerprints as one.
+
+    ``None`` when ``FEOH_PAYEE_FINGERPRINT_KEY`` is empty: there is no fallback
+    key, and a fingerprint nobody can recompute is worth nothing.
     """
-    canonical = json.dumps(bank_details or None, sort_keys=True, separators=(",", ":"), default=str)
-    digest = hmac.new(
-        _fingerprint_key(),
-        f"{organization_id}\x00{canonical}".encode(),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"{_FINGERPRINT_VERSION}:{digest}"
+    key = _current_key()
+    if not key:
+        return None
+    digest = _digest(key, bank_details, organization_id)
+    return f"{_FINGERPRINT_VERSION}:{fingerprint_key_id(key)}:{digest}"
+
+
+def fingerprint_matches(
+    stored: str | None, bank_details: dict | None, *, organization_id: uuid.UUID
+) -> bool:
+    """Does ``stored`` fingerprint exactly these ``bank_details``?
+
+    Recomputed under the key the stamp names, current or retired, so a key
+    rotation never reads as a bank change. Everything that cannot be
+    recomputed answers ``False``, which flags: no fingerprint (no key when the
+    payment was stamped), another scheme, or a key id no longer in the keyring
+    (a retired key dropped too early).
+    """
+    if not stored:
+        return False
+    version, _, rest = stored.partition(":")
+    kid, _, digest = rest.partition(":")
+    if version != _FINGERPRINT_VERSION or not kid or not digest:
+        return False
+    key = _keyring().get(kid)
+    if key is None:
+        # The id names a key, never the key; nothing here is PII.
+        logger.warning(
+            "payee fingerprint key %s is not in FEOH_PAYEE_FINGERPRINT_KEY or "
+            "FEOH_PAYEE_FINGERPRINT_PREVIOUS_KEYS; the void flags it as a payee change",
+            kid,
+        )
+        return False
+    return hmac.compare_digest(_digest(key, bank_details, organization_id), digest)
 
 
 def stamp_payee(
@@ -109,6 +173,12 @@ def stamp_payee(
     payment.payee_vendor_id = vendor_id
     payment.payee_bank_fingerprint = bank_fingerprint(bank_details, organization_id=organization_id)
     payment.payee_recorded_at = at
+    if payment.payee_bank_fingerprint is None:
+        logger.warning(
+            "FEOH_PAYEE_FINGERPRINT_KEY is empty: payment %s records its payee vendor but "
+            "no bank fingerprint, so a void of it raises payee_changed_since_paid",
+            payment.id,
+        )
 
 
 async def stamp_payee_from_vendor(
@@ -276,8 +346,11 @@ async def payee_changes_since(
       moves a paid invoice's vendor (an approved one is financially locked), so
       the raisers are the stewards of every merge on the way from the paid
       vendor to the current one;
-    * **stamped**, same vendor, different bank fingerprint → the approvers of
-      the bank changes since the stamp;
+    * **stamped**, same vendor, and the fingerprint does not match the current
+      details under the key it names → the approvers of the bank changes since
+      the stamp. A fingerprint that cannot be recomputed (none stored because
+      no key was configured, or a key id no longer in the keyring) does not
+      match: a stamp says money moved, so the comparison fails closed;
     * **not stamped** (paid before migration 0128): nothing honest to compare,
       and nothing is backfilled (§141) — the current details are exactly what
       cannot stand in for the paid ones. The one fact on record is a merge into
@@ -301,8 +374,9 @@ async def payee_changes_since(
         actors = await _merge_actors_between(db, payment.payee_vendor_id, invoice.vendor_id)
         return PAYEE_CHANGED_SINCE_PAID, _distinct(actors) or [None]
 
-    current = bank_fingerprint(current_bank, organization_id=organization_id)
-    if hmac.compare_digest(current, payment.payee_bank_fingerprint or ""):
+    if fingerprint_matches(
+        payment.payee_bank_fingerprint, current_bank, organization_id=organization_id
+    ):
         return None
     approvers = await bank_change_approvers_since(db, invoice.vendor_id, since=since)
     return PAYEE_CHANGED_SINCE_PAID, _distinct(approvers) or [None]

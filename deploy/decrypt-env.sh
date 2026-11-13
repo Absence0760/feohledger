@@ -50,7 +50,7 @@ env_value() {
 # uploads/backups silently need.
 REQUIRED_VARS=(APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION
 	FEOH_SECRET_KEY FEOH_ENVIRONMENT FEOH_S3_BUCKET BACKUP_S3_BUCKET
-	FEOH_CREDENTIAL_KMS_KEY_ID FEOH_EMAIL_PROVIDER)
+	FEOH_CREDENTIAL_KMS_KEY_ID FEOH_EMAIL_PROVIDER FEOH_PAYEE_FINGERPRINT_KEY)
 
 # ── Database mode: the same decision deploy/lib.sh makes for every script ────
 # FEOH_DATABASE_URL set → an external database (RDS): it must parse under the
@@ -140,6 +140,19 @@ change-me-in-production)
 esac
 [ "${#SECRET_KEY_VALUE}" -ge 32 ] ||
 	die "FEOH_SECRET_KEY is ${#SECRET_KEY_VALUE} chars; the app refuses to boot below 32 (openssl rand -hex 32)."
+
+# The payee bank-fingerprint key (config.py
+# _require_payee_fingerprint_key_in_deployed_envs, decisions §383): the app
+# refuses to boot below 32 chars, on the committed dev value, or on the JWT
+# key's own value, which rotates every 90 days and is what this key exists to be
+# independent of. Mirrored here so the deploy stops in its first second.
+FINGERPRINT_KEY_VALUE=$(env_value FEOH_PAYEE_FINGERPRINT_KEY)
+[ "${#FINGERPRINT_KEY_VALUE}" -ge 32 ] ||
+	die "FEOH_PAYEE_FINGERPRINT_KEY is ${#FINGERPRINT_KEY_VALUE} chars; the app refuses to boot below 32 (openssl rand -hex 32)."
+[ "$FINGERPRINT_KEY_VALUE" != dev-payee-fingerprint-key-not-a-secret ] ||
+	die "FEOH_PAYEE_FINGERPRINT_KEY is the committed development value — generate one with 'openssl rand -hex 32'."
+[ "$FINGERPRINT_KEY_VALUE" != "$SECRET_KEY_VALUE" ] ||
+	die "FEOH_PAYEE_FINGERPRINT_KEY equals FEOH_SECRET_KEY — it must be its own key, or every JWT rotation flags old voids (docs/secrets-rotation.md)."
 
 # The app refuses to boot with the console email adapter in a deployed env
 # (config.py _refuse_console_email_in_deployed_envs): it logs every temporary
