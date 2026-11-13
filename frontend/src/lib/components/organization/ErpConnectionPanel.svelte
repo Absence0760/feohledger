@@ -416,15 +416,35 @@
 			focusStatus();
 		} catch (err) {
 			setStatus(pickFailure(err, erp), 'failure');
-			// A coded pick refusal spent the pending connect server-side, so the
-			// next step is a fresh Connect. Anything else (the network, a lapsed
-			// session) may have left it waiting: keep the picker for a retry.
-			if (err instanceof ApiError && pickRefusalKey(err.code)) {
+			// Only `erp_pick_expired` says the pending connect is gone. Every
+			// other refusal the admin can act on leaves it parked (decisions §355,
+			// amended): a company the consent did not offer and a lost plan are
+			// refused before anything is spent, and `already_linked` and the two
+			// 503s put it back, so the admin picks again (another company, or the
+			// same one once the cause clears) without a second consent. A refusal
+			// can still have spent it (a token that could not be opened, a put-back
+			// that failed), so the server's own answer decides: re-read it, keep
+			// the picker while it offers something, close it when it does not.
+			if (isNothingPending(err)) {
 				pending = null;
-				focusStatus();
+			} else if (err instanceof ApiError) {
+				await rereadPending();
 			}
+			// Anything else (the network) may have left it waiting: keep the
+			// picker for a retry.
+			if (!pending) focusStatus();
 		} finally {
 			picking = false;
+		}
+	}
+
+	/** After a refused pick: what the server still holds for this browser. A
+	 *  read that fails for any other reason keeps the list already shown. */
+	async function rereadPending() {
+		try {
+			pending = await getErpPendingConnect();
+		} catch (err) {
+			if (isNothingPending(err)) pending = null;
 		}
 	}
 

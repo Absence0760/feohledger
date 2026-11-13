@@ -39,6 +39,10 @@ import { FAKE_ERP_BASE } from './helpers';
  *   4. Nothing parked — a plain visit says nothing (the read's 409 is the
  *      normal case there, not a failure).
  *   5. axe — the picker at desktop width and at 320px (WCAG 1.4.10).
+ *   6. A refused pick keeps the picker — a company the consent did not offer
+ *      (the real server's peek refusal) and `already_linked` (the claim
+ *      refusal the server puts the consent back after): the admin picks
+ *      again from the same list, with no second consent (§355, amended).
  */
 
 const PROVIDER = 'xero';
@@ -208,5 +212,61 @@ test.describe('/erp company picker against fake-erp Xero', () => {
 
 		await picker.getByTestId('erp-company-cancel').click();
 		await expect(picker).toHaveCount(0);
+	});
+
+	test('a refused pick keeps the picker, and the admin picks again', async ({ page }) => {
+		const landing = await consentToTwoOrganisations(page);
+		await page.goto(landing);
+		const picker = page.getByTestId('erp-company-picker');
+		await expect(picker).toBeVisible();
+		const status = page.getByTestId('erp-status');
+
+		// 1. A company the consent did not offer. The browser can only send an
+		//    id from the list, so the request is rewritten on the way out; the
+		//    REAL server refuses it on a peek, before the consent is spent.
+		const select = '**/api/organization/erp/oauth/pending/select';
+		await page.route(select, (route) =>
+			route.continue({ postData: JSON.stringify({ company_id: 'not-offered' }) })
+		);
+		await picker.getByRole('radio', { name: /Fake Xero Org 2/ }).check();
+		await picker.getByTestId('erp-company-connect').click();
+		await expect(status).toHaveText(
+			"That company wasn't offered by this connection, so nothing was connected. Choose one from the list."
+		);
+		await expect(picker).toBeVisible();
+		await expect(picker.getByRole('radio')).toHaveCount(2);
+		await page.unroute(select);
+
+		// 2. `already_linked`: the claim refusal after which the server puts the
+		//    consent back. Answered here, since another workspace holding this
+		//    stub organisation is not this spec's to arrange; the re-read that
+		//    decides whether the picker stays is the real server's.
+		await page.route(select, (route) =>
+			route.fulfill({
+				status: 409,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					detail: {
+						code: 'already_linked',
+						message: 'That company is already connected to another workspace.',
+						params: {}
+					}
+				})
+			})
+		);
+		await picker.getByTestId('erp-company-connect').click();
+		await expect(status).toHaveText(
+			'That Xero company is already connected to another FeohLedger account.'
+		);
+		await expect(picker).toBeVisible();
+		await page.unroute(select);
+		expect((await oauthStatus(page)).connected).toBe(false);
+
+		// The same consent still links, with no second trip to Xero.
+		await picker.getByRole('radio', { name: /Fake Xero Org 2/ }).check();
+		await picker.getByTestId('erp-company-connect').click();
+		await expect(status).toHaveText('Xero is now connected.');
+		await expect(picker).toHaveCount(0);
+		expect((await oauthStatus(page)).external_tenant_id).toBe(SECOND);
 	});
 });

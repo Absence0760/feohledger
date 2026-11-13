@@ -82,6 +82,8 @@ async def test_bulk_approve_of_own_upload_is_skipped_by_segregation(realdb):
     # showing for every skip regardless of why it happened.
     assert "immutable" not in skip["reason"].lower()
     assert "segregation" in skip["reason"].lower()
+    # A coded approval refusal keeps its code on the skip row.
+    assert skip["code"] == "approval_segregation"
 
     mk = realdb.sessionmaker("a")
     async with mk() as s:
@@ -406,8 +408,13 @@ async def test_one_illegal_transition_is_skipped_not_a_batch_abort(realdb):
     body = resp.json()
     assert body["updated"] == 1
     assert [s["id"] for s in body["skipped"]] == [str(bad_id)]
-    # The state machine's own refusal message, not a generic label.
-    assert "approved" in body["skipped"][0]["reason"]
+    # The state machine's own refusal message, not a generic label — and its
+    # code and the edge, so the list names both statuses in the reader's
+    # language.
+    skip = body["skipped"][0]
+    assert skip["reason"] == "Cannot transition from 'approved' to 'new'"
+    assert skip["code"] == "invoice_transition_invalid"
+    assert skip["params"] == {"status": "approved", "target": "new"}
 
     async with mk() as s:
         ok = (await s.execute(select(Invoice).where(Invoice.id == ok_id))).scalar_one()

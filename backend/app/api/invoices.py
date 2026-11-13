@@ -2675,6 +2675,27 @@ def _skip_reason(exc: HTTPException, fallback: str) -> str:
     return detail_text(exc.detail) or fallback
 
 
+def _refused_skip(invoice_id: uuid.UUID, exc: HTTPException, fallback: str) -> BulkStatusSkip:
+    """The skip for a row a service or the engine refused with ``exc``.
+
+    A coded refusal (`api/refusals.coded_refusal`: the engine's own 409s, the
+    approval gates, the resubmit and review refusals) keeps its ``code`` and
+    ``params`` beside the English, as §357's close refusal does, so the list
+    states it in the reader's language; anything else is the plain
+    :func:`_skip_reason` row. A structured detail that is not `{code, params}`
+    (the GL-chart refusal) contributes only its sentence.
+    """
+    detail = exc.detail
+    if (
+        isinstance(detail, dict)
+        and isinstance(detail.get("code"), str)
+        and isinstance(detail.get("params"), dict)
+        and isinstance(detail.get("message"), str)
+    ):
+        return _coded_skip(invoice_id, detail)
+    return BulkStatusSkip(id=str(invoice_id), reason=_skip_reason(exc, fallback))
+
+
 def _coded_skip(invoice_id: uuid.UUID, refusal: dict) -> BulkStatusSkip:
     """A bulk-status skip from a coded refusal (`api/refusals.coded_refusal`):
     its English as ``reason``, its code and params for the browser to state."""
@@ -2870,9 +2891,7 @@ async def bulk_status_change(
                 # keep processing the rest of the batch. The service's own
                 # `detail` names WHICH control fired; that's what the caller
                 # needs to know, not a generic label.
-                skipped.append(
-                    BulkStatusSkip(id=str(inv.id), reason=_skip_reason(exc, "approval was refused"))
-                )
+                skipped.append(_refused_skip(inv.id, exc, "approval was refused"))
                 continue
             updated += 1
         elif target == DBInvoiceStatus.rejected:
@@ -2888,11 +2907,7 @@ async def bulk_status_change(
                 )
             except HTTPException as exc:
                 # Not in `ready_for_review` — skip, same as the approve branch.
-                skipped.append(
-                    BulkStatusSkip(
-                        id=str(inv.id), reason=_skip_reason(exc, "rejection was refused")
-                    )
-                )
+                skipped.append(_refused_skip(inv.id, exc, "rejection was refused"))
                 continue
             updated += 1
         elif target == DBInvoiceStatus.ready_for_review and inv.status == DBInvoiceStatus.rejected:
@@ -2904,9 +2919,7 @@ async def bulk_status_change(
             try:
                 await resubmit_invoice(db, inv, actor_id=user.id)
             except HTTPException as exc:
-                skipped.append(
-                    BulkStatusSkip(id=str(inv.id), reason=_skip_reason(exc, "resubmit was refused"))
-                )
+                skipped.append(_refused_skip(inv.id, exc, "resubmit was refused"))
                 continue
             await refresh_warnings(db, inv, org_settings=org.settings)
             updated += 1
@@ -2960,11 +2973,7 @@ async def bulk_status_change(
                     action_name="invoice.bulk_status_change",
                 )
             except HTTPException as exc:
-                skipped.append(
-                    BulkStatusSkip(
-                        id=str(inv.id), reason=_skip_reason(exc, "transition was refused")
-                    )
-                )
+                skipped.append(_refused_skip(inv.id, exc, "transition was refused"))
                 continue
             await refresh_warnings(db, inv, org_settings=org.settings)
             updated += 1

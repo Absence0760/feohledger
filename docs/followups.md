@@ -903,15 +903,20 @@ or is a sibling of a fix that needs its own pass.
       vendor is no longer that one. **Trigger:** the next change to the void
       path or to `services/vendor_merge.py`, or the first merge of a vendor
       whose paid invoices could still be voided.
-- [ ] **(c) Three new refusals read in English only.** The web app has no
-      sentence for `vendor_merge_approved_unpaid` (`codedRefusals.ts` falls back
-      to the server's message), and the engine's two once-approved refusals
-      (`workflow_engine.ONCE_APPROVED_NOT_TO_DRAFT` /
-      `ONCE_APPROVED_NOT_CLOSED_FROM_DRAFT`) are plain strings, so a bulk skip
-      shows them uncoded. **Durable fix:** a `codedRefusals.ts` entry and the
-      six locales for the merge code (with its `count`), and coded refusals for
-      the two engine sentences, mapped the same way. **Trigger:** the next change
-      to `frontend/src/lib/api/codedRefusals.ts` or to the engine's refusals.
+- [ ] **(c) The bulk-status endpoint's own skip sentences read in English
+      only.** Since the engine's refusals were coded, every skip a
+      `POST /api/invoices/bulk/status` row gets from a service or the state
+      machine carries `code` + `params` (`api/invoices._refused_skip`), but the
+      six the endpoint writes itself are bare English `reason`s: `invoice not
+      found`, an entry-only caller's source, an immutable status, a mid-read
+      `pending → new`, the one-at-a-time recall, and missing required fields.
+      The list shows them untranslated beside localized rows. **Durable fix:**
+      a `coded_refusal` per sentence (the missing-fields one can reuse
+      `invoice_required_fields_missing` with its `fields`, the immutable one
+      `invoice_not_completable`'s `params.status` shape), built through
+      `_coded_skip`, with `codedRefusals.ts` entries in the six locales.
+      **Trigger:** the next change to `bulk_status_change` or to the invoice
+      list's bulk bar.
 
 ### Surfaced by the vendors table column fix (2026-10-06)
 

@@ -14,6 +14,11 @@
 	 * reader announces it on entering the group (WCAG 1.3.1). Focus moves to
 	 * the heading when it appears: the admin has just come back from the ERP
 	 * and this is the one thing left to do (WCAG 2.4.3).
+	 *
+	 * It stays open after a refused pick the server kept the consent for (a
+	 * company it did not offer, one linked to another workspace, a lost plan,
+	 * a transient 503), so the admin picks again with no second consent; the
+	 * panel closes it only once the server holds nothing to pick.
 	 */
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -42,6 +47,13 @@
 	let heading = $state<HTMLHeadingElement | null>(null);
 
 	onMount(() => heading?.focus());
+
+	// A refused pick leaves the picker open and the panel re-reads the list
+	// (decisions §355): a newer consent from this browser can offer other
+	// companies, so a choice the list no longer holds is dropped, never sent.
+	$effect(() => {
+		if (chosen && !pending.companies.some((c) => c.id === chosen)) chosen = '';
+	});
 
 	function submit(e: SubmitEvent) {
 		e.preventDefault();

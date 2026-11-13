@@ -172,6 +172,10 @@ def test_validate_transition_rejects_illegal_paths(src, tgt):
     with pytest.raises(HTTPException) as exc:
         validate_transition(src, tgt)
     assert exc.value.status_code == 409
+    # Coded, so the browser names both statuses in the reader's language.
+    assert exc.value.detail["code"] == "invoice_transition_invalid"
+    assert exc.value.detail["params"] == {"status": src.value, "target": tgt.value}
+    assert exc.value.detail["message"] == f"Cannot transition from '{src.value}' to '{tgt.value}'"
 
 
 def test_validate_transition_accepts_legal_paths():
@@ -289,6 +293,11 @@ async def test_the_recall_edges_refuse_every_action_but_the_recall(src):
                         action_name=action,
                     )
                 assert exc.value.status_code == 409
+                assert exc.value.detail["code"] == "invoice_transition_recall_only"
+                assert exc.value.detail["params"] == {
+                    "status": src.value,
+                    "target": "ready_for_review",
+                }
                 assert invoice.status == src
                 mk_audit.assert_not_called()
 
@@ -319,6 +328,8 @@ async def test_an_invoice_once_approved_never_reenters_extraction(src):
                         action_name="invoice.bulk_status_change",
                     )
                 assert exc.value.status_code == 409
+                assert exc.value.detail["code"] == "invoice_once_approved_not_reread"
+                assert exc.value.detail["params"] == {}
                 assert invoice.status == src
             else:
                 await transition_invoice(
@@ -332,18 +343,18 @@ async def test_an_invoice_once_approved_never_reenters_extraction(src):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("src", "target"),
+    ("src", "target", "code"),
     [
         # Recall → reject → `bulk/status → new`: draft, the lock off, the floor
         # and the unapproved close waiting (decisions §379).
-        (InvoiceStatus.rejected, InvoiceStatus.new),
+        (InvoiceStatus.rejected, InvoiceStatus.new, "invoice_once_approved_not_to_draft"),
         # A row at draft with a stamp from before the rule: closed only by an
         # approval, never `new → done`.
-        (InvoiceStatus.new, InvoiceStatus.done),
+        (InvoiceStatus.new, InvoiceStatus.done, "invoice_once_approved_not_closed_from_draft"),
     ],
     ids=["rejected-to-new", "new-to-done"],
 )
-async def test_an_invoice_once_approved_never_reaches_an_unattended_exit(src, target):
+async def test_an_invoice_once_approved_never_reaches_an_unattended_exit(src, target, code):
     """A once-approved invoice gets back to approval only through a person at
     `ready_for_review`. Each edge is refused for it, with nothing changed or
     audited, and stays open for a never-approved invoice."""
@@ -370,6 +381,8 @@ async def test_an_invoice_once_approved_never_reaches_an_unattended_exit(src, ta
                         action_name="invoice.bulk_status_change",
                     )
                 assert exc.value.status_code == 409
+                assert exc.value.detail["code"] == code
+                assert exc.value.detail["params"] == {}
                 assert invoice.status == src
                 mk_audit.assert_not_called()
             else:

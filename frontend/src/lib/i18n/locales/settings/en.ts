@@ -351,7 +351,7 @@ export const enSettings = {
 	'org.erp.oauth.pick.loading': 'Loading your {erp} companies…',
 	'org.erp.oauth.pick.noneSelected': 'Choose a company first.',
 	'org.erp.oauth.pick.expired': 'This connection is no longer waiting for a company choice: it expired, was already used, or was started in another browser. Connect again to choose one.',
-	'org.erp.oauth.pick.unknownCompany': 'That company wasn\'t offered by this connection, so nothing was connected. Connect again to choose one.',
+	'org.erp.oauth.pick.unknownCompany': 'That company wasn\'t offered by this connection, so nothing was connected. Choose one from the list.',
 	'org.erp.oauth.connectFromPlatform': 'Connecting {erp} has to start from your FeohLedger address, not a custom domain. Open this page there and connect again:',
 	'org.erp.oauth.connectFromPlatformLink': 'Open Organization → ERP at your FeohLedger address',
 	'org.erp.oauth.connectUnavailableHere': 'Connecting {erp} is not available from this address. Ask your FeohLedger operator to serve the API on the same domain as the app.',

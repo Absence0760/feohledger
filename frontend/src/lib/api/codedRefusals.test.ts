@@ -895,6 +895,150 @@ describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
 	});
 });
 
+describe('a merge refused while a duplicate holds approved unpaid invoices (decisions §379)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+
+	it('counts them, in every shipped locale', () => {
+		expect(CODED_REFUSAL_CODES).toContain('vendor_merge_approved_unpaid');
+		for (const [locale, messages] of LOCALES) {
+			const t = translator(messages, locale);
+			const one = codedRefusalText('vendor_merge_approved_unpaid', { count: 1 }, t);
+			const three = codedRefusalText('vendor_merge_approved_unpaid', { count: 3 }, t);
+			expect(one, locale).toBeTruthy();
+			expect(three, `${locale} names the count`).toContain('3');
+			expect(one, locale).not.toBe(three);
+			expect(three, locale).not.toMatch(/[{}]/);
+		}
+		expect(
+			localizeApiDetail(detail('vendor_merge_approved_unpaid', { count: 2 }), deT)
+		).toContain('2 genehmigte Rechnungen');
+	});
+
+	it.each([[{}], [{ count: 0 }], [{ count: '2' }], [{ count: 1.5 }]])(
+		'falls back to the server sentence for malformed params %j',
+		(params) => {
+			expect(codedRefusalText('vendor_merge_approved_unpaid', params, deT)).toBeNull();
+		}
+	);
+
+	it('states every merge code the backend defines — the reverse of the literal pin', () => {
+		const source = readFileSync(
+			new URL('../../../../backend/app/services/vendor_merge.py', import.meta.url).pathname,
+			'utf8'
+		);
+		const codes = [...source.matchAll(/= "(vendor_merge_[a-z_]+)"/g)].map((x) => x[1]);
+		expect(codes).toContain('vendor_merge_approved_unpaid');
+		for (const code of codes) {
+			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
+		}
+	});
+});
+
+describe('the invoice state machine’s own refusals (`services/workflow_engine.py`)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+	const engineSource = () =>
+		readFileSync(
+			new URL('../../../../backend/app/services/workflow_engine.py', import.meta.url).pathname,
+			'utf8'
+		);
+
+	it('states every code the engine defines — the reverse of the literal pin', () => {
+		const codes = [...engineSource().matchAll(/^INVOICE_[A-Z_]+ = "(invoice_[a-z_]+)"/gm)].map(
+			(x) => x[1]
+		);
+		expect(codes).toHaveLength(5);
+		for (const code of codes) {
+			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
+		}
+	});
+
+	const FIXED: [string, MainMessageKey][] = [
+		['invoice_once_approved_not_reread', 'refusal.invoiceOnceApprovedNotReread'],
+		['invoice_once_approved_not_to_draft', 'refusal.invoiceOnceApprovedNotToDraft'],
+		[
+			'invoice_once_approved_not_closed_from_draft',
+			'refusal.invoiceOnceApprovedNotClosedFromDraft'
+		]
+	];
+
+	it.each(FIXED)('%s is the fixed sentence %s in every shipped locale', (code, key) => {
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, `${locale} ${code}`).toBe((messages as Record<string, string>)[key]);
+			expect(text, `${locale} ${code}`).toBeTruthy();
+		}
+	});
+
+	it.each([['invoice_transition_invalid'], ['invoice_transition_recall_only']])(
+		'%s names both statuses by their labels, in every shipped locale',
+		(code) => {
+			for (const [locale, messages] of LOCALES) {
+				const text = codedRefusalText(
+					code,
+					{ status: 'failed', target: 'ready_for_review' },
+					translator(messages, locale)
+				);
+				const labels = messages as Record<string, string>;
+				expect(text, `${locale} ${code}`).toContain(labels['invoices.status.failed']);
+				expect(text, `${locale} ${code}`).toContain(labels['invoices.status.readyForReview']);
+				expect(text, `${locale} ${code}`).not.toMatch(/[{}]/);
+				expect(text, `${locale} ${code}`).not.toContain('ready_for_review');
+			}
+		}
+	);
+
+	it.each([[{}], [{ status: 'new' }], [{ target: 'done' }], [{ status: '', target: 'done' }]])(
+		'an edge with a status missing falls back to the server sentence %j',
+		(params) => {
+			expect(codedRefusalText('invoice_transition_invalid', params, deT)).toBeNull();
+			expect(codedRefusalText('invoice_transition_recall_only', params, deT)).toBeNull();
+		}
+	);
+
+	it('states a `POST /bulk/status` skip row carrying the engine code', () => {
+		// The skip is `coded_refusal`'s shape with the invoice id and the English
+		// as `reason` (`api/invoices._refused_skip`).
+		expect(
+			localizeApiDetail(
+				{
+					id: 'x',
+					reason: "This invoice has already been approved, so it can't go back to draft.",
+					code: 'invoice_once_approved_not_to_draft',
+					params: {}
+				},
+				deT
+			)
+		).toBe(de['refusal.invoiceOnceApprovedNotToDraft']);
+		expect(
+			localizeApiDetail(
+				{
+					id: 'x',
+					reason: "Cannot transition from 'ready_for_review' to 'done'",
+					code: 'invoice_transition_invalid',
+					params: { status: 'ready_for_review', target: 'done' }
+				},
+				enT
+			)
+		).toBe(
+			`This invoice can't move from ${EN_ALL['invoices.status.readyForReview']} to ${EN_ALL['invoices.status.done']}.`
+		);
+	});
+});
+
 describe('the vendor ERP unlink refusals (`services/vendor_erp_unlink.py`, decisions §375)', () => {
 	const LOCALES = [
 		['en', en],

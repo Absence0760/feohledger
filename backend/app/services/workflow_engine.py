@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.refusals import coded_refusal
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.workflow import WorkflowDefinition, WorkflowInstance, WorkflowStep
 from app.services.audit_dispatch import dispatch_audit
@@ -188,15 +189,49 @@ RECALL_EDGES: frozenset[tuple[InvoiceStatus, InvoiceStatus]] = frozenset(
 )
 
 
+# ---------- the engine's refusals, coded ----------
+#
+# Every 409 below is a `coded_refusal` (`api/refusals.py`): it reaches a person
+# through `POST /bulk/status`'s skip rows and every single-invoice door that
+# transitions, so the browser states it from the code and its params (the
+# statuses, as `InvoiceStatus` values) and keeps the English for a code it
+# predates. The codes are only as specific as the sentences they replace.
+
+#: No edge from ``params.status`` to ``params.target`` in the state machine.
+INVOICE_TRANSITION_INVALID = "invoice_transition_invalid"
+#: ``params.status → params.target`` is a :data:`RECALL_EDGES` edge, walked by
+#: the recall alone (§374).
+INVOICE_TRANSITION_RECALL_ONLY = "invoice_transition_recall_only"
+#: A once-approved invoice's document is never read again (`→ pending`, §374).
+INVOICE_ONCE_APPROVED_NOT_REREAD = "invoice_once_approved_not_reread"
+#: A once-approved invoice never goes back to draft (`→ new`, §379).
+INVOICE_ONCE_APPROVED_NOT_TO_DRAFT = "invoice_once_approved_not_to_draft"
+#: A once-approved invoice is never closed from draft (`new → done`, §379).
+INVOICE_ONCE_APPROVED_NOT_CLOSED_FROM_DRAFT = "invoice_once_approved_not_closed_from_draft"
+
+
+def _engine_refusal(code: str, message: str, **params: object) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT, detail=coded_refusal(code, message, **params)
+    )
+
+
 def validate_transition(current: InvoiceStatus, target: InvoiceStatus) -> None:
     allowed = VALID_TRANSITIONS.get(current, set())
     if target not in allowed:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot transition from '{current.value}' to '{target.value}'",
+        raise _engine_refusal(
+            INVOICE_TRANSITION_INVALID,
+            f"Cannot transition from '{current.value}' to '{target.value}'",
+            status=current.value,
+            target=target.value,
         )
 
 
+#: Why a once-approved invoice's document may not be read again (§374).
+ONCE_APPROVED_NOT_REREAD = (
+    "This invoice has already been approved, so its document can't be read "
+    "again. Recall its approval and correct it instead."
+)
 #: Why a once-approved invoice may not go back to draft (decisions §374, §379).
 ONCE_APPROVED_NOT_TO_DRAFT = (
     "This invoice has already been approved, so it can't go back to draft. "
@@ -236,28 +271,22 @@ def _refuse_outside_the_recall(invoice: Invoice, target: InvoiceStatus, action_n
       the floor stamps it and sends such a row to review.)
     """
     if (invoice.status, target) in RECALL_EDGES and action_name != RECALL_ACTION:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Cannot transition from '{invoice.status.value}' to '{target.value}' "
-                "except by recalling the approval"
-            ),
+        raise _engine_refusal(
+            INVOICE_TRANSITION_RECALL_ONLY,
+            f"Cannot transition from '{invoice.status.value}' to '{target.value}' "
+            "except by recalling the approval",
+            status=invoice.status.value,
+            target=target.value,
         )
     if not ever_approved(invoice):
         return
     if target == InvoiceStatus.pending:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This invoice has already been approved, so its document can't be read "
-                "again. Recall its approval and correct it instead."
-            ),
-        )
+        raise _engine_refusal(INVOICE_ONCE_APPROVED_NOT_REREAD, ONCE_APPROVED_NOT_REREAD)
     if target == InvoiceStatus.new:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ONCE_APPROVED_NOT_TO_DRAFT)
+        raise _engine_refusal(INVOICE_ONCE_APPROVED_NOT_TO_DRAFT, ONCE_APPROVED_NOT_TO_DRAFT)
     if invoice.status == InvoiceStatus.new and target == InvoiceStatus.done:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=ONCE_APPROVED_NOT_CLOSED_FROM_DRAFT
+        raise _engine_refusal(
+            INVOICE_ONCE_APPROVED_NOT_CLOSED_FROM_DRAFT, ONCE_APPROVED_NOT_CLOSED_FROM_DRAFT
         )
 
 

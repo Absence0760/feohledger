@@ -74,6 +74,18 @@ The way back from that lock is **recalling the approval** (`POST /api/invoices/{
 
 All transitions are enforced by a state machine in `services/workflow_engine.py`. Invalid transitions return `409 Conflict`. Authoritative graph: `VALID_TRANSITIONS` in that file.
 
+Every engine 409 is a coded refusal (`api/refusals.coded_refusal`), so a client states it in the reader's language and keeps the English `message` for a code it predates:
+
+| Code | Refused | `params` |
+|------|---------|----------|
+| `invoice_transition_invalid` | an edge `VALID_TRANSITIONS` does not hold | `status`, `target` |
+| `invoice_transition_recall_only` | a recall edge walked by anything but the recall (§374) | `status`, `target` |
+| `invoice_once_approved_not_reread` | `→ pending` for an invoice ever approved (§374) | — |
+| `invoice_once_approved_not_to_draft` | `→ new` for an invoice ever approved (§379) | — |
+| `invoice_once_approved_not_closed_from_draft` | `new → done` for an invoice ever approved (§379) | — |
+
+`POST /api/invoices/bulk/status` carries the code and `params` on the row's skip beside its English `reason` (`api/invoices._refused_skip`), as it does for every coded refusal a row meets (the approval gates, resubmit, the close rule of §357). The web registry is `frontend/src/lib/api/codedRefusals.ts`, whose vitest reads these constants from the engine and fails on one with no sentence.
+
 ## Stage 1: Upload & Extraction
 
 **Endpoint:** `POST /api/invoices/upload` (multipart/form-data)
