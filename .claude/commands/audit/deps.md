@@ -10,7 +10,7 @@ Four ecosystems, not one — a JS-only sweep misses most of the attack surface:
 
 - `frontend/` — SvelteKit 3 / Svelte 5 / Vite / Playwright, **pnpm**, lockfile at `frontend/pnpm-lock.yaml` (**not** the repo root).
 - `backend/` — Python 3.12+, FastAPI / SQLAlchemy 2 / Alembic. Declared in `backend/pyproject.toml` (+ the pip pin in `backend/requirements-dev.in`), compiled to `backend/requirements.lock` and `backend/requirements-dev.lock` by `uv pip compile --universal --generate-hashes`.
-- `mobile/` — Flutter 3.41+ / Dart 3.11+, `mobile/pubspec.yaml` + `mobile/pubspec.lock`.
+- `mobile/` — Flutter 3.50.0 (pinned) / Dart 3.14+, `mobile/pubspec.yaml` + `mobile/pubspec.lock`.
 - `infra/` — Terraform providers/modules.
 - `tools/fake-erp/` — the local e2e fixture ERP: its own Dockerfile (digest-pinned base) + `requirements.in`/`requirements.txt`.
 - Root `package.json` — pnpm dispatch scripts only, no dependencies of its own.
