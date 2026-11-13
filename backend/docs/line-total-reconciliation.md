@@ -133,11 +133,13 @@ Covered by `backend/tests/test_extraction_line_items_replace.py`.
 - The invoice is taken `FOR UPDATE` (`get_invoice_for_update`) — the
   delete-and-reinsert is not atomic on its own and the status guard must not
   read a stale row.
-- **Post-approval financial freeze applies and already did**: the endpoint 409s
-  once the invoice is in `_FINANCIALLY_LOCKED_STATUSES` (`approved` +
-  `IMMUTABLE_STATUSES`). Re-coding lines after sign-off requires
-  reject → re-approve. Covered by
-  `test_invoice_critical_path.test_line_items_frozen_after_approved`.
+- **Post-approval financial freeze applies**: the endpoint 409s
+  `invoice_financially_locked` whenever `models/invoice_status.financially_locked`
+  holds — from `approved` on, and at a failed ERP push after approval
+  (decisions §370). Covered by
+  `test_invoice_critical_path.test_line_items_frozen_after_approved`,
+  `test_line_items_refused_on_a_failed_push_after_approval`, and the verdict
+  parity in `test_review_actions_parity.test_the_edit_financials_verdict_matches_both_doors`.
 - Writes an append-only **`invoice.line_items_edited`** audit row via
   `dispatch_audit`, with a `build_field_diff` over `line_item_count`,
   `line_items_total` and `gl_accounts`, plus the header amount and whether the

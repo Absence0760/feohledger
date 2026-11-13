@@ -18,7 +18,9 @@ This file pins:
 from __future__ import annotations
 
 import ast
+from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.models import invoice_status as groups
 from app.models.invoice_status import (
@@ -29,6 +31,8 @@ from app.models.invoice_status import (
     POST_APPROVAL_LOCKED_STATUSES,
     PRE_APPROVAL_STATUSES,
     InvoiceStatus,
+    financially_locked,
+    was_ever_approved,
 )
 from app.services.workflow_engine import VALID_TRANSITIONS
 
@@ -94,14 +98,53 @@ def test_financially_locked_is_post_approval_locked_plus_approved():
     assert FINANCIALLY_LOCKED_STATUSES == POST_APPROVAL_LOCKED_STATUSES | {S.approved}
 
 
+def _row(status, *, approval_date=None, approved_by=None):
+    return SimpleNamespace(status=status, approval_date=approval_date, approved_by=approved_by)
+
+
+def test_financially_locked_is_the_set_plus_a_failed_push_after_approval():
+    """`financially_locked` is written fail-closed (only pre-approval statuses
+    and a never-approved `failed` are open); for every status that exists it
+    must answer exactly "in FINANCIALLY_LOCKED_STATUSES, or `failed` and ever
+    approved" (decisions §363, §370)."""
+    stamps = {
+        "never": {},
+        "dated": {"approval_date": date(2026, 1, 1)},
+        "named": {"approved_by": "Approver"},
+        "blank-name": {"approved_by": ""},
+    }
+    for status in InvoiceStatus:
+        for label, stamp in stamps.items():
+            row = _row(status, **stamp)
+            approved = was_ever_approved(row)
+            assert approved is (label in {"dated", "named"}), label
+            expected = status in FINANCIALLY_LOCKED_STATUSES or (status is S.failed and approved)
+            assert financially_locked(row) is expected, (status, label)
+
+
+def test_financially_locked_fails_closed_on_a_status_it_does_not_know():
+    """A status added to the enum later is frozen until someone decides
+    otherwise — the open side is the explicit list."""
+    assert financially_locked(_row("some_future_status")) is True
+
+
+def test_financially_locked_reads_the_wire_string_too():
+    """`Invoice.status` is the StrEnum, but a raw string compares equal."""
+    assert financially_locked(_row("new")) is False
+    assert financially_locked(_row("failed", approved_by="Approver")) is True
+
+
 def test_consumers_read_the_owner():
     from app.api import analytics as api_analytics
+    from app.api import invoice_entry
     from app.api import invoices as api_invoices
     from app.services import analytics as svc_analytics
     from app.services import budget_service, gl_recode, invoice_warnings
 
     assert api_invoices.IMMUTABLE_STATUSES is POST_APPROVAL_LOCKED_STATUSES
-    assert api_invoices._FINANCIALLY_LOCKED_STATUSES is FINANCIALLY_LOCKED_STATUSES
+    # One financial-lock predicate, one approval read (decisions §370).
+    assert invoice_entry.financially_locked is financially_locked
+    assert invoice_entry.was_ever_approved is was_ever_approved
     assert gl_recode._IMMUTABLE_STATUSES is POST_APPROVAL_LOCKED_STATUSES
     assert invoice_warnings._PRE_APPROVAL_STATUSES is PRE_APPROVAL_STATUSES
     assert svc_analytics.OPEN_AP_STATUSES == tuple(s.value for s in OPEN_AP_STATUSES)

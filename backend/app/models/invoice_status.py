@@ -86,17 +86,53 @@ APPROVED_OR_BEYOND_STATUSES: tuple[InvoiceStatus, ...] = (
 
 #: Past approval AND handed onward (ERP push started, payment scheduled, paid,
 #: or finished): the invoice is immutable — no edit, delete, or bulk recode.
-#: `approved` is not in it because a reject → rework is still possible there;
-#: financial fields are frozen from `approved` by `api/invoices`'
-#: `_FINANCIALLY_LOCKED_STATUSES`, which adds it back.
+#: `approved` is not in it because its metadata (GL coding, notes, addresses)
+#: is still edited there; its financial fields are frozen by
+#: :func:`financially_locked`, which adds it back.
 POST_APPROVAL_LOCKED_STATUSES: frozenset[InvoiceStatus] = frozenset(
     set(APPROVED_OR_BEYOND_STATUSES) - {InvoiceStatus.approved}
 )
 
 #: Approved, whatever has happened since: the invoice's financial content
 #: (amount, payee, line items) and its source document are what the approver
-#: signed off. `api/invoices`' `_FINANCIALLY_LOCKED_STATUSES` is this set;
-#: `api/invoice_entry.document_locked` reads it for the document (decisions §363).
+#: signed off. Not the whole lock on its own — an approved invoice whose ERP
+#: push failed sits at `failed` — so read :func:`financially_locked`, never
+#: membership of this set (decisions §363, §370).
 FINANCIALLY_LOCKED_STATUSES: frozenset[InvoiceStatus] = frozenset(
     {InvoiceStatus.approved} | POST_APPROVAL_LOCKED_STATUSES
 )
+
+
+def was_ever_approved(invoice) -> bool:
+    """Whether the invoice has ever been finally approved.
+
+    Every approval site sets both `approval_date` and `approved_by`, and
+    nothing clears either. Both are read: `approved_by` is a display name and
+    can be empty for a user with a blank `full_name`. Duck-typed over the row
+    so this module stays free of the ORM.
+    """
+    return invoice.approval_date is not None or bool(invoice.approved_by)
+
+
+def financially_locked(invoice) -> bool:
+    """Whether the invoice's amount, payee, line items and source document are
+    frozen — the ONE predicate every door that changes them asks
+    (decisions §363, §370).
+
+    Frozen from `approved` on (:data:`FINANCIALLY_LOCKED_STATUSES`), and at
+    `failed` once the invoice was ever approved: that is a failed ERP push,
+    which `/retry-erp` pushes again — and a payment run then pays — with no new
+    approval. A `failed` extraction (never approved) stays open; its corrected
+    figures still meet approval.
+
+    Fail closed: only the statuses known to sit before an approval decision
+    are open, so a status added to the enum later is frozen until someone
+    decides otherwise. `tests/test_invoice_status_groups.py` pins this to
+    :data:`FINANCIALLY_LOCKED_STATUSES` for every status that exists today.
+    """
+    status = invoice.status
+    if status in PRE_APPROVAL_STATUSES:
+        return False
+    if status == InvoiceStatus.failed:
+        return was_ever_approved(invoice)
+    return True

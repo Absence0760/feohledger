@@ -694,6 +694,71 @@ async def test_the_resubmit_verdict_matches_what_resubmit_answers(realdb, role):
     assert seen == expected, (role, seen)
 
 
+#: name → (status, approved before?) for the financial lock (decisions §370).
+_LOCK_ROWS = {
+    "new": (InvoiceStatus.new, False),
+    "in_review": (InvoiceStatus.ready_for_review, False),
+    "reworked_after_approval": (InvoiceStatus.rejected, True),
+    "failed_extraction": (InvoiceStatus.failed, False),
+    "failed_push_after_approval": (InvoiceStatus.failed, True),
+    "approved": (InvoiceStatus.approved, True),
+    "paid": (InvoiceStatus.paid, True),
+    "imported_done": (InvoiceStatus.done, False),
+}
+_ONE_LINE = [{"description": "line", "quantity": "1", "unit_price": "9.00", "total": "9.00"}]
+
+
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_edit_financials_verdict_matches_both_doors(realdb, role):
+    """`edit_financials` (the modal's "may I edit and send the amount, payee and
+    lines?") is null exactly when `PATCH` with a financial field and
+    `PUT /line-items` succeed, and otherwise carries their code. The modal used
+    to restate the locked statuses and missed a failed ERP push after approval,
+    so it would have sent the frozen fields and 409'd every save. The
+    response's `financially_locked` states the same lock for the mobile app."""
+    seen: set[str | None] = set()
+    for name, (status, approved) in _LOCK_ROWS.items():
+        patch_id = await _invoice(realdb, status=status)
+        lines_id = await _invoice(realdb, status=status)
+        if approved:
+            async with realdb.sessionmaker(TENANT)() as s:
+                for invoice_id in (patch_id, lines_id):
+                    (await s.get(Invoice, invoice_id)).approved_by = "Approver"
+                await s.commit()
+        verdict = (await _verdict(realdb, role, patch_id))["edit_financials"]
+        async with realdb.client(key=TENANT, role=role) as c:
+            read = (await c.get(f"/api/invoices/{patch_id}")).json()
+            patch = await c.patch(f"/api/invoices/{patch_id}", json={"amount": "501.00"})
+            lines = await c.put(f"/api/invoices/{lines_id}/line-items", json=_ONE_LINE)
+        label = (role, name)
+        locked = status not in {
+            InvoiceStatus.new,
+            InvoiceStatus.ready_for_review,
+            InvoiceStatus.rejected,
+        } and (status is not InvoiceStatus.failed or approved)
+        assert read["financially_locked"] is locked, label
+        _assert_parity(verdict, lines, (*label, "line-items"))
+        if status in {InvoiceStatus.paid, InvoiceStatus.done}:
+            # `PATCH` refuses an immutable status outright, before the lock and
+            # in plain text; the verdict refuses there too.
+            assert verdict is not None and patch.status_code == 409, (label, patch.text)
+        else:
+            _assert_parity(verdict, patch, (*label, "patch"))
+        if locked and role != "ap_clerk":
+            assert verdict["code"] == "invoice_financially_locked", (label, verdict)
+        async with realdb.sessionmaker(TENANT)() as s:
+            row = await s.get(Invoice, patch_id)
+            assert (row.amount == Decimal("501.00")) is (verdict is None), label
+        seen.add(verdict and verdict["code"])
+
+    expected = {None, "invoice_financially_locked"}
+    if role == "ap_clerk":
+        # A clerk hears the closed entry window first on anything past entry,
+        # the doors' own order — the lock itself never reaches them.
+        expected = {None, "invoice_entry_window_closed"}
+    assert seen == expected, (role, seen)
+
+
 async def test_resubmit_refuses_a_non_rejected_invoice_with_a_code(realdb):
     """It used to surface the state machine's plain "Cannot transition" text."""
     invoice_id = await _invoice(realdb, status=InvoiceStatus.new)

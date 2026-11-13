@@ -34,6 +34,7 @@ from app.api.invoice_entry import (
     INVOICE_ENTRY_WINDOW_CLOSED,
     INVOICE_IMPORT_ROLES,
     document_lock_refusal,
+    financial_lock_refusal,
     in_entry_window,
     is_entry_only,
     may_import_history,
@@ -66,7 +67,7 @@ from app.models.exception import Exception as ExceptionModel
 from app.models.expense import CorporateCardTransaction
 from app.models.invoice import Invoice, InvoiceExtractionResult, InvoiceLineItem
 from app.models.invoice import InvoiceStatus as DBInvoiceStatus
-from app.models.invoice_status import FINANCIALLY_LOCKED_STATUSES, POST_APPROVAL_LOCKED_STATUSES
+from app.models.invoice_status import POST_APPROVAL_LOCKED_STATUSES
 from app.models.organization import Organization
 from app.models.payment import Payment, PaymentSchedule
 from app.models.peppol_transmission import PeppolTransmission
@@ -161,12 +162,13 @@ _PEPPOL_SENDABLE_STATUSES = {DBInvoiceStatus.approved} | IMMUTABLE_STATUSES
 # signature (services/approval_signature.py) is computed over the exact amount,
 # and the payment run reads `Invoice.amount` straight off the row — so editing
 # the amount / line items after sign-off would pay out a figure nobody approved
-# and silently invalidate the signature. `approved` was the gap: IMMUTABLE_STATUSES
-# only starts at `sending_to_erp`, so an edit in the `approved` window slipped
-# through. Financial edits past approval must go back through reject → re-approve.
-# The source document freezes from the same set (`invoice_entry.document_locked`,
-# decisions §363).
-_FINANCIALLY_LOCKED_STATUSES = FINANCIALLY_LOCKED_STATUSES
+# and silently invalidate the signature. `approved` was the first gap:
+# IMMUTABLE_STATUSES only starts at `sending_to_erp`. `failed` after an
+# approval was the second: a failed ERP push sits there and `/retry-erp`
+# re-pushes it with no new approval. Both doors below ask the one predicate,
+# `models/invoice_status.financially_locked`, through
+# `invoice_entry.financial_lock_refusal` (409 `invoice_financially_locked`);
+# the source document freezes on the same predicate (decisions §363, §370).
 # WHO gets paid is frozen alongside HOW MUCH. `_execute_single_payment` resolves
 # the payee's `Vendor.bank_details` through `Invoice.vendor_id` at execution
 # time, and this PATCH re-runs `match_and_link_vendor` whenever the vendor name
@@ -1164,13 +1166,11 @@ async def save_invoice_line_items(
     invoice = await get_invoice_for_update(db, invoice_id)
     refuse_entry_only_outside_window(user, invoice)
     # Line items are financial content — frozen once the invoice is approved
-    # (the approved amount was signed off; payment reads it). Re-coding lines
-    # after sign-off requires reject → re-approve. See _FINANCIALLY_LOCKED_STATUSES.
-    if invoice.status in _FINANCIALLY_LOCKED_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot edit line items once the invoice is approved",
-        )
+    # (the approved amount was signed off; payment reads it), including at a
+    # failed ERP push after approval. See `invoice_entry.financial_lock_refusal`.
+    locked = financial_lock_refusal(invoice)
+    if locked is not None:
+        raise HTTPException(status_code=409, detail=locked)
 
     # Snapshot the outgoing lines. The audit row reports counts + exact Decimal
     # totals + GL codes (never a float; never the free-form line text), but the
@@ -1648,17 +1648,15 @@ async def update_invoice(
                 ),
             )
     # An approved invoice is financially frozen — the signed-off amount is what
-    # the payment run pays. Non-financial edits (notes, addresses, GL coding)
-    # stay allowed in the `approved` window so AP can keep cleaning up metadata;
-    # touching a money field requires reject → re-approve. (Past ERP-send the
-    # IMMUTABLE_STATUSES check above has already blocked the whole edit.)
-    if invoice.status in _FINANCIALLY_LOCKED_STATUSES:
-        touched_financial = _FINANCIAL_FIELDS & set(update_data)
-        if touched_financial:
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot edit financial fields once the invoice is approved",
-            )
+    # the payment run pays — and so is one whose ERP push failed after approval
+    # (`/retry-erp` re-pushes it unapproved). Non-financial edits (notes,
+    # addresses, GL coding) stay allowed there so AP can keep cleaning up
+    # metadata. (Past ERP-send the IMMUTABLE_STATUSES check above has already
+    # blocked the whole edit.)
+    if _FINANCIAL_FIELDS & set(update_data):
+        locked = financial_lock_refusal(invoice)
+        if locked is not None:
+            raise HTTPException(status_code=409, detail=locked)
     # A GL code NEW to this invoice must resolve in the invoice's own chart
     # (shared ∪ its entity): not another subsidiary's, and an active account of
     # it whenever it has any (`services/gl_chart`, decisions §194/§199). Only a
