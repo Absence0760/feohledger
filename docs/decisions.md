@@ -18588,9 +18588,9 @@ goes through `_coded_skip(coded_refusal(...))`, so the invoice list's toast
   shape, named by its label), `invoice_still_extracting`,
   `invoice_recall_one_at_a_time`. Not reused: `invoice_not_completable` says
   "only new or approved can be completed", which is false for an immutable row
-  under a non-`done` target; `invoice_transition_recall_only` needs a
-  `target` the recall skip would have to invent nothing for but still reads as
-  an engine edge, so the bulk bar keeps its own sentence.
+  under a non-`done` target; `invoice_transition_recall_only` is the engine's
+  edge refusal and needs `params.target`, while the bulk recall skip is the
+  endpoint declining before any edge is tried.
 - **Other bulk endpoints left uncoded on purpose:** vendors `/bulk/status` and
   `/bulk/screen`, exceptions bulk resolve, expenses `/bulk/gl-code` write
   English (or machine) `reason`s, but no page renders them — their toasts show
