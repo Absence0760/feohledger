@@ -1835,6 +1835,7 @@ async def xero_organisation(request: Request) -> JSONResponse:
                 {
                     "OrganisationID": XERO_TENANT_ID,
                     "Name": "Fake Xero Org",
+                    "ShortCode": "!fAkE1",
                     "BaseCurrency": "ZAR",
                     "CountryCode": "ZA",
                 }

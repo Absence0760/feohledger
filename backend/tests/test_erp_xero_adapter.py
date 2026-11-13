@@ -91,6 +91,9 @@ def token():
         yield m
 
 
+SHORT_CODE = "!mBdtL"
+
+
 def _client(cm):
     return cm.return_value.__aenter__.return_value
 
@@ -100,12 +103,16 @@ def _get_router(
     lookup: httpx.Response,
     accounts: httpx.Response | None = None,
     bills: dict[str, dict] | None = None,
+    organisation: httpx.Response | None = None,
 ):
-    """``bills`` serves ``GET /Invoices/{id}`` — the read-back after a create."""
+    """``bills`` serves ``GET /Invoices/{id}`` — the read-back after a create;
+    ``organisation`` the ShortCode read after a confirmed post."""
 
     async def get(url, params=None, headers=None):
         if url.endswith("/Invoices"):
             return lookup
+        if url.endswith("/Organisation"):
+            return organisation or _resp(200, {"Organisations": [{"ShortCode": SHORT_CODE}]})
         if url.endswith("/Accounts"):
             assert accounts is not None, "unexpected Accounts lookup"
             return accounts
@@ -539,7 +546,9 @@ def test_existing_bill_with_same_total_short_circuits(token):
     assert result.success
     assert result.erp_document_id == "inv-old"
     assert "idempotent" in result.message
-    params = client.get.await_args.kwargs["params"]
+    # An adopted bill links into its organisation as a created one does.
+    assert result.erp_company_code == SHORT_CODE
+    params = client.get.await_args_list[0].kwargs["params"]
     assert params["InvoiceNumbers"] == "SUP-1001"
     assert params["ContactIDs"] == VENDOR
 
@@ -558,6 +567,81 @@ def test_existing_bill_with_a_different_total_is_refused_not_adopted(token):
         result = _run(_adapter().post_invoice(_payload()))
     assert result.success is False
     assert result.message == "Xero post refused: duplicate_document_number"
+
+
+# ---------------------------------------------------------------------------
+# post_invoice: the organisation ShortCode for the deep link (decisions §354)
+# ---------------------------------------------------------------------------
+
+
+def _post_with_organisation(organisation=None, *, get_error: Exception | None = None):
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        router = _get_router(
+            lookup=_resp(200, {"Invoices": []}),
+            accounts=_resp(200, _accounts()),
+            bills={"inv-1": {"InvoiceID": "inv-1", "Status": "AUTHORISED", "Total": 1150.0}},
+            organisation=organisation,
+        )
+        if get_error is not None:
+
+            async def get(url, params=None, headers=None):
+                if url.endswith("/Organisation"):
+                    raise get_error
+                return await router(url, params=params, headers=headers)
+
+            client.get = AsyncMock(side_effect=get)
+        else:
+            client.get = router
+        client.put = AsyncMock(
+            return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-1", "Total": 1150.0}]})
+        )
+        result = _run(_adapter().post_invoice(_payload()))
+    return client, result
+
+
+def test_a_confirmed_post_carries_the_organisation_short_code(token):
+    client, result = _post_with_organisation()
+    assert result.success, result.message
+    assert result.erp_company_code == SHORT_CODE
+    (org_call,) = [c for c in client.get.await_args_list if c.args[0].endswith("/Organisation")]
+    # Read from the connected organisation, not whichever the token reaches first.
+    assert org_call.kwargs["headers"]["Xero-Tenant-Id"] == TENANT
+
+
+@pytest.mark.parametrize(
+    "organisation",
+    [
+        _resp(500, {}),
+        _resp(429, {}, {"Retry-After": "5"}),
+        _resp(200, {"Organisations": []}),
+        _resp(200, {"Organisations": [{"Name": "No code"}]}),
+        _resp(200, {"Organisations": [{"ShortCode": "   "}]}),
+    ],
+)
+def test_an_unreadable_short_code_leaves_the_bill_posted_without_one(token, organisation):
+    _, result = _post_with_organisation(organisation)
+    assert result.success, result.message
+    assert result.erp_document_id == "inv-1"
+    assert result.erp_company_code is None
+
+
+def test_a_failed_organisation_request_never_fails_a_posted_bill(token):
+    _, result = _post_with_organisation(get_error=httpx.ConnectError("down"))
+    assert result.success, result.message
+    assert result.erp_document_id == "inv-1"
+    assert result.erp_company_code is None
+
+
+def test_a_failed_post_reads_no_short_code(token):
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = _get_router(lookup=_resp(429, {}, {"Retry-After": "37"}))
+        client.put = AsyncMock(side_effect=AssertionError("must not post"))
+        result = _run(_adapter().post_invoice(_payload()))
+    assert result.success is False
+    assert result.erp_company_code is None
+    assert not [c for c in client.get.await_args_list if c.args[0].endswith("/Organisation")]
 
 
 # ---------------------------------------------------------------------------

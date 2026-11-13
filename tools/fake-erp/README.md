@@ -258,7 +258,7 @@ Backs `erp_adapters/xero.py`. Auth is shape-only: any non-empty
 otherwise). Point the backend at it with
 `FEOH_ERP_XERO_API_BASE=http://localhost:12112/xero/api.xro/2.0`.
 
-- `GET /Organisation` — `Fake Xero Org` (ZAR, ZA).
+- `GET /Organisation` — `Fake Xero Org` (ZAR, ZA, ShortCode `!fAkE1`, which the adapter reads after each confirmed push for the bill's organisation-scoped deep link).
 - `GET /Contacts?where=IsSupplier==true` — `xero-contact-1` *Fake Xero
   Supplier Co* (the customer `xero-contact-2` is filtered out).
 - `GET /Accounts` — `xero-acc-6100` / `6200` (default tax type `INPUT`) and

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -78,6 +79,8 @@ from app.services.erp_adapters.posted_total import (
 )
 from app.services.erp_oauth import register_oauth_provider
 from app.utils.json_money import dumps_exact_json
+
+logger = logging.getLogger(__name__)
 
 PROVIDER = "Xero"
 XERO_API_BASE = "https://api.xero.com/api.xro/2.0"
@@ -339,6 +342,44 @@ class XeroAdapter(OAuthErpAdapter):
         return items
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
+        """Post the bill; a confirmed one also carries the organisation's
+        ``ShortCode``, so its deep link opens in this organisation
+        (``deep_links``, decisions §354)."""
+        result = await self._post_invoice(payload)
+        if result.success and result.erp_document_id:
+            result.erp_company_code = await self.organisation_short_code()
+        return result
+
+    async def organisation_short_code(self) -> str | None:
+        """The connected organisation's ``ShortCode`` (``GET /Organisation``),
+        or None when it cannot be read.
+
+        Best effort by design: it runs after the bill is confirmed, so a failed
+        read must not turn a posted bill into a failed push. The link then
+        falls back to the page in the user's currently selected organisation.
+        Read at each push rather than stored on the connection, so a connection
+        made before this existed needs no backfill or reconnect.
+        """
+        try:
+            headers = await self._headers()
+            async with self.oauth_client(timeout=10) as client:
+                resp = await client.get(f"{_api_base()}/Organisation", headers=headers)
+            if resp.status_code != 200:
+                logger.warning(
+                    "xero: Organisation read for the deep link returned %s", resp.status_code
+                )
+                return None
+            orgs = _json(resp).get("Organisations") or []
+            code = orgs[0].get("ShortCode") if orgs and isinstance(orgs[0], dict) else None
+        except Exception as exc:  # noqa: BLE001 — the bill is posted; only the link degrades
+            logger.warning(
+                "xero: Organisation read for the deep link failed (%s)", type(exc).__name__
+            )
+            return None
+        code = str(code or "").strip()
+        return code or None
+
+    async def _post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
             return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
         if payload.invoice_date is None or payload.due_date is None:

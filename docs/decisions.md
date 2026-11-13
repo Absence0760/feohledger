@@ -16313,3 +16313,66 @@ migration across every tenant for a label. Also rejected: listing each
 shortened vendor name in the toast, since each one is up to 255 characters; the
 vendor line counts them and the response carries the names.
 
+
+## 354. The Xero deep link names the bill's organisation by a ShortCode read at each push; QuickBooks has no such link (2026-11-12)
+
+**The gap.** §302 stored `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=`
+and QuickBooks' `app/bill?txnId=` from the bill id alone. Both open in whichever
+organisation or company the user last had open, so a user who works in several
+lands on "not found", or in another company's books.
+
+**Xero: the organisation-login redirect.** The link is
+`https://go.xero.com/organisationlogin/default.aspx?shortcode=<ShortCode>&redirecturl=/AccountsPayable/View.aspx?InvoiceID=<id>`.
+Xero switches the signed-in user to the organisation named by its `ShortCode`,
+then opens the bill. Xero's own MCP server builds the same form
+(`src/consts/deeplinks.ts` in `XeroAPI/xero-mcp-server`). The
+`ShortCode` comes from `GET /Organisation` (Xero's OpenAPI describes it as "A
+unique identifier for the organisation"). The redirect path is sent
+unencoded, as Xero's links send it. That is safe because the bill id inside it
+is already fully percent-quoted, so it holds no `&` or `#` that could end the
+query. The ShortCode is quoted with only `!` left literal. We kept the
+`View.aspx` page from §302. Xero's MCP server targets `Edit.aspx` for bills,
+but the view page is the read-only one, and it is the one already tested.
+
+**Read at each confirmed push, not stored on the connection.** After a bill is
+created, or an existing one is adopted idempotently,
+`XeroAdapter.organisation_short_code` reads `/Organisation` with the
+connection's own `Xero-Tenant-Id`. It returns the code as
+`ErpPostResult.erp_company_code`, and `deep_links.erp_document_url(…,
+company_code=)` builds the link. The link stored on the invoice is the only
+copy that persists. We considered storing the code in
+`settings.erp.oauth` when `resolve_external_tenant_id` runs at connect time,
+and rejected it for three reasons. (1) Every connection made before this
+change would have no code until someone reconnected it, so a lazy fill on the
+push path would be needed anyway, which is a control-plane write from the
+tenant push path. (2) The connect flow is being reworked separately, to choose
+among several organisations. (3) A stored code is a second copy that can go
+stale. A migration was never on the table, since the per-org JSON would have
+held it. The cost is one Xero call per confirmed push, which already makes
+three or four, against Xero's 60-per-minute limit.
+
+**Best effort, never failing the push.** The read happens after the bill is
+confirmed. A non-200 answer, an empty or missing `ShortCode`, or an exception
+means `erp_company_code=None`, and the link falls back to the bare §302 page.
+It is logged with only the status or the exception type. Turning a posted
+bill into a failed push over a link would make the next retry's idempotency
+lookup carry the whole outcome for a cosmetic field. Links stored before this
+change are not rebuilt: the tenant database does not record the code, and
+reading it now for old bills would mean assuming the connection never changed
+organisation.
+
+**QuickBooks: none exists.** We found no Intuit documentation for a web URL
+that selects a company by `realmId`. developer.intuit.com documents only the
+REST path `/v3/company/<realmId>/bill/<id>`, which is not a page a browser
+opens. Intuit's help centre's only route is Settings → Switch company
+(quickbooks.intuit.com/learn-support, "Switch company files"). Community
+answers give `qbo.intuit.com/app/<entity>?txnId=` with no company selector. So
+the QuickBooks link is unchanged, and the docs say it opens in the current
+company. An undocumented `companyId=`-style parameter would be a guess that
+could fail silently.
+
+**Mobile.** The mobile ERP panel parses `erp_document_url` and makes the
+reference a link through the shared `ExternalLink` widget, which uses
+`url_launcher` and opens the link outside the app. It accepts only an
+`https` URL. Anything else shows as plain text, the same as a provider with
+no link.

@@ -1748,7 +1748,8 @@ A confirmed push stores the adapter's `erp_document_id` on
 `state_data["erp_reference"]` write in `services/erp._call_erp`. Both are on
 `InvoiceResponse`; the invoice modal's ERP section shows the id as
 "ERP Reference", linked when there is a URL, at every status from
-`sending_to_erp` on, `done` included.
+`sending_to_erp` on, `done` included. The mobile ERP panel does the same,
+opening the link outside the app (`ExternalLink`, https only).
 
 - **Only the ERP's id is stored**, never the document number or the
   `"UNKNOWN"` placeholder `erp_reference` falls back to: the column is what a
@@ -1764,13 +1765,25 @@ A confirmed push stores the adapter's `erp_document_id` on
 
   | Adapter | Link |
   |---|---|
-  | `xero` | `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=<id>` |
+  | `xero` | `https://go.xero.com/organisationlogin/default.aspx?shortcode=<ShortCode>&redirecturl=/AccountsPayable/View.aspx?InvoiceID=<id>`, or the bare `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=<id>` when the ShortCode could not be read |
   | `quickbooks_online` | `https://app.qbo.intuit.com/app/bill?txnId=<id>` (`app.sandbox.qbo.intuit.com` when `environment` is `sandbox`) |
   | everything else (Merge.dev, mock, the other direct adapters) | none — the id is shown alone |
 
-  Both open in the user's currently selected organisation / company
-  (`docs/followups.md`). Invoices posted before 0117 got the id backfilled
-  from `state_data` but no link. Reasoning: `docs/decisions.md` §302.
+  **The Xero link opens in the bill's organisation.** Xero's
+  `organisationlogin` redirect switches the signed-in user to the organisation
+  named by its `ShortCode`, then opens the bill, which is the form Xero's own
+  MCP server builds. After each confirmed push (a created bill or an adopted
+  idempotent one) `XeroAdapter.organisation_short_code` reads `ShortCode` from
+  `GET /Organisation` and returns it as `ErpPostResult.erp_company_code`;
+  nothing stores it on the connection, so connections made earlier need no
+  backfill or reconnect. The read is best effort: it costs one Xero call per
+  confirmed push, and a failed read never fails a bill that is already
+  posted. The link then falls back to the bare page, which opens in whichever
+  organisation the user has selected. **The QuickBooks link opens in the
+  user's current company.** Intuit documents no URL that selects a company by
+  `realmId`, so none is guessed. Invoices posted before 0118 got the id
+  backfilled from `state_data` but no link, and links stored before §354 keep
+  the bare Xero form. Reasoning: `docs/decisions.md` §302, §354.
 
 **Manual retry:** `POST /api/invoices/{id}/retry-erp` resets `erp_retries` to 0
 and moves the invoice to `sending_to_erp`. The route then dispatches the push.

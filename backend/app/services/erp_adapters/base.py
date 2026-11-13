@@ -410,6 +410,11 @@ class ErpPostResult:
     #: the bill stays partly open there — a discount or credit taken in
     #: FeohLedger that the ERP does not know about (``payment_erp_sync``).
     bill_balance_after: Decimal | None = None
+    #: The ERP's own code for the company the document was posted in, when its
+    #: web UI needs one to open the document in that company (Xero's
+    #: organisation ``ShortCode``). Read by ``deep_links.erp_document_url``
+    #: only; None leaves the link to the user's currently selected company.
+    erp_company_code: str | None = None
 
 
 #: Stable reason code: a payment written back to the ERP (``post_payment``)

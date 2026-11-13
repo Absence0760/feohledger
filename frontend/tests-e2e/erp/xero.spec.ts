@@ -279,7 +279,11 @@ test.describe('/erp xero adapter against fake-erp', () => {
 		try {
 			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
 			const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
-			const link = `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=${bill.InvoiceID}`;
+			// Scoped to the organisation by fake-erp's ShortCode (`!fAkE1`), which
+			// the adapter reads after the post (backend decisions §354).
+			const link =
+				'https://go.xero.com/organisationlogin/default.aspx?shortcode=!fAkE1' +
+				`&redirecturl=/AccountsPayable/View.aspx?InvoiceID=${bill.InvoiceID}`;
 
 			const posted = (await getInvoice(page, inv.id)) as Inv &
 				Pick<Invoice, 'erp_document_id' | 'erp_document_url'>;

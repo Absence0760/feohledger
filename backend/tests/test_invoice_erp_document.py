@@ -7,7 +7,8 @@ invoice to the bill. Pinned here:
 
 * ``erp_adapters.deep_links`` — the one provider -> URL mapping (Xero, both
   QuickBooks hosts, no link for Merge.dev / the mock / an empty id, the id
-  URL-quoted);
+  URL-quoted; Xero's organisation-scoped ShortCode redirect when the adapter
+  reports the ShortCode, decisions §354);
 * on real Postgres: a confirmed push stores the id and link on the invoice row,
   and ``GET /api/invoices/{id}`` returns both.
 """
@@ -70,6 +71,44 @@ def test_erp_document_url(config, doc, expected):
     assert erp_document_url(config, doc) == expected
 
 
+XERO_ORG_LINK = (
+    "https://go.xero.com/organisationlogin/default.aspx?shortcode=!mBdtL"
+    f"&redirecturl=/AccountsPayable/View.aspx?InvoiceID={BILL}"
+)
+
+
+@pytest.mark.parametrize(
+    ("config", "code", "expected"),
+    [
+        # Xero's organisation-login redirect picks the organisation by its
+        # ShortCode, then opens the bill — the form Xero's own MCP server builds.
+        (XERO, "!mBdtL", XERO_ORG_LINK),
+        (XERO, "  !mBdtL ", XERO_ORG_LINK),
+        # No ShortCode (the Organisation read failed): the bare bill page.
+        (XERO, None, f"https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={BILL}"),
+        (XERO, "  ", f"https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={BILL}"),
+        # Whatever Xero sent cannot add a query parameter or end the query.
+        (
+            XERO,
+            "!a&redirecturl=//evil#x",
+            "https://go.xero.com/organisationlogin/default.aspx?"
+            "shortcode=!a%26redirecturl%3D%2F%2Fevil%23x"
+            f"&redirecturl=/AccountsPayable/View.aspx?InvoiceID={BILL}",
+        ),
+        # QuickBooks has no documented company-selecting URL: a code is ignored.
+        (
+            {"type": "quickbooks_online", "integration_method": "direct"},
+            "!mBdtL",
+            f"https://app.qbo.intuit.com/app/bill?txnId={BILL}",
+        ),
+        # No link at all stays no link.
+        ({"type": "mock", "integration_method": "direct"}, "!mBdtL", None),
+    ],
+)
+def test_erp_document_url_company_code(config, code, expected):
+    assert erp_document_url(config, BILL, company_code=code) == expected
+
+
 # ---------------------------------------------------------------------------
 # end to end on a real tenant
 # ---------------------------------------------------------------------------
@@ -77,7 +116,12 @@ def test_erp_document_url(config, doc, expected):
 
 class _XeroLike:
     async def post_invoice(self, payload):
-        return ErpPostResult(success=True, erp_document_id=BILL, erp_document_number="INV-9")
+        return ErpPostResult(
+            success=True,
+            erp_document_id=BILL,
+            erp_document_number="INV-9",
+            erp_company_code="!mBdtL",
+        )
 
 
 async def test_a_confirmed_push_is_on_the_invoice_and_its_api_response(realdb):
@@ -113,7 +157,8 @@ async def test_a_confirmed_push_is_on_the_invoice_and_its_api_response(realdb):
         with patch("app.services.erp.get_erp_adapter", return_value=_XeroLike()):
             await send_to_erp_internal(s, inv, actor_id=None, erp_config=XERO)
 
-    link = f"https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={BILL}"
+    # The adapter's ShortCode reaches the stored link (decisions §354).
+    link = XERO_ORG_LINK
     async with mk() as s:
         row = await s.get(Invoice, inv_id)
         assert row.status == InvoiceStatus.done

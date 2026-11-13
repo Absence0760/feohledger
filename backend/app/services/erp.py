@@ -740,7 +740,9 @@ async def _call_erp(
         # one, which may name another ERP's bill if the org has switched.
         # Persisted by the caller's commit.
         invoice.erp_document_id = result.erp_document_id or None
-        invoice.erp_document_url = erp_document_url(config, result.erp_document_id)
+        invoice.erp_document_url = erp_document_url(
+            config, result.erp_document_id, company_code=result.erp_company_code
+        )
 
     if instance is not None:
         new_state = dict(state)
