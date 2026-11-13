@@ -28,6 +28,8 @@ import {
 	PICK_REFUSAL_KEYS,
 	secretIsSaved,
 	selectedProviderKey,
+	statusSyncNowOffered,
+	statusSyncStartedKey,
 	type ErpProvider
 } from './erpConnection';
 
@@ -823,6 +825,58 @@ describe('disconnectMessage', () => {
 				'org.erp.oauth.disconnectedRemoveAtProvider'
 			] as const) {
 				expect(messages[key], `${locale}: ${key}`).toContain('{erp}');
+			}
+		}
+	});
+});
+
+describe('statusSyncNowOffered', () => {
+	const connected = (overrides: Partial<ErpOAuthStatus> = {}) =>
+		status({ provider: 'xero', connected: true, ...overrides });
+
+	it('offers the check only while the server says a pass would run', () => {
+		expect(statusSyncNowOffered('xero', connected({ status_sync_available: true }))).toBe(true);
+		expect(
+			statusSyncNowOffered(
+				'xero',
+				connected({ status_sync_available: false, status_sync_refusal: 'status_sync_off' })
+			)
+		).toBe(false);
+	});
+
+	it('offers nothing an older server sent no verdict for', () => {
+		expect(statusSyncNowOffered('xero', connected())).toBe(false);
+	});
+
+	it('offers nothing for another ERP, or a connection that is not live', () => {
+		const live = connected({ status_sync_available: true });
+		expect(statusSyncNowOffered('quickbooks_online', live)).toBe(false);
+		expect(
+			statusSyncNowOffered('xero', { ...live, needs_reconnect: true, connected: false })
+		).toBe(false);
+		expect(statusSyncNowOffered('xero', null)).toBe(false);
+	});
+});
+
+describe('statusSyncStartedKey', () => {
+	it('says a check started, or that one already runs', () => {
+		expect(statusSyncStartedKey(true)).toBe('org.erp.oauth.checkPaymentsStarted');
+		expect(statusSyncStartedKey(false)).toBe('org.erp.oauth.checkPaymentsRunning');
+	});
+
+	it('has every sentence of the button, naming the ERP, in every locale', async () => {
+		const { loadAllMessages } = await import('#lib/i18n/allMessages.ts');
+		for (const locale of SUPPORTED_LOCALES) {
+			const messages = await loadAllMessages(locale);
+			for (const key of [
+				'org.erp.oauth.checkPaymentsHint',
+				'org.erp.oauth.checkPaymentsStarted',
+				'org.erp.oauth.checkPaymentsRunning'
+			] as const) {
+				expect(messages[key], `${locale}: ${key}`).toContain('{erp}');
+			}
+			for (const key of ['org.erp.oauth.checkPayments', 'org.erp.oauth.checkingPayments'] as const) {
+				expect(messages[key], `${locale}: ${key}`).toBeTruthy();
 			}
 		}
 	});

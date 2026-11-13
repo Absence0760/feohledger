@@ -904,7 +904,12 @@ const BUILDERS: Record<string, Builder> = {
 	card_skip_erp_bill: fixed('refusal.cardSkipErpBill'),
 	card_skip_issue_failed: fixed('refusal.cardSkipIssueFailed'),
 	// The whole `/cards/generate` call, on a tenant whose programme is off.
-	cards_not_enabled: fixed('refusal.cardsNotEnabled')
+	cards_not_enabled: fixed('refusal.cardsNotEnabled'),
+	// `POST /organization/erp/oauth/status-sync` (`api/erp_oauth.py`, §386):
+	// why an on-request payment check cannot run.
+	status_sync_off: fixed('refusal.statusSyncOff'),
+	status_sync_unsupported: fixed('refusal.statusSyncUnsupported'),
+	status_sync_needs_reconnect: fixed('refusal.statusSyncNeedsReconnect')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

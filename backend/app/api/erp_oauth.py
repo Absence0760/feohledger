@@ -124,6 +124,15 @@ class OAuthStatusResponse(BaseModel):
     #: (Blackbaud). None for any other ERP, and when it cannot be read: the
     #: page then shows nothing rather than an error (§324).
     call_usage: ErpCallUsage | None = None
+    #: Whether ``POST /status-sync`` would run a pass now (decisions §392):
+    #: the settings page shows its "check payments now" button only then.
+    #: The verdict is ``erp_status_sync.status_sync_now_refusal``, the rule the
+    #: POST itself applies; False when it cannot be read.
+    status_sync_available: bool = False
+    #: Why not, as the POST's 409 code (``status_sync_off`` /
+    #: ``status_sync_unsupported`` / ``status_sync_needs_reconnect``); None when
+    #: available, or when the verdict could not be read.
+    status_sync_refusal: str | None = None
     #: The redirect URI to register on a bring-your-own provider app.
     redirect_uri: str
     providers: list[ProviderStatus]
@@ -256,6 +265,7 @@ async def oauth_status(
         known = provider in erp_oauth.OAUTH_PROVIDERS
         return OAuthStatusResponse(provider=provider if known else None, connected=False, **common)
     needs_reconnect = bool(oauth.get("needs_reconnect"))
+    sync_refusal, sync_readable = await _status_sync_verdict(org)
     return OAuthStatusResponse(
         provider=oauth.get("provider"),
         connected=not needs_reconnect,
@@ -271,8 +281,27 @@ async def oauth_status(
         ),
         connected_at=oauth.get("connected_at"),
         call_usage=await _call_usage(resolved),
+        status_sync_available=sync_readable and sync_refusal is None,
+        status_sync_refusal=sync_refusal,
         **common,
     )
+
+
+async def _status_sync_verdict(org: Organization) -> tuple[str | None, bool]:
+    """``(refusal, readable)`` for ``POST /status-sync`` on this tenant now.
+
+    The POST's own rule, so the button the page shows and the answer it gets
+    cannot disagree. Never raises, like ``_call_usage``: a verdict that cannot
+    be read (a credential store that cannot be opened, a control-plane blip)
+    is not a verdict, and the button is then not offered, while the rest of
+    the connection status still answers."""
+    from app.services import erp_status_sync
+
+    try:
+        return await erp_status_sync.status_sync_now_refusal(org), True
+    except Exception as exc:  # noqa: BLE001 — a courtesy verdict; fail closed
+        logger.info("erp status-sync verdict unavailable: %s", exc.__class__.__name__)
+        return None, False
 
 
 #: ``/authorize`` reached the API on a host whose cookies the callback will not
@@ -731,8 +760,9 @@ async def oauth_status_sync_now(
 ):
     """Run the status-sync sweep's pass for this tenant now (decisions §386).
 
-    For a bill just paid in the ERP: the sweep runs every few hours, and an
-    ERP with no webhook here (Xero) has no faster channel. The pass is the
+    For a bill just paid in the ERP: the sweep runs every few hours, and a
+    webhook delivery can be lost or turned off (Xero's and QuickBooks' are
+    both best effort, §295 / §392). The pass is the
     sweep's own (``erp_status_sync.sync_org_now``), so every change it makes
     is the audited change the sweep would have made. It runs after the
     response (202): a full reconciliation reads every payable bill, which at

@@ -125,7 +125,10 @@ describe('codedRefusalText', () => {
 		['card_txn_already_matched', 'refusal.cardTxnAlreadyMatched'],
 		['card_txn_not_matched', 'refusal.cardTxnNotMatched'],
 		['card_txn_matched_not_ignorable', 'refusal.cardTxnMatchedNotIgnorable'],
-		['card_txn_already_ignored', 'refusal.cardTxnAlreadyIgnored']
+		['card_txn_already_ignored', 'refusal.cardTxnAlreadyIgnored'],
+		['status_sync_off', 'refusal.statusSyncOff'],
+		['status_sync_unsupported', 'refusal.statusSyncUnsupported'],
+		['status_sync_needs_reconnect', 'refusal.statusSyncNeedsReconnect']
 	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
