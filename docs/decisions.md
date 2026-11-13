@@ -17409,3 +17409,120 @@ durable fix is a kept-link table for `gl_accounts` mirroring `vendor_erp_links`,
 which needs a migration; repurposing an existing column (such as
 `erp_link_candidates` JSONB) would be the keyed-JSON shape §356 rejected for
 vendors, with no uniqueness per realm. It stays in `docs/followups.md`.
+
+## 374. An approval can be recalled to review, refused while a rail or the ERP holds the invoice (§370 follow-up, 2026-11-13)
+
+**The gap.** §370 froze an approved invoice's amount, payee and lines, and its
+failed push after approval with them. Nothing led back: `approved` had no edge
+into review, `failed` only `pending` / `sending_to_erp`, and `/reject` takes
+only `ready_for_review`. The mobile lock notice promised "reject the invoice,
+correct it, then approve it again", which the server refused. The one way to
+correct a signed-off figure was to delete the invoice and enter it again.
+
+**The rule.** `POST /api/invoices/{id}/recall-approval` (body `{reason}`,
+required) moves an `approved` invoice, or a `failed` one that was ever approved,
+to `ready_for_review`. The two edges are in `VALID_TRANSITIONS`, and this door
+is the only one that walks them: `POST /bulk/status` reports such a row as a
+skip. One predicate, `services/review.recall_refusal`, gates the door on the
+locked row, and `GET /review-actions` serves it as `recall_approval`. The web
+modal and the mobile detail screen both read that verdict. In order:
+
+1. `invoice.approve` — the approve and reject doors' permission.
+2. The status (409 `invoice_not_recallable`, `params.status`). The clients hide
+   the action on this code.
+3. The ERP may hold the bill (409 `invoice_recall_in_erp`): `erp_document_id`
+   is set (a confirmed push, or an invoice a void walked back to `approved` from
+   `posted_in_erp`), or the push's own record says a bill may exist
+   (`services/erp.possibly_posted`: an attempt with an unknown outcome, a queued
+   job, an orphan document, a confirmed reference). This is fail-closed: a push
+   that failed with an unknown outcome refuses. It is named before a claim
+   because nothing in FeohLedger clears it, so nobody cancels a run only to meet
+   this refusal next. Recalling a bill that is already in the ERP is the
+   `void-erp` product call in `docs/followups.md`. This change does not
+   pre-empt it.
+4. A live payment or virtual card (409 `invoice_recall_claimed`,
+   `params.claim`), read by `erp_export_gate.live_claims`, so "live" means here
+   what it means for the run builder, the card mint, the push and closing
+   (§309, §357). A payment run holds its invoices only through payment rows, so
+   a staged, approved, exported or executed run refuses. The remedy is the
+   rail's own exit.
+
+The run builder, the card mint and the push each lock the invoice, so no claim
+or push lands between the read and the transition. A late auto-send meets the
+push's own status gate.
+
+**Why `ready_for_review`, not `rejected`.** A recall withdraws a decision, and
+`ready_for_review` is the state that means "awaiting a decision". From there
+every exit is the existing one: approve (corrections included), or reject for
+rework when the supplier has to reissue. `rejected` would have been wrong in
+three ways:
+
+- It is the supplier portal's "action required" bucket. A supplier could then
+  resubmit, and replace the document of, an invoice AP had approved.
+- `reject_invoice` opens a `review_rejected` exception and counts toward the
+  rejection metrics, so it would record a decision nobody made.
+- It would need a resubmit step, and `rejected → new` would put the invoice back
+  in draft, where `/complete` with no approval step closes it unapproved.
+
+A manager corrects the figures with `PATCH` while the invoice sits in review.
+The lock is off there and a clerk's entry window stays shut. The approval then
+binds the version the approver loaded (§263).
+
+**Who may recall.** Holders of `invoice.approve`. Recall takes back an approval
+and moves no money, so it sits with the duty that gives approvals, not with
+`payment.void`. There is no threshold: the CFO gate applies again at
+re-approval, which is where it counts.
+
+**The recaller joins the segregation set**
+(`approval_chain.add_implicated_actor`, now shared with `stamp_entry_editor`).
+Someone who reopens signed figures is disputing them, and is usually the one who
+corrects them. Without the stamp, one person could approve, recall, re-point the
+payee and approve again, with nobody else looking after the first sign-off. A
+manager who edits before review is not stamped, because approve-with-corrections
+is the approver editing what they sign. A recall is different: it comes after a
+signature, and that is what makes the next signature need a second person. The
+org-level `require_segregation: false` opt-out covers the recaller as it covers
+the uploader, so a one-person team can still finish the loop. The original
+approver is not stamped. They may approve the corrected figures.
+
+**Nothing is erased.** The `invoice.approved` row and its signature stay. The
+recall writes `invoice.approval_recalled` (`reason`, `recalled_from`,
+`recalled_approval: {approved_by, approval_date}`). The row's `approved_by` /
+`approval_date` keep naming the recalled approval until a new one overwrites
+them, so `was_ever_approved` holds: `/extract` still refuses to re-read the
+document, and a clerk cannot reopen it for entry.
+
+**Re-approval re-runs everything.** The chain state is cleared (as
+`reject_invoice` clears it), `recall_count` is bumped, and a fresh review step
+is opened. The next approval re-routes the chain from level 0 against the
+corrected figures, and meets segregation, the receiving rule and the max-amount
+and CFO gates again.
+
+**Rejected:**
+- *Keep delete-and-re-enter as the documented exit.* It loses the row's link to
+  its payments, exceptions, chat and document versions, and re-entry produces a
+  new uploader, which segregation would then measure against instead of the
+  real preparer.
+- *A bulk recall.* Each recall carries its own reason and its own claim read,
+  and a batch that silently skipped claimed rows would read as done.
+- *Clearing `approved_by` / `approval_date` on recall.* `was_ever_approved` is
+  what keeps a clerk and `/extract` away from figures that were once signed off.
+  The audit trail names who approved, and the next approval replaces the
+  display fields.
+
+**Clients.** Web: "Recall Approval" in the invoice modal opens
+`RecallApprovalModal` (the shared `ui/Modal`, rendered beside the invoice dialog
+so its Esc and focus trap stay its own). Mobile: the same action on the detail
+screen, read through `ActionVerdict`, with a missing key failing closed. The
+financial-lock sentence now names the exit, on the server and in every locale.
+The mobile lock notice does the same.
+
+Tests: `backend/tests/test_invoice_recall_approval.py` (happy path, each
+refusal, verdict/door parity for every role, SoD after recall and the opt-out,
+the audit row, the chain and the CFO gate re-run, bulk refusal);
+`tests/test_invoice_status_groups.py` and `tests/test_workflow_state_machine.py`
+(the two edges, and that nothing else goes back before approval);
+`frontend/tests-e2e/invoices/recall-approval.spec.ts`;
+`frontend/src/lib/api/codedRefusals.test.ts`; and the mobile
+`invoice_detail_screen_test.dart`, `action_verdict_test.dart` and
+`coded_refusal_messages_test.dart`.
