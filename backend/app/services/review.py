@@ -951,6 +951,7 @@ async def recall_approval(
       again — none of the recalled approval's levels carry over.
     """
     from app.services.approval_chain import add_implicated_actor, clear_chain_state
+    from app.services.workflow_engine import RECALL_ACTION, advance_workflow
 
     from_status = invoice.status.value
     recalled = {
@@ -963,7 +964,7 @@ async def recall_approval(
         invoice,
         InvoiceStatus.ready_for_review,
         actor_id=actor_id,
-        action_name="invoice.approval_recalled",
+        action_name=RECALL_ACTION,
         details={"reason": reason, "recalled_from": from_status, "recalled_approval": recalled},
     )
 
@@ -972,10 +973,20 @@ async def recall_approval(
         state_data = dict(instance.state_data or {})
         state_data["recall_count"] = state_data.get("recall_count", 0) + 1
         clear_chain_state(state_data)
+        # A recall from a failed push starts the next push with a full budget,
+        # as `/retry-erp` does: an exhausted counter would leave the
+        # re-approved invoice at `sending_to_erp` with no attempt made. The
+        # push's other keys (a queued job, an orphan document, attempt dates)
+        # are kept — the recall gate has already refused one that names a bill.
+        if "erp_retries" in state_data:
+            state_data["erp_retries"] = 0
         instance.state_data = state_data
-        # A fresh review step for the approval queue, as a resubmit opens.
-        await create_workflow_step(db, instance, "review")
-        instance.current_step = 1  # review step index
+        # Back in review: an instance a failed push marked `failed` is active
+        # again (the escalation sweep reads only active ones), the step the
+        # approval opened (the ERP push) is closed, and a fresh approval step is
+        # opened for the queue.
+        instance.state = "active"
+        await advance_workflow(db, instance, "review", action="approval_recalled")
     return invoice
 
 

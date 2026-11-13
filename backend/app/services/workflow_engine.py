@@ -170,12 +170,65 @@ async def is_step_enabled(
     return _check_step_enabled(defn.steps_config, step_type)
 
 
+#: The audit action of the one transition allowed to walk :data:`RECALL_EDGES`
+#: (`services/review.recall_approval`, decisions §374).
+RECALL_ACTION = "invoice.approval_recalled"
+
+#: `approved` / `failed → ready_for_review`: legal edges, but only as the
+#: recall, which first asks `review.recall_refusal` (no live claim, no ERP
+#: bill), stamps the recaller and clears the chain. Any other caller — a bulk
+#: transition, an extraction re-read redelivered after a human approved the
+#: invoice — is refused here, at the chokepoint, as it was before the edges
+#: existed.
+RECALL_EDGES: frozenset[tuple[InvoiceStatus, InvoiceStatus]] = frozenset(
+    {
+        (InvoiceStatus.approved, InvoiceStatus.ready_for_review),
+        (InvoiceStatus.failed, InvoiceStatus.ready_for_review),
+    }
+)
+
+
 def validate_transition(current: InvoiceStatus, target: InvoiceStatus) -> None:
     allowed = VALID_TRANSITIONS.get(current, set())
     if target not in allowed:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot transition from '{current.value}' to '{target.value}'",
+        )
+
+
+def _refuse_outside_the_recall(invoice: Invoice, target: InvoiceStatus, action_name: str) -> None:
+    """The two engine-level rules the recall's edges need (decisions §374).
+
+    * :data:`RECALL_EDGES` are walked by the recall alone.
+    * An invoice that was ever approved never re-enters ``pending``. Extraction
+      rewrites the vendor, amount and lines, and `failed` with an approval stamp
+      is read everywhere (`/retry-erp`, `financially_locked`, the recall itself)
+      as "an approved invoice whose push failed". A once-approved invoice that
+      reached `failed` through a re-read would be pushed, and then paid, on
+      figures nobody approved. `/extract` already refused it; this holds it for
+      `POST /bulk/status`, the portal resubmit and any future door.
+    """
+    if (invoice.status, target) in RECALL_EDGES and action_name != RECALL_ACTION:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot transition from '{invoice.status.value}' to '{target.value}' "
+                "except by recalling the approval"
+            ),
+        )
+    # `was_ever_approved`'s reading, through getattr: unit tests drive the
+    # engine with bare namespaces that carry no approval stamp at all.
+    ever_approved = getattr(invoice, "approval_date", None) is not None or bool(
+        getattr(invoice, "approved_by", None)
+    )
+    if target == InvoiceStatus.pending and ever_approved:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This invoice has already been approved, so its document can't be read "
+                "again. Recall its approval and correct it instead."
+            ),
         )
 
 
@@ -211,6 +264,7 @@ async def transition_invoice(
 ) -> Invoice:
     """Validate and apply a status transition, writing an audit log entry."""
     validate_transition(invoice.status, target_status)
+    _refuse_outside_the_recall(invoice, target_status, action_name)
     old_status = invoice.status.value
     invoice.status = target_status
 

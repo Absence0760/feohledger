@@ -28,7 +28,7 @@ from sqlalchemy import select
 
 from app.models.entity import Entity
 from app.models.invoice import Invoice, InvoiceStatus
-from app.models.workflow import AuditLog, WorkflowDefinition, WorkflowInstance
+from app.models.workflow import AuditLog, WorkflowDefinition, WorkflowInstance, WorkflowStep
 
 TENANT = "a"
 ROLES = ("admin", "ap_manager", "ap_clerk", "cfo")
@@ -157,6 +157,16 @@ async def _instance(realdb, invoice_id) -> WorkflowInstance:
         ).scalar_one()
 
 
+async def _open_steps(realdb, instance_id) -> list[WorkflowStep]:
+    async with realdb.sessionmaker(TENANT)() as s:
+        rows = await s.execute(
+            select(WorkflowStep).where(
+                WorkflowStep.instance_id == instance_id, WorkflowStep.completed_at.is_(None)
+            )
+        )
+        return list(rows.scalars())
+
+
 async def _audit(realdb, invoice_id, action: str) -> list[AuditLog]:
     async with realdb.sessionmaker(TENANT)() as s:
         rows = await s.execute(
@@ -223,15 +233,38 @@ async def test_a_failed_push_after_approval_can_be_recalled(realdb):
     invoice_id = await _invoice(
         realdb,
         status=InvoiceStatus.failed,
-        state_data={"erp_outcome_unknown": False, "erp_retries": 1},
+        state_data={
+            "erp_outcome_unknown": False,
+            "erp_retries": 3,
+            "erp_attempt_invoice_dates": ["2026-11-01"],
+        },
     )
+    async with realdb.sessionmaker(TENANT)() as s:
+        instance = (
+            await s.execute(
+                select(WorkflowInstance).where(WorkflowInstance.invoice_id == invoice_id)
+            )
+        ).scalar_one()
+        instance.state = "failed"
+        s.add(WorkflowStep(instance_id=instance.id, step_number=3, step_type="erp_export"))
+        await s.commit()
+
     resp = await _recall(realdb, "ap_manager", invoice_id)
     assert resp.status_code == 200, resp.text
     assert (await _row(realdb, invoice_id)).status == InvoiceStatus.ready_for_review
     (recall,) = await _audit(realdb, invoice_id, RECALL)
     assert recall.details["recalled_from"] == "failed"
-    # The push's own record is kept: a later push still finds what it needs.
-    assert (await _instance(realdb, invoice_id)).state_data["erp_retries"] == 1
+    instance = await _instance(realdb, invoice_id)
+    # The next push gets a full budget, as after `/retry-erp`: an exhausted
+    # counter would strand the re-approved invoice at `sending_to_erp`. The
+    # push's other keys are kept.
+    assert instance.state_data["erp_retries"] == 0
+    assert instance.state_data["erp_attempt_invoice_dates"] == ["2026-11-01"]
+    # Back in review: active again (the escalation sweep reads only active
+    # instances), the push's step closed, and one open approval step.
+    assert instance.state == "active"
+    open_steps = await _open_steps(realdb, instance.id)
+    assert [step.step_type for step in open_steps] == ["approval"]
 
 
 async def test_a_blank_reason_is_refused(realdb):
@@ -553,3 +586,58 @@ async def test_bulk_status_does_not_recall(realdb, status):
     assert "Recall approval" in skip["reason"]
     assert (await _row(realdb, invoice_id)).status == status
     assert await _audit(realdb, invoice_id, RECALL) == []
+
+
+async def test_a_recalled_invoice_is_never_read_again_so_it_cannot_pose_as_a_failed_push(
+    realdb,
+):
+    """The approval stamps outlive the recall (`was_ever_approved` stays true),
+    and `failed` with a stamp reads as "an approved invoice whose push failed",
+    which `/retry-erp` re-pushes. So a once-approved invoice must never reach
+    `failed` by a re-read: recall → reject → back to draft → `pending` is
+    refused at the engine, and nothing is offered for retry."""
+    invoice_id = await _invoice(realdb)
+    assert (await _recall(realdb, "ap_manager", invoice_id)).status_code == 200
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/reject", json={"reason": "reissue"})
+        assert resp.status_code == 200, resp.text
+        resp = await c.post(
+            "/api/invoices/bulk/status", json={"ids": [str(invoice_id)], "status": "new"}
+        )
+        assert resp.json()["updated"] == 1, resp.text
+        resp = await c.post(
+            "/api/invoices/bulk/status", json={"ids": [str(invoice_id)], "status": "pending"}
+        )
+        body = resp.json()
+        assert body["updated"] == 0, body
+        (skip,) = body["skipped"]
+        assert "already been approved" in skip["reason"]
+        assert (await _row(realdb, invoice_id)).status == InvoiceStatus.new
+        resp = await c.post(f"/api/invoices/{invoice_id}/retry-erp")
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "invoice_not_erp_retryable"
+
+
+async def test_the_engine_walks_the_recall_edges_only_for_the_recall(realdb):
+    """`approved → ready_for_review` is legal only as the recall: an extraction
+    re-read redelivered after a human approved the invoice, or any other
+    caller, is refused before anything changes."""
+    from fastapi import HTTPException
+
+    from app.services.workflow_engine import RECALL_ACTION, transition_invoice
+
+    invoice_id = await _invoice(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = await s.get(Invoice, invoice_id)
+        with pytest.raises(HTTPException) as exc:
+            await transition_invoice(
+                s,
+                inv,
+                InvoiceStatus.ready_for_review,
+                action_name="invoice.extraction_completed",
+            )
+        assert exc.value.status_code == 409
+        assert inv.status == InvoiceStatus.approved
+        await transition_invoice(s, inv, InvoiceStatus.ready_for_review, action_name=RECALL_ACTION)
+        assert inv.status == InvoiceStatus.ready_for_review
+        await s.rollback()

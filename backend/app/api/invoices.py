@@ -2797,6 +2797,8 @@ async def bulk_status_change(
     # payment or card holds the invoice — a staged or exported run, or a minted
     # card, leaves it `approved`, and `done` would take it off the payable set
     # with our rail still paying it. Read for the whole locked batch at once.
+    from app.services.review import holds_recallable_approval
+
     close_refused: dict[uuid.UUID, dict] = {}
     if target == DBInvoiceStatus.done:
         from app.api.workflow import close_refusals
@@ -2908,15 +2910,15 @@ async def bulk_status_change(
                 continue
             await refresh_warnings(db, inv, org_settings=org.settings)
             updated += 1
-        elif target == DBInvoiceStatus.ready_for_review and inv.status in (
-            DBInvoiceStatus.approved,
-            DBInvoiceStatus.failed,
-        ):
+        elif target == DBInvoiceStatus.ready_for_review and holds_recallable_approval(inv):
             # `approved` / `failed → ready_for_review` is a RECALL of the
             # approval (decisions §374): one invoice at a time, with a reason,
             # through `POST /{id}/recall-approval` and its claim / ERP gate
             # (`review.recall_refusal`). A bare transition here would skip all
-            # of it, and the SoD stamp and chain reset with it.
+            # of it, and the SoD stamp and chain reset with it. (The engine
+            # refuses the edge to anyone else anyway — `workflow_engine.
+            # RECALL_EDGES` — so a never-approved `failed` row falls through to
+            # the generic branch and is skipped with that refusal.)
             skipped.append(
                 BulkStatusSkip(
                     id=str(inv.id),

@@ -105,8 +105,9 @@ def test_approved_or_beyond_is_forward_closed():
 
 def test_the_only_edges_back_before_approval_are_the_recalls():
     """`approved` and `failed` reach `ready_for_review` only by the recall door
-    (`review.recall_refusal`), and `failed → pending` is the re-extraction
-    `/extract` refuses once an invoice was approved; no other approved-or-beyond
+    (`review.recall_refusal`), and `failed → pending` is a re-extraction, which
+    the engine refuses for an invoice that was ever approved
+    (`workflow_engine._refuse_outside_the_recall`); no other approved-or-beyond
     status has an edge into the pre-approval statuses."""
     back = {
         (status, nxt)

@@ -33,6 +33,7 @@ from app.database import get_control_db
 from app.models.discount import OFFER_STATUS_OFFERED, DiscountOffer
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
+from app.models.invoice_status import was_ever_approved
 from app.models.organization import Organization
 from app.models.payment import Payment
 from app.models.procurement import POLineItem, PurchaseOrder, po_vouched_money
@@ -760,7 +761,11 @@ async def resubmit_invoice(
         db, vendor.organization_id, "extraction", invoice_id=inv.id
     )
 
-    if extraction_enabled:
+    # An invoice AP approved once (and then recalled and rejected, decisions
+    # §374) is not re-read: extraction would rewrite figures that were signed
+    # off, and the engine refuses `→ pending` for it. The corrected document
+    # goes straight to the reviewer, who keys any correction by hand.
+    if extraction_enabled and not was_ever_approved(inv):
         await transition_invoice(
             db,
             inv,
