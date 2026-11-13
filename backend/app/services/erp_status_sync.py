@@ -1612,15 +1612,26 @@ def parse_qbo_events(body: object) -> list[QboEvent]:
 async def process_qbo_event(event: QboEvent) -> None:
     """Apply one event. Raises on our own failure (the caller releases its
     dedup claim; Intuit already has its 204, so the CDC sweep is what
-    reprocesses the change)."""
+    reprocesses the change).
+
+    Every refusal is a decision, not a failure, and does nothing: a company no
+    tenant is connected to (or whose tenant has moved to another ERP), and a
+    tenant the sweep itself would skip (status sync off, a connection that
+    needs reconnecting): :func:`status_sync_now_refusal`, the one rule the
+    sweep, the on-request pass and both ERP webhooks share (§392). With status
+    sync off a confirmed push closes the invoice at ``done``, and nothing may
+    then act on its bill."""
     org = await org_for_company(QBO_PROVIDER, event.company_id)
     if org is None:
-        return  # a company no tenant is connected to: a decision, not a failure
-    erp_config = await _resolved_erp(org)
-    adapter = _adapter_or_none(erp_config or {})
-    if adapter is None or not adapter.supports_status_sync:
+        return
+    if await status_sync_now_refusal(org) is not None:
+        # A decision, so the claim stands: the sweep reads the change when the
+        # tenant is synced again (its mark has not moved past it).
         return
     if event.entity == "billpayment":
+        adapter = _adapter_or_none(await _resolved_erp(org) or {})
+        if adapter is None:
+            return
         bill_ids = await adapter.bills_for_payment(event.entity_id)
     else:
         bill_ids = [event.entity_id]
@@ -1633,12 +1644,20 @@ async def claim_qbo_events(events: list[QboEvent]) -> list[QboEvent]:
     (``is_event_already_processed``, dedupe per the webhook invariant). Called
     by the route BEFORE it answers, so a Redis failure raises there and becomes
     a 503 that makes Intuit redeliver, instead of a 2xx for unclaimed work."""
-    from app.services.webhook_security import is_event_already_processed
+    from app.services.webhook_security import is_event_already_processed, release_event_claim
 
     fresh: list[QboEvent] = []
-    for event in events:
-        if not await is_event_already_processed(_QBO_DEDUP_PROVIDER, event.event_id):
-            fresh.append(event)
+    try:
+        for event in events:
+            if not await is_event_already_processed(_QBO_DEDUP_PROVIDER, event.event_id):
+                fresh.append(event)
+    except Exception:
+        # The route answers 503 and dispatches nothing, so the claims already
+        # made here guard no work: released, Intuit's redelivery is not deduped
+        # away (best effort; the CDC sweep is the backstop if a release fails).
+        for event in fresh:
+            await release_event_claim(_QBO_DEDUP_PROVIDER, event.event_id)
+        raise
     return fresh
 
 
