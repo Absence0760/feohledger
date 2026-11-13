@@ -1100,24 +1100,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to `_commitment_rows` or to the `/cfo`
       cash panels, or a product decision on how overdue AP should appear.
 
-### Surfaced by scoping the email-intake dedup per tenant (2026-10-05, PR #509)
-
-- [ ] **(c) Delete the transitional legacy-claim check in email intake.** The
-      intake dedup claim moved from `email_intake:<message_id>` to
-      `email_intake:<org_id>:<message_id>` so one email addressed to two
-      tenants reaches both. Claims written before that deploy carry no tenant,
-      so `services/email_intake._legacy_claim_live` still treats a live
-      unscoped claim as "already processed" for every tenant — the only rule
-      that can never create a duplicate payable when a provider redelivers a
-      pre-deploy message. It is dead weight once every such claim has expired.
-      **Durable fix:** delete `_legacy_claim_live` and its call in
-      `_process_for_org`, delete `webhook_security.event_claim_exists` if
-      nothing else calls it by then, and delete
-      `test_a_live_pre_upgrade_unscoped_claim_still_dedupes_the_redelivery`
-      (plus `test_event_claim_exists_reads_without_claiming` with the helper).
-      **Trigger:** the dedup TTL (`DEFAULT_DEDUP_TTL_SECONDS`, 72h) has elapsed
-      since PR #509 was deployed to every environment.
-
 ### Surfaced by the round-2 issues batch (2026-10-06, PR #514, decisions §237–§243)
 
 - [ ] **(c) Three refusals a user acts on are still English-only.** §238 coded the
