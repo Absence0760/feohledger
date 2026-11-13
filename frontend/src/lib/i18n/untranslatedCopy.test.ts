@@ -470,6 +470,94 @@ describe('translated surfaces carry no literal copy', () => {
 	}
 });
 
+/**
+ * `m(…)` spliced into a larger string — the shape a per-file roster cannot
+ * see, because the message is usually built in a local (`const msg = …`) before
+ * it reaches `toast()`.
+ *
+ * `/expenses` shipped `` `${m('expenses.toast.glCoded', …)} (skipped ${n})` ``,
+ * so "(skipped N)" read in English in every locale; `/vendors`, `/contracts`,
+ * the card import / sync toasts and the Positive Pay return toast glued two
+ * catalogue FRAGMENTS together with `+`, which fixes the clause order in code
+ * where no translator can reorder it. Each is now one ICU message per
+ * sentence (an `=0 {}` branch drops an optional clause).
+ *
+ * Two shapes fail, across every component's instance script:
+ *  - `m(…)` as an operand of `+`;
+ *  - `m(…)` inside a template literal whose literal text has a word in it.
+ * A template literal that only joins with punctuation or whitespace —
+ * `` `${outcome} ${m('exceptions.bulk.segregationSkipped', …)}` ``, two whole
+ * sentences — is allowed.
+ */
+function splicedMessages(source: string): string[] {
+	const ast = parse(source, { modern: true }) as unknown as { instance?: { content: unknown } };
+	const out: string[] = [];
+	const seen = new Set<unknown>();
+	const isM = (node: unknown): boolean => {
+		const r = node as Record<string, unknown> | null;
+		const callee = r?.callee as Record<string, unknown> | undefined;
+		return r?.type === 'CallExpression' && callee?.type === 'Identifier' && callee.name === 'm';
+	};
+	const snippet = (node: Record<string, unknown>): string =>
+		source.slice(node.start as number, node.end as number).replace(/\s+/g, ' ');
+	(function walk(node: unknown): void {
+		if (node === null || typeof node !== 'object' || seen.has(node)) return;
+		seen.add(node);
+		if (Array.isArray(node)) {
+			for (const child of node) walk(child);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		if (
+			record.type === 'BinaryExpression' &&
+			record.operator === '+' &&
+			(isM(record.left) || isM(record.right))
+		) {
+			out.push(snippet(record));
+		}
+		if (
+			record.type === 'TemplateLiteral' &&
+			(record.expressions as unknown[]).some(isM) &&
+			(record.quasis as { value: { cooked?: string } }[]).some((q) =>
+				IS_COPY.test(q.value.cooked ?? '')
+			)
+		) {
+			out.push(snippet(record));
+		}
+		for (const [key, value] of Object.entries(record)) {
+			if (key === 'loc') continue;
+			walk(value);
+		}
+	})(ast.instance?.content);
+	return out;
+}
+
+describe('no message is spliced together from m() and other text', () => {
+	it('detects both splice shapes, and not a whitespace join', () => {
+		const sample = [
+			'<script lang="ts">',
+			"\tconst a = `${m('x.glCoded', { n })} (skipped ${k})`;",
+			"\tconst b = m('x.updated', { n }) + m('x.skipped', { n: k });",
+			"\tconst c = `${outcome} ${m('x.second', { n })}`;",
+			"\tconst d = m('x.one', { n, skipped: k });",
+			'</script>'
+		].join('\n');
+		expect(splicedMessages(sample)).toEqual([
+			"`${m('x.glCoded', { n })} (skipped ${k})`",
+			"m('x.updated', { n }) + m('x.skipped', { n: k })"
+		]);
+	});
+
+	for (const [path, source] of Object.entries(RAW)) {
+		it(`${path} builds no sentence by splicing m()`, () => {
+			expect(
+				splicedMessages(source),
+				`${path} splices m() into a larger string. Key the whole sentence (all six catalogues) as one ICU message; an optional clause is a \`{x, plural, =0 {} …}\` branch.`
+			).toEqual([]);
+		});
+	}
+});
+
 describe('consent banner key roster', () => {
 	// The banner is the ePrivacy Art 5(3) gate: an unrendered key is copy a
 	// reader was supposed to see, and an orphaned one is copy that quietly left

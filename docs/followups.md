@@ -889,19 +889,6 @@ or is a sibling of a fix that needs its own pass.
       fixtures that call it on other statuses. **Trigger:** the next change to
       `services/erp.py` or either dispatcher.
 
-### Surfaced by the money-path review of the recall (2026-11-13, decisions §379)
-
-- [ ] **(c) The expenses bulk GL-code toast splices English into a
-      localized sentence.** `routes/expenses/+page.svelte` (`bulkGlCode`)
-      builds `` `${m('expenses.toast.glCoded', …)} (skipped ${n})` ``, so the
-      "(skipped N)" tail reads in English in every locale. Found while sweeping
-      the other bulk endpoints for decisions §387 (their skip `reason`s are
-      never rendered — vendors, exceptions and expenses toasts show counts
-      only — so they need no code). **Durable fix:** a pluralized
-      `expenses.toast.glCodedSkipped` key in the six locales, as
-      `invoices.toast.updatedSkipped` does. **Trigger:** the next change to the
-      expenses bulk bar.
-
 ### Surfaced by the vendors table column fix (2026-10-06)
 
 - [ ] **(c) A vendor you've just created can be invisible in the list.**
