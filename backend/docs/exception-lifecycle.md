@@ -62,7 +62,17 @@ and the invoice still hashes as it was raised, and every refresh voids the stamp
 of an open row the invoice has moved away from, so an edit made while someone
 was deciding (even one reverted before they click) never rides their verdict.
 Suppression only honours a decision `record_decision` let through, so the
-segregation rules below decide who can create one. The decision writes its
+segregation rules below decide who can create one. **It also re-asks them at
+every refresh.** `record_decision` records the person on the row
+(`decided_by_user_id`, migration 0126; NULL for a detector or an agent), and a
+closed payment-blocking row suppresses only while `segregation_refusal` would
+still let that person clear it (`exception_lifecycle.clearance_stands`). So a
+decider who has become implicated since (an importer migration 0126 named as
+the uploader, or a person who recalled the invoice's approval) no longer keeps
+their own clearance live, and the finding is raised again for someone else;
+a clearance by anyone the invoice does not implicate still holds. A
+payment-blocking row with no recorded decider never suppresses (decisions §367).
+The decision writes its
 `exception.resolved` / `exception.dismissed` row as always; a suppressed
 refresh writes nothing, because nothing was raised. A row closed before its type
 was stamped (before 0116, or before §366 for the types it added) has no

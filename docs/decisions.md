@@ -17067,7 +17067,9 @@ but the hold it should raise waits for that refresh.
 ## 367. An invoice an employee created before §131 gets the uploader its own creation record names, and only that (§198 follow-up, 2026-11-13)
 
 **Decided:** 2026-11-13 · `backend/alembic/versions/0126_uploader_audit_backfill.py` ·
-`backend/tests/test_migration_0126_uploader_audit_backfill.py`
+`backend/app/services/exception_lifecycle.py` (`clearance_stands`) ·
+`backend/tests/test_migration_0126_uploader_audit_backfill.py` ·
+`backend/tests/test_exception_clearance_fingerprint.py`
 
 Before §131, CSV import and recurring `generate-now` built the invoice without
 `uploaded_by_id`, so `violates_segregation` read it as "no employee created this"
@@ -17118,9 +17120,54 @@ at all, so nothing names its importer, and those invoices keep the legacy NULL
 reading. `generate-now` wrote its row from the feature's first commit, so every
 pre-§131 generate-now invoice is covered.
 
+**A clearance the backfilled uploader gave themselves stops holding.** Review
+found that stamping the uploader refuses them the next clearance but not the one
+they already gave. While the uploader was NULL, the importer could dismiss a
+`duplicate` or `fraud_flag` on their own invoice, and that dismissal kept its
+§286 fingerprint. `_finding_cleared_by_a_person` honoured any person's past
+verdict and never re-checked who gave it, so the self-clearance went on
+suppressing the finding on every refresh after 0126. Two fixes were weighed:
+
+- *(a) In 0126, clear the fingerprint on closed payment-blocking rows of each
+  stamped invoice whose decision audit row names the new uploader.* It closes
+  this case once and nothing else. A recaller (§374) who cleared a hold before
+  the recall stamped them is the same hole, and so is any later way someone
+  joins the set.
+- *(b) Re-ask segregation of the decider at suppression time.* Chosen, because it
+  is the general rule: a cleared finding stays cleared only while the person who
+  cleared it could still clear it.
+
+The rule lives in one place. `exception_lifecycle.clearance_stands` re-asks the
+same `segregation_refusal` the decision met, with the recorded decider, against
+the invoice as it stands. Its scope is `segregation_applies`, split out of
+`segregation_refusal` so the two cannot drift: a clearing verb, a
+payment-blocking type, and an org that has not opted out. Outside that scope the
+decider does not matter and the clearance holds, as before. A clearance by
+anyone the invoice does not implicate still suppresses. The org's
+`require_segregation: false` opt-out covers this check as it covers the decision.
+
+The decider has to be on the row. Reading the decision's audit row at refresh
+time was rejected for 0105's reason: under `FEOH_AUDIT_MODE=lambda` (production)
+that row goes to SQS and is not local yet, so a refresh right after a dismissal
+(`/complete` runs one) would find no decider. So 0126 also adds
+`exceptions.decided_by_user_id`, which `record_decision` writes on every resolve
+or dismiss (the person; NULL for a detector or an agent), and backfills it for
+rows already closed from their `exception.resolved` / `exception.dismissed`
+rows. The backfill uses the same rule as the uploader: every decision row on the
+exception must be a person's (an actor, not the sentinel, no `via`, its
+`new_status` equal to the row's, same organization), and all must name one
+person. It writes no audit row, because the column copies an audit row verbatim
+and changes nobody's rights. A payment-blocking row with no recorded decider
+never suppresses. That fails closed, as an unknown inspection recorder does
+(0105), and the cost is one more review of that finding. 0126 had not been
+released, so the column went into it rather than a new revision: it belongs with
+the backfill whose hole it closes. `downgrade` drops the column and keeps the
+uploaders.
+
 The migration's literals (terminal statuses, the sentinel, the import marker,
-the creation actions) restate app constants, and the test pins each to its
-source so a rename fails CI rather than silently narrowing the conflict check.
+the creation actions, the decision actions) restate app constants, and the test
+pins each to its source so a rename fails CI rather than silently narrowing the
+conflict check.
 
 ## 368. Email intake reads only the per-tenant dedup claim; the legacy unscoped check is gone (PR #509 follow-up, 2026-11-13)
 

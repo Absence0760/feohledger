@@ -21,6 +21,10 @@ NULL) and runs the migration's own SQL against the real tenant DB, the pattern
   - a re-run is a no-op;
   - the employee is then refused as approver, at the approve route and at the
     exception queue;
+  - a payment-blocking finding the importer dismissed while the uploader was
+    NULL is raised again after the backfill, while one an independent person
+    dismissed stays cleared; the decider column is filled from the decision's
+    audit row, and an agent's or a contested decision leaves it NULL;
   - the upgrade runs through Alembic on a tenant and no-ops on the control plane.
 
 Runs against the opt-in ``realdb`` fixture (skips without ``pnpm db:up``).
@@ -40,6 +44,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.models.entity import Entity
+from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.recurring_invoice import (
     CADENCE_MONTHLY,
@@ -104,6 +109,23 @@ def test_every_creation_action_is_one_the_app_writes():
     assert f'"source": "{mig.RECURRING_SOURCE}"' in recurring
 
 
+def test_decision_actions_and_statuses_are_the_lifecycles():
+    from app.services.exception_lifecycle import (
+        ACTION_DISMISSED,
+        ACTION_RESOLVED,
+        CLEARING_ACTIONS,
+        RESOLUTION_ACTIONS,
+        RESOLUTION_STATUSES,
+    )
+
+    mig = _migration()
+    assert set(mig.DECISION_ACTIONS) == {ACTION_RESOLVED, ACTION_DISMISSED}
+    assert set(mig.DECISION_ACTIONS) == {RESOLUTION_ACTIONS[v] for v in CLEARING_ACTIONS}
+    assert set(mig.CLEARED_STATUSES) == {RESOLUTION_STATUSES[v] for v in CLEARING_ACTIONS}
+    assert "decided_by_user_id" in mig.ADD_DECIDER_SQL
+    assert "decided_by_user_id" in APException.__table__.columns
+
+
 def test_revision_chains_after_0125_and_fits_the_version_column():
     mig = _migration()
     assert mig.down_revision == "0125_vendor_erp_links"
@@ -119,6 +141,12 @@ def test_revision_chains_after_0125_and_fits_the_version_column():
 async def _backfill(mk) -> None:
     async with mk() as s:
         await s.execute(text(_migration().BACKFILL_SQL))
+        await s.commit()
+
+
+async def _backfill_deciders(mk) -> None:
+    async with mk() as s:
+        await s.execute(text(_migration().DECIDER_BACKFILL_SQL))
         await s.commit()
 
 
@@ -505,6 +533,195 @@ async def test_a_terminal_invoice_and_a_stamped_one_are_untouched(realdb):
     assert await _backfill_rows(mk, stamped_id) == []
 
 
+# ---------------------------------------------------------------------------
+# A clearance the backfilled uploader gave themselves stops holding (§367)
+# ---------------------------------------------------------------------------
+
+
+def _round_flag():
+    from app.services.invoice_warning_catalog import warning
+
+    return warning("round_amount", "info", amount=Decimal("125.00"), currency="USD")
+
+
+async def _raise_round_flag(mk, invoice_id: uuid.UUID) -> None:
+    """A payment-blocking detector row on the invoice, raised as a refresh would."""
+    from app.services.invoice_warnings import _ensure_exception
+
+    async with mk() as s:
+        inv = await s.get(Invoice, invoice_id)
+        await _ensure_exception(s, inv, "fraud_flag", "info", _round_flag(), org_settings={})
+        await s.commit()
+
+
+async def _fraud_statuses(mk, invoice_id: uuid.UUID) -> list[str]:
+    async with mk() as s:
+        return list(
+            (
+                await s.execute(
+                    select(APException.status)
+                    .where(
+                        APException.invoice_id == invoice_id,
+                        APException.exception_type == "fraud_flag",
+                    )
+                    .order_by(APException.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def _decide(mk, invoice_id: uuid.UUID, actor_id, *, via: str | None = None) -> uuid.UUID:
+    from app.services.exception_lifecycle import record_decision
+
+    async with mk() as s:
+        inv = await s.get(Invoice, invoice_id)
+        row = (
+            await s.execute(
+                select(APException).where(
+                    APException.invoice_id == invoice_id,
+                    APException.exception_type == "fraud_flag",
+                    APException.status == "open",
+                )
+            )
+        ).scalar_one()
+        await record_decision(
+            s,
+            exception=row,
+            action="dismiss",
+            resolution="Round, and fine.",
+            actor_id=actor_id,
+            actor_name="Reviewer",
+            invoice=inv,
+            via=via,
+            org_settings={},
+        )
+        await s.commit()
+        return row.id
+
+
+async def _decider(mk, exception_id: uuid.UUID):
+    async with mk() as s:
+        return (await s.get(APException, exception_id)).decided_by_user_id
+
+
+async def _forget_decider(mk, exception_id: uuid.UUID) -> None:
+    """The row as a decision before 0126 left it: no decider column value."""
+    async with mk() as s:
+        await s.execute(
+            text("UPDATE exceptions SET decided_by_user_id = NULL WHERE id = :id"),
+            {"id": exception_id},
+        )
+        await s.commit()
+
+
+async def _legacy_import_with_a_fresh_flag(realdb, number: str) -> uuid.UUID:
+    """A pre-§131 import (uploader NULL) carrying exactly one open round-amount flag."""
+    mk = realdb.sessionmaker("a")
+    invoice_id = await _import_csv(realdb, number)
+    await _rewind(mk, invoice_id)
+    async with mk() as s:
+        # Whatever the import's own refresh opened would sit in the way of the
+        # one row this test is about; exceptions are not append-only.
+        await s.execute(text("DELETE FROM exceptions WHERE invoice_id = :id"), {"id": invoice_id})
+        await s.commit()
+    await _raise_round_flag(mk, invoice_id)
+    assert await _fraud_statuses(mk, invoice_id) == ["open"]
+    return invoice_id
+
+
+@pytest.mark.asyncio
+async def test_the_importers_own_dismissal_stops_suppressing_after_the_backfill(realdb):
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    importer = info.users["ap_manager"]
+    invoice_id = await _legacy_import_with_a_fresh_flag(realdb, "UPL-BF-SELFCLR-1")
+
+    # The NULL uploader lets the importer clear the flag on their own invoice.
+    exception_id = await _decide(mk, invoice_id, importer)
+    await _forget_decider(mk, exception_id)
+
+    await _backfill_deciders(mk)
+    assert await _decider(mk, exception_id) == importer  # from the decision's audit row
+
+    # Before the uploader backfill the self-clearance suppresses: the hole.
+    await _raise_round_flag(mk, invoice_id)
+    assert await _fraud_statuses(mk, invoice_id) == ["dismissed"]
+
+    await _backfill(mk)
+    assert (await _load(mk, invoice_id)).uploaded_by_id == importer
+
+    # Now the importer's verdict no longer stands, so the finding is raised for
+    # someone independent, and the payment run is blocked again.
+    from app.services.payment_runs import blocked_invoice_ids
+
+    await _raise_round_flag(mk, invoice_id)
+    assert await _fraud_statuses(mk, invoice_id) == ["dismissed", "open"]
+    async with mk() as s:
+        assert await blocked_invoice_ids(s, [invoice_id]) == {invoice_id}
+
+
+@pytest.mark.asyncio
+async def test_an_independent_dismissal_still_suppresses_after_the_backfill(realdb):
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    invoice_id = await _legacy_import_with_a_fresh_flag(realdb, "UPL-BF-INDEP-1")
+
+    exception_id = await _decide(mk, invoice_id, info.users["cfo"])
+    await _forget_decider(mk, exception_id)
+
+    await _backfill_deciders(mk)
+    await _backfill(mk)
+    assert (await _load(mk, invoice_id)).uploaded_by_id == info.users["ap_manager"]
+    assert await _decider(mk, exception_id) == info.users["cfo"]
+
+    await _raise_round_flag(mk, invoice_id)
+    assert await _fraud_statuses(mk, invoice_id) == ["dismissed"]
+
+
+@pytest.mark.asyncio
+async def test_an_agents_or_a_contested_decision_leaves_the_decider_null(realdb):
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+
+    agent_invoice = await _legacy_import_with_a_fresh_flag(realdb, "UPL-BF-AGENT-1")
+    agent_row = await _decide(mk, agent_invoice, info.users["cfo"], via="agent")
+
+    contested_invoice = await _legacy_import_with_a_fresh_flag(realdb, "UPL-BF-CONTEST-1")
+    contested_row = await _decide(mk, contested_invoice, info.users["cfo"])
+    await _forget_decider(mk, contested_row)
+    async with mk() as s:
+        genuine = (
+            await s.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_id == contested_row, AuditLog.action == "exception.dismissed"
+                )
+            )
+        ).scalar_one()
+        # A second decision row naming somebody else: the records disagree.
+        s.add(
+            AuditLog(
+                correlation_id=genuine.correlation_id,
+                organization_id=genuine.organization_id,
+                actor_id=info.users["admin"],
+                action="exception.dismissed",
+                entity_type="exception",
+                entity_id=contested_row,
+                details=dict(genuine.details),
+            )
+        )
+        await s.commit()
+
+    await _backfill_deciders(mk)
+
+    assert await _decider(mk, agent_row) is None
+    assert await _decider(mk, contested_row) is None
+    # And a payment-blocking row with no decider suppresses nothing.
+    await _raise_round_flag(mk, contested_invoice)
+    assert await _fraud_statuses(mk, contested_invoice) == ["dismissed", "open"]
+
+
 async def _run(engine, fn) -> None:
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
@@ -531,12 +748,30 @@ async def test_0126_upgrade_runs_through_alembic_on_a_tenant(realdb):
     try:
         await _run(engine, mig.upgrade)
         await _run(engine, mig.upgrade)  # idempotent
-        await _run(engine, mig.downgrade)  # a no-op by design
+        assert await _decider_column(engine) == ("uuid", "YES")
+        await _run(engine, mig.downgrade)  # drops the column, keeps the uploaders
+        assert await _decider_column(engine) is None
     finally:
+        # The model carries the column, so the shared test tenant must too.
+        await _run(engine, mig.upgrade)
         await engine.dispose()
 
     assert (await _load(mk, invoice_id)).uploaded_by_id == realdb.info("a").users["ap_manager"]
     assert len(await _backfill_rows(mk, invoice_id)) == 1
+
+
+async def _decider_column(engine) -> tuple | None:
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT data_type, is_nullable FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'exceptions' "
+                    "AND column_name = 'decided_by_user_id'"
+                )
+            )
+        ).one_or_none()
+    return tuple(row) if row is not None else None
 
 
 @pytest.mark.asyncio

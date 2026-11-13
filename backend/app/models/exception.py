@@ -96,6 +96,17 @@ class Exception(Base, EntityMixin, TimestampMixin):
     # NULL on rows other paths open, and on rows closed before their type was
     # stamped.
     finding_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    # The control-plane user whose resolve or dismiss closed this row
+    # (migration 0126, decisions §367). `record_decision` writes it on every
+    # clearing decision: the person, or NULL when no person decided (a detector
+    # auto-close, an agent). A closed row suppresses a re-raise only while
+    # `exception_lifecycle.clearance_stands` says segregation would still let
+    # this person clear it, so a decider who became implicated afterwards (an
+    # uploader backfilled by 0126, a recaller, §374) no longer keeps their own
+    # verdict live. Not read from the audit log, which under
+    # `FEOH_AUDIT_MODE=lambda` is not local yet when the next refresh runs. No
+    # FK: control-plane id, as `raised_by_user_id` above.
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     # What the ERP reported, kept as data rather than prose (migration 0121,
     # decisions §319). Set only on the reconciliation rows the ERP paths open
     # (`services/erp_status_sync`, `api/erp_webhook`): PII-free ids, a status,

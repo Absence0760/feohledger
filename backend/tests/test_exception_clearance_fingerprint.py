@@ -750,3 +750,153 @@ async def test_the_uploader_still_cannot_clear_the_hold_it_would_then_keep_clear
         await _refresh(s, inv)
         assert await _statuses(s, inv.id, "line_total_mismatch") == ["open"]
         assert await blocked_invoice_ids(s, [inv.id]) == {inv.id}
+
+
+# --------------------------------------------------------------------------- #
+# A clearance holds only while its decider could still give it (decisions §367)
+# --------------------------------------------------------------------------- #
+
+
+def _closed_row(*, exception_type="line_total_mismatch", status="dismissed", decider=None):
+    return SimpleNamespace(
+        exception_type=exception_type,
+        status=status,
+        decided_by_user_id=decider,
+        raised_by_user_id=None,
+    )
+
+
+def _payable(*, uploader=None, actors=None):
+    return SimpleNamespace(uploaded_by_id=uploader, segregation_actor_ids=actors)
+
+
+def test_an_independent_deciders_clearance_stands():
+    from app.services.exception_lifecycle import clearance_stands
+
+    reviewer, clerk = uuid.uuid4(), uuid.uuid4()
+    row = _closed_row(decider=reviewer)
+    assert clearance_stands(row, _payable(uploader=clerk), org_settings={}) is True
+    assert clearance_stands(row, _payable(), org_settings={}) is True
+
+
+@pytest.mark.parametrize("how", ["uploader", "segregation_set"])
+def test_a_decider_implicated_since_no_longer_stands(how):
+    """The uploader 0126 named, or a recaller `add_implicated_actor` stamped."""
+    from app.services.exception_lifecycle import clearance_stands
+
+    decider = uuid.uuid4()
+    payable = (
+        _payable(uploader=decider)
+        if how == "uploader"
+        else _payable(uploader=uuid.uuid4(), actors=[str(decider)])
+    )
+    for status in ("resolved", "dismissed"):
+        row = _closed_row(status=status, decider=decider)
+        assert clearance_stands(row, payable, org_settings={}) is False
+        assert clearance_stands(row, payable, org_settings=None) is False  # default on
+
+
+def test_the_queue_opt_out_covers_the_recheck_too():
+    from app.services.exception_lifecycle import clearance_stands
+
+    decider = uuid.uuid4()
+    row = _closed_row(decider=decider)
+    opted_out = {"exceptions": {"require_segregation": False}}
+    assert clearance_stands(row, _payable(uploader=decider), org_settings=opted_out) is True
+
+
+def test_an_unknown_decider_stands_only_outside_segregations_scope():
+    from app.services.exception_lifecycle import clearance_stands
+
+    payable = _payable(uploader=uuid.uuid4())
+    # Payment-blocking: who cleared it cannot be shown independent, so fail closed.
+    assert clearance_stands(_closed_row(), payable, org_settings={}) is False
+    # Not payment-blocking: nobody is ever refused, so the decider is moot.
+    row = _closed_row(exception_type="price_variance")
+    assert clearance_stands(row, payable, org_settings={}) is True
+
+
+def test_an_open_row_is_no_clearance():
+    from app.services.exception_lifecycle import clearance_stands
+
+    row = _closed_row(status="open", decider=uuid.uuid4())
+    assert clearance_stands(row, _payable(), org_settings={}) is False
+
+
+@pytest.mark.asyncio
+async def test_record_decision_names_the_person_and_no_agent(realdb):
+    from app.services.exception_lifecycle import record_decision
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    manager = info.users["ap_manager"]
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        person_inv = await _add_invoice(s, info.org_id, ent, amount="1037.00")
+        await _add_lines(s, person_inv.id, ["500.00", "400.00"])
+        agent_inv = await _add_invoice(s, info.org_id, ent, amount="1037.00")
+        await _add_lines(s, agent_inv.id, ["500.00", "400.00"])
+        await s.commit()
+        await _refresh(s, person_inv)
+        await _refresh(s, agent_inv)
+
+        row = await _person_dismisses(s, person_inv, "line_total_mismatch", manager)
+        assert row.decided_by_user_id == manager
+
+        (agent_row,) = await _rows(s, agent_inv.id, "line_total_mismatch")
+        await record_decision(
+            s,
+            exception=agent_row,
+            action="resolve",
+            resolution="Closed by an agent.",
+            actor_id=manager,
+            actor_name="agent",
+            invoice=agent_inv,
+            via="agent",
+            org_settings={},
+        )
+        await s.commit()
+        assert agent_row.decided_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_recallers_earlier_clearance_stops_suppressing(realdb):
+    """§374: the recaller joins the segregation set. A hold they cleared while
+    independent then no longer suppresses, and is raised for someone else; the
+    same clearance by a person still independent keeps holding."""
+    from app.services.approval_chain import add_implicated_actor
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    manager = info.users["ap_manager"]
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        inv = await _add_invoice(s, info.org_id, ent, amount="1037.00")
+        await _add_lines(s, inv.id, ["500.00", "400.00"])
+        await s.commit()
+        await _refresh(s, inv)
+        await _person_dismisses(s, inv, "line_total_mismatch", manager)
+        await _refresh(s, inv)
+        assert await _statuses(s, inv.id, "line_total_mismatch") == ["dismissed"]
+
+        # Someone ELSE joining the set changes nothing for the manager's verdict.
+        add_implicated_actor(inv, info.users["cfo"])
+        await s.commit()
+        await _refresh(s, inv)
+        assert await _statuses(s, inv.id, "line_total_mismatch") == ["dismissed"]
+        assert await blocked_invoice_ids(s, [inv.id]) == set()
+
+        # The manager recalls the approval and is stamped: the hold comes back.
+        add_implicated_actor(inv, manager)
+        await s.commit()
+        await _refresh(s, inv)
+        assert await _statuses(s, inv.id, "line_total_mismatch") == ["dismissed", "open"]
+        assert await blocked_invoice_ids(s, [inv.id]) == {inv.id}
+
+        # An independent person clears the new row, and that one holds.
+        await _person_dismisses(s, inv, "line_total_mismatch", info.users["admin"])
+        await _refresh(s, inv)
+        assert await _statuses(s, inv.id, "line_total_mismatch") == [
+            "dismissed",
+            "dismissed",
+        ]
