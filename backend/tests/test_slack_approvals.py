@@ -100,7 +100,7 @@ async def _make_invoice(
         )
         s.add(inv)
         await s.commit()
-        _SEEDED_FACTS[inv.id] = digest_of_invoice(inv)
+        _SEEDED_FACTS[inv.id] = digest_of_invoice(inv, review_round=0)
         return inv.id
 
 

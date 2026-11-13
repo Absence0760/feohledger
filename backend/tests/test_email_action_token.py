@@ -24,6 +24,7 @@ from app.services.email_action_token import (
     build_action_token,
     build_email_action_links,
     digest_of_invoice,
+    round_from_state_data,
     verify_action_token,
 )
 
@@ -270,7 +271,9 @@ def test_a_token_without_the_facts_claim_does_not_verify():
 def test_digest_is_canonical_over_the_amount():
     # The notification and the endpoint both digest the row; `1500` and
     # `1500.00` are one amount and must give one digest.
-    assert digest_of_invoice(_invoice(amount=Decimal("1500"))) == digest_of_invoice(_invoice())
+    assert digest_of_invoice(_invoice(amount=Decimal("1500")), review_round=0) == digest_of_invoice(
+        _invoice(), review_round=0
+    )
 
 
 def test_digest_tolerates_every_optional_fact_being_absent():
@@ -284,11 +287,11 @@ def test_digest_tolerates_every_optional_fact_being_absent():
         due_date=None,
         entity_id=None,
     )
-    assert len(digest_of_invoice(bare)) == 32
+    assert len(digest_of_invoice(bare, review_round=0)) == 32
 
 
 def test_digest_changes_with_every_bound_fact():
-    seen = digest_of_invoice(_invoice())
+    seen = digest_of_invoice(_invoice(), review_round=0)
     for change in (
         {"amount": Decimal("1500.01")},
         {"currency": "EUR"},
@@ -302,25 +305,30 @@ def test_digest_changes_with_every_bound_fact():
         {"due_date": date(2026, 10, 15)},
         {"entity_id": uuid.UUID(int=4)},
     ):
-        assert digest_of_invoice(_invoice(**change)) != seen, change
+        assert digest_of_invoice(_invoice(**change), review_round=0) != seen, change
 
 
 def test_only_an_approve_token_is_held_to_its_facts():
-    stale = digest_of_invoice(_invoice(amount=Decimal("1.00")))
+    stale = digest_of_invoice(_invoice(amount=Decimal("1.00")), review_round=0)
     approve = verify_action_token(_build(ACTION_APPROVE, facts=stale), _KEY)
     reject = verify_action_token(_build(ACTION_REJECT, facts=stale), _KEY)
-    assert approval_facts_changed(approve, _invoice())
+    assert approval_facts_changed(approve, _invoice(), review_round=0)
     # Sending an invoice back is safe whatever it now says.
-    assert not approval_facts_changed(reject, _invoice())
-    current = verify_action_token(_build(ACTION_APPROVE, facts=digest_of_invoice(_invoice())), _KEY)
-    assert not approval_facts_changed(current, _invoice())
+    assert not approval_facts_changed(reject, _invoice(), review_round=0)
+    current = verify_action_token(
+        _build(ACTION_APPROVE, facts=digest_of_invoice(_invoice(), review_round=0)), _KEY
+    )
+    assert not approval_facts_changed(current, _invoice(), review_round=0)
 
 
 def test_every_assignment_notification_binds_the_invoice_digest():
     """An `invoice_assigned` message's Approve / Reject actions bind
     `action_facts`; a site that sends the event without it offers no actions
     at all — silently. So every `notify_event(event_type=EVENT_INVOICE_ASSIGNED,
-    ...)` under `app/` must pass `action_facts=digest_of_invoice(...)`."""
+    ...)` under `app/` must pass `action_facts=await approval_message_facts(...)`:
+    the digest in the invoice's current review round (decisions §379). A bare
+    `digest_of_invoice(...)` there would bind no round, and a recall would not
+    retire the link."""
     import ast
     from pathlib import Path
 
@@ -337,9 +345,71 @@ def test_every_assignment_notification_binds_the_invoice_digest():
             if not (isinstance(event, ast.Name) and event.id == "EVENT_INVOICE_ASSIGNED"):
                 continue
             facts = kw.get("action_facts")
-            ok = isinstance(facts, ast.Call) and getattr(facts.func, "id", None) == (
-                "digest_of_invoice"
+            ok = (
+                isinstance(facts, ast.Await)
+                and isinstance(facts.value, ast.Call)
+                and getattr(facts.value.func, "id", None) == "approval_message_facts"
             )
             sites.append((f"{path.relative_to(app)}:{node.lineno}", ok))
     assert sites, "no invoice_assigned notification found — the scan is broken"
     assert all(ok for _, ok in sites), [s for s, ok in sites if not ok]
+
+
+# ── The review round (decisions §379) ──────────────────────────────────────
+
+
+def test_round_zero_leaves_the_digest_as_it_was_before_the_round_existed():
+    """Links already in inboxes for an invoice never rejected or recalled keep
+    verifying across the deploy: round 0 hashes the eight facts alone, exactly
+    the canonical form the digest had before."""
+    import hashlib
+
+    inv = _invoice()
+    legacy = json.dumps(
+        [
+            "INV-1",
+            "Acme Supplies",
+            str(uuid.UUID(int=7)),
+            "1500.00",
+            "USD",
+            "ach",
+            "2026-11-01",
+            str(uuid.UUID(int=3)),
+        ],
+        separators=(",", ":"),
+    )
+    expected = hashlib.sha256(legacy.encode("utf-8")).hexdigest()[:32]
+    assert digest_of_invoice(inv, review_round=0) == expected
+
+
+def test_each_review_round_has_its_own_digest():
+    digests = {digest_of_invoice(_invoice(), review_round=r) for r in range(4)}
+    assert len(digests) == 4
+
+
+def test_a_first_round_approve_link_is_refused_in_a_later_round():
+    """Recalled (or rejected in the app and resubmitted) with nothing on the
+    message changed: the first round's Approve link is stale, a link minted in
+    the new round is not, and Reject stays unbound."""
+    first = digest_of_invoice(_invoice(), review_round=0)
+    approve = verify_action_token(_build(ACTION_APPROVE, facts=first), _KEY)
+    reject = verify_action_token(_build(ACTION_REJECT, facts=first), _KEY)
+    assert not approval_facts_changed(approve, _invoice(), review_round=0)
+    assert approval_facts_changed(approve, _invoice(), review_round=1)
+    assert not approval_facts_changed(reject, _invoice(), review_round=1)
+
+    fresh = verify_action_token(
+        _build(ACTION_APPROVE, facts=digest_of_invoice(_invoice(), review_round=1)), _KEY
+    )
+    assert not approval_facts_changed(fresh, _invoice(), review_round=1)
+
+
+def test_the_round_counts_rejections_and_recalls():
+    assert round_from_state_data(None) == 0
+    assert round_from_state_data({}) == 0
+    assert round_from_state_data({"rejection_count": 2}) == 2
+    assert round_from_state_data({"recall_count": 1}) == 1
+    assert round_from_state_data({"rejection_count": 2, "recall_count": 1}) == 3
+    # A malformed counter reads as 0, never as a round that matches anything.
+    assert round_from_state_data({"rejection_count": "2", "recall_count": True}) == 0
+    assert round_from_state_data({"rejection_count": -1}) == 0

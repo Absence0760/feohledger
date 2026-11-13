@@ -25,7 +25,7 @@ from sqlalchemy import func, select
 from app.config import settings
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
-from app.models.workflow import AuditLog
+from app.models.workflow import AuditLog, WorkflowDefinition, WorkflowInstance
 from app.services.email_action_token import (
     ACTION_APPROVE,
     ACTION_REJECT,
@@ -96,7 +96,7 @@ async def _make_invoice(
         )
         s.add(inv)
         await s.commit()
-        _SEEDED_FACTS[inv.id] = digest_of_invoice(inv)
+        _SEEDED_FACTS[inv.id] = digest_of_invoice(inv, review_round=0)
         return inv.id
 
 
@@ -388,7 +388,7 @@ async def test_assigned_email_includes_action_links(
                 amount=Decimal("100.00"),
                 currency="USD",
             ),
-            action_facts=digest_of_invoice(invoice),
+            action_facts=digest_of_invoice(invoice, review_round=0),
         )
         # The email leg runs AFTER the caller's commit (services/post_commit),
         # so the caller has to actually commit — a dispatch whose transaction
@@ -579,3 +579,117 @@ async def test_reject_link_still_works_after_the_invoice_changed(realdb, signing
         resp = await c.post(f"/api/invoices/email-action/{token}/confirm", data={"reason": "x"})
     assert resp.status_code == 200, resp.text
     assert await _status(realdb, inv_id) == InvoiceStatus.rejected
+
+
+# ---------------------------------------------------------------------------
+# The review round: a link belongs to the round it was sent in (decisions §379)
+# ---------------------------------------------------------------------------
+
+
+async def _with_workflow(realdb, invoice_id: uuid.UUID) -> None:
+    """A workflow instance (segregation on) so a recall or a rejection has a
+    round to count."""
+    info = realdb.info("a")
+    snapshot = {
+        "steps": [
+            {
+                "number": 2,
+                "type": "approval",
+                "enabled": True,
+                "config": {"require_segregation": True},
+            }
+        ]
+    }
+    async with realdb.sessionmaker("a")() as s:
+        definition = WorkflowDefinition(
+            name=f"ea-round-{uuid.uuid4().hex[:6]}",
+            steps_config=snapshot,
+            is_active=False,
+            organization_id=info.org_id,
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                definition_id=definition.id,
+                invoice_id=invoice_id,
+                steps_config_snapshot=snapshot,
+                state_data={},
+            )
+        )
+        await s.commit()
+
+
+async def _token_in_current_round(realdb, invoice_id: uuid.UUID, *, role="ap_manager") -> str:
+    """What a message sent NOW would carry: the facts in the current round,
+    read the way every notification reads them."""
+    from app.services.review import approval_message_facts
+
+    info = realdb.info("a")
+    async with realdb.sessionmaker("a")() as s:
+        facts = await approval_message_facts(s, await s.get(Invoice, invoice_id))
+    return build_action_token(
+        tenant_slug=info.slug,
+        invoice_id=invoice_id,
+        facts=facts,
+        actor_id=info.users[role],
+        action=ACTION_APPROVE,
+        signing_key=_KEY,
+        ttl_hours=168,
+    )
+
+
+async def test_a_recall_retires_the_first_rounds_approve_link(realdb, signing_key):
+    """Approved in the app, then recalled with nothing on the message changed:
+    the first round's Approve link no longer approves (page or POST), and a
+    link sent in the new round does."""
+    info = realdb.info("a")
+    inv_id = await _make_invoice(realdb, uploaded_by_id=info.users["admin"])
+    await _with_workflow(realdb, inv_id)
+    stale = _token(realdb, inv_id)
+
+    async with realdb.client(key="a", role="cfo") as c:
+        resp = await c.post(f"/api/invoices/{inv_id}/approve", json={})
+        assert resp.status_code == 200, resp.text
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            f"/api/invoices/{inv_id}/recall-approval", json={"reason": "Tax keyed wrong"}
+        )
+        assert resp.status_code == 200, resp.text
+    assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review
+
+    async with realdb.client(key="a", role=None) as c:
+        page = await c.get(f"/api/invoices/email-action/{stale}")
+        assert "changed after this message was sent" in page.text
+        assert "Confirm approve" not in page.text
+        resp = await c.post(f"/api/invoices/email-action/{stale}/confirm")
+        assert "changed after this message was sent" in resp.text
+    assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review
+
+    fresh = await _token_in_current_round(realdb, inv_id)
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(f"/api/invoices/email-action/{fresh}/confirm")
+    assert resp.status_code == 200, resp.text
+    assert await _status(realdb, inv_id) == InvoiceStatus.approved
+
+
+async def test_an_in_app_reject_and_resubmit_retires_the_link(realdb, signing_key):
+    """The pair consume retires a message only when one of its own links was
+    clicked. Rejected and resubmitted in the app instead, the old message's
+    Approve link is retired by the round."""
+    info = realdb.info("a")
+    inv_id = await _make_invoice(realdb, uploaded_by_id=info.users["admin"])
+    await _with_workflow(realdb, inv_id)
+    stale = _token(realdb, inv_id)
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/invoices/{inv_id}/reject", json={"reason": "Wrong PO"})
+        assert resp.status_code == 200, resp.text
+        resp = await c.post(f"/api/invoices/{inv_id}/resubmit")
+        assert resp.status_code == 200, resp.text
+    assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review
+
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(f"/api/invoices/email-action/{stale}/confirm")
+    assert "changed after this message was sent" in resp.text
+    assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review
