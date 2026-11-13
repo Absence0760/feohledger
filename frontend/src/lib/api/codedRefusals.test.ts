@@ -965,7 +965,7 @@ describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', 
 			...backendSource('services/csv_import.py').matchAll(/"(csv_invoice_number_[a-z_]+)"/g)
 		].map((x) => x[1]);
 		expect(skipCodes.length).toBeGreaterThan(10);
-		expect(csvCodes).toHaveLength(3);
+		expect(csvCodes).toHaveLength(4);
 		for (const code of [...skipCodes, ...csvCodes]) {
 			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
 		}
