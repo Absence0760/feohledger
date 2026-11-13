@@ -2160,15 +2160,6 @@ user-visible halves still open.
       **Trigger:** `curl -s https://pypi.org/pypi/onnxruntime/json` lists a
       `cp315` wheel for the latest release.
 
-### Surfaced by fixing the supply-chain scan baseline (2026-11-11, decisions §350)
-
-- [ ] **(c) Two local action references in `ci.yml` keep zizmor's low
-      `self-repository` finding.** zizmor wants GitHub's `$/` same-repository
-      `uses:` syntax in place of `./`; actionlint, which the CI workflow lint
-      runs, rejects `$/` today, so switching would turn the gate red.
-      **Durable fix:** switch both references to `$/` and drop this entry.
-      **Trigger:** an actionlint release that reads `$/`.
-
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
