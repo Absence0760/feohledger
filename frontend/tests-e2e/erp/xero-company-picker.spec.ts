@@ -173,8 +173,10 @@ test.describe('/erp company picker against fake-erp Xero', () => {
 		await expect(picker).toBeVisible();
 		await expect(picker.getByRole('radio')).toHaveCount(2);
 
-		// Leaving and coming back (a plain /organization, no parameter) too.
-		await page.goto('/organization');
+		// Leaving and coming back to the ERP section (no return parameter) too.
+		// The panel mounts only on `?section=erp` (the section the OAuth callback
+		// returns to); a bare /organization opens the default section instead.
+		await page.goto('/organization?section=erp');
 		await expect(picker).toBeVisible();
 		await picker.getByTestId('erp-company-cancel').click();
 		await expect(picker).toHaveCount(0);
@@ -184,7 +186,7 @@ test.describe('/erp company picker against fake-erp Xero', () => {
 		const read = page.waitForResponse((r) =>
 			r.url().includes('/api/organization/erp/oauth/pending')
 		);
-		await page.goto('/organization');
+		await page.goto('/organization?section=erp');
 		expect((await read).status()).toBe(409);
 		await expect(page.getByTestId('erp-company-picker')).toHaveCount(0);
 		// The status line (always mounted, a live region) stays empty.

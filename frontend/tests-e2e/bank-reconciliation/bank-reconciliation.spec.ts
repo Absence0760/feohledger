@@ -51,6 +51,7 @@ function unmatchableCsv(reference: string): string {
 interface ImportedStatement {
 	id: string;
 	account_identifier: string;
+	currency: string;
 	transaction_count: number;
 	transactions: { id: string; direction: string; matched_payment_id: string | null }[] | null;
 }
@@ -418,9 +419,12 @@ test.describe('/bank-reconciliation (admin) — statement currency', () => {
 			await dialog.getByRole('button', { name: 'Import', exact: true }).click();
 			const resp = await uploadResp;
 			expect(resp.status()).toBe(201);
-			// The multipart body carried the typed code, uppercased.
-			expect(resp.request().postData() ?? '').toMatch(/name="currency"\r\n\r\nPLN\r\n/);
-			id = ((await resp.json()) as ImportedStatement).id;
+			// What the server stored is the typed code, uppercased. (Playwright's
+			// `postData()` cannot be used: a multipart body with a file part is a
+			// Blob it does not expose, so it reads null whatever was sent.)
+			const statement = (await resp.json()) as ImportedStatement;
+			id = statement.id;
+			expect(statement.currency).toBe('PLN');
 		} finally {
 			if (id) await deleteStatement(page, id);
 		}
