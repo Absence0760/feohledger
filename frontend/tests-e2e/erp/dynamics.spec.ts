@@ -51,6 +51,15 @@ import {
  *      `vendorId` naming no vendor and a line whose `accountId` is not a
  *      posting account, as BC does, so `done` proves the adapter posted by
  *      the synced ids rather than the name or the account No.
+ *   5. A VAT company (`fake-vat-co`, 20% on top of the lines): an invoice that
+ *      states its VAT posts at the approved gross — the adapter replaces the
+ *      gross draft with one at the net amounts, and BC's own VAT brings it
+ *      back to the approved total. One that states no VAT is refused.
+ *   6. A draft a BC user edits between the adapter's check and its post
+ *      (`fake-edit-co` adds 10.00 as it posts): the posted total is read back
+ *      and refused, the posted invoice left for the accountant.
+ *   7. Vendor sync stores the payment term's code (`30 DAYS`), not the
+ *      vendor's `paymentTermsId` GUID.
  */
 
 // The exact settings.erp shape the adapter reads: get_erp_adapter passes the
@@ -156,12 +165,80 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 		}
 	});
 
+	test('vendor sync stores the payment term code, not its id', async ({ page }) => {
+		await syncErpVendors(page);
+		const list = await page.request.get(
+			`${API_BASE}/api/vendors?search=Fake%20BC%20Vendor%20A&page_size=50`,
+			{ headers: await authedTenantHeaders(page) }
+		);
+		expect(list.status()).toBe(200);
+		const { items } = (await list.json()) as {
+			items: Array<{ name: string; payment_terms: string | null }>;
+		};
+		const vendor = items.find((v) => v.name === 'Fake BC Vendor A');
+		expect(vendor, 'Fake BC Vendor A synced').toBeTruthy();
+		expect(vendor!.payment_terms).toBe('30 DAYS');
+	});
+
+	test('a VAT company posts an invoice that states its VAT at the approved gross', async ({
+		page
+	}) => {
+		// 1,028.80 net + 205.76 VAT (20%) = 1,234.56 approved. The gross draft
+		// comes back at 1,481.47 (BC's VAT on top), so the adapter deletes it and
+		// sends the net 1,028.80; BC's 20% makes that exactly 1,234.56, which is
+		// posted and read back.
+		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-vat-co' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365-VATNET',
+			amount: '1234.56',
+			taxAmount: '205.76',
+			vendor: 'Fake BC Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await erpReferenceFromAudit(page, inv.id)).toMatch(/^d365-inv-\d+$/);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a draft edited in BC between the total check and the post is refused', async ({
+		page
+	}) => {
+		// fake-erp's `fake-edit-co` adds 10.00 to a draft as it posts it — a BC
+		// user's edit landing after our check. The adapter reads the posted
+		// invoice back, refuses, and leaves it (posted documents are reversed
+		// by an accountant in BC, never deleted).
+		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-edit-co' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365-EDIT',
+			amount: '2345.67',
+			vendor: 'Fake BC Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'Business Central post refused: posted_total_mismatch ' +
+					'(the invoice is posted in Business Central and was not deleted)'
+			);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
 	test('a VAT company that would book more than was approved is refused, not posted', async ({
 		page
 	}) => {
 		// fake-erp's `fake-vat-co` adds 20% VAT on top of the lines, as a real
 		// BC VAT company does: 1,234.56 approved would become a 1,481.47 bill.
-		// The adapter reads the draft's total, deletes the draft and refuses.
+		// The invoice states no VAT, so there is no net to send instead: the
+		// adapter reads the draft's total, deletes the draft and refuses.
 		// (Not a round figure: that would open a `fraud_flag`, which refuses
 		// the send before it reaches BC — decisions §286.)
 		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-vat-co' });

@@ -718,7 +718,6 @@ POST /purchaseInvoices
   "invoiceDate": "2026-04-01",
   "dueDate": "2026-05-01",
   "vendorInvoiceNumber": "INV-2024-001",
-  "externalDocumentNumber": "<correlation_id>",
   "purchaseInvoiceLines": [
     {
       "lineType": "Account",
@@ -748,7 +747,10 @@ POST /subscriptions
 - Must create vendor in BC first or map to existing vendor number
 - `purchaseInvoiceLines` require item numbers or GL accounts
 - Posting the invoice is a separate step from creating it
-- The `correlation_id` should be stored in `externalDocumentNumber`
+- API v2.0's purchaseInvoice has **no `externalDocumentNumber`** (that is a
+  salesInvoice field), so the idempotency key is BC's own duplicate key: the
+  vendor (`vendorId`) and the Vendor Invoice No. (`vendorInvoiceNumber`) — see
+  [Business Central: chart, POs and void](#business-central-chart-pos-and-void)
 
 ---
 
@@ -1107,7 +1109,7 @@ Each ERP has different field names for the same concepts. The adapter handles ma
 | po_number | purchaseOrderNumber | PurchaseOrder | purchaseOrderNumber | PONum | PONumber.value |
 | gl_account | accountId | GLAccount | account.id | GLAccount | Account.value |
 | currency | currencyCode | DocumentCurrency | currency.refName | CurrencyCode | CurrencyID.value |
-| correlation_id | externalDocumentNumber | ReferenceDocument | externalId | UserDefinedField | Note |
+| correlation_id | — (lookup by `vendorId` + `vendorInvoiceNumber`) | ReferenceDocument | externalId | UserDefinedField | Note |
 
 ## Error Handling
 
@@ -1869,17 +1871,17 @@ target ERP actually supports:
 |---|---|
 | `merge_dev` | `X-Idempotency-Key: <correlation_id>` header on `POST /invoices` — Merge's unified API returns the ORIGINAL response for a repeated key instead of creating a second invoice. |
 | `netsuite` | Pre-create lookup: `GET /vendorBill?q=externalId IS "<correlation_id>"` (NetSuite enforces `externalId` uniqueness per record type). A match short-circuits `post_invoice` to a success referencing the existing bill — once its `total` reads back as the approved amount (the same check as a fresh create); only a miss proceeds to `POST /vendorBill`. |
-| `dynamics_365_bc` | Pre-create lookup: `GET purchaseInvoices?$filter=externalDocumentNumber eq '<correlation_id>'`. A hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount; a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` (an earlier attempt whose post step failed or whose response was lost) is finished: its total re-checked, then `Microsoft.NAV.post` re-run — never a second create. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
+| `dynamics_365_bc` | Pre-create lookup on BC's own duplicate key: `GET purchaseInvoices?$filter=vendorId eq <vendor guid> and vendorInvoiceNumber eq '<NUMBER>'` (upper-cased, since `Vendor Invoice No.` is a `Code[35]` field; a quote doubled). API v2.0's purchaseInvoice has no `externalDocumentNumber`, so the old filter on it failed every push. More than one hit refuses `duplicate_document_number`; a 200 whose body is not a collection is a retryable failure, never a miss. A hit found `Paid` refuses `existing_invoice_not_open` whatever its total — BC has paid it, and success would send it to our payment run too. Any other hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount; a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` at the approved total (an earlier attempt whose post step failed or whose response was lost) is finished: `Microsoft.NAV.post` re-run and the posted total read back — never a second create. A `Draft` at any other total may be a BC user's own draft of this bill, so it is refused `posted_total_mismatch` and **left in BC, never deleted or repriced** (decisions §391); a coded post refusal of a found draft leaves it in BC too. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
 
 The local `fake-erp` mock implements the matching server-side behavior (a
 merge-idempotency-key cache; `q=`/`$filter=` collection queries filtered by
-`externalId`/`externalDocumentNumber`) so this is exercised end-to-end by
+`externalId` / `vendorId` + `vendorInvoiceNumber`) so this is exercised end-to-end by
 `pnpm test:erp` without a live ERP account. Unit-level coverage (mocked HTTP,
 no fake-erp container needed) lives in
 `backend/tests/test_erp_adapter_idempotency.py`.
 
 **A failed lookup is a failure, not a miss** — on every direct adapter. A
-non-200 from the NetSuite `externalId` or the BC `externalDocumentNumber`
+non-200 from the NetSuite `externalId` or the BC vendor-and-invoice-number
 lookup returns a retryable `erp_failure_message(...)` result and creates
 nothing; the retry looks again. Reading it as "not posted yet" re-created the
 duplicate the lookup exists to prevent, at exactly the moment the ERP was
@@ -2955,10 +2957,11 @@ period or an inactive vendor on the create or in the job, and whether
 
 | Operation | Call |
 |---|---|
-| `post_invoice` | refuse without `vendor_erp_id` / a line account id / a valid `base_url` → `GET purchaseInvoices?$filter=externalDocumentNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` (a draft) → `GET purchaseInvoices({id})` → total check → `POST purchaseInvoices({id})/Microsoft.NAV.post` |
-| `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts are skipped (BC refuses a line on one); blocked accounts are emitted `active=False`. |
+| `post_invoice` | refuse without a GUID `vendor_erp_id` / a line account id / a valid `base_url` / a GUID `company_id`, or with an invoice number over 35 characters (`doc_number_too_long`) → `GET purchaseInvoices?$filter=vendorId eq … and vendorInvoiceNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` (a draft, at the gross) → `GET purchaseInvoices({id})` → total check (a VAT company: delete, re-create at the net, check again) → `POST purchaseInvoices({id})/Microsoft.NAV.post` → `GET purchaseInvoices({id})` → posted-total check |
+| `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts are skipped (BC refuses a line on one); blocked accounts, and Posting accounts with `directPosting: false` (control accounts — payables, bank, inventory — which refuse a purchase line), are emitted `active=False`. |
 | `list_pos` | `GET purchaseOrders?$expand=purchaseOrderLines` — total `totalAmountIncludingTax`; status always `open`; vendor linked by `vendorId` (the vendor GUID `list_vendors` stamps; BC's empty GUID is no vendor) before `vendorName`; `currencyCode` only when non-blank; `requestedReceiptDate` unless BC's blank `0001-01-01`; comment lines dropped |
-| `list_vendors` | `GET vendors` |
+| `list_vendors` | `GET vendors?$expand=paymentTerm` — `payment_terms` is the term's `code` (`30 DAYS`), never the vendor's `paymentTermsId` GUID (no term, or no expansion, → None); `blocked` `Payment` or `All` → `active=False`, so the sync never makes a blocked vendor a payee and marks a linked one `inactive` |
+| `get_invoice_status` | `GET purchaseInvoices({id})` — `Draft` / `Open` / `Paid` / `Canceled`; `Corrective` (an invoice BC made by cancelling a posted credit memo — a live document, never one we pushed) and blank are `unknown` |
 | `void_invoice` | `GET purchaseInvoices({id})`; a `Draft` is deleted (`DELETE` with `If-Match` = the etag just read — never `*`; a read with no etag returns `False` unsent); anything else returns `False` |
 
 **Lines post on `accountId`, not the No.** The chart sync is now the writer of
@@ -2983,7 +2986,24 @@ goes as quantity 1 at its gross, an exact `Decimal` at the invoice currency's
 scale (`payment_adapters.base.exponent_for`: `100.000000` → `100.00`, JPY →
 whole units); a gross finer than the currency refuses `line_amount_precision`
 rather than being rounded. A line's description is its own, else the invoice's,
-else its number.
+else its number, cut to BC's `Text[100]` (a description is not money).
+
+**A VAT company gets a second draft at the net.** BC prices a purchase line
+exclusive of tax and computes each line's tax itself from the G/L account's tax
+group, so a draft at the approved gross comes back taxed on top (1,200 →
+1,440). When the draft's `totalAmountExcludingTax` is exactly the approved
+amount and `totalTaxAmount` is non-zero (`pricesIncludeTax` false), the adapter
+deletes that draft and creates one at each line's net — its gross less its own
+tax, from `bill_allocation.allocate_bill_lines` — so BC's own tax brings it back
+to the approved gross. That second draft goes through the same total check and
+is **never repriced again**: BC's rate not being the supplier's, a rounding
+difference or an account with no tax group is `posted_total_mismatch`, the draft
+deleted. An invoice that gives no exact per-line net is refused instead of
+pro-rated: several tax-inclusive lines with only a header tax →
+`tax_not_itemised` (the shared code #670 introduced for the same condition on
+the other adapters), a net finer than the currency → `line_amount_precision`.
+An invoice that states no tax but that BC taxes is `posted_total_mismatch`, as
+before. Only a draft this push created is repriced (decisions §391).
 
 **The draft's total is checked before it is posted.** BC computes a
 purchaseInvoice's total itself, and a VAT / sales-tax company adds tax on top
@@ -2999,9 +3019,31 @@ BC user had posted it in between. Its status is checked: when the draft could
 not be deleted (BC refused, or no etag was known) the message says so —
 `… posted_total_mismatch (the draft was not deleted in Business Central)` — so
 the accountant knows a draft above the approved amount is still sitting in BC.
-A failed draft read or post step is a **retryable** `erp_failure_message`
-failure. The post step used to be `except Exception: pass`, reporting success —
-and moving the invoice to `sent_to_erp` — while BC held only a draft.
+A failed draft read, or a post step BC answered with a retryable status, is a
+**retryable** `erp_failure_message` failure with the draft kept for the
+retry's lookup. The post step used to be `except Exception: pass`, reporting
+success — and moving the invoice to `sent_to_erp` — while BC held only a draft.
+
+**The posted invoice is read back.** A BC user can edit the draft between our
+total check and `Microsoft.NAV.post`. BC carries a draft's id to the posted
+invoice in the API, so after the post the same `purchaseInvoices({id})` is read
+again and checked once more: a different total is `posted_total_mismatch`, the
+posted invoice left for the accountant (`… (the invoice is posted in Business
+Central and was not deleted)`). A failed read after a successful post is
+retryable — the retry's lookup finds the posted invoice and checks it, so a
+re-send cannot post twice; a draft still unposted is retryable; any other
+status refuses `existing_invoice_not_open`.
+
+**Refusals are coded from facts** (decisions §285's rule). A create or post BC
+refuses with a non-retryable status is explained by reading the bill's own
+records back: the vendor blocked `All` (or gone) → `vendor_inactive`; an
+account it posts on blocked, not open to direct posting, or gone →
+`account_inactive` with our GL codes in `params.accounts`; BC's
+allowed-posting-dates dialog (matched, never stored) → `period_closed`. A
+refused create is marked `not_posted`; a coded post refusal deletes the draft
+first, since re-posting it cannot succeed. Anything unexplained stays the
+plain HTTP failure. BC's own message never reaches the result — it can echo a
+vendor's name.
 
 **Every success is total-checked, including an invoice already posted.** Success
 is reported only for an invoice BC holds as `Open` or `Paid` whose
