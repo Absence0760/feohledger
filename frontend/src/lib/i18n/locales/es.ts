@@ -5124,6 +5124,7 @@ export const messages = {
 	'refusal.vendorMergeInvalidId': "No se pudo identificar uno de estos proveedores. Cierre este cuadro de diálogo y vuelva a abrirlo.",
 	'refusal.vendorMergeCrossEntity': "Estos proveedores pertenecen a entidades distintas, y una combinación no puede trasladar el gasto de una filial a otra.",
 	'refusal.vendorMergeBlockedDuplicate': "Un duplicado tiene los pagos bloqueados y el proveedor principal no, así que combinarlos liberaría sus facturas retenidas. Resuelva primero el bloqueo en su revisión de control o déjelo fuera de esta combinación.",
+	'refusal.vendorMergeErpLinkConflict': "El proveedor principal y un duplicado están vinculados a registros de proveedor distintos en la misma empresa del ERP, y una combinación no puede elegir a cuál contabiliza el proveedor combinado. Deje ese duplicado fuera de esta combinación.",
 	'refusal.workspaceCloseConfirmationMismatch': "Escriba la dirección de este espacio de trabajo exactamente como se muestra para confirmar que debe cerrarse.",
 	'refusal.workspaceCloseRefused': "Este espacio de trabajo no se puede cerrar aquí porque contiene registros que deben conservarse o cuentas de otras personas. Póngase en contacto con soporte para cerrarlo.",
 	'refusal.workspaceCloseActorNotAdmin': "Solo un administrador activo de este espacio de trabajo puede cerrarlo.",

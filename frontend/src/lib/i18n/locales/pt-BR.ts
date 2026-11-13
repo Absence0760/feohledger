@@ -5125,6 +5125,7 @@ export const messages = {
 	'refusal.vendorMergeInvalidId': "Não foi possível identificar um desses fornecedores. Feche esta caixa de diálogo e abra-a novamente.",
 	'refusal.vendorMergeCrossEntity': "Esses fornecedores pertencem a entidades diferentes, e uma mesclagem não pode transferir os gastos de uma subsidiária para outra.",
 	'refusal.vendorMergeBlockedDuplicate': "Um duplicado tem os pagamentos bloqueados e o fornecedor principal não, então a mesclagem liberaria as faturas retidas dele. Resolva primeiro o bloqueio na análise de triagem ou deixe-o fora desta mesclagem.",
+	'refusal.vendorMergeErpLinkConflict': "O fornecedor principal e um duplicado estão vinculados a registros de fornecedor diferentes na mesma empresa do ERP, e uma mesclagem não pode escolher para qual deles o fornecedor mesclado lança. Deixe esse duplicado fora desta mesclagem.",
 	'refusal.workspaceCloseConfirmationMismatch': "Digite o endereço deste espaço de trabalho exatamente como mostrado para confirmar que ele deve ser encerrado.",
 	'refusal.workspaceCloseRefused': "Este espaço de trabalho não pode ser encerrado aqui porque contém registros que precisam ser mantidos ou contas de outras pessoas. Entre em contato com o suporte para encerrá-lo.",
 	'refusal.workspaceCloseActorNotAdmin': "Somente um administrador ativo deste espaço de trabalho pode encerrá-lo.",

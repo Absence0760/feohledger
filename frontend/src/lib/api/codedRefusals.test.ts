@@ -832,7 +832,8 @@ describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
 		['vendor_merge_duplicate_not_found', 'refusal.vendorMergeDuplicateNotFound'],
 		['vendor_merge_invalid_id', 'refusal.vendorMergeInvalidId'],
 		['vendor_merge_cross_entity', 'refusal.vendorMergeCrossEntity'],
-		['vendor_merge_blocked_duplicate', 'refusal.vendorMergeBlockedDuplicate']
+		['vendor_merge_blocked_duplicate', 'refusal.vendorMergeBlockedDuplicate'],
+		['vendor_merge_erp_link_conflict', 'refusal.vendorMergeErpLinkConflict']
 	];
 
 	it.each(MERGE)('%s is the fixed sentence %s in every shipped locale', (code, key) => {

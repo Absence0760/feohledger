@@ -5131,6 +5131,7 @@ export const messages = {
 	'refusal.vendorMergeInvalidId': "L’un de ces fournisseurs n’a pas pu être identifié. Fermez cette fenêtre et rouvrez-la.",
 	'refusal.vendorMergeCrossEntity': "Ces fournisseurs appartiennent à des entités différentes, et une fusion ne peut pas transférer les dépenses d’une filiale vers une autre.",
 	'refusal.vendorMergeBlockedDuplicate': "Les paiements d’un doublon sont bloqués, mais pas ceux du fournisseur de référence : la fusion libérerait ses factures retenues. Levez d’abord le blocage dans son examen de filtrage, ou excluez-le de cette fusion.",
+	'refusal.vendorMergeErpLinkConflict': "Le fournisseur de référence et un doublon sont liés à des fiches fournisseur différentes dans la même société de l’ERP, et une fusion ne peut pas choisir celle vers laquelle le fournisseur fusionné comptabilise. Excluez ce doublon de cette fusion.",
 	'refusal.workspaceCloseConfirmationMismatch': "Saisissez l’adresse de cet espace de travail exactement comme affichée pour confirmer qu’il doit être fermé.",
 	'refusal.workspaceCloseRefused': "Cet espace de travail ne peut pas être fermé ici, car il contient des données qui doivent être conservées ou les comptes d’autres personnes. Contactez le support pour le fermer.",
 	'refusal.workspaceCloseActorNotAdmin': "Seul un administrateur actif de cet espace de travail peut le fermer.",

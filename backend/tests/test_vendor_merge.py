@@ -21,7 +21,7 @@ from app.models.contract import Contract, ContractStatus, ContractType
 from app.models.credit_memo import CreditMemo
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.procurement import PurchaseOrder
-from app.models.vendor import Vendor
+from app.models.vendor import Vendor, VendorErpLink
 from app.models.vendor_priors import VendorExtractionPrior
 from app.models.workflow import AuditLog
 from app.services.vendor_merge import (
@@ -29,6 +29,7 @@ from app.services.vendor_merge import (
     VENDOR_MERGE_CANONICAL_NOT_FOUND,
     VENDOR_MERGE_CROSS_ENTITY,
     VENDOR_MERGE_DUPLICATE_NOT_FOUND,
+    VENDOR_MERGE_ERP_LINK_CONFLICT,
     VENDOR_MERGE_INVALID_ID,
     VENDOR_MERGE_NO_DUPLICATES,
     VENDOR_MERGE_SELF,
@@ -565,6 +566,296 @@ async def test_merge_prior_collapse_is_idempotent(realdb):
 
 
 # ---------------------------------------------------------------------------
+# ERP links move with the merge (docs/decisions.md §373)
+# ---------------------------------------------------------------------------
+#
+# A vendor's ERP link lives in two places since §356: the row's
+# `erp_vendor_id` + `erp_link_realm`, and one `vendor_erp_links` row per other
+# company it was linked in. A merge used to move neither, so the canonical
+# vendor's invoices were refused `vendor_not_linked` while the id sat on the
+# retired duplicate, and a later sync restored a kept link onto it.
+
+
+def _realm() -> str:
+    # Unique per test: tenant "a" is shared, and a sync judges every link the
+    # tenant holds under the realm it runs in.
+    return f"quickbooks:{uuid.uuid4().hex[:12]}"
+
+
+async def _seed_linked(
+    mk, org_id, *, name, erp_vendor_id=None, realm=None, kept=None, bank_details=None
+):
+    """A vendor with a row link (``erp_vendor_id`` under ``realm``) and a kept
+    link per ``kept`` entry ``{realm: erp_vendor_id}``."""
+    async with mk() as s:
+        v = Vendor(
+            organization_id=org_id,
+            name=name,
+            status="active",
+            erp_vendor_id=erp_vendor_id,
+            erp_link_realm=realm,
+            bank_details=bank_details,
+        )
+        s.add(v)
+        await s.flush()
+        for kept_realm, kept_id in (kept or {}).items():
+            s.add(
+                VendorErpLink(
+                    organization_id=org_id,
+                    vendor_id=v.id,
+                    realm=kept_realm,
+                    erp_vendor_id=kept_id,
+                )
+            )
+        await s.commit()
+        return v.id
+
+
+async def _links_of(mk, vendor_id):
+    """(row link as (realm, id) or None, {realm: id} of kept links)."""
+    async with mk() as s:
+        v = await s.get(Vendor, vendor_id)
+        row = (v.erp_link_realm, v.erp_vendor_id) if v.erp_vendor_id else None
+        kept = (
+            await s.execute(
+                select(VendorErpLink.realm, VendorErpLink.erp_vendor_id).where(
+                    VendorErpLink.vendor_id == vendor_id
+                )
+            )
+        ).all()
+    return row, {r: i for r, i in kept}
+
+
+async def _holders(mk, org_id, realm, erp_id) -> set[uuid.UUID]:
+    """Every vendor holding ``erp_id`` in ``realm``, on its row or kept."""
+    async with mk() as s:
+        on_row = (
+            await s.execute(
+                select(Vendor.id).where(
+                    Vendor.organization_id == org_id,
+                    Vendor.erp_link_realm == realm,
+                    Vendor.erp_vendor_id == erp_id,
+                )
+            )
+        ).scalars()
+        kept = (
+            await s.execute(
+                select(VendorErpLink.vendor_id).where(
+                    VendorErpLink.organization_id == org_id,
+                    VendorErpLink.realm == realm,
+                    VendorErpLink.erp_vendor_id == erp_id,
+                )
+            )
+        ).scalars()
+        return {*on_row, *kept}
+
+
+async def _merge(realdb, canonical, *dups):
+    body = {"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(d) for d in dups]}
+    async with realdb.client(key="a", role="ap_manager") as client:
+        return await client.post(_MERGE_URL, json=body)
+
+
+async def test_merge_moves_the_duplicates_live_link_onto_an_unlinked_canonical(realdb):
+    """The case the follow-up named: the duplicate held the ERP link, so the
+    canonical's invoices were refused `vendor_not_linked`. Now the link lands on
+    the canonical's row, the push resolves it there, and the duplicate holds
+    none. The canonical's bank details are untouched."""
+    from app.services.vendor_erp_links import vendor_erp_ids
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    realm = _realm()
+    bank = {"account_number": "000123456789", "routing_number": "021000021"}
+    canonical = await _seed_linked(mk, org_id, name="LinkMove Co", bank_details=bank)
+    dup = await _seed_linked(mk, org_id, name="LinkMove Company", erp_vendor_id="57", realm=realm)
+
+    r = await _merge(realdb, canonical, dup)
+    assert r.status_code == 200, r.text
+
+    assert await _links_of(mk, canonical) == ((realm, "57"), {})
+    assert await _links_of(mk, dup) == (None, {})
+    async with mk() as s:
+        c = await s.get(Vendor, canonical)
+        assert c.bank_details == bank
+        assert await vendor_erp_ids(s, org_id, [c], realm=realm, trust_legacy=False) == {
+            canonical: "57"
+        }
+    assert await _holders(mk, org_id, realm, "57") == {canonical}
+
+    (details,) = await _audit_merge_rows(mk, canonical)
+    assert details["erp_links"] == [
+        {"realm": realm, "erp_vendor_id": "57", "from_vendor_id": str(dup), "placed": "row"}
+    ]
+
+
+async def test_merge_moves_kept_links_to_realms_the_canonical_has_none_in(realdb):
+    """The canonical keeps its own row link; the duplicate's row link (another
+    company) and its kept link are filed as the canonical's kept links, so a
+    return to either company posts them at once."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    r1, r2, r3 = _realm(), _realm(), _realm()
+    canonical = await _seed_linked(mk, org_id, name="KeptMove Co", erp_vendor_id="10", realm=r1)
+    dup = await _seed_linked(
+        mk, org_id, name="KeptMove Ltd", erp_vendor_id="57", realm=r2, kept={r3: "88"}
+    )
+
+    r = await _merge(realdb, canonical, dup)
+    assert r.status_code == 200, r.text
+
+    assert await _links_of(mk, canonical) == ((r1, "10"), {r2: "57", r3: "88"})
+    assert await _links_of(mk, dup) == (None, {})
+    (details,) = await _audit_merge_rows(mk, canonical)
+    assert sorted((e["realm"], e["placed"]) for e in details["erp_links"]) == sorted(
+        [(r2, "kept"), (r3, "kept")]
+    )
+
+
+async def test_merge_releases_a_duplicate_link_the_canonical_already_holds(realdb):
+    """Same id in the same company on both sides: nothing to choose. The
+    duplicate drops its copy and the canonical gains no second row for it."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    r1, r2 = _realm(), _realm()
+    canonical = await _seed_linked(
+        mk, org_id, name="Release Co", erp_vendor_id="57", realm=r1, kept={r2: "9"}
+    )
+    dup = await _seed_linked(
+        mk, org_id, name="Release Inc", erp_vendor_id="9", realm=r2, kept={r1: "57"}
+    )
+
+    r = await _merge(realdb, canonical, dup)
+    assert r.status_code == 200, r.text
+
+    assert await _links_of(mk, canonical) == ((r1, "57"), {r2: "9"})
+    assert await _links_of(mk, dup) == (None, {})
+    (details,) = await _audit_merge_rows(mk, canonical)
+    assert {e["placed"] for e in details["erp_links"]} == {"released"}
+
+
+async def test_merge_refuses_a_realm_where_both_hold_different_ids(realdb):
+    """Two ERP supplier records claim the merged vendor in one company. The
+    merge refuses, names the company, and moves nothing at all: no link, no
+    invoice, no retirement, no audit row."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    ent = await _default_entity_id(mk)
+    r1, r2 = _realm(), _realm()
+    canonical = await _seed_linked(
+        mk, org_id, name="Conflict Co", erp_vendor_id="10", realm=r1, kept={r2: "5"}
+    )
+    dup = await _seed_linked(
+        mk, org_id, name="Conflict Corp", erp_vendor_id="57", realm=r1, kept={r2: "6"}
+    )
+    inv = await _seed_invoice(mk, org_id, dup, number="INV-CONFLICT", entity_id=ent)
+
+    r = await _merge(realdb, canonical, dup)
+    assert r.status_code == 409, r.text
+    detail = r.json()["detail"]
+    assert detail["code"] == VENDOR_MERGE_ERP_LINK_CONFLICT
+    assert detail["params"] == {"realms": sorted([r1, r2])}
+
+    assert await _links_of(mk, canonical) == ((r1, "10"), {r2: "5"})
+    assert await _links_of(mk, dup) == ((r1, "57"), {r2: "6"})
+    async with mk() as s:
+        assert (await s.get(Invoice, inv)).vendor_id == dup
+        assert (await s.get(Vendor, dup)).status == "active"
+    assert await _audit_merge_rows(mk, canonical) == []
+
+
+async def test_merge_refuses_two_duplicates_linked_differently_in_one_realm(realdb):
+    """The conflict is not only canonical-vs-duplicate: two duplicates moving
+    different ids into a company the canonical has none in is the same choice."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    realm = _realm()
+    canonical = await _seed_linked(mk, org_id, name="TwoDup Co")
+    dup1 = await _seed_linked(mk, org_id, name="TwoDup A", kept={realm: "57"})
+    dup2 = await _seed_linked(mk, org_id, name="TwoDup B", erp_vendor_id="58", realm=realm)
+
+    r = await _merge(realdb, canonical, dup1, dup2)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["params"] == {"realms": [realm]}
+    assert await _links_of(mk, dup1) == (None, {realm: "57"})
+    assert await _links_of(mk, dup2) == ((realm, "58"), {})
+    assert await _links_of(mk, canonical) == (None, {})
+
+
+async def test_merge_refuses_an_unnamed_link_against_a_different_named_one(realdb):
+    """A NULL-realm link names no company, so it may be the same company as the
+    duplicate's named link: a different id there is reported as realm null."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    realm = _realm()
+    canonical = await _seed_linked(mk, org_id, name="Legacy Co", erp_vendor_id="10")
+    dup = await _seed_linked(mk, org_id, name="Legacy Inc", erp_vendor_id="57", realm=realm)
+
+    r = await _merge(realdb, canonical, dup)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["params"] == {"realms": [None]}
+    assert await _links_of(mk, canonical) == ((None, "10"), {})
+
+
+async def test_after_a_merge_a_sync_restores_nothing_onto_the_retired_duplicate(realdb):
+    """The duplicate's kept link went to the canonical, so the next sync under
+    that company restores it onto the canonical — and the duplicate stays
+    unlinked, with nothing kept for any company."""
+    from app.services.vendor_sync import sync_vendors_from_erp
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    r1, r2 = _realm(), _realm()
+    tag = uuid.uuid4().hex[:8]
+    canonical = await _seed_linked(mk, org_id, name=f"Restore Co {tag}")
+    dup = await _seed_linked(
+        mk, org_id, name=f"Restore Ltd {tag}", erp_vendor_id="57", realm=r1, kept={r2: "88"}
+    )
+
+    r = await _merge(realdb, canonical, dup)
+    assert r.status_code == 200, r.text
+    assert await _links_of(mk, canonical) == ((r1, "57"), {r2: "88"})
+
+    async with mk() as s:
+        result = await sync_vendors_from_erp(
+            s, org_id, [{"erp_vendor_id": "88", "name": f"Restore Co {tag}"}], realm=r2
+        )
+        await s.commit()
+    assert result["restored"] == 1
+
+    # Restored onto the canonical, which files its r1 link in turn (§356).
+    assert await _links_of(mk, canonical) == ((r2, "88"), {r1: "57"})
+    assert await _links_of(mk, dup) == (None, {})
+
+
+async def test_merge_never_leaves_two_holders_of_one_id_in_one_realm(realdb):
+    """Two duplicates holding the same id in one company (one on its row, one
+    kept) collapse to one link on the canonical: one holder per (realm, id),
+    one kept row per (vendor, realm) — the unique constraint is never reached."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    r1, r2 = _realm(), _realm()
+    canonical = await _seed_linked(mk, org_id, name="OneHolder Co", erp_vendor_id="1", realm=r1)
+    dup1 = await _seed_linked(mk, org_id, name="OneHolder A", kept={r2: "88"})
+    dup2 = await _seed_linked(mk, org_id, name="OneHolder B", erp_vendor_id="88", realm=r2)
+
+    r = await _merge(realdb, canonical, dup1, dup2)
+    assert r.status_code == 200, r.text
+
+    assert await _links_of(mk, canonical) == ((r1, "1"), {r2: "88"})
+    assert await _holders(mk, org_id, r2, "88") == {canonical}
+    assert await _links_of(mk, dup1) == (None, {})
+    assert await _links_of(mk, dup2) == (None, {})
+
+    # A re-run has nothing left to move.
+    r2_ = await _merge(realdb, canonical, dup1, dup2)
+    assert r2_.status_code == 200, r2_.text
+    rows = await _audit_merge_rows(mk, canonical)
+    assert rows[-1]["erp_links"] == []
+    assert await _links_of(mk, canonical) == ((r1, "1"), {r2: "88"})
+
+
+# ---------------------------------------------------------------------------
 # VENDOR_FK_CHILDREN drift guard
 # ---------------------------------------------------------------------------
 #
@@ -585,12 +876,11 @@ _VENDOR_FK_NOT_PLAIN_REASSIGNED = {
     "vendor_extraction_priors": (
         "unique (vendor_id, field_name) — merged specially, not plain-reassigned"
     ),
-    # A duplicate's links to ERP companies it left stay with it, exactly as its
-    # own `vendors.erp_vendor_id` does (a merge moves no ERP link), and the
-    # table is unique on (vendor_id, realm), so a blind UPDATE could collide.
+    # Unique on (vendor_id, realm), and a realm the canonical is already linked
+    # in must not gain a second link: `_plan_erp_links` moves each kept link
+    # realm by realm with the row link, or refuses the merge (decisions §373).
     "vendor_erp_links": (
-        "the duplicate's ERP links stay with it, like vendors.erp_vendor_id; "
-        "unique (vendor_id, realm)"
+        "unique (vendor_id, realm) — moved realm by realm with the row link, not plain-reassigned"
     ),
 }
 
