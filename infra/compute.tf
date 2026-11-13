@@ -1,6 +1,7 @@
 # The app VM for the single-VM workload stack (docs/minimal-deployment.md):
-# Docker Compose running Caddy (TLS + the static SPA + /api reverse proxy), the
-# FastAPI backend and Redis. The database is RDS (database.tf), so nothing on
+# Docker Compose running Caddy (TLS + the api.<domain> reverse proxy, plus any
+# customer vanity host), the FastAPI backend and Redis. The SPA is not here:
+# it is S3 + CloudFront (frontend.tf, docs/decisions.md §278, §364). The database is RDS (database.tf), so nothing on
 # this machine's disk is the system of record — losing the VM costs a rebuild,
 # not data.
 #
@@ -288,12 +289,12 @@ resource "aws_eip" "app" {
 #
 # The apex and the wildcard are the SPA, so they point at the CloudFront
 # distribution (frontend.tf) once var.frontend_on_cloudfront is true, and at the
-# VM's Caddy until then. Only their A records change (plus an AAAA, which the
+# VM's Caddy otherwise. Only their A records change (plus an AAAA, which the
 # VM — IPv4 only — never had); the apex's Migadu MX/TXT records are separate
-# and untouched. api.<domain> stays on the VM either way. Rolling back is
-# setting the variable to false and applying: Route 53 swaps each record in one
-# atomic change, and the VM's Caddy still serves the SPA until the step-4
-# cleanup removes it (issue #582).
+# and untouched. api.<domain> stays on the VM either way. Since
+# docs/decisions.md §364 the VM's Caddy serves no SPA, so setting the variable
+# back to false is no longer a rollback: it points every web host at a server
+# with no site block for it. It stays true.
 
 locals {
   spa_records = {

@@ -729,6 +729,11 @@ jobs:
         run: scripts/install_vm_compose.sh
       - name: Render compose.prod.yml in local and external mode; any warning fails
         run: scripts/check_deploy_compose_config.sh
+      # The pinned Caddy image adapts deploy/Caddyfile with a vanity host block
+      # (docs/decisions.md §364): a config Caddy refuses would take api. down
+      # on the next deploy, and this covers a Caddy image bump on its own PR.
+      - name: Validate deploy/Caddyfile with the pinned Caddy image
+        run: scripts/check_deploy_caddyfile.sh
 
   e2e:
     # Shard the Playwright suite across 14 parallel GitHub runners with

@@ -8,17 +8,21 @@
 #       On the VM, from anywhere. Everything comes from deploy/.env and
 #       deploy/tenants.caddy, and every request goes through THIS VM's Caddy
 #       under the real hostname (lib.sh feoh_smoke_check), so public DNS is
-#       not involved.
+#       not involved. It checks only what this VM serves: since
+#       docs/decisions.md §364 the apex and the tenant subdomains are
+#       CloudFront's, checked after each publish by smoke-frontend.sh, so the
+#       apex is not fetched and the TLS check is a vanity host's.
 #   smoke.sh --app <host> --api <host> --tenant <host> --signup true|false [--sitekey <key>]
 #       From anywhere else, through public DNS. Every argument but --sitekey
 #       is required: a check that is not asked for is not run.
 #
 # It checks, each with retries, and reports EVERY failure before exiting 1:
-#   - the apex (https://<app>/) serves a page;
+#   - the apex (https://<app>/) serves a page (not in --vm mode);
 #   - https://<api>/api/health answers;
 #   - a tenant host serves a page over a certificate curl accepts — the tenant
-#     TLS path (in --vm mode, the first host in tenants.caddy; a VM with no
-#     tenant yet says so instead of checking one);
+#     TLS path (in --vm mode, the first vanity host in tenants.caddy, which
+#     this VM's Caddy issues for and proxies from CloudFront; a VM with none
+#     says so instead of checking one);
 #   - https://<api>/api/public-config reports signup exactly as configured,
 #     and a captcha site key whenever signup is on (and, given --sitekey or
 #     FEOH_HCAPTCHA_SITEKEY in deploy/.env, that key).
@@ -60,14 +64,11 @@ command -v python3 >/dev/null || usage "'python3' is not installed (it parses /a
 if [ "$VM" = 1 ]; then
 	[ -z "$APP$API$TENANT$SIGNUP$SITEKEY" ] || usage "--vm reads deploy/.env; it takes no other argument"
 	[ -f .env ] || usage "deploy/.env missing — run deploy.sh first"
-	APP=$(feoh_env APP_DOMAIN)
 	API=$(feoh_env API_DOMAIN)
 	SIGNUP=$(feoh_signup_enabled .env)
 	SITEKEY=$(feoh_env FEOH_HCAPTCHA_SITEKEY)
-	TENANT=$(feoh_first_tenant_host)
-	if [ -z "$APP" ] || [ -z "$API" ]; then
-		usage "APP_DOMAIN / API_DOMAIN missing from deploy/.env"
-	fi
+	TENANT=$(feoh_first_vanity_host)
+	[ -n "$API" ] || usage "API_DOMAIN missing from deploy/.env"
 	export FEOH_SMOKE_RESOLVE=127.0.0.1
 else
 	if [ -z "$APP" ] || [ -z "$API" ] || [ -z "$TENANT" ] || [ -z "$SIGNUP" ]; then
@@ -83,13 +84,15 @@ esac
 FAILED=()
 fail() { FAILED+=("$1"); }
 
-feoh_smoke_check "$APP" / || fail "apex https://${APP}/ does not serve a page"
+if [ "$VM" = 0 ]; then
+	feoh_smoke_check "$APP" / || fail "apex https://${APP}/ does not serve a page"
+fi
 feoh_smoke_check "$API" /api/health || fail "https://${API}/api/health does not answer"
 if [ -n "$TENANT" ]; then
 	feoh_smoke_check "$TENANT" / ||
 		fail "tenant host https://${TENANT}/ does not serve a page over a valid certificate"
 else
-	echo "NOTE: deploy/tenants.caddy lists no tenant host yet, so no tenant's TLS was checked — add-tenant.sh adds the first, and the next deploy checks it." >&2
+	echo "NOTE: deploy/tenants.caddy lists no vanity host, so no TLS this VM issues beyond api. was checked; the apex and tenant hosts are CloudFront's (smoke-frontend.sh checks them after the publish)." >&2
 fi
 
 CONFIG=$(mktemp)
@@ -132,4 +135,4 @@ if [ "${#FAILED[@]}" -gt 0 ]; then
 	} >&2
 	exit 1
 fi
-echo "==> smoke: every check passed (apex, API health, ${TENANT:-no tenant yet}, public-config: signup ${SIGNUP})"
+echo "==> smoke: every check passed (${APP:+apex, }API health, ${TENANT:-no vanity host}, public-config: signup ${SIGNUP})"

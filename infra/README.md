@@ -189,7 +189,7 @@ The filled tfvars is operator config rather than a secret — bucket names, the 
 
 ## Workload stack
 
-`network.tf`, `compute.tf`, `database.tf` and `monitoring.tf` are the infrastructure the app runs on: one EC2 VM running the Docker Compose stack in `../deploy/` (Caddy, the API, Redis), and the database on RDS. Why that shape rather than the full ECS build-out, and why RDS rather than Postgres on the VM: `../docs/decisions.md` §254. Roughly **$45–55/month**:
+`network.tf`, `compute.tf`, `database.tf` and `monitoring.tf` are the infrastructure the app runs on: one EC2 VM running the Docker Compose stack in `../deploy/` (Caddy for `api.` and any vanity host, the API, Redis), and the database on RDS. Why that shape rather than the full ECS build-out, and why RDS rather than Postgres on the VM: `../docs/decisions.md` §254. Roughly **$45–55/month**:
 
 | Resource | Monthly (us-east-1) |
 |---|---|
@@ -204,7 +204,7 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 - **No SSH.** Port 22 is closed and there is no key pair; you reach the VM with Session Manager: `aws ssm start-session --target <app_instance_id> --profile feohledger` (needs the Session Manager plugin for the AWS CLI installed locally).
 - **The VM holds no AWS keys.** Its instance role can decrypt the sops secrets, read and write the three data buckets under the app key, and send mail as the platform domain — nothing else.
 - **The database is private.** Private subnets with no internet route, reachable only from the VM's security group, encrypted with the app key, TLS forced (`rds.force_ssl`), deletion-protected, IAM database authentication enabled — the app signs in as the `feoh_app` role with a per-connection token, and the VM role's `rds-db:connect` names that one user on this one instance (`compute.tf`, `../docs/decisions.md` §310); the master keeps password login for break-glass only — and restorable to any point in the last `db_backup_retention_days` (default 7). The nightly logical dumps (`../deploy/backup.sh`) keep 90 days beyond that.
-- **DNS.** `api.` points at the VM's Elastic IP. The apex and `*.` (every tenant) do too until `frontend_on_cloudfront` moves them to the SPA's CloudFront distribution (§ Frontend on CloudFront).
+- **DNS.** `api.` points at the VM's Elastic IP. The apex and `*.` (every tenant) are aliases of the SPA's CloudFront distribution, with `frontend_on_cloudfront = true` (§ Frontend on CloudFront); the VM serves no SPA since `../docs/decisions.md` §364.
 - **Alarms** go to `alert_emails` through SNS — each address must click AWS's confirmation link once. The VM recovers itself onto new hardware on a host failure and reboots on a guest failure. Database storage running out also texts `alert_phone_number`, as do the external uptime checks (§ Uptime checks and paging).
 
 **The database password never enters Terraform state.** `db_master_password` is an *ephemeral* variable feeding RDS's *write-only* `password_wo`, so it is sent to AWS and stored nowhere else — not in state, not in a plan file. That is why this module does not read it through a `sops_file` data source (§ Secrets): a data source's value is written to state in plaintext. The operator supplies it at apply time from the private `infra-secrets` repo, as an environment variable on the one command.
@@ -353,15 +353,18 @@ are in the repo root with `AWS_PROFILE=feohledger`.
    the IP to an alias, and add two `spa_ipv6` records. Nothing else. The next
    release's smoke check then covers the apex and a tenant host too: it notices
    CloudFront's `x-amz-cf-id` header on the apex.
-8. **Watch for a day**, then remove the SPA from Caddy, `deploy.sh` and
-   `add-tenant.sh` (the step-4 follow-up in `../docs/followups.md`). Do it within
-   about 30 days: Caddy can no longer renew the apex and tenant certificates
-   once DNS points elsewhere.
+8. **Watch for a day**, then remove the SPA from the VM. Done in
+   `../docs/decisions.md` §364: Caddy keeps only `api.` and vanity hosts,
+   `deploy.sh` builds no SPA, and `add-tenant.sh` writes no Caddy block.
 
-**Rollback**: set `frontend_on_cloudfront = false` and apply. The records swap
-back to the VM, whose Caddy still serves the SPA until step 8. For a bad
-*build*, rather than bad infrastructure, see `../deploy/README.md` § Frontend
-rollback.
+**Rollback**: since step 8, setting `frontend_on_cloudfront = false` is an
+outage, not a rollback: the records would swap back to a VM with no site block
+for the apex or a tenant. The only way back to the VM serving the SPA is
+re-deploying a commit from before §364 (its `deploy.sh` builds and publishes
+the SPA under `deploy/www/` again), putting back the `<slug>.<domain> { import
+spa }` block per tenant that the first §364 deploy dropped from
+`deploy/tenants.caddy` (its log lists them), and only then the flag. For a bad *build*,
+rather than bad infrastructure, see `../deploy/README.md` § Frontend rollback.
 
 ## Uptime checks and paging
 

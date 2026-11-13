@@ -14,16 +14,10 @@ the place to check before raising either.
 | Dart | **^3.14.0** | `environment.sdk` in `mobile/pubspec.yaml` (Flutter 3.50.0 ships Dart 3.14.0) |
 
 There is no `.nvmrc` and no `engines` block in either `package.json`, so the
-workflow pins are the whole story for CI — **plus** the production frontend
-build, which runs in `deploy/compose.prod.yml`'s one-shot `frontend-build`
-service: Node 24 alpine, pinned to an exact release tag plus its index digest.
-Dependabot's `docker-compose` entry bumps its minor and patch and ignores its
-major (see [minimal-deployment.md](minimal-deployment.md) and
-[`backend/docs/docker.md` § Image pinning](../backend/docs/docker.md#image-pinning)).
-Both move together: Node 20 reached end-of-life on 2026-04-30, and a deploy
-image behind the CI pin means production builds on a runtime CI never tested —
-so `backend/tests/test_container_supply_chain.py` fails when the image's major
-differs from any `setup-node` `node-version:`.
+workflow pins are the whole story. That includes production: the SPA is built
+by `vm-deploy.yml`'s `build-frontend` job on `setup-node` and published to S3 +
+CloudFront. The VM's Node 24 alpine build service, a second Node version to
+keep in step, went in `docs/decisions.md` §364.
 
 The floor is not arbitrary: `jsdom` — vitest's test-environment peer — declares
 `engines: ^22.22.2 || ^24.15.0 || >=26.0.0`. pnpm does not enforce

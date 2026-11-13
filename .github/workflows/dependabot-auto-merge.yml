@@ -12,8 +12,8 @@ name: Dependabot auto-merge
 # from backend/docker-compose.yml, not restated in a workflow
 # (docs/decisions.md §203), so a compose PR's own run tests the new
 # digest. What CI never starts is merged untested: the Authentik stack
-# and Ollama (local-only profiles), and deploy/compose.prod.yml's Caddy
-# and frontend-build Node image, which the next deploy is first to run.
+# and Ollama (local-only profiles), and deploy/compose.prod.yml's Caddy,
+# which the next deploy is first to run.
 #
 # Major bumps stay manual. The last manual sweep through this repo
 # proved why: bcrypt 4 → 5 silently broke passlib 1.7.4 (passlib reads

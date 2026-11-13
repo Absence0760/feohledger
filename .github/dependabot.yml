@@ -141,23 +141,21 @@ updates:
   # No ecosystem reads a workflow's `services:` images or a ref in a shell
   # script (`github-actions` reads only `uses:`), so nothing else writes one:
   # CI's pgvector / redis / minio come from backend/docker-compose.yml through
-  # the `compose-images` job in ci.yml and sso-e2e.yml, and the production
-  # frontend build's Node image is the `frontend-build` service in
-  # deploy/compose.prod.yml (docs/decisions.md §203). So a PR from this entry
+  # the `compose-images` job in ci.yml and sso-e2e.yml (docs/decisions.md
+  # §203). (The production SPA builds in CI on `setup-node` since §364, so no
+  # compose file carries a Node image any more.) So a PR from this entry
   # is tested by its own CI run on the images it bumps, which is what makes
   # `dependabot-auto-merge.yml` merging a green one safe.
   # backend/tests/test_container_supply_chain.py fails if a ref is restated.
   #
-  # Majors are ignored for the stateful stores, for LocalStack and for Node. A
+  # Majors are ignored for the stateful stores and for LocalStack. A
   # Postgres or Redis major is a data-directory / persistence upgrade to plan,
   # not a dependency bump to merge — pgvector's `-pg16` tag suffix already
   # keeps it on 16, and this keeps `postgres` (Authentik's DB) and `redis`
   # there too. LocalStack's next "major" is the calendar-versioned 2026.x line,
   # which refuses to start without a LOCALSTACK_AUTH_TOKEN; local-first (guard
   # rail 7) and CI's service-e2e job both run it with no account, so 3.x is
-  # held. The Node major moves with every `setup-node` in the workflows at once
-  # (frontend/CLAUDE.md § The Node floor) — a lone image major would build
-  # production on a runtime CI never ran, and the supply-chain test fails it.
+  # held.
   - package-ecosystem: docker-compose
     directories:
       - /backend
@@ -186,8 +184,6 @@ updates:
       - dependency-name: redis
         update-types: ["version-update:semver-major"]
       - dependency-name: localstack/localstack
-        update-types: ["version-update:semver-major"]
-      - dependency-name: node
         update-types: ["version-update:semver-major"]
 
   # fake-erp's Python deps. Dependabot's pip-compile support pairs

@@ -463,9 +463,9 @@ def test_ci_reads_the_core_service_images_from_compose() -> None:
 def test_deploy_scripts_restate_no_image_ref() -> None:
     """The production VM runs what deploy/compose.prod.yml pins, and nothing else.
 
-    `deploy.sh` used to carry the frontend-build Node image as a shell variable,
-    which no Dependabot ecosystem reads; it is now compose.prod.yml's
-    `frontend-build` service. Full-line comments are skipped.
+    `deploy.sh` once carried the frontend-build Node image as a shell variable,
+    which no Dependabot ecosystem reads (§203); the build has since left the VM
+    altogether (§364). Full-line comments are skipped.
     """
     assert DEPLOY_SCRIPTS, "no deploy/*.sh found — did the directory move?"
     restated = {}
@@ -479,36 +479,4 @@ def test_deploy_scripts_restate_no_image_ref() -> None:
         f"deploy scripts restate image refs: {restated}. Declare the image as a service in "
         "deploy/compose.prod.yml (a `profiles:` entry keeps a one-shot out of `up`) and run it "
         "with `docker compose run`."
-    )
-
-
-def test_frontend_build_is_never_started_by_up() -> None:
-    """`deploy.sh` runs it by name; `up -d --wait` must not start a one-shot build."""
-    service = _compose_services(PROD_COMPOSE)["frontend-build"]
-    assert service.get("profiles"), "frontend-build lost its profile, so `up` would start it"
-
-
-def test_frontend_build_node_major_matches_ci_setup_node() -> None:
-    """Production builds the frontend on the Node major every CI job tests.
-
-    Dependabot bumps the image's minor and patch and ignores its majors, so a
-    major is a deliberate move of both halves together (frontend/CLAUDE.md
-    § The Node floor); this fails when only one half moved.
-    """
-    image = _compose_services(PROD_COMPOSE)["frontend-build"]["image"]
-    tag = image.split("@", 1)[0].rsplit(":", 1)[1]
-    image_major = re.match(r"\d+", tag)
-    assert image_major, f"frontend-build's tag {tag!r} does not start with a Node version"
-
-    ci_majors = {}
-    for workflow in WORKFLOWS:
-        for job_id, job in (yaml.safe_load(workflow.read_text()).get("jobs") or {}).items():
-            for step in job.get("steps", []):
-                if str(step.get("uses", "")).startswith("actions/setup-node@"):
-                    version = str(step.get("with", {}).get("node-version", ""))
-                    ci_majors[f"{workflow.name}:{job_id}"] = version.split(".", 1)[0]
-    assert ci_majors, "no workflow runs actions/setup-node — did the step move?"
-    drifted = {site: major for site, major in ci_majors.items() if major != image_major[0]}
-    assert not drifted, (
-        f"deploy/compose.prod.yml builds on Node {image_major[0]} but CI runs {drifted}"
     )

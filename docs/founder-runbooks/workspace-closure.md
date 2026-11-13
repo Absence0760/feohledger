@@ -31,13 +31,12 @@ oldest first. The oldest is closest to the 60-day deadline.
    ```
 
    It finds no organisation (the closure removed it), says so, and continues
-   with the Caddy and backup legs, which key off the slug alone. It removes the
-   tenant's Caddy host block if there is one and every version of
-   `pg/*/feoh_<slug>.dump` in the backup bucket.
+   with the backup leg, which keys off the slug alone. It removes every version
+   of `pg/*/feoh_<slug>.dump` in the backup bucket. (There is no host block to
+   remove: since `docs/decisions.md` §364 tenant hosts are CloudFront's.)
 
    If it stops with **"nothing found for slug"**, there was nothing to remove:
-   the workspace was closed before its first nightly backup and has no host
-   block. Go to step 2.
+   the workspace was closed before its first nightly backup. Go to step 2.
 
 2. **Mark it done**:
 

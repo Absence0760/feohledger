@@ -83,10 +83,79 @@ feoh_signup_enabled() {
 	if feoh_is_false "$value"; then echo false; else echo true; fi
 }
 
-# The first tenant host in deploy/tenants.caddy (a `<host> {` line, the shape
-# add-tenant.sh appends), or empty when no tenant has been added yet.
-feoh_first_tenant_host() {
+# The first host in deploy/tenants.caddy (a `<host> {` line), or empty when the
+# VM serves no vanity host. Since docs/decisions.md §364 that file lists only
+# customer vanity hosts, the one kind of page this VM still issues a
+# certificate for; smoke.sh checks the first one.
+feoh_first_vanity_host() {
 	{ sed -nE 's/^([A-Za-z0-9][A-Za-z0-9.-]*)[[:space:]]*\{[[:space:]]*$/\1/p' tenants.caddy 2>/dev/null || true; } | head -1
+}
+
+# feoh_drop_host_blocks <file> <host-ere> rewrites <file> without every site
+# block whose host matches <host-ere> (anchored by the caller), from its
+# `<host> {` line to the `}` that closes it, and prints each host it dropped.
+# It tracks the brace rather than assuming a line count, so a hand-edited block
+# with extra directives goes whole instead of leaving an orphan `}` that breaks
+# the config. The file is rewritten IN PLACE, never renamed over: Caddy mounts
+# it as a single file, and a bind mount keeps the inode it started with, so
+# after a rename the running container would still read the old list (#579).
+feoh_drop_host_blocks() {
+	local file=$1 re=$2 tmp
+	[ -f "$file" ] || return 0
+	tmp="${file}.tmp"
+	rm -f "${tmp}.dropped"
+	# Through ENVIRON, not `awk -v`: -v expands backslash escapes, which would
+	# turn the caller's `\.` into a bare `.` that matches any character.
+	FEOH_HOST_RE="$re" FEOH_DROPPED="${tmp}.dropped" awk '
+		!skipping && $0 ~ /^[^[:space:]{]+[[:space:]]*\{[[:space:]]*$/ {
+			host = $0
+			sub(/[[:space:]]*\{[[:space:]]*$/, "", host)
+			if (host ~ ENVIRON["FEOH_HOST_RE"]) {
+				skipping = 1
+				print host > ENVIRON["FEOH_DROPPED"]
+				next
+			}
+		}
+		skipping && $0 ~ /^\}[[:space:]]*$/ { skipping = 0; next }
+		skipping { next }
+		{ print }
+	' "$file" >"$tmp" || return 1
+	cat "$tmp" >"$file" || return 1
+	rm -f "$tmp"
+	if [ -s "${tmp}.dropped" ]; then
+		cat "${tmp}.dropped"
+		rm -f "${tmp}.dropped"
+	fi
+}
+
+# feoh_prune_platform_hosts <app-domain> takes the platform's own hosts out of
+# deploy/tenants.caddy: the apex and every `<label>.<app-domain>`. Before
+# docs/decisions.md §364 add-tenant.sh appended one `{ import spa }` block per
+# tenant, and the Caddyfile no longer defines `spa`, so a VM's first deploy of
+# this layout would otherwise hand Caddy a config it refuses. Those names now
+# resolve to CloudFront, so the blocks served nothing anyway. A block left that
+# still says `import spa` is a vanity host written from the old runbook, and is
+# moved to `import vanity`, which serves the same page from CloudFront. Prints
+# what it changed; idempotent.
+feoh_prune_platform_hosts() {
+	local domain=$1 escaped dropped
+	[ -n "$domain" ] || {
+		echo "feoh_prune_platform_hosts: no app domain given." >&2
+		return 1
+	}
+	[ -f tenants.caddy ] || return 0
+	escaped=$(printf '%s' "$domain" | sed 's/[.]/\\./g')
+	dropped=$(feoh_drop_host_blocks tenants.caddy "^([A-Za-z0-9-]+\\.)*${escaped}\$") || return 1
+	if [ -n "$dropped" ]; then
+		echo "==> caddy: dropped platform host block(s) from tenants.caddy (CloudFront serves them, docs/decisions.md §364):"
+		printf '%s\n' "$dropped" | sed 's/^/    /'
+	fi
+	if grep -Eq '^[[:space:]]*import[[:space:]]+spa[[:space:]]*$' tenants.caddy; then
+		sed -E 's/^([[:space:]]*)import[[:space:]]+spa[[:space:]]*$/\1import vanity/' tenants.caddy >tenants.caddy.tmp || return 1
+		cat tenants.caddy.tmp >tenants.caddy || return 1
+		rm -f tenants.caddy.tmp
+		echo "==> caddy: moved the vanity host block(s) in tenants.caddy from \`import spa\` to \`import vanity\` (the SPA is proxied from CloudFront now)."
+	fi
 }
 
 # feoh_compose_pin <bootstrap-vm.sh> prints the Docker Compose release tag
@@ -237,9 +306,9 @@ feoh_pg_run() {
 #   FEOH_TENANT_FORCED    1 when the password was generated, which also forces
 #                         a change at first login; 0 otherwise
 #
-# --skip-existing makes add-tenant.sh re-runnable: a run that provisioned the
-# tenant but died before the Caddy step skips provisioning cleanly instead of
-# tripping the deliberate duplicate-slug error.
+# --skip-existing makes add-tenant.sh re-runnable: a second run for a tenant
+# that already exists skips provisioning cleanly instead of tripping the
+# deliberate duplicate-slug error.
 feoh_tenant_argv() {
 	local slug=$1 name=$2 email=$3 password=${4:-}
 	FEOH_TENANT_FORCED=0
@@ -273,9 +342,9 @@ feoh_tenant_argv() {
 #            tracked file is refused: the deploy would no longer be the commit
 #            it names.
 #
-# A sha whose compose.prod.yml does not mount ./www into Caddy is refused too
-# (FEOH_WWW_MOUNT_RE, below).
-FEOH_WWW_MOUNT_RE='^[[:space:]]*-[[:space:]]*\./www:/srv(:ro)?[[:space:]]*$'
+# A sha whose compose.prod.yml bind-mounts frontend/build is refused too
+# (FEOH_BUILD_MOUNT_RE, below).
+FEOH_BUILD_MOUNT_RE='^[[:space:]]*-[[:space:]]*\.\./frontend/build:'
 
 feoh_sync_source() {
 	local root=$1 ref=${2:-}
@@ -302,80 +371,26 @@ feoh_sync_source() {
 	fi
 	# A commit from before the www/ layout (docs/decisions.md §277) would be
 	# deployed by its own deploy.sh and compose.prod.yml, which mount
-	# ../frontend/build into Caddy again — the full-site 404 outage of #579 the
-	# moment its build runs. Refused before the checkout moves.
-	if ! git -C "$root" show "${ref}:deploy/compose.prod.yml" 2>/dev/null |
-		grep -Eq "$FEOH_WWW_MOUNT_RE"; then
-		echo "commit ${ref} predates the deploy/www/ SPA layout (docs/decisions.md §277): its compose file mounts frontend/build into Caddy, which serves every page as an empty 404 after a rebuild (#579). To roll the SPA back, swap to the previous release instead (deploy/README.md § Rolling the frontend back); rolling the stack back to a pre-layout commit is not supported." >&2
+	# ../frontend/build into Caddy — the full-site 404 outage of #579 the moment
+	# its build runs. Refused before the checkout moves. Commits between §277
+	# and §364 still deploy: they build the SPA on the VM again and serve it
+	# beside CloudFront, which is what "roll back past §364" means.
+	# Read whole, then matched: `git show | grep -q` would let grep's early exit
+	# SIGPIPE git, and under pipefail that reads as "no match" — deploying the
+	# very commit this exists to refuse.
+	local compose
+	if ! compose=$(git -C "$root" show "${ref}:deploy/compose.prod.yml" 2>/dev/null); then
+		echo "commit ${ref} has no deploy/compose.prod.yml to deploy." >&2
+		return 1
+	fi
+	if grep -Eq "$FEOH_BUILD_MOUNT_RE" <<<"$compose"; then
+		echo "commit ${ref} predates the deploy/www/ SPA layout (docs/decisions.md §277): its compose file mounts frontend/build into Caddy, which serves every page as an empty 404 after a rebuild (#579). The SPA is on S3 + CloudFront now: roll it back there (deploy/README.md § The SPA on S3 + CloudFront); rolling the stack back to a pre-layout commit is not supported." >&2
 		return 1
 	fi
 	# Explicit returns throughout: callers run this as `feoh_sync_source … || die`,
 	# where errexit does not apply inside the function.
 	git -C "$root" checkout --quiet -B main "$ref" || return 1
 	echo "==> source: main at ${ref}"
-}
-
-# ── The SPA Caddy serves: published releases, swapped atomically ─────────────
-#
-# Caddy bind-mounts deploy/www/ at /srv and serves /srv/current, a RELATIVE
-# symlink (`releases/<id>`, so it resolves the same inside the container) to the
-# live build (docs/decisions.md §277). Never mount the build output itself: the
-# SvelteKit build deletes and recreates frontend/build, a bind mount pins the
-# directory's inode, and the container is left holding an orphaned, empty
-# directory — every page 404s with an empty body and runc refuses `exec`
-# ("current working directory is outside of container mount namespace root"),
-# which is the v0.1.0 outage (#579). www/ itself is never removed, so the mount
-# stays valid; only names inside it change, and a rename inside a mounted
-# directory is visible to the container at once.
-#
-# feoh_publish_frontend <build-dir> <www-dir> <release-id> copies a finished
-# build to <www-dir>/releases/<release-id>, then points `current` at it with a
-# rename (`ln -sfn` to a temp name, then `mv -T` — one rename(2)), so a request
-# sees the old release or the new one, never a missing or half-copied one. The
-# release it replaced stays, linked as `previous`, for an instant rollback
-# (deploy/README.md § Rolling the frontend back); every other one is pruned.
-feoh_publish_frontend() {
-	local build=$1 www=$2 id=$3 prev="" keep_prev="" rel
-	if ! [ -s "$build/index.html" ]; then
-		echo "${build}/index.html is missing or empty — refusing to publish a build that would serve nothing." >&2
-		return 1
-	fi
-	if ! [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-		echo "release id '${id}' is not a plain name." >&2
-		return 1
-	fi
-	mkdir -p "$www/releases" || return 1
-	if [ -e "$www/releases/$id" ]; then
-		echo "release ${id} is already published; refusing to overwrite a release that may be live." >&2
-		return 1
-	fi
-	# A copy, not a move: frontend/build belongs to the build container, and a
-	# copy cut short only ever leaves a staging name that nothing serves.
-	rm -rf "$www/releases/.staging-"* || return 1
-	cp -R --preserve=mode,timestamps "$build" "$www/releases/.staging-$id" || return 1
-	mv -T "$www/releases/.staging-$id" "$www/releases/$id" || return 1
-	# Only a release that still exists is worth keeping as `previous`; a
-	# dangling `current` names nothing to roll back to.
-	if [ -L "$www/current" ] && [ -e "$www/current/index.html" ]; then
-		prev=$(readlink "$www/current") || return 1
-	fi
-	ln -sfn "releases/$id" "$www/current.new" || return 1
-	mv -T "$www/current.new" "$www/current" || return 1
-	if [ -n "$prev" ] && [ "$prev" != "releases/$id" ]; then
-		ln -sfn "$prev" "$www/previous.new" || return 1
-		mv -T "$www/previous.new" "$www/previous" || return 1
-	fi
-	if [ -L "$www/previous" ]; then
-		keep_prev=$(readlink "$www/previous") || return 1
-	fi
-	for rel in "$www"/releases/*; do
-		[ -e "$rel" ] || continue
-		case "releases/${rel##*/}" in
-		"releases/$id" | "$keep_prev") ;;
-		*) rm -rf "$rel" || return 1 ;;
-		esac
-	done
-	echo "==> frontend: published release ${id}${prev:+ (previous: ${prev#releases/})}"
 }
 
 # feoh_caddy_reload makes the running Caddy serve the config on disk. Caddy
@@ -386,7 +401,7 @@ feoh_publish_frontend() {
 # config and reports success. So compare what the container sees with the host
 # files first: identical → a zero-downtime reload; different (or unreadable) →
 # recreate the container, which re-resolves every mount. Writers still rewrite
-# these files in place (remove-tenant.sh does) so the reload is the usual path.
+# these files in place (feoh_drop_host_blocks does) so the reload is the usual path.
 # Needs COMPOSE (feoh_load_db_mode); run from deploy/.
 feoh_caddy_reload() {
 	local f stale=""
