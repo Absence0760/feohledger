@@ -5289,6 +5289,7 @@ export const messages = {
 	'erpRefusal.callBudgetTenant': "Cet espace de travail a utilisé sa part des appels à l'API {provider} pour aujourd'hui ; FeohLedger n'a donc effectué aucun appel. Le quota est réinitialisé à minuit UTC : réessayez ensuite.",
 	'erpRefusal.callBudgetQuota': "{provider} a suspendu les appels à l'API pour l'abonnement utilisé par FeohLedger (son quota quotidien est épuisé) ; FeohLedger n'a donc effectué aucun appel. Il est réinitialisé à minuit UTC : réessayez ensuite.",
 	'erpRefusal.callBudgetRateLimited': "{provider} a demandé à FeohLedger de ralentir ; aucun appel n'a donc été effectué. Réessayez dans une minute.",
+	'erpRefusal.billLeftUnposted': "{provider} conserve cette facture en brouillon ou en attente d'approbation, non comptabilisée, donc rien n'est encore en comptes fournisseurs. Comptabilisez-la ou approuvez-la dans {provider}, puis réessayez.",
 	'erpRefusal.credentialsUnavailable': "Les identifiants ERP n'ont pas pu être ouverts pour le moment. Réessayez dans quelques minutes ; si l'échec persiste, prévenez un administrateur.",
 	'erpRefusal.periodClosed': "{provider} a refusé cette facture car sa date se situe dans une période clôturée (les livres sont fermés). Modifiez la date de la facture ou rouvrez la période dans {provider}, puis réessayez.",
 	'erpRefusal.vendorInactive': "{provider} a refusé cette facture car son fournisseur y est inactif ou supprimé. Réactivez le fournisseur dans {provider}, puis réessayez.",

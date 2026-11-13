@@ -1844,6 +1844,21 @@ stay open.
       the first tenant that hits its share in production, or a support request
       to retry a batch by hand.
 
+### Surfaced by porting the Sage Intacct audit fixes (#655, decisions §395)
+
+- [ ] **(c) Intacct's link realm ignores `location_id`.** `erp_link_realm`
+      keys a Sage Intacct connection by `company_id` alone, but every call is
+      scoped by `X-IA-API-Param-Entity` when `location_id` is set, and an
+      entity can hold vendors and accounts the top level does not. Re-pointing
+      a connection at another entity of the same company therefore keeps the
+      first entity's vendor and GL links as this realm's: a bill can be pushed
+      to a vendor id the new entity does not hold, which Intacct refuses and
+      the adapter reads back as `vendor_inactive`. **Durable fix:** fold `location_id` into the Intacct realm
+      (`services/erp_link_realm`), with a realm migration that stamps existing
+      links with the location they were made under, and a test that a
+      location change re-judges them. **Trigger:** the first multi-entity
+      Intacct tenant, or the next change to `services/erp_link_realm`.
+
 ### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §304)
 
 - [ ] **(c) An approval whose auto-send never ran is not noticed.** The push
@@ -2257,8 +2272,16 @@ as oversights.
       whether `GenMaster.Company` scopes a COMFND read; the e.net licence a
       logon takes (and a `runtime_product_code` for ISV Managed Run Time);
       and the TLS binding a customer has to publish.
-      **Intacct:** bill `state` values, the purchasing-document query name,
-      `txnTotal`, and whether REST can reverse a paid bill.
+      **Intacct** (the documented mismatches are fixed, decisions §395;
+      the rest is #654): whether a `state: "posted"` create is honoured or
+      refused in a company with bill approvals, the `errorId`s for a closed
+      period / inactive vendor or account / duplicate bill number (to map
+      `period_closed` and `duplicate_document_number`), whether a bill
+      settled by a debit memo reads `paid`, the purchasing-document `state`
+      strings for a draft or unapproved PO, multi-currency without an
+      exchange rate, a top-level create in a multi-entity company, whether the
+      token endpoint takes the form-encoded body, and the reverse-workflow
+      answer in a reversal-enabled company.
       **Sage SA** (decisions §385; the docs-level defects are fixed): whether a
       string `$filter` 400s or is ignored, the `datetime'…'` literal the
       lookup's date window uses, the 400 body for a locked period / inactive

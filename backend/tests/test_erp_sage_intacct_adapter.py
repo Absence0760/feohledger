@@ -34,6 +34,7 @@ from app.services.erp_adapters.dispatcher import get_erp_adapter
 from app.services.erp_adapters.sage_intacct import (
     DEFAULT_API_BASE,
     SageIntacctAdapter,
+    clear_token_cache,
     map_bill_status,
 )
 
@@ -60,9 +61,18 @@ class FakeIntacct:
         # A query page at this index (or later) answers 503.
         self.query_fail_from_page: int | None = None
         self.create_status = 201
+        # Statuses the next creates answer with, before `create_status`.
+        self.create_statuses: list[int] = []
         self.create_body: dict = {"ia::result": {"key": "777", "id": "777"}}
         self.bill: dict | None = None
+        # A bill created while `bill` is None is read back as Intacct holds
+        # it: the state the create asked for (else `draft`, the spec's
+        # default) at the sum of its lines, unless these override it.
+        self.read_back_state: str | None = None
+        self.read_back_total: str | None = None
         self.delete_status = 204
+        self.reverse_status = 200
+        self.tokens_minted = 0
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -70,7 +80,8 @@ class FakeIntacct:
         if path.endswith("/oauth2/token"):
             if self.token_status != 200:
                 return httpx.Response(self.token_status, json={"error": "invalid_client"})
-            return httpx.Response(200, json={"access_token": "tok-abc", "expires_in": 21600})
+            self.tokens_minted += 1
+            return httpx.Response(200, json={"access_token": "tok-abc", "expires_in": 43200})
         if path.endswith("/services/core/query"):
             if self.query_status != 200:
                 return httpx.Response(self.query_status, json={})
@@ -83,7 +94,19 @@ class FakeIntacct:
             nxt = body["start"] + body["size"] if idx + 1 < len(pages) else None
             return httpx.Response(200, json={"ia::result": page, "ia::meta": {"next": nxt}})
         if path.endswith("/objects/accounts-payable/bill") and request.method == "POST":
-            return httpx.Response(self.create_status, json=self.create_body)
+            status = self.create_statuses.pop(0) if self.create_statuses else self.create_status
+            if status in (200, 201) and self.bill is None:
+                body = json.loads(request.content)
+                total = sum((Decimal(li["txnAmount"]) for li in body["lines"]), Decimal(0))
+                self.bill = {
+                    "key": "777",
+                    "state": self.read_back_state or body.get("state") or "draft",
+                    "totalTxnAmount": self.read_back_total or str(total),
+                    "postingDate": body.get("createdDate"),
+                }
+            return httpx.Response(status, json=self.create_body)
+        if path.endswith("/workflows/accounts-payable/bill/reverse"):
+            return httpx.Response(self.reverse_status, json={"ia::result": {"state": "reversed"}})
         if "/objects/accounts-payable/bill/" in path and request.method == "GET":
             if self.bill is None:
                 return httpx.Response(404, json={})
@@ -94,6 +117,14 @@ class FakeIntacct:
 
     def of(self, method: str, suffix: str) -> list[httpx.Request]:
         return [r for r in self.requests if r.method == method and r.url.path.endswith(suffix)]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_token_cache():
+    """Tokens are cached per process; every test starts (and ends) with none."""
+    clear_token_cache()
+    yield
+    clear_token_cache()
 
 
 def _run(fake: FakeIntacct, coro_fn):
@@ -299,9 +330,106 @@ def test_idempotency_lookup_filters_on_reference_number():
 def test_existing_bill_short_circuits_without_a_second_create():
     fake = FakeIntacct()
     fake.query_rows["accounts-payable/bill"] = [[{"key": "555", "id": "555"}]]
+    fake.bill = {"key": "555", "state": "posted", "totalTxnAmount": "100.00"}
     result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
     assert result.success and result.erp_document_id == "555"
     assert fake.of("POST", "/objects/accounts-payable/bill") == []
+    assert fake.of("GET", "/objects/accounts-payable/bill/555")
+
+
+def test_existing_bill_counts_only_when_posted_at_the_approved_total():
+    """A retry that finds our earlier bill holds it to the same terms as a bill
+    just created: a draft is not posted, and a different total is a mismatch."""
+    fake = FakeIntacct()
+    fake.query_rows["accounts-payable/bill"] = [[{"key": "555", "id": "555"}]]
+    fake.bill = {"key": "555", "state": "draft", "totalTxnAmount": "100.00"}
+    draft = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not draft.success and draft.refusal_code == "bill_left_unposted"
+    assert draft.erp_document_id == "555"
+
+    fake.bill = {"key": "555", "state": "posted", "totalTxnAmount": "115.00"}
+    mismatch = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not mismatch.success and mismatch.refusal_code == "posted_total_mismatch"
+    assert fake.of("POST", "/objects/accounts-payable/bill") == []
+    # A found bill may be the draft a person edited and posted after we refused
+    # it: it is left in Intacct, never deleted or reversed.
+    assert "could not be voided" in mismatch.message
+    assert fake.of("DELETE", "/objects/accounts-payable/bill/555") == []
+    assert fake.of("POST", "/workflows/accounts-payable/bill/reverse") == []
+
+
+def _refuse_tokens_from_the_read_back(fake: FakeIntacct) -> None:
+    """The bill GET answers 401, and every token minted after it is refused."""
+    inner = fake.handler
+
+    def handler(request):
+        if request.method == "GET" and "/objects/accounts-payable/bill/" in request.url.path:
+            fake.requests.append(request)
+            fake.token_status = 401
+            return httpx.Response(401, json={})
+        return inner(request)
+
+    fake.handler = handler
+
+
+def test_a_token_refused_after_the_bill_exists_is_never_read_as_nothing_posted():
+    """201 on the create, then the read-back's token is refused: the bill is
+    live in Intacct, so the refusal must not carry `not_posted`, and it names
+    the bill so the push records it. The same holds for a bill a retry found."""
+    fake = FakeIntacct()
+    _refuse_tokens_from_the_read_back(fake)
+    created = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not created.success and created.refusal_code == "not_connected"
+    assert created.not_posted is False
+    assert created.erp_document_id == "777"
+
+    clear_token_cache()
+    fake = FakeIntacct()
+    fake.query_rows["accounts-payable/bill"] = [[{"key": "555", "id": "555"}]]
+    fake.bill = {"key": "555", "state": "posted", "totalTxnAmount": "100.00"}
+    _refuse_tokens_from_the_read_back(fake)
+    found = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert found.refusal_code == "not_connected" and found.not_posted is False
+    assert found.erp_document_id == "555"
+
+
+def test_a_token_refused_before_any_bill_exists_is_nothing_posted():
+    fake = FakeIntacct()
+    fake.token_status = 401
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert result.refusal_code == "not_connected" and result.not_posted is True
+
+
+def test_an_unreadable_create_answer_is_unconfirmed_never_success():
+    fake = FakeIntacct()
+
+    def handler(request, _inner=fake.handler):
+        if request.method == "POST" and request.url.path.endswith("/accounts-payable/bill"):
+            fake.requests.append(request)
+            return httpx.Response(201, content=b"not json")
+        return _inner(request)
+
+    fake.handler = handler
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.not_posted is False
+    assert result.refusal_code == "posted_total_unconfirmed"
+
+
+@pytest.mark.parametrize("state", ["reversed", "declined"])
+def test_a_found_bill_intacct_reversed_or_declined_is_never_reported_posted(state):
+    """Our earlier bill, since reversed or declined in Intacct, is in no AP to
+    pay. Reporting it posted would close the invoice against a dead bill; a
+    second create would sit beside it under the same reference. It is left for
+    a person, nothing created and nothing deleted."""
+    fake = FakeIntacct()
+    fake.query_rows["accounts-payable/bill"] = [[{"key": "555", "id": "555"}]]
+    fake.bill = {"key": "555", "state": state, "totalTxnAmount": "100.00"}
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.refusal_code == "existing_invoice_not_open"
+    assert result.erp_document_id == "555"
+    assert fake.of("POST", "/objects/accounts-payable/bill") == []
+    assert fake.of("DELETE", "/objects/accounts-payable/bill/555") == []
 
 
 def test_failed_lookup_is_not_read_as_a_miss():
@@ -314,9 +442,15 @@ def test_failed_lookup_is_not_read_as_a_miss():
     assert fake.of("POST", "/objects/accounts-payable/bill") == []
 
 
-def test_create_failure_message_is_pii_free():
+_ACTIVE_VENDOR = {"key": "11", "id": "V-ACME", "status": "active"}
+_ACTIVE_ACCOUNT = {"key": "61", "id": "6100", "status": "active"}
+
+
+def test_create_refusal_message_is_pii_free():
     fake = FakeIntacct()
     fake.create_status = 422
+    fake.query_rows["accounts-payable/vendor"] = [[_ACTIVE_VENDOR]]
+    fake.query_rows["general-ledger/account"] = [[_ACTIVE_ACCOUNT]]
     fake.create_body = {
         "ia::result": {
             "ia::error": {
@@ -327,18 +461,236 @@ def test_create_failure_message_is_pii_free():
     }
     result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
     assert not result.success
-    assert result.message == erp_failure_message("Sage Intacct", 422)
+    assert result.message == "Sage Intacct post refused: bill_refused"
     for token in ("12-3456789", "Bank Street", "PO Box", "GB29", "Validation failed"):
         assert token not in result.message
 
 
-def test_token_failure_raises_with_status_only():
+@pytest.mark.parametrize("status", [400, 403, 404, 422])
+def test_a_refused_create_is_coded_never_retried_and_created_nothing(status):
+    """QuickBooks lesson 3 (decisions §285): a deterministic 4xx answer to the
+    create is a refusal of the bill, not an outcome we can't know."""
     fake = FakeIntacct()
-    fake.token_status = 401
-    with pytest.raises(RuntimeError) as exc:
-        _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
-    assert "HTTP 401" in str(exc.value)
-    assert "s3cr3t" not in str(exc.value) and "cid-123" not in str(exc.value)
+    fake.create_status = status
+    fake.query_rows["accounts-payable/vendor"] = [[_ACTIVE_VENDOR]]
+    fake.query_rows["general-ledger/account"] = [[_ACTIVE_ACCOUNT]]
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.refusal_code == "bill_refused" and result.refusal_provider == "Sage Intacct"
+    assert result.not_posted is True
+
+
+@pytest.mark.parametrize(
+    "vendor",
+    [
+        {"key": "11", "id": "V-ACME", "status": "inactive"},
+        {"key": "11", "id": "V-ACME", "status": "activeNonPosting"},
+        {"key": "11", "id": "V-ACME", "status": "active", "state": "s"},
+        None,  # no such vendor at all
+    ],
+)
+def test_a_refused_create_names_an_unusable_vendor(vendor):
+    fake = FakeIntacct()
+    fake.create_status = 422
+    fake.query_rows["accounts-payable/vendor"] = [[vendor] if vendor else []]
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert result.refusal_code == "vendor_inactive"
+    assert result.not_posted is True and result.retryable is False
+    [vendor_query] = [
+        json.loads(r.content)
+        for r in fake.of("POST", "/services/core/query")
+        if json.loads(r.content)["object"] == "accounts-payable/vendor"
+    ]
+    assert vendor_query["filters"] == [{"$eq": {"id": "V-ACME"}}]
+
+
+def test_a_refused_create_names_inactive_accounts_by_our_code():
+    fake = FakeIntacct()
+    fake.create_status = 422
+    fake.query_rows["accounts-payable/vendor"] = [[_ACTIVE_VENDOR]]
+    fake.query_rows["general-ledger/account"] = [
+        [{"key": "61", "id": "6100", "status": "inactive"}]
+    ]
+    result = _run(
+        fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload(gl_account="Supplies"))
+    )
+    assert result.refusal_code == "account_inactive"
+    assert result.refusal_params == {"accounts": ["Supplies"]}
+    assert result.not_posted is True
+
+
+def test_an_unreadable_reference_is_not_read_as_inactive():
+    """A vendor lookup that fails is "don't know", never "inactive"."""
+    fake = FakeIntacct()
+    fake.create_status = 422
+    fake.query_rows["accounts-payable/bill"] = [[]]
+
+    def handler(request, _inner=fake.handler):
+        if request.url.path.endswith("/services/core/query"):
+            obj = json.loads(request.content)["object"]
+            if obj != "accounts-payable/bill":
+                fake.requests.append(request)
+                return httpx.Response(503, json={})
+        return _inner(request)
+
+    fake.handler = handler
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert result.refusal_code == "bill_refused"
+
+
+def test_a_refused_create_whose_cause_reads_break_is_still_coded_and_created_nothing():
+    """The create answered a deterministic 4xx, so nothing was created whatever
+    the follow-up reads do. A transport error there must not escape as an
+    uncoded exception, which `services/erp` would count as possibly posted."""
+    fake = FakeIntacct()
+    fake.create_status = 422
+    fake.query_rows["accounts-payable/bill"] = [[]]
+
+    def handler(request, _inner=fake.handler):
+        if request.url.path.endswith("/services/core/query"):
+            obj = json.loads(request.content)["object"]
+            if obj != "accounts-payable/bill":
+                raise httpx.ConnectError("refused")
+        return _inner(request)
+
+    fake.handler = handler
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.refusal_code == "bill_refused"
+    assert result.not_posted is True
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_a_create_that_may_succeed_later_stays_retryable_and_possibly_posted(status):
+    fake = FakeIntacct()
+    fake.create_status = status
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is True
+    assert result.not_posted is False
+    assert result.message == erp_failure_message("Sage Intacct", status)
+
+
+def test_a_401_on_the_create_mints_a_fresh_token_once_then_succeeds():
+    fake = FakeIntacct()
+    fake.create_statuses = [401]
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert result.success
+    assert len(fake.of("POST", "/objects/accounts-payable/bill")) == 2
+    assert fake.tokens_minted == 2
+
+
+def test_a_401_twice_on_the_create_is_not_connected_and_created_nothing():
+    fake = FakeIntacct()
+    fake.create_status = 401
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert result.refusal_code == "not_connected"
+    assert result.not_posted is True and result.retryable is False
+    assert len(fake.of("POST", "/objects/accounts-payable/bill")) == 2
+
+
+@pytest.mark.parametrize("status", [400, 401, 403])
+def test_refused_credentials_are_a_coded_not_connected_refusal(status):
+    fake = FakeIntacct()
+    fake.token_status = status
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.refusal_code == "not_connected" and result.not_posted is True
+    assert "s3cr3t" not in result.message and "cid-123" not in result.message
+    assert fake.of("POST", "/objects/accounts-payable/bill") == []
+
+
+def test_a_transient_token_failure_is_retryable_and_names_the_status_only():
+    fake = FakeIntacct()
+    fake.token_status = 503
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is True and result.refusal_code is None
+    assert result.message == "Sage Intacct token exchange failed: HTTP 503"
+    assert "s3cr3t" not in result.message and "cid-123" not in result.message
+
+
+def test_the_token_is_cached_across_operations_until_it_nears_expiry():
+    """Intacct tokens live 12 h; minting one per call spends a transaction."""
+    fake = FakeIntacct()
+    adapter = SageIntacctAdapter(CONFIG)
+    _run(fake, lambda: adapter.post_invoice(_payload()))
+    _run(fake, lambda: SageIntacctAdapter(CONFIG).get_invoice_status("777"))
+    assert fake.tokens_minted == 1
+    # Other credentials are another token.
+    _run(fake, lambda: SageIntacctAdapter({**CONFIG, "user_id": "other"}).get_invoice_status("1"))
+    assert fake.tokens_minted == 2
+    # The cache is keyed by a digest: no secret is held a second time.
+    from app.services.erp_adapters import sage_intacct
+
+    assert not any("s3cr3t" in key for key in sage_intacct._TOKEN_CACHE)
+
+
+# ---------------------------------------------------------------------------
+# Posting state + the booked total (audit rows 1, 4, 6)
+# ---------------------------------------------------------------------------
+
+
+def test_the_bill_is_created_posted_not_as_intacct_s_default_draft():
+    fake = FakeIntacct()
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    body, _ = _create_json(fake)
+    assert body["state"] == "posted"
+    assert result.success and result.erp_document_id == "777"
+    # Read back before it counts.
+    assert fake.of("GET", "/objects/accounts-payable/bill/777")
+
+
+def test_a_bill_intacct_keeps_as_a_draft_is_never_reported_posted():
+    """What the old adapter did: Intacct answered 201 for a draft that booked
+    nothing, and we recorded "Posted to Sage Intacct"."""
+    fake = FakeIntacct()
+    fake.read_back_state = "submitted"
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.refusal_code == "bill_left_unposted"
+    assert result.not_posted is False  # the bill exists in Intacct
+    assert fake.of("DELETE", "/objects/accounts-payable/bill/777") == []
+
+
+def test_a_different_booked_total_is_a_mismatch_and_the_bill_is_removed():
+    fake = FakeIntacct()
+    fake.read_back_total = "108.25"  # a tax solution added tax
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.refusal_code == "posted_total_mismatch"
+    assert "the bill was voided" in result.message
+    assert fake.of("DELETE", "/objects/accounts-payable/bill/777")
+
+
+def test_a_bill_that_cannot_be_read_back_is_never_success():
+    fake = FakeIntacct()
+
+    def handler(request, _inner=fake.handler):
+        if request.method == "GET":
+            fake.requests.append(request)
+            return httpx.Response(503, json={})
+        return _inner(request)
+
+    fake.handler = handler
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    assert not result.success and result.retryable is True
+    assert result.erp_document_id == "777"
+
+
+@pytest.mark.parametrize("missing", ["invoice_date", "due_date"])
+def test_both_dates_are_required_before_any_call(missing):
+    fake = FakeIntacct()
+    result = _run(
+        fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload(**{missing: None}))
+    )
+    assert result.refusal_code == "missing_dates" and result.not_posted is True
+    assert fake.requests == []
+
+
+def test_every_query_is_ordered_so_pages_cannot_shift():
+    fake = FakeIntacct()
+    _run(fake, SageIntacctAdapter(CONFIG).list_vendors)
+    _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload()))
+    queries = [json.loads(r.content) for r in fake.of("POST", "/services/core/query")]
+    assert queries and all(q["orderBy"] == [{"key": "asc"}] for q in queries)
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +713,9 @@ def test_token_failure_raises_with_status_only():
             {"state": "posted", "totalTxnAmount": "100.00", "totalTxnAmountDue": "0.00"},
             ErpInvoiceStatus.open,
         ),
+        ({"state": "analyzing"}, ErpInvoiceStatus.draft),
+        # "Posted but has not affected the GL": nothing owing, no payment (§303).
+        ({"state": "noValue"}, ErpInvoiceStatus.settled_no_payment),
         ({"state": "partiallyPaid"}, ErpInvoiceStatus.partially_paid),
         ({"state": "paid"}, ErpInvoiceStatus.paid),
         ({"state": "reversed"}, ErpInvoiceStatus.cancelled),
@@ -401,6 +756,45 @@ def test_void_never_deletes_a_bill_with_money_applied(state):
     fake.bill = {"key": "777", "state": state}
     assert _run(fake, lambda: SageIntacctAdapter(CONFIG).void_invoice("777")) is False
     assert fake.of("DELETE", "/objects/accounts-payable/bill/777") == []
+    assert fake.of("POST", "/workflows/accounts-payable/bill/reverse") == []
+
+
+def test_void_reverses_a_posted_bill_a_reversal_enabled_company_will_not_delete():
+    fake = FakeIntacct()
+    fake.bill = {"key": "777", "state": "posted", "postingDate": "2999-01-01"}
+    fake.delete_status = 400
+    assert _run(fake, lambda: SageIntacctAdapter(CONFIG).void_invoice("777")) is True
+    [reverse] = fake.of("POST", "/workflows/accounts-payable/bill/reverse")
+    body = json.loads(reverse.content)
+    assert body["key"] == "777"
+    # Intacct requires the reversal to be dated after the bill's posting date.
+    assert body["reverseDate"] == "2999-01-02"
+
+
+def test_void_reverses_today_when_the_bill_was_posted_earlier():
+    fake = FakeIntacct()
+    fake.bill = {"key": "777", "state": "posted", "postingDate": "2000-01-01"}
+    fake.delete_status = 400
+    assert _run(fake, lambda: SageIntacctAdapter(CONFIG).void_invoice("777")) is True
+    [reverse] = fake.of("POST", "/workflows/accounts-payable/bill/reverse")
+    assert json.loads(reverse.content)["reverseDate"] == date.today().isoformat()
+
+
+def test_void_fails_when_neither_delete_nor_reverse_is_allowed():
+    fake = FakeIntacct()
+    fake.bill = {"key": "777", "state": "posted", "postingDate": "2000-01-01"}
+    fake.delete_status = 400
+    fake.reverse_status = 400
+    assert _run(fake, lambda: SageIntacctAdapter(CONFIG).void_invoice("777")) is False
+
+
+def test_void_never_reverses_a_draft_or_after_a_transient_failure():
+    for state, status in (("draft", 400), ("posted", 503)):
+        fake = FakeIntacct()
+        fake.bill = {"key": "777", "state": state}
+        fake.delete_status = status
+        assert _run(fake, lambda: SageIntacctAdapter(CONFIG).void_invoice("777")) is False
+        assert fake.of("POST", "/workflows/accounts-payable/bill/reverse") == []
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +848,9 @@ def test_list_gl_accounts_classifies_only_what_intacct_states():
 
 
 def test_list_pos_maps_total_exactly_and_state():
+    """`totalInTxnCurrency` and a top-level `txnCurrency` are the purchasing
+    document's fields; `txnTotal` / `currency.txnCurrency` do not exist there
+    and Intacct 400s a query naming them."""
     fake = FakeIntacct()
     fake.query_rows["purchasing/document::Purchase Order"] = [
         [
@@ -461,16 +858,18 @@ def test_list_pos_maps_total_exactly_and_state():
                 "documentNumber": "PO-1",
                 "vendor.name": "Acme",
                 "state": "pending",
-                "txnTotal": "1250.10",
-                "currency.txnCurrency": "USD",
+                "totalInTxnCurrency": "1250.10",
+                "txnCurrency": "USD",
             },
             {
                 "documentNumber": "PO-2",
                 "vendor": {"name": "Beta"},
                 "state": "closed",
-                "txnTotal": "5.00",
-                "currency": {"txnCurrency": "ZAR"},
+                "totalInTxnCurrency": "5.00",
+                "txnCurrency": "ZAR",
             },
+            # No total reported: skipped, never synced at 0.
+            {"documentNumber": "PO-3", "state": "pending", "txnCurrency": "USD"},
         ]
     ]
     pos = _run(fake, lambda: SageIntacctAdapter(CONFIG).list_pos())
@@ -478,6 +877,45 @@ def test_list_pos_maps_total_exactly_and_state():
         ("PO-1", "Acme", Decimal("1250.10"), "open", "USD"),
         ("PO-2", "Beta", Decimal("5.00"), "closed", "ZAR"),
     ]
+    [query] = fake.of("POST", "/services/core/query")
+    fields = json.loads(query.content)["fields"]
+    assert "totalInTxnCurrency" in fields and "txnCurrency" in fields
+    assert "txnTotal" not in fields and "currency.txnCurrency" not in fields
+
+
+def test_list_vendors_emits_unusable_vendors_inactive():
+    fake = FakeIntacct()
+    fake.query_rows["accounts-payable/vendor"] = [
+        [
+            {"id": "V1", "name": "A", "status": "active"},
+            {"id": "V2", "name": "B", "status": "inactive"},
+            {"id": "V3", "name": "C", "status": "activeNonPosting"},
+            {"id": "V4", "name": "D", "status": "active", "state": "s"},
+            {"id": "V5", "name": "E", "status": None, "state": "a"},
+        ]
+    ]
+    vendors = _run(fake, SageIntacctAdapter(CONFIG).list_vendors)
+    assert [(v.erp_vendor_id, v.active) for v in vendors] == [
+        ("V1", True),
+        ("V2", False),
+        ("V3", False),
+        ("V4", False),
+        ("V5", True),
+    ]
+    [query] = fake.of("POST", "/services/core/query")
+    assert {"status", "state"} <= set(json.loads(query.content)["fields"])
+
+
+def test_list_gl_accounts_emits_inactive_accounts_inactive():
+    fake = FakeIntacct()
+    fake.query_rows["general-ledger/account"] = [
+        [
+            {"id": "6100", "name": "A", "status": "active"},
+            {"id": "6900", "name": "B", "status": "inactive"},
+        ]
+    ]
+    accounts = _run(fake, SageIntacctAdapter(CONFIG).list_gl_accounts)
+    assert [(a.erp_account_id, a.active) for a in accounts] == [("6100", True), ("6900", False)]
 
 
 def test_a_po_with_no_total_is_reported_skipped_never_synced_at_zero():
@@ -487,10 +925,10 @@ def test_a_po_with_no_total_is_reported_skipped_never_synced_at_zero():
     fake = FakeIntacct()
     fake.query_rows["purchasing/document::Purchase Order"] = [
         [
-            {"documentNumber": "PO-1", "txnTotal": "10.00"},
-            {"documentNumber": "PO-NO-TOTAL", "txnTotal": None},
-            {"documentNumber": "PO-BAD", "txnTotal": "n/a"},
-            {"documentNumber": None, "txnTotal": "5.00"},
+            {"documentNumber": "PO-1", "totalInTxnCurrency": "10.00"},
+            {"documentNumber": "PO-NO-TOTAL", "totalInTxnCurrency": None},
+            {"documentNumber": "PO-BAD", "totalInTxnCurrency": "n/a"},
+            {"documentNumber": None, "totalInTxnCurrency": "5.00"},
         ]
     ]
     listing = _run(fake, lambda: SageIntacctAdapter(CONFIG).list_pos_report())
@@ -519,15 +957,15 @@ def test_list_pos_carries_the_vendor_id_list_vendors_reports():
             {
                 "documentNumber": "PO-1",
                 "vendor": {"id": "V-ACME-2", "name": "Acme"},
-                "txnTotal": "1",
+                "totalInTxnCurrency": "1",
             },
             {
                 "documentNumber": "PO-2",
                 "vendor.id": "V-BOLT",
                 "vendor.name": "Bolt Old",
-                "txnTotal": "1",
+                "totalInTxnCurrency": "1",
             },
-            {"documentNumber": "PO-3", "vendor": {"name": "Acme"}, "txnTotal": "1"},
+            {"documentNumber": "PO-3", "vendor": {"name": "Acme"}, "totalInTxnCurrency": "1"},
         ]
     ]
     adapter = SageIntacctAdapter(CONFIG)
@@ -555,6 +993,19 @@ def test_every_sync_listing_raises_on_failure_the_po_list_included():
         _run(fake, adapter.list_pos)
 
 
+@pytest.mark.parametrize("token_status", [401, 503])
+def test_a_sync_listing_whose_token_fails_is_incomplete_not_an_uncoded_error(token_status):
+    """The token is minted inside the query walk now, so a refused or failed
+    exchange there is a failed page like any other (decisions §395)."""
+    fake = FakeIntacct()
+    fake.token_status = token_status
+    adapter = SageIntacctAdapter(CONFIG)
+    for listing in (adapter.list_vendors, adapter.list_gl_accounts, adapter.list_pos_report):
+        with pytest.raises(ErpListingIncomplete) as exc:
+            _run(fake, listing)
+        assert exc.value.gap is ListingGap.fetch_failed
+
+
 def test_a_po_listing_is_read_whole_or_raises():
     """A later page failing, a transport error, an unreadable page, or more POs
     than ``SYNC_LISTING_MAX_ROWS`` raises; the POs read so far are never
@@ -564,7 +1015,8 @@ def test_a_po_listing_is_read_whole_or_raises():
 
     fake = FakeIntacct()
     fake.query_rows[obj] = [
-        [{"documentNumber": f"PO-{p}-{i}", "txnTotal": "1"} for i in range(100)] for p in range(12)
+        [{"documentNumber": f"PO-{p}-{i}", "totalInTxnCurrency": "1"} for i in range(100)]
+        for p in range(12)
     ]
     # Past the old 10-page cap, read whole.
     assert len(_run(fake, adapter.list_pos_report).pos) == 1200
@@ -576,7 +1028,7 @@ def test_a_po_listing_is_read_whole_or_raises():
     assert exc.value.collection == "purchase orders"
 
     fake = FakeIntacct()
-    fake.query_rows[obj] = [[{"documentNumber": "PO-1", "txnTotal": "1"}]] * (
+    fake.query_rows[obj] = [[{"documentNumber": "PO-1", "totalInTxnCurrency": "1"}]] * (
         SYNC_LISTING_MAX_ROWS // 100 + 1
     )
     with pytest.raises(ErpListingIncomplete) as exc:
@@ -625,6 +1077,17 @@ def test_a_chart_past_the_sync_bound_raises_truncated():
 def test_test_connection():
     fake = FakeIntacct()
     assert _run(fake, SageIntacctAdapter(CONFIG).test_connection) is True
+    clear_token_cache()
+    fake.token_status = 401
+    assert _run(fake, SageIntacctAdapter(CONFIG).test_connection) is False
+
+
+def test_test_connection_drops_a_token_intacct_no_longer_accepts():
+    """A cached token for an app since de-authorized: the 401 re-mints, and the
+    refused exchange fails the test rather than a stale token passing it."""
+    fake = FakeIntacct()
+    assert _run(fake, SageIntacctAdapter(CONFIG).test_connection) is True
+    fake.query_status = 401
     fake.token_status = 401
     assert _run(fake, SageIntacctAdapter(CONFIG).test_connection) is False
 

@@ -302,6 +302,7 @@ export const messages = {
 	'org.erp.help.sageZaBaseUrl': 'Solo para un endpoint de socio de Sage. Déjelo en blanco para usar la API de Sage para Sudáfrica.',
 	'org.erp.help.byoApp': 'Solo si registró su propia aplicación en el ERP.',
 	'org.erp.help.intacctLocation': 'Déjelo en blanco para contabilizar a nivel de empresa en lugar de en una entidad.',
+	'org.erp.help.intacctUser': 'Un usuario de Web Services. La empresa debe suscribirse a Web Services, autorizar nuestro ID de remitente y añadir nuestro ID de cliente con este usuario en Company > Setup > Company > Security > Authorized Client Applications.',
 	'org.erp.oauth.byoHint': 'Deje en blanco el ID de cliente y el secreto para conectarse mediante la aplicación de FeohLedger. Rellénelos solo si registró su propia aplicación en {erp}.',
 	'org.erp.oauth.connect': 'Conectar con {erp}',
 	'org.erp.oauth.redirecting': 'Abriendo {erp}…',

@@ -5282,6 +5282,7 @@ export const messages = {
 	'erpRefusal.callBudgetTenant': "Este espacio de trabajo ha usado su parte de las llamadas a la API de {provider} de hoy, así que FeohLedger no hizo ninguna llamada. El cupo se restablece a medianoche UTC; vuelva a intentarlo entonces.",
 	'erpRefusal.callBudgetQuota': "{provider} ha pausado las llamadas a la API de la suscripción que usa FeohLedger (su cuota diaria está agotada), así que FeohLedger no hizo ninguna llamada. Se restablece a medianoche UTC; vuelva a intentarlo entonces.",
 	'erpRefusal.callBudgetRateLimited': "{provider} pidió a FeohLedger que redujera el ritmo, así que no se hizo ninguna llamada. Vuelva a intentarlo en un minuto.",
+	'erpRefusal.billLeftUnposted': "{provider} tiene esta factura como borrador o pendiente de aprobación, no contabilizada, así que aún no figura en cuentas por pagar. Contabilícela o apruébela en {provider} y vuelva a intentarlo.",
 	'erpRefusal.credentialsUnavailable': "No se pudieron abrir las credenciales del ERP en este momento. Vuelva a intentarlo en unos minutos; si sigue fallando, avise a un administrador.",
 	'erpRefusal.periodClosed': "{provider} rechazó esta factura porque su fecha está en un período cerrado (los libros están cerrados). Cambie la fecha de la factura o vuelva a abrir el período en {provider} y vuelva a intentarlo.",
 	'erpRefusal.vendorInactive': "{provider} rechazó esta factura porque su proveedor está inactivo o eliminado allí. Active el proveedor en {provider} y vuelva a intentarlo.",

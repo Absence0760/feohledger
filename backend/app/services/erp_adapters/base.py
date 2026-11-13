@@ -314,6 +314,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "job_failed",
         # `services/erp_call_budget`: the shared SKY call quota (decisions §322)
         "erp_call_budget_exhausted",
+        # Sage Intacct
+        "bill_left_unposted",
         # `services/erp` itself: the sealed ERP credentials could not be opened
         "erp_credentials_unavailable",
         # `services/erp_export_gate`: an open duplicate / fraud exception (§286)

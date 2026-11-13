@@ -5472,6 +5472,7 @@ export const en = {
 	'erpRefusal.callBudgetTenant': "This workspace has used its share of today's {provider} API calls, so FeohLedger made no call. The allowance resets at midnight UTC — retry then.",
 	'erpRefusal.callBudgetQuota': "{provider} has paused API calls for the subscription FeohLedger uses (its daily quota is used), so FeohLedger made no call. It resets at midnight UTC — retry then.",
 	'erpRefusal.callBudgetRateLimited': "{provider} asked FeohLedger to slow down, so no call was made. Retry in a minute.",
+	'erpRefusal.billLeftUnposted': "{provider} holds this bill as a draft or awaiting approval, not posted, so nothing is in accounts payable there yet. Post or approve it in {provider}, then retry.",
 	'erpRefusal.credentialsUnavailable': "The ERP credentials couldn't be opened just now. Retry in a few minutes; if it keeps failing, tell an administrator.",
 	'erpRefusal.periodClosed': "{provider} refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in {provider}, then retry.",
 	'erpRefusal.vendorInactive': "{provider} refused this bill because its vendor is inactive or deleted there. Make the vendor active in {provider}, then retry.",
