@@ -119,6 +119,7 @@ from app.services.payment_controls import (
     payment_settlement_coverage,
     payment_void_refusal,
     run_approve_refusal,
+    run_bank_file_applies,
     run_cancel_refusal,
     run_execute_refusal,
     run_nacha_export_refusal,
@@ -3873,6 +3874,14 @@ async def get_payment_run(
             retryable_failures=retryable_failures,
             pending_active=sum(1 for p in active if p.status == "pending"),
             pending_all=sum(1 for p, _ in rows if p.status == "pending"),
+        ),
+        # Whether the dialog's bank-file panel applies: always on a
+        # record-only tenant, and on a processor tenant only while the run
+        # still holds a file exported before the switch — so its Verify and
+        # the refusals' reasons stay on screen (decisions §382). Read from
+        # the STORED status, as the `nacha_*` verdicts are.
+        "bank_file_applies": run_bank_file_applies(
+            run, record_only=resolve_execution_mode(org.settings).record_only
         ),
         "payments": payments,
     }

@@ -624,6 +624,27 @@ def run_nacha_void_refusal(run, *, record_only: bool) -> ActionRefusal | None:
     return None
 
 
+def run_bank_file_applies(run, *, record_only: bool) -> bool:
+    """Whether the run dialog's bank-file panel applies to ``run`` — the
+    run payload's ``bank_file_applies`` (decisions §382).
+
+    On a tenant that records payments, every run may have a file: a draft can
+    export one, an exported run can verify, regenerate or release it. On a
+    tenant that sends payments through a processor, only a run that still
+    holds a file exported before the switch does (stored status ``exported``,
+    the claim §251 / §362 keep). There the panel is how the reader holding
+    that file verifies it before upload (``run_nacha_verify_refusal`` has no
+    record-only gate) and learns why the run cannot be released
+    (``nacha_void_requires_record_only``) or regenerated
+    (``nacha_requires_record_only``). A processor tenant's draft has no file
+    and never gets one, so the panel does not apply to it.
+
+    This says only whether the panel is the right place to look; which of its
+    controls are offered stays each control's own verdict in ``actions``.
+    """
+    return record_only or run.status == "exported"
+
+
 def run_nacha_verify_refusal(run, pending_payments: int) -> ActionRefusal | None:
     """Why ``POST /runs/{id}/nacha/verify`` ("verify before upload") would
     refuse, or ``None`` — the ONE definition the endpoint raises from and the

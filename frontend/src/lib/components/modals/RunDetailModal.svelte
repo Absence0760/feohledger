@@ -43,7 +43,6 @@
 	import {
 		NACHA_SEC_CODES,
 		canDispatchPayments,
-		canDownloadBankFile,
 		isBusinessDay,
 		isExternalPayment,
 		localToday,
@@ -178,6 +177,12 @@
 			 *  (`.run_nacha_verify_refusal`, decisions §362). */
 			nacha_verify?: ActionRefusal;
 		};
+		/** Whether the bank-file panel applies to this run
+		 *  (`payment_controls.run_bank_file_applies`): on a record-only tenant
+		 *  always, on a processor tenant only while the run still holds an
+		 *  exported file. Optional so an older backend parses; absent shows no
+		 *  panel (decisions §382). */
+		bank_file_applies?: boolean;
 		/** Failures `/retry-failed` would actually send again (retry-safe,
 		 *  latest attempt). Only used to word the armed note — the verdict, not
 		 *  this count, decides whether the control is offered. */
@@ -300,13 +305,17 @@
 	let verifyResult = $state<NachaVerifyResult | null>(null);
 	let verifying = $state(false);
 	let verifyError = $state('');
-	// The bank-file panel: only on a confirmed record-only tenant (org
-	// configuration, read once from `/execution-mode` — not a row verdict),
-	// and only while one of its controls is offered (or a verify result is
-	// still on screen).
+	// The bank-file panel: where the server says it applies to this run
+	// (`bank_file_applies` — every run of a record-only tenant, and a run
+	// still holding a file exported before a switch to processor mode, whose
+	// Verify stays allowed and whose Regenerate / Bank rejected the file state
+	// why they are refused; decisions §382), and only while one of its
+	// controls is offered. A verify result stays on screen whatever the run
+	// became: a superseded file must not be uploaded.
 	const showBankFile = $derived(
-		canDownloadBankFile(executionMode) &&
-			(showDownload || showRegenerate || showReject || showVerify || verifyResult !== null)
+		(run?.bank_file_applies === true &&
+			(showDownload || showRegenerate || showReject || showVerify)) ||
+			verifyResult !== null
 	);
 	// Presentation only: once the run's file is out, recording it is THE next
 	// step, so that control becomes the primary one. Whether anything is
