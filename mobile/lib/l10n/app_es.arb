@@ -283,7 +283,8 @@
   "invoiceEditNotSet": "Sin definir",
   "invoiceEditInvalidAmount": "Introduce un importe válido (p. ej. 1234,56)",
   "invoiceEditClearDueDate": "Borrar fecha de vencimiento",
-  "invoiceEditLockedNotice": "Aprobada: el beneficiario y el importe están bloqueados. Para cambiarlos, retire la aprobación, corrija la factura y haga que se apruebe de nuevo.",
+  "invoiceEditLockedNotice": "Aprobada: el beneficiario y el importe están bloqueados.",
+  "invoiceEditLockedNoticeRecall": "Aprobada: el beneficiario y el importe están bloqueados. Para cambiarlos, retire la aprobación, corrija la factura y haga que se apruebe de nuevo.",
   "invoiceEditLockedHelper": "Bloqueado tras la aprobación",
   "invoiceEditDueDateHint": "Fecha de vencimiento, actualmente {value}. Toca dos veces para cambiar.",
 
@@ -301,6 +302,7 @@
   "erpStatusDocumentId": "ID de documento",
   "erpStatusError": "Error",
   "erpStatusLastUpdate": "Última actualización",
+  "erpStatusActionBy": "{action} por {actor}",
   "erpStatusStatus": "Estado",
   "erpStatusOpensInErp": "abre la factura en el ERP",
   "externalLinkOpenFailed": "No se pudo abrir el enlace",

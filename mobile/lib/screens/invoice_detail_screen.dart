@@ -158,7 +158,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     final inv = _invoice;
     if (inv == null || _submitting) return;
     final l = AppLocalizations.of(context);
-    final changes = await showInvoiceEditSheet(context, inv);
+    final changes = await showInvoiceEditSheet(context, inv, recall: _recall);
     if (changes == null || !mounted) return; // cancelled / dismissed
     if (changes.isEmpty) {
       _showSnack(l.invoiceDetailNoChanges);

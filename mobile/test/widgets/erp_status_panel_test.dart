@@ -230,6 +230,43 @@ void main() {
         handle.dispose();
       });
 
+      testWidgets('reads in screen order: title, reference, then details',
+          (tester) async {
+        // The details used to ride the title's merged label, so a screen
+        // reader heard them before the reference that sits above them.
+        final handle = tester.ensureSemantics();
+        final info = ErpInfo.fromAuditLog([
+          _entry('invoice.erp_failed', details: {'error': 'Timeout'}),
+        ]);
+        await tester.pumpWidget(_host(
+          ErpStatusPanel(
+            invoice: _inv(InvoiceStatus.failed,
+                erpDocumentId: bill, erpDocumentUrl: url),
+            erpInfo: info,
+            opener: (_) async => true,
+          ),
+        ));
+
+        expect(find.bySemanticsLabel('ERP Status'), findsOneWidget);
+        final details = tester.getSemantics(
+          find.byKey(const ValueKey('erp-status-details')),
+        );
+        expect(details.label, startsWith('Error Timeout, Last update '));
+        expect(details.label, contains('by Demo User'));
+
+        // Vertical order on screen is the reading order.
+        final title = tester.getTopLeft(find.text('ERP Status')).dy;
+        final link = tester
+            .getTopLeft(find.byKey(const ValueKey('erp-reference-link')))
+            .dy;
+        final detailRow = tester
+            .getTopLeft(find.byKey(const ValueKey('erp-status-details')))
+            .dy;
+        expect(title, lessThan(link));
+        expect(link, lessThan(detailRow));
+        handle.dispose();
+      });
+
       testWidgets('says so when no app can open it', (tester) async {
         await tester.pumpWidget(_host(
           ErpStatusPanel(
@@ -265,6 +302,45 @@ void main() {
           expect(find.text(bill), findsOneWidget);
         });
       }
+    });
+
+    testWidgets('the last update names its actor in the reader\'s language',
+        (tester) async {
+      final info = ErpInfo.fromAuditLog([
+        _entry('invoice.erp_failed', details: {'error': 'Timeout'}),
+      ]);
+      await tester.pumpWidget(MaterialApp(
+        locale: const Locale('fr'),
+        localizationsDelegates: appLocalizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: ErpStatusPanel(
+            invoice: _inv(InvoiceStatus.failed),
+            erpInfo: info,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('par Demo User'), findsOneWidget);
+      expect(find.textContaining(' by '), findsNothing);
+    });
+
+    testWidgets('an unlinked panel announces every row, last update included',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      final info = ErpInfo.fromAuditLog([
+        _entry('invoice.erp_failed', details: {'error': 'Timeout'}),
+      ]);
+      await tester.pumpWidget(_host(
+        ErpStatusPanel(invoice: _inv(InvoiceStatus.failed), erpInfo: info),
+      ));
+      expect(
+        find.bySemanticsLabel(
+          RegExp(r'^ERP Status, Error Timeout, Last update .* by Demo User'),
+        ),
+        findsOneWidget,
+      );
+      handle.dispose();
     });
 
     testWidgets('clears contrast guideline', (tester) async {

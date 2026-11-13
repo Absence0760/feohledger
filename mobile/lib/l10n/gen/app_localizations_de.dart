@@ -1081,6 +1081,10 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
+      'Genehmigt — Zahlungsempfänger und Betrag sind gesperrt.';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
       'Genehmigt — Zahlungsempfänger und Betrag sind gesperrt. Zum Ändern die Genehmigung zurücknehmen, die Rechnung korrigieren und erneut genehmigen lassen.';
 
   @override
@@ -1133,6 +1137,11 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get erpStatusLastUpdate => 'Letzte Aktualisierung';
+
+  @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action von $actor';
+  }
 
   @override
   String get erpStatusStatus => 'Status';

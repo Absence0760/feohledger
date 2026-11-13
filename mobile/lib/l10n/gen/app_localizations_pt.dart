@@ -1087,6 +1087,10 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
+      'Aprovada — o beneficiário e o valor estão bloqueados.';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
       'Aprovada — o beneficiário e o valor estão bloqueados. Para alterá-los, revogue a aprovação, corrija a fatura e volte a submetê-la para aprovação.';
 
   @override
@@ -1139,6 +1143,11 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get erpStatusLastUpdate => 'Última atualização';
+
+  @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action por $actor';
+  }
 
   @override
   String get erpStatusStatus => 'Status';
@@ -4652,6 +4661,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get invoiceEditLockedNotice =>
+      'Aprovada — o beneficiário e o valor estão bloqueados.';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
       'Aprovada — o beneficiário e o valor estão bloqueados. Para alterá-los, revogue a aprovação, corrija a fatura e envie-a para aprovação novamente.';
 
   @override
@@ -4704,6 +4717,11 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get erpStatusLastUpdate => 'Última atualização';
+
+  @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action por $actor';
+  }
 
   @override
   String get erpStatusStatus => 'Status';

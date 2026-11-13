@@ -1299,6 +1299,41 @@ void main() {
     );
   });
 
+  // The edit sheet's lock notice reads the same verdict the recall bar does:
+  // it names the recall only when the server offers it.
+  for (final (verdict, expected) in [
+    (null, 'To change them, recall the approval'),
+    (
+      {
+        'code': 'invoice_recall_in_erp',
+        'message': 'server english',
+        'params': <String, dynamic>{},
+      },
+      'Correct or void it in the ERP',
+    ),
+  ]) {
+    testWidgets(
+        'the edit sheet lock notice follows the recall verdict '
+        '(${verdict == null ? 'allowed' : verdict['code']})', (tester) async {
+      await _arrange(_detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+        reviewActions: {'recall_approval': verdict},
+      ));
+
+      await tester.pumpWidget(_localized());
+      await _pumpUntil(tester, find.text('Recall approval'));
+      await tester.tap(find.byTooltip('Edit'));
+      await tester.pumpAndSettle();
+
+      final notice = tester
+          .widget<Text>(
+              find.byKey(const ValueKey('invoice-edit-locked-notice')))
+          .data!;
+      expect(notice, startsWith('Approved — the payee and amount are frozen.'));
+      expect(notice, contains(expected));
+    });
+  }
+
   testWidgets('a recall refused at the door is stated from its code',
       (tester) async {
     await _arrange(_detailClient(

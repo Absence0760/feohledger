@@ -283,7 +283,8 @@
   "invoiceEditNotSet": "Non défini",
   "invoiceEditInvalidAmount": "Saisissez un montant valide (par ex. 1234,56)",
   "invoiceEditClearDueDate": "Effacer la date d'échéance",
-  "invoiceEditLockedNotice": "Approuvée — le bénéficiaire et le montant sont figés. Pour les modifier, retirez l'approbation, corrigez la facture puis faites-la approuver de nouveau.",
+  "invoiceEditLockedNotice": "Approuvée — le bénéficiaire et le montant sont figés.",
+  "invoiceEditLockedNoticeRecall": "Approuvée — le bénéficiaire et le montant sont figés. Pour les modifier, retirez l'approbation, corrigez la facture puis faites-la approuver de nouveau.",
   "invoiceEditLockedHelper": "Figé après approbation",
   "invoiceEditDueDateHint": "Date d'échéance, actuellement {value}. Appuyez deux fois pour modifier.",
 
@@ -301,6 +302,7 @@
   "erpStatusDocumentId": "ID du document",
   "erpStatusError": "Erreur",
   "erpStatusLastUpdate": "Dernière mise à jour",
+  "erpStatusActionBy": "{action} par {actor}",
   "erpStatusStatus": "Statut",
   "erpStatusOpensInErp": "ouvre la facture dans l'ERP",
   "externalLinkOpenFailed": "Impossible d'ouvrir le lien",

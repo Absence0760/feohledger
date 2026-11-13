@@ -1078,6 +1078,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
+      'Approved — the payee and amount are frozen.';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
       'Approved — the payee and amount are frozen. To change them, recall the approval, correct the invoice, then have it approved again.';
 
   @override
@@ -1130,6 +1134,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get erpStatusLastUpdate => 'Last update';
+
+  @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action by $actor';
+  }
 
   @override
   String get erpStatusStatus => 'Status';

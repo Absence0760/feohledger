@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/widgets/invoice_edit_sheet.dart';
 
@@ -30,13 +31,28 @@ Invoice _invoice(InvoiceStatus status, {required bool locked}) => Invoice(
       financiallyLocked: locked,
     );
 
+final _recallAllowed = ActionVerdict.fromVerdicts(
+  const {'recall_approval': null},
+  'recall_approval',
+);
+
+ActionVerdict _recallRefused(String code, [Map<String, dynamic>? params]) =>
+    ActionVerdict.fromVerdicts({
+      'recall_approval': {
+        'code': code,
+        'message': 'server sentence',
+        'params': ?params,
+      },
+    }, 'recall_approval');
+
 /// Opens the sheet the way the detail screen does. Returns a reader for
 /// whatever `showInvoiceEditSheet` pops, so the assertions run against the real
 /// result rather than a re-implementation of the diff.
 Future<InvoiceEditResult? Function()> _openSheet(
   WidgetTester tester,
-  Invoice inv,
-) async {
+  Invoice inv, {
+  ActionVerdict recall = ActionVerdict.unanswered,
+}) async {
   InvoiceEditResult? popped;
   await tester.pumpWidget(MaterialApp(
     localizationsDelegates: appLocalizationsDelegates,
@@ -46,7 +62,7 @@ Future<InvoiceEditResult? Function()> _openSheet(
         body: Center(
           child: ElevatedButton(
             onPressed: () async {
-              popped = await showInvoiceEditSheet(context, inv);
+              popped = await showInvoiceEditSheet(context, inv, recall: recall);
             },
             child: const Text('open'),
           ),
@@ -114,7 +130,11 @@ void main() {
   group('financially locked invoice', () {
     testWidgets('renders the money + payee fields read-only with a reason',
         (tester) async {
-      await _openSheet(tester, _invoice(InvoiceStatus.approved, locked: true));
+      await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.approved, locked: true),
+        recall: _recallAllowed,
+      );
 
       expect(_fieldFor(tester, 'Amount').readOnly, isTrue);
       expect(_fieldFor(tester, 'Vendor').readOnly, isTrue);
@@ -124,9 +144,9 @@ void main() {
       expect(_fieldFor(tester, 'GL Account').readOnly, isFalse);
       expect(_fieldFor(tester, 'Invoice #').readOnly, isFalse);
 
-      // The reviewer is told why, and how to change it: the exit that exists
-      // (recall the approval, backend decisions §374), not a rejection the
-      // server refuses on an approved invoice.
+      // The reviewer is told why, and how to change it: the exit the server
+      // says is open (recall the approval, backend decisions §374), not a
+      // rejection the server refuses on an approved invoice.
       expect(
         find.textContaining('recall the approval, correct the invoice'),
         findsOneWidget,
@@ -208,6 +228,80 @@ void main() {
       await _enterInto(tester, 'Description', 'Retry note');
       await _tapButton(tester, 'Save');
       expect(result(), {'description': 'Retry note'});
+    });
+  });
+
+  // The lock notice names the way out only when the server's
+  // `recall_approval` verdict says it is open: from `sent_to_erp` on the
+  // recall is always refused, and telling the reader to recall there sent
+  // them to a button that does not exist (backend decisions §374).
+  group('the lock notice follows the recall verdict', () {
+    String notice(WidgetTester tester) => tester
+        .widget<Text>(find.byKey(const ValueKey('invoice-edit-locked-notice')))
+        .data!;
+
+    testWidgets('past the recall: the plain freeze sentence', (tester) async {
+      await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.sentToErp, locked: true),
+        recall: _recallRefused('invoice_not_recallable'),
+      );
+      expect(notice(tester), 'Approved — the payee and amount are frozen.');
+    });
+
+    testWidgets('no verdict: the plain freeze sentence', (tester) async {
+      await _openSheet(tester, _invoice(InvoiceStatus.done, locked: true));
+      expect(notice(tester), 'Approved — the payee and amount are frozen.');
+    });
+
+    testWidgets('a role that cannot recall: the plain freeze sentence',
+        (tester) async {
+      await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.approved, locked: true),
+        recall: _recallRefused('role_not_permitted'),
+      );
+      expect(notice(tester), 'Approved — the payee and amount are frozen.');
+    });
+
+    testWidgets('recall allowed: names the recall', (tester) async {
+      await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.approved, locked: true),
+        recall: _recallAllowed,
+      );
+      expect(
+        notice(tester),
+        'Approved — the payee and amount are frozen. To change them, recall '
+        'the approval, correct the invoice, then have it approved again.',
+      );
+    });
+
+    testWidgets('recall refused by the ERP: says to correct it in the ERP',
+        (tester) async {
+      await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.failed, locked: true),
+        recall: _recallRefused('invoice_recall_in_erp'),
+      );
+      expect(
+        notice(tester),
+        'Approved — the payee and amount are frozen. The ERP may already hold '
+        'a bill for this invoice, and a bill there can be paid there. Correct '
+        "or void it in the ERP; its approval can't be recalled from FeohLedger.",
+      );
+      expect(notice(tester), isNot(contains('To change them')));
+    });
+
+    testWidgets('recall refused by a live payment: names the rail',
+        (tester) async {
+      await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.approved, locked: true),
+        recall: _recallRefused('invoice_recall_claimed', {'claim': 'payment'}),
+      );
+      expect(notice(tester), contains('it has a live payment'));
+      expect(notice(tester), isNot(contains('To change them')));
     });
   });
 }

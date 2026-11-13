@@ -1722,11 +1722,17 @@ abstract class AppLocalizations {
   /// **'Clear due date'**
   String get invoiceEditClearDueDate;
 
-  /// No description provided for @invoiceEditLockedNotice.
+  /// Edit sheet notice on a financially locked invoice whose approval cannot be recalled from here (past the recall, or no recall verdict).
+  ///
+  /// In en, this message translates to:
+  /// **'Approved — the payee and amount are frozen.'**
+  String get invoiceEditLockedNotice;
+
+  /// Edit sheet notice on a financially locked invoice when the server says this user may recall its approval (review-actions recall_approval allowed).
   ///
   /// In en, this message translates to:
   /// **'Approved — the payee and amount are frozen. To change them, recall the approval, correct the invoice, then have it approved again.'**
-  String get invoiceEditLockedNotice;
+  String get invoiceEditLockedNoticeRecall;
 
   /// No description provided for @invoiceEditLockedHelper.
   ///
@@ -1817,6 +1823,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Last update'**
   String get erpStatusLastUpdate;
+
+  /// ERP panel last-update value: the audit action and who performed it.
+  ///
+  /// In en, this message translates to:
+  /// **'{action} by {actor}'**
+  String erpStatusActionBy(String action, String actor);
 
   /// No description provided for @erpStatusStatus.
   ///
