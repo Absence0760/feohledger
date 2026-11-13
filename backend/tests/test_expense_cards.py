@@ -318,7 +318,11 @@ async def test_match_refuses_a_cross_currency_pair(realdb):
             json={"expense_id": eur_expense},
         )
     assert resp.status_code == 409, resp.text
-    assert "Currency mismatch" in resp.json()["detail"]
+    assert resp.json()["detail"] == {
+        "code": "card_txn_currency_mismatch",
+        "message": "Currency mismatch: transaction is USD, expense is EUR.",
+        "params": {"transaction_currency": "USD", "expense_currency": "EUR"},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +435,39 @@ async def test_match_already_matched_rejected(realdb):
         dup = await c.post(
             f"/api/corporate-card-transactions/{txn_id}/match", json={"expense_id": e2}
         )
-    assert dup.status_code == 409
+        # Every refusal on this router is coded, with the English it answered
+        # with as a plain string kept as `message` (decisions §361).
+        assert dup.status_code == 409
+        assert dup.json()["detail"] == {
+            "code": "card_txn_already_matched",
+            "message": "Transaction is already matched",
+            "params": {},
+        }
+        again = await c.post(f"/api/corporate-card-transactions/{txn_id}/create-expense")
+        assert again.status_code == 409
+        assert again.json()["detail"]["code"] == "card_txn_already_matched"
+
+
+async def test_match_refuses_an_expense_already_matched_elsewhere(realdb):
+    """The expense side: an expense reconciled to one card line cannot be
+    matched to a second."""
+    first = await _make_txn(realdb)
+    second = await _make_txn(realdb)
+    expense_id = await _make_expense(realdb)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        ok = await c.post(
+            f"/api/corporate-card-transactions/{first}/match", json={"expense_id": expense_id}
+        )
+        assert ok.status_code == 200, ok.text
+        dup = await c.post(
+            f"/api/corporate-card-transactions/{second}/match", json={"expense_id": expense_id}
+        )
+    assert dup.status_code == 409, dup.text
+    assert dup.json()["detail"] == {
+        "code": "card_txn_expense_already_matched",
+        "message": "Expense is already matched",
+        "params": {},
+    }
 
 
 async def test_unmatch_on_unmatched_rejected(realdb):
@@ -441,6 +477,11 @@ async def test_unmatch_on_unmatched_rejected(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(f"/api/corporate-card-transactions/{txn_id}/unmatch")
     assert resp.status_code == 409
+    assert resp.json()["detail"] == {
+        "code": "card_txn_not_matched",
+        "message": "Transaction is not matched",
+        "params": {},
+    }
 
     async with mk() as s:
         actions = (
@@ -503,7 +544,11 @@ async def test_ignore_refuses_a_matched_transaction(realdb):
 
         ignored = await c.post(f"/api/corporate-card-transactions/{txn_id}/ignore")
         assert ignored.status_code == 409, ignored.text
-        assert "unmatch" in ignored.json()["detail"].lower()
+        assert ignored.json()["detail"] == {
+            "code": "card_txn_matched_not_ignorable",
+            "message": "Transaction is matched — unmatch it before ignoring.",
+            "params": {},
+        }
 
         # Still matched, and still reversible.
         unmatched = await c.post(f"/api/corporate-card-transactions/{txn_id}/unmatch")
@@ -743,7 +788,13 @@ async def test_deleting_a_reconciled_expense_is_refused_not_a_500(realdb):
 
         refused = await c.delete(f"/api/expenses/{expense_id}")
         assert refused.status_code == 409, refused.text
-        assert txn_id in refused.json()["detail"]
+        assert refused.json()["detail"] == {
+            "code": "expense_card_reconciled",
+            "message": (
+                f"Expense is reconciled to card transaction {txn_id}; unmatch it before deleting."
+            ),
+            "params": {"card_transaction_id": txn_id},
+        }
 
     # Nothing was destroyed, and both legs of the link still hold.
     async with mk() as s:

@@ -63,6 +63,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_corporate_card_csv
 from app.services.expense_card_reconciliation import suggest_matches, sync_virtual_cards
 from app.services.expense_controls import (
+    card_match_expense_refusal,
     card_txn_ignore_refusal,
     card_txn_link_refusal,
     card_txn_unmatch_refusal,
@@ -399,20 +400,11 @@ async def match_card_transaction(
     refusal = card_txn_link_refusal(txn)
     if refusal is not None:
         raise refusal.http()
-    if expense.card_transaction_id is not None:
-        raise HTTPException(status_code=409, detail="Expense is already matched")
-    # Re-checked here, not just filtered out of `suggest_matches`: the client
-    # sends an arbitrary `expense_id`, so the suggestion query is a convenience
-    # and this is the control. Multi-currency card reconciliation is deferred —
-    # a €100.00 expense is not the same money as a $100.00 card line, and
-    # linking them stamps a payment_method onto an expense the card never paid.
-    if (expense.currency or "").upper() != (txn.currency or "").upper():
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Currency mismatch: transaction is {txn.currency}, expense is {expense.currency}."
-            ),
-        )
+    # The chosen expense's side: already reconciled, or another currency
+    # (multi-currency card reconciliation is deferred).
+    refusal = card_match_expense_refusal(txn, expense)
+    if refusal is not None:
+        raise refusal.http()
 
     await _link_both_sides(db, txn=txn, expense=expense, org_id=org_id, actor_id=user.id)
     await db.commit()

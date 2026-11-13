@@ -182,8 +182,10 @@ async def test_lock_expense_conversion_raises_on_an_unknown_currency():
         await lock_expense_conversion(
             expense, target_currency="USD", fx_adapter=get_fx_adapter({"provider": "mock"})
         )
-    # PII-free: currency codes only.
+    # PII-free: currency codes only — and carried as codes, for the coded
+    # refusal's params (decisions §361).
     assert "XYZ" in str(exc.value) and "USD" in str(exc.value)
+    assert (exc.value.source_currency, exc.value.target_currency) == ("XYZ", "USD")
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +310,11 @@ async def test_unconvertible_line_is_refused_rather_than_attached(realdb):
     async with realdb.client(key="a", role="ap_clerk") as c:
         refused = await c.post(f"/api/expense-reports/{rid}/expenses", json={"expense_ids": [bad]})
     assert refused.status_code == 422, refused.text
-    assert "XYZ" in refused.json()["detail"]
+    assert refused.json()["detail"] == {
+        "code": "expense_fx_rate_unavailable",
+        "message": "No FX rate available to convert XYZ into the report currency USD.",
+        "params": {"source_currency": "XYZ", "report_currency": "USD"},
+    }
 
     async with mk() as s:
         still = (
@@ -672,6 +678,11 @@ async def test_same_currency_line_attaches_without_a_usable_fx_provider(realdb):
                 f"/api/expense-reports/{rid}/expenses", json={"expense_ids": [eur]}
             )
             assert refused.status_code == 422, refused.text
+            assert refused.json()["detail"] == {
+                "code": "expense_fx_source_missing",
+                "message": "No FX rate source is configured, so this line cannot be converted.",
+                "params": {},
+            }
     finally:
         async with ctrl() as s:
             org = (

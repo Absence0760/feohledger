@@ -3,9 +3,11 @@ each the ONE definition its endpoint raises from and its list row's verdict is
 read from (issue #575 § One rule, one place; ``docs/decisions.md`` §305).
 
 Every gate returns an :class:`~app.api.refusals.ActionRefusal` or ``None``. The
-endpoint raises ``refusal.http()``, which keeps the ``detail`` it always
-answered with (a plain string, or the coded ``{code, message, params}`` for the
-refusals that were already coded); ``api/expenses.report_action_refusals`` and
+endpoint raises ``refusal.http()``, whose ``detail`` is the coded
+``{code, message, params}`` (every gate here is ``coded=True``; the English
+``message`` is the sentence the endpoint answered with as a plain string before
+``docs/decisions.md`` §361, so a client that reads it as text still shows it).
+``api/expenses.report_action_refusals`` and
 ``api/expense_cards.card_txn_action_refusals`` ship ``refusal.verdict()`` on the
 row, after the endpoint's own role predicate.
 
@@ -44,6 +46,30 @@ EXPENSE_REPORT_SELF_REJECT = "expense_report_self_reject"
 #: `services/review.APPROVAL_CFO_REQUIRED`.
 EXPENSE_CFO_REQUIRED = "expense_cfo_required"
 
+#: Editing, deleting or moving a line on a report whose total is locked in for
+#: an approval decision (`report_unlocked_refusal`, issue #155).
+EXPENSE_REPORT_LOCKED = "expense_report_locked"
+#: Attaching a line in another currency with no FX rate source configured.
+EXPENSE_FX_SOURCE_MISSING = "expense_fx_source_missing"
+#: Attaching a line the FX source has no usable rate for
+#: (`expense_currency.ExpenseConversionError`).
+EXPENSE_FX_RATE_UNAVAILABLE = "expense_fx_rate_unavailable"
+#: Deleting an expense a card transaction is reconciled to.
+EXPENSE_CARD_RECONCILED = "expense_card_reconciled"
+
+#: A report in one of these states has its total locked in for an approval
+#: decision: `submitted` / `pending_approval` (awaiting it) and `approved` /
+#: `reimbursed` (signed against it). `draft` is freely editable; `rejected` /
+#: `cancelled` are terminal and their lines may be corrected and re-reported.
+LOCKED_REPORT_STATUSES = frozenset(
+    {
+        ExpenseReportStatus.submitted,
+        ExpenseReportStatus.pending_approval,
+        ExpenseReportStatus.approved,
+        ExpenseReportStatus.reimbursed,
+    }
+)
+
 #: Platform default CFO threshold; per-org override in
 #: `Organization.settings.expense_approval.cfo_threshold`, denominated in the
 #: org REPORTING currency.
@@ -67,7 +93,11 @@ def report_owner_refusal(report: ExpenseReport, actor_id: uuid.UUID) -> ActionRe
 def _not_draft(report: ExpenseReport, message: str, http_status: int) -> ActionRefusal | None:
     if report.status != ExpenseReportStatus.draft:
         return ActionRefusal(
-            EXPENSE_REPORT_NOT_DRAFT, message, http_status, params={"status": str(report.status)}
+            EXPENSE_REPORT_NOT_DRAFT,
+            message,
+            http_status,
+            params={"status": str(report.status)},
+            coded=True,
         )
     return None
 
@@ -95,6 +125,21 @@ def report_draft_refusal(report: ExpenseReport) -> ActionRefusal | None:
     )
 
 
+def report_unlocked_refusal(report: ExpenseReport) -> ActionRefusal | None:
+    """A line on a report whose total is locked (:data:`LOCKED_REPORT_STATUSES`)
+    cannot be edited, deleted or moved off it (409): that would silently bypass
+    the CFO gate and stale-sign the approval (issue #155)."""
+    if report.status in LOCKED_REPORT_STATUSES:
+        return ActionRefusal(
+            EXPENSE_REPORT_LOCKED,
+            f"Cannot modify a report in '{report.status}' state; its total is locked.",
+            status.HTTP_409_CONFLICT,
+            params={"status": str(report.status)},
+            coded=True,
+        )
+    return None
+
+
 def report_compose_refusal(report: ExpenseReport, actor_id: uuid.UUID) -> ActionRefusal | None:
     """Why ``POST /expense-reports/{id}/expenses`` (attach / detach) would
     refuse on the TARGET report: not a draft (409), then not the owner (403).
@@ -110,6 +155,7 @@ def _not_submitted(report: ExpenseReport, verb: str) -> ActionRefusal | None:
             f"Cannot {verb} a report in '{report.status}' state",
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             params={"status": str(report.status)},
+            coded=True,
         )
     return None
 
@@ -279,6 +325,10 @@ CARD_TXN_ALREADY_MATCHED = "card_txn_already_matched"
 CARD_TXN_NOT_MATCHED = "card_txn_not_matched"
 CARD_TXN_MATCHED_NOT_IGNORABLE = "card_txn_matched_not_ignorable"
 CARD_TXN_ALREADY_IGNORED = "card_txn_already_ignored"
+#: `/match`'s expense-side refusals — they depend on the expense chosen, so
+#: they are not in the row's verdict (§348).
+CARD_TXN_EXPENSE_ALREADY_MATCHED = "card_txn_expense_already_matched"
+CARD_TXN_CURRENCY_MISMATCH = "card_txn_currency_mismatch"
 
 
 def _is_matched(txn: CorporateCardTransaction) -> bool:
@@ -296,7 +346,10 @@ def card_txn_link_refusal(txn: CorporateCardTransaction) -> ActionRefusal | None
     matched, a currency mismatch) depend on the expense chosen."""
     if _is_matched(txn):
         return ActionRefusal(
-            CARD_TXN_ALREADY_MATCHED, "Transaction is already matched", status.HTTP_409_CONFLICT
+            CARD_TXN_ALREADY_MATCHED,
+            "Transaction is already matched",
+            status.HTTP_409_CONFLICT,
+            coded=True,
         )
     return None
 
@@ -305,7 +358,7 @@ def card_txn_unmatch_refusal(txn: CorporateCardTransaction) -> ActionRefusal | N
     """Why ``POST /{id}/unmatch`` would refuse: the transaction is not matched."""
     if txn.reconciliation_status != ReconciliationStatus.matched:
         return ActionRefusal(
-            CARD_TXN_NOT_MATCHED, "Transaction is not matched", status.HTTP_409_CONFLICT
+            CARD_TXN_NOT_MATCHED, "Transaction is not matched", status.HTTP_409_CONFLICT, coded=True
         )
     return None
 
@@ -320,9 +373,38 @@ def card_txn_ignore_refusal(txn: CorporateCardTransaction) -> ActionRefusal | No
             CARD_TXN_MATCHED_NOT_IGNORABLE,
             "Transaction is matched — unmatch it before ignoring.",
             status.HTTP_409_CONFLICT,
+            coded=True,
         )
     if txn.reconciliation_status == ReconciliationStatus.ignored:
         return ActionRefusal(
-            CARD_TXN_ALREADY_IGNORED, "Transaction is already ignored", status.HTTP_409_CONFLICT
+            CARD_TXN_ALREADY_IGNORED,
+            "Transaction is already ignored",
+            status.HTTP_409_CONFLICT,
+            coded=True,
+        )
+    return None
+
+
+def card_match_expense_refusal(txn: CorporateCardTransaction, expense) -> ActionRefusal | None:
+    """Why ``POST /{id}/match`` would refuse on the chosen EXPENSE's side: it is
+    already reconciled to a card line (409), or it is in another currency
+    (409) — a EUR 100.00 expense is not the same money as a USD 100.00 card
+    line, and linking them stamps a ``payment_method`` onto an expense the card
+    never paid. Re-checked here, not just filtered out of ``suggest_matches``:
+    the client sends an arbitrary ``expense_id``."""
+    if expense.card_transaction_id is not None:
+        return ActionRefusal(
+            CARD_TXN_EXPENSE_ALREADY_MATCHED,
+            "Expense is already matched",
+            status.HTTP_409_CONFLICT,
+            coded=True,
+        )
+    if (expense.currency or "").upper() != (txn.currency or "").upper():
+        return ActionRefusal(
+            CARD_TXN_CURRENCY_MISMATCH,
+            f"Currency mismatch: transaction is {txn.currency}, expense is {expense.currency}.",
+            status.HTTP_409_CONFLICT,
+            params={"transaction_currency": txn.currency, "expense_currency": expense.currency},
+            coded=True,
         )
     return None
