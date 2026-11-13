@@ -247,6 +247,25 @@ stale record (below) and merge again, or leave that duplicate out. Detail:
 [data-enrichment.md](data-enrichment.md) § `POST /api/enrichment/vendors/consolidation/merge`,
 [erp-integration.md](erp-integration.md); decisions §373.
 
+**A merge never changes the payee of an approved invoice still to be paid**
+(decisions §379). Such an invoice was signed for the duplicate's payee, and the
+payment run and the ERP push read the bank details of whichever vendor it
+names at the time, so re-pointed it would be paid to the canonical's account —
+which its approver never saw and no bank-change dual control covered. While
+any duplicate holds one (`approved`, `sending_to_erp`, `sent_to_erp`,
+`posted_in_erp`, `payment_scheduled`, or `failed` after an approval:
+`vendor_merge.approved_unpaid_clause`, `financially_locked` minus `paid` /
+`done`, the same population the bank-change flag covers) the merge is refused
+409 `vendor_merge_approved_unpaid`, `params.count` across every duplicate, with
+nothing written. The way through: let them be paid (a `paid` / `done`
+invoice's payee is history and is folded like every other row), or recall
+their approvals (`POST /api/invoices/{id}/recall-approval`, itself refused
+while a rail or the ERP holds the invoice). A recalled invoice moves with the
+merge and its next approval signs the canonical payee. A live virtual card on
+an approved invoice therefore refuses the merge too; cancel or settle the card
+first. An approval that lands while the merge runs is caught as well: the
+invoice reassignment skips such a row and a recount refuses the merge.
+
 ### Unlinking a vendor from one ERP company
 
 `GET /api/vendors/{id}/erp-links` lists the vendor's links, one per company:
