@@ -591,9 +591,165 @@ async def test_a_bill_paid_by_cheque_and_card_is_recorded_at_their_sum(realdb):
     assert (await _apply(realdb, report)).action == "paid_recorded"
     [booked] = await _payments(realdb, inv_id)
     assert booked.amount == Decimal("250.00")
-    # No one rail paid it all: not stated, so it counts as 1099-reportable.
+    # No one rail paid it all, so `method` states none; the split is kept on
+    # the payment, and the 1099 reports the cheque part only (§396).
     assert booked.method is None
+    assert booked.rail_breakdown == [
+        {"method": "check", "amount": "150.00"},
+        {"method": "card", "amount": "100.00"},
+    ]
     assert await _exceptions(realdb, inv_id) == []
+    # The record's audit row says which rails paid how much, and that it stands.
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown"] == booked.rail_breakdown
+    assert details["rail_breakdown_status"] == "applied"
+    assert details["method"] is None
+
+
+async def _recorded_outside_details(realdb, payment_id) -> dict:
+    from app.models.workflow import AuditLog
+
+    async with realdb.sessionmaker("a")() as s:
+        return (
+            await s.execute(
+                select(AuditLog.details).where(
+                    AuditLog.entity_id == payment_id, AuditLog.action == "payment.recorded_outside"
+                )
+            )
+        ).scalar_one()
+
+
+async def test_a_bill_paid_by_two_cards_is_recorded_as_card_with_its_breakdown(realdb):
+    inv_id, corr = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    report = await _qbo_report(
+        corr,
+        "250.00",
+        [
+            _qbo_cash("901", "200.00", pay_type="CreditCard"),
+            _qbo_cash("902", "50.00", pay_type="CreditCard"),
+        ],
+    )
+    assert (await _apply(realdb, report)).action == "paid_recorded"
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method == "card"
+    assert booked.rail_breakdown == [
+        {"method": "card", "amount": "200.00"},
+        {"method": "card", "amount": "50.00"},
+    ]
+
+
+async def test_a_breakdown_that_does_not_sum_to_the_payment_is_recorded_reportable(realdb):
+    """Fail closed (§396): an adapter whose parts miss the cash figure by a
+    cent gets no split and no rail, even the "card" it stated, so the whole
+    payment is reportable; the audit row keeps the parts and says why."""
+    from app.services.payment_methods import RailPart
+
+    inv_id, corr = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    report = _report(
+        corr,
+        ErpBillState.paid,
+        external_payment_ids=("901", "902"),
+        payment_method="card",
+        paid_amount=Decimal("250.00"),
+        paid_currency="USD",
+        payment_parts=(RailPart("card", Decimal("150.00")), RailPart("card", Decimal("99.99"))),
+    )
+    assert (await _apply(realdb, report)).action == "paid_recorded"
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.amount == Decimal("250.00")
+    assert booked.method is None and booked.rail_breakdown is None
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown_status"] == "unreconciled"
+    assert details["rail_breakdown"] == [
+        {"method": "card", "amount": "150.00"},
+        {"method": "card", "amount": "99.99"},
+    ]
+    assert details["method_stated"] == "card"
+
+
+async def test_a_kept_two_rail_payment_is_booked_with_its_split_when_its_blocker_clears(realdb):
+    """The re-attempt books the kept facts, the split included, never the
+    payment as one unstated rail."""
+    inv_id, corr = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    blocker = uuid.uuid4()
+    async with realdb.sessionmaker("a")() as s:
+        s.add(
+            APException(
+                id=blocker,
+                organization_id=realdb.info("a").org_id,
+                invoice_id=inv_id,
+                exception_type="duplicate",
+                severity="error",
+                description="stale",
+                status="open",
+            )
+        )
+        await s.commit()
+    report = await _qbo_report(
+        corr,
+        "250.00",
+        [_qbo_cash("901", "150.00"), _qbo_cash("902", "100.00", pay_type="CreditCard")],
+    )
+    await _apply(realdb, report)
+    [row] = [e for e in await _exceptions(realdb, inv_id) if e.erp_report]
+    assert row.erp_report["payment_parts"] == [
+        {"method": "check", "amount": "150.00"},
+        {"method": "card", "amount": "100.00"},
+    ]
+    assert await _payments(realdb, inv_id) == []
+
+    await _dismiss_flag(realdb, blocker)
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.status == "completed" and booked.method is None
+    assert booked.rail_breakdown == row.erp_report["payment_parts"]
+
+
+async def test_the_one_click_books_the_kept_split_over_a_persons_one_rail(realdb):
+    """The dialog asks for one rail; the ERP said two paid it. As with the
+    figure, the ERP's breakdown is the record; the person's rail is audited."""
+    inv_id, corr = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    async with realdb.sessionmaker("a")() as s:
+        s.add(
+            APException(
+                organization_id=realdb.info("a").org_id,
+                invoice_id=inv_id,
+                exception_type="erp_reconciliation",
+                severity="warning",
+                description="kept",
+                status="open",
+                erp_report={
+                    "kind": "paid_not_recorded",
+                    "erp_type": "quickbooks_online",
+                    "erp_document_id": BILL,
+                    "method": None,
+                    "reference": BILL,
+                    "paid_on": utc_today().isoformat(),
+                    "paid_on_reported": True,
+                    "amount": "250.00",
+                    "amount_currency": "USD",
+                    "payment_parts": [
+                        {"method": "check", "amount": "150.00"},
+                        {"method": "card", "amount": "100.00"},
+                    ],
+                    "refusal_code": "external_payment_blocking_exception",
+                },
+            )
+        )
+        await s.commit()
+    [row] = await _exceptions(realdb, inv_id)
+    body = {"method": "check", "reference": BILL, "paid_on": utc_today().isoformat()}
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/exceptions/{row.id}/record-erp-payment", json=body)
+    assert resp.status_code == 201, resp.text
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None
+    assert booked.rail_breakdown == [
+        {"method": "check", "amount": "150.00"},
+        {"method": "card", "amount": "100.00"},
+    ]
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown_status"] == "applied"
+    assert details["method_stated"] == "check"
 
 
 async def test_a_bill_part_paid_in_quickbooks_records_nothing_and_blocks(realdb):
@@ -1631,12 +1787,37 @@ async def test_two_invoices_naming_one_xero_bill_match_neither(realdb):
 
 
 def test_a_later_report_without_an_amount_keeps_the_stated_one():
+    parts = [{"method": "check", "amount": "140.00"}, {"method": "card", "amount": "100.00"}]
     merged = erp_status_sync._merged_report(
-        {"amount": "240.00", "paid_on": "2026-10-01", "reported_at": "t0"},
-        {"amount": None, "paid_on": "2026-10-01", "reported_at": "t1"},
+        {"amount": "240.00", "paid_on": "2026-10-01", "reported_at": "t0", "payment_parts": parts},
+        {"amount": None, "paid_on": "2026-10-01", "reported_at": "t1", "payment_parts": None},
         keep_refusal=False,
     )
     assert merged["amount"] == "240.00"
+    # The breakdown of that amount stays with it (§396).
+    assert merged["payment_parts"] == parts
+
+
+async def test_a_bill_paid_in_xero_from_the_bank_then_a_card_is_split(realdb):
+    """The follow-up's Xero case (§396): booked as all card before, so the bank
+    part was left off the 1099. The adapter now reads every payment's account
+    (`test_xero_status_sync_adapter.py`); here its report, as `bill_report`
+    completes it, is recorded with both parts."""
+    from app.services.erp_adapters.xero import report_from_bill
+    from app.services.payment_methods import RailPart
+
+    inv_id, _ = await _seed(
+        realdb, status=InvoiceStatus.posted_in_erp, bill_id=XERO_BILL, realm=XERO_REALM
+    )
+    report = report_from_bill(_xero_bill("250.00", paid="250.00"), XERO_BILL)
+    report.payment_parts = (RailPart(None, Decimal("150.00")), RailPart("card", Decimal("100.00")))
+    assert (await _apply_xero(realdb, report)).action == "paid_recorded"
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None
+    assert booked.rail_breakdown == [
+        {"method": None, "amount": "150.00"},
+        {"method": "card", "amount": "100.00"},
+    ]
 
 
 async def _connect_xero(realdb, **oauth_extra) -> None:

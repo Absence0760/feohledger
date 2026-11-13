@@ -2287,7 +2287,11 @@ endpoint's coded 403 is what tells the creator a colleague must record it.
 endpoint's answer to the field.
 
 Audit: `payment.recorded_outside` (source `user` / `erp`, amount, currency,
-method, reference, paid-on date — never bank data) plus the invoice's
+method, reference, paid-on date — never bank data; and, when the ERP stated
+which rails paid how much, `rail_breakdown`, `rail_breakdown_status` and
+`method_stated`, decisions §396; such a payment's `method` is NULL when several
+rails paid it, so NULL there means "not stated" or "several rails", and
+`rail_breakdown` tells them apart) plus the invoice's
 `invoice.payment_scheduled` and `invoice.paid_outside` /
 `invoice.paid_via_erp_report` transitions.
 

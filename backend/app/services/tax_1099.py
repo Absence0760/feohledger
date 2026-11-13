@@ -29,14 +29,14 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import and_, case, extract, func, select
+from sqlalchemy import and_, case, extract, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice
 from app.models.payment import Payment
 from app.models.vendor import Vendor
 from app.services.currency_conversion import payment_reporting_amount_sql
-from app.services.payment_methods import card_payment_method_clause
+from app.services.payment_methods import card_payment_method_clause, rail_breakdown_sums_sql
 from app.services.storage import tax_form_type_from_key
 from app.utils.dates import utc_today
 
@@ -735,6 +735,22 @@ async def build_1099_report(
         invoice_currency=Invoice.currency,
     )
     countable = reported.is_expressible
+    # One payment made on several rails (an ERP bill paid by cheque and card)
+    # carries its breakdown (decisions §396), and is split by it: the card
+    # parts go to `card_paid`, the rest to `ytd_paid`. Only when every part is a
+    # positive whole-cent amount and they sum EXACTLY to the payment (the
+    # writer already refused anything else; this re-checks it on every read),
+    # and the reported figure is the payment's own amount, in the currency the
+    # parts are in. Otherwise the payment counts as
+    # its `method` says, which for a split one is NULL: reportable, whole.
+    rails = rail_breakdown_sums_sql(Payment.rail_breakdown)
+    split = and_(rails.applies_to(Payment.amount), reported.is_payment_amount)
+    card_share = case((split, rails.card_amount), (is_card, reported.amount), else_=Decimal("0"))
+    reportable_share = reported.amount - card_share
+    has_card_share = case((split, rails.card_amount > 0), else_=is_card)
+    has_reportable_share = case((split, rails.card_amount < rails.total_amount), else_=~is_card)
+    reportable = and_(has_reportable_share, countable)
+    on_card = and_(has_card_share, countable)
     # The paying invoice's GL coding is the box driver. Grouping by it as well
     # as by vendor keeps this ONE query: the per-vendor figures are recovered
     # by adding the buckets back up, which is exact (same Decimals), while the
@@ -751,14 +767,14 @@ async def build_1099_report(
             Vendor.w9_file_key.label("w9_file_key"),
             Vendor.tin_verified_at.label("tin_verified_at"),
             gl_key.label("gl_account"),
-            func.coalesce(
-                func.sum(case((and_(~is_card, countable), reported.amount))), Decimal("0")
-            ).label("ytd_paid"),
-            func.count(case((and_(~is_card, countable), Payment.id))).label("payment_count"),
-            func.coalesce(
-                func.sum(case((and_(is_card, countable), reported.amount))), Decimal("0")
-            ).label("card_paid"),
-            func.count(case((and_(is_card, countable), Payment.id))).label("card_payment_count"),
+            func.coalesce(func.sum(case((reportable, reportable_share))), Decimal("0")).label(
+                "ytd_paid"
+            ),
+            # A split payment is counted on both sides: it has a reportable part
+            # and a card part.
+            func.count(case((reportable, Payment.id))).label("payment_count"),
+            func.coalesce(func.sum(case((on_card, card_share))), Decimal("0")).label("card_paid"),
+            func.count(case((on_card, Payment.id))).label("card_payment_count"),
             func.count(case((~countable, Payment.id))).label("unconverted_payment_count"),
         )
         .select_from(Vendor)
@@ -776,6 +792,7 @@ async def build_1099_report(
             # filing — or the reverse — on a non-UTC server session.
             & (extract("year", func.timezone("UTC", Payment.completed_at)) == year),
         )
+        .outerjoin(rails.lateral, true())
         .where(Vendor.organization_id == organization_id)
         .group_by(
             Vendor.id,
