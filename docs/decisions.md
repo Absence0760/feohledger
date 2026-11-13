@@ -17409,3 +17409,63 @@ durable fix is a kept-link table for `gl_accounts` mirroring `vendor_erp_links`,
 which needs a migration; repurposing an existing column (such as
 `erp_link_candidates` JSONB) would be the keyed-JSON shape §356 rejected for
 vendors, with no uniqueness per realm. It stays in `docs/followups.md`.
+
+## 378. Each policy violation is coded by the engine, and submit's two list-shaped 422s are coded refusals that keep their lists (§361 follow-up, 2026-11-13)
+
+**Context.** §361 coded every expense-report and card refusal except
+`POST /expense-reports/{id}/submit`'s two list-shaped 422s: `{message,
+violations}` for blocking policy violations and `{message, expense_ids}` for
+lines with no rate locked into the report currency. Each violation carried a
+`code` but its figures only inside a server-English `message`, so the web
+toast and the violation panel were English in every locale.
+
+**Decision.**
+
+- **The policy engine builds the params, per violation.** `_violation` adds
+  `params` from the same values the English sentence is composed from, and
+  `expense_policy.VIOLATION_PARAMS` is the catalogue of which keys each code
+  carries: `amount` + `amount_currency`, `limit` + `currency`, `comparison`
+  for all; `category` for `category_limit`; `miles`, `rate`, `direction` for
+  `mileage_amount_mismatch`. Money is `str(Decimal)` beside its ISO code.
+  `amount_currency` is explicit rather than derived from `comparison`, so a
+  client never has to know that a fell-closed comparison quotes the face
+  amount in the expense's own currency. Building them at the call site that
+  already composes the sentence, rather than parsing the sentence or
+  re-deriving figures in the endpoint, is what keeps the two from drifting.
+- **The params are a nested object; the flat keys stay.** `limit`, `actual`,
+  `currency`, `comparison`, `miles`, `rate` were already top-level, and
+  `expenses.policy_violations` stores them in JSONB. Moving them would break
+  the badge and every stored row; adding `params` beside them gives the
+  violation the same `{code, message, params}` shape as a coded refusal at
+  the cost of duplicating a few strings. A row stored before this has no
+  `params` and states its English `message` until its next write refreshes it
+  — no backfill, because the refresh is already on every write path and a
+  migration recomputing violations would need the live policies and FX state.
+- **Direction is a param, not a code.** Over- and under-claimed mileage stay
+  one code (`mileage_amount_mismatch`), so `BLOCKING_CODES`, the badge count
+  and every consumer that keys on the code are unchanged; the sentence picks
+  its variant from `params.direction` (and from `comparison` for the
+  fell-closed variants of every rule).
+- **The envelopes are coded refusals that keep their lists.**
+  `expense_controls.report_policy_blocked_detail` and
+  `report_lines_unconverted_detail` return `coded_refusal(...)` plus the
+  original `violations` / `expense_ids` key, with byte-identical English
+  `message`s. Codes: `expense_report_policy_blocked` (`count`) and
+  `expense_report_lines_unconverted` (`count`, `currency`). `count` on the
+  latter is the rollup's `unconverted_count`, not the id list's length, since a
+  line with no id still counts. Status 422 unchanged. The no-locked-rate list
+  holds ids, not per-line reasons (every entry has the same reason), so only
+  its envelope is coded.
+- **The web states each violation in a module of its own**,
+  `api/policyViolations.ts`, not in the `codedRefusals.ts` registry: a
+  violation is advisory data shown in a panel and a badge, not an error
+  `detail`, and its function always returns a sentence (the localized one, or
+  `message`) where the registry returns `null`. `miles` and `rate` are shown
+  as sent: `formatMoney` would round a four-place per-mile rate to two places.
+  A free-text category is named verbatim.
+
+**Mobile.** No change: §361 confirmed mobile calls no expense-report endpoint.
+
+**Also fixed.** The submit panel's `{#each}` key was `code + policy_id`, which
+collides when one policy blocks two lines (Svelte throws on a duplicate key);
+it now includes `expense_id`.
