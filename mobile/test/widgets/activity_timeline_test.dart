@@ -1,12 +1,13 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/widgets/activity_timeline.dart';
 
 Widget _host(Widget child) => MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: child),
     );
