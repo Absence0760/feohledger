@@ -58,9 +58,17 @@ class OAuthProviderSpec:
     #: Extra query parameters on the authorize redirect (e.g. Sage's
     #: ``filter=apiv3.1``). Never secrets.
     extra_authorize_params: dict[str, str] = field(default_factory=dict)
-    #: The provider's token-revocation endpoint, or None when it has none.
-    #: Disconnect calls it best-effort before clearing local state.
+    #: The provider's token-revocation endpoint. Disconnect and tenant deletion
+    #: call it best-effort (``erp_oauth.revoke_grant``). None ONLY together with
+    #: ``no_revoke_endpoint_reason``: a provider with no way to revoke is
+    #: stated, never assumed (``__post_init__``; decisions §371).
     revoke_url: str | None = None
+    #: Why ``revoke_url`` is None: the provider documents no revocation
+    #: endpoint, so the grant ends only when the customer removes the app on
+    #: the provider's side. Disconnect then answers ``revocation:
+    #: "unsupported"`` and the settings page tells the admin to do that.
+    #: Never set beside a ``revoke_url``. Not shown to users (English only).
+    no_revoke_endpoint_reason: str | None = None
     #: How the revoke endpoint takes the token: a form body (``token=…``,
     #: RFC 7009 — Xero, Sage) or, when True, a JSON object
     #: (``{"token": …}``), which is what Intuit documents. A provider sent the
@@ -91,6 +99,16 @@ class OAuthProviderSpec:
     authorize_url_setting: str | None = None
     token_url_setting: str | None = None
     revoke_url_setting: str | None = None
+
+    def __post_init__(self) -> None:
+        # Exactly one of the two: a spec with neither would make Disconnect
+        # silently forget our copy of the tokens while the grant stays live at
+        # the provider, which is the gap decisions §371 closed.
+        if bool(self.revoke_url) == bool(self.no_revoke_endpoint_reason):
+            raise ValueError(
+                f"OAuth provider {self.key!r} must set exactly one of revoke_url "
+                "and no_revoke_endpoint_reason"
+            )
 
 
 #: Bounds on what a provider's company list may put in front of the admin and

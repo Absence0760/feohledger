@@ -423,7 +423,11 @@ test.describe('/erp xero adapter against fake-erp', () => {
 		// The grant is revoked at Xero, not just forgotten here — otherwise the
 		// org stays connected on Xero's side (the live Demo Company showed it
 		// "Already connected" on the next consent).
-		expect(await resp.json()).toEqual({ disconnected: true, revoked: true });
+		expect(await resp.json()).toEqual({
+			disconnected: true,
+			revoked: true,
+			revocation: 'revoked'
+		});
 		const status = await oauthStatus(page);
 		expect(status.connected).toBe(false);
 	});

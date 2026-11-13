@@ -57,6 +57,23 @@ oldest first. The oldest is closest to the 60-day deadline.
    `provision_tenant`, so `scripts/create_tenant.py` and `deploy/add-tenant.sh`
    refuse a held slug too (exit 2).
 
+## An ERP grant the closure could not revoke
+
+A closure revokes the workspace's ERP OAuth grant at the provider before the
+control-plane rows go (`docs/decisions.md` §371). It never stops for it, so
+check the API log for the closure's line:
+
+```
+[tenant-deletion] <slug>: ERP OAuth grant (<provider>) failed|unsupported|unreadable
+```
+
+Anything but `revoked` (a warning) means the grant may still be live at the
+provider. Tell the customer to remove FeohLedger from that provider's connected
+apps; for Blackbaud (`unsupported`, SKY API has no revocation endpoint) that is
+disconnecting it from the environment in Blackbaud Marketplace. An operator
+deletion (`scripts/delete_tenant.py`) prints the same outcome in its written
+confirmation.
+
 ## What stays, on purpose
 
 - **The `workspace_closures` row** — organisation id, slug, the requesting

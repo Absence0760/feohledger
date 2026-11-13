@@ -10,7 +10,8 @@ for every such adapter (``erp_adapters/oauth_base.OAuthErpAdapter``):
   bound to the starting browser by :data:`BROWSER_COOKIE` (below);
 * :func:`exchange_code` — the callback's code → token exchange;
 * :func:`get_access_token` — what adapters call; refreshes and persists;
-* :func:`revoke` — best-effort revocation on disconnect.
+* :func:`revoke` / :func:`revoke_grant` — best-effort revocation on disconnect
+  and on tenant deletion.
 
 The routes live in ``app/api/erp_oauth.py``.
 
@@ -663,6 +664,10 @@ async def revoke(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> bo
 
     ``erp_settings`` is the resolved block and ``oauth`` carries the tokens
     (:func:`resolved_erp`), both read before the disconnect cleared them.
+
+    The client authenticates the way the provider's token endpoint takes it
+    (``spec.token_auth``): HTTP Basic for Intuit and Xero, ``client_id`` /
+    ``client_secret`` form fields for Sage (decisions §371).
     """
     url = revoke_endpoint(spec)
     token = oauth.get("refresh_token") or oauth.get("access_token")
@@ -672,18 +677,54 @@ async def revoke(spec: OAuthProviderSpec, erp_settings: dict, oauth: dict) -> bo
     headers = token_headers(spec, erp_settings)
     if creds is None:
         return False
+    body = {"token": str(token)}
+    auth = None
+    if spec.token_auth == "body":
+        body["client_id"] = creds.client_id
+        body["client_secret"] = creds.client_secret
+    else:
+        auth = httpx.BasicAuth(creds.client_id, creds.client_secret)
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-            body = {"token": str(token)}
             resp = await client.post(
                 url,
                 **({"json": body} if spec.revoke_json else {"data": body}),
                 headers=headers,
-                auth=httpx.BasicAuth(creds.client_id, creds.client_secret),
+                auth=auth,
             )
         return resp.status_code in (200, 204)
     except httpx.HTTPError:
         return False
+
+
+#: :func:`revoke_grant`'s answers, which Disconnect returns as ``revocation``
+#: and tenant deletion reports. ``unsupported``: the provider documents no
+#: revocation endpoint (``OAuthProviderSpec.no_revoke_endpoint_reason``), so the
+#: customer must remove the app on the provider's side. ``failed``: it has one
+#: and did not confirm (refused, unreachable, no usable app or token, or a
+#: provider key this build does not know).
+REVOKED = "revoked"
+REVOKE_FAILED = "failed"
+REVOKE_UNSUPPORTED = "unsupported"
+
+
+async def revoke_grant(spec: OAuthProviderSpec | None, erp_settings: dict, oauth: dict) -> str:
+    """:func:`revoke`, stated as :data:`REVOKED` / :data:`REVOKE_FAILED` /
+    :data:`REVOKE_UNSUPPORTED`.
+
+    Never raises: both callers (Disconnect, tenant deletion) have already
+    decided to forget the grant, and a provider that cannot be told must not
+    undo that. Never logs a token: the warning names the provider only.
+    """
+    if spec is None:
+        return REVOKE_FAILED
+    if not revoke_endpoint(spec):
+        return REVOKE_UNSUPPORTED if spec.no_revoke_endpoint_reason else REVOKE_FAILED
+    try:
+        return REVOKED if await revoke(spec, erp_settings, oauth) else REVOKE_FAILED
+    except Exception as exc:  # noqa: BLE001 — best-effort by contract; the outcome says so
+        logger.warning("erp_oauth: %s revocation raised %s", spec.key, exc.__class__.__name__)
+        return REVOKE_FAILED
 
 
 # ---------------------------------------------------------------------------

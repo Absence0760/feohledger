@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Literal
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -131,6 +132,12 @@ class OAuthStatusResponse(BaseModel):
 class DisconnectResponse(BaseModel):
     disconnected: bool
     revoked: bool
+    #: ``erp_oauth.revoke_grant``'s outcome: ``revoked``, ``failed`` (the
+    #: provider did not confirm) or ``unsupported`` (it has no revocation
+    #: endpoint — Blackbaud). Anything but ``revoked`` means the grant may still
+    #: be live at the provider, and the settings page tells the admin to remove
+    #: the app there (decisions §371). None when nothing was connected.
+    revocation: Literal["revoked", "failed", "unsupported"] | None = None
 
 
 class PendingCompany(BaseModel):
@@ -434,7 +441,7 @@ async def oauth_disconnect(
             stored = {}
         if not any(stored.get(p) for p in erp_oauth.TOKEN_PATHS):
             await db.rollback()
-            return DisconnectResponse(disconnected=False, revoked=False)
+            return DisconnectResponse(disconnected=False, revoked=False, revocation=None)
         oauth = {}
 
     provider = str(oauth.get("provider") or "")
@@ -482,10 +489,10 @@ async def oauth_disconnect(
     # Revoke AFTER the commit: the provider's latency is not charged to a
     # transaction holding the org row lock, and a failed revoke must not leave
     # the tenant believing it is still connected.
-    revoked = False
-    spec = erp_oauth.load_providers().get(provider)
-    if spec is not None:
-        revoked = await erp_oauth.revoke(spec, resolved, oauth_with_tokens)
+    revocation = await erp_oauth.revoke_grant(
+        erp_oauth.load_providers().get(provider), resolved, oauth_with_tokens
+    )
+    revoked = revocation == erp_oauth.REVOKED
 
     await dispatch_auth_audit(
         organization_id=org.id,
@@ -493,9 +500,9 @@ async def oauth_disconnect(
         action="organization.erp_token_revoked",
         entity_id=org.id,
         entity_type="organization",
-        details={"provider": provider, "revoked": revoked},
+        details={"provider": provider, "revoked": revoked, "revocation": revocation},
     )
-    return DisconnectResponse(disconnected=True, revoked=revoked)
+    return DisconnectResponse(disconnected=True, revoked=revoked, revocation=revocation)
 
 
 # ---------------------------------------------------------------------------
