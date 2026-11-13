@@ -143,6 +143,29 @@ currency the entity *reports* in, not the one a supplier bills it in. So the
 row is refused and the file is fixed (`docs/decisions.md` §372). Add the column
 with the invoice's real currency, even when every row is `USD`.
 
+### The corporate-card feed and statement uploads follow the same rule
+
+`POST /api/corporate-card-transactions/import-csv` (`import_corporate_card_csv`,
+`expense-management.md` § WF4) refuses a blank or malformed per-row `currency`
+with the same two codes and the same helper (`_parse_currency`). It used to
+write `(currency or "USD").upper()[:3]`, so a GBP card statement with no
+currency column reconciled as dollars, and the match-suggestion query compares
+currencies exactly, so those lines then matched USD expenses and no GBP ones.
+Its other row errors are coded too: `csv_card_amount_invalid` (a blank or
+non-numeric `amount`; a negative is a refund and imports) and
+`csv_date_invalid`. The expenses page's Cards tab lists every refused row with
+its reason (`components/ui/CsvImportErrors.svelte`, the list the import modal
+uses); it used to show only an imported / skipped count.
+
+The two statement uploads take one currency for the whole file as a form field,
+and neither defaults it any more: `POST /api/bank-reconciliation/upload` and
+`POST /api/vendor-statements/upload` answer 422
+`statement_currency_required` for an absent or blank field and
+`statement_currency_invalid` (`params: {value}`) for a malformed one
+(`api/refusals.statement_currency`), before the file is read. A lowercase code
+is stored uppercased. Both web forms offer a currency list defaulted to the
+organization's currency. `docs/decisions.md` §377.
+
 ## Vendors resolve within the import's entity
 
 Both importers run under one entity — the selected one (`X-Entity-ID`), or the
@@ -170,18 +193,21 @@ matching). The entity's own row wins over an unstamped one of the same name.
 
 Each row error carries a stable `code` and the `params` its sentence needs, and
 the web import modal (`ImportCsvModal.svelte`, shared by `/vendors` and
-`/invoices`) states it in the reader's language through
+`/invoices`) and the expenses page's card import both render the list through
+`components/ui/CsvImportErrors.svelte`, which states it in the reader's language through
 `frontend/src/lib/api/codedRefusals.ts`, falling back to `message`:
 
 | `code` | Importer | `params` | Raised when |
 |---|---|---|---|
-| `csv_malformed` | both | — | The file is not parseable CSV (reported as row 0). |
+| `csv_malformed` | all three | — | The file is not parseable CSV (reported as row 0). |
 | `csv_vendor_name_required` | vendors | — | `name` is blank. |
 | `csv_invoice_number_required` | invoices | — | `invoice_number` is blank. |
 | `csv_vendor_required` | invoices | — | Both `vendor_name` and `vendor_code` are blank. |
 | `csv_amount_invalid` | invoices | `value` | `amount` is blank, unparseable, negative or too wide (§ Amount range). |
-| `csv_currency_required` | invoices | — | `currency` is blank or missing. |
-| `csv_currency_invalid` | invoices | `value` | `currency` is not a three-letter code. |
+| `csv_currency_required` | invoices, card feed | — | `currency` is blank or missing. |
+| `csv_currency_invalid` | invoices, card feed | `value` | `currency` is not a three-letter code. |
+| `csv_card_amount_invalid` | card feed | `value` | `amount` is blank or not a number (negatives import). |
+| `csv_date_invalid` | card feed | `value` | `date` is blank or not a readable date. |
 | `csv_status_invalid` | invoices | `value` | `status` is no invoice status. |
 | `csv_status_not_importable` | invoices | `status` | A live pipeline stage (§ Choosing the right status). |
 | `csv_status_records_history` | invoices | `status` | `done` / `paid` (or a blank status) from a caller without admin / AP manager. |
@@ -433,6 +459,7 @@ can correct it. See `api-reference.md` § Money and quantity fields.)
 | Many `vendor_name or vendor_code is required` errors | The vendor column name in the CSV doesn't match. Rename it before upload. |
 | Every row says `currency is required` | The file has no `currency` column (or it is named differently). Add one with each invoice's real currency — there is no default, not even `USD`. |
 | `currency invalid: 'EURO'` | Use the three-letter ISO 4217 code (`EUR`). |
+| A card-feed import lists rows as not imported for currency | The bank's card export has no `currency` column, or names it differently. Add one with each transaction's real currency; there is no default. |
 | An invoice linked to a new `unverified` vendor although the supplier exists | The existing vendor belongs to another entity. Import under that entity (switch entity first), or keep the new stub as this entity's own record of the supplier. |
 | `invoice_number 'INV-1' is the same invoice number as existing invoice 'INV-001' …` | The ledger already holds that invoice for this vendor under a differently formatted number. Use the existing number, or enter the row by hand if it is a different invoice. |
 | Duplicate vendors show up twice | Customer export has inconsistent casing. Add a `code` column to dedup cleanly. |

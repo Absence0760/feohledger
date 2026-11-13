@@ -1074,16 +1074,89 @@ async def test_corporate_card_import_validation_errors_count_as_skipped():
     '{imported} imported, {skipped} skipped' UI banner) would otherwise
     silently undercount every non-dedup failure."""
     csv_text = (
-        "external_txn_id,date,merchant,amount\n"
-        "T1,2026-06-01,Uber,not-a-number\n"
-        "T2,not-a-date,Lyft,10.00\n"
-        "T3,2026-06-02,Waymo,5.00\n"
+        "external_txn_id,date,merchant,amount,currency\n"
+        "T1,2026-06-01,Uber,not-a-number,USD\n"
+        "T2,not-a-date,Lyft,10.00,USD\n"
+        "T3,2026-06-02,Waymo,5.00,USD\n"
     )
     db = _StubSession()
     result = await import_corporate_card_csv(db, uuid.uuid4(), csv_text)
     assert result.imported == 1, result.to_dict()
     assert result.skipped == 2, result.to_dict()
-    assert len(result.errors) == 2
+    assert [(e["row"], e["code"], e["params"]) for e in result.to_dict()["errors"]] == [
+        (2, "csv_card_amount_invalid", {"value": "not-a-number"}),
+        (3, "csv_date_invalid", {"value": "not-a-date"}),
+    ]
+
+
+# A card feed's currency is required per row, exactly as the invoice
+# importer's is (decisions §372, §377): a GBP statement with no currency column
+# used to reconcile as USD, and a long cell was truncated to three letters.
+
+
+@pytest.mark.asyncio
+async def test_corporate_card_import_refuses_a_blank_currency_never_usd():
+    csv_text = "external_txn_id,date,merchant,amount,currency\nT1,2026-06-01,Pret,12.40,\n"
+    db = _StubSession()
+    result = await import_corporate_card_csv(db, uuid.uuid4(), csv_text)
+    assert result.imported == 0
+    assert result.skipped == 1
+    assert db.added == []
+    [err] = result.to_dict()["errors"]
+    assert err["row"] == 2
+    assert err["code"] == "csv_currency_required"
+    assert err["params"] == {}
+    assert err["message"]  # the English fallback stays
+
+
+@pytest.mark.asyncio
+async def test_corporate_card_import_refuses_a_file_with_no_currency_column():
+    csv_text = "external_txn_id,date,merchant,amount\nT1,2026-06-01,Pret,12.40\n"
+    db = _StubSession()
+    result = await import_corporate_card_csv(db, uuid.uuid4(), csv_text)
+    assert result.imported == 0
+    assert [e["code"] for e in result.to_dict()["errors"]] == ["csv_currency_required"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cell", ["EURO", "US$", "e", "12"])
+async def test_corporate_card_import_refuses_a_malformed_currency_never_truncates(cell):
+    csv_text = f"external_txn_id,date,merchant,amount,currency\nT1,2026-06-01,Pret,12.40,{cell}\n"
+    db = _StubSession()
+    result = await import_corporate_card_csv(db, uuid.uuid4(), csv_text)
+    assert result.imported == 0
+    assert db.added == []
+    [err] = result.to_dict()["errors"]
+    assert (err["row"], err["code"], err["params"]) == (2, "csv_currency_invalid", {"value": cell})
+
+
+@pytest.mark.asyncio
+async def test_corporate_card_import_mixed_file_imports_good_rows_and_codes_the_rest():
+    """One bad currency refuses its own row only; the rest import, a lowercase
+    code is normalized, and a refused row does not claim its external id (a
+    later good row with the same id still imports)."""
+    csv_text = (
+        "external_txn_id,date,merchant,amount,currency\n"
+        "T1,2026-06-01,Pret,12.40,gbp\n"
+        "T2,2026-06-02,Uber,8.00,\n"
+        "T3,2026-06-03,Lyft,9.00,EURO\n"
+        "T2,2026-06-02,Uber,8.00,GBP\n"
+        "T4,2026-06-04,Hotel,-50.00,EUR\n"
+    )
+    db = _StubSession()
+    result = await import_corporate_card_csv(db, uuid.uuid4(), csv_text)
+    body = result.to_dict()
+    assert body["imported"] == 3, body
+    assert body["skipped"] == 2, body
+    assert [(e["row"], e["code"]) for e in body["errors"]] == [
+        (3, "csv_currency_required"),
+        (4, "csv_currency_invalid"),
+    ]
+    assert [(t.external_txn_id, t.currency) for t in db.added] == [
+        ("T1", "GBP"),
+        ("T2", "GBP"),
+        ("T4", "EUR"),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1298,7 +1371,7 @@ async def test_vendor_and_malformed_file_errors_are_coded(monkeypatch):
         raise csv_import_module.csv.Error("field larger than field limit")
 
     monkeypatch.setattr(csv_import_module, "_read_rows", _unreadable)
-    for importer in (import_vendors_csv, import_invoices_csv):
+    for importer in (import_vendors_csv, import_invoices_csv, import_corporate_card_csv):
         (err,) = (await importer(_StubSession(), uuid.uuid4(), "x")).errors
         assert (err.row, err.structured) == (0, {"code": "csv_malformed", "params": {}})
         assert err.message == "Malformed CSV: field larger than field limit"

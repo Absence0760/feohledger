@@ -746,6 +746,26 @@ const BUILDERS: Record<string, Builder> = {
 		const value = str(p, 'value');
 		return value === null ? null : t('refusal.csvCurrencyInvalid', { value });
 	},
+	// The corporate-card feed's own row errors (decisions §377): a negative
+	// amount is a refund there, so only a non-number is refused, and the date
+	// is required. A blank cell has its own sentence, as for `csv_amount_invalid`.
+	csv_card_amount_invalid: (p, t) => {
+		if (typeof p.value !== 'string') return null;
+		const value = str(p, 'value');
+		return value === null ? t('refusal.csvAmountMissing') : t('refusal.csvCardAmountInvalid', { value });
+	},
+	csv_date_invalid: (p, t) => {
+		if (typeof p.value !== 'string') return null;
+		const value = str(p, 'value');
+		return value === null ? t('refusal.csvDateMissing') : t('refusal.csvDateInvalid', { value });
+	},
+	// A statement upload's one currency field (bank reconciliation, vendor
+	// statements — `api/refusals.statement_currency`, decisions §377).
+	statement_currency_required: fixed('refusal.statementCurrencyRequired'),
+	statement_currency_invalid: (p, t) => {
+		const value = str(p, 'value');
+		return value === null ? null : t('refusal.statementCurrencyInvalid', { value });
+	},
 	csv_status_invalid: (p, t) => {
 		const value = str(p, 'value');
 		return value === null ? null : t('refusal.csvStatusInvalid', { value });

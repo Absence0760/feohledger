@@ -17409,3 +17409,53 @@ durable fix is a kept-link table for `gl_accounts` mirroring `vendor_erp_links`,
 which needs a migration; repurposing an existing column (such as
 `erp_link_candidates` JSONB) would be the keyed-JSON shape §356 rejected for
 vendors, with no uniqueness per realm. It stays in `docs/followups.md`.
+
+## 377. The corporate-card feed and the statement uploads refuse a blank currency too (§372 follow-up, 2026-11-13)
+
+§372 stopped the invoice importer stamping `USD` on a blank currency cell. The
+corporate-card feed (`csv_import.import_corporate_card_csv`) still wrote
+`(currency or "USD").upper()[:3]`, so a GBP card statement with no currency
+column reconciled as dollars, and a long cell was truncated. That matters more
+here than it looks: match suggestions and `/match` compare currencies exactly,
+so every such line became a candidate for USD expenses and for no GBP one.
+
+**The card feed refuses the row with §372's codes and helper.** A blank cell,
+or no `currency` column, is `csv_currency_required`; a malformed one is
+`csv_currency_invalid` with `params.value`, both through `_parse_currency`, so
+there is one rule and one shape check (`normalize_iso_currency`). A refused row
+does not claim its `external_txn_id`, so a corrected repeat later in the file
+still imports. The feed's other row errors are coded in the same change
+(`csv_card_amount_invalid`, distinct from `csv_amount_invalid` because a
+negative amount is a refund on a card feed and imports; `csv_date_invalid`;
+`csv_malformed`), since the page that now shows them would otherwise show
+server English for those in five locales. **Rejected: default to the entity's
+or the organization's currency.** It is what the entity reports in, not what a
+card was charged in, which is §372's reason and the same here; a card programme
+billed in one currency is exactly when the column is easiest to add.
+
+**The Cards tab lists refused rows.** It used to toast only imported / skipped
+counts, so a refused row would have vanished, and the toast called every
+skipped row a duplicate. The list `ImportCsvModal` rendered is now a shared
+component (`components/ui/CsvImportErrors.svelte`), used by the modal and by a
+dismissible panel above the card table; the toast counts duplicates and
+refused rows separately. `refusal.csvCurrencyRequired` now says "the row's"
+currency rather than "the invoice's", since a card row shares the sentence.
+
+**The two statement uploads have the same default at the statement level.**
+`POST /api/bank-reconciliation/upload` and `POST /api/vendor-statements/upload`
+took `currency: str = Form("USD")`, and passed any string through (an `EURO`
+overflowed the `String(3)` column). Both now go through
+`api/refusals.statement_currency`: absent or blank is 422
+`statement_currency_required`, malformed is 422 `statement_currency_invalid`,
+before the file is read, and a lowercase code is stored uppercased;
+`bank_reconciliation.parse_csv_statement` no longer defaults it either. These are
+new codes, not §372's, because the field is one per file and §372's sentences
+say "this row was not imported". The vendor-statement modal's free-text
+currency (which sent a blank as "use the default") became the same ISO list the
+bank-statement modal already used, defaulted to the organization's currency.
+
+The other CSV ingest paths checked: budgets and catalogs have no CSV import
+(their `currency` defaults are JSON create schemas). The pasted-lines vendor
+statement create (`ReconciliationCreate.currency`, `default="USD"`) is not a
+CSV path but has the same default; it is tracked in `docs/followups.md`, since
+making it required touches every caller that omits it.

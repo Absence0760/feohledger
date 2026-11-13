@@ -600,6 +600,41 @@ async def test_import_csv_still_rejects_an_unparseable_amount(realdb):
     assert body["errors"]
 
 
+async def test_import_csv_reports_each_refused_currency_row_with_code_and_params(realdb):
+    """A blank currency is refused per row, never stored as USD, and the
+    response carries each refused row's `{code, params}` beside its English
+    message so the Cards tab can state it in the reader's language (§377)."""
+    csv_bytes = _csv(
+        _HEADER,
+        "ccy-ok,2026-06-05,,Pret,12.40,gbp,1234,c",
+        "ccy-blank,2026-06-05,,Pret,8.00,,1234,c",
+        "ccy-bad,2026-06-05,,Pret,9.00,EURO,1234,c",
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/corporate-card-transactions/import-csv",
+            files={"file": ("cards.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert (body["imported"], body["skipped"]) == (1, 2)
+    assert [{k: e[k] for k in ("row", "code", "params")} for e in body["errors"]] == [
+        {"row": 3, "code": "csv_currency_required", "params": {}},
+        {"row": 4, "code": "csv_currency_invalid", "params": {"value": "EURO"}},
+    ]
+    assert all(e["message"] for e in body["errors"])
+
+    async with realdb.sessionmaker("a")() as s:
+        rows = (
+            await s.execute(
+                select(
+                    CorporateCardTransaction.external_txn_id, CorporateCardTransaction.currency
+                ).where(CorporateCardTransaction.external_txn_id.like("ccy-%"))
+            )
+        ).all()
+    assert [tuple(r) for r in rows] == [("ccy-ok", "GBP")]
+
+
 # ---------------------------------------------------------------------------
 # List filters
 # ---------------------------------------------------------------------------

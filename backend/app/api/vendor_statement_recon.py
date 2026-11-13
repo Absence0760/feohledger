@@ -42,6 +42,7 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.api.refusals import statement_currency
 from app.config import settings
 from app.database import get_control_db
 from app.models.invoice import Invoice, InvoiceStatus
@@ -474,7 +475,8 @@ async def upload_reconciliation(
     vendor_id: str = Form(...),
     statement_date: date = Form(...),
     statement_reference: str | None = Form(None),
-    currency: str = Form("USD"),
+    # No default (decisions §377): see `refusals.statement_currency`.
+    currency: str | None = Form(None),
     db: AsyncSession = Depends(get_tenant_db),
     ctrl_db: AsyncSession = Depends(get_control_db),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
@@ -501,6 +503,7 @@ async def upload_reconciliation(
     # unconditional post-read length check below stays regardless, since
     # `.size` is Optional and this must not depend on the framework populating
     # it.
+    statement_ccy = statement_currency(currency)
     if file.size is not None and file.size > storage.MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail=_TOO_LARGE)
     raw = await file.read()
@@ -547,7 +550,7 @@ async def upload_reconciliation(
         vendor_id=uuid.UUID(vendor_id),
         statement_date=statement_date,
         statement_reference=statement_reference,
-        currency=currency,
+        currency=statement_ccy,
         notes=None,
         source_format=source_format,
         statement_lines=statement_lines,

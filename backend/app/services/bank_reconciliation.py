@@ -363,7 +363,9 @@ def parse_csv_statement(
     account_identifier: str,
     period_start: date,
     period_end: date,
-    currency: str = "USD",
+    # Required: the caller supplies the statement's currency (the upload route
+    # validates it, `api/refusals.statement_currency`); never assumed USD (§377).
+    currency: str,
     imported_by: uuid.UUID | None = None,
     file_key: str | None = None,
     day_first: bool = False,

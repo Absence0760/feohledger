@@ -1014,7 +1014,15 @@ describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', 
 			{ status: 'paid' },
 			'refusal.csvStatusRecordsHistory',
 			{ status: 'paid' }
-		]
+		],
+		// The corporate-card feed's own row errors and the statement uploads'
+		// currency field (decisions §377).
+		['csv_card_amount_invalid', { value: 'n/a' }, 'refusal.csvCardAmountInvalid', { value: 'n/a' }],
+		['csv_card_amount_invalid', { value: '' }, 'refusal.csvAmountMissing', {}],
+		['csv_date_invalid', { value: '31/31/2026' }, 'refusal.csvDateInvalid', { value: '31/31/2026' }],
+		['csv_date_invalid', { value: '' }, 'refusal.csvDateMissing', {}],
+		['statement_currency_required', {}, 'refusal.statementCurrencyRequired', {}],
+		['statement_currency_invalid', { value: 'EURO' }, 'refusal.statementCurrencyInvalid', { value: 'EURO' }]
 	] as const;
 
 	it.each(CSV_ROW_ERRORS)(

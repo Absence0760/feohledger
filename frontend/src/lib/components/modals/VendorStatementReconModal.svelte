@@ -28,6 +28,8 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { DEFAULT_CURRENCY, currencyOptions } from '#lib/utils/money.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import {
 		createReconciliation,
@@ -61,7 +63,11 @@
 	let vendor_id = $state('');
 	let statement_date = $state('');
 	let statement_reference = $state('');
-	let currency = $state('USD');
+	// The statement's currency is chosen, never typed blank and never assumed:
+	// the upload refuses a blank or malformed code (decisions §377), and this
+	// list is the same ISO set the bank-statement import offers.
+	let currency = $state(orgCurrency.currency ?? DEFAULT_CURRENCY);
+	const currencies = $derived(currencyOptions(orgCurrency.currency ?? DEFAULT_CURRENCY));
 	let notes = $state('');
 	// Intake choice, explicit rather than inferred. Both paths used to be visible
 	// at once with "a file wins" as the tiebreak, so a user who typed lines AND
@@ -168,14 +174,14 @@
 					vendor_id,
 					statement_date,
 					statement_reference: statement_reference.trim() || undefined,
-					currency: currency.trim() || undefined
+					currency
 				});
 			} else {
 				saved = await createReconciliation({
 					vendor_id,
 					statement_date,
 					statement_reference: statement_reference.trim() || null,
-					currency: currency.trim() || 'USD',
+					currency,
 					notes: notes.trim() || null,
 					lines: payloadLines
 				});
@@ -304,7 +310,11 @@
 				</label>
 				<label>
 					<span>{m('vendorStatements.modal.currency')}</span>
-					<input type="text" bind:value={currency} maxlength="3" disabled={!canEdit} />
+					<select bind:value={currency} disabled={!canEdit}>
+						{#each currencies as code (code)}
+							<option value={code}>{code}</option>
+						{/each}
+					</select>
 				</label>
 			</div>
 
