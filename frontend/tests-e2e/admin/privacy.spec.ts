@@ -73,11 +73,57 @@ test.describe('/admin/privacy (admin)', () => {
 		// server prose (decisions §360): a fresh vendor has no invoices yet.
 		const summary = dsarModal.getByTestId('dsar-summary');
 		await expect(summary.locator('[data-section="related_invoices"]')).toHaveText('0 invoices');
+		// Nothing was cut, so there is no truncation notice (decisions §369).
+		await expect(dsarModal.getByTestId('dsar-truncated-notice')).toHaveCount(0);
 		await dsarModal.getByRole('button', { name: 'Close' }).click();
 		await expect(dsarModal).toBeHidden();
 
 		// The request lands in the history table.
 		await expect(page.getByText('DSAR export').first()).toBeVisible();
+	});
+
+	test('offers the complete bundle as a download, and says when the view was cut', async ({
+		page
+	}) => {
+		const name = `E2E Bundle Vendor ${Date.now()}`;
+		const vendorId = await createVendor(page, name);
+
+		// A vendor past the 1000-row cap is too heavy to seed per run, so the
+		// cut is simulated on the REAL response (only the two flags change);
+		// the download itself is the real, uncapped route. The cap and the
+		// bundle's completeness are pinned server-side in
+		// backend/tests/test_privacy_full_bundle.py.
+		await page.route('**/api/privacy/dsar', async (route) => {
+			const response = await route.fetch();
+			const json = await response.json();
+			await route.fulfill({
+				response,
+				json: { ...json, complete: false, truncated_sections: ['related_invoices'] }
+			});
+		});
+
+		await page.goto('/admin/privacy');
+		await page.getByLabel('Subject type').selectOption('vendor_contact');
+		await page.getByLabel('Identifier').fill(vendorId);
+		await page.getByRole('button', { name: 'Export data (DSAR)' }).click();
+
+		const dsarModal = page.getByRole('dialog', { name: 'Data export' });
+		await expect(dsarModal).toBeVisible({ timeout: 10_000 });
+		await expect(dsarModal.getByTestId('dsar-truncated-notice')).toContainText(
+			'1 section holds more records'
+		);
+
+		const [download] = await Promise.all([
+			page.waitForEvent('download'),
+			dsarModal.getByRole('button', { name: 'Download complete bundle' }).click()
+		]);
+		expect(download.suggestedFilename()).toMatch(/^dsar-[0-9a-f-]+\.json$/);
+		const path = await download.path();
+		const { readFile } = await import('node:fs/promises');
+		const bundle = JSON.parse(await readFile(path, 'utf-8'));
+		expect(bundle.complete).toBe(true);
+		expect(bundle.data.vendor.name).toBe(name);
+		expect(bundle.data.related_invoices.truncated).toBe(false);
 	});
 
 	test('erasure requires the acknowledgement checkbox and is a real, irreversible redaction', async ({

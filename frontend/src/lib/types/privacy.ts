@@ -108,6 +108,15 @@ export interface DSARResponse {
 	/** Typed per-section record counts of `data` (see `DSAR_COUNTED_SECTIONS`).
 	 *  Optional only for a server that predates it. */
 	record_counts?: Record<string, number>;
+	/** Whether `data` is everything held. Each high-volume section is capped in
+	 *  this response; `false` means at least one was cut (named in
+	 *  `truncated_sections`) and the whole set is the download at
+	 *  `full_bundle_url` (decisions §369). Optional only for an older server. */
+	complete?: boolean;
+	truncated_sections?: string[];
+	/** API-relative path of the complete, uncapped bundle for this request
+	 *  (`GET /api/privacy/dsar/{request_id}/bundle`). */
+	full_bundle_url?: string | null;
 }
 
 export interface ErasureRequest {

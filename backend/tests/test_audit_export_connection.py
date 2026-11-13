@@ -42,6 +42,7 @@ from app.api import audit as audit_api
 from app.models.organization import Organization
 from app.models.workflow import AuditLog
 from app.tenant import get_tenant
+from app.utils import spooled_export
 
 TENANT = "a"
 
@@ -480,7 +481,9 @@ async def test_a_render_failure_closes_the_spool_rather_than_leaking_it(monkeypa
         made.append(spool)
         return spool
 
-    monkeypatch.setattr(audit_api.tempfile, "SpooledTemporaryFile", _recording)
+    # The spool primitives live in `utils/spooled_export` since §369 (shared
+    # with the DSAR complete bundle); `audit_api._spool_body` is that function.
+    monkeypatch.setattr(spooled_export.tempfile, "SpooledTemporaryFile", _recording)
     boom = RuntimeError("cursor died mid-range")
 
     async def _failing():

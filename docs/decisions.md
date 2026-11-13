@@ -17042,6 +17042,78 @@ its only helper `webhook_security.event_claim_exists` (no other caller), and
 their tests are deleted. `test_an_unscoped_message_id_claim_no_longer_blocks_any_tenant`
 pins the absence: a bare Message-ID claim no longer drops any tenant's invoice.
 
+## 369. A DSAR export caps every large section inline and streams the complete bundle on request; nothing is stored (privacy follow-up, 2026-11-13)
+
+**The gap.** §237 put every `.limit()` collection of the DSAR bundle behind
+`_capped`, but `services/privacy_export` still returned a vendor subject's
+invoices and payments whole. A supplier with years of volume therefore built one
+unbounded JSON document in memory, in a synchronous response, on the event loop.
+The sections that *were* capped had the opposite problem: they reported their
+true total, but the subject only ever received the first thousand rows. GDPR
+Art. 15 is a right to the data, not to a tally of what was left out.
+
+**The calls.**
+
+- **Every high-volume section is capped in the `POST /privacy/dsar` response,**
+  invoices and payments now included, and the document manifest's listing too
+  (it gains `returned` / `truncated`). **That is a shape change:**
+  `data.related_invoices` / `data.related_payments` were arrays and are now
+  `{total, returned, truncated, items}` objects like every other capped
+  section. No consumer in the repo read them as arrays (the page summarises
+  from `record_counts`), and a uniform shape was preferred over keeping two
+  sections the odd ones out. The response gains `complete`,
+  `truncated_sections` and `full_bundle_url`, so a cut is stated for the
+  export as a whole, not only per section. The routine `privacy.dsar_export`
+  audit row records `complete` and the cut section names.
+- **The complete set is `GET /privacy/dsar/{request_id}/bundle`, streamed.**
+  Every capped section is declared once as a `_Section` (a column select and its
+  serialiser); the inline reader takes the first `MAX_EXPORT_ROWS` of it and the
+  streamed reader walks all of it off a server-side cursor
+  (`yield_per=STREAM_CHUNK_ROWS`). One declaration is what keeps the preview and
+  the file from disagreeing about a section. Payments and vendor chat reach the
+  vendor's invoices by subquery, and a user's expenses join their reports, so
+  each section and its total are the same set whether or not a sibling section
+  was cut (the old code listed only the lines of the reports it had returned).
+- **The body is spooled, then audited, then sent.** Chunks go into an anonymous
+  `SpooledTemporaryFile` (1 MB in memory, then disk, writes off the loop). The
+  helpers moved from `api/audit` to `utils/spooled_export`, because the SOX
+  audit export solved exactly this problem (§105, §110). Only after the whole body is
+  rendered is `privacy.dsar_export.full_bundle` committed, and only then are the
+  sessions released and the bytes sent. A failure while rendering is a clean 500
+  with no row and no data, and every retrieval is its own row. The closing
+  braces come last, so an aborted transfer never parses as complete.
+- **The download is always masked.** The `vendor` record is the only section
+  with banking data, and it is never capped, so the step-up-gated `POST` already
+  delivers it whole when an unmasked disclosure is authorized. Re-running that
+  gate on a GET would buy nothing the POST does not, and honouring an earlier
+  request's unmasked flag would turn one step-up into a reusable grant.
+- **Any admin may download any of the org's DSAR exports by id**, the same reach
+  the `POST` has; an erasure's id, another tenant's or an unknown one is the same
+  404. The bundle is read at download time (`generated_at` says when), not
+  frozen at request time.
+
+**Rejected: an async job that writes the bundle to object storage and hands
+back a signed URL** (the follow-up's proposal). It would put a complete copy of
+the subject's PII in a bucket with a GOVERNANCE Object Lock default retention
+(`infra/s3.tf`, `invoice_retention_days`). That copy would outlive the export's
+purpose, and a later Art. 17 erasure of the same subject could not delete it:
+`privacy_documents` does not know it exists, and the lock refuses the delete.
+A signed URL is also a bearer credential that skips the tenant and role checks
+the storage module refuses to bypass (`storage.invoice_file_url`: "never a
+presigned or bucket URL"). And an in-process job that dies on a restart leaves a
+request stuck in `pending`, which then needs a recovery sweep. Streaming gives
+the subject the same complete set with none of that, at the price of a slower
+download for a very large subject: the same price the SOX audit export already
+pays (§105, §110). **Rejected: paging the response.**
+The subject is owed one whole set, and pages read at different moments are not
+one.
+
+**Left as is.** The sections are read under the session's default READ
+COMMITTED, so a write that lands mid-download can make two sections reflect
+slightly different moments, as the inline response always could. The
+`DataSubjectRequest` row's `record_counts` is still the vendor bundle's
+`counts`.
+
 ## 373. A vendor merge moves the duplicates' ERP links, company by company, and refuses two different ids in one company (§356 follow-up, 2026-11-13)
 
 **The gap.** §356 left the merge alone: `services/vendor_merge` moved every

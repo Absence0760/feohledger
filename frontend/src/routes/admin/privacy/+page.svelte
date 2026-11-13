@@ -11,7 +11,12 @@
 	import StepUpPrompt from '#lib/components/ui/StepUpPrompt.svelte';
 	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
-	import { submitDsar, submitErasure, listPrivacyRequests } from '#lib/api/privacy.ts';
+	import {
+		submitDsar,
+		submitErasure,
+		listPrivacyRequests,
+		downloadDsarBundle
+	} from '#lib/api/privacy.ts';
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -168,6 +173,24 @@
 			toast(m('admin.privacy.toast.copied'), 'success');
 		} catch {
 			toast(m('admin.privacy.toast.copyFailed'), 'error');
+		}
+	}
+
+	// ── Complete bundle (every section uncapped) ─────────────────────────
+	// The inline result caps each large section; when one was cut the page
+	// says so and offers the whole set as a file, which the server streams
+	// and audits per download (decisions §369).
+	let bundleDownloading = $state(false);
+
+	async function downloadFullBundle() {
+		if (!dsarResult?.full_bundle_url) return;
+		bundleDownloading = true;
+		try {
+			await downloadDsarBundle(dsarResult.full_bundle_url, `dsar-${dsarResult.request_id}.json`);
+		} catch (e) {
+			toast(privacyError(e, m('admin.privacy.error.bundle')), 'error');
+		} finally {
+			bundleDownloading = false;
 		}
 	}
 
@@ -404,6 +427,13 @@
 				{/if}
 			</section>
 		{/if}
+		{#if dsarResult.complete === false}
+			<p class="truncated-notice" role="status" data-testid="dsar-truncated-notice">
+				{m('admin.privacy.export.truncated', {
+					sections: dsarResult.truncated_sections?.length ?? 0
+				})}
+			</p>
+		{/if}
 		{#if dsarResult.banking_disclosure === 'unmasked'}
 			<p class="unmask-refusal" data-testid="dsar-unmasked-notice">
 				{m('privacyDsar.unmaskedNotice')}
@@ -416,7 +446,24 @@
 			<button type="button" class="btn-cancel" onclick={() => (dsarResult = null)}
 				>{m('admin.privacy.export.close')}</button
 			>
-			<button type="button" class="btn-primary" onclick={copyDsarJson}>
+			{#if dsarResult.full_bundle_url}
+				<button
+					type="button"
+					class={dsarResult.complete === false ? 'btn-primary' : 'btn-cancel'}
+					onclick={downloadFullBundle}
+					disabled={bundleDownloading}
+					data-testid="dsar-download-bundle"
+				>
+					{bundleDownloading
+						? m('admin.privacy.export.downloading')
+						: m('admin.privacy.export.download')}
+				</button>
+			{/if}
+			<button
+				type="button"
+				class={dsarResult.complete === false ? 'btn-cancel' : 'btn-primary'}
+				onclick={copyDsarJson}
+			>
 				{dsarCopied ? m('admin.privacy.export.copied') : m('admin.privacy.export.copy')}
 			</button>
 		</div>
@@ -703,6 +750,17 @@
 
 	.justification-label {
 		margin-top: 0.75rem;
+	}
+
+	/* An inline export that was cut short. Warning tint + its on-tint text, the
+	   pair app.css measures for contrast (not the bare --warning hue). */
+	.truncated-notice {
+		margin: 0.5rem 0 0;
+		padding: 0.5rem 0.75rem;
+		border-radius: 4px;
+		background: var(--warning-tint);
+		color: var(--warning-on-tint);
+		font-size: 0.85rem;
 	}
 
 	.unmask-refusal {

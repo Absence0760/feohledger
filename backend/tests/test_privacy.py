@@ -233,9 +233,15 @@ async def test_dsar_vendor_contact_bundle(realdb):
     assert data["vendor"]["bank_details"]["account"] == "****1222"
     assert data["vendor"]["bank_details"]["_masked"] is True
     assert "000111222" not in resp.text
-    assert len(data["related_invoices"]) == 1
-    assert data["related_invoices"][0]["amount"] == "4200.50"  # Decimal-as-string
-    assert len(data["related_payments"]) == 1
+    # Capped sections since §369: `{total, returned, truncated, items}`.
+    assert data["related_invoices"]["total"] == 1
+    assert data["related_invoices"]["truncated"] is False
+    assert data["related_invoices"]["items"][0]["amount"] == "4200.50"  # Decimal-as-string
+    assert data["related_payments"]["total"] == 1
+    assert len(data["related_payments"]["items"]) == 1
+    # A subject this small is whole inline, and the response says so.
+    assert resp.json()["complete"] is True
+    assert resp.json()["truncated_sections"] == []
     assert data["counts"]["portal_users"] == 1
     _assert_record_counts_cover(resp.json())
     assert resp.json()["record_counts"]["related_invoices"] == 1
