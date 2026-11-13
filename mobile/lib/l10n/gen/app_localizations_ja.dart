@@ -720,6 +720,41 @@ class AppLocalizationsJa extends AppLocalizations {
   String get invoiceDetailReject => '却下';
 
   @override
+  String get invoiceDetailRecall => '承認を取り消す';
+
+  @override
+  String get invoiceDetailRecallTitle => 'この承認を取り消しますか？';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      '請求書はレビューに戻り、金額を修正できるようになった後、承認チェーン全体による新たな承認が必要になります。職務分掌上、あなたはアップロードした人と同様に、この請求書の関係者として扱われます。元の承認は監査証跡に残ります。';
+
+  @override
+  String get invoiceDetailRecallReason => '取り消す理由';
+
+  @override
+  String get invoiceDetailRecalled => '承認を取り消しました。請求書はレビューに戻りました。';
+
+  @override
+  String get invoiceDetailRecallFailed => '承認を取り消せませんでした。もう一度お試しください';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      '承認を取り消せるのは、承認済みの請求書、または承認後にERPへの送信が失敗した請求書のみです。';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'ERPにこの請求書の支払請求がすでに登録されている可能性があり、ERP上で支払われる可能性があります。ERPで修正または無効化してください。FeohLedgerから承認を取り消すことはできません。';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'FeohLedgerはすでにこの請求書を支払い中です（有効な支払いがあります）。承認を取り消す前に、支払いランを取り消すか、支払いを無効にしてください。';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'この請求書の支払いにバーチャルカードが発行されています。承認を取り消す前に、カードを取り消してください。';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     return '$count件の請求書を却下';
   }
@@ -945,7 +980,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
-      '承認済み — 支払先と金額は固定されています。変更するには請求書を却下し、修正してから再承認してください。';
+      '承認済み — 支払先と金額は固定されています。変更するには承認を取り消し、請求書を修正してから、改めて承認を受けてください。';
 
   @override
   String get invoiceEditLockedHelper => '承認後は変更不可';

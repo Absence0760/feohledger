@@ -126,6 +126,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
     _error = null;
     _updateErrorDetail = null;
     _approveErrorDetail = null;
+    _recallErrorDetail = null;
     _pending = [];
     _pendingLoading = false;
     _pendingError = null;
@@ -346,6 +347,29 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   /// changed after the screen loaded it (`invoice_stale_approval`).
   static bool isStaleApproval(Object? detail) =>
       detail is Map && detail['code'] == 'invoice_stale_approval';
+
+  Object? _recallErrorDetail;
+
+  /// The server's refusal body from the last failed [recallApproval] — a coded
+  /// `{code, message, params}` the screen states in the reader's language.
+  Object? get recallErrorDetail => _recallErrorDetail;
+
+  /// `POST /api/invoices/{id}/recall-approval` (backend decisions §374).
+  /// Not money-moving; the server re-checks its gate under the row lock, so a
+  /// claim or push that landed since the verdict is refused, coded.
+  Future<bool> recallApproval(String id, String reason) async {
+    _recallErrorDetail = null;
+    try {
+      await InvoiceApi.recallApproval(id, reason);
+      await _refreshAfterMutation();
+      return true;
+    } catch (e) {
+      _error = describeApiError(e);
+      _recallErrorDetail = e is ApiException ? e.detail : null;
+      notifyListeners();
+      return false;
+    }
+  }
 
   Future<bool> reject(String id, String reason) async {
     try {

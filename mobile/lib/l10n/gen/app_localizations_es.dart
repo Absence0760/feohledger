@@ -767,6 +767,43 @@ class AppLocalizationsEs extends AppLocalizations {
   String get invoiceDetailReject => 'Rechazar';
 
   @override
+  String get invoiceDetailRecall => 'Retirar aprobación';
+
+  @override
+  String get invoiceDetailRecallTitle => '¿Retirar esta aprobación?';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      'La factura vuelve a revisión para que se puedan corregir sus importes y después necesita una nueva aprobación por toda la cadena de aprobación. La segregación de funciones le contará como implicado en esta factura, igual que a quien la cargó. La aprobación original se conserva en el registro de auditoría.';
+
+  @override
+  String get invoiceDetailRecallReason => '¿Por qué la retira?';
+
+  @override
+  String get invoiceDetailRecalled =>
+      'Aprobación retirada. La factura vuelve a estar en revisión.';
+
+  @override
+  String get invoiceDetailRecallFailed =>
+      'No se pudo retirar la aprobación; inténtelo de nuevo';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      'Solo se puede retirar la aprobación de una factura aprobada o de una cuyo envío al ERP falló después de aprobarse.';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'Es posible que el ERP ya tenga una factura de proveedor para esta factura, y allí se puede pagar. Corríjala o anúlela en el ERP; su aprobación no se puede retirar desde FeohLedger.';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'FeohLedger ya está pagando esta factura: tiene un pago activo. Cancele su lote de pagos o anule el pago antes de retirar la aprobación.';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'Se ha emitido una tarjeta virtual para pagar esta factura. Cancele la tarjeta antes de retirar la aprobación.';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1049,7 +1086,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
-      'Aprobada: el beneficiario y el importe están bloqueados. Para cambiarlos, rechace la factura, corríjala y apruébela de nuevo.';
+      'Aprobada: el beneficiario y el importe están bloqueados. Para cambiarlos, retire la aprobación, corrija la factura y haga que se apruebe de nuevo.';
 
   @override
   String get invoiceEditLockedHelper => 'Bloqueado tras la aprobación';

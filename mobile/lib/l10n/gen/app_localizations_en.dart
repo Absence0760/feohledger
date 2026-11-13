@@ -760,6 +760,43 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoiceDetailReject => 'Reject';
 
   @override
+  String get invoiceDetailRecall => 'Recall approval';
+
+  @override
+  String get invoiceDetailRecallTitle => 'Recall this approval?';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      'The invoice goes back to review so its figures can be corrected, then needs a fresh approval through the full approval chain. Segregation of duties will count you as involved in this invoice, as it does its uploader. The original approval stays in the audit trail.';
+
+  @override
+  String get invoiceDetailRecallReason => 'Why are you recalling it?';
+
+  @override
+  String get invoiceDetailRecalled =>
+      'Approval recalled. The invoice is back in review.';
+
+  @override
+  String get invoiceDetailRecallFailed =>
+      'Could not recall the approval — please try again';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      'Only an approved invoice, or one whose ERP push failed after approval, can have its approval recalled.';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'The ERP may already hold a bill for this invoice, and a bill there can be paid there. Correct or void it in the ERP; its approval can\'t be recalled from FeohLedger.';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'FeohLedger is already paying this invoice: it has a live payment. Cancel its payment run or void the payment before recalling the approval.';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'A virtual card has been issued to pay this invoice. Cancel the card before recalling the approval.';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1041,7 +1078,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
-      'Approved — the payee and amount are frozen. To change them, reject the invoice, correct it, then approve it again.';
+      'Approved — the payee and amount are frozen. To change them, recall the approval, correct the invoice, then have it approved again.';
 
   @override
   String get invoiceEditLockedHelper => 'Frozen after approval';

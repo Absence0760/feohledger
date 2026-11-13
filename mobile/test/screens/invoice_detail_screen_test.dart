@@ -104,6 +104,8 @@ MockClient _detailClient(
   http.Response Function(http.Request req)? onApprove,
   http.Response Function(http.Request req)? onReject,
   http.Response Function(http.Request req)? onPatch,
+  http.Response Function(http.Request req)? onRecall,
+  Map<String, dynamic>? reviewActions,
   List<String> roles = const ['admin'],
   List<String>? permissions,
   List<Map<String, dynamic>> audit = const [],
@@ -127,6 +129,14 @@ MockClient _detailClient(
     }
     if (req.method == 'POST' && path.endsWith('/reject')) {
       return onReject?.call(req) ?? _json(invoice);
+    }
+    if (req.method == 'POST' && path.endsWith('/recall-approval')) {
+      return onRecall?.call(req) ?? _json(invoice);
+    }
+    if (req.method == 'GET' &&
+        path.endsWith('/review-actions') &&
+        reviewActions != null) {
+      return _json(reviewActions);
     }
     // InvoiceStore.approve/reject/update refetch the list after the write.
     if (req.method == 'GET' && path == '/api/invoices') {
@@ -1173,5 +1183,147 @@ void main() {
 
       expect(tester.takeException(), isNull);
     });
+  });
+
+  // ── Recall approval (backend decisions §374) ────────────────────────────
+
+  testWidgets('an approved invoice offers Recall approval from the verdict',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+      reviewActions: {'recall_approval': null},
+      roles: ['ap_manager'],
+    ));
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Recall approval'));
+
+    final button = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Recall approval'),
+    );
+    expect(button.onPressed, isNotNull);
+  });
+
+  testWidgets('a refused recall is shown disabled with the server\'s reason',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+      reviewActions: {
+        'recall_approval': {
+          'code': 'invoice_recall_claimed',
+          'message': 'server english',
+          'params': {'claim': 'payment'},
+        },
+      },
+      roles: ['ap_manager'],
+    ));
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Recall approval'));
+
+    final button = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Recall approval'),
+    );
+    expect(button.onPressed, isNull);
+    expect(
+      find.textContaining('Cancel its payment run or void the payment'),
+      findsOneWidget,
+    );
+  });
+
+  for (final hidden in ['invoice_not_recallable', 'role_not_permitted']) {
+    testWidgets('no recall is offered on a $hidden verdict', (tester) async {
+      await _arrange(_detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+        reviewActions: {
+          'recall_approval': {
+            'code': hidden,
+            'message': 'x',
+            'params': <String, dynamic>{},
+          },
+        },
+      ));
+      await tester.pumpWidget(_localized());
+      await _pumpUntil(tester, find.text('Acme Corp'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Recall approval'), findsNothing);
+    });
+  }
+
+  testWidgets('a backend without the verdict offers no recall (fails closed)',
+      (tester) async {
+    // No `reviewActions`: the GET answers with the invoice body, which carries
+    // no `recall_approval` key.
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+    ));
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Acme Corp'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Recall approval'), findsNothing);
+  });
+
+  testWidgets('recalling posts the reason and confirms', (tester) async {
+    http.Request? posted;
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+      reviewActions: {'recall_approval': null},
+      onRecall: (req) {
+        posted = req;
+        return _json(_invoiceJson('1', status: 'ready_for_review'));
+      },
+      roles: ['ap_manager'],
+    ));
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Recall approval'));
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Recall approval'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Recall this approval?'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '  Amount keyed wrong  ');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Recall approval'));
+    await _pumpUntil(
+      tester,
+      find.text('Approval recalled. The invoice is back in review.'),
+    );
+
+    expect(posted, isNotNull);
+    expect(posted!.url.path, '/api/invoices/1/recall-approval');
+    expect(jsonDecode(posted!.body), {'reason': 'Amount keyed wrong'});
+    expect(
+      find.text('Approval recalled. The invoice is back in review.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a recall refused at the door is stated from its code',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+      reviewActions: {'recall_approval': null},
+      onRecall: (_) => _json({
+        'detail': {
+          'code': 'invoice_recall_in_erp',
+          'message': 'server english',
+          'params': <String, dynamic>{},
+        },
+      }, 409),
+      roles: ['ap_manager'],
+    ));
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Recall approval'));
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Recall approval'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(find.byType(TextField), 'Wrong payee');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Recall approval'));
+    await _pumpUntil(tester, find.textContaining('Correct or void it in the ERP'));
+
+    expect(find.textContaining('Correct or void it in the ERP'), findsWidgets);
   });
 }
