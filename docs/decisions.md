@@ -16970,6 +16970,100 @@ fix, and §350's rule is to fix rather than waive wherever a fix exists. Also
 rejected: keeping `./` until a GHES mirror needs it. `$/` is unavailable on
 GHES, but this repository runs only on github.com.
 
+## 366. A person's clearance of any detector finding holds until that type's facts change (§286 follow-up, 2026-11-13)
+
+**Found.** §286 stopped `refresh_warnings` re-opening a `duplicate` or
+`fraud_flag` a person had resolved or dismissed while the invoice was
+unchanged. Every other type `_ensure_exception` raises deduped only against
+open rows, so the next refresh re-opened it. For the payment-blocking
+`line_total_mismatch`, `po_mismatch` and `quality_hold` that meant a reviewer
+who accepted a line variance, an over-PO bill or a failed inspection saw the
+hold come back the next time anyone saved the invoice, received a line, or
+pressed "Send to ERP" (`/complete` refreshes). A clearance that does not hold
+is not a sign-off.
+
+**The rule, once.** `_ensure_exception` stamps `finding_fingerprint` on every
+row it raises, and `invoice_warnings.current_finding_fingerprint` is the one
+definition of "the facts", read by the raise, by the stale-stamp check
+(`_void_stale_finding_stamps`, now over every stamped open row) and by a
+person's decision (`exception_lifecycle._bind_fingerprint_to_decision`, now
+async because two types need a read). §286's binding rules apply unchanged to
+every type: the stamp is fixed at raise; it survives a resolve or dismiss only
+when a person decided (an `actor_id`, no `via`) and the invoice still hashes as
+raised; any refresh that sees the facts differ voids an open row's stamp, so a
+change reverted before the click binds nothing.
+
+**What "facts" means, per type.** Each type hashes what its own rule reads,
+and nothing that drifts with no edit (the lesson of §286's second version):
+
+| Type | Hashed | Deliberately not hashed |
+|---|---|---|
+| `duplicate`, `fraud_flag`, `missing_data` | §286's header payload, byte for byte, so stamps written since 0116 still compare | — |
+| `line_total_mismatch` | header money (`amount`, `subtotal`, `tax_amount`, `shipping_amount`, `discount_amount`, `currency`) + the summed line totals | the invoice number, dates, vendor: the reconciliation reads none of them |
+| `po_mismatch`, `quality_hold` | the invoice's PO number, amount, currency, vendor, GL code, entity + the persisted `invoice.po_match` | — |
+| `price_variance` | the priced lines (item code, description, unit price), vendor, currency | the history's medians, which move as other invoices are approved |
+| `contract_noncompliant` | the invoice fields compliance reads, the contract id, and *which* terms are breached | the running spend figure, which grows with every other invoice on the contract |
+| `unverified_vendor` | the linked vendor | everything else on the invoice |
+
+`invoice.po_match` stands in for "the PO and receipts" because it already is
+their reading: the PO's total, currency and status, the summed receipt
+quantities, the inspection's id and verdict, and the tolerance the rule chose.
+Hashing the match rather than re-reading the PO tables keeps one source for
+what the matcher saw, and a match-rule change (a tighter tolerance) counts as a
+fact change, which is right: the person accepted a variance under the old rule.
+The hash reads a named subset of the match (`_PO_MATCH_FACT_FIELDS`, the
+tolerance, and each issue as `[code, params]`), not the whole dict: each issue
+carries its English `message`, so rewording a catalogue sentence or adding a
+`MatchResult` field would otherwise re-raise every cleared hold on the first
+refresh after a deploy. Numbers are canonicalized (`_canonical`) because the
+column round-trips the match through JSONB floats while the raise sees it in
+memory. The review also found the matcher's PO, receipt and inspection picks
+ordered by `created_at` alone, which is transaction time, so rows a sync wrote
+together tied and the pick (and with two inspections, the 4-way verdict
+itself) rested on physical row order. Each now breaks the tie on `id`.
+
+The non-header types are keyed on the exception type, not the row's
+`description_code`. These rows are one per type and invoice, and the code names
+only the first finding raised (a composite frame, or the first of two PO-match
+findings that folded into the open row). The person cleared the row with
+everything it held; keying on the code would re-raise a second finding that was
+there all along and ask for a second round for nothing. The header types keep
+§286's code-keyed payload so existing stamps stay valid.
+
+**Where the PO facts are read.** The stale-stamp check runs at the start of a
+refresh, before the match is recomputed, so a PO-match row compares against the
+match the previous refresh persisted. A match that moves and moves back is
+still seen one refresh later, and a decision in between compares against the
+moved match and binds nothing, so the timed variant §286 closed stays closed.
+
+**SoD is untouched.** Suppression honours only a decision `record_decision`
+accepted, so `segregation_refusal` (the invoice's implicated set and the
+recorded `raised_by_user_id`) still decides who can create one. A refused
+uploader leaves the row open and blocking. Detector auto-closes
+(`_close_cleared_po_exceptions`, `via="po_match_refresh"`) and agent decisions
+carry no verdict and clear the stamp, as before. The ERP PO sync's hold-only
+rule (§323) is unaffected: a sync that changes the PO changes the match, which
+re-raises a cleared hold rather than suppressing one.
+
+**The trail.** The person's decision writes its `exception.resolved` /
+`exception.dismissed` row as before. A refresh that suppresses writes nothing,
+because nothing is raised; the warning stays on `invoice.warnings` for the
+approver to read.
+
+**Not changed.** Rows opened by other paths through `create_exception`
+(Positive Pay, settlement, the reconciler, ERP sync, extraction's own
+duplicate, the bank-change flag) carry no stamp and keep their own dedupe;
+`payment_reconciliation` is raised only there, never by a refresh, so there is
+nothing to re-open. No migration: the column exists since 0116, and a row
+closed before this change has no stamp and never suppresses, which is how it
+behaved.
+
+**Not done** (`docs/followups.md`): a hand-entered inspection
+(`POST /api/inspections`) re-matches nothing, so `invoice.po_match` keeps
+describing the old verdict until another write refreshes the invoice. It cannot
+make a changed fact read as cleared (the next refresh recomputes the match),
+but the hold it should raise waits for that refresh.
+
 ## 367. An invoice an employee created before §131 gets the uploader its own creation record names, and only that (§198 follow-up, 2026-11-13)
 
 **Decided:** 2026-11-13 · `backend/alembic/versions/0126_uploader_audit_backfill.py` ·

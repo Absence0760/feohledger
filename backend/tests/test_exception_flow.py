@@ -63,8 +63,9 @@ def _invoice(**overrides):
 
 
 def _mk_db(dup_count: int = 0, exception_count: int = 0):
-    """Bare-bones mock: returns 0 for the dup-count query, 0 for the
-    exception-existence query, and lets db.add() collect new rows.
+    """Bare-bones mock: returns 0 for the dup-count query, no open exception
+    rows, ``exception_count`` for the person-cleared count (decisions §366),
+    and lets db.add() collect new rows.
     The vendor-scoped branches are skipped because we leave
     `vendor_id=None` on the invoice."""
     db = AsyncMock()
@@ -72,14 +73,15 @@ def _mk_db(dup_count: int = 0, exception_count: int = 0):
     # Each execute() call returns a result whose `.scalar()` matches a
     # caller-controlled queue. The endpoint calls scalar() for both
     # the dup-count and the exception-count. The first read is the stale-stamp
-    # check over open duplicate / fraud rows (`_void_stale_finding_stamps`,
-    # decisions §286), which finds none; every result also answers
-    # `.scalars().all()` with no rows, the shape `_ensure_exception` reads open
-    # duplicate / fraud rows in.
+    # check over open stamped rows (`_void_stale_finding_stamps`, decisions
+    # §286 / §366), which finds none; every result also answers
+    # `.scalars().all()` with no rows, the shape `_ensure_exception` reads the
+    # open rows of every type in before its person-cleared count (§366: two
+    # reads per raise, where an unstamped type used to make one).
     results = [
         _mk_scalar(0),
         _mk_scalar(dup_count),
-        *[_mk_scalar(exception_count) for _ in range(6)],
+        *[_mk_scalar(exception_count) for _ in range(10)],
     ]
     db.execute = AsyncMock(side_effect=results)
     db.add = MagicMock()

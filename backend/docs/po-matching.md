@@ -546,7 +546,10 @@ on the invoice. Resolving or dismissing the exception is the sign-off that
 releases it, and **segregation of duties applies**: the invoice's uploader (or
 anyone in its `segregation_actor_ids`) may not clear it, and an exception agent
 run they trigger escalates instead of auto-resolving
-([exception-lifecycle.md](exception-lifecycle.md)).
+([exception-lifecycle.md](exception-lifecycle.md)). A person's clearance holds
+across refreshes while the match is unchanged (the invoice's PO fields and the
+persisted `invoice.po_match`); a PO edit, a receipt, an inspection or a rule
+change raises the hold again (decisions §366).
 
 **A hold lifts when the evidence catches up.** Each refresh closes any open or
 escalated `po_mismatch` / `quality_hold` row whose finding it no longer reports

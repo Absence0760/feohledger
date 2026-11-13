@@ -1609,19 +1609,26 @@ scope (§260) — do not fold them into any of these.
       QuickBooks up to its bill create.) **Trigger:** a bill found in an ERP
       for an invoice we show as failed, or the next change to the ERP void
       path.
-- [ ] **(c) A human-cleared finding of any other type is re-opened by the next
-      refresh.** §286 stops `refresh_warnings` re-opening a `duplicate` or
-      `fraud_flag` a person resolved or dismissed while the invoice is
-      unchanged (`exceptions.finding_fingerprint`, migration 0116). The other
-      types `_ensure_exception` raises still re-open, including the
-      payment-blocking `line_total_mismatch`, so a reviewer who accepts a line
-      variance sees the hold come back on the next refresh. **Durable fix:**
-      stamp the fingerprint for every type `_ensure_exception` raises, with
-      each type's own input fields (line items for the line-total check, the
-      PO and receipts for PO matching); `record_decision` already clears it on
-      a decision no person made. **Trigger:** the next change to
-      `_ensure_exception` or to the line-total reconciliation, or a reviewer
-      report of a hold that keeps coming back.
+
+### Surfaced by keeping a person's clearance across refreshes (2026-11-13, decisions §366)
+
+- [ ] **(c) A hand-entered inspection does not re-match the invoices citing
+      its PO.** `POST /api/inspections` (`api/inspections.create_inspection`)
+      flushes the row and audits it, but never calls
+      `invoice_warnings.refresh_invoices_citing_pos`, which the goods-receipt
+      paths and the QMS sync both do. A typed-in `fail` therefore raises no
+      `quality_hold` until something else refreshes the invoice, and a typed-in
+      `pass` lifts none; meanwhile `invoice.po_match` (what §366's
+      `quality_hold` fingerprint reads) still describes the old verdict.
+      **Durable fix:** after the flush, resolve the PO's number and call
+      `refresh_invoices_citing_pos(..., org_settings=<the org's own>,
+      caller="inspection_create")` in the same transaction, as
+      `services/goods_receipts` does; the recorder-segregation rule
+      (`_inspection_clears_hold`) already decides whether the new verdict may
+      lift a hold. Test both directions on real Postgres. **Trigger:** the next
+      change to `api/inspections.py`, or a report of a failed inspection that
+      did not hold its invoice.
+
 ### Surfaced by reviewing the QuickBooks live-test fixes (2026-10-19, decisions §284–§287)
 
 - [ ] **(c) A chart or vendor listing over `SYNC_LISTING_MAX_ROWS` cannot sync

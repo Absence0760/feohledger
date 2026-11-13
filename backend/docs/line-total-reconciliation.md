@@ -70,7 +70,10 @@ run** (409). That is the later, narrower gate: the invoice can still be
 reviewed, corrected and re-run; only the money is stopped. Resolving or
 dismissing the exception is the documented human sign-off that clears it — the
 same escape hatch the other two types have. See `payments.md` § Financial-integrity
-exception gate.
+exception gate. That sign-off holds: the next refresh does not raise the
+mismatch again while the header money and the summed line totals are what the
+person accepted, and does once either changes (decisions §366,
+[exception-lifecycle.md](exception-lifecycle.md)).
 
 The check lives in `invoice_warnings.refresh_warnings`, the single write
 chokepoint, so it applies to **every** path that touches lines or the header —

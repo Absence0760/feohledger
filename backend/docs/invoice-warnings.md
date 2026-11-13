@@ -227,6 +227,16 @@ English fallback), its `code` and its `params`. Which code:
   localized on its own code; the server no longer joins localized text, which
   also retired the `$` the price-variance summary stamped on every figure.
 
+A refresh re-derives the warnings every time, but it does not re-open an
+exception a person has resolved or dismissed while the facts that type's rule
+reads are unchanged. `_ensure_exception` stamps every row it raises with
+`finding_fingerprint` (`current_finding_fingerprint`, one rule per type), and
+a caller that already holds those facts (the line-total sum, the priced lines,
+the compliance findings) passes the stamp in. The per-type table and the
+binding rules are in [exception-lifecycle.md](exception-lifecycle.md); the
+reasoning is decisions §286 and §366. The warning itself stays on the invoice,
+so the reviewer still reads it at approval.
+
 Both columns stay **NULL** for a human-authored description (a rejection
 reason) and for every row raised before 0103 — no backfill, because the
 `$`-prefixed historical sentences recorded no currency, and parsing English back

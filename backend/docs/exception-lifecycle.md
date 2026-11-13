@@ -35,18 +35,38 @@ created the bill (a timeout or 5xx the ERP may have applied), the refusal, the
 409 and the `invoice.erp_failed` row carry `possibly_posted: true`: check the
 ERP for that bill before anyone pays it, then clear the exception.
 
-Once a person has resolved or dismissed one of these two, `refresh_warnings`
-does not raise the same finding again **while the invoice is unchanged**. Each
-detector row carries `finding_fingerprint` (migration 0116), a hash of the
-finding's code and the invoice fields the duplicate and fraud rules read,
-stamped when the row is raised. A closed row suppresses the re-raise only when
-its fingerprint equals the invoice's current one, so an edit to the vendor,
-number, amount, dates or remit address raises the finding again.
+Once a person has resolved or dismissed a finding, `refresh_warnings` does not
+raise it again **while the facts its rule reads are unchanged**. This holds for
+every type `_ensure_exception` raises, payment-blocking or not (decisions §286
+for these two, §366 for the rest). Each detector row carries
+`finding_fingerprint` (migration 0116), a hash of the facts that type's rule
+reads, stamped when the row is raised. A closed row suppresses the re-raise
+only when its fingerprint equals the invoice's current one. The one rule for
+"the facts" is `invoice_warnings.current_finding_fingerprint`:
+
+| Type | Facts hashed | So this re-raises it |
+|---|---|---|
+| `duplicate`, `fraud_flag`, `missing_data` | the finding's code and the header fields the rules read (vendor, number, amount, currency, dates, remit address, PO number, entity …), plus the vendor email domain for `personal_email_domain` | an edit to any of those fields |
+| `line_total_mismatch` | the header money (`amount`, `subtotal`, `tax_amount`, `shipping_amount`, `discount_amount`, `currency`) and the summed line totals | editing a line total or a header money field |
+| `po_mismatch`, `quality_hold` | the invoice's PO number, amount, currency, vendor, GL code and entity, and what the persisted `invoice.po_match` found (PO total, currency and status, receipt quantities, inspection id and verdict, tolerance, each issue's code and params; not its wording) | a PO change (an ERP sync included), a receipt recorded or cancelled, a new inspection, a match-rule change |
+| `price_variance` | the invoice's priced lines (item, description, unit price), vendor and currency; not the history's medians | changing a line's price or item |
+| `contract_noncompliant` | the contract and the invoice fields compliance reads, and *which* terms are breached; not the running spend | a newly breached term, or an invoice edit |
+| `unverified_vendor` | the linked vendor | re-linking the invoice to another vendor |
+
+The non-header types are keyed on the type, not the row's code, because one row
+holds every finding of its type: clearing it accepts all of them.
+
 `record_decision` keeps the fingerprint on a resolve or dismiss only when a
 person decided (an `actor_id`, no `via` such as an agent or a PO-match refresh)
 and the invoice still hashes as it was raised, and every refresh voids the stamp
 of an open row the invoice has moved away from, so an edit made while someone
 was deciding (even one reverted before they click) never rides their verdict.
+Suppression only honours a decision `record_decision` let through, so the
+segregation rules below decide who can create one. The decision writes its
+`exception.resolved` / `exception.dismissed` row as always; a suppressed
+refresh writes nothing, because nothing was raised. A row closed before its type
+was stamped (before 0116, or before §366 for the types it added) has no
+fingerprint and never suppresses.
 
 ## Why the trail is in `audit_log`, not on the exception row
 
