@@ -468,6 +468,12 @@ What the merge does, in one tenant transaction (`app/services/vendor_merge.py`):
   (canonical id + duplicate ids + per-table reassigned counts + `erp_links`, one
   `{realm, erp_vendor_id, from_vendor_id, placed}` per link a duplicate gave
   up, `placed` = `row` / `kept` / `released`; no `tax_id` / bank / address).
+- **Records the merge on the duplicate** — `merged_into_vendor_id`, `merged_by_user_id`
+  and `merged_at`, set the first time a duplicate is retired (a re-run never
+  re-attributes it). A void reads them to name every steward whose merge moved a
+  paid invoice to another payee; payments keep the vendor they actually paid
+  (`payments.payee_vendor_id`, never moved by a merge). See `payments.md` § A
+  payment records the payee it paid (decisions §383).
 - **Refusals** — self-merge (canonical in the duplicate set) and an empty
   duplicate set → 422; an unknown vendor → 404; a **cross-entity** merge
   (canonical and a duplicate in different entities) → 422 (folding across

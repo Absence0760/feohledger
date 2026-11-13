@@ -1010,6 +1010,8 @@
   "exceptionDescriptionPositivePayAlteredAmount": "Retorno do Positive Pay: cheque {checkNumber} com valor alterado",
   "exceptionDescriptionPositivePayNotOnFile": "Retorno do Positive Pay: cheque {checkNumber} não consta do arquivo de emissão",
   "exceptionDescriptionVendorBankChanged": "Os dados bancários do fornecedor foram alterados; verifique antes do pagamento.",
+  "exceptionDescriptionPayeeChangedSincePaid": "O beneficiário mudou desde o último pagamento desta fatura; verifique antes de pagar novamente.",
+  "exceptionDescriptionPayeeUnrecordedAfterMerge": "O fornecedor foi mesclado desde o último pagamento desta fatura, e esse pagamento não registrou beneficiário; verifique antes de pagar novamente.",
   "exceptionDescriptionComplianceHoldFindings": "Pagamento retido para revisão de conformidade ({count, plural, one {{count} motivo} other {{count} motivos}})",
   "exceptionDescriptionComplianceNoScreenableVendor": "A fatura não tem um fornecedor que possa ser verificado",
   "exceptionDescriptionComplianceProviderUnavailable": "Não foi possível executar a verificação de sanções: não há adaptador para o provedor configurado “{provider}”",

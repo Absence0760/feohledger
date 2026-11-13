@@ -1226,17 +1226,81 @@ the same function, so the button and the endpoint cannot disagree
 **Accept settlement** works the same way (`accept_settlement_refusal`, from
 `payment_controls.settlement_accept_refusal` — see § Settlement verification).
 
-### A void re-flags the invoice if the vendor's bank details changed since
+### A payment records the payee it paid, and a void flags a re-payment to anyone else
 
-A void that returns the invoice to `approved` also calls
-`api/vendors.reflag_voided_invoice_for_bank_change`: if a `bank_details`
-change for the vendor was approved after the voided payment was created, the
-invoice gets the same de-duped `fraud_flag` the change raises on unpaid
-invoices, stamped with that change's approver as its raiser. The change could
-not flag the invoice while it was `paid`, and without the flag the re-payment
-would go to the new account with no second look (decisions §286).
+Every payment records, at the step that releases its money, the payee it pays:
+`payee_vendor_id` (the invoice's vendor then), `payee_bank_fingerprint` (a keyed
+HMAC of that vendor's whole `bank_details`, `v1:<hex>`, never a number) and
+`payee_recorded_at` (migration 0128, `services/payee_stamp.py`, decisions §383).
+The steps that stamp it are the ones that move money:
 
-**Tests:** `tests/test_erp_export_blocking_exceptions.py`.
+- the rail or card dispatch (`_execute_single_payment`), from the same read the
+  order is built from, once every refusal and compliance hold has passed and
+  immediately before the processor or card call. A held or refused attempt
+  records no payee; each attempt re-stamps; and the stamp is restored with the
+  order after a database error (`_ORDER_FIELDS`);
+- the NACHA export (`GET /runs/{id}/nacha`), once the file is certain; a
+  regenerated file re-stamps, since the latest file is the one the customer is
+  told to upload (if an earlier file was uploaded too, the record names only the
+  latest file's payee);
+- a payment recorded as paid outside FeohLedger (`external_payment._complete`:
+  the single and run-level records, and an ERP-reported payment). An entry of an
+  `exported` file keeps the payee its file carried; a file the bank rejected
+  (`/nacha/void`) paid nobody, and its stamp is replaced.
+
+The fingerprint covers the whole blob because the bank-change dual control
+treats any change to it as a bank change, and a key allowlist would miss the
+next key that steers money. It is keyed with a domain-separated derivation of
+`FEOH_SECRET_KEY` and the tenant id is in its message, so it cannot be
+brute-forced from a routing number, and one account paid by two tenants does
+not fingerprint alike. Rotating that key changes every fingerprint, so the next
+void of an older payment flags once (`docs/secrets-rotation.md`). A card payment
+is fingerprinted too, so a bank change after it flags its void: noise, in the
+fail-closed direction.
+
+A merge also records, on each duplicate it retires for the first time, where it
+went and who merged it (`vendors.merged_into_vendor_id` / `merged_by_user_id` /
+`merged_at`, same migration), in the merge's own transaction.
+
+`POST /payments/{id}/void` returns a scheduled or paid invoice to `approved`,
+then asks `payee_stamp.flag_repayment_payee_change`. A re-payment would pay
+whoever the invoice names now, and two things change that while an invoice is
+paid without flagging it: a **vendor merge** moves paid invoices to the
+canonical vendor (§379), and a **bank change** skips paid invoices (§286). The
+void reads the invoice's vendor `FOR SHARE`, so a bank-change approval racing it
+is seen by whichever of the two runs second.
+
+| The voided payment | The invoice now | Flag (`fraud_flag`, blocks the run and the ERP push) | Raisers (one flag each; none can clear their own) |
+|---|---|---|---|
+| stamped | another vendor | `payee_changed_since_paid` | every steward on the merge chain from the paid vendor to the current one |
+| stamped | same vendor, other bank fingerprint | `payee_changed_since_paid` | every approver of a bank change since the stamp |
+| stamped | same vendor, same fingerprint | none | |
+| unstamped (paid before 0128) | a merge into its vendor since the payment was booked | `payee_unrecorded_after_merge` | the stewards of those merges |
+| unstamped | a bank change approved since the payment was booked | `vendor_bank_changed` (`api/vendors.reflag_voided_invoice_for_bank_change`) | every approver of those changes |
+
+The merge chain follows each retired vendor's own record; a merge from before
+0128 is read from its `vendor.merged` audit row (the earliest one naming the
+vendor a duplicate, so a re-run never re-attributes it). When no person can be
+named (bank details cleared by an erasure, an old merge whose audit row has not
+landed in `lambda` mode) the raiser is `NULL`: the stamped flag still blocks,
+and anyone outside the invoice's implicated set may clear it. For an
+**unstamped** payment the merge evidence for a pre-0128 merge is that audit row
+alone, so in `lambda` mode a lost row means no flag; every merge since 0128 is
+on the vendor itself. The clearing rules are the payment-blocking set's
+(`exception_lifecycle.segregation_refusal`, decisions §169). Flags are
+de-duplicated by finding **and raiser**: an open Positive Pay or detector
+`fraud_flag` no longer absorbs a payee-change flag, and a second approver's
+change gets its own row rather than one its approver could clear.
+
+Nothing is backfilled: today's details are exactly what cannot stand in for the
+ones an old payment paid (§141). `payments.payee_vendor_id` is not a
+`vendor_id` FK and a merge never moves it.
+
+**Tests:** `tests/test_payment_payee_stamp.py`,
+`tests/test_payment_dispatch_db_error.py` (the stamp survives a post-processor
+rollback, and is absent when nothing was sent),
+`tests/test_erp_export_blocking_exceptions.py` (the unstamped bank-change
+re-flag), `tests/test_migration_0128_payee_and_merge_stamp.py`.
 
 ### Payment processor adapters
 
@@ -2520,7 +2584,8 @@ invoices
   |       due_date, discount_date, discount_percent, payment_terms
   |
   |-- payments (invoice_id FK)
-          amount, method, status, reference
+          amount, method, status, reference,
+          payee_vendor_id, payee_bank_fingerprint, payee_recorded_at
           |-- payment_runs (payment_run_id FK)
                   status, total_amount, initiated_by, executed_at
 ```

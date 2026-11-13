@@ -844,6 +844,8 @@
   "exceptionDescriptionPositivePayAlteredAmount": "Positive-Pay-Rückmeldung: Scheck {checkNumber} mit verändertem Betrag",
   "exceptionDescriptionPositivePayNotOnFile": "Positive-Pay-Rückmeldung: Scheck {checkNumber} nicht in der Ausstellungsdatei",
   "exceptionDescriptionVendorBankChanged": "Bankverbindung des Lieferanten geändert; vor der Zahlung prüfen.",
+  "exceptionDescriptionPayeeChangedSincePaid": "Zahlungsempfänger seit der letzten Zahlung dieser Rechnung geändert; vor erneuter Zahlung prüfen.",
+  "exceptionDescriptionPayeeUnrecordedAfterMerge": "Lieferant seit der letzten Zahlung dieser Rechnung zusammengeführt, und diese Zahlung hat keinen Zahlungsempfänger erfasst; vor erneuter Zahlung prüfen.",
   "exceptionDescriptionComplianceHoldFindings": "Zahlung zur Compliance-Prüfung angehalten ({count, plural, one {{count} Grund} other {{count} Gründe}})",
   "exceptionDescriptionComplianceNoScreenableVendor": "Kein prüfbarer Lieferant auf der Rechnung",
   "exceptionDescriptionComplianceProviderUnavailable": "Sanktionsprüfung konnte nicht ausgeführt werden: kein Adapter für den konfigurierten Anbieter „{provider}“",

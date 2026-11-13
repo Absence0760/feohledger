@@ -103,6 +103,7 @@ from app.services.nacha import (
     originator_from_settings,
     originator_problems,
 )
+from app.services.payee_stamp import flag_repayment_payee_change, stamp_payee
 from app.services.payment_adapters import (
     PaymentAdapter,
     PaymentPayload,
@@ -1945,13 +1946,14 @@ async def void_payment(
             action_name="invoice.voided_return_to_approved",
             details={"void_reason": body.reason, "payment_id": str(payment.id)},
         )
-        # Back in the queue: a bank change approved since this payment was made
-        # re-points the re-payment, and that change could not flag the invoice
-        # while it was paid. Same flag, same SoD stamp (decisions §286).
-        from app.api.vendors import reflag_voided_invoice_for_bank_change
-
-        await reflag_voided_invoice_for_bank_change(
-            db, invoice=invoice, paid_since=payment.created_at
+        # Back in the queue, and a re-payment pays whoever the invoice names
+        # NOW. A vendor merge since this payment moved the invoice to another
+        # vendor, or a bank change re-pointed its vendor's account, and neither
+        # could flag it while it was paid: compare the payee this payment
+        # recorded and raise the blocking flag, stamped with whoever changed it
+        # (decisions §286, §383).
+        await flag_repayment_payee_change(
+            db, invoice=invoice, payment=payment, organization_id=org.id
         )
 
     from app.services.audit_dispatch import dispatch_audit
@@ -2237,6 +2239,12 @@ _ORDER_FIELDS = (
     "fx_locked_at",
     "corridor",
     "target_country",
+    # Who the order pays (migration 0128, decisions §383): restored with the
+    # rest, so a payment whose order reached the processor keeps the payee it
+    # was sent to even when a database error rolled the attempt back.
+    "payee_vendor_id",
+    "payee_bank_fingerprint",
+    "payee_recorded_at",
 )
 
 #: `failure_reason` prefixes for a dispatch whose database transaction aborted.
@@ -4239,6 +4247,21 @@ async def _execute_single_payment(
         )
         vendor_bank = v_result.scalar_one_or_none()
 
+    def _stamp_payee() -> None:
+        # The payee this attempt pays, from the same read the order is built
+        # from (decisions §383). Written only once every refusal and hold has
+        # passed, immediately before the card / processor call, so a stamp
+        # means money was instructed; `mark_called` then carries it. Each
+        # attempt re-stamps (a compliance release, a resume): each is a fresh
+        # instruction. A void compares it.
+        stamp_payee(
+            payment,
+            vendor_id=invoice.vendor_id,
+            bank_details=vendor_bank,
+            organization_id=org.id,
+            at=datetime.now(UTC),
+        )
+
     # Virtual-card method: skip the payment adapter and mint a card
     # via the card adapter instead. The Payment row still settles
     # locally — the rebate flow runs off VirtualCard webhooks, not
@@ -4318,6 +4341,8 @@ async def _execute_single_payment(
         # invoice.
         card = await find_live_card_for_invoice(db, invoice.id)
         minted = False
+        # Minted or converged, this payment settles on a card for this vendor.
+        _stamp_payee()
         if card is None:
             contact.mark_called(payment)
             issue = await issue_card_for_invoice(
@@ -4616,6 +4641,7 @@ async def _execute_single_payment(
         target_country=payment.target_country,
     )
 
+    _stamp_payee()
     contact.mark_called(payment)
     result_obj = await adapter.create_payment(payload)
     contact.provider = adapter.provider_name
@@ -5161,6 +5187,8 @@ async def export_run_nacha(
         )
 
     entries = []
+    # Who each entry pays, stamped once the file is certain (decisions §383).
+    payees: list[tuple[Payment, uuid.UUID | None, dict | None]] = []
     # Every invoice is locked up front, in ID order — the order `bulk/status`,
     # `bulk/delete` and record-as-paid take them in — so a bulk action over two
     # of this run's invoices cannot deadlock against the export. The per-
@@ -5206,6 +5234,9 @@ async def export_run_nacha(
             )
         entries.append(entry)
         checked.append((payment, invoice))
+        payees.append(
+            (payment, invoice.vendor_id, vendor.bank_details if vendor is not None else None)
+        )
 
     # The bank's upload of this file is the money moving: the same live read of
     # each ERP bill as a rail dispatch (decisions §296) — made last, once every
@@ -5254,6 +5285,18 @@ async def export_run_nacha(
     run.nacha_export_count = prior + 1
 
     now = datetime.now(UTC)
+    # The upload of this file is the money moving, so each payment records the
+    # payee its entry carries — after every refusal above, so the commit kept
+    # for the ERP check's exceptions never carries a stamp for a file that was
+    # not built. A regenerated file re-stamps: the latest file is the one sent.
+    for payment, payee_vendor_id, bank in payees:
+        stamp_payee(
+            payment,
+            vendor_id=payee_vendor_id,
+            bank_details=bank,
+            organization_id=org.id,
+            at=now,
+        )
     content = build_nacha_file(
         originator,
         entries,

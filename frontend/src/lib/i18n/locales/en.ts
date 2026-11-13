@@ -777,6 +777,8 @@ export const en = {
 	'exceptions.description.positivePayAlteredAmount': "Positive Pay return: check {checkNumber} altered amount",
 	'exceptions.description.positivePayNotOnFile': "Positive Pay return: check {checkNumber} not on issued file",
 	'exceptions.description.vendorBankChanged': "Vendor bank details changed; verify before payment.",
+	'exceptions.description.payeeChangedSincePaid': "Payee changed since this invoice was last paid; verify before paying again.",
+	'exceptions.description.payeeUnrecordedAfterMerge': "Vendor merged since this invoice was last paid, and that payment recorded no payee; verify before paying again.",
 	'exceptions.description.complianceHoldFindings': "Payment held for compliance review ({count, plural, one {# reason} other {# reasons}})",
 	'exceptions.description.complianceNoScreenableVendor': "No screenable vendor on the invoice",
 	'exceptions.description.complianceProviderUnavailable': "Sanctions screening could not run: no adapter for the configured provider “{provider}”",

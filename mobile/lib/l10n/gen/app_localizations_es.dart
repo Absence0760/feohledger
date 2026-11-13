@@ -3428,6 +3428,14 @@ class AppLocalizationsEs extends AppLocalizations {
       'Los datos bancarios del proveedor cambiaron; verifíquelos antes del pago.';
 
   @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      'El beneficiario cambió desde el último pago de esta factura; verifíquelo antes de volver a pagar.';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      'El proveedor se fusionó desde el último pago de esta factura y ese pago no registró ningún beneficiario; verifíquelo antes de volver a pagar.';
+
+  @override
   String exceptionDescriptionComplianceHoldFindings(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

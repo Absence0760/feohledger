@@ -698,6 +698,8 @@ export const messages = {
 	'exceptions.description.positivePayAlteredAmount': "Devolución de Positive Pay: cheque {checkNumber} con importe alterado",
 	'exceptions.description.positivePayNotOnFile': "Devolución de Positive Pay: cheque {checkNumber} no figura en el archivo de emisión",
 	'exceptions.description.vendorBankChanged': "Los datos bancarios del proveedor cambiaron; verifíquelos antes del pago.",
+	'exceptions.description.payeeChangedSincePaid': "El beneficiario cambió desde el último pago de esta factura; verifíquelo antes de volver a pagar.",
+	'exceptions.description.payeeUnrecordedAfterMerge': "El proveedor se fusionó desde el último pago de esta factura y ese pago no registró ningún beneficiario; verifíquelo antes de volver a pagar.",
 	'exceptions.description.complianceHoldFindings': "Pago retenido para revisión de cumplimiento ({count, plural, one {# motivo} other {# motivos}})",
 	'exceptions.description.complianceNoScreenableVendor': "La factura no tiene un proveedor que se pueda verificar",
 	'exceptions.description.complianceProviderUnavailable': "No se pudo ejecutar la verificación de sanciones: no hay adaptador para el proveedor configurado «{provider}»",

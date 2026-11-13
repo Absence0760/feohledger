@@ -3437,6 +3437,14 @@ class AppLocalizationsFr extends AppLocalizations {
       'Les coordonnées bancaires du fournisseur ont changé ; vérifiez-les avant le paiement.';
 
   @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      'Le bénéficiaire a changé depuis le dernier paiement de cette facture ; vérifiez-le avant de payer à nouveau.';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      'Le fournisseur a été fusionné depuis le dernier paiement de cette facture, et ce paiement n\'a enregistré aucun bénéficiaire ; vérifiez avant de payer à nouveau.';
+
+  @override
   String exceptionDescriptionComplianceHoldFindings(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

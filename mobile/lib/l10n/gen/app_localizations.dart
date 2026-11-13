@@ -5146,6 +5146,18 @@ abstract class AppLocalizations {
   /// **'Vendor bank details changed; verify before payment.'**
   String get exceptionDescriptionVendorBankChanged;
 
+  /// No description provided for @exceptionDescriptionPayeeChangedSincePaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Payee changed since this invoice was last paid; verify before paying again.'**
+  String get exceptionDescriptionPayeeChangedSincePaid;
+
+  /// No description provided for @exceptionDescriptionPayeeUnrecordedAfterMerge.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor merged since this invoice was last paid, and that payment recorded no payee; verify before paying again.'**
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge;
+
   /// No description provided for @exceptionDescriptionComplianceHoldFindings.
   ///
   /// In en, this message translates to:

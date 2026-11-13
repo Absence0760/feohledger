@@ -219,10 +219,11 @@ async def test_void_payment_returns_invoice_to_approved_via_transition_invoice()
             new_callable=AsyncMock,
             return_value=[],
         ),
-        # The bank-change re-flag queries vendor change requests, which this
-        # mock session doesn't model either; it is pinned against a real DB in
+        # The re-payment payee check queries vendors, change requests and the
+        # audit trail, which this mock session doesn't model either; it is
+        # pinned against a real DB in test_payment_payee_stamp.py and
         # test_erp_export_blocking_exceptions.py.
-        patch("app.api.vendors.reflag_voided_invoice_for_bank_change", new_callable=AsyncMock),
+        patch("app.api.payments.flag_repayment_payee_change", new_callable=AsyncMock),
     ):
         ti.return_value = invoice
         da.return_value = None
@@ -321,10 +322,11 @@ async def test_void_audit_records_real_previous_status_and_decimal_amount():
             new_callable=AsyncMock,
             return_value=[],
         ),
-        # The bank-change re-flag queries vendor change requests, which this
-        # mock session doesn't model either; it is pinned against a real DB in
+        # The re-payment payee check queries vendors, change requests and the
+        # audit trail, which this mock session doesn't model either; it is
+        # pinned against a real DB in test_payment_payee_stamp.py and
         # test_erp_export_blocking_exceptions.py.
-        patch("app.api.vendors.reflag_voided_invoice_for_bank_change", new_callable=AsyncMock),
+        patch("app.api.payments.flag_repayment_payee_change", new_callable=AsyncMock),
     ):
         ti.return_value = invoice
         da.return_value = None

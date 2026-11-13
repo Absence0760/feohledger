@@ -86,11 +86,14 @@ _NO_RAISING_ACTOR: dict[str, str] = {
 
 # The sites that must pass a real VALUE. Currently exactly one: approving a
 # vendor bank-detail change is what re-points the money, and the flag exists to
-# get a second pair of eyes on that act.
+# get a second pair of eyes on that act. The same site raises the void's
+# re-payment flag (decisions §383), stamped with whoever re-pointed the payee
+# since the voided payment: the merge's actor or the bank change's approver.
 _MUST_STAMP_AN_ACTOR: dict[str, str] = {
     "app/api/vendors.py": (
-        "the bank-change approver — the one raise site where the signed-in actor is "
-        "genuinely what the flag asks someone else to check, and the axis the "
+        "the bank-change approver, or for a voided payment's re-payment the vendor "
+        "merge's actor (services/payee_stamp) — the person whose act re-pointed the "
+        "payee, which is what the flag asks someone else to check, and the axis the "
         "payable's own implicated-actor set cannot reach"
     ),
 }

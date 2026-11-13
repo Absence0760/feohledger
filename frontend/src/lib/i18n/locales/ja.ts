@@ -691,6 +691,8 @@ export const messages = {
 	'exceptions.description.positivePayAlteredAmount': "Positive Pay の返却: 小切手 {checkNumber} の金額が改ざんされています",
 	'exceptions.description.positivePayNotOnFile': "Positive Pay の返却: 小切手 {checkNumber} は発行ファイルにありません",
 	'exceptions.description.vendorBankChanged': "仕入先の銀行口座情報が変更されました。支払い前に確認してください。",
+	'exceptions.description.payeeChangedSincePaid': "前回の支払い以降、この請求書の支払先が変更されました。再度支払う前に確認してください。",
+	'exceptions.description.payeeUnrecordedAfterMerge': "前回の支払い以降に仕入先が統合されましたが、その支払いには支払先が記録されていません。再度支払う前に確認してください。",
 	'exceptions.description.complianceHoldFindings': "コンプライアンス審査のため支払いを保留中（{count, plural, other {#件の理由}}）",
 	'exceptions.description.complianceNoScreenableVendor': "請求書に審査可能な仕入先がありません",
 	'exceptions.description.complianceProviderUnavailable': "制裁スクリーニングを実行できませんでした: 設定されたプロバイダー「{provider}」のアダプターがありません",

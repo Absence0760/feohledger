@@ -284,6 +284,8 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'exception.positive_pay_altered_amount': {'checkNumber': 'text'},
   'exception.positive_pay_not_on_file': {'checkNumber': 'text'},
   'exception.vendor_bank_changed': {},
+  'exception.payee_changed_since_paid': {},
+  'exception.payee_unrecorded_after_merge': {},
   'exception.compliance_hold_findings': {'count': 'count'},
   'exception.compliance_no_screenable_vendor': {},
   'exception.compliance_provider_unavailable': {'provider': 'text'},
@@ -1121,6 +1123,12 @@ String? _localizeWarningCode(
     // Vendor bank details changed; verify before payment.
     case 'exception.vendor_bank_changed':
       return l.exceptionDescriptionVendorBankChanged;
+    // Payee changed since this invoice was last paid; verify before paying again.
+    case 'exception.payee_changed_since_paid':
+      return l.exceptionDescriptionPayeeChangedSincePaid;
+    // Vendor merged since this invoice was last paid, and that payment recorded no payee; verify before paying again.
+    case 'exception.payee_unrecorded_after_merge':
+      return l.exceptionDescriptionPayeeUnrecordedAfterMerge;
     // Payment held for compliance review ({count, plural, one {# reason} other {# reasons}})
     case 'exception.compliance_hold_findings':
       final count = _count(p['count']);

@@ -844,6 +844,8 @@
   "exceptionDescriptionPositivePayAlteredAmount": "Retour Positive Pay : chèque {checkNumber} au montant modifié",
   "exceptionDescriptionPositivePayNotOnFile": "Retour Positive Pay : chèque {checkNumber} absent du fichier d’émission",
   "exceptionDescriptionVendorBankChanged": "Les coordonnées bancaires du fournisseur ont changé ; vérifiez-les avant le paiement.",
+  "exceptionDescriptionPayeeChangedSincePaid": "Le bénéficiaire a changé depuis le dernier paiement de cette facture ; vérifiez-le avant de payer à nouveau.",
+  "exceptionDescriptionPayeeUnrecordedAfterMerge": "Le fournisseur a été fusionné depuis le dernier paiement de cette facture, et ce paiement n'a enregistré aucun bénéficiaire ; vérifiez avant de payer à nouveau.",
   "exceptionDescriptionComplianceHoldFindings": "Paiement suspendu pour contrôle de conformité ({count, plural, one {{count} motif} other {{count} motifs}})",
   "exceptionDescriptionComplianceNoScreenableVendor": "Aucun fournisseur vérifiable sur la facture",
   "exceptionDescriptionComplianceProviderUnavailable": "Le contrôle des sanctions n’a pas pu s’exécuter : aucun adaptateur pour le fournisseur configuré « {provider} »",

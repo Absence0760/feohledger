@@ -208,6 +208,11 @@ async def test_a_db_error_after_the_processor_call_is_recorded_in_doubt(
     assert payment.provider_payment_id == calls[0]
     assert payment.provider == "mock"
     assert payment.submitted_at is not None
+    # So did the payee the order was sent to (`_ORDER_FIELDS`, decisions §383):
+    # a later void of this payment compares against it.
+    assert payment.payee_recorded_at is not None
+    assert payment.payee_vendor_id == invoice.vendor_id
+    assert payment.payee_bank_fingerprint is not None
     # Nobody can show it settled: the order's outcome is unknown.
     assert payment.completed_at is None
     assert payment.failure_reason.startswith("db_error_after_processor_call:")
@@ -327,6 +332,8 @@ async def test_a_db_error_before_the_processor_call_is_recorded_without_a_send(r
     assert payment.provider_payment_id is None
     assert payment.submitted_at is None
     assert payment.failure_reason.startswith("dispatch_db_error:")
+    # Nothing was instructed, so no payee is recorded (decisions §383).
+    assert payment.payee_recorded_at is None
     assert invoice.status == InvoiceStatus.approved
     assert [a.action for a in audit] == ["payment.failed"]
 

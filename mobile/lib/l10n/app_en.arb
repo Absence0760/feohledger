@@ -2479,6 +2479,8 @@
     }
   },
   "exceptionDescriptionVendorBankChanged": "Vendor bank details changed; verify before payment.",
+  "exceptionDescriptionPayeeChangedSincePaid": "Payee changed since this invoice was last paid; verify before paying again.",
+  "exceptionDescriptionPayeeUnrecordedAfterMerge": "Vendor merged since this invoice was last paid, and that payment recorded no payee; verify before paying again.",
   "exceptionDescriptionComplianceHoldFindings": "Payment held for compliance review ({count, plural, one {{count} reason} other {{count} reasons}})",
   "@exceptionDescriptionComplianceHoldFindings": {
     "placeholders": {

@@ -985,6 +985,24 @@ DIRECT_EXCEPTION_SPECS: tuple[WarningSpec, ...] = (
         "Vendor bank details changed; verify before payment.",
         {},
     ),
+    # `services/payee_stamp.flag_repayment_payee_change`, raised by the void
+    # (decisions §383): the voided payment's recorded payee (vendor, bank
+    # fingerprint) is not who a re-payment would pay ...
+    WarningSpec(
+        EXCEPTION_PREFIX + "payee_changed_since_paid",
+        "fraud_flag",
+        "Payee changed since this invoice was last paid; verify before paying again.",
+        {},
+    ),
+    # ... or that payment predates the stamp and the vendor absorbed a merge
+    # since, so the invoice may have moved to another vendor's bank details.
+    WarningSpec(
+        EXCEPTION_PREFIX + "payee_unrecorded_after_merge",
+        "fraud_flag",
+        "Vendor merged since this invoice was last paid, and that payment recorded "
+        "no payee; verify before paying again.",
+        {},
+    ),
     # `api/payments._open_compliance_hold_exception`: a FRAME over the hold's
     # reasons (`params.findings`), always — even one reason, because each
     # reason is a lower-case clause written to follow it.

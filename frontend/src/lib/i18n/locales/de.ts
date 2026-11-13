@@ -696,6 +696,8 @@ export const messages = {
 	'exceptions.description.positivePayAlteredAmount': "Positive-Pay-Rückmeldung: Scheck {checkNumber} mit verändertem Betrag",
 	'exceptions.description.positivePayNotOnFile': "Positive-Pay-Rückmeldung: Scheck {checkNumber} nicht in der Ausstellungsdatei",
 	'exceptions.description.vendorBankChanged': "Bankverbindung des Lieferanten geändert; vor der Zahlung prüfen.",
+	'exceptions.description.payeeChangedSincePaid': "Zahlungsempfänger seit der letzten Zahlung dieser Rechnung geändert; vor erneuter Zahlung prüfen.",
+	'exceptions.description.payeeUnrecordedAfterMerge': "Lieferant seit der letzten Zahlung dieser Rechnung zusammengeführt, und diese Zahlung hat keinen Zahlungsempfänger erfasst; vor erneuter Zahlung prüfen.",
 	'exceptions.description.complianceHoldFindings': "Zahlung zur Compliance-Prüfung angehalten ({count, plural, one {# Grund} other {# Gründe}})",
 	'exceptions.description.complianceNoScreenableVendor': "Kein prüfbarer Lieferant auf der Rechnung",
 	'exceptions.description.complianceProviderUnavailable': "Sanktionsprüfung konnte nicht ausgeführt werden: kein Adapter für den konfigurierten Anbieter „{provider}“",
