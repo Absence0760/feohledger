@@ -33,6 +33,7 @@ from app.services.workflow_engine import (
     get_workflow_instance,
     transition_invoice,
 )
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.dates import parse_ambiguous_date, resolve_day_first_preference, utc_today
 
 logger = logging.getLogger(__name__)
@@ -1471,10 +1472,9 @@ def _clean_currency_code(val: str | None) -> str | None:
     cur = _clean_string(val)
     if cur is None:
         return None
-    cur_upper = cur.upper().rstrip(".").strip()
-    if len(cur_upper) == 3 and cur_upper.isalpha():
-        return cur_upper
-    return None
+    # The shared rule: three ASCII letters (decisions §381). `isalpha()` alone
+    # admitted a model's "ÄÖÜ".
+    return iso_currency_or_none(cur.rstrip(".").strip())
 
 
 @dataclass(frozen=True)

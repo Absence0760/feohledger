@@ -3,35 +3,26 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.api.pagination import PageMeta
 from app.schemas.action_verdict import CodedRefusal
-from app.schemas.expense import normalize_iso_currency
+from app.schemas.currency import CurrencyCode, CurrencyCodeOrUnset
 from app.schemas.money import MoneyAmount
-
-
-def _normalize_optional_currency(value: str | None) -> str | None:
-    """Blank means "not asserted"; anything else must be a real ISO 4217 shape.
-
-    `max_length=3` alone accepted `""`, `"e"` and `"us"`, and a memo stamped
-    with a code no invoice carries can never pass the currency guard on either
-    application path — it is born unappliable. Blank stays the "resolve it for
-    me" signal `api/credit_memos.create_credit_memo` documents.
-    """
-    if value is None or not value.strip():
-        return None
-    return normalize_iso_currency(value)
-
 
 #: Shared by create and PATCH so the two cannot validate a memo differently.
 MemoNumber = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 #: Digits match `credit_memos.amount` Numeric(15, 2); strictly positive, since a
 #: zero or negative credit is not a credit.
 MemoAmount = Annotated[Decimal, Field(gt=0, max_digits=15, decimal_places=2)]
-OptionalMemoCurrency = Annotated[str | None, AfterValidator(_normalize_optional_currency)]
+#: Blank means "not asserted"; anything else must be a real ISO 4217 shape.
+#: `max_length=3` alone accepted `""`, `"e"` and `"us"`, and a memo stamped
+#: with a code no invoice carries can never pass the currency guard on either
+#: application path — it is born unappliable. Blank stays the "resolve it for
+#: me" signal `api/credit_memos.create_credit_memo` documents.
+OptionalMemoCurrency = CurrencyCodeOrUnset
 #: A NOT NULL column's PATCH type: shape-checked, never blank.
-MemoCurrency = Annotated[str, AfterValidator(normalize_iso_currency)]
+MemoCurrency = CurrencyCode
 
 
 class CreditMemoCreate(BaseModel):

@@ -7,6 +7,7 @@ from app.models.invoice_status import (
     InvoiceStatus,  # the one enum; see that module
     financially_locked,
 )
+from app.schemas.currency import BlankableCurrencyCode, CurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
@@ -54,7 +55,7 @@ class InvoiceBase(BaseModel):
     invoice_number: str = Field(..., max_length=100)
     # Digits match `invoices.amount` Numeric(15, 2).
     amount: Decimal = Field(..., ge=0, max_digits=15, decimal_places=2)
-    currency: str = Field(default="USD", max_length=3)
+    currency: CurrencyCode = "USD"
     invoice_date: date | None = None
     received_date: date | None = None
     due_date: date | None = None
@@ -108,7 +109,7 @@ class InvoiceUpdate(BaseModel):
     vendor: str | None = Field(default=None, max_length=255)
     invoice_number: str | None = Field(default=None, max_length=100)
     amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: str | None = Field(default=None, max_length=3)
+    currency: BlankableCurrencyCode = None
     invoice_date: date | None = None
     received_date: date | None = None
     due_date: date | None = None

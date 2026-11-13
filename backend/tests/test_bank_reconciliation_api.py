@@ -964,6 +964,8 @@ async def test_upload_flags_a_debit_in_another_currency_as_currency_mismatch(rea
         ("", "statement_currency_required", {}),
         ("EURO", "statement_currency_invalid", {"value": "EURO"}),
         ("US$", "statement_currency_invalid", {"value": "US$"}),
+        # Letters, but not ASCII: `isalpha()` admitted it (decisions §381).
+        ("ÄÖÜ", "statement_currency_invalid", {"value": "ÄÖÜ"}),
     ],
 )
 async def test_upload_refuses_a_blank_or_malformed_statement_currency(

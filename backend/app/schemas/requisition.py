@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.procurement import RequisitionStatus
+from app.schemas.currency import CurrencyCode, OptionalCurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
@@ -72,7 +73,7 @@ class RequisitionBase(BaseModel):
     vendor_id: str | None = None
     contract_id: str | None = None
     budget_id: str | None = None
-    currency: str = Field(default="USD", max_length=3)
+    currency: CurrencyCode = "USD"
     notes: str | None = None
 
 
@@ -95,7 +96,7 @@ class RequisitionUpdate(BaseModel):
     vendor_id: str | None = None
     contract_id: str | None = None
     budget_id: str | None = None
-    currency: str | None = Field(default=None, max_length=3)
+    currency: OptionalCurrencyCode = None
     notes: str | None = None
     line_items: list[RequisitionLineItemCreate] | None = None
 
