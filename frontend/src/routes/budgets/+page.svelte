@@ -2,8 +2,8 @@
 	import type { Budget } from '#lib/types/budget.ts';
 	import {
 		BUDGET_DIMENSIONS,
-		BUDGET_DIMENSION_LABELS,
-		type BudgetDimension
+		BUDGET_DIMENSION_LABEL_KEYS,
+		budgetDimensionLabelKey
 	} from '#lib/types/budget.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
@@ -60,7 +60,7 @@
 
 	const DIMENSION_CHIPS = $derived([
 		{ key: 'all', label: m('common.all') },
-		...BUDGET_DIMENSIONS.map((d) => ({ key: d, label: BUDGET_DIMENSION_LABELS[d] }))
+		...BUDGET_DIMENSIONS.map((d) => ({ key: d, label: m(BUDGET_DIMENSION_LABEL_KEYS[d]) }))
 	]);
 
 	const COLUMNS = $derived([
@@ -279,7 +279,8 @@
 	}
 
 	function dimLabel(d: string): string {
-		return BUDGET_DIMENSION_LABELS[d as BudgetDimension] ?? d;
+		const key = budgetDimensionLabelKey(d);
+		return key ? m(key) : d;
 	}
 </script>
 

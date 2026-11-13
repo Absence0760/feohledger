@@ -69,6 +69,10 @@ test.describe('/admin/privacy (admin)', () => {
 		const bundle = dsarModal.getByTestId('dsar-bundle');
 		await expect(bundle).toBeVisible();
 		await expect(bundle).toContainText(name);
+		// The summary is built from the response's typed record_counts, not
+		// server prose (decisions §360): a fresh vendor has no invoices yet.
+		const summary = dsarModal.getByTestId('dsar-summary');
+		await expect(summary.locator('[data-section="related_invoices"]')).toHaveText('0 invoices');
 		await dsarModal.getByRole('button', { name: 'Close' }).click();
 		await expect(dsarModal).toBeHidden();
 
@@ -106,7 +110,9 @@ test.describe('/admin/privacy (admin)', () => {
 		// Second click actually erases.
 		await eraseModal.getByRole('button', { name: 'Click again to confirm' }).click();
 		await expect(eraseModal).toBeHidden({ timeout: 10_000 });
-		await expect(page.getByText(/field\(s\) redacted/)).toBeVisible({ timeout: 10_000 });
+		await expect(page.getByText(/^Erased: \d+ fields? redacted, \d+ documents? deleted\.$/)).toBeVisible({
+			timeout: 10_000
+		});
 
 		// Verify the real effect server-side. `vendor.name` is DELIBERATELY
 		// preserved by erasure (it's denormalised onto every Invoice's

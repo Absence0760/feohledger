@@ -584,7 +584,7 @@ export const VENDOR_GUIDES: Guide[] = [
 						type: 'steps',
 						items: [
 							'Open [[page:/budgets]] and select {ui:budgets.action.new}.',
-							'Give it a {ui:budgets.modal.field.name} and choose the {ui:budgets.modal.field.dimension} it tracks: **Department**, **Project**, **Cost Center** or **GL Account**.',
+							'Give it a {ui:budgets.modal.field.name} and choose the {ui:budgets.modal.field.dimension} it tracks: {ui:budgets.dimension.department}, {ui:budgets.dimension.project}, {ui:budgets.dimension.costCenter} or {ui:budgets.dimension.glAccount}.',
 							'Enter the {ui:budgets.modal.field.dimensionValue} exactly as it is coded on invoices, for example the department name or the GL account number.',
 							'Set the {ui:budgets.modal.field.period}, and a {ui:budgets.modal.field.periodStart} and {ui:budgets.modal.field.periodEnd} if spend should only count inside those dates. Then set the {ui:budgets.modal.field.amount} and {ui:budgets.modal.field.currency}, and select {ui:budgets.modal.create}.'
 						]

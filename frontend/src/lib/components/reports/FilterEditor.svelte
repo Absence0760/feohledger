@@ -4,7 +4,8 @@
 	// for enum fields, the allowed values. The value input adapts to the field
 	// type + operator (single scalar / two-value `between` / multi-value `in`).
 	import type { CatalogFilter, FilterOp, SpecFilter } from '#lib/types/reports.ts';
-	import { OP_LABELS } from '#lib/types/reports.ts';
+	import { OP_LABEL_KEYS, fieldLabel } from '#lib/types/reports.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 
 	interface Props {
@@ -15,6 +16,10 @@
 
 	function meta(key: string): CatalogFilter | undefined {
 		return available.find((f) => f.key === key);
+	}
+
+	function label(key: string): string {
+		return fieldLabel(m, key, meta(key)?.label);
 	}
 
 	function isNumeric(key: string): boolean {
@@ -94,40 +99,41 @@
 
 <div class="editor" data-testid="filter-editor">
 	<div class="editor-head">
-		<h3>Filters</h3>
+		<h3>{m('reports.filters.title')}</h3>
 		{#if available.length}
 			<select
-				aria-label="Add filter"
+				aria-label={m('reports.filters.add')}
 				value=""
 				onchange={(e) => {
 					add(e.currentTarget.value);
 					e.currentTarget.value = '';
 				}}
 			>
-				<option value="" disabled selected>+ Add filter…</option>
+				<option value="" disabled selected>{m('reports.filters.addOption')}</option>
 				{#each available as f (f.key)}
-					<option value={f.key}>{f.label}</option>
+					<option value={f.key}>{fieldLabel(m, f.key, f.label)}</option>
 				{/each}
 			</select>
 		{/if}
 	</div>
 
 	{#if selected.length === 0}
-		<p class="hint">No filters — the report includes the whole set.</p>
+		<p class="hint">{m('reports.filters.empty')}</p>
 	{:else}
 		<ul class="rows">
 			{#each selected as filter, idx (idx)}
 				{@const field = meta(filter.key)}
+				{@const name = label(filter.key)}
 				<li class="row">
-					<span class="field-label">{field?.label ?? filter.key}</span>
+					<span class="field-label">{name}</span>
 
 					<select
-						aria-label="Operator for {field?.label ?? filter.key}"
+						aria-label={m('reports.filters.opFor', { field: name })}
 						value={filter.op}
 						onchange={(e) => changeOp(filter, e.currentTarget.value as FilterOp)}
 					>
 						{#each field?.ops ?? [] as op (op)}
-							<option value={op}>{OP_LABELS[op]}</option>
+							<option value={op}>{m(OP_LABEL_KEYS[op])}</option>
 						{/each}
 					</select>
 
@@ -135,14 +141,14 @@
 						{#if filter.op === 'between'}
 							<input
 								type={inputType(filter.key)}
-								aria-label="{field?.label} from"
+								aria-label={m('reports.filters.from', { field: name })}
 								value={betweenAt(filter, 0)}
 								oninput={(e) => setBetween(filter, 0, e.currentTarget.value)}
 							/>
-							<span class="and">and</span>
+							<span class="and">{m('reports.filters.and')}</span>
 							<input
 								type={inputType(filter.key)}
-								aria-label="{field?.label} to"
+								aria-label={m('reports.filters.to', { field: name })}
 								value={betweenAt(filter, 1)}
 								oninput={(e) => setBetween(filter, 1, e.currentTarget.value)}
 							/>
@@ -163,15 +169,15 @@
 							{:else}
 								<input
 									type="text"
-									aria-label="{field?.label} values (comma-separated)"
-									placeholder="value1, value2"
+									aria-label={m('reports.filters.valuesFor', { field: name })}
+									placeholder={m('reports.filters.valuesPlaceholder')}
 									value={inText(filter)}
 									oninput={(e) => setInText(filter, e.currentTarget.value)}
 								/>
 							{/if}
 						{:else if field?.enumValues?.length && (filter.op === 'eq' || filter.op === 'ne')}
 							<select
-								aria-label="Value for {field?.label}"
+								aria-label={m('reports.filters.valueFor', { field: name })}
 								value={scalarValue(filter)}
 								onchange={(e) => (filter.value = e.currentTarget.value)}
 							>
@@ -183,7 +189,7 @@
 						{:else}
 							<input
 								type={inputType(filter.key)}
-								aria-label="Value for {field?.label}"
+								aria-label={m('reports.filters.valueFor', { field: name })}
 								value={scalarValue(filter)}
 								oninput={(e) => (filter.value = coerce(filter.key, e.currentTarget.value))}
 							/>
@@ -193,7 +199,8 @@
 					<RowAction
 						variant="danger"
 						onclick={() => remove(idx)}
-						ariaLabel="Remove filter {field?.label ?? filter.key}">Remove</RowAction
+						ariaLabel={m('reports.filters.removeAria', { field: name })}
+						>{m('reports.remove')}</RowAction
 					>
 				</li>
 			{/each}

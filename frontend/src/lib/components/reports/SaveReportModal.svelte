@@ -2,6 +2,7 @@
 	// Save-as-report dialog. Collects a name (required) + optional description;
 	// the parent owns the actual POST/PATCH and passes save state back in.
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface Props {
 		open: boolean;
@@ -47,8 +48,8 @@
 
 <Modal
 	{open}
-	ariaLabel={editing ? 'Save report changes' : 'Save report'}
-	title={editing ? 'Save changes' : 'Save report'}
+	ariaLabel={editing ? m('reports.save.ariaEdit') : m('reports.action.save')}
+	title={editing ? m('reports.action.saveChanges') : m('reports.action.save')}
 	width="sm"
 	{onclose}
 >
@@ -59,25 +60,34 @@
 		}}
 	>
 		<div class="field">
-			<label for="report-name">Name <em class="required">*</em></label>
-			<input id="report-name" type="text" bind:value={name} placeholder="Vendor spend by month" />
+			<label for="report-name">{m('reports.save.name')} <em class="required">*</em></label>
+			<input
+				id="report-name"
+				type="text"
+				bind:value={name}
+				placeholder={m('reports.save.namePlaceholder')}
+			/>
 		</div>
 		<div class="field">
-			<label for="report-desc">Description</label>
+			<label for="report-desc">{m('reports.save.description')}</label>
 			<textarea
 				id="report-desc"
 				rows="3"
 				bind:value={description}
-				placeholder="Optional notes about what this report shows"
+				placeholder={m('reports.save.descriptionPlaceholder')}
 			></textarea>
 		</div>
 		{#if error}
 			<p class="error-banner">{error}</p>
 		{/if}
 		<div class="modal-footer">
-			<button type="button" class="btn-cancel" onclick={onclose}>Cancel</button>
+			<button type="button" class="btn-cancel" onclick={onclose}>{m('common.cancel')}</button>
 			<button type="submit" class="btn-primary" disabled={saving || !name.trim()}>
-				{saving ? 'Saving…' : editing ? 'Save changes' : 'Save report'}
+				{saving
+					? m('common.saving')
+					: editing
+						? m('reports.action.saveChanges')
+						: m('reports.action.save')}
 			</button>
 		</div>
 	</form>
