@@ -471,8 +471,9 @@
 			messages, passkey metadata, and a manifest of the stored documents held about them with
 			what an erasure would do to each. Bank details are masked unless an administrator
 			separately requests and justifies an unmasked copy, which is audited on its own. A
-			collection that can run long is cut at one thousand entries with its true total stated
-			beside it.
+			collection that can run long is cut at one thousand entries in the on-screen view, with
+			its true total stated beside it, and the complete bundle — every entry, uncapped — is a
+			separate download, audited on each retrieval.
 		</li>
 		<li>
 			<strong>Rectification.</strong> The supplier, invoice, expense, contract and user

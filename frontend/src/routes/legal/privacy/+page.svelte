@@ -827,11 +827,12 @@
 			wrote yourself are listed — what you did, to which record, and when — but without the detail
 			each entry recorded, because an entry about an action you took on someone else's record
 			carries that other person's identifiers, and Article 15(4) does not let your copy override
-			their rights. And seven kinds of record that can run long for one person — audit entries,
-			notifications, expense reports, expenses, chat messages, contracts and virtual cards — are
-			each cut at one thousand entries, with the true total stated beside the cut, so you can see
-			what was trimmed and ask for the rest. Everything else in the export, including the list of
-			your documents, is returned in full.
+			their rights. And the kinds of record that can run long for one person — audit entries,
+			notifications, expense reports, expenses, chat messages, contracts, virtual cards, a
+			supplier's invoices and payments, and the list of your documents — are each cut at one
+			thousand entries in the on-screen view, with the true total stated beside the cut. The cut
+			is only of the view: the same export is also downloadable as one complete file with every
+			entry of every kind, and that file is what you receive whenever the view was cut.
 		</li>
 	</ul>
 
