@@ -217,6 +217,8 @@ DIRECT_EXCEPTION_PRODUCER_MODULES = (
     "app/services/sanctions_categories.py",
     "app/services/payment_reconciler.py",
     "app/services/payment_settlement.py",
+    # The void's payee comparison (decisions §383).
+    "app/services/payee_stamp.py",
 )
 
 #: Direct `create_exception` callers whose description is a PERSON's words, so
