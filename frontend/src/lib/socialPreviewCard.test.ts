@@ -215,12 +215,14 @@ describe('social preview card in src/app.html', () => {
 		// An origin and nothing else: a trailing slash would render `//og-image.png`.
 		expect(new URL(devValue!).origin).toBe(devValue);
 
-		// vm-deploy.yml's SPA build (S3 + CloudFront) derives it from APP_URL
-		// (failing when empty, trailing slash stripped); deploy.sh's VM build from
-		// APP_DOMAIN, which its preflight requires.
+		// vm-deploy.yml's SPA build (S3 + CloudFront) is the only deploy build
+		// since decisions §364: it derives the origin from APP_URL (failing when
+		// empty, trailing slash stripped). The VM builds no SPA, so deploy.sh must
+		// not grow a second, unpinned build that could drift from this one.
 		expect(RELEASE_WORKFLOW).toContain('PUBLIC_SITE_URL="${APP_URL%/}" pnpm build');
 		expect(RELEASE_WORKFLOW).toMatch(/if \[ -z "\$APP_URL" \]; then[\s\S]*?exit 1/);
-		expect(VM_DEPLOY).toContain('-e PUBLIC_SITE_URL="https://${APP_DOMAIN}"');
+		expect(VM_DEPLOY).not.toContain('PUBLIC_SITE_URL');
+		expect(VM_DEPLOY).not.toContain('frontend-build');
 	});
 
 	it('has no title element, so a route-set (white-label) title still wins', () => {
