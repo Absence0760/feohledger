@@ -23,6 +23,7 @@ from pathlib import Path
 from app.models import invoice_status as groups
 from app.models.invoice_status import (
     APPROVED_OR_BEYOND_STATUSES,
+    FINANCIALLY_LOCKED_STATUSES,
     IN_REVIEW_STATUSES,
     OPEN_AP_STATUSES,
     POST_APPROVAL_LOCKED_STATUSES,
@@ -89,6 +90,10 @@ def test_post_approval_locked_is_approved_or_beyond_minus_approved():
     assert POST_APPROVAL_LOCKED_STATUSES == set(APPROVED_OR_BEYOND_STATUSES) - {S.approved}
 
 
+def test_financially_locked_is_post_approval_locked_plus_approved():
+    assert FINANCIALLY_LOCKED_STATUSES == POST_APPROVAL_LOCKED_STATUSES | {S.approved}
+
+
 def test_consumers_read_the_owner():
     from app.api import analytics as api_analytics
     from app.api import invoices as api_invoices
@@ -96,6 +101,7 @@ def test_consumers_read_the_owner():
     from app.services import budget_service, gl_recode, invoice_warnings
 
     assert api_invoices.IMMUTABLE_STATUSES is POST_APPROVAL_LOCKED_STATUSES
+    assert api_invoices._FINANCIALLY_LOCKED_STATUSES is FINANCIALLY_LOCKED_STATUSES
     assert gl_recode._IMMUTABLE_STATUSES is POST_APPROVAL_LOCKED_STATUSES
     assert invoice_warnings._PRE_APPROVAL_STATUSES is PRE_APPROVAL_STATUSES
     assert svc_analytics.OPEN_AP_STATUSES == tuple(s.value for s in OPEN_AP_STATUSES)
@@ -116,6 +122,7 @@ _GROUPS = {
         "OPEN_AP_STATUSES",
         "APPROVED_OR_BEYOND_STATUSES",
         "POST_APPROVAL_LOCKED_STATUSES",
+        "FINANCIALLY_LOCKED_STATUSES",
     )
 }
 

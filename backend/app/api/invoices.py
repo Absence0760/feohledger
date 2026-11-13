@@ -33,6 +33,7 @@ from app.api.invoice_entry import (
     INVOICE_ENTRY_ROLES,
     INVOICE_ENTRY_WINDOW_CLOSED,
     INVOICE_IMPORT_ROLES,
+    document_lock_refusal,
     in_entry_window,
     is_entry_only,
     may_import_history,
@@ -65,7 +66,7 @@ from app.models.exception import Exception as ExceptionModel
 from app.models.expense import CorporateCardTransaction
 from app.models.invoice import Invoice, InvoiceExtractionResult, InvoiceLineItem
 from app.models.invoice import InvoiceStatus as DBInvoiceStatus
-from app.models.invoice_status import POST_APPROVAL_LOCKED_STATUSES
+from app.models.invoice_status import FINANCIALLY_LOCKED_STATUSES, POST_APPROVAL_LOCKED_STATUSES
 from app.models.organization import Organization
 from app.models.payment import Payment, PaymentSchedule
 from app.models.peppol_transmission import PeppolTransmission
@@ -112,7 +113,11 @@ from app.services.gl_recode import RecodeFilter, bulk_recode_gl
 from app.services.invoice_warnings import reconcile_line_totals, refresh_warnings
 from app.services.payment_runs import live_payment_invoices
 from app.services.report_export import csv_safe_cell
-from app.services.storage import delete_file, upload_chat_file, upload_invoice_file
+from app.services.storage import (
+    invoice_file_display_name,
+    upload_chat_file,
+    upload_invoice_file,
+)
 from app.services.supplier_chat import (
     CHAT_TEMPLATES,
     attachment_url,
@@ -159,7 +164,9 @@ _PEPPOL_SENDABLE_STATUSES = {DBInvoiceStatus.approved} | IMMUTABLE_STATUSES
 # and silently invalidate the signature. `approved` was the gap: IMMUTABLE_STATUSES
 # only starts at `sending_to_erp`, so an edit in the `approved` window slipped
 # through. Financial edits past approval must go back through reject → re-approve.
-_FINANCIALLY_LOCKED_STATUSES = {DBInvoiceStatus.approved} | IMMUTABLE_STATUSES
+# The source document freezes from the same set (`invoice_entry.document_locked`,
+# decisions §363).
+_FINANCIALLY_LOCKED_STATUSES = FINANCIALLY_LOCKED_STATUSES
 # WHO gets paid is frozen alongside HOW MUCH. `_execute_single_payment` resolves
 # the payee's `Vendor.bank_details` through `Invoice.vendor_id` at execution
 # time, and this PATCH re-runs `match_and_link_vendor` whenever the vendor name
@@ -1406,6 +1413,15 @@ async def create_invoice(
     return InvoiceResponse.from_db(invoice)
 
 
+def _refuse_locked_document(invoice: Invoice) -> None:
+    """409 ``invoice_document_locked`` from the file routes once the document is
+    frozen (`invoice_entry.document_locked`). The verdict the modal reads is
+    `invoice_entry.manage_file_refusal`, built on the same check."""
+    refused = document_lock_refusal(invoice)
+    if refused is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
+
+
 @router.post(
     "/{invoice_id}/file", response_model=InvoiceResponse, status_code=status.HTTP_201_CREATED
 )
@@ -1423,10 +1439,10 @@ async def attach_invoice_file(
     Manual entry (``create_invoice``) never runs extraction, so a caller who
     wants to keep the source document alongside a manually-keyed invoice
     attaches it as a second step. Attach-only: refuses once the invoice
-    already has a file rather than silently replacing it — replacing an
-    existing invoice file is a separate, not-yet-built feature with its own
-    role/status gating still to be decided (see docs/roadmap.md § Invoice PDF
-    Management).
+    already has a file rather than silently replacing it (`PUT` replaces).
+    Refused once the document is frozen (`invoice_document_locked`, from
+    `approved` on): a document added after sign-off is one nobody approved
+    against (decisions §363).
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     # Row-locked: the entry-window guard and the editor stamp below must not
@@ -1435,9 +1451,12 @@ async def attach_invoice_file(
     refuse_entry_only_outside_window(user, invoice)
     if invoice.file_key:
         raise HTTPException(status_code=409, detail="Invoice already has a file attached.")
+    _refuse_locked_document(invoice)
 
     try:
-        file_key, file_url = await upload_invoice_file(org_id, invoice.id, file)
+        # Versioned: a document removed earlier is kept under its own key, and a
+        # new upload of the same name must not overwrite it.
+        file_key, file_url = await upload_invoice_file(org_id, invoice.id, file, versioned=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -1452,7 +1471,11 @@ async def attach_invoice_file(
         action="invoice.file_attached",
         entity_type="invoice",
         entity_id=invoice.id,
-        details={"filename": file.filename, "content_type": file.content_type},
+        details={
+            "filename": invoice_file_display_name(file_key),
+            "file_key": file_key,
+            "content_type": file.content_type,
+        },
     )
     await db.flush()
     result = await db.execute(
@@ -1479,8 +1502,11 @@ async def replace_invoice_file(
     `attach_invoice_file` only works when the invoice has no file yet; this
     endpoint is the reverse — it requires one to already be present (404
     otherwise, pointing the caller at attach instead) and swaps it for a new
-    upload. Refused once the invoice is `done` (terminal, financially frozen)
-    to match the rest of the file-mutation gating in this file.
+    upload. Refused once the document is frozen (`invoice_document_locked`, from
+    `approved` on, with the financial fields). Before that the superseded object
+    is KEPT, under its own key, and the audit row names it
+    (``previous_file_key``): a reviewer may have read it, and a rejection may
+    have been made against it (decisions §363).
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     # Row-locked for the same reason as attach.
@@ -1490,14 +1516,13 @@ async def replace_invoice_file(
     refuse_entry_only_outside_window(user, invoice)
     if not invoice.file_key:
         raise HTTPException(status_code=404, detail="No file to replace. Use upload to attach one.")
-    if invoice.status == DBInvoiceStatus.done:
-        raise HTTPException(
-            status_code=409, detail="Cannot modify the file once the invoice is done."
-        )
+    _refuse_locked_document(invoice)
 
     old_file_key = invoice.file_key
     try:
-        file_key, file_url = await upload_invoice_file(org_id, invoice.id, file)
+        # Versioned, so the new object never lands on the key of the one it
+        # supersedes (or of any earlier version) when the filenames match.
+        file_key, file_url = await upload_invoice_file(org_id, invoice.id, file, versioned=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -1513,22 +1538,16 @@ async def replace_invoice_file(
         entity_type="invoice",
         entity_id=invoice.id,
         details={
-            "previous_filename": old_file_key.rsplit("/", 1)[-1],
-            "filename": file_key.rsplit("/", 1)[-1],
+            "previous_filename": invoice_file_display_name(old_file_key),
+            # The superseded object, kept: the audit row is its reference.
+            # Storage keys carry ids and the sanitized filename only.
+            "previous_file_key": old_file_key,
+            "filename": invoice_file_display_name(file_key),
+            "file_key": file_key,
             "content_type": file.content_type,
         },
     )
-    # Commit before touching storage — the row pointing at the new key must be
-    # durable before the old object is removed, so a failure here never leaves
-    # `file_key` referencing an object we already deleted (mirrors the
-    # commit-then-delete order in api/positive_pay.py's delete route).
     await db.commit()
-    # upload_invoice_file's S3 key is deterministic on the sanitized filename
-    # (no uniquifier) — replacing a file with one of the SAME name overwrites
-    # the old object in place, so old_file_key == file_key. Deleting it in
-    # that case would delete the file we just wrote.
-    if old_file_key != file_key:
-        await delete_file(old_file_key)
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.extraction_results))
@@ -1546,19 +1565,20 @@ async def delete_invoice_file(
     user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    """Delete an invoice's file without replacing it."""
+    """Remove an invoice's file without replacing it.
+
+    Detaches the document from the invoice; the stored object is KEPT and the
+    audit row names it (``file_key``), as for a replace (decisions §363).
+    Refused once the document is frozen (`invoice_document_locked`).
+    """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
     refuse_entry_only_outside_window(user, invoice)
     if not invoice.file_key:
         raise HTTPException(status_code=404, detail="No file to delete.")
-    if invoice.status == DBInvoiceStatus.done:
-        raise HTTPException(
-            status_code=409, detail="Cannot modify the file once the invoice is done."
-        )
+    _refuse_locked_document(invoice)
 
-    filename = invoice.file_key.rsplit("/", 1)[-1]
-    file_key_to_delete = invoice.file_key
+    detached_file_key = invoice.file_key
     invoice.file_key = None
     invoice.file_url = None
     stamp_entry_editor(user, invoice)
@@ -1570,12 +1590,12 @@ async def delete_invoice_file(
         action="invoice.file_deleted",
         entity_type="invoice",
         entity_id=invoice.id,
-        details={"filename": filename},
+        details={
+            "filename": invoice_file_display_name(detached_file_key),
+            "file_key": detached_file_key,
+        },
     )
-    # Commit before touching storage — see replace_invoice_file for why
-    # (mirrors api/positive_pay.py's commit-then-delete order).
     await db.commit()
-    await delete_file(file_key_to_delete)
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.extraction_results))

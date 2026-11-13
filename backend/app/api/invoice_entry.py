@@ -28,9 +28,10 @@ set is non-empty.
 
 from fastapi import HTTPException, status
 
-from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK, ROLE_AP_MANAGER, ROLE_CFO
-from app.api.refusals import coded_refusal
+from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK, ROLE_AP_MANAGER, ROLE_CFO, holds_any_role
+from app.api.refusals import coded_refusal, role_not_permitted
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice_status import FINANCIALLY_LOCKED_STATUSES
 from app.models.user import User
 
 #: The roles whose invoice reach goes past entry (delete, ERP, the `approved`
@@ -48,6 +49,10 @@ INVOICE_IMPORT_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)
 HISTORICAL_IMPORT_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
 
 INVOICE_ENTRY_WINDOW_CLOSED = "invoice_entry_window_closed"
+
+#: The source-document routes (`POST` / `PUT` / `DELETE /invoices/{id}/file`)
+#: on an approved invoice. ``params.status``. See :func:`document_locked`.
+INVOICE_DOCUMENT_LOCKED = "invoice_document_locked"
 
 # An explicit allowlist, so a status added later is outside the window until
 # someone decides otherwise. `ready_for_review` is NOT in it: once submitted,
@@ -119,22 +124,66 @@ def missing_required_fields(invoice: Invoice) -> list[str]:
     return missing
 
 
+def entry_window_refusal(user: User, invoice: Invoice) -> dict | None:
+    """The coded refusal for an entry-only caller past the entry window, or
+    None — the verdict form of :func:`refuse_entry_only_outside_window`."""
+    if is_entry_only(user) and not in_entry_window(invoice):
+        return coded_refusal(
+            INVOICE_ENTRY_WINDOW_CLOSED,
+            "AP clerks can enter and edit an invoice only until it is submitted for "
+            "review; after that it needs an AP manager, or a rejection for rework.",
+            status=invoice.status.value,
+        )
+    return None
+
+
 def refuse_entry_only_outside_window(user: User, invoice: Invoice) -> None:
     """403 an entry-only caller acting on an invoice past the entry window.
 
     A no-op for a caller holding a manage role: their endpoint's own status
     guards apply unchanged.
     """
-    if is_entry_only(user) and not in_entry_window(invoice):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=coded_refusal(
-                INVOICE_ENTRY_WINDOW_CLOSED,
-                "AP clerks can enter and edit an invoice only until it is submitted for "
-                "review; after that it needs an AP manager, or a rejection for rework.",
-                status=invoice.status.value,
-            ),
-        )
+    refused = entry_window_refusal(user, invoice)
+    if refused is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refused)
+
+
+def document_locked(invoice: Invoice) -> bool:
+    """Whether the invoice's source document is frozen (decisions §363).
+
+    From `approved` on (`FINANCIALLY_LOCKED_STATUSES`), the document is what
+    the approver signed off and what the payment is made against, so it is
+    neither replaced, removed nor added to. An approved invoice whose ERP push
+    failed sits at `failed`, and `/retry-erp` pushes it again with no new
+    approval, so it is frozen too; a `failed` extraction (never approved) is
+    not.
+    """
+    if invoice.status in FINANCIALLY_LOCKED_STATUSES:
+        return True
+    return invoice.status is InvoiceStatus.failed and was_ever_approved(invoice)
+
+
+def document_lock_refusal(invoice: Invoice) -> dict | None:
+    """The coded 409 the file routes answer on a frozen document, or None."""
+    if not document_locked(invoice):
+        return None
+    return coded_refusal(
+        INVOICE_DOCUMENT_LOCKED,
+        "The source document cannot be changed once the invoice is approved.",
+        status=invoice.status.value,
+    )
+
+
+def manage_file_refusal(user: User, invoice: Invoice) -> dict | None:
+    """What the file routes would answer ``user`` for ``invoice`` right now:
+    the route's role list, the entry window, then the document lock — the
+    doors' own order. ``GET /review-actions`` serves it as ``manage_file``, so
+    the modal offers Upload / Replace / Delete from it rather than a status
+    list of its own. Whether there is a file to replace is the modal's choice
+    of button, not a rule."""
+    if not holds_any_role(user, INVOICE_ENTRY_ROLES):
+        return role_not_permitted()
+    return entry_window_refusal(user, invoice) or document_lock_refusal(invoice)
 
 
 def stamp_entry_editor(user: User, invoice: Invoice) -> None:

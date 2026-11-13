@@ -72,6 +72,7 @@ from app.models.positive_pay import PositivePayFile
 from app.models.supplier_chat import ChatAuthorRole, SupplierChatMessage, SupplierChatThread
 from app.models.vendor import Vendor
 from app.models.vendor_statement_recon import VendorStatementReconciliation
+from app.models.workflow import AuditLog
 from app.services import storage
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,10 @@ KIND_VENDOR_STATEMENT = "vendor_statement"
 _RETAIN_REASON_EVIDENCE = (
     "transaction evidence — retained on the same legal basis as the invoice / "
     "payment rows it supports"
+)
+_RETAIN_REASON_SUPERSEDED = (
+    "an earlier version of the invoice document, kept as evidence of what was "
+    "reviewed — retained on the same legal basis as the invoice it belongs to"
 )
 _RETAIN_REASON_COMPANY_RECORD = (
     "company correspondence authored by an AP user, not the subject's own document"
@@ -152,6 +157,57 @@ class DocumentErasureResult:
 # ---------------------------------------------------------------------------
 # Per-subject collection
 # ---------------------------------------------------------------------------
+
+
+#: The audit actions that detach an invoice document while keeping its object,
+#: and the ``details`` field naming the kept key (decisions §363). Nothing else
+#: references a superseded document, so the walk reads them from here.
+_SUPERSEDED_DOCUMENT_ACTIONS = {
+    "invoice.file_replaced": "previous_file_key",
+    "invoice.file_deleted": "file_key",
+    "invoice.resubmitted_by_vendor": "previous_file_key",
+}
+
+
+async def _superseded_invoice_documents(
+    tenant_db: AsyncSession,
+    *,
+    invoice_ids: list[uuid.UUID],
+    organization_id: uuid.UUID,
+    current_keys: set[str],
+) -> list[SubjectDocument]:
+    """The invoice documents a replace, a removal or a supplier resubmit kept
+    in storage after detaching them. Retained, as the invoice's own document
+    is: each is a version someone reviewed."""
+    rows = (
+        await tenant_db.execute(
+            select(AuditLog.entity_id, AuditLog.action, AuditLog.details).where(
+                AuditLog.entity_type == "invoice",
+                AuditLog.entity_id.in_(invoice_ids),
+                AuditLog.action.in_(tuple(_SUPERSEDED_DOCUMENT_ACTIONS)),
+            )
+        )
+    ).all()
+    seen = set(current_keys)
+    docs: list[SubjectDocument] = []
+    for row in rows:
+        key = (row.details or {}).get(_SUPERSEDED_DOCUMENT_ACTIONS[row.action])
+        # Only a key under this organisation's prefix is one of its objects.
+        if not isinstance(key, str) or not key.startswith(f"{organization_id}/") or key in seen:
+            continue
+        seen.add(key)
+        docs.append(
+            SubjectDocument(
+                file_key=key,
+                kind=KIND_INVOICE,
+                disposition=RETAIN,
+                record_type="invoice",
+                record_id=str(row.entity_id),
+                filename=storage.invoice_file_display_name(key),
+                reason=_RETAIN_REASON_SUPERSEDED,
+            )
+        )
+    return docs
 
 
 async def _vendor_invoice_ids(
@@ -250,6 +306,14 @@ async def _collect_vendor_contact(
                     reason=_RETAIN_REASON_EVIDENCE,
                 )
             )
+        docs.extend(
+            await _superseded_invoice_documents(
+                tenant_db,
+                invoice_ids=invoice_ids,
+                organization_id=organization_id,
+                current_keys={row.file_key for row in invoice_rows},
+            )
+        )
 
         messages = (
             (

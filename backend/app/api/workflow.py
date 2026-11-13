@@ -21,8 +21,10 @@ from app.api.invoice_entry import (
     INVOICE_ENTRY_ROLES,
     INVOICE_ENTRY_WINDOW_CLOSED,
     INVOICE_MANAGE_ROLES,
+    entry_window_refusal,
     in_entry_window,
     is_entry_only,
+    manage_file_refusal,
     missing_required_fields,
     refuse_entry_only_outside_window,
     stamp_entry_editor,
@@ -107,6 +109,30 @@ def complete_status_refusal(invoice: Invoice) -> dict | None:
 #: Closing an invoice to `done` refused because one of our rails is already
 #: paying it (decisions §357). ``params.claim`` is ``payment`` / ``virtual_card``
 #: (`services/erp_export_gate.CLAIM_*`).
+INVOICE_NOT_RESUBMITTABLE = "invoice_not_resubmittable"
+
+
+def resubmit_refusal(user: User, invoice: Invoice) -> dict | None:
+    """What `POST /{id}/resubmit` would answer ``user`` for ``invoice``: the
+    route's role list, then the status (only a `rejected` invoice goes back to
+    review), then the entry window — the door's own order, so
+    ``GET /review-actions``' ``resubmit`` verdict cannot disagree with it.
+    Status before the window: a clerk looking at an approved invoice is told
+    nothing about a resubmit that was never on offer."""
+    from app.api.deps import holds_any_role
+    from app.api.refusals import role_not_permitted
+
+    if not holds_any_role(user, INVOICE_ENTRY_ROLES):
+        return role_not_permitted()
+    if invoice.status is not InvoiceStatus.rejected:
+        return coded_refusal(
+            INVOICE_NOT_RESUBMITTABLE,
+            "Only a rejected invoice can be resubmitted for review.",
+            status=invoice.status.value,
+        )
+    return entry_window_refusal(user, invoice)
+
+
 PAYMENT_BLOCKS_COMPLETION = "payment_blocks_completion"
 
 _CLAIM_BLOCKS_COMPLETION_MESSAGES = {
@@ -548,12 +574,14 @@ async def review_actions(
 ):
     """Would each of the invoice modal's workflow actions accept the CALLER
     on this invoice right now? ``{"approve", "reject", "complete",
-    "send_to_erp", "retry_erp"}`` — each ``null`` or the coded ``{code,
-    message, params}`` refusal its endpoint would answer with:
-    ``review.review_refusals`` runs `/approve` and `/reject`'s gates and
+    "send_to_erp", "retry_erp", "resubmit", "manage_file"}`` — each ``null``
+    or the coded ``{code, message, params}`` refusal its endpoint would answer
+    with: ``review.review_refusals`` runs `/approve` and `/reject`'s gates,
     :func:`workflow_action_refusals` runs `/complete`, `/send-to-erp` and
-    `/retry-erp`'s. The modal offers an action exactly when its verdict is
-    ``null`` and states the refusal otherwise, so it never restates a rule.
+    `/retry-erp`'s, :func:`resubmit_refusal` `/resubmit`'s, and
+    ``invoice_entry.manage_file_refusal`` the `/file` routes'. The modal offers
+    an action exactly when its verdict is ``null`` and states the refusal
+    otherwise, so it never restates a rule.
 
     Any signed-in reader of the invoice may ask: the answer is about the caller
     and names nobody else, and a caller whose role the endpoint turns away gets
@@ -567,7 +595,12 @@ async def review_actions(
     workflow = await workflow_action_refusals(
         db, invoice, actor=user, org=org, control_db=control_db
     )
-    return {**review, **workflow}
+    return {
+        **review,
+        **workflow,
+        "resubmit": resubmit_refusal(user, invoice),
+        "manage_file": manage_file_refusal(user, invoice),
+    }
 
 
 @router.post("/{invoice_id}/approve", response_model=InvoiceResponse)
@@ -647,18 +680,36 @@ async def reject_invoice(
 async def resubmit_invoice(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    """Send a `rejected` invoice back to review (the modal's "Resubmit for
+    review", and the bulk bar's `rejected → ready_for_review`).
+
+    Refused, in :func:`resubmit_refusal`'s order, with 409
+    ``invoice_not_resubmittable`` from any other status and 403
+    ``invoice_entry_window_closed`` for an entry-only caller on an invoice that
+    was ever approved. Warnings are re-run as the bulk resubmit does, so the
+    reviewer reads findings for the version in front of them.
+    """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
-    refuse_entry_only_outside_window(user, invoice)
+    refused = resubmit_refusal(user, invoice)
+    if refused is not None:
+        code = (
+            status.HTTP_409_CONFLICT
+            if refused["code"] == INVOICE_NOT_RESUBMITTABLE
+            else status.HTTP_403_FORBIDDEN
+        )
+        raise HTTPException(status_code=code, detail=refused)
 
     await review_svc.resubmit_invoice(
         db,
         invoice,
         actor_id=user.id,
     )
+    await refresh_warnings(db, invoice, org_settings=org.settings)
     return InvoiceResponse.from_db(invoice)
 
 
