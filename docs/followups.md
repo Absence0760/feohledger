@@ -1394,14 +1394,6 @@ scope (§260) — do not fold them into any of these.
       OAuth stubs for Xero, Sage and Blackbaud (QuickBooks has one), plus a
       connect → push spec for each under `tests-e2e/erp/`. **Trigger:** the
       next change to `services/erp_oauth`.
-- [ ] **(c) Deleting a tenant does not revoke its ERP OAuth grant.**
-      `services/tenant_deletion` deletes the sealed `provider_credentials` row,
-      but the refresh token stays valid at Intuit / Xero / Sage / Blackbaud
-      until it expires (up to five years for QuickBooks). **Durable fix:**
-      before the control-plane sweep, open the sealed tokens and call
-      `erp_oauth.revoke` best-effort, recording the outcome in the deletion
-      report. **Trigger:** the next change to `tenant_deletion`, or before the
-      first tenant with a live OAuth ERP is deleted.
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
 - [ ] **(c) Approving first and recording the receipt second still works.**
@@ -1791,24 +1783,6 @@ stay open.
       decisions.md. **Trigger:** before the first tenant matches invoices
       against live Xero or NetSuite POs, or the next change to the PO status
       vocabulary.
-
-### Surfaced by Xero's Disconnect leaving the grant live (2026-10-20)
-
-Xero's adapter had no revoke URL, so Disconnect cleared our tokens and audited
-`revoked: false` while the org stayed connected at Xero. The live Demo Company
-showed it "Already connected" on the next consent. Xero now revokes; two
-providers still have the same gap.
-
-- [ ] **(c) Sage Accounting and Blackbaud FE NXT do not revoke on Disconnect.**
-      Their `OAuthProviderSpec` has no `revoke_url`, so `erp_oauth.revoke`
-      returns False without calling out: the refresh token stays valid at the
-      provider until it expires, and the tenant still lists the app as
-      connected there. **Durable fix:** set each provider's documented
-      revocation endpoint (and a `*_revoke_url` override for fake-erp, with a
-      fake revocation route), or record in the spec that the provider has
-      none and make the Disconnect message say the grant must be removed at
-      the provider. **Trigger:** the next change to either adapter's OAuth
-      spec, or before either provider's platform app goes live.
 
 ### Surfaced by the Blackbaud FE NXT API audit (#651, 2026-10-26)
 
@@ -2381,6 +2355,12 @@ as oversights.
       account to the "Standard APIs" product (free, no approval: 10
       calls/s and 25,000/day per subscription), and check whether the
       Blackbaud Partner Program terms apply to a commercial multi-tenant app.
+      For Sage, connect a sandbox business once and Disconnect: the answer
+      must read `revocation: "revoked"` and the app must leave the business's
+      connected apps. Sage's own guide refused automated fetches, so the
+      revoke shape (decisions §371: `POST oauth.accounting.sage.com/revoke`,
+      form `token` + `client_id` / `client_secret`) is from Apideck's and a
+      client library's documentation, not yet seen against Sage.
       Then put `FEOH_ERP_QBO_*`, `FEOH_ERP_XERO_*`,
       `FEOH_ERP_SAGE_ACCOUNTING_*` and `FEOH_ERP_BLACKBAUD_*` (client id,
       secret, subscription key) in `infra-secrets/feohledger/prod.sops.yaml`.

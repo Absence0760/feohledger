@@ -98,8 +98,17 @@ SAGE_ACCOUNTING_OAUTH = register_oauth_provider(
         extra_authorize_params={"filter": "apiv3.1"},
         # Sage's token endpoint takes client_id / client_secret as form fields.
         token_auth="body",
+        # Revoking the refresh token ends the grant (an access token lives out
+        # its few minutes). Form body `token`, with the client as form fields
+        # like the token endpoint, never HTTP Basic (decisions §371). Sage's
+        # own guide refuses automated fetches; the URL and shape are the ones
+        # Apideck's Sage configuration page and the sage-business-cloud-
+        # accounting-api-ts client document. The v3.0 guide's regional hosts
+        # (oauth.{na,eu}.sageone.com) belong to the retired v3.0 API.
+        revoke_url="https://oauth.accounting.sage.com/revoke",
         authorize_url_setting="erp_sage_accounting_authorize_url",
         token_url_setting="erp_sage_accounting_token_url",
+        revoke_url_setting="erp_sage_accounting_revoke_url",
     )
 )
 

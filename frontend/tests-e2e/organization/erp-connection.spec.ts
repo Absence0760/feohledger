@@ -313,7 +313,9 @@ test.describe('/organization ERP connection', () => {
 			(url) => url.pathname === '/api/organization/erp/oauth/disconnect',
 			(route) => {
 				current = oauthStatus();
-				return route.fulfill({ json: { disconnected: true, revoked: true } });
+				return route.fulfill({
+					json: { disconnected: true, revoked: true, revocation: 'revoked' }
+				});
 			}
 		);
 

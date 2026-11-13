@@ -23,16 +23,20 @@ broken while the operator believed it kept:
 
 from __future__ import annotations
 
+import types
 import uuid
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
 from app.config import settings
-from app.services import tenant_deletion
+from app.services import erp_oauth, tenant_deletion
+from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_adapters.sage_accounting import SAGE_ACCOUNTING_OAUTH
 from app.services.tenant_deletion import (
     CONTROL_DELETIONS,
     CONTROL_TABLES_EXEMPT,
@@ -157,19 +161,26 @@ async def test_the_database_goes_first_then_documents_then_the_control_row():
             result.rowcount = 1
             return result
 
+    async def _grant(_plan, _session):
+        order.append("grant")
+        return None, None
+
     with (
         patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
         patch.object(tenant_deletion.storage, "delete_prefix", _sweep),
         patch.object(tenant_deletion, "_drop_postgres_database", _drop),
+        patch.object(tenant_deletion, "_revoke_erp_grant", _grant),
         patch.object(tenant_deletion, "control_session_factory", lambda: _Session()),
     ):
         result = await delete_tenant("ordertest")
 
-    assert order == ["database", "storage", "storage", "control"], (
+    assert order == ["database", "storage", "storage", "grant", "control"], (
         "the database goes first, so a drop that fails leaves a whole workspace "
         "rather than one whose files are gone (decisions §306); the sweep runs twice "
-        "for an object PUT mid-listing; and the control-plane row — the only place "
-        "the object-storage prefix is written down — goes last (decisions §179)"
+        "for an object PUT mid-listing; the ERP grant is revoked once the workspace "
+        "is unusable but while its sealed tokens can still be read (decisions §371); "
+        "and the control-plane row — the only place the object-storage prefix is "
+        "written down — goes last (decisions §179)"
     )
     assert result.objects_deleted == 4
     assert result.database_dropped is True
@@ -244,6 +255,7 @@ async def test_an_object_put_after_the_first_listing_is_swept_by_the_second():
     with (
         patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
         patch.object(tenant_deletion.storage, "delete_prefix", _sweep),
+        patch.object(tenant_deletion, "_revoke_erp_grant", AsyncMock(return_value=(None, None))),
         patch.object(tenant_deletion, "control_session_factory", lambda: _Session()),
     ):
         result = await delete_tenant("latepu")
@@ -274,6 +286,7 @@ async def test_dry_run_destroys_nothing():
     sweep.assert_not_awaited()
     drop.assert_not_awaited()
     assert result.dry_run is True
+    assert result.erp_grant_provider is None
     assert result.objects_deleted == 0
     assert result.database_dropped is False
     assert result.control_rows_deleted == {}
@@ -303,6 +316,333 @@ def test_the_written_confirmation_states_what_it_does_not_reach():
     assert "feoh_conf" in text_out
     assert "backup" in text_out.lower()
     assert "write-once" in text_out.lower()
+
+
+# ---------------------------------------------------------------------------
+# The ERP OAuth grant — revoked best-effort, reported, never blocking (§371)
+# ---------------------------------------------------------------------------
+
+_GRANT_TOKENS = {"access_token": "ACCESS-SECRET-9", "refresh_token": "REFRESH-SECRET-9"}
+
+
+def _grant_settings(provider: str) -> dict:
+    return {
+        "erp": {
+            "type": provider,
+            "integration_method": "direct",
+            "oauth": {"provider": provider, "client_source": "platform"},
+        }
+    }
+
+
+class _GrantSession:
+    """A control-plane session: the settings SELECT answers ``org_settings``,
+    every DELETE one row. Records whether the control-plane step ran."""
+
+    def __init__(self, org_settings: dict | None):
+        self.org_settings = org_settings
+        self.deletes = 0
+        self.savepoints = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def begin(self):
+        return self
+
+    def begin_nested(self):
+        self.savepoints += 1
+        return self
+
+    async def execute(self, statement, *_args, **_kwargs):
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = self.org_settings
+        if str(statement).lstrip().upper().startswith("DELETE"):
+            self.deletes += 1
+            result.rowcount = 1
+        return result
+
+
+class _ScriptedRevoke:
+    """Stands in for the provider's revoke endpoint (``erp_oauth.httpx``)."""
+
+    def __init__(self, status: int = 200, error: Exception | None = None):
+        self.status, self.error = status, error
+        self.calls: list[dict] = []
+
+    def install(self, monkeypatch):
+        scripted = self
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def post(self, url, data=None, headers=None, auth=None, json=None):
+                scripted.calls.append({"url": url, "data": dict(data or {}), "auth": auth})
+                if scripted.error is not None:
+                    raise scripted.error
+                response = MagicMock()
+                response.status_code = scripted.status
+                return response
+
+        monkeypatch.setattr(
+            erp_oauth,
+            "httpx",
+            types.SimpleNamespace(
+                AsyncClient=_Client, BasicAuth=httpx.BasicAuth, HTTPError=httpx.HTTPError
+            ),
+        )
+        return self
+
+
+@pytest.fixture
+def sage_platform_app(monkeypatch):
+    monkeypatch.setattr(settings, "erp_sage_accounting_client_id", "sage-platform-client")
+    monkeypatch.setattr(settings, "erp_sage_accounting_client_secret", "sage-platform-secret")
+    monkeypatch.setattr(settings, "erp_sage_accounting_revoke_url", "")
+
+
+async def _delete_with_grant(monkeypatch, provider: str | None, *, unreadable: bool = False):
+    """Run `delete_tenant` over a tenant whose org settings name ``provider``'s
+    consent and whose sealed store holds its tokens (None: no grant at all)."""
+    org_id = uuid.uuid4()
+    plan = _FakePlan(
+        organization_id=org_id,
+        slug="grant",
+        name="Grant Co",
+        db_name="feoh_grant",
+        database_exists=False,
+        control_rows={},
+    )
+    org_settings = _grant_settings(provider) if provider else {}
+    session = _GrantSession(org_settings)
+
+    async def _resolved(got_org_id, got_settings, _db):
+        assert got_org_id == org_id
+        if unreadable:
+            raise CredentialCryptoError("open failed (kms)")
+        erp = dict(got_settings.get("erp") or {})
+        oauth = dict(erp.pop("oauth", None) or {})
+        if provider:
+            oauth.update(_GRANT_TOKENS)
+        return erp, oauth
+
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _resolved)
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: session),
+    ):
+        result = await delete_tenant("grant")
+    return result, session
+
+
+@pytest.mark.asyncio
+async def test_a_connected_erp_grant_is_revoked_before_the_control_plane_goes(
+    monkeypatch, sage_platform_app, caplog
+):
+    """Sage's refresh token goes to its revoke endpoint, the client as form
+    fields (its token endpoint's way), and the confirmation says it is gone."""
+    revoke = _ScriptedRevoke(200).install(monkeypatch)
+    caplog.set_level("DEBUG")
+
+    result, session = await _delete_with_grant(monkeypatch, "sage_accounting")
+
+    (call,) = revoke.calls
+    assert call["url"] == SAGE_ACCOUNTING_OAUTH.revoke_url
+    assert call["data"] == {
+        "token": "REFRESH-SECRET-9",
+        "client_id": "sage-platform-client",
+        "client_secret": "sage-platform-secret",
+    }
+    assert call["auth"] is None, "Sage takes the client as form fields, never HTTP Basic"
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "sage_accounting",
+        erp_oauth.REVOKED,
+    )
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert "sage_accounting — revoked at the provider" in format_confirmation(result)
+    for secret in (*_GRANT_TOKENS.values(), "sage-platform-secret"):
+        assert secret not in caplog.text, "a token or the client secret reached the log"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [(400, None), (503, None), (None, httpx.ConnectError("down"))],
+    ids=["refused", "outage", "unreachable"],
+)
+async def test_a_revoke_that_fails_never_stops_the_deletion(
+    monkeypatch, sage_platform_app, caplog, status, error
+):
+    revoke = _ScriptedRevoke(status or 200, error).install(monkeypatch)
+    caplog.set_level("DEBUG")
+
+    result, session = await _delete_with_grant(monkeypatch, "sage_accounting")
+
+    assert len(revoke.calls) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_FAILED
+    assert session.deletes == len(CONTROL_DELETIONS), "the control plane must still go"
+    confirmation = format_confirmation(result)
+    assert "sage_accounting — NOT revoked" in confirmation
+    assert "connected apps" in confirmation
+    assert "REFRESH-SECRET-9" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_provider_with_no_revoke_endpoint_is_reported_not_called(monkeypatch):
+    """Blackbaud SKY has no revocation endpoint: nothing is sent, and the
+    confirmation tells the operator the customer must remove the app."""
+    revoke = _ScriptedRevoke(200).install(monkeypatch)
+
+    result, session = await _delete_with_grant(monkeypatch, "blackbaud_fe_nxt")
+
+    assert revoke.calls == []
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_UNSUPPORTED
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert "no revocation endpoint" in format_confirmation(result)
+
+
+@pytest.mark.asyncio
+async def test_an_unopenable_store_is_reported_and_the_deletion_proceeds(monkeypatch):
+    revoke = _ScriptedRevoke(200).install(monkeypatch)
+
+    result, session = await _delete_with_grant(monkeypatch, "xero", unreadable=True)
+
+    assert revoke.calls == []
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "xero",
+        tenant_deletion.GRANT_UNREADABLE,
+    )
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert "sealed tokens could not be opened" in format_confirmation(result)
+
+
+@pytest.mark.asyncio
+async def test_a_tenant_without_an_erp_grant_calls_nobody(monkeypatch):
+    revoke = _ScriptedRevoke(200).install(monkeypatch)
+
+    result, _session = await _delete_with_grant(monkeypatch, None)
+
+    assert revoke.calls == []
+    assert result.erp_grant_provider is None
+    assert "ERP OAuth grant" not in format_confirmation(result)
+
+
+@pytest.mark.asyncio
+async def test_the_grant_is_read_on_the_closures_own_session(monkeypatch, sage_platform_app):
+    """A self-service closure holds the org row FOR UPDATE on its session; the
+    grant must be read there, not on a second session (decisions §306)."""
+    _ScriptedRevoke(200).install(monkeypatch)
+    org_id = uuid.uuid4()
+    plan = _FakePlan(
+        organization_id=org_id,
+        slug="closing",
+        name="Closing Co",
+        db_name="feoh_closing",
+        database_exists=False,
+        control_rows={},
+    )
+    held = _GrantSession(_grant_settings("sage_accounting"))
+    seen: list[object] = []
+
+    async def _resolved(_org_id, got_settings, db):
+        seen.append(db)
+        erp = dict(got_settings["erp"])
+        oauth = dict(erp.pop("oauth"))
+        oauth.update(_GRANT_TOKENS)
+        return erp, oauth
+
+    other = _GrantSession(None)  # what a second session would read: no grant
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _resolved)
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: other),
+    ):
+        result = await delete_tenant("closing", control_session=held)
+    assert seen == [held]
+    # Inside a savepoint, so a failed read cannot poison the closure's
+    # transaction before its control-plane delete.
+    assert held.savepoints == 1
+    assert held.deletes == len(CONTROL_DELETIONS) and other.deletes == 0
+    assert result.erp_grant_revocation == erp_oauth.REVOKED
+
+
+@pytest.mark.asyncio
+async def test_a_failed_grant_read_on_the_closures_session_still_deletes(monkeypatch):
+    """A lock timeout (or any SQL error) reading the grant is reported as
+    ``failed``; the read ran in a savepoint, so the closure's own transaction
+    still carries the control-plane delete."""
+    revoke = _ScriptedRevoke(200).install(monkeypatch)
+    plan = _FakePlan(
+        organization_id=uuid.uuid4(),
+        slug="closing",
+        name="Closing Co",
+        db_name="feoh_closing",
+        database_exists=False,
+        control_rows={},
+    )
+    held = _GrantSession(_grant_settings("xero"))
+
+    async def _timeout(*_a, **_k):
+        raise RuntimeError("canceling statement due to lock timeout")
+
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _timeout)
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: _GrantSession(None)),
+    ):
+        result = await delete_tenant("closing", control_session=held)
+    assert revoke.calls == []
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "xero",
+        erp_oauth.REVOKE_FAILED,
+    )
+    assert held.savepoints == 1
+    assert held.deletes == len(CONTROL_DELETIONS)
+
+
+def test_every_grant_outcome_has_its_confirmation_text():
+    plan = _FakePlan(
+        organization_id=uuid.uuid4(),
+        slug="conf",
+        name="Confirm Co",
+        db_name="feoh_conf",
+        database_exists=True,
+        control_rows={},
+    )
+    outcomes = (
+        erp_oauth.REVOKED,
+        erp_oauth.REVOKE_FAILED,
+        erp_oauth.REVOKE_UNSUPPORTED,
+        tenant_deletion.GRANT_UNREADABLE,
+    )
+    for outcome in outcomes:
+        text_out = format_confirmation(
+            tenant_deletion.TenantDeletionResult(
+                plan=plan,
+                objects_deleted=0,
+                database_dropped=True,
+                erp_grant_provider="xero",
+                erp_grant_revocation=outcome,
+            )
+        )
+        line = next(ln for ln in text_out.splitlines() if "ERP OAuth grant" in ln)
+        if outcome == erp_oauth.REVOKED:
+            assert "revoked at the provider" in line
+        else:
+            assert "NOT revoked" in line and "connected apps" in line, outcome
 
 
 # ---------------------------------------------------------------------------

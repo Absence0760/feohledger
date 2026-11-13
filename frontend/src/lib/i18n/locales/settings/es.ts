@@ -311,6 +311,10 @@ export const messages = {
 	'org.erp.oauth.disconnect': 'Desconectar',
 	'org.erp.oauth.disconnecting': 'Desconectando…',
 	'org.erp.oauth.disconnected': 'Desconectado de {erp}.',
+	'org.erp.oauth.disconnectedNotRevoked':
+		'Desconectado de {erp}, pero {erp} no confirmó que se revocara el acceso. Para terminarlo, quite FeohLedger de las aplicaciones conectadas en {erp}.',
+	'org.erp.oauth.disconnectedRemoveAtProvider':
+		'Desconectado de {erp}. {erp} no nos permite revocar el acceso: para terminarlo, desconecte FeohLedger de su entorno de {erp} (Blackbaud Marketplace, aplicaciones conectadas).',
 	'org.erp.test.connected': "Conectado a {erp}. La prueba de conexión se realizó correctamente.",
 	'org.erp.test.failed': "No se pudo conectar con {erp}. Revise los datos de conexión y vuelva a probar.",
 	'org.erp.test.failedOAuth': "No se pudo acceder a {erp} con la conexión guardada. Vuelva a conectar {erp} y vuelva a probar.",

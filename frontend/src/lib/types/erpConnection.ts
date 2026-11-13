@@ -413,6 +413,34 @@ export type OAuthReturn =
 	| { kind: 'error'; code: string }
 	| null;
 
+/** `POST /api/organization/erp/oauth/disconnect`. `revocation` says whether
+ *  the provider ended the grant: `failed` (it did not confirm) and
+ *  `unsupported` (it has no revocation endpoint — Blackbaud) both leave it
+ *  possibly live there, so the admin is told to remove the app on the
+ *  provider's side (decisions §371). Null when nothing was connected. */
+export interface ErpDisconnectResult {
+	disconnected: boolean;
+	revoked: boolean;
+	revocation: 'revoked' | 'failed' | 'unsupported' | null;
+}
+
+/** The sentence a Disconnect ends with, and its tone. Only a confirmed
+ *  revocation is plain success; anything else tells the admin what is still
+ *  theirs to do at the provider. An unknown outcome reads as `failed`. */
+export function disconnectMessage(result: ErpDisconnectResult | null | undefined): {
+	key: MessageKey;
+	tone: 'success' | 'failure';
+} {
+	switch (result?.revocation) {
+		case 'revoked':
+			return { key: 'org.erp.oauth.disconnected', tone: 'success' };
+		case 'unsupported':
+			return { key: 'org.erp.oauth.disconnectedRemoveAtProvider', tone: 'failure' };
+		default:
+			return { key: 'org.erp.oauth.disconnectedNotRevoked', tone: 'failure' };
+	}
+}
+
 /** `GET /api/organization/erp/oauth/pending`: the companies a parked consent
  *  offers. Never a token — those stay sealed server-side. */
 export interface ErpPendingConnect {

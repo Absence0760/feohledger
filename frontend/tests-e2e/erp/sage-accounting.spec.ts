@@ -44,7 +44,9 @@ import {
  *      the ledger's own GB_STANDARD rate.
  *   3. Fail closed — an unlinked vendor, and a taxed invoice on a ledger
  *      with no default tax rate, are refused before anything is posted.
- *   4. Disconnect — clears the connection.
+ *   4. Disconnect — clears the connection AND revokes the grant at the fake's
+ *      `POST /sage/oauth2/revoke` (form `token`, the client as form fields;
+ *      decisions §371), so it does not stay live at Sage.
  */
 
 const PROVIDER = 'sage_accounting';
@@ -79,6 +81,13 @@ async function oauthStatus(page: Page) {
 	});
 	expect(resp.ok()).toBe(true);
 	return resp.json();
+}
+
+/** How many well-formed revoke requests the fake Sage identity server has had. */
+async function revocations(request: APIRequestContext): Promise<number> {
+	const resp = await request.get(`${FAKE_ERP_BASE}/__oauth/sage/stats`);
+	expect(resp.ok(), await resp.text()).toBe(true);
+	return (await resp.json()).revocations;
 }
 
 /** A purchase invoice straight from the fake, as Sage holds it. */
@@ -194,12 +203,25 @@ test.describe('/erp sage_accounting adapter against fake-erp', () => {
 		}
 	});
 
-	test('disconnect clears the connection', async ({ page }) => {
+	test('disconnect clears the connection and revokes the grant at Sage', async ({
+		page,
+		request
+	}) => {
 		const headers = await authedTenantHeaders(page);
+		const before = await revocations(request);
 		const resp = await page.request.post(`${API_BASE}/api/organization/erp/oauth/disconnect`, {
 			headers
 		});
-		expect((await resp.json()).disconnected).toBe(true);
+		// The fake answers 200 only to a form body carrying `token` with the
+		// client as form fields (a Basic header is refused), so `revoked` proves
+		// the backend sent Sage's shape.
+		expect(await resp.json()).toEqual({
+			disconnected: true,
+			revoked: true,
+			revocation: 'revoked'
+		});
+		// At least ours: another worker's Disconnect may land in between.
+		expect(await revocations(request)).toBeGreaterThan(before);
 		const status = await oauthStatus(page);
 		expect(status.connected).toBe(false);
 	});

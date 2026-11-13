@@ -63,6 +63,7 @@
 		buildErpSecretUpdate,
 		buildErpTestPayload,
 		callUsageLines,
+		disconnectMessage,
 		erpTestResultText,
 		byoAppRequired,
 		fieldApplies,
@@ -560,9 +561,12 @@
 		confirmDisconnect = false;
 		disconnecting = true;
 		try {
-			await disconnectErpOAuth();
+			const result = await disconnectErpOAuth();
 			await loadOAuthStatus();
-			setStatus(m('org.erp.oauth.disconnected', { erp: providerLabel(p) }), 'success');
+			// Our copy is gone either way; only a confirmed revocation means the
+			// grant is gone at the provider too (decisions §371).
+			const done = disconnectMessage(result);
+			setStatus(m(done.key, { erp: providerLabel(p) }), done.tone);
 		} catch (err) {
 			setStatus(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'failure');
 		} finally {

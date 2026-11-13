@@ -311,6 +311,10 @@ export const messages = {
 	'org.erp.oauth.disconnect': 'Trennen',
 	'org.erp.oauth.disconnecting': 'Wird getrennt…',
 	'org.erp.oauth.disconnected': 'Verbindung zu {erp} getrennt.',
+	'org.erp.oauth.disconnectedNotRevoked':
+		'Verbindung zu {erp} getrennt, aber {erp} hat den Widerruf des Zugriffs nicht bestätigt. Entfernen Sie FeohLedger in {erp} aus den verbundenen Apps, um ihn zu beenden.',
+	'org.erp.oauth.disconnectedRemoveAtProvider':
+		'Verbindung zu {erp} getrennt. {erp} bietet uns keine Möglichkeit, den Zugriff zu widerrufen: Trennen Sie FeohLedger in Ihrer {erp}-Umgebung (Blackbaud Marketplace, verbundene Anwendungen), um ihn zu beenden.',
 	'org.erp.test.connected': "Mit {erp} verbunden. Der Verbindungstest war erfolgreich.",
 	'org.erp.test.failed': "Keine Verbindung zu {erp}. Prüfen Sie die Verbindungsdaten und testen Sie erneut.",
 	'org.erp.test.failedOAuth': "{erp} ist mit der gespeicherten Verbindung nicht erreichbar. Verbinden Sie {erp} neu und testen Sie erneut.",

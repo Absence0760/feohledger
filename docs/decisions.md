@@ -17192,6 +17192,88 @@ back to review, because `approved` and `failed` have no edge to `rejected`. The
 mobile notice still promises "reject, correct, approve again"
 (`docs/followups.md`).
 
+## 371. Disconnect and tenant deletion revoke every ERP OAuth grant, or say why they cannot (2026-11-13)
+
+**Context.** Two paths forgot an ERP OAuth grant without ending it. Sage
+Accounting and Blackbaud FE NXT had no `revoke_url`, so Disconnect cleared our
+tokens and answered `revoked: false`, and the page still said "Disconnected".
+Tenant deletion deleted the sealed `provider_credentials` row and never called
+the provider at all. Either way the refresh token stayed valid until it expired,
+up to five years for QuickBooks, and the customer's ERP still listed the app.
+
+**Decision.**
+
+- **Every `OAuthProviderSpec` sets exactly one of `revoke_url` and
+  `no_revoke_endpoint_reason`.** A spec with neither, or both, raises at
+  construction. A new provider cannot silently skip revocation.
+- **Sage revokes at `https://oauth.accounting.sage.com/revoke`.** The body is an
+  RFC 7009 form `token` (the refresh token), with the client as `client_id` /
+  `client_secret` form fields, the way Sage's token endpoint takes it. Never
+  HTTP Basic: `erp_oauth.revoke` now follows `spec.token_auth`.
+  `FEOH_ERP_SAGE_ACCOUNTING_REVOKE_URL` points dev at fake-erp's
+  `POST /sage/oauth2/revoke`, which refuses Basic and JSON so a wrong shape
+  fails the e2e spec. Sources: Sage's own guide answers automated fetches with
+  403, so the URL and shape come from Apideck's Sage configuration page
+  (developers.apideck.com/apis/accounting/sage-business-cloud-accounting/configuration)
+  and the sage-business-cloud-accounting-api-ts README, which cites Sage's guide
+  (`POST …/revoke` with `client_id`, `client_secret` and `token`). The
+  olsgreen/oauth2-sage-business-cloud client names the same URL. The v3.0
+  guide's regional hosts (`oauth.{na,eu}.sageone.com/revoke`) belong to the
+  retired v3.0 API. A sandbox Disconnect is on the platform-app follow-up.
+- **Blackbaud has no endpoint, and Disconnect says so.** SKY API's OAuth service
+  has `/authorization` and `/token` only. Blackbaud's SKY API team says on the
+  community forum (community.blackbaud.com/discussion/comment/262802, "Revoking
+  Tokens?") that disconnecting the application from the environment, by the
+  customer in Marketplace or the developer under My Apps, revokes that
+  connection's refresh tokens, and that regenerating the client secret does not.
+  Its 2025 announcement "Disconnect your SKY Application from Customer
+  Environments" added the developer-side disconnect. Blackbaud's developer docs
+  are a client-rendered app we could not read automatically, so the claim of
+  "no endpoint" rests on the forum. Disconnect answers
+  `revocation: "unsupported"` without calling out.
+- **Disconnect returns `revocation`** (`revoked` / `failed` / `unsupported`)
+  beside `revoked`, and audits it on `organization.erp_token_revoked`. The
+  settings page says plain "Disconnected" only on `revoked`. On `failed` it
+  says the provider did not confirm; on `unsupported` it says to disconnect
+  FeohLedger from the environment in Blackbaud. Both tell the admin to remove
+  the app on the provider's side.
+- **Tenant deletion revokes best-effort.** Between the document sweep and the
+  control-plane delete, it reads `settings.erp.oauth` and the sealed tokens. It
+  uses the closure's own session when a self-service closure holds the org row,
+  inside a savepoint so a failed read cannot abort the closure's transaction
+  before its control-plane delete. Otherwise it uses a short session closed
+  before the provider is called. On the closure path the provider call (15 s
+  timeout at most) runs while the closure still holds its row locks; the
+  workspace is already dropped, so only writers to a doomed org wait. Then it
+  calls `erp_oauth.revoke_grant`. A tenant holds one grant, a single block with
+  two fixed sealed paths. The outcome (`revoked`, `failed`, `unsupported`, or
+  `unreadable` when the store cannot be opened) is on `TenantDeletionResult` and
+  in `format_confirmation`, with "the customer should remove FeohLedger from the
+  provider's connected apps" for anything but `revoked`. Nothing about it can
+  stop the deletion. The log line names the provider and the outcome, never a
+  token.
+
+**Why after the drop and the sweep, not first.** If revocation came first and
+the drop then failed, a live workspace would be left with its ERP cut off at
+the provider while its own state still said connected. After the irreversible
+steps the workspace is already unusable, and the sealed row is still there to
+read. A re-run after a later failure revokes again. A provider may answer an
+already-revoked token with an error, and the confirmation then says "NOT
+revoked" for a grant that is gone: the error is on the safe side.
+
+**Rejected.**
+- *Revoking after the control-plane commit*, with the tokens held in memory. A
+  closure's commit belongs to its caller, so `delete_tenant` cannot run
+  anything after it, and the operator's confirmation would have to be written
+  before the outcome was known.
+- *Failing the deletion when revocation fails.* A provider outage would keep a
+  terminated customer's data past the DPA's 60 days, to protect a grant the
+  customer can end themselves.
+- *Revoking a consent parked for the company picker* (§355), at deletion as at
+  cancel, for §337's reason. It lapses with its Redis TTL.
+- *Regenerating the Blackbaud client secret* as a way to revoke. Blackbaud says
+  it does not invalidate refresh tokens, and it would cut every tenant at once.
+
 ## 373. A vendor merge moves the duplicates' ERP links, company by company, and refuses two different ids in one company (§356 follow-up, 2026-11-13)
 
 **The gap.** §356 left the merge alone: `services/vendor_merge` moved every

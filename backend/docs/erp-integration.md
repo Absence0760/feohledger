@@ -2407,11 +2407,12 @@ token comes only from `self.access_token()`, and every call sends
 `https://api.accounting.sage.com/v3.1` (override
 `FEOH_ERP_SAGE_ACCOUNTING_API_BASE`). OAuth: authorize at
 `https://www.sageone.com/oauth2/auth/central` with `filter=apiv3.1`, token at
-`https://oauth.accounting.sage.com/token`, scope `full_access`. Platform app
+`https://oauth.accounting.sage.com/token`, revoke at
+`https://oauth.accounting.sage.com/revoke` (§ Connecting an OAuth ERP), scope `full_access`. Platform app
 credentials: `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `_SECRET` (empty →
-unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_URL`
-override the OAuth endpoints, which dev points at fake-erp so the connect flow
-runs locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
+unavailable, no fallback); `FEOH_ERP_SAGE_ACCOUNTING_AUTHORIZE_URL` / `_TOKEN_URL` / `_REVOKE_URL`
+override the OAuth endpoints, which dev points at fake-erp so the connect and
+disconnect flows run locally (`frontend/tests-e2e/erp/sage-accounting.spec.ts`).
 
 **Region coverage: not the US, not South Africa.** Every v3.1 operation lists
 its availability as CA, DE, ES, FR, GB, IE and US, but **Sage retired the US
@@ -3022,7 +3023,7 @@ and calls `await self.access_token()`.
 | `GET /api/organization/erp/oauth/pending` | admin; **credentialed** | The consent parked for this browser and admin: `{provider, display_name, companies: [{id, name}], expires_at}`. Does not spend it. `409` coded `erp_pick_expired` for anything else (none parked, lapsed, used, another browser or another admin). Never a token. |
 | `POST /api/organization/erp/oauth/pending/select` | admin + `erp_integrations` plan; **credentialed** | `{company_id}` → `200 {connected, provider, external_tenant_id}`, the nonce cookie cleared. Spends the pending connect first (GETDEL), then links through the callback's own claim-and-link (`_claim_and_link`: realm lock, linked-elsewhere check, `organization.erp_connected` audit-first with `picked_from`). Coded refusals: `409 erp_pick_expired`, `409 erp_pick_unknown_company` (an id the consent did not offer; audited `organization.erp_connect_refused`), `409 already_linked`, `503 credentials_unavailable`, `503 audit_unavailable`; the plan gate's own `402`. |
 | `DELETE /api/organization/erp/oauth/pending` | admin; **credentialed** | Drops the parked consent, links nothing: `{discarded}` (idempotent), the cookie cleared and `organization.erp_connect_cancelled` written best-effort when one was dropped. The token is not revoked (§337's reason). |
-| `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked"}`. `503` when the credential store cannot be opened, with nothing changed. |
+| `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked", "revocation"}`, `revocation` being `revoked`, `failed` (the provider did not confirm, or could not be reached) or `unsupported` (it has no revocation endpoint: Blackbaud), and null when nothing was connected. The settings page says "Disconnected" only on `revoked`; otherwise it tells the admin to remove FeohLedger on the provider's side (`types/erpConnection.disconnectMessage`). `503` when the credential store cannot be opened, with nothing changed. |
 | `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
 
 Connect and disconnect write `organization.erp_connected` /
@@ -3030,7 +3031,7 @@ Connect and disconnect write `organization.erp_connected` /
 changed by name — never a token) BEFORE anything is saved, through
 `record_auth_audit_or_raise`; a row that cannot be written means nothing is
 linked or cleared. The revoke outcome, known only after the commit, follows as
-`organization.erp_token_revoked`.
+`organization.erp_token_revoked` (`{provider, revoked, revocation}`).
 
 **Bound to the browser that started it (login-CSRF).** The callback is
 public and carries no JWT, so a signed single-use `state` alone let a rogue
@@ -3201,13 +3202,24 @@ the 403, so `tests-e2e/erp/quickbooks-online.spec.ts` drives the refusal.
 `revoke_json` sends the revoke as a JSON `{"token": …}` (Intuit,
 which documents that) instead of RFC 7009's form body; sent a form, Intuit may
 refuse it, and Disconnect would then leave the grant live behind a
-`revoked: false` the user never sees. **Which providers revoke:** QuickBooks
-(JSON) and Xero (RFC 7009 form + Basic, `identity.xero.com/connect/revocation`;
-revoking the refresh token also removes the org's connection, so the next
-consent offers the org afresh instead of "Already connected"). Sage Accounting
-and Blackbaud FE NXT configure no revoke URL yet, so their Disconnect only
-forgets our copy of the tokens (`docs/followups.md`). An empty `scopes` sends no `scope`. Operator URL overrides
-(`*_url_setting`) are read on every call.
+`revocation: "failed"`. The revoke authenticates the client the way the token
+endpoint does (`token_auth`). **Which providers revoke** (decisions §371):
+
+| Provider | Revocation | Shape |
+|---|---|---|
+| QuickBooks Online | `developer.api.intuit.com/v2/oauth2/tokens/revoke` | JSON `{"token"}`, Basic |
+| Xero | `identity.xero.com/connect/revocation` | RFC 7009 form, Basic. Revoking the refresh token also removes the org's connection, so the next consent offers the org afresh instead of "Already connected" |
+| Sage Accounting | `oauth.accounting.sage.com/revoke` (`FEOH_ERP_SAGE_ACCOUNTING_REVOKE_URL`) | RFC 7009 form, the client as `client_id` / `client_secret` form fields like its token endpoint, never Basic |
+| Blackbaud FE NXT | none: SKY API's OAuth service has only `/authorization` and `/token` | `revocation: "unsupported"`. The grant ends when the customer disconnects the app from the environment in Blackbaud Marketplace (or the developer does, under My Applications); regenerating the client secret does not end it |
+
+Every `OAuthProviderSpec` sets exactly one of `revoke_url` and
+`no_revoke_endpoint_reason`; one with neither does not construct, so a new
+provider cannot quietly forget the grant on Disconnect. **Deleting a tenant
+revokes too**: `services/tenant_deletion` reads the sealed tokens just before
+the control-plane rows (which hold them) are deleted, calls
+`erp_oauth.revoke_grant`, and prints the outcome in the deletion confirmation.
+It never blocks the deletion and never logs a token. An empty `scopes` sends no
+`scope`. Operator URL overrides (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before
 any post, with `QuickBooks Online post refused: <reason>`: `vendor_not_linked`,

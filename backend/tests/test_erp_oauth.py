@@ -1308,7 +1308,7 @@ async def test_disconnect_revokes_clears_and_audits(realdb, platform_app, provid
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.post("/api/organization/erp/oauth/disconnect")
     assert resp.status_code == 200
-    assert resp.json() == {"disconnected": True, "revoked": True}
+    assert resp.json() == {"disconnected": True, "revoked": True, "revocation": "revoked"}
 
     (call,) = provider.calls
     assert call["url"] == QBO_OAUTH.revoke_url
@@ -1326,12 +1326,12 @@ async def test_disconnect_revokes_clears_and_audits(realdb, platform_app, provid
         "cleared": ["oauth.access_token", "oauth.refresh_token"],
     }
     assert revoked.action == "organization.erp_token_revoked"
-    assert revoked.details == {"provider": PROVIDER, "revoked": True}
+    assert revoked.details == {"provider": PROVIDER, "revoked": True, "revocation": "revoked"}
     assert await _sealed(realdb) == {}
 
     async with realdb.client(key="a", role="admin") as c:
         again = await c.post("/api/organization/erp/oauth/disconnect")
-    assert again.json() == {"disconnected": False, "revoked": False}
+    assert again.json() == {"disconnected": False, "revoked": False, "revocation": None}
 
 
 @pytest.mark.plan("scale")
@@ -1346,7 +1346,7 @@ async def test_disconnect_clears_even_when_revoke_fails(realdb, platform_app, pr
     provider.handler = _boom
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.post("/api/organization/erp/oauth/disconnect")
-    assert resp.json() == {"disconnected": True, "revoked": False}
+    assert resp.json() == {"disconnected": True, "revoked": False, "revocation": "failed"}
     assert "oauth" not in (await _org_settings(realdb))["erp"]
 
 
@@ -1644,6 +1644,125 @@ async def test_revoke_sends_a_form_body_unless_the_provider_takes_json(platform_
     assert (call["data"], call["json"]) == ({"token": "R-1"}, None)
 
 
+async def test_sage_revoke_sends_the_client_as_form_fields(monkeypatch, provider):
+    """Sage's revoke endpoint takes the client the way its token endpoint does:
+    ``client_id`` / ``client_secret`` in the form body, never HTTP Basic
+    (decisions §371). The refresh token is what ends the grant."""
+    from app.services.erp_adapters.sage_accounting import SAGE_ACCOUNTING_OAUTH
+
+    monkeypatch.setattr(settings, "erp_sage_accounting_client_id", "sage-client")
+    monkeypatch.setattr(settings, "erp_sage_accounting_client_secret", "sage-secret")
+    monkeypatch.setattr(settings, "erp_sage_accounting_revoke_url", "")
+    provider.handler = lambda url, data: _resp(204)
+
+    oauth = {"refresh_token": "R-SAGE", "access_token": "A-SAGE", "client_source": "platform"}
+    assert (
+        await erp_oauth.revoke_grant(SAGE_ACCOUNTING_OAUTH, {"type": "sage_accounting"}, oauth)
+        == erp_oauth.REVOKED
+    )
+    (call,) = provider.calls
+    assert call["url"] == "https://oauth.accounting.sage.com/revoke"
+    assert call["data"] == {
+        "token": "R-SAGE",
+        "client_id": "sage-client",
+        "client_secret": "sage-secret",
+    }
+    assert call["auth"] is None and call["json"] is None
+
+
+async def test_the_sage_revoke_url_override_is_read_on_every_call(monkeypatch, provider):
+    from app.services.erp_adapters.sage_accounting import SAGE_ACCOUNTING_OAUTH
+
+    monkeypatch.setattr(
+        settings, "erp_sage_accounting_revoke_url", "http://localhost:12112/sage/oauth2/revoke"
+    )
+    assert erp_oauth.revoke_endpoint(SAGE_ACCOUNTING_OAUTH) == (
+        "http://localhost:12112/sage/oauth2/revoke"
+    )
+
+
+async def test_revoke_grant_outcomes(platform_app, provider):
+    """``revoked`` only on the provider's 200/204; ``failed`` for a refusal,
+    an outage, or a provider key this build does not know; ``unsupported``
+    only for a provider that states it has no endpoint. Never raises."""
+    from app.services.erp_adapters.blackbaud_fe_nxt import BLACKBAUD_OAUTH
+
+    oauth = {"refresh_token": "R-1", "client_source": "platform"}
+    provider.handler = lambda url, data: _resp(200)
+    assert await erp_oauth.revoke_grant(QBO_OAUTH, {}, oauth) == erp_oauth.REVOKED
+    provider.handler = lambda url, data: _resp(400)
+    assert await erp_oauth.revoke_grant(QBO_OAUTH, {}, oauth) == erp_oauth.REVOKE_FAILED
+
+    def _raise(url, data):
+        raise RuntimeError("unexpected")
+
+    provider.handler = _raise
+    assert await erp_oauth.revoke_grant(QBO_OAUTH, {}, oauth) == erp_oauth.REVOKE_FAILED
+    assert await erp_oauth.revoke_grant(None, {}, oauth) == erp_oauth.REVOKE_FAILED
+    before = len(provider.calls)
+    assert await erp_oauth.revoke_grant(BLACKBAUD_OAUTH, {}, oauth) == erp_oauth.REVOKE_UNSUPPORTED
+    assert len(provider.calls) == before, "a provider without an endpoint is never called"
+
+
+def test_every_oauth_provider_revokes_or_says_why_not():
+    """Disconnect once forgot our copy of the tokens while Sage's and
+    Blackbaud's grants stayed live, because their specs simply had no
+    ``revoke_url``. Now each registered provider has one or states the reason
+    (decisions §371), and a spec with neither does not construct."""
+    providers = erp_oauth.load_providers()
+    assert {"quickbooks_online", "xero", "sage_accounting", "blackbaud_fe_nxt"} <= set(providers)
+    for key, spec in providers.items():
+        assert bool(spec.revoke_url) != bool(spec.no_revoke_endpoint_reason), key
+    assert providers["sage_accounting"].revoke_url
+    assert providers["blackbaud_fe_nxt"].revoke_url is None
+    assert "Marketplace" in providers["blackbaud_fe_nxt"].no_revoke_endpoint_reason
+
+    base = dict(
+        key="neither",
+        display_name="Neither",
+        authorize_url="https://idp.test/authorize",
+        token_url="https://idp.test/token",
+        scopes=(),
+        client_id_setting="erp_qbo_client_id",
+        client_secret_setting="erp_qbo_client_secret",
+    )
+    with pytest.raises(ValueError):
+        erp_oauth.OAuthProviderSpec(**base)
+    with pytest.raises(ValueError):
+        erp_oauth.OAuthProviderSpec(
+            **base, revoke_url="https://idp.test/revoke", no_revoke_endpoint_reason="none"
+        )
+
+
+@pytest.mark.plan("scale")
+async def test_disconnecting_blackbaud_says_the_grant_must_be_removed_there(
+    realdb, monkeypatch, provider
+):
+    """SKY API has no revocation endpoint: Disconnect clears our copy, calls
+    nobody, and answers ``revocation: "unsupported"`` so the settings page
+    tells the admin to disconnect the app in Blackbaud."""
+    monkeypatch.setattr(settings, "erp_blackbaud_client_id", "bb-client")
+    monkeypatch.setattr(settings, "erp_blackbaud_client_secret", "bb-secret")
+    block = {**_connected_block(realdb.info("a").org_id), "provider": "blackbaud_fe_nxt"}
+    await _set_settings(realdb, {"erp": {"type": "blackbaud_fe_nxt", "oauth": block}})
+    provider.handler = lambda url, data: pytest.fail("Blackbaud has no revoke endpoint to call")
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/organization/erp/oauth/disconnect")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"disconnected": True, "revoked": False, "revocation": "unsupported"}
+    assert provider.calls == []
+    assert await _sealed(realdb) == {}
+    revoked = [
+        r for r in await _audit_actions(realdb) if r.action == "organization.erp_token_revoked"
+    ]
+    assert revoked[-1].details == {
+        "provider": "blackbaud_fe_nxt",
+        "revoked": False,
+        "revocation": "unsupported",
+    }
+
+
 @pytest.mark.plan("scale")
 async def test_disconnect_with_an_unopenable_store_changes_nothing(
     realdb, platform_app, provider, monkeypatch
@@ -1744,6 +1863,7 @@ _HOOKED = erp_oauth.OAuthProviderSpec(
     display_name="Hooked",
     authorize_url="https://idp.test/authorize",
     token_url="https://idp.test/token",
+    revoke_url="https://idp.test/revoke",
     scopes=(),
     client_id_setting="erp_qbo_client_id",
     client_secret_setting="erp_qbo_client_secret",
