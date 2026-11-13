@@ -1125,23 +1125,6 @@ or is a sibling of a fix that needs its own pass.
 
 ### Surfaced by the round-2 issues batch (2026-10-06, PR #514, decisions §237–§243)
 
-- [ ] **(c) Eight `create_exception` sites still write an unkeyed English description.**
-      §240 keyed every `_ensure_exception` finding, but the direct `create_exception`
-      callers were outside it: `extraction_failed` in `services/extraction.py` (which
-      also embeds `str(exc)`), `api/erp_webhook.py`, `api/positive_pay.py`,
-      `api/vendors.py` (the bank-change exception), `api/payments.py`,
-      `services/payment_reconciler.py`, `services/payment_settlement_record.py` and
-      `services/payment_erp_sync.py`. Their rows have no `description_code`, so the
-      queue renders them in server English beside localized ones
-      (`backend/docs/invoice-warnings.md` § What is NOT localized lists them).
-      **Durable fix:** an `exception.*` catalogue code per site, built through
-      `invoice_warning_catalog.warning`, with the generator re-run for both clients.
-      Positive Pay de-duplicates on `APException.description == description`, so its
-      dedup key has to move to the code + params first. `extraction_failed` should
-      carry the exception class name as a param, never `str(exc)`.
-      **Trigger:** the next change to any of those sites, or the next i18n pass over
-      the exception queue.
-
 - [ ] **(c) Three refusals a user acts on are still English-only.** §238 coded the
       approval, CFO / max-amount, credit-memo, expense and stale-edit refusals. Not
       done: the per-row skip reasons `POST /api/invoices/bulk-status` returns
