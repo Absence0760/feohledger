@@ -390,11 +390,16 @@ async def flag_invoice_for_bank_change(
     ).scalar() or 0
     if existing:
         return
+    from app.services.invoice_warning_catalog import exception_finding
+
+    finding = exception_finding("vendor_bank_changed")
     await create_exception(
         db,
         exception_type="fraud_flag",
         severity="error",
-        description="Vendor bank details changed; verify before payment.",
+        description=finding["message"],
+        description_code=finding["code"],
+        description_params=finding["params"],
         status="open",
         organization_id=invoice.organization_id,
         invoice=invoice,

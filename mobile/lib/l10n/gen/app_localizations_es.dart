@@ -3360,6 +3360,161 @@ class AppLocalizationsEs extends AppLocalizations {
       'El pago de esta factura se liquidó, pero FeohLedger no pudo terminar de registrarlo, así que la factura no ha pasado a «Pagada» aunque el dinero ya salió. Nada lo reintenta automáticamente: use «Reintentar sincronización ERP» en la ejecución de pago correspondiente, en Pagos.';
 
   @override
+  String exceptionDescriptionExtractionFailed(String errorClass) {
+    return 'La extracción falló: $errorClass';
+  }
+
+  @override
+  String exceptionDescriptionPositivePayAlteredAmount(String checkNumber) {
+    return 'Devolución de Positive Pay: cheque $checkNumber con importe alterado';
+  }
+
+  @override
+  String exceptionDescriptionPositivePayNotOnFile(String checkNumber) {
+    return 'Devolución de Positive Pay: cheque $checkNumber no figura en el archivo de emisión';
+  }
+
+  @override
+  String get exceptionDescriptionVendorBankChanged =>
+      'Los datos bancarios del proveedor cambiaron; verifíquelos antes del pago.';
+
+  @override
+  String exceptionDescriptionComplianceHoldFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count motivos',
+      one: '$count motivo',
+    );
+    return 'Pago retenido para revisión de cumplimiento ($_temp0)';
+  }
+
+  @override
+  String get exceptionDescriptionComplianceNoScreenableVendor =>
+      'La factura no tiene un proveedor que se pueda verificar';
+
+  @override
+  String exceptionDescriptionComplianceProviderUnavailable(String provider) {
+    return 'No se pudo ejecutar la verificación de sanciones: no hay adaptador para el proveedor configurado «$provider»';
+  }
+
+  @override
+  String exceptionDescriptionComplianceReviewRequired(
+    String provider,
+    String matchedList,
+  ) {
+    return 'La verificación del proveedor mediante $provider requiere revisión ($matchedList)';
+  }
+
+  @override
+  String exceptionDescriptionComplianceReviewRequiredUnlisted(String provider) {
+    return 'La verificación del proveedor mediante $provider requiere revisión (consulte el registro de verificación)';
+  }
+
+  @override
+  String exceptionDescriptionComplianceUnrecognisedResult(
+    String provider,
+    String result,
+  ) {
+    return 'La verificación del proveedor mediante $provider devolvió un resultado no reconocido «$result»; se trata como pendiente de revisión';
+  }
+
+  @override
+  String exceptionDescriptionComplianceAdverseMedia(String provider) {
+    return 'La verificación del proveedor mediante $provider encontró noticias adversas; se requiere revisión de cuentas por pagar';
+  }
+
+  @override
+  String get exceptionDescriptionComplianceAdverseMediaUnnamedProvider =>
+      'La verificación del proveedor encontró noticias adversas; se requiere revisión de cuentas por pagar';
+
+  @override
+  String exceptionDescriptionComplianceAmlSpend(
+    String projected,
+    String threshold,
+  ) {
+    return 'El gasto de los últimos 12 meses con este proveedor alcanzaría $projected (umbral $threshold); se requiere revisión de cuentas por pagar';
+  }
+
+  @override
+  String exceptionDescriptionComplianceAmlSpendPartial(
+    String projected,
+    String threshold,
+    int excluded,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      excluded,
+      locale: localeName,
+      other: '$excluded pagos quedaron excluidos',
+      one: '$excluded pago quedó excluido',
+    );
+    return 'El gasto de los últimos 12 meses con este proveedor alcanzaría al menos $projected (umbral $threshold); se requiere revisión de cuentas por pagar. $_temp0 por no tener importe en la moneda local, así que el total real es mayor';
+  }
+
+  @override
+  String exceptionDescriptionPaymentAgedOut(
+    String paymentId,
+    String hours,
+    String invoiceStatus,
+  ) {
+    return 'El pago $paymentId seguía en curso tras $hours h y el conciliador lo marcó como fallido; la red de pago nunca lo confirmó, así que el dinero puede haberse movido o no. La factura está en «$invoiceStatus». Confírmelo con el procesador y anule o vuelva a pagar: esta factura queda bloqueada para nuevas ejecuciones de pago hasta resolverlo.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInDoubt(
+    String paymentId,
+    String failureCode,
+  ) {
+    return 'El pago $paymentId falló durante el envío ($failureCode) cuando el procesador quizá ya lo había aceptado, así que el dinero puede haberse movido o no. Confírmelo con el procesador y anule o vuelva a pagar: esta factura queda bloqueada para nuevas ejecuciones de pago hasta resolverlo.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInterruptedFailed(
+    String paymentId,
+  ) {
+    return 'El pago $paymentId falló, pero un intento anterior de enviarlo se interrumpió cuando quizá ya había llegado al procesador, así que el dinero puede haberse movido o no. Confírmelo con el procesador y anule o vuelva a pagar: esta factura queda bloqueada para nuevas ejecuciones de pago hasta resolverlo.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInterruptedCancelled(
+    String paymentId,
+  ) {
+    return 'El pago $paymentId se canceló, pero un intento anterior de enviarlo se interrumpió cuando quizá ya había llegado al procesador, así que el dinero puede haberse movido o no. Confírmelo con el procesador y anule o vuelva a pagar: esta factura queda bloqueada para nuevas ejecuciones de pago hasta resolverlo.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementCurrencyMismatch(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+  ) {
+    return 'Moneda de liquidación distinta: el procesador informó $settledAmount $settledCurrency, pero este pago autoriza $authorizedAmount $authorizedCurrency. El dinero se movió en una moneda que cuentas por pagar no autorizó: concílielo con el procesador antes de liberar esta factura.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementAmountOver(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  ) {
+    return 'Importe de liquidación distinto: el procesador informó $settledAmount $settledCurrency, MÁS que los $authorizedAmount $authorizedCurrency autorizados (diferencia $variance). El dinero se movió por un importe que cuentas por pagar no autorizó: concílielo con el procesador antes de liberar esta factura.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementAmountUnder(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  ) {
+    return 'Importe de liquidación distinto: el procesador informó $settledAmount $settledCurrency, MENOS que los $authorizedAmount $authorizedCurrency autorizados (diferencia $variance). El dinero se movió por un importe que cuentas por pagar no autorizó: concílielo con el procesador antes de liberar esta factura.';
+  }
+
+  @override
   String get warningsPoMatchStatusMatched => 'Coincide';
 
   @override

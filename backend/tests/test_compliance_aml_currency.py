@@ -171,3 +171,14 @@ async def test_the_alert_states_that_its_figure_is_a_floor(realdb):
     assert "USD" in aml[0]
     assert "$" not in aml[0]  # the hardcoded dollar sign was wrong for every non-USD tenant
     assert "excluded" in aml[0]
+    # Keyed for the hold exception (decisions §358): the floor is its own code,
+    # with the excluded count a plural param and the money exact.
+    (finding,) = [f for f in decision.findings if f["code"].startswith("exception.compliance_aml")]
+    assert finding["code"] == "exception.compliance_aml_spend_partial"
+    assert finding["params"] == {
+        "projected": "120010.00",
+        "threshold": "100000.00",
+        "currency": "USD",
+        "excluded": 1,
+    }
+    assert finding["message"] == aml[0]

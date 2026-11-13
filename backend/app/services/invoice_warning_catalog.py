@@ -938,6 +938,213 @@ ERP_RECONCILIATION_SPECS: tuple[WarningSpec, ...] = (
     ),
 )
 
+#: The `type` of a compliance-hold reason: one entry of the hold exception's
+#: `params.findings`, never a description on its own.
+COMPLIANCE_HOLD_TYPE = "payment_compliance_hold"
+
+_PAYMENT_RECONCILE_TAIL = (
+    "Confirm with the processor and void or re-pay — this invoice is blocked from a "
+    "new payment run until this is resolved."
+)
+_SETTLEMENT_RECONCILE_TAIL = "reconcile with the processor before releasing this invoice."
+
+#: Descriptions the direct `exception_service.create_exception` callers write
+#: (decisions §358): extraction failure, Positive Pay returns, the bank-change
+#: flag, compliance holds, payments the reconciler or dispatch left in doubt,
+#: and settlement discrepancies. `tests/test_invoice_warning_catalog.py` holds
+#: every `create_exception` call under `app/` to passing a code.
+DIRECT_EXCEPTION_SPECS: tuple[WarningSpec, ...] = (
+    # `services/extraction.py`. The exception CLASS only: the message of a
+    # provider or parser error can quote the document, so it never reaches the
+    # row (it stays on the worker's log line and the audit row's details).
+    WarningSpec(
+        EXCEPTION_PREFIX + "extraction_failed",
+        "extraction_failed",
+        "Extraction failed: {errorClass}",
+        {"errorClass": "text"},
+    ),
+    # `api/positive_pay.py`. The verdict is a word, so it picks the code; the
+    # cheque number is the one param, and code + cheque number is the dedupe
+    # key (a row raised before §358 is matched on its English instead).
+    WarningSpec(
+        EXCEPTION_PREFIX + "positive_pay_altered_amount",
+        "fraud_flag",
+        "Positive Pay return: check {checkNumber} altered amount",
+        {"checkNumber": "text"},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "positive_pay_not_on_file",
+        "fraud_flag",
+        "Positive Pay return: check {checkNumber} not on issued file",
+        {"checkNumber": "text"},
+    ),
+    # `api/vendors.flag_invoice_for_bank_change`.
+    WarningSpec(
+        EXCEPTION_PREFIX + "vendor_bank_changed",
+        "fraud_flag",
+        "Vendor bank details changed; verify before payment.",
+        {},
+    ),
+    # `api/payments._open_compliance_hold_exception`: a FRAME over the hold's
+    # reasons (`params.findings`), always — even one reason, because each
+    # reason is a lower-case clause written to follow it.
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_hold_findings",
+        "payment_compliance_hold",
+        "Payment held for compliance review ({count, plural, one {# reason} other {# reasons}})",
+        {"count": "count"},
+    ),
+    # The reasons, from `services/compliance.check_payment_compliance` and the
+    # two no-screenable-vendor legs in `api/payments`.
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_no_screenable_vendor",
+        COMPLIANCE_HOLD_TYPE,
+        "no screenable vendor on invoice",
+        {},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_provider_unavailable",
+        COMPLIANCE_HOLD_TYPE,
+        "sanctions screening could not run: no adapter for configured provider '{provider}'",
+        {"provider": "text"},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_review_required",
+        COMPLIANCE_HOLD_TYPE,
+        "vendor screening returned review_required ({matchedList}) via {provider}",
+        {"matchedList": "text", "provider": "text"},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_review_required_unlisted",
+        COMPLIANCE_HOLD_TYPE,
+        "vendor screening returned review_required (see audit row) via {provider}",
+        {"provider": "text"},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_unrecognised_result",
+        COMPLIANCE_HOLD_TYPE,
+        "vendor screening returned an unrecognised result '{result}' via {provider}; "
+        "treating as review_required",
+        {"result": "text", "provider": "text"},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_adverse_media",
+        COMPLIANCE_HOLD_TYPE,
+        "vendor screening returned an adverse-media (negative news) hit via {provider}; "
+        "AP review required",
+        {"provider": "text"},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_adverse_media_unnamed_provider",
+        COMPLIANCE_HOLD_TYPE,
+        "vendor screening returned an adverse-media (negative news) hit via the configured "
+        "provider; AP review required",
+        {},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_aml_spend",
+        COMPLIANCE_HOLD_TYPE,
+        "trailing 12-month spend with vendor would reach {projected} {currency} "
+        "(threshold {threshold} {currency}); AP review required",
+        {"projected": "money", "threshold": "money", "currency": "currency"},
+    ),
+    # Some payments had no home-currency figure, so `projected` is a floor.
+    WarningSpec(
+        EXCEPTION_PREFIX + "compliance_aml_spend_partial",
+        COMPLIANCE_HOLD_TYPE,
+        "trailing 12-month spend with vendor would reach {projected} {currency} "
+        "(threshold {threshold} {currency}); AP review required — at least, on "
+        "{excluded, plural, one {# payment} other {# payments}} excluded for having no "
+        "figure in the home currency, so the real total is higher",
+        {
+            "projected": "money",
+            "threshold": "money",
+            "currency": "currency",
+            "excluded": "count",
+        },
+    ),
+    # `services/payment_reconciler.flag_payment_for_reconciliation`'s three
+    # callers. The payment id stays in the sentence: it is the only thing that
+    # says WHICH of the invoice's payments to chase.
+    WarningSpec(
+        EXCEPTION_PREFIX + "payment_aged_out",
+        "payment_reconciliation",
+        "Payment {paymentId} was still in flight after {hours}h and the reconciler marked "
+        "it failed; the rail never confirmed, so the money may or may not have moved. The "
+        "invoice is '{invoiceStatus}'. " + _PAYMENT_RECONCILE_TAIL,
+        {"paymentId": "text", "hours": "number", "invoiceStatus": "text"},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "payment_dispatch_in_doubt",
+        "payment_reconciliation",
+        "Payment {paymentId} failed during dispatch ({failureCode}) after the processor may "
+        "already have accepted it, so the money may or may not have moved. "
+        + _PAYMENT_RECONCILE_TAIL,
+        {"paymentId": "text", "failureCode": "text"},
+    ),
+    # The payment's status is a word, so it picks the code (`failed` /
+    # `cancelled` — `api/payments.RETRYABLE_PAYMENT_STATUSES`).
+    *(
+        WarningSpec(
+            EXCEPTION_PREFIX + f"payment_dispatch_interrupted_{status}",
+            "payment_reconciliation",
+            f"Payment {{paymentId}} {verb}, but an earlier attempt to send it was "
+            "interrupted after it may already have reached the processor, so the money may "
+            "or may not have moved. " + _PAYMENT_RECONCILE_TAIL,
+            {"paymentId": "text"},
+        )
+        for status, verb in (("failed", "failed"), ("cancelled", "was cancelled"))
+    ),
+    # `services/payment_settlement.discrepancy_finding`. The two sides can be
+    # in different currencies (and either may be unknown), so the figures are
+    # bare `number`s beside their own codes as `text` — one `currency` param
+    # could only label one of them. MORE / LESS is a word, so it is the code.
+    WarningSpec(
+        EXCEPTION_PREFIX + "settlement_currency_mismatch",
+        "fraud_flag",
+        "Settlement currency mismatch: the processor reported {settledAmount} "
+        "{settledCurrency} but this payment authorizes {authorizedAmount} "
+        "{authorizedCurrency}. Money moved on a currency AP did not authorize — "
+        + _SETTLEMENT_RECONCILE_TAIL,
+        {
+            "settledAmount": "number",
+            "settledCurrency": "text",
+            "authorizedAmount": "number",
+            "authorizedCurrency": "text",
+        },
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "settlement_amount_over",
+        "fraud_flag",
+        "Settlement amount mismatch: the processor reported {settledAmount} "
+        "{settledCurrency}, MORE than the authorized {authorizedAmount} "
+        "{authorizedCurrency} (variance {variance}). Money moved at an amount AP did not "
+        "authorize — " + _SETTLEMENT_RECONCILE_TAIL,
+        {
+            "settledAmount": "number",
+            "settledCurrency": "text",
+            "authorizedAmount": "number",
+            "authorizedCurrency": "text",
+            "variance": "number",
+        },
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "settlement_amount_under",
+        "fraud_flag",
+        "Settlement amount mismatch: the processor reported {settledAmount} "
+        "{settledCurrency}, LESS than the authorized {authorizedAmount} "
+        "{authorizedCurrency} (variance {variance}). Money moved at an amount AP did not "
+        "authorize — " + _SETTLEMENT_RECONCILE_TAIL,
+        {
+            "settledAmount": "number",
+            "settledCurrency": "text",
+            "authorizedAmount": "number",
+            "authorizedCurrency": "text",
+            "variance": "number",
+        },
+    ),
+)
+
 #: Exception descriptions no warning states. `type` is the exception type the
 #: description belongs to (`exception_lifecycle.EXCEPTION_TYPES`).
 #:
@@ -970,6 +1177,7 @@ EXCEPTION_DESCRIPTION_SPECS: tuple[WarningSpec, ...] = (
         {"count": "count"},
     ),
     *ERP_RECONCILIATION_SPECS,
+    *DIRECT_EXCEPTION_SPECS,
 )
 
 #: Every sentence the catalogue declares, in generation order.
@@ -1168,7 +1376,7 @@ def exception_finding(code: str, /, **params: object) -> dict:
     return _finding(full, params)
 
 
-def exception_findings(frame: str, findings: list[dict]) -> dict:
+def exception_findings(frame: str, findings: list[dict], *, frame_single: bool = False) -> dict:
     """One exception description covering ``findings`` (warning dicts).
 
     A single finding IS the description — it needs no frame, and stating it in
@@ -1180,13 +1388,17 @@ def exception_findings(frame: str, findings: list[dict]) -> dict:
     English string. ``message`` — the fallback, and what
     ``Exception.description`` stores — is the frame followed by each finding's
     own English.
+
+    ``frame_single`` frames a lone finding too, for findings that are clauses
+    written to follow their frame rather than sentences of their own (the
+    compliance-hold reasons).
     """
     if not findings:
         raise ValueError("exception_findings needs at least one finding")
     items = [
         {"code": f["code"], "params": dict(f["params"]), "message": f["message"]} for f in findings
     ]
-    if len(items) == 1:
+    if len(items) == 1 and not frame_single:
         return items[0]
     head = exception_finding(frame, count=len(items))
     head["params"][FINDINGS_PARAM] = items

@@ -3339,6 +3339,161 @@ class AppLocalizationsEn extends AppLocalizations {
       'This invoice\'s payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment\'s run in Payments.';
 
   @override
+  String exceptionDescriptionExtractionFailed(String errorClass) {
+    return 'Extraction failed: $errorClass';
+  }
+
+  @override
+  String exceptionDescriptionPositivePayAlteredAmount(String checkNumber) {
+    return 'Positive Pay return: check $checkNumber altered amount';
+  }
+
+  @override
+  String exceptionDescriptionPositivePayNotOnFile(String checkNumber) {
+    return 'Positive Pay return: check $checkNumber not on issued file';
+  }
+
+  @override
+  String get exceptionDescriptionVendorBankChanged =>
+      'Vendor bank details changed; verify before payment.';
+
+  @override
+  String exceptionDescriptionComplianceHoldFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count reasons',
+      one: '$count reason',
+    );
+    return 'Payment held for compliance review ($_temp0)';
+  }
+
+  @override
+  String get exceptionDescriptionComplianceNoScreenableVendor =>
+      'No screenable vendor on the invoice';
+
+  @override
+  String exceptionDescriptionComplianceProviderUnavailable(String provider) {
+    return 'Sanctions screening could not run: no adapter for the configured provider “$provider”';
+  }
+
+  @override
+  String exceptionDescriptionComplianceReviewRequired(
+    String provider,
+    String matchedList,
+  ) {
+    return 'Vendor screening via $provider requires review ($matchedList)';
+  }
+
+  @override
+  String exceptionDescriptionComplianceReviewRequiredUnlisted(String provider) {
+    return 'Vendor screening via $provider requires review (see the screening record)';
+  }
+
+  @override
+  String exceptionDescriptionComplianceUnrecognisedResult(
+    String provider,
+    String result,
+  ) {
+    return 'Vendor screening via $provider returned an unrecognised result “$result”; treated as requiring review';
+  }
+
+  @override
+  String exceptionDescriptionComplianceAdverseMedia(String provider) {
+    return 'Vendor screening via $provider found adverse media (negative news); AP review required';
+  }
+
+  @override
+  String get exceptionDescriptionComplianceAdverseMediaUnnamedProvider =>
+      'Vendor screening found adverse media (negative news); AP review required';
+
+  @override
+  String exceptionDescriptionComplianceAmlSpend(
+    String projected,
+    String threshold,
+  ) {
+    return 'Trailing 12-month spend with this vendor would reach $projected (threshold $threshold); AP review required';
+  }
+
+  @override
+  String exceptionDescriptionComplianceAmlSpendPartial(
+    String projected,
+    String threshold,
+    int excluded,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      excluded,
+      locale: localeName,
+      other: '$excluded payments were',
+      one: '$excluded payment was',
+    );
+    return 'Trailing 12-month spend with this vendor would reach at least $projected (threshold $threshold); AP review required. $_temp0 left out for having no figure in the home currency, so the real total is higher';
+  }
+
+  @override
+  String exceptionDescriptionPaymentAgedOut(
+    String paymentId,
+    String hours,
+    String invoiceStatus,
+  ) {
+    return 'Payment $paymentId was still in flight after ${hours}h and the reconciler marked it failed; the rail never confirmed, so the money may or may not have moved. The invoice is “$invoiceStatus”. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInDoubt(
+    String paymentId,
+    String failureCode,
+  ) {
+    return 'Payment $paymentId failed during dispatch ($failureCode) after the processor may already have accepted it, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInterruptedFailed(
+    String paymentId,
+  ) {
+    return 'Payment $paymentId failed, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.';
+  }
+
+  @override
+  String exceptionDescriptionPaymentDispatchInterruptedCancelled(
+    String paymentId,
+  ) {
+    return 'Payment $paymentId was cancelled, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementCurrencyMismatch(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+  ) {
+    return 'Settlement currency mismatch: the processor reported $settledAmount $settledCurrency but this payment authorizes $authorizedAmount $authorizedCurrency. Money moved in a currency AP did not authorize — reconcile with the processor before releasing this invoice.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementAmountOver(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  ) {
+    return 'Settlement amount mismatch: the processor reported $settledAmount $settledCurrency, MORE than the authorized $authorizedAmount $authorizedCurrency (variance $variance). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.';
+  }
+
+  @override
+  String exceptionDescriptionSettlementAmountUnder(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  ) {
+    return 'Settlement amount mismatch: the processor reported $settledAmount $settledCurrency, LESS than the authorized $authorizedAmount $authorizedCurrency (variance $variance). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.';
+  }
+
+  @override
   String get warningsPoMatchStatusMatched => 'Matched';
 
   @override

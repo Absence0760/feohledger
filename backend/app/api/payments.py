@@ -95,6 +95,7 @@ from app.services.international_payments import (
     normalize_currency_code,
     resolve_home_currency,
 )
+from app.services.invoice_warning_catalog import exception_finding, exception_findings
 from app.services.nacha import MAX_ENTRY_AMOUNT as NACHA_MAX_ENTRY_AMOUNT
 from app.services.nacha import (
     build_nacha_file,
@@ -2399,12 +2400,12 @@ async def _flag_in_doubt_dispatch(db: AsyncSession, *, org_id: uuid.UUID, paymen
         db,
         organization_id=org_id,
         payment=payment,
-        description=(
-            f"Payment {payment.id} failed during dispatch "
-            f"({payment.failure_reason}) after the processor may already have "
-            f"accepted it, so the money may or may not have moved. Confirm with "
-            f"the processor and void or re-pay — this invoice is blocked from a "
-            f"new payment run until this is resolved."
+        # `failure_reason` here is the machine `<prefix>:<ExceptionClass>` the
+        # caller just wrote, never free text.
+        finding=exception_finding(
+            "payment_dispatch_in_doubt",
+            paymentId=payment.id,
+            failureCode=payment.failure_reason,
         ),
         log_tag="payment-dispatch",
     )
@@ -2431,17 +2432,15 @@ async def _flag_if_dispatch_in_doubt(
     from app.services.payment_reconciler import flag_payment_for_reconciliation
 
     # PII-free: the status only, never `failure_reason` (a dismissal's carries
-    # the operator's free-text note).
+    # the operator's free-text note). The status is a word, so it picks the code.
     await flag_payment_for_reconciliation(
         db,
         organization_id=org_id,
         payment=payment,
-        description=(
-            f"Payment {payment.id} is {payment.status}, but an earlier attempt to "
-            f"send it was interrupted after it may already have reached the "
-            f"processor, so the money may or may not have moved. Confirm with the "
-            f"processor and void or re-pay — this invoice is blocked from a new "
-            f"payment run until this is resolved."
+        finding=(
+            exception_finding("payment_dispatch_interrupted_failed", paymentId=payment.id)
+            if payment.status == "failed"
+            else exception_finding("payment_dispatch_interrupted_cancelled", paymentId=payment.id)
         ),
         log_tag="payment-dispatch",
     )
@@ -4009,8 +4008,15 @@ async def _open_compliance_hold_exception(
     payment: Payment,
     invoice: Invoice | None,
     org: Organization,
+    findings: list[dict],
 ) -> None:
     """Surface a `pending_compliance` payment in the Exceptions queue.
+
+    ``findings`` are the hold's reasons as catalogue findings
+    (`ComplianceDecision.findings`, or the no-screenable-vendor one). The
+    description is the `exception.compliance_hold_findings` frame over them —
+    the same reasons `payment.failure_reason` joins in English, keyed so the
+    queue reads them in the reviewer's language (decisions §358).
 
     `check_payment_compliance`'s own docstring promises a hold "opens an
     exception for AP review" — until this, none of the four call sites that
@@ -4035,10 +4041,13 @@ async def _open_compliance_hold_exception(
     )
     if existing.scalar_one_or_none() is not None:
         return
+    description = exception_findings("compliance_hold_findings", findings, frame_single=True)
     await create_exception(
         db,
         exception_type="payment_compliance_hold",
-        description=payment.failure_reason,
+        description=description["message"],
+        description_code=description["code"],
+        description_params=description["params"],
         organization_id=org.id,
         severity="error",
         invoice=invoice,
@@ -4261,9 +4270,12 @@ async def _execute_single_payment(
             # funds on a card for an unscreened name, defeating the gate.
             # Fail-safe: hold for AP to attach + verify a vendor (mirrors the
             # ACH/wire leg); never mint a card unscreened.
+            no_vendor = exception_finding("compliance_no_screenable_vendor")
             payment.status = "pending_compliance"
-            payment.failure_reason = "compliance_hold: no screenable vendor on invoice"
-            await _open_compliance_hold_exception(db, payment=payment, invoice=invoice, org=org)
+            payment.failure_reason = "compliance_hold: " + no_vendor["message"]
+            await _open_compliance_hold_exception(
+                db, payment=payment, invoice=invoice, org=org, findings=[no_vendor]
+            )
             return
         card_decision = await check_payment_compliance(
             db,
@@ -4290,7 +4302,9 @@ async def _execute_single_payment(
         if card_decision.verdict == "hold":
             payment.status = "pending_compliance"
             payment.failure_reason = "compliance_hold: " + "; ".join(card_decision.reasons)
-            await _open_compliance_hold_exception(db, payment=payment, invoice=invoice, org=org)
+            await _open_compliance_hold_exception(
+                db, payment=payment, invoice=invoice, org=org, findings=card_decision.findings
+            )
             return
 
         # Idempotency pre-check, mirroring the batch `/api/cards/generate` leg:
@@ -4545,9 +4559,12 @@ async def _execute_single_payment(
             # reach here with vendor_id NULL. Paying anyway would route money
             # to an unscreened name, defeating the gate. Fail-safe: hold for
             # AP to attach + verify a vendor, never pay unscreened.
+            no_vendor = exception_finding("compliance_no_screenable_vendor")
             payment.status = "pending_compliance"
-            payment.failure_reason = "compliance_hold: no screenable vendor on invoice"
-            await _open_compliance_hold_exception(db, payment=payment, invoice=invoice, org=org)
+            payment.failure_reason = "compliance_hold: " + no_vendor["message"]
+            await _open_compliance_hold_exception(
+                db, payment=payment, invoice=invoice, org=org, findings=[no_vendor]
+            )
             return
         decision = await check_payment_compliance(
             db,
@@ -4575,7 +4592,9 @@ async def _execute_single_payment(
             payment.status = "pending_compliance"
             payment.failure_reason = "compliance_hold: " + "; ".join(decision.reasons)
             # Hold doesn't flip the invoice — money hasn't moved.
-            await _open_compliance_hold_exception(db, payment=payment, invoice=invoice, org=org)
+            await _open_compliance_hold_exception(
+                db, payment=payment, invoice=invoice, org=org, findings=decision.findings
+            )
             return
 
     payload = PaymentPayload(

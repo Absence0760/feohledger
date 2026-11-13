@@ -250,6 +250,9 @@ async def test_a_db_error_after_the_processor_call_is_recorded_in_doubt(
             .all()
         )
     assert len(flags) == 1
+    # Keyed (decisions §358): the machine failure code, never free text.
+    assert flags[0].description_code == "exception.payment_dispatch_in_doubt"
+    assert flags[0].description_params["failureCode"].startswith("db_error_after_processor_call:")
     async with realdb.client(key="a", role="admin") as c:
         rerun = await c.post(
             "/api/payments/runs", json={"items": [{"invoice_id": invoice_id, "method": "ach"}]}

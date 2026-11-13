@@ -107,6 +107,18 @@ async def test_hold_opens_a_visible_exception(realdb):
         ).scalar_one()
         assert exc.status == "open"
         assert exc.severity == "error"
+        # Keyed (decisions §358): the hold frame over its one reason, so the
+        # queue reads it in the reviewer's language. `failure_reason` keeps
+        # its English shape.
+        assert payment.failure_reason == "compliance_hold: no screenable vendor on invoice"
+        assert exc.description_code == "exception.compliance_hold_findings"
+        assert exc.description_params["count"] == 1
+        assert [f["code"] for f in exc.description_params["findings"]] == [
+            "exception.compliance_no_screenable_vendor"
+        ]
+        assert exc.description == (
+            "Payment held for compliance review (1 reason): no screenable vendor on invoice"
+        )
 
     async with realdb.client(key=TENANT, role="admin") as c:
         resp = await c.get("/api/exceptions")

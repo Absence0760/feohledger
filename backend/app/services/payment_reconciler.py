@@ -32,6 +32,7 @@ from app.db_engine import create_async_engine
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.payment import Payment
+from app.services.invoice_warning_catalog import exception_finding
 from app.services.payment_adapters import PaymentStatus, SettlementReport, get_payment_adapter
 from app.services.payment_settlement_record import (
     SettlementCompletion,
@@ -255,7 +256,7 @@ async def flag_payment_for_reconciliation(
     *,
     organization_id,
     payment: Payment,
-    description: str,
+    finding: dict,
     log_tag: str,
 ) -> None:
     """Open a de-duped ``payment_reconciliation`` exception on ``payment``'s invoice.
@@ -268,8 +269,10 @@ async def flag_payment_for_reconciliation(
 
     **De-duped** on an already-open/escalated ``payment_reconciliation`` for the
     invoice, so a tenant whose rail is down doesn't accumulate a row per sweep.
-    ``description`` must be **PII-free**: ids, ages and statuses — never the
-    vendor, the payee, or any bank field.
+    ``finding`` is the description as a catalogue finding
+    (``invoice_warning_catalog.exception_finding``, one of the
+    ``exception.payment_*`` codes — decisions §358), and must be **PII-free**:
+    ids, ages and statuses — never the vendor, the payee, or any bank field.
 
     Best-effort in the same sense as ``payment_erp_sync._flag_sync_failure``: a
     flagging failure must not lose the transition the caller just decided. It is
@@ -300,7 +303,9 @@ async def flag_payment_for_reconciliation(
             db,
             exception_type=AGED_OUT_EXCEPTION_TYPE,
             severity="error",
-            description=description,
+            description=finding["message"],
+            description_code=finding["code"],
+            description_params=finding["params"],
             status="open",
             # Raised by the system on an outcome nobody chose; no human's act
             # is what the flag asks to be reviewed.
@@ -335,12 +340,11 @@ async def _flag_aged_out_payment(
         db,
         organization_id=org.id,
         payment=payment,
-        description=(
-            f"Payment {payment.id} was still in flight after {hours:.1f}h and the "
-            f"reconciler marked it failed; the rail never confirmed, so the money "
-            f"may or may not have moved. The invoice is '{current_status}'. Confirm "
-            f"with the processor and void or re-pay — this invoice is blocked from "
-            f"a new payment run until this is resolved."
+        finding=exception_finding(
+            "payment_aged_out",
+            paymentId=payment.id,
+            hours=f"{hours:.1f}",
+            invoiceStatus=current_status,
         ),
         log_tag="payment-reconciler",
     )
