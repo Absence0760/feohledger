@@ -70,6 +70,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          TRACKING_TITLE: "pnpm audit: vulnerabilities detected"
         run: |
           set -euo pipefail
           # Ensure the label exists. Idempotent — silently no-ops if already
@@ -79,10 +80,18 @@ jobs:
             --description "Findings from the scheduled pnpm audit workflow" \
             2>/dev/null || true
 
-          # Look for an existing open issue tagged "dependency-audit". If
-          # one exists, update its body; otherwise create a new one.
+          # Find this workflow's OWN tracking issue: open, labelled, opened
+          # by github-actions[bot], with exactly TRACKING_TITLE. The label
+          # alone is not enough — humans apply it too, and on 2026-11-09 the
+          # old label-only lookup overwrote the body of a human issue (#694).
+          # Only the workflow token can author as github-actions[bot], so the
+          # author check is what makes this safe; the title pins it to this
+          # workflow rather than any other bot-opened issue. If one exists,
+          # update its body; otherwise create a new one.
           existing=$(gh issue list --repo "$REPO" --state open \
-            --label dependency-audit --json number --jq '.[0].number // empty')
+            --label dependency-audit --author app/github-actions \
+            --json number,title,author \
+            --jq "[.[] | select(.author.login == \"app/github-actions\" or .author.login == \"github-actions[bot]\" or .author.login == \"github-actions\") | select(.title == env.TRACKING_TITLE)] | .[0].number // empty")
 
           body_file=audit-summary.md
           if [ -n "$existing" ]; then
@@ -91,7 +100,7 @@ jobs:
               --body "Re-detected on $(date -u +%Y-%m-%d). See workflow run $GITHUB_RUN_ID."
           else
             gh issue create --repo "$REPO" \
-              --title "pnpm audit: vulnerabilities detected" \
+              --title "$TRACKING_TITLE" \
               --body-file "$body_file" \
               --label dependency-audit
           fi
@@ -101,10 +110,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          TRACKING_TITLE: "pnpm audit: vulnerabilities detected"
         run: |
           set -euo pipefail
+          # Same bot-authored + exact-title match as the step above; never
+          # close a human issue that merely carries the label.
           existing=$(gh issue list --repo "$REPO" --state open \
-            --label dependency-audit --json number --jq '.[0].number // empty')
+            --label dependency-audit --author app/github-actions \
+            --json number,title,author \
+            --jq "[.[] | select(.author.login == \"app/github-actions\" or .author.login == \"github-actions[bot]\" or .author.login == \"github-actions\") | select(.title == env.TRACKING_TITLE)] | .[0].number // empty")
           if [ -n "$existing" ]; then
             gh issue close "$existing" --repo "$REPO" \
               --comment "Audit clean as of $(date -u +%Y-%m-%d) — closing automatically."
