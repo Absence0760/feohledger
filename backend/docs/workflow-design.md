@@ -484,9 +484,19 @@ An approved invoice's amount, payee, line items and document are frozen (§363,
    and so are the row's own `approved_by` / `approval_date` until a new approval
    replaces them, so `was_ever_approved` stays true (a clerk's entry window
    stays shut; `/extract` still refuses).
-4. Clear the approval-chain state, bump `recall_count`, and open a fresh review
-   step. The next approval re-routes the chain from level 0 and meets the
-   max-amount and CFO gates again.
+4. Clear the approval-chain state, bump `recall_count`, reset a failed push's
+   `erp_retries` to 0 (as `/retry-erp` does), make the instance `active`, close
+   the step the approval opened and open a fresh approval step. The next
+   approval re-routes the chain from level 0 and meets the max-amount and CFO
+   gates again.
+
+The engine backs this up (`workflow_engine._refuse_outside_the_recall`): the
+two recall edges refuse any action but `invoice.approval_recalled`, and an
+invoice that was ever approved never re-enters `pending`, whoever asks. A
+re-read would rewrite signed-off figures, and a once-approved invoice that then
+failed extraction would read as an approved push failure that `/retry-erp`
+re-pushes. The supplier-portal resubmit therefore skips the re-read for such an
+invoice.
 
 A bill already in the ERP is not recalled here: correct or void it in the ERP
 (the `void-erp` action is a product call tracked in `docs/followups.md`).

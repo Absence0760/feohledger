@@ -17451,6 +17451,38 @@ The run builder, the card mint and the push each lock the invoice, so no claim
 or push lands between the read and the transition. A late auto-send meets the
 push's own status gate.
 
+**The engine holds the two edges for the recall** (`workflow_engine.
+RECALL_EDGES`, refused unless the action is `invoice.approval_recalled`).
+Without that, a legal edge is open to every caller of `transition_invoice`. The
+extraction worker has no status precondition of its own, so a re-read
+redelivered after a human approved the invoice would have rewritten its figures
+and walked it back to review. It would have skipped the claim and ERP gate, the
+stamp and the chain reset, and a completed chain would then have let one
+approver sign past every level. Before these edges existed, the same re-read hit
+a 409 and rolled back. It does so again.
+
+**A once-approved invoice never re-enters `pending`**, for any caller. The
+recall keeps the approval stamps (below), and `failed` with a stamp is read as
+"an approved invoice whose push failed" by `/retry-erp`, `financially_locked`
+and this recall. If a recalled invoice could be re-read (reject, back to draft,
+`pending` through bulk status, then a failed extraction or `reset-extraction`),
+it would sit at `failed` posing as an approved push. `/retry-erp` would then
+post, and a run would then pay, figures nobody approved. `/extract` already
+refused a once-approved invoice. The engine now refuses one for bulk status and
+any future door too. That also closes the older form of the same hole, where an
+approved invoice's failed push was sent back to `pending` by bulk status. The
+supplier-portal resubmit skips the re-read for such an invoice: the corrected
+document goes to the reviewer, who keys any change by hand. This keeps `failed`
+plus a stamp meaning what every reader takes it to mean, without a migration. A
+separate "approval in force" column was weighed and is not needed while no
+re-read can reach `failed`.
+
+**A recall from a failed push resets the push's retry counter**, as `/retry-erp`
+does, and keeps its other keys. The instance is made `active` again (the
+escalation sweep reads only active instances). The step the approval opened is
+closed and a fresh approval step is opened, so the approval queue and the
+bottleneck panel see one open step.
+
 **Why `ready_for_review`, not `rejected`.** A recall withdraws a decision, and
 `ready_for_review` is the state that means "awaiting a decision". From there
 every exit is the existing one: approve (corrections included), or reject for
@@ -17485,6 +17517,14 @@ org-level `require_segregation: false` opt-out covers the recaller as it covers
 the uploader, so a one-person team can still finish the loop. The original
 approver is not stamped. They may approve the corrected figures.
 
+Because the stamp joins `implicated_actors`, it reaches two more places, by
+design. The recaller can no longer clear a payment-blocking exception on the
+invoice (`exception_lifecycle.segregation_refusal`, §169); they escalate it, as
+the uploader would. And a goods receipt the recaller hand-recorded stops lifting
+a "billed beyond receipt" hold (`receipts_clear_hold`, §267) once the recall's
+`refresh_warnings` runs. A person who reopened the figures is not the
+independent receiver that rule wants.
+
 **Nothing is erased.** The `invoice.approved` row and its signature stay. The
 recall writes `invoice.approval_recalled` (`reason`, `recalled_from`,
 `recalled_approval: {approved_by, approval_date}`). The row's `approved_by` /
@@ -17510,6 +17550,11 @@ and CFO gates again.
   The audit trail names who approved, and the next approval replaces the
   display fields.
 
+**Left open** (`docs/followups.md`): no outbound webhook says an approval was
+withdrawn; a PEPPOL transmission sent while the invoice was approved, and an
+inter-company mirror, keep the recalled figures; and the ERP dispatchers do not
+re-check `sending_to_erp` before a redelivered push.
+
 **Clients.** Web: "Recall Approval" in the invoice modal opens
 `RecallApprovalModal` (the shared `ui/Modal`, rendered beside the invoice dialog
 so its Esc and focus trap stay its own). Mobile: the same action on the detail
@@ -17521,7 +17566,9 @@ Tests: `backend/tests/test_invoice_recall_approval.py` (happy path, each
 refusal, verdict/door parity for every role, SoD after recall and the opt-out,
 the audit row, the chain and the CFO gate re-run, bulk refusal);
 `tests/test_invoice_status_groups.py` and `tests/test_workflow_state_machine.py`
-(the two edges, and that nothing else goes back before approval);
+(the two edges, that nothing else goes back before approval, the engine's
+recall-only and no-re-read rules); `tests/test_invoice_uploader_stamping.py`
+(the two post-construction writers of the segregation set);
 `frontend/tests-e2e/invoices/recall-approval.spec.ts`;
 `frontend/src/lib/api/codedRefusals.test.ts`; and the mobile
 `invoice_detail_screen_test.dart`, `action_verdict_test.dart` and

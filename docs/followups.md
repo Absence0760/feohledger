@@ -860,6 +860,35 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change that touches more than one panel of
       `frontend/src/routes/organization/+page.svelte`.
 
+### Surfaced by the approval recall (2026-11-13, decisions §374)
+
+- [ ] **(c) Nothing outside FeohLedger hears that an approval was recalled.**
+      `transition_invoice` emits `invoice.approved` to webhook subscribers
+      (`workflow_engine._maybe_emit_webhook`) but there is no event for the
+      recall, so an integrator that acted on the approval never learns it was
+      withdrawn. **Durable fix:** an `invoice.approval_recalled` event in the
+      outbound catalogue and the published OpenAPI, emitted from the same hook
+      on `RECALL_ACTION`. **Trigger:** the first integrator subscribing to
+      `invoice.approved`, or the next change to the webhook catalogue.
+- [ ] **(c) A recalled invoice's PEPPOL transmission and inter-company mirror
+      keep the recalled figures.** `recall_refusal` does not ask whether the
+      approved invoice was already sent over PEPPOL (`POST {id}/peppol-send`)
+      or routed inter-company (`intercompany_mirror_id`); correcting it then
+      leaves the network holding the old document and the mirror its copied
+      amount and segregation set. **Durable fix:** a product call between
+      refusing the recall for a transmitted / routed invoice and re-sending /
+      re-syncing the mirror after re-approval. **Trigger:** the first
+      customer using PEPPOL send or inter-company routing who recalls.
+- [ ] **(c) The ERP dispatchers do not re-check `sending_to_erp`.**
+      `erp_dispatch` and `erp_lambda` call `send_to_erp_internal` on whatever
+      status the invoice now holds, so a redelivered push for an invoice that
+      has since failed and been recalled could post a bill for an invoice in
+      review. **Durable fix:** re-read the invoice `FOR UPDATE` in
+      `send_to_erp_internal` and return without calling the adapter unless it
+      is `sending_to_erp`, with `tests/test_erp_push_flow.py` updated for the
+      fixtures that call it on other statuses. **Trigger:** the next change to
+      `services/erp.py` or either dispatcher.
+
 ### Surfaced by the vendors table column fix (2026-10-06)
 
 - [ ] **(c) A vendor you've just created can be invisible in the list.**
