@@ -4,7 +4,9 @@ The crypto verification lives in test_saml_security.py; this drives the actual
 FastAPI routes (in-process, no DB / no Keycloak) to verify the handler GLUE:
 RelayState-derived tenant, the 303 -> bridge -> one-time-code -> /exchange token
 handoff, and — critically — that every failure path writes a PII-safe
-auth.saml.login.failure audit row and returns one generic error.
+auth.saml.login.failure audit row and lands on the SPA bridge with a coded
+refusal (decisions §359): one generic `saml_login_unverified` for every
+verification failure, so the bridge says no more than the ACS used to.
 
 Collaborators that need a real DB (org fetch, jit_provision) are monkeypatched;
 resolve_saml_config + the full python3-saml verification run for real.
@@ -149,15 +151,46 @@ def _client() -> httpx.AsyncClient:
     )
 
 
-async def _post_acs(client, response_xml: str):
+async def _post_acs(client, response_xml: str, relay_state: str = "st-int-1"):
     import base64
 
     b64 = base64.b64encode(response_xml.encode()).decode()
     return await client.post(
         "/api/auth/saml/acs",
-        data={"SAMLResponse": b64, "RelayState": "st-int-1"},
+        data={"SAMLResponse": b64, "RelayState": relay_state},
         follow_redirects=False,
     )
+
+
+async def _refusal_on_the_bridge(client, acs) -> tuple[int, dict]:
+    """A refused ACS POST: a 303 to the tenant's SPA bridge carrying a one-time
+    code (never JSON at the ACS), which `/exchange` answers with the coded
+    refusal and no token — once."""
+    assert acs.status_code == 303
+    loc = acs.headers["location"]
+    assert loc.startswith("http://acme.localhost:7777/login/saml-callback?code=")
+    code = loc.split("code=", 1)[1]
+    ex = await client.post("/api/auth/saml/exchange", json={"code": code})
+    assert "access_token" not in ex.json()
+    again = await client.post("/api/auth/saml/exchange", json={"code": code})
+    assert again.status_code == 400
+    return ex.status_code, ex.json()["detail"]
+
+
+def _failure_reasons(saml_wired) -> list[str]:
+    assert not [a for a in saml_wired["audits"] if a["action"] == "auth.saml.login.success"]
+    failures = [a for a in saml_wired["audits"] if a["action"] == "auth.saml.login.failure"]
+    for row in failures:
+        # PII-safe: reason code only, no email / NameID / raw assertion.
+        assert set(row["details"]) <= {"tenant", "ip", "reason"}
+    return [row["details"]["reason"] for row in failures]
+
+
+UNVERIFIED = {
+    "code": "saml_login_unverified",
+    "message": "SAML login could not be verified.",
+    "params": {},
+}
 
 
 async def test_acs_happy_path_303_then_exchange(saml_wired):
@@ -223,25 +256,172 @@ async def test_acs_bad_signature_audits_failure_without_pii(saml_wired):
     forged = _signed_response((key_pem, cert_pem, cert_b64))
     async with _client() as client:
         acs = await _post_acs(client, forged)
-        assert acs.status_code == 400
-        assert acs.json()["detail"] == "SAML login could not be verified."
+        assert await _refusal_on_the_bridge(client, acs) == (400, UNVERIFIED)
 
-    failures = [a for a in saml_wired["audits"] if a["action"] == "auth.saml.login.failure"]
-    assert len(failures) == 1
-    details = failures[0]["details"]
-    # PII-safe: reason code only, no email / NameID / raw assertion.
-    assert details["reason"] in {"assertion_invalid", "issuer_mismatch", "unsolicited"}
-    assert "email" not in details
-    assert set(details) <= {"tenant", "ip", "reason"}
+    assert _failure_reasons(saml_wired) == ["assertion_invalid"]
 
 
 async def test_acs_unknown_relaystate_is_generic_400(saml_wired):
     # No RelayState seeded — tenant can't be recovered, so it fails generically
-    # WITHOUT an org-scoped audit row (nothing to scope it to, like OIDC).
+    # WITHOUT an org-scoped audit row (nothing to scope it to, like OIDC), and
+    # stays a 400 at the ACS: there is no workspace origin to send it to.
     async with _client() as client:
         acs = await _post_acs(client, _signed_response(saml_wired["keypair"]))
         assert acs.status_code == 400
     assert saml_wired["audits"] == []
+
+
+@pytest.mark.parametrize(
+    ("assertion_kwargs", "reason"),
+    [
+        # A tampered or foreign-signed document: python3-saml rejects it.
+        ({"audience": "https://someone-else.test/metadata"}, "assertion_invalid"),
+        # Signed by the pinned key, but the Issuer is not this workspace's IdP:
+        # python3-saml refuses it before the handler's own pin is reached
+        # (both layers: test_saml_security.test_wrong_issuer_rejected_at_both_layers).
+        ({"issuer": "https://other-idp.test/metadata"}, "assertion_invalid"),
+        # Verified, but names no subject / address to sign in as.
+        ({"nameid": "opaque-subject-1", "email": ""}, "missing_email"),
+    ],
+)
+async def test_acs_verification_failures_are_one_refusal_on_the_bridge(
+    saml_wired, assertion_kwargs, reason
+):
+    """Every verification failure is stated identically on the bridge — the
+    same code, status and sentence — so whoever holds a forged or captured
+    assertion learns nothing about which check stopped it. Only the audit row
+    tells them apart, unchanged."""
+    await store_saml_relay_state("st-int-1", "acme", REQUEST_ID)
+    async with _client() as client:
+        acs = await _post_acs(client, _signed_response(saml_wired["keypair"], **assertion_kwargs))
+        assert await _refusal_on_the_bridge(client, acs) == (400, UNVERIFIED)
+    assert _failure_reasons(saml_wired) == [reason]
+
+
+async def test_acs_unsolicited_response_is_the_one_refusal(saml_wired):
+    """A response with no InResponseTo (IdP-initiated / unsolicited)."""
+    from tests.test_saml_security import _assertion_xml, _response, _sign
+
+    key_pem, cert_pem, _ = saml_wired["keypair"]
+    unsolicited = _response(
+        _sign(_assertion_xml(in_response_to=None), key_pem, cert_pem), in_response_to=None
+    )
+    await store_saml_relay_state("st-int-1", "acme", REQUEST_ID)
+    async with _client() as client:
+        acs = await _post_acs(client, unsolicited)
+        assert await _refusal_on_the_bridge(client, acs) == (400, UNVERIFIED)
+    assert _failure_reasons(saml_wired) == ["unsolicited"]
+
+
+async def test_acs_replayed_assertion_is_the_one_refusal(saml_wired):
+    """The same signed response a second time, under a fresh RelayState bound to
+    the same request: the first signs in, the replay is refused on the bridge
+    exactly as a forged signature is."""
+    response = _signed_response(saml_wired["keypair"])
+    await store_saml_relay_state("st-int-1", "acme", REQUEST_ID)
+    await store_saml_relay_state("st-int-2", "acme", REQUEST_ID)
+    async with _client() as client:
+        first = await _post_acs(client, response, "st-int-1")
+        assert first.status_code == 303
+        replay = await _post_acs(client, response, "st-int-2")
+        assert await _refusal_on_the_bridge(client, replay) == (400, UNVERIFIED)
+    failures = [a for a in saml_wired["audits"] if a["action"] == "auth.saml.login.failure"]
+    assert [row["details"]["reason"] for row in failures] == ["replay"]
+    assert set(failures[0]["details"]) <= {"tenant", "ip", "reason"}
+
+
+async def test_acs_session_without_request_binding_is_the_one_refusal(saml_wired):
+    """Server-minted state that never bound an AuthnRequest: refused before
+    python3-saml could skip InResponseTo, unaudited as before."""
+    await store_saml_relay_state("st-int-1", "acme", "")
+    async with _client() as client:
+        acs = await _post_acs(client, _signed_response(saml_wired["keypair"]))
+        assert await _refusal_on_the_bridge(client, acs) == (400, UNVERIFIED)
+    assert saml_wired["audits"] == []
+
+
+async def test_acs_unconfigured_since_login_is_stated_on_the_bridge(saml_wired, monkeypatch):
+    """SAML switched off (or the plan lost `sso`) between /login and the ACS."""
+
+    async def _no_sso(db, org):
+        return {}
+
+    monkeypatch.setattr(auth_saml, "sign_in_settings", _no_sso)
+    await store_saml_relay_state("st-int-1", "acme", REQUEST_ID)
+    async with _client() as client:
+        acs = await _post_acs(client, _signed_response(saml_wired["keypair"]))
+        status, detail = await _refusal_on_the_bridge(client, acs)
+    assert status == 400
+    assert detail["code"] == "saml_not_configured"
+    assert saml_wired["audits"] == []
+
+
+@pytest.mark.parametrize(
+    ("raised", "reason", "code", "message"),
+    [
+        (
+            "DeactivatedAccount",
+            "inactive",
+            "sso_account_inactive",
+            "This account has been deactivated. Contact your administrator.",
+        ),
+        (
+            "EmailDomainNotAllowed",
+            "domain_blocked",
+            "sso_email_domain_blocked",
+            "Your email domain isn't allowed to sign in to this workspace.",
+        ),
+        (
+            "UnsafeEmailAddress",
+            "unsafe_email",
+            "sso_email_unusable",
+            "The identity provider supplied an unusable email address.",
+        ),
+    ],
+)
+async def test_acs_identity_refusals_are_coded_like_the_oidc_callback(
+    saml_wired, monkeypatch, raised, reason, code, message
+):
+    """The refusals a person can act on are stated as the OIDC callback states
+    them — the same code and English — with the audit reason unchanged."""
+    import app.services.identity_provisioning as ip
+
+    exc_type = getattr(ip, raised)
+
+    def _make():
+        if raised == "DeactivatedAccount":
+            return exc_type(uuid.uuid4())
+        return exc_type("user@acme.com")
+
+    def _check_refuses(email_raw, allowed):
+        if raised == "DeactivatedAccount":
+            return email_raw
+        raise _make()
+
+    async def _jit_refuses(db, org_, email, sub, provider, claims):
+        raise _make()
+
+    monkeypatch.setattr(auth_saml, "extract_and_check_email", _check_refuses)
+    monkeypatch.setattr(auth_saml, "jit_provision", _jit_refuses)
+    await store_saml_relay_state("st-int-1", "acme", REQUEST_ID)
+    async with _client() as client:
+        acs = await _post_acs(client, _signed_response(saml_wired["keypair"]))
+        status, detail = await _refusal_on_the_bridge(client, acs)
+    assert status == 403
+    assert detail == {"code": code, "message": message, "params": {}}
+    assert _failure_reasons(saml_wired) == [reason]
+
+
+async def test_exchange_answers_an_unknown_parked_refusal_as_unverified(saml_wired):
+    """A refusal record this build does not know (written by a newer one) is
+    never read as a token: fail closed to the one unverified refusal."""
+    from app.services.sso import create_saml_refusal_handoff
+
+    code = await create_saml_refusal_handoff("some_future_refusal", "acme")
+    async with _client() as client:
+        ex = await client.post("/api/auth/saml/exchange", json={"code": code})
+    assert ex.status_code == 400
+    assert ex.json()["detail"] == UNVERIFIED
 
 
 async def test_acs_address_in_another_workspace_lands_on_the_bridge_coded(saml_wired, monkeypatch):

@@ -5077,6 +5077,14 @@ export const messages = {
 	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Cette adresse e-mail appartient déjà à un compte d’un autre espace de travail ; elle ne peut donc pas se connecter ici. Connectez-vous sur la page de votre propre espace de travail, ou demandez à l’administrateur de cet espace de travail que votre fournisseur d’identité utilise une autre adresse.",
+	// The other SSO / SAML sign-in refusals (decisions §359): the identity refusals the
+	// OIDC callback and the SAML bridge both state, and the SAML bridge's one sentence for
+	// every response it could not verify (never more specific than that).
+	'refusal.ssoAccountInactive': "Ce compte a été désactivé. Contactez votre administrateur.",
+	'refusal.ssoEmailDomainBlocked': "Votre domaine de messagerie n’est pas autorisé à se connecter à cet espace de travail.",
+	'refusal.ssoEmailUnusable': "Votre fournisseur d’identité a envoyé une adresse e-mail inutilisable pour la connexion. Demandez à votre administrateur de vérifier comment le fournisseur d’identité transmet votre adresse.",
+	'refusal.samlLoginUnverified': "Votre connexion SAML n’a pas pu être vérifiée. Réessayez de vous connecter.",
+	'refusal.samlNotConfigured': "La connexion SAML n’est pas configurée pour cet espace de travail.",
 	'refusal.emailInThisWorkspace': "Un utilisateur avec cette adresse e-mail existe déjà dans cet espace de travail.",
 	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne. Si cette personne n’utilise plus l’autre espace de travail, son administrateur peut le fermer, ce qui libère l’adresse.",
 	'refusal.emailCheckThrottled': "Trop d’adresses saisies récemment dans cet espace de travail appartenaient déjà à d’autres espaces de travail : l’ajout d’utilisateurs et la modification de leur e-mail sont suspendus pendant une heure au plus. Réessayez plus tard.",

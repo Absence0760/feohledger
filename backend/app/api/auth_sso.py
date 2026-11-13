@@ -35,7 +35,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import create_access_token_with_jti
-from app.api.refusals import SSO_EMAIL_IN_OTHER_WORKSPACE, SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL
+from app.api.refusals import (
+    SSO_ACCOUNT_INACTIVE_DETAIL,
+    SSO_EMAIL_DOMAIN_BLOCKED_DETAIL,
+    SSO_EMAIL_IN_OTHER_WORKSPACE,
+    SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL,
+    SSO_EMAIL_UNUSABLE_DETAIL,
+)
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.services.audit_dispatch import dispatch_auth_audit
@@ -328,10 +334,7 @@ async def sso_callback(
             action="auth.sso.login.failure",
             details={"tenant": tenant_slug, "ip": ip, "reason": "unsafe_email"},
         )
-        raise HTTPException(
-            status_code=403,
-            detail="The identity provider supplied an unusable email address.",
-        ) from exc
+        raise HTTPException(status_code=403, detail=SSO_EMAIL_UNUSABLE_DETAIL) from exc
     except EmailDomainNotAllowed as exc:
         await dispatch_auth_audit(
             organization_id=org.id,
@@ -344,10 +347,7 @@ async def sso_callback(
                 "reason": "domain_blocked",
             },
         )
-        raise HTTPException(
-            status_code=403,
-            detail="Your email domain isn't allowed to sign in to this workspace.",
-        ) from exc
+        raise HTTPException(status_code=403, detail=SSO_EMAIL_DOMAIN_BLOCKED_DETAIL) from exc
 
     try:
         user = await jit_provision(db, org, email, sub, config.provider, claims)
@@ -363,10 +363,7 @@ async def sso_callback(
             entity_id=exc.user_id,
             details={"tenant": tenant_slug, "ip": ip, "reason": "inactive"},
         )
-        raise HTTPException(
-            status_code=403,
-            detail="This account has been deactivated. Contact your administrator.",
-        ) from exc
+        raise HTTPException(status_code=403, detail=SSO_ACCOUNT_INACTIVE_DETAIL) from exc
     except EmailInOtherWorkspace as exc:
         # The address names an account in another workspace, and one address is
         # one account. Audited HERE, in the workspace whose IdP asserted it —

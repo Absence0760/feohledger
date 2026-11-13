@@ -4987,6 +4987,14 @@ export const messages = {
 	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "このメールアドレスは別のワークスペースのアカウントで既に使用されているため、ここではサインインできません。ご自身のワークスペースのページでサインインするか、このワークスペースの管理者に、ID プロバイダーが別のアドレスを使うよう依頼してください。",
+	// The other SSO / SAML sign-in refusals (decisions §359): the identity refusals the
+	// OIDC callback and the SAML bridge both state, and the SAML bridge's one sentence for
+	// every response it could not verify (never more specific than that).
+	'refusal.ssoAccountInactive': "このアカウントは無効化されています。管理者にお問い合わせください。",
+	'refusal.ssoEmailDomainBlocked': "お使いのメールドメインでは、このワークスペースにサインインできません。",
+	'refusal.ssoEmailUnusable': "ID プロバイダーから送信されたメールアドレスはサインインに使用できません。ID プロバイダーがアドレスをどのように送信しているか、管理者に確認を依頼してください。",
+	'refusal.samlLoginUnverified': "SAML サインインを検証できませんでした。もう一度サインインしてください。",
+	'refusal.samlNotConfigured': "このワークスペースでは SAML サインインが設定されていません。",
 	'refusal.emailInThisWorkspace': "このメールアドレスのユーザーは、このワークスペースに既に存在します。",
 	'refusal.emailInOtherWorkspace': "このメールアドレスには別のワークスペースのアカウントが既にあります。1 つのアドレスは 1 つのワークスペースにしか所属できないため、この方には別のアドレスを使用してください。その方がもう別のワークスペースを使用していない場合は、そのワークスペースの管理者が閉鎖するとアドレスが解放されます。",
 	'refusal.emailCheckThrottled': "このワークスペースで最近入力されたアドレスのうち、別のワークスペースに既に属していたものが多すぎるため、ユーザーの追加とメールアドレスの変更を最大 1 時間停止しています。しばらくしてからもう一度お試しください。",

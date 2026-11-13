@@ -5071,6 +5071,14 @@ export const messages = {
 	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Este endereço de e-mail já pertence a uma conta de outro espaço de trabalho, então não pode entrar aqui. Entre pela página do seu próprio espaço de trabalho ou peça ao administrador deste espaço de trabalho que seu provedor de identidade use outro endereço.",
+	// The other SSO / SAML sign-in refusals (decisions §359): the identity refusals the
+	// OIDC callback and the SAML bridge both state, and the SAML bridge's one sentence for
+	// every response it could not verify (never more specific than that).
+	'refusal.ssoAccountInactive': "Esta conta foi desativada. Entre em contato com seu administrador.",
+	'refusal.ssoEmailDomainBlocked': "Seu domínio de e-mail não tem permissão para entrar neste espaço de trabalho.",
+	'refusal.ssoEmailUnusable': "Seu provedor de identidade enviou um endereço de e-mail que não pode ser usado para entrar. Peça ao seu administrador que verifique como o provedor de identidade envia seu endereço.",
+	'refusal.samlLoginUnverified': "Não foi possível verificar seu login SAML. Tente entrar novamente.",
+	'refusal.samlNotConfigured': "O login SAML não está configurado para este espaço de trabalho.",
 	'refusal.emailInThisWorkspace': "Já existe um usuário com este endereço de e-mail neste espaço de trabalho.",
 	'refusal.emailInOtherWorkspace': "Este endereço de e-mail já tem uma conta em outro espaço de trabalho. Um endereço só pode pertencer a um espaço de trabalho; use outro endereço para esta pessoa. Se a pessoa não usa mais o outro espaço de trabalho, o administrador dele pode encerrá-lo, o que libera o endereço.",
 	'refusal.emailCheckThrottled': "Muitos endereços inseridos recentemente neste espaço de trabalho já pertenciam a outros espaços de trabalho, então adicionar usuários ou alterar o e-mail deles está pausado por até uma hora. Tente novamente mais tarde.",

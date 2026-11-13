@@ -5078,6 +5078,14 @@ export const messages = {
 	// One address, one account, one workspace (decisions §291): an SSO sign-in
 	// and a user-manager's create / rename refused for an address held elsewhere.
 	'refusal.ssoEmailInOtherWorkspace': "Diese E-Mail-Adresse gehört bereits zu einem Konto in einem anderen Workspace und kann sich hier nicht anmelden. Melden Sie sich auf der Seite Ihres eigenen Workspace an, oder bitten Sie die Administration dieses Workspace, Ihren Identitätsanbieter eine andere Adresse verwenden zu lassen.",
+	// The other SSO / SAML sign-in refusals (decisions §359): the identity refusals the
+	// OIDC callback and the SAML bridge both state, and the SAML bridge's one sentence for
+	// every response it could not verify (never more specific than that).
+	'refusal.ssoAccountInactive': "Dieses Konto wurde deaktiviert. Wenden Sie sich an Ihre Administration.",
+	'refusal.ssoEmailDomainBlocked': "Ihre E-Mail-Domain darf sich nicht bei diesem Workspace anmelden.",
+	'refusal.ssoEmailUnusable': "Ihr Identitätsanbieter hat eine E-Mail-Adresse gesendet, mit der keine Anmeldung möglich ist. Bitten Sie Ihre Administration zu prüfen, wie der Identitätsanbieter Ihre Adresse übermittelt.",
+	'refusal.samlLoginUnverified': "Ihre SAML-Anmeldung konnte nicht überprüft werden. Versuchen Sie es erneut.",
+	'refusal.samlNotConfigured': "Die SAML-Anmeldung ist für diesen Workspace nicht eingerichtet.",
 	'refusal.emailInThisWorkspace': "In diesem Workspace gibt es bereits einen Benutzer mit dieser E-Mail-Adresse.",
 	'refusal.emailInOtherWorkspace': "Diese E-Mail-Adresse hat bereits ein Konto in einem anderen Workspace. Eine Adresse kann nur zu einem Workspace gehören; verwenden Sie für diese Person eine andere Adresse. Wenn die Person den anderen Workspace nicht mehr nutzt, kann dessen Administrator ihn schließen, wodurch die Adresse frei wird.",
 	'refusal.emailCheckThrottled': "Zu viele kürzlich in diesem Workspace eingegebene Adressen gehörten bereits zu anderen Workspaces. Das Hinzufügen von Benutzern und das Ändern ihrer E-Mail-Adresse ist daher für bis zu eine Stunde pausiert. Versuchen Sie es später erneut.",
