@@ -1,0 +1,42 @@
+diff --git a/dist/cjs.js b/dist/cjs.js
+index 7c36cbdd06cc22c92d590be3f87a08a91ca06b40..968415044f8b90a8481413d7f83ad9dd23b8005f 100644
+--- a/dist/cjs.js
++++ b/dist/cjs.js
+@@ -71,6 +71,9 @@ function propertyIsOnObject(object, property) {
+ 
+ // Protects from prototype poisoning and unexpected merging up the prototype chain.
+ function propertyIsUnsafe(target, key) {
++	// Patched (GHSA-gcqx-w48m-w2h4): assigning a "__proto__" key sets the result's
++	// prototype when the target has none for the `in` check below to see.
++	if (key === "__proto__") { return true }
+ 	return propertyIsOnObject(target, key) // Properties are safe to merge if they don't exist in the target yet,
+ 		&& !(Object.hasOwnProperty.call(target, key) // unsafe if they exist up the prototype chain,
+ 			&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+diff --git a/dist/umd.js b/dist/umd.js
+index 4071e7c56ec8e5273fe166f6e723ac460fab8b72..8b2a64e50691b53debbe869e53a079c6efdd4e89 100644
+--- a/dist/umd.js
++++ b/dist/umd.js
+@@ -75,6 +75,9 @@
+ 
+ 	// Protects from prototype poisoning and unexpected merging up the prototype chain.
+ 	function propertyIsUnsafe(target, key) {
++		// Patched (GHSA-gcqx-w48m-w2h4): assigning a "__proto__" key sets the result's
++		// prototype when the target has none for the `in` check below to see.
++		if (key === "__proto__") { return true }
+ 		return propertyIsOnObject(target, key) // Properties are safe to merge if they don't exist in the target yet,
+ 			&& !(Object.hasOwnProperty.call(target, key) // unsafe if they exist up the prototype chain,
+ 				&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+diff --git a/index.js b/index.js
+index 77968aed5d456cccc294f60912ef381fa1e52a7b..3efba4f65d27a52db38c3b690f75a0eccc040480 100644
+--- a/index.js
++++ b/index.js
+@@ -46,6 +46,9 @@ function propertyIsOnObject(object, property) {
+ 
+ // Protects from prototype poisoning and unexpected merging up the prototype chain.
+ function propertyIsUnsafe(target, key) {
++	// Patched (GHSA-gcqx-w48m-w2h4): assigning a "__proto__" key sets the result's
++	// prototype when the target has none for the `in` check below to see.
++	if (key === "__proto__") { return true }
+ 	return propertyIsOnObject(target, key) // Properties are safe to merge if they don't exist in the target yet,
+ 		&& !(Object.hasOwnProperty.call(target, key) // unsafe if they exist up the prototype chain,
+ 			&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
