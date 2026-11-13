@@ -5,6 +5,7 @@ import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/gl_chart_refusal_messages.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -37,6 +38,11 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   // double-tap firing the money-path POST twice and disables the buttons.
   bool _submitting = false;
 
+  // The server's verdict on "Recall approval" for this user and invoice
+  // (`GET /review-actions` → `recall_approval`, backend decisions §374), asked
+  // only where a recall could apply. Unanswered offers nothing.
+  ActionVerdict _recall = ActionVerdict.unanswered;
+
   // Activity timeline (audit log) state — loaded independently of the invoice
   // body so a slow / failed trail never blocks the detail view.
   List<AuditEntry> _activity = [];
@@ -64,12 +70,65 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         _invoice = invoice;
         _loading = false;
       });
+      await _loadRecallVerdict(invoice);
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = describeApiError(e);
         _loading = false;
       });
+    }
+  }
+
+  /// Ask the server whether this user may recall the invoice's approval.
+  /// Only an approved invoice, or a failed one (an approved invoice's failed
+  /// ERP push), can hold one; for anything else nothing is asked. A failed
+  /// read leaves the verdict unanswered, which offers nothing.
+  Future<void> _loadRecallVerdict(Invoice invoice) async {
+    final status = invoice.status;
+    if (status != InvoiceStatus.approved && status != InvoiceStatus.failed) {
+      if (mounted) setState(() => _recall = ActionVerdict.unanswered);
+      return;
+    }
+    ActionVerdict verdict;
+    try {
+      verdict = await InvoiceApi.recallVerdict(invoice.id);
+    } catch (_) {
+      verdict = ActionVerdict.unanswered;
+    }
+    if (!mounted) return;
+    setState(() => _recall = verdict);
+  }
+
+  Future<void> _recallApproval() async {
+    if (_submitting) return;
+    final l = AppLocalizations.of(context);
+    final reason = await showRejectReasonDialog(
+      context,
+      title: l.invoiceDetailRecallTitle,
+      message: l.invoiceDetailRecallBody,
+      reasonLabel: l.invoiceDetailRecallReason,
+      confirmLabel: l.invoiceDetailRecall,
+    );
+    if (reason == null || _submitting || !mounted) return;
+
+    setState(() => _submitting = true);
+    try {
+      final store = InvoiceStore.instance;
+      final success = await store.recallApproval(widget.invoiceId, reason);
+      if (!mounted) return;
+      // Either way the invoice may have moved under the verdict this screen
+      // holds (a run staged meanwhile): re-read both.
+      await _load();
+      await _loadActivity();
+      _showSnack(
+        success
+            ? l.invoiceDetailRecalled
+            : localizeCodedRefusal(l, store.recallErrorDetail) ??
+                l.invoiceDetailRecallFailed,
+      );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -483,6 +542,51 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     );
   }
 
+  /// "Recall approval" — offered from the server's verdict alone: hidden for
+  /// a status it does not start from and for a role that cannot recall,
+  /// otherwise shown, disabled with the server's reason when refused (a bill
+  /// the ERP may hold, a live payment or virtual card).
+  Widget? _buildRecallAction() {
+    final verdict = _recall;
+    if (!verdict.isOffered(hiddenCodes: const {'invoice_not_recallable'})) {
+      return null;
+    }
+    final l = AppLocalizations.of(context);
+    final refusal = verdict.allowed
+        ? null
+        : (localizeCodedRefusal(l, verdict.refusal) ??
+            verdict.refusal?['message'] as String?);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (refusal != null) ...[
+              Text(
+                refusal,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            OutlinedButton.icon(
+              onPressed:
+                  _submitting || !verdict.allowed ? null : _recallApproval,
+              icon: const Icon(Icons.undo),
+              label: Text(l.invoiceDetailRecall),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openViewer(BuildContext context, String fileUrl) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -494,7 +598,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   Widget? _buildActions() {
     final inv = _invoice;
     if (inv == null) return null;
-    if (!inv.status.isActionable) return null;
+    if (!inv.status.isActionable) return _buildRecallAction();
     if (!AuthStore.instance.canApproveInvoice) return null;
     final l = AppLocalizations.of(context);
 

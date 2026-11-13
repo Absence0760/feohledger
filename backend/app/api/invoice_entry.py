@@ -177,7 +177,8 @@ def financial_lock_refusal(invoice: Invoice) -> dict | None:
     return coded_refusal(
         INVOICE_FINANCIALLY_LOCKED,
         "The amount, payee and line items cannot be changed once the invoice is "
-        "approved: they are what the approver signed off and what will be paid.",
+        "approved: they are what the approver signed off and what will be paid. "
+        "To correct them, recall the approval: the invoice goes back to review.",
         status=invoice.status.value,
     )
 
@@ -222,11 +223,8 @@ def stamp_entry_editor(user: User, invoice: Invoice) -> None:
     stamping a manager's pre-review fix would refuse that same manager the
     approval in a one-approver org.
     """
-    if not is_entry_only(user) or invoice.uploaded_by_id == user.id:
+    if not is_entry_only(user):
         return
-    current = [str(x) for x in (invoice.segregation_actor_ids or [])]
-    if str(user.id) in current:
-        return
-    # A new list, not an in-place append: the JSONB column does not track
-    # mutation, so an append would never be flushed.
-    invoice.segregation_actor_ids = [*current, str(user.id)]
+    from app.services.approval_chain import add_implicated_actor
+
+    add_implicated_actor(invoice, user.id)

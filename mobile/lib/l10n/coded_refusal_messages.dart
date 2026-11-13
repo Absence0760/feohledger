@@ -114,6 +114,9 @@ const codedRefusalCodes = <String>{
   'segregation_raiser',
   'segregation_implicated',
   'invoice_stale_approval',
+  'invoice_not_recallable',
+  'invoice_recall_in_erp',
+  'invoice_recall_claimed',
 };
 
 /// The localized refusal for [detail] (a decoded error `detail`), or `null`
@@ -147,6 +150,19 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
     // The invoice changed after this screen loaded it; nothing was approved.
     case 'invoice_stale_approval':
       return l.codedRefusalInvoiceStaleApproval;
+    // `services/review.recall_refusal` — recalling an approval (backend
+    // decisions §374). `params.claim` names the rail; an unknown one keeps the
+    // caller's generic failure.
+    case 'invoice_not_recallable':
+      return l.codedRefusalInvoiceNotRecallable;
+    case 'invoice_recall_in_erp':
+      return l.codedRefusalInvoiceRecallInErp;
+    case 'invoice_recall_claimed':
+      return switch (_str(params, 'claim')) {
+        'payment' => l.codedRefusalPaymentBlocksRecall,
+        'virtual_card' => l.codedRefusalCardBlocksRecall,
+        _ => null,
+      };
   }
   return null;
 }

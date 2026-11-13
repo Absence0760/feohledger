@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:feohledger_mobile/api/api_client.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/adaptive.dart';
 import 'package:feohledger_mobile/models/admin_user.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
@@ -147,6 +148,26 @@ class InvoiceApi {
 
   static Future<Invoice> reject(String id, String reason) async {
     final data = await _api.post('/invoices/$id/reject', {
+      'reason': reason,
+    });
+    return Invoice.fromJson(data);
+  }
+
+  /// The `recall_approval` verdict of `GET /api/invoices/{id}/review-actions`
+  /// (`services/review.recall_refusal`, backend decisions §374): whether
+  /// [recallApproval] would accept the signed-in user now, and why not.
+  static Future<ActionVerdict> recallVerdict(String id) async {
+    final data = await _api.get('/invoices/$id/review-actions');
+    return ActionVerdict.fromVerdicts(data, 'recall_approval');
+  }
+
+  /// `POST /api/invoices/{id}/recall-approval`: take back the approval of an
+  /// approved invoice, or of one whose ERP push failed after approval, and
+  /// return it to review so its frozen figures can be corrected and approved
+  /// again through the whole chain. [reason] is required; it lands on the
+  /// `invoice.approval_recalled` audit row.
+  static Future<Invoice> recallApproval(String id, String reason) async {
+    final data = await _api.post('/invoices/$id/recall-approval', {
       'reason': reason,
     });
     return Invoice.fromJson(data);

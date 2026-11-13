@@ -50,6 +50,7 @@ rejected ─────────> new                      (requires full re
 approved ─────────> sending_to_erp           (ERP submission initiated)
 approved ─────────> payment_scheduled        (direct schedule — no ERP step)
 approved ─────────> done                     (no further steps → terminal)
+approved ─────────> ready_for_review         (approval recalled — POST /recall-approval only, decisions §374)
 sending_to_erp ───> sent_to_erp              (ERP confirmed)
 sending_to_erp ───> failed                   (ERP rejected or timed out)
 sent_to_erp ──────> posted_in_erp            (ERP webhook confirms post)
@@ -62,9 +63,12 @@ paid ─────────────> done                     (terminal
 paid ─────────────> approved                 (void payment → back to queue)
 failed ───────────> pending                  (retry extraction)
 failed ───────────> sending_to_erp           (retry ERP push, if previously approved)
+failed ───────────> ready_for_review         (approval recalled after a failed push — POST /recall-approval only)
 ```
 
 A `failed` invoice that was approved before its push failed is still **financially locked** (`models/invoice_status.financially_locked`, decisions §370): `failed → sending_to_erp` re-pushes the figures that were approved, with no new approval, so `PATCH` refuses its amount, payee and tax fields and `PUT /line-items` refuses outright (409 `invoice_financially_locked`), as from `approved` on. Its metadata stays editable. A `failed` extraction, never approved, is not locked.
+
+The way back from that lock is **recalling the approval** (`POST /api/invoices/{id}/recall-approval`, decisions §374): `approved`, or `failed` after an approval, returns to `ready_for_review`, where the figures can be corrected and approved again. It is the only door that walks those two edges; `POST /bulk/status` reports such a row as a skip. See [Recall an approval](#recall-an-approval).
 
 `done` is terminal. The `payment_scheduled → approved` and `paid → approved` back-edges are the **void-payment** path (`POST /api/payments/{id}/void`): the invoice returns to the queue so it can be re-scheduled. Every transition above writes an audit-log row through `transition_invoice()`; nothing in the payment path mutates `invoice.status` directly.
 
@@ -428,6 +432,7 @@ API:
 | POST   | `/api/invoices/{id}/approve`      | Approve (with optional edits)    | `ready_for_review`  |
 | POST   | `/api/invoices/{id}/reject`       | Reject with a reason             | `ready_for_review`  |
 | POST   | `/api/invoices/{id}/resubmit`     | Re-enter review after edits      | `rejected`          |
+| POST   | `/api/invoices/{id}/recall-approval` | Take an approval back to review | `approved`, or `failed` after approval |
 
 ### Approve
 
@@ -453,6 +458,48 @@ API:
 After a rejection, the user can edit the invoice fields and resubmit for another round of review. This transitions `rejected → ready_for_review` and creates a new review WorkflowStep.
 
 A rejection counter is tracked in `WorkflowInstance.state_data`. After a configurable number of rejections, the invoice may be auto-escalated or locked.
+
+### Recall an approval
+
+An approved invoice's amount, payee, line items and document are frozen (§363,
+§370). When they turn out to be wrong, `POST /api/invoices/{id}/recall-approval`
+(body `{reason}`, required) takes the approval back (decisions §374):
+
+1. Lock the row and ask `services/review.recall_refusal` — the one rule, which
+   `GET /review-actions` also serves as `recall_approval`, so the web modal and
+   the mobile detail screen offer the action from it. In order: the
+   `invoice.approve` permission (403); `approved`, or `failed` once approved
+   (409 `invoice_not_recallable`); no bill the ERP may hold — `erp_document_id`
+   set, or `services/erp.possibly_posted` on the push's state (409
+   `invoice_recall_in_erp`); no live payment or virtual card,
+   `erp_export_gate.live_claims` (409 `invoice_recall_claimed`,
+   `params.claim`). A payment run holds its invoices through those payment
+   rows, so a staged, approved, exported or executed run refuses.
+2. Add the recaller to `Invoice.segregation_actor_ids`
+   (`approval_chain.add_implicated_actor`): they may not approve the
+   corrected invoice, unless the step opted out of segregation.
+3. Transition to `ready_for_review`, writing `invoice.approval_recalled` with
+   the reason, the status it left and the recalled approval's `approved_by` /
+   `approval_date`. The `invoice.approved` row and its signature are untouched,
+   and so are the row's own `approved_by` / `approval_date` until a new approval
+   replaces them, so `was_ever_approved` stays true (a clerk's entry window
+   stays shut; `/extract` still refuses).
+4. Clear the approval-chain state, bump `recall_count`, reset a failed push's
+   `erp_retries` to 0 (as `/retry-erp` does), make the instance `active`, close
+   the step the approval opened and open a fresh approval step. The next
+   approval re-routes the chain from level 0 and meets the max-amount and CFO
+   gates again.
+
+The engine backs this up (`workflow_engine._refuse_outside_the_recall`): the
+two recall edges refuse any action but `invoice.approval_recalled`, and an
+invoice that was ever approved never re-enters `pending`, whoever asks. A
+re-read would rewrite signed-off figures, and a once-approved invoice that then
+failed extraction would read as an approved push failure that `/retry-erp`
+re-pushes. The supplier-portal resubmit therefore skips the re-read for such an
+invoice.
+
+A bill already in the ERP is not recalled here: correct or void it in the ERP
+(the `void-erp` action is a product call tracked in `docs/followups.md`).
 
 ## Stage 3: Send to ERP
 
@@ -848,6 +895,7 @@ Each entry records:
 | `invoice.approved`             | Reviewer approved               |
 | `invoice.rejected`             | Reviewer rejected               |
 | `invoice.resubmitted`         | Re-entered review after edits   |
+| `invoice.approval_recalled`   | Approval recalled back to review |
 | `invoice.erp_submitted`       | ERP push initiated              |
 | `invoice.erp_confirmed`       | ERP confirmed receipt           |
 | `invoice.erp_failed`          | ERP push failed                 |
@@ -878,13 +926,14 @@ Each entry records:
 | POST   | `/api/invoices/{id}/approve`          | Approve invoice                            | 200     |
 | POST   | `/api/invoices/{id}/reject`           | Reject invoice                             | 200     |
 | POST   | `/api/invoices/{id}/resubmit`         | Resubmit for review                        | 200     |
+| POST   | `/api/invoices/{id}/recall-approval`  | Recall an approval back to review          | 200     |
 | POST   | `/api/invoices/{id}/send-to-erp`      | Initiate ERP push                          | 202     |
 | POST   | `/api/invoices/{id}/retry-erp`        | Retry failed ERP push                      | 202     |
 | POST   | `/api/invoices/{id}/complete`         | Advance to next workflow step              | 200     |
 
 Upload, extract, reset-extraction, resubmit and complete take
 `INVOICE_ENTRY_ROLES` — invoice entry, `ap_clerk` included;
-approve / reject are `invoice.approve`; assign, send-to-erp and retry-erp stay
+approve / reject / recall-approval are `invoice.approve`; assign, send-to-erp and retry-erp stay
 role-gated to the manage roles. See `docs/user-management.md` for what an
 entry-only caller may do.
 

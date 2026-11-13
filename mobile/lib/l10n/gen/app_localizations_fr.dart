@@ -770,6 +770,43 @@ class AppLocalizationsFr extends AppLocalizations {
   String get invoiceDetailReject => 'Rejeter';
 
   @override
+  String get invoiceDetailRecall => 'Retirer l\'approbation';
+
+  @override
+  String get invoiceDetailRecallTitle => 'Retirer cette approbation ?';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      'La facture repasse en examen afin que ses montants puissent être corrigés, puis doit être approuvée de nouveau par toute la chaîne d\'approbation. La séparation des tâches vous comptera parmi les personnes impliquées dans cette facture, comme celle qui l\'a déposée. L\'approbation d\'origine reste dans la piste d\'audit.';
+
+  @override
+  String get invoiceDetailRecallReason => 'Pourquoi la retirez-vous ?';
+
+  @override
+  String get invoiceDetailRecalled =>
+      'Approbation retirée. La facture est de nouveau en examen.';
+
+  @override
+  String get invoiceDetailRecallFailed =>
+      'Impossible de retirer l\'approbation — veuillez réessayer';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      'Seule une facture approuvée, ou dont l\'envoi à l\'ERP a échoué après l\'approbation, peut voir son approbation retirée.';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'L\'ERP détient peut-être déjà une facture fournisseur pour cette facture, et elle peut y être payée. Corrigez-la ou annulez-la dans l\'ERP ; son approbation ne peut pas être retirée depuis FeohLedger.';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'FeohLedger paie déjà cette facture : elle a un paiement actif. Annulez son lot de paiement ou le paiement avant de retirer l\'approbation.';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'Une carte virtuelle a été émise pour payer cette facture. Annulez la carte avant de retirer l\'approbation.';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1052,7 +1089,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
-      'Approuvée — le bénéficiaire et le montant sont figés. Pour les modifier, rejetez la facture, corrigez-la puis approuvez-la de nouveau.';
+      'Approuvée — le bénéficiaire et le montant sont figés. Pour les modifier, retirez l\'approbation, corrigez la facture puis faites-la approuver de nouveau.';
 
   @override
   String get invoiceEditLockedHelper => 'Figé après approbation';

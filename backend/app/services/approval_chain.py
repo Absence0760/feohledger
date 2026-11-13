@@ -63,6 +63,23 @@ def implicated_actors(invoice: Invoice) -> set[str]:
     return ids
 
 
+def add_implicated_actor(invoice: Invoice, actor_id: uuid.UUID) -> None:
+    """Add ``actor_id`` to ``invoice.segregation_actor_ids`` after construction.
+
+    The two callers are the acts that make someone a preparer of a payable's
+    figures once it exists: an entry-only caller changing an invoice they did
+    not upload (``api/invoice_entry.stamp_entry_editor``) and a recall of its
+    approval (``services/review.recall_approval``, decisions §374). A no-op when
+    :func:`implicated_actors` already names them.
+    """
+    if str(actor_id) in implicated_actors(invoice):
+        return
+    current = [str(x) for x in (invoice.segregation_actor_ids or [])]
+    # A new list, not an in-place append: the JSONB column does not track
+    # mutation, so an append would never be flushed.
+    invoice.segregation_actor_ids = [*current, str(actor_id)]
+
+
 def violates_segregation(
     invoice: Invoice,
     actor_id: uuid.UUID,

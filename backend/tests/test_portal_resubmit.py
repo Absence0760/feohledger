@@ -172,6 +172,36 @@ async def test_resubmit_without_extraction_goes_straight_back_to_review(realdb):
 
 
 @pytest.mark.asyncio
+async def test_resubmit_does_not_re_read_an_invoice_ap_once_approved(realdb):
+    """An invoice AP approved, then recalled (decisions §374) and rejected for
+    the supplier to reissue, is not re-extracted even with the extraction step
+    on: a re-read would rewrite signed-off figures, and the engine refuses
+    `→ pending` for it. The corrected document goes straight to review."""
+    from datetime import date
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed(mk, org_id)
+    await _enable_extraction(mk, org_id)
+    inv_id = await _add_invoice(mk, org_id, vendor_id, status=InvoiceStatus.rejected)
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        inv.approved_by = "Original Approver"
+        inv.approval_date = date(2026, 11, 1)
+        await s.commit()
+    await _add_rejection_exc(mk, org_id, inv_id)
+
+    dispatch = AsyncMock()
+    with patch("app.api.portal.dispatch_extraction", dispatch):
+        async with _client(realdb, vu_id, vendor_id) as client:
+            resp = await client.post(f"/api/portal/invoices/{inv_id}/resubmit", files={"file": PDF})
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["status"] == "ready_for_review"
+    dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_resubmit_re_extracts_the_corrected_document(realdb):
     """The invoice takes the documented `rejected → new → pending` rework loop
     and hands the corrected file to extraction with BOTH guards on. Without the

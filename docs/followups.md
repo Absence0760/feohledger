@@ -860,25 +860,34 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change that touches more than one panel of
       `frontend/src/routes/organization/+page.svelte`.
 
-### Surfaced by the failed-push financial lock (2026-11-13)
+### Surfaced by the approval recall (2026-11-13, decisions §374)
 
-- [ ] **(c) A financially locked invoice whose approved figures are wrong has
-      no way back to review.** `VALID_TRANSITIONS` gives `approved` no edge to
-      `rejected` or `new`, and `failed` only `pending` / `sending_to_erp`;
-      `POST /reject` refuses anything but `ready_for_review`
-      (`review.refuse_unless_in_review`). Yet the mobile lock notice
-      (`invoiceEditLockedNotice`: "reject the invoice, correct it, then approve
-      it again") and older code comments promise that exit. Today the only way
-      to correct a signed-off amount or payee is to delete the invoice and
-      re-enter it, which loses its trail on the row (the audit rows survive).
-      Decisions §370 extended the lock to a failed push after approval, so the
-      gap now covers that case as well. **Durable fix:** decide the exit, an
-      audited "send back to review" edge from `approved` / `failed`-after-approval
-      to `rejected` behind `invoice.approve` with its own segregation rule, or
-      keep delete-and-re-enter as the documented exit. Then make the mobile
-      notice and the web refusal sentence name that exit, in every locale.
-      **Trigger:** the next change to the invoice state machine or the
-      reject endpoint, or the money-path audit.
+- [ ] **(c) Nothing outside FeohLedger hears that an approval was recalled.**
+      `transition_invoice` emits `invoice.approved` to webhook subscribers
+      (`workflow_engine._maybe_emit_webhook`) but there is no event for the
+      recall, so an integrator that acted on the approval never learns it was
+      withdrawn. **Durable fix:** an `invoice.approval_recalled` event in the
+      outbound catalogue and the published OpenAPI, emitted from the same hook
+      on `RECALL_ACTION`. **Trigger:** the first integrator subscribing to
+      `invoice.approved`, or the next change to the webhook catalogue.
+- [ ] **(c) A recalled invoice's PEPPOL transmission and inter-company mirror
+      keep the recalled figures.** `recall_refusal` does not ask whether the
+      approved invoice was already sent over PEPPOL (`POST {id}/peppol-send`)
+      or routed inter-company (`intercompany_mirror_id`); correcting it then
+      leaves the network holding the old document and the mirror its copied
+      amount and segregation set. **Durable fix:** a product call between
+      refusing the recall for a transmitted / routed invoice and re-sending /
+      re-syncing the mirror after re-approval. **Trigger:** the first
+      customer using PEPPOL send or inter-company routing who recalls.
+- [ ] **(c) The ERP dispatchers do not re-check `sending_to_erp`.**
+      `erp_dispatch` and `erp_lambda` call `send_to_erp_internal` on whatever
+      status the invoice now holds, so a redelivered push for an invoice that
+      has since failed and been recalled could post a bill for an invoice in
+      review. **Durable fix:** re-read the invoice `FOR UPDATE` in
+      `send_to_erp_internal` and return without calling the adapter unless it
+      is `sending_to_erp`, with `tests/test_erp_push_flow.py` updated for the
+      fixtures that call it on other statuses. **Trigger:** the next change to
+      `services/erp.py` or either dispatcher.
 
 ### Surfaced by the vendors table column fix (2026-10-06)
 
@@ -1360,8 +1369,12 @@ scope (§260) — do not fold them into any of these.
       void-erp` (the push's roles) that calls `void_invoice` and refuses a bill
       the ERP shows paid or part-paid. On success it walks the invoice through
       an audited edge back to `approved`, so it can be corrected and re-pushed
-      or paid. **Trigger:** the first customer who needs to recall a pushed
-      bill, or the live void test now pending.
+      or paid. Correcting it means recalling its approval (decisions §374), and
+      `review.recall_refusal` refuses while `erp_document_id` or the push's
+      `erp.possibly_posted` record names a bill, so a void must clear what it
+      voided there, or the recall stays refused. **Trigger:** the first
+      customer who needs to recall a pushed bill, or the live void test now
+      pending.
 - [ ] **(c) Business Central's vendor sync stores `paymentTermsId` (a GUID) as
       the payment-terms text, and NetSuite's PO sync pulls no lines.**
       **Durable fix:** resolve BC's `paymentTerms` code; pull NetSuite PO lines

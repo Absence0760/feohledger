@@ -413,6 +413,46 @@
   "invoiceDetailRejectTitle": "Reject Invoice",
   "invoiceDetailRejectReason": "Reason",
   "invoiceDetailReject": "Reject",
+  "invoiceDetailRecall": "Recall approval",
+  "@invoiceDetailRecall": {
+    "description": "Button on an approved invoice that recalls its approval back to review (POST /recall-approval)."
+  },
+  "invoiceDetailRecallTitle": "Recall this approval?",
+  "@invoiceDetailRecallTitle": {
+    "description": "Title of the reason prompt shown before recalling an approval."
+  },
+  "invoiceDetailRecallBody": "The invoice goes back to review so its figures can be corrected, then needs a fresh approval through the full approval chain. Segregation of duties will count you as involved in this invoice, as it does its uploader. The original approval stays in the audit trail.",
+  "@invoiceDetailRecallBody": {
+    "description": "Explanation in the recall prompt: what a recall does and its segregation-of-duties consequence."
+  },
+  "invoiceDetailRecallReason": "Why are you recalling it?",
+  "@invoiceDetailRecallReason": {
+    "description": "Label of the reason field in the recall prompt."
+  },
+  "invoiceDetailRecalled": "Approval recalled. The invoice is back in review.",
+  "@invoiceDetailRecalled": {
+    "description": "Snackbar after an approval was recalled."
+  },
+  "invoiceDetailRecallFailed": "Could not recall the approval — please try again",
+  "@invoiceDetailRecallFailed": {
+    "description": "Snackbar when a recall failed for a reason the app cannot state from its code."
+  },
+  "codedRefusalInvoiceNotRecallable": "Only an approved invoice, or one whose ERP push failed after approval, can have its approval recalled.",
+  "@codedRefusalInvoiceNotRecallable": {
+    "description": "Coded refusal `invoice_not_recallable` on recalling an approval."
+  },
+  "codedRefusalInvoiceRecallInErp": "The ERP may already hold a bill for this invoice, and a bill there can be paid there. Correct or void it in the ERP; its approval can't be recalled from FeohLedger.",
+  "@codedRefusalInvoiceRecallInErp": {
+    "description": "Coded refusal `invoice_recall_in_erp`: the ERP may hold the bill."
+  },
+  "codedRefusalPaymentBlocksRecall": "FeohLedger is already paying this invoice: it has a live payment. Cancel its payment run or void the payment before recalling the approval.",
+  "@codedRefusalPaymentBlocksRecall": {
+    "description": "Coded refusal `invoice_recall_claimed` with claim `payment`."
+  },
+  "codedRefusalCardBlocksRecall": "A virtual card has been issued to pay this invoice. Cancel the card before recalling the approval.",
+  "@codedRefusalCardBlocksRecall": {
+    "description": "Coded refusal `invoice_recall_claimed` with claim `virtual_card`."
+  },
   "invoicesBulkRejectTitle": "Reject {count, plural, one {{count} invoice} other {{count} invoices}}",
   "@invoicesBulkRejectTitle": {
     "description": "Title of the reason prompt shown before bulk-rejecting the selected invoices.",
@@ -635,7 +675,7 @@
   "invoiceEditNotSet": "Not set",
   "invoiceEditInvalidAmount": "Enter a valid amount (e.g. 1234.56)",
   "invoiceEditClearDueDate": "Clear due date",
-  "invoiceEditLockedNotice": "Approved — the payee and amount are frozen. To change them, reject the invoice, correct it, then approve it again.",
+  "invoiceEditLockedNotice": "Approved — the payee and amount are frozen. To change them, recall the approval, correct the invoice, then have it approved again.",
   "invoiceEditLockedHelper": "Frozen after approval",
   "invoiceEditDueDateHint": "Due date, currently {value}. Double tap to change.",
   "@invoiceEditDueDateHint": {

@@ -767,6 +767,43 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceDetailReject => 'Ablehnen';
 
   @override
+  String get invoiceDetailRecall => 'Genehmigung zurücknehmen';
+
+  @override
+  String get invoiceDetailRecallTitle => 'Diese Genehmigung zurücknehmen?';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      'Die Rechnung geht zurück in die Prüfung, damit ihre Beträge korrigiert werden können, und braucht danach eine neue Genehmigung über die gesamte Genehmigungskette. Die Funktionstrennung zählt Sie dann, wie den Einreicher, zu den an dieser Rechnung Beteiligten. Die ursprüngliche Genehmigung bleibt im Prüfprotokoll erhalten.';
+
+  @override
+  String get invoiceDetailRecallReason => 'Warum nehmen Sie sie zurück?';
+
+  @override
+  String get invoiceDetailRecalled =>
+      'Genehmigung zurückgenommen. Die Rechnung ist wieder in der Prüfung.';
+
+  @override
+  String get invoiceDetailRecallFailed =>
+      'Die Genehmigung konnte nicht zurückgenommen werden – bitte erneut versuchen';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      'Nur bei einer genehmigten Rechnung oder einer, deren ERP-Übertragung nach der Genehmigung fehlgeschlagen ist, kann die Genehmigung zurückgenommen werden.';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'Im ERP liegt möglicherweise bereits eine Rechnung zu diesem Beleg vor, und sie kann dort bezahlt werden. Korrigieren oder stornieren Sie sie im ERP; die Genehmigung kann in FeohLedger nicht zurückgenommen werden.';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'FeohLedger bezahlt diese Rechnung bereits: Es gibt eine aktive Zahlung. Brechen Sie den Zahlungslauf ab oder stornieren Sie die Zahlung, bevor Sie die Genehmigung zurücknehmen.';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'Für die Zahlung dieser Rechnung wurde eine virtuelle Karte ausgestellt. Stornieren Sie die Karte, bevor Sie die Genehmigung zurücknehmen.';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1044,7 +1081,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
-      'Genehmigt — Zahlungsempfänger und Betrag sind gesperrt. Zum Ändern die Rechnung ablehnen, korrigieren und erneut genehmigen.';
+      'Genehmigt — Zahlungsempfänger und Betrag sind gesperrt. Zum Ändern die Genehmigung zurücknehmen, die Rechnung korrigieren und erneut genehmigen lassen.';
 
   @override
   String get invoiceEditLockedHelper => 'Nach der Genehmigung gesperrt';

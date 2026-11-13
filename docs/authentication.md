@@ -2648,7 +2648,7 @@ It describes the **endpoints**, and in two places the nav is deliberately narrow
 | `/invoices` entry (create / `upload` / `{id}/file` / patch / line-items / `extract` / `reset-extraction` / `resubmit` / `complete` / `bulk/status`) | any-authenticated (read) | admin · ap_manager · cfo · ap_clerk (clerk: until submitted, and only the entry transitions — `api/invoice_entry.py`) |
 | `/invoices/import-csv` | — | admin · ap_manager · ap_clerk (clerk: open AP rows only; historical `done` / `paid` rows are admin · ap_manager) |
 | `/invoices` delete / `bulk/delete` | — | admin · ap_manager · cfo |
-| `/invoices/{id}/approve`, `/reject` | — | `invoice.approve` (admin · ap_manager · cfo by default) |
+| `/invoices/{id}/approve`, `/reject`, `/recall-approval` | — | `invoice.approve` (admin · ap_manager · cfo by default) |
 | `/invoices/{id}/send-to-erp`, `/retry-erp` | — | admin · ap_manager · cfo |
 | `/payments/*` (incl. runs create + execute) | admin · ap_manager · cfo | admin · ap_manager · cfo |
 | `/cards` (list / dashboard / generate / cancel / details / rebates) | admin · ap_manager · cfo | admin · ap_manager · cfo |

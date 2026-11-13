@@ -124,11 +124,14 @@ void main() {
       expect(_fieldFor(tester, 'GL Account').readOnly, isFalse);
       expect(_fieldFor(tester, 'Invoice #').readOnly, isFalse);
 
-      // The reviewer is told why, and how to change it.
+      // The reviewer is told why, and how to change it: the exit that exists
+      // (recall the approval, backend decisions §374), not a rejection the
+      // server refuses on an approved invoice.
       expect(
-        find.textContaining('reject the invoice, correct it'),
+        find.textContaining('recall the approval, correct the invoice'),
         findsOneWidget,
       );
+      expect(find.textContaining('reject'), findsNothing);
       expect(find.text('Frozen after approval'), findsNWidgets(2));
       // The frozen value stays legible — read-only, not hidden.
       expect(find.text('1500'), findsOneWidget);

@@ -75,6 +75,8 @@ HUMAN_INVOICE_TOUCH_ACTIONS: tuple[str, ...] = (
     "invoice.approved",
     "invoice.approval_step",
     "invoice.rejected",
+    # A person took the approval back (decisions §374).
+    "invoice.approval_recalled",
     "invoice.edited",
     "invoice.line_items_edited",
     "invoice.gl_recoded",

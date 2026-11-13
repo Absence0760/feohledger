@@ -48,6 +48,7 @@ from app.schemas.workflow import (
     ApproveRequest,
     AssignReviewerRequest,
     AuditLogEntryResponse,
+    RecallApprovalRequest,
     RejectRequest,
     WorkflowInstanceResponse,
 )
@@ -422,7 +423,7 @@ async def trigger_extraction(
             status_code=409,
             detail=(
                 "This invoice has already been approved, so its document can't be read "
-                "again. Retry the ERP push, or reject it for rework."
+                "again. Retry the ERP push, or recall its approval to correct it."
             ),
         )
 
@@ -575,14 +576,16 @@ async def review_actions(
 ):
     """Would each of the invoice modal's workflow actions accept the CALLER
     on this invoice right now? ``{"approve", "reject", "complete",
-    "send_to_erp", "retry_erp", "resubmit", "manage_file", "edit_financials"}``
+    "send_to_erp", "retry_erp", "resubmit", "manage_file", "edit_financials",
+    "recall_approval"}``
     — each ``null`` or the coded ``{code, message, params}`` refusal its
     endpoint would answer with: ``review.review_refusals`` runs `/approve` and
     `/reject`'s gates, :func:`workflow_action_refusals` runs `/complete`,
     `/send-to-erp` and `/retry-erp`'s, :func:`resubmit_refusal` `/resubmit`'s,
-    ``invoice_entry.manage_file_refusal`` the `/file` routes', and
+    ``invoice_entry.manage_file_refusal`` the `/file` routes',
     ``invoice_entry.edit_financials_refusal`` what `PATCH` (on a financial
-    field) and `PUT /line-items` would answer (decisions §370). The modal offers
+    field) and `PUT /line-items` would answer (decisions §370), and
+    ``review.recall_refusal`` `/recall-approval`'s (decisions §374). The modal offers
     an action exactly when its verdict is ``null`` and states the refusal
     otherwise, so it never restates a rule.
 
@@ -604,6 +607,7 @@ async def review_actions(
         "resubmit": resubmit_refusal(user, invoice),
         "manage_file": manage_file_refusal(user, invoice),
         "edit_financials": edit_financials_refusal(user, invoice),
+        "recall_approval": await review_svc.recall_refusal(db, invoice, actor=user),
     }
 
 
@@ -677,6 +681,52 @@ async def reject_invoice(
         actor_name=user.full_name,
         reason=body.reason,
     )
+    return InvoiceResponse.from_db(invoice)
+
+
+@router.post("/{invoice_id}/recall-approval", response_model=InvoiceResponse)
+async def recall_approval(
+    invoice_id: uuid.UUID,
+    body: RecallApprovalRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_permission(PERM_INVOICE_APPROVE)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Take back the approval of an `approved` invoice, or of one whose ERP
+    push failed after approval, and return it to `ready_for_review` so its
+    figures can be corrected and approved again (decisions §374).
+
+    Refused from ``review.recall_refusal`` — the rule ``GET /review-actions``
+    serves as ``recall_approval`` — on the locked row: 403 without
+    `invoice.approve`; 409
+    ``invoice_not_recallable`` from any other status; 409
+    ``invoice_recall_in_erp`` when the ERP may hold the bill; 409
+    ``invoice_recall_claimed`` while a live payment or virtual card holds it.
+    The permission is the approve and reject doors' (`invoice.approve`), so
+    whoever may sign an approval may take one back; the predicate re-reads it
+    for the verdict. Writes an `invoice.approval_recalled` audit row; the
+    recalled approval's own row and signature are untouched. The recaller joins
+    the invoice's segregation set, and the approval chain re-runs from its
+    first level. Not money-moving, and a repeat is refused by the status gate.
+    """
+    from app.api.refusals import ROLE_NOT_PERMITTED
+
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
+    invoice = await get_invoice_for_update(db, invoice_id)
+    refused = await review_svc.recall_refusal(db, invoice, actor=user)
+    if refused is not None:
+        code = (
+            status.HTTP_403_FORBIDDEN
+            if refused["code"] == ROLE_NOT_PERMITTED
+            else status.HTTP_409_CONFLICT
+        )
+        raise HTTPException(status_code=code, detail=refused)
+
+    await review_svc.recall_approval(db, invoice, actor_id=user.id, reason=body.reason)
+    # The reviewer reads findings for the version in front of them, as after a
+    # resubmit.
+    await refresh_warnings(db, invoice, org_settings=org.settings)
     return InvoiceResponse.from_db(invoice)
 
 

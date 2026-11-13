@@ -1266,6 +1266,66 @@ abstract class AppLocalizations {
   /// **'Reject'**
   String get invoiceDetailReject;
 
+  /// Button on an approved invoice that recalls its approval back to review (POST /recall-approval).
+  ///
+  /// In en, this message translates to:
+  /// **'Recall approval'**
+  String get invoiceDetailRecall;
+
+  /// Title of the reason prompt shown before recalling an approval.
+  ///
+  /// In en, this message translates to:
+  /// **'Recall this approval?'**
+  String get invoiceDetailRecallTitle;
+
+  /// Explanation in the recall prompt: what a recall does and its segregation-of-duties consequence.
+  ///
+  /// In en, this message translates to:
+  /// **'The invoice goes back to review so its figures can be corrected, then needs a fresh approval through the full approval chain. Segregation of duties will count you as involved in this invoice, as it does its uploader. The original approval stays in the audit trail.'**
+  String get invoiceDetailRecallBody;
+
+  /// Label of the reason field in the recall prompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Why are you recalling it?'**
+  String get invoiceDetailRecallReason;
+
+  /// Snackbar after an approval was recalled.
+  ///
+  /// In en, this message translates to:
+  /// **'Approval recalled. The invoice is back in review.'**
+  String get invoiceDetailRecalled;
+
+  /// Snackbar when a recall failed for a reason the app cannot state from its code.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not recall the approval — please try again'**
+  String get invoiceDetailRecallFailed;
+
+  /// Coded refusal `invoice_not_recallable` on recalling an approval.
+  ///
+  /// In en, this message translates to:
+  /// **'Only an approved invoice, or one whose ERP push failed after approval, can have its approval recalled.'**
+  String get codedRefusalInvoiceNotRecallable;
+
+  /// Coded refusal `invoice_recall_in_erp`: the ERP may hold the bill.
+  ///
+  /// In en, this message translates to:
+  /// **'The ERP may already hold a bill for this invoice, and a bill there can be paid there. Correct or void it in the ERP; its approval can\'t be recalled from FeohLedger.'**
+  String get codedRefusalInvoiceRecallInErp;
+
+  /// Coded refusal `invoice_recall_claimed` with claim `payment`.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger is already paying this invoice: it has a live payment. Cancel its payment run or void the payment before recalling the approval.'**
+  String get codedRefusalPaymentBlocksRecall;
+
+  /// Coded refusal `invoice_recall_claimed` with claim `virtual_card`.
+  ///
+  /// In en, this message translates to:
+  /// **'A virtual card has been issued to pay this invoice. Cancel the card before recalling the approval.'**
+  String get codedRefusalCardBlocksRecall;
+
   /// Title of the reason prompt shown before bulk-rejecting the selected invoices.
   ///
   /// In en, this message translates to:
@@ -1665,7 +1725,7 @@ abstract class AppLocalizations {
   /// No description provided for @invoiceEditLockedNotice.
   ///
   /// In en, this message translates to:
-  /// **'Approved — the payee and amount are frozen. To change them, reject the invoice, correct it, then approve it again.'**
+  /// **'Approved — the payee and amount are frozen. To change them, recall the approval, correct the invoice, then have it approved again.'**
   String get invoiceEditLockedNotice;
 
   /// No description provided for @invoiceEditLockedHelper.

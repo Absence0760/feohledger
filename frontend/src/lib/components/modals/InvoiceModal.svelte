@@ -46,10 +46,12 @@
 		INVOICE_FINANCIALLY_LOCKED,
 		INVOICE_NOT_ERP_RETRYABLE,
 		INVOICE_NOT_RESUBMITTABLE,
+		INVOICE_NOT_RECALLABLE,
 		routeIntercompany,
 		type InvoiceActionVerdicts
 	} from '#lib/api/invoices.ts';
 	import { isAllowed, isOffered, refusalText } from '#lib/api/actionVerdicts.ts';
+	import RecallApprovalModal from '#lib/components/modals/RecallApprovalModal.svelte';
 	import { listInvoiceChart } from '#lib/api/glAccounts.ts';
 	import { glAccountOptionLabel, type GlAccountOption } from '#lib/types/glAccount.ts';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
@@ -166,6 +168,7 @@
 		'invoice.approved': 'invoices.modal.action.approved',
 		'invoice.rejected': 'invoices.modal.action.rejected',
 		'invoice.resubmitted': 'invoices.modal.action.resubmitted',
+		'invoice.approval_recalled': 'invoices.modal.action.approvalRecalled',
 		'invoice.assigned_for_review': 'invoices.modal.action.assignedForReview',
 		'invoice.erp_submitted': 'invoices.modal.action.erpSubmitted',
 		'invoice.erp_auto_send_refused': 'invoices.modal.action.erpAutoSendRefused',
@@ -739,6 +742,16 @@
 	);
 	let resubmitRefusal = $derived(resubmitOffered ? (resubmitVerdict ?? null) : null);
 	let resubmitting = $state(false);
+	// `POST /{id}/recall-approval` ("Recall Approval", decisions §374): only on
+	// an approved invoice or an approved invoice's failed push — the status
+	// refusal hides it — and disabled with the reason otherwise (a bill the
+	// ERP may hold, a live payment or card). Opens the shared reason dialog.
+	let recallVerdict = $derived(verdicts?.recall_approval);
+	let recallOffered = $derived(
+		isOffered(recallVerdict) && recallVerdict?.code !== INVOICE_NOT_RECALLABLE
+	);
+	let recallRefusal = $derived(recallOffered ? (recallVerdict ?? null) : null);
+	let showRecallDialog = $state(false);
 	let canManageFile = $derived(isAllowed(verdicts?.manage_file));
 	// The one refusal worth stating where the file controls were: the frozen
 	// document. A role or a clerk's closed window just hides them.
@@ -3032,6 +3045,25 @@
 									</p>
 								{/if}
 							{/if}
+							{#if recallOffered}
+								<button
+									type="button"
+									class="btn-cancel"
+									data-testid="recall-approval"
+									disabled={saving || !isAllowed(recallVerdict)}
+									aria-describedby={recallRefusal ? 'recall-refusal' : undefined}
+									onclick={() => (showRecallDialog = true)}
+								>
+									{m('invoices.modal.recall.open')}
+								</button>
+								{#if recallRefusal}
+									<!-- Why the approval can't be taken back, from the server's
+									     verdict: a bill the ERP may hold, or a rail paying it. -->
+									<p class="approver-hint" id="recall-refusal" data-testid="recall-refusal">
+										{refusalText(recallRefusal, m)}
+									</p>
+								{/if}
+							{/if}
 						</div>
 					</footer>
 				</form>
@@ -3039,6 +3071,20 @@
 		</div>
 	</div>
 </div>
+
+{#if showRecallDialog}
+	<!-- A sibling of the invoice dialog, not a child: its Esc and focus trap
+	     stay its own, and the invoice dialog is closed once the recall lands
+	     (the host refetches its list, as after every workflow action). -->
+	<RecallApprovalModal
+		invoiceId={invoice.id}
+		onclose={() => (showRecallDialog = false)}
+		onrecalled={() => {
+			showRecallDialog = false;
+			onclose();
+		}}
+	/>
+{/if}
 
 <style>
 	.backdrop {

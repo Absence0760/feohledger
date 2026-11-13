@@ -266,6 +266,20 @@ export const INVOICE_GUIDES: Guide[] = [
 				]
 			},
 			{
+				heading: 'Correct an approved invoice',
+				blocks: [
+					{
+						type: 'p',
+						text: 'Once an invoice is approved, its amount, payee and line items are locked: they are what the approver signed off. If they turn out to be wrong, open the invoice, click {ui:invoices.modal.recall.open}, type why, and click {ui:invoices.modal.recall.confirm}. The invoice goes back to {ui:invoices.status.readyForReview}, where an AP manager can correct it, and it then needs a fresh approval through the whole approval chain. The original approval stays in the audit trail.'
+					},
+					{
+						type: 'note',
+						tone: 'caution',
+						text: '**Recalling counts you as involved in the invoice.** Like whoever entered it, you can\'t then approve it yourself ([[segregation-of-duties]]). The button is disabled, with the reason, while the invoice is in a payment run or has a virtual card (cancel those first), and once the bill may already be in your ERP, where it can be paid. Correct a bill in the ERP there.'
+					}
+				]
+			},
+			{
 				heading: 'Multi-level approval chains',
 				blocks: [
 					{
@@ -290,7 +304,7 @@ export const INVOICE_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'caution',
-						text: '**You can\'t approve an invoice you brought in.** If you uploaded, created or imported it — or generated it from a recurring template, wrote that template, or changed its vendor, amount, currency, coding or schedule — someone else has to approve it. This is [[segregation-of-duties]]: one person should never be able to both raise a bill and sign it off. It is on by default; only an admin can turn it off, for example for a one-person team.'
+						text: '**You can\'t approve an invoice you brought in.** If you uploaded, created or imported it — or generated it from a recurring template, wrote that template, or changed its vendor, amount, currency, coding or schedule, or recalled its approval — someone else has to approve it. This is [[segregation-of-duties]]: one person should never be able to both raise a bill and sign it off. It is on by default; only an admin can turn it off, for example for a one-person team.'
 					},
 					{
 						type: 'list',

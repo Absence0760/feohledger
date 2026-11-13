@@ -767,6 +767,43 @@ class AppLocalizationsPt extends AppLocalizations {
   String get invoiceDetailReject => 'Rejeitar';
 
   @override
+  String get invoiceDetailRecall => 'Revogar aprovação';
+
+  @override
+  String get invoiceDetailRecallTitle => 'Revogar esta aprovação?';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      'A fatura volta para revisão para que os valores possam ser corrigidos e depois precisa de uma nova aprovação por toda a cadeia de aprovação. A segregação de funções passará a considerá-lo envolvido nesta fatura, tal como quem a carregou. A aprovação original mantém-se no registo de auditoria.';
+
+  @override
+  String get invoiceDetailRecallReason => 'Porque está a revogá-la?';
+
+  @override
+  String get invoiceDetailRecalled =>
+      'Aprovação revogada. A fatura voltou para revisão.';
+
+  @override
+  String get invoiceDetailRecallFailed =>
+      'Não foi possível revogar a aprovação — tente novamente';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      'Só uma fatura aprovada, ou cujo envio para o ERP falhou após a aprovação, pode ter a aprovação revogada.';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'O ERP pode já ter uma conta a pagar para esta fatura, e ela pode ser paga lá. Corrija-a ou anule-a no ERP; a aprovação não pode ser revogada a partir do FeohLedger.';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'O FeohLedger já está a pagar esta fatura: tem um pagamento ativo. Cancele o lote de pagamento ou anule o pagamento antes de revogar a aprovação.';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'Foi emitido um cartão virtual para pagar esta fatura. Cancele o cartão antes de revogar a aprovação.';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1050,7 +1087,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
-      'Aprovada — o beneficiário e o valor estão bloqueados. Para alterá-los, rejeite a fatura, corrija-a e aprove novamente.';
+      'Aprovada — o beneficiário e o valor estão bloqueados. Para alterá-los, revogue a aprovação, corrija a fatura e volte a submetê-la para aprovação.';
 
   @override
   String get invoiceEditLockedHelper => 'Bloqueado após a aprovação';
@@ -4295,6 +4332,43 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get invoiceDetailReject => 'Rejeitar';
 
   @override
+  String get invoiceDetailRecall => 'Revogar aprovação';
+
+  @override
+  String get invoiceDetailRecallTitle => 'Revogar esta aprovação?';
+
+  @override
+  String get invoiceDetailRecallBody =>
+      'A fatura volta para revisão para que seus valores possam ser corrigidos e depois precisa de uma nova aprovação por toda a cadeia de aprovação. A segregação de funções passará a considerar você envolvido nesta fatura, como quem a enviou. A aprovação original permanece na trilha de auditoria.';
+
+  @override
+  String get invoiceDetailRecallReason => 'Por que você está revogando?';
+
+  @override
+  String get invoiceDetailRecalled =>
+      'Aprovação revogada. A fatura voltou para revisão.';
+
+  @override
+  String get invoiceDetailRecallFailed =>
+      'Não foi possível revogar a aprovação — tente novamente';
+
+  @override
+  String get codedRefusalInvoiceNotRecallable =>
+      'Somente uma fatura aprovada, ou cujo envio ao ERP falhou após a aprovação, pode ter a aprovação revogada.';
+
+  @override
+  String get codedRefusalInvoiceRecallInErp =>
+      'O ERP pode já ter uma conta a pagar para esta fatura, e ela pode ser paga lá. Corrija-a ou anule-a no ERP; a aprovação não pode ser revogada pelo FeohLedger.';
+
+  @override
+  String get codedRefusalPaymentBlocksRecall =>
+      'O FeohLedger já está pagando esta fatura: ela tem um pagamento ativo. Cancele o lote de pagamento ou anule o pagamento antes de revogar a aprovação.';
+
+  @override
+  String get codedRefusalCardBlocksRecall =>
+      'Um cartão virtual foi emitido para pagar esta fatura. Cancele o cartão antes de revogar a aprovação.';
+
+  @override
   String invoicesBulkRejectTitle(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -4578,7 +4652,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get invoiceEditLockedNotice =>
-      'Aprovada — o beneficiário e o valor estão bloqueados. Para alterá-los, rejeite a fatura, corrija-a e aprove novamente.';
+      'Aprovada — o beneficiário e o valor estão bloqueados. Para alterá-los, revogue a aprovação, corrija a fatura e envie-a para aprovação novamente.';
 
   @override
   String get invoiceEditLockedHelper => 'Bloqueado após a aprovação';
