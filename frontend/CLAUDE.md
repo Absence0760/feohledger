@@ -114,6 +114,14 @@ resolves `cookie@0.7.2` and `undici@8.10.0`, so neither override matches
 anything today. They exist to block a *future* transitive downgrade onto a
 vulnerable version — which is exactly why losing one is easy to miss.
 
+`pnpm.patchedDependencies` patches `deepmerge@4.3.1` (`patches/`), an
+advisory with no fixed release (GHSA-gcqx-w48m-w2h4, decisions §352), and
+`pnpm.auditConfig.ignoreGhsas` plus the root `osv-scanner.toml` ignore it on
+that basis. `src/lib/deepmergePatch.security.test.ts` is the guard: it fails
+if the copy vite-plugin-svelte resolves is not the patched one. A local patch
+is how to handle such an advisory; an ignore without a patch, or a patch
+without the guard, is not.
+
 Two Dependabot npm PRs (#344, #351) arrived with the lockfile's whole
 `overrides:` block deleted, red on every job that installs:
 

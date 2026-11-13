@@ -16230,3 +16230,40 @@ decision. Also rejected: calling joserfc directly in `deps.py` and `mfa.py` as
 python-jose was, which would duplicate the extra claim checks and the error
 mapping in two places; `security-patterns.sh`'s `bypass-decode-token` rule now
 allows `jwt.decode` only in `utils/jwt_hs256.py` and `services/sso.py`.
+
+## 352. deepmerge 4.3.1 is patched locally, and both scanners ignore it only on that basis (2026-11-12)
+
+**Decision.** Closes #695 and #689. GHSA-gcqx-w48m-w2h4 (CVE-2026-93753):
+deepmerge's `mergeObject()` copies a `"__proto__"` key with plain assignment,
+which sets the merged object's prototype when the target has no such
+property for `propertyIsUnsafe`'s `in` check to see. 4.3.1 is the last
+release and the advisory lists no patched version; its only dependent here is
+`@sveltejs/vite-plugin-svelte`, whose latest (7.3.1, already pinned) still
+declares `deepmerge ^4.3.1`, so neither a bump nor an override can remove it.
+§350 had answered it with an `osv-scanner.toml` ignore alone, and `audit.yml`'s
+`pnpm audit` kept reopening #689 because nothing told pnpm.
+
+- `frontend/patches/deepmerge@4.3.1.patch` (`pnpm patch`, listed under
+  `package.json` `pnpm.patchedDependencies`) makes `propertyIsUnsafe` refuse
+  the `"__proto__"` key in `index.js`, `dist/cjs.js` and `dist/umd.js`. It is
+  the same patch project-water-management carries.
+- `frontend/src/lib/deepmergePatch.security.test.ts` loads the copy
+  vite-plugin-svelte resolves and fails if a `"__proto__"` key still sets the
+  prototype (checked against the unpatched 4.3.1: it does). It also fails if
+  `pnpm.auditConfig.ignoreGhsas` names the advisory while the resolved version
+  has no patch entry, and if the `osv-scanner.toml` entry loses its expiry.
+- `pnpm.auditConfig.ignoreGhsas` in `frontend/package.json` carries the same
+  exception for `pnpm audit`, so `audit.yml` needs no change. The
+  `osv-scanner.toml` entry now names the patch and expires 2027-02-10, ~90
+  days, rather than §350's six months.
+
+`opentelemetry-api` (GHSA-xcq7-p3pf-p88h, fixed in 1.45.1), the issue's other
+two rows, was already at 1.45.2 in both `tools/fake-*` locks since §350.
+
+**Rejected:** the ignore alone (§350's state): it records a judgement that the
+reachable input is trusted, which holds today but is enforced by nothing.
+Replacing or forking vite-plugin-svelte for one build-time option merge.
+**Drop** the patch, both ignores and the guard once deepmerge ships a fixed
+release or vite-plugin-svelte stops depending on it. The patch is keyed to
+4.3.1, so a resolved version that moves off it leaves the copy unpatched and
+the guard red, which is the prompt to re-check.
