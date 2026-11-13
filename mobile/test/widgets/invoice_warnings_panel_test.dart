@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/utils/format_locale.dart';
@@ -11,7 +12,7 @@ import 'package:feohledger_mobile/widgets/invoice_warnings_panel.dart';
 /// warning is formatted the way the app really formats it.
 Widget _host(Widget child, {Locale? locale}) => MaterialApp(
       locale: locale,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       builder: (context, inner) =>
           FormatLocaleScope(child: inner ?? const SizedBox.shrink()),
