@@ -664,6 +664,37 @@ describe('closing an invoice refused because FeohLedger is already paying it', (
 	});
 });
 
+describe('recalling an approval (decisions §374)', () => {
+	const locales = { en, de, fr, es, 'pt-BR': ptBR, ja } as const;
+
+	it('states every refusal the recall door and its verdict answer with, in all six locales', () => {
+		for (const [loc, catalogue] of Object.entries(locales)) {
+			const t = translator(catalogue as typeof en, loc);
+			const cat = catalogue as Record<string, string>;
+			expect(codedRefusalText('invoice_not_recallable', { status: 'paid' }, t)).toBe(
+				cat['refusal.invoiceNotRecallable']
+			);
+			expect(codedRefusalText('invoice_recall_in_erp', {}, t)).toBe(
+				cat['refusal.invoiceRecallInErp']
+			);
+			expect(codedRefusalText('invoice_recall_claimed', { claim: 'payment' }, t)).toBe(
+				cat['refusal.paymentBlocksRecall']
+			);
+			expect(codedRefusalText('invoice_recall_claimed', { claim: 'virtual_card' }, t)).toBe(
+				cat['refusal.cardBlocksRecall']
+			);
+		}
+		expect(localizeApiDetail(detail('invoice_recall_in_erp', {}), deT)).toBe(
+			de['refusal.invoiceRecallInErp']
+		);
+	});
+
+	it('falls back to the server sentence for a claim this build does not know', () => {
+		expect(codedRefusalText('invoice_recall_claimed', {}, enT)).toBeNull();
+		expect(codedRefusalText('invoice_recall_claimed', { claim: 'cheque' }, enT)).toBeNull();
+	});
+});
+
 describe('the ERP send refused because of the vendor', () => {
 	it('states the 409 the send doors answer with, per hold', () => {
 		expect(

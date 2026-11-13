@@ -19,7 +19,9 @@ const BACKEND_TRANSITIONS: Record<string, string[]> = {
 	// deliberately NOT offered as a manual move (VALID_TRANSITIONS.pending is []).
 	pending: ['ready_for_review', 'approved', 'failed', 'new'],
 	ready_for_review: ['approved', 'rejected'],
-	approved: ['sending_to_erp', 'payment_scheduled', 'done'],
+	// `ready_for_review` from `approved` / `failed` is the recall (decisions
+	// §374): its own door, refused by `POST /bulk/status`, so never offered here.
+	approved: ['sending_to_erp', 'payment_scheduled', 'done', 'ready_for_review'],
 	rejected: ['ready_for_review', 'new'],
 	sending_to_erp: ['sent_to_erp', 'failed'],
 	sent_to_erp: ['posted_in_erp', 'done'],
@@ -27,7 +29,7 @@ const BACKEND_TRANSITIONS: Record<string, string[]> = {
 	payment_scheduled: ['paid', 'approved'],
 	paid: ['done', 'approved'],
 	done: [],
-	failed: ['pending', 'sending_to_erp']
+	failed: ['pending', 'sending_to_erp', 'ready_for_review']
 };
 
 describe('VALID_TRANSITIONS', () => {
@@ -49,6 +51,11 @@ describe('VALID_TRANSITIONS', () => {
 
 	it('still allows rejecting from ready_for_review', () => {
 		expect(VALID_TRANSITIONS.ready_for_review).toContain('rejected');
+	});
+
+	it('never offers the recall as a bulk move — bulk status refuses it', () => {
+		expect(VALID_TRANSITIONS.approved).not.toContain('ready_for_review');
+		expect(VALID_TRANSITIONS.failed).not.toContain('ready_for_review');
 	});
 });
 

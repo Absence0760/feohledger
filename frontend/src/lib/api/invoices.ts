@@ -38,6 +38,11 @@ export type InvoiceActionVerdicts = {
 	 *  on, and at a failed ERP push after approval — decisions §370). The
 	 *  modal edits and sends the financial fields only while this is `null`. */
 	edit_financials: ActionRefusal;
+	/** `POST /recall-approval` ("Recall approval") — `services/review.recall_refusal`:
+	 *  `invoice.approve`, an approved invoice or one whose ERP push failed after
+	 *  approval, no bill the ERP may hold, no live payment or virtual card
+	 *  (decisions §374). */
+	recall_approval: ActionRefusal;
 };
 
 /** `invoice_not_completable` — `/complete` from a status it does not advance
@@ -58,6 +63,9 @@ export const INVOICE_DOCUMENT_LOCKED = 'invoice_document_locked';
  *  `PUT /line-items` on an approved invoice, or on one whose ERP push failed
  *  after approval (`models/invoice_status.financially_locked`, decisions §370). */
 export const INVOICE_FINANCIALLY_LOCKED = 'invoice_financially_locked';
+/** `invoice_not_recallable` — `/recall-approval` on an invoice holding no
+ *  approval to take back. Hidden, like {@link INVOICE_NOT_COMPLETABLE}. */
+export const INVOICE_NOT_RECALLABLE = 'invoice_not_recallable';
 
 /**
  * The server's verdicts on the caller's workflow actions for this invoice
@@ -67,6 +75,17 @@ export const INVOICE_FINANCIALLY_LOCKED = 'invoice_financially_locked';
  */
 export function getReviewActions(invoiceId: string): Promise<InvoiceActionVerdicts> {
 	return api.get(`/api/invoices/${invoiceId}/review-actions`);
+}
+
+/**
+ * Recall an invoice's approval (`POST /api/invoices/{id}/recall-approval`):
+ * back to `ready_for_review`, so its frozen figures can be corrected and
+ * approved again through the whole chain. The reason is required and lands on
+ * the `invoice.approval_recalled` audit row. Offered from the `recall_approval`
+ * verdict only (decisions §374).
+ */
+export function recallApproval(invoiceId: string, reason: string): Promise<Invoice> {
+	return api.post<Invoice>(`/api/invoices/${invoiceId}/recall-approval`, { reason });
 }
 
 /**

@@ -93,7 +93,7 @@ test.describe('invoice modal — the financial lock follows the server verdict',
 		const modal = await openWithVerdict(page, id, number);
 
 		await expect(modal.getByTestId('financials-locked')).toHaveText(
-			'The amount, payee and line items cannot be changed once the invoice is approved: they are what the approver signed off and what will be paid.'
+			'The amount, payee and line items cannot be changed once the invoice is approved: they are what the approver signed off and what will be paid. To correct them, recall the approval: the invoice goes back to review.'
 		);
 		await expect(field(modal, 'Amount')).toBeDisabled();
 		await expect(field(modal, 'Vendor')).toBeDisabled();

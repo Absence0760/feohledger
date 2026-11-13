@@ -337,6 +337,18 @@ const BUILDERS: Record<string, Builder> = {
 	// modal's `edit_financials` verdict (decisions §370).
 	invoice_financially_locked: fixed('refusal.invoiceFinanciallyLocked'),
 	invoice_not_resubmittable: fixed('refusal.invoiceNotResubmittable'),
+	// `services/review.recall_refusal` — `POST /recall-approval` and the
+	// modal's `recall_approval` verdict (decisions §374). `params.claim` names
+	// the rail holding the invoice; an unknown one falls back to the server's
+	// sentence.
+	invoice_not_recallable: fixed('refusal.invoiceNotRecallable'),
+	invoice_recall_in_erp: fixed('refusal.invoiceRecallInErp'),
+	invoice_recall_claimed: (params, t) => {
+		const claim = str(params, 'claim');
+		if (claim === 'payment') return t('refusal.paymentBlocksRecall');
+		if (claim === 'virtual_card') return t('refusal.cardBlocksRecall');
+		return null;
+	},
 	// `api/workflow.close_refusals` — `/complete` closing to `done`, and a
 	// `POST /bulk/status → done` row's skip, refused while a live payment or
 	// virtual card holds the invoice (decisions §357). `params.claim` names
