@@ -793,12 +793,16 @@ async def record_erp_payment(
             stated_amount = Decimal(str(stated))
         except ArithmeticError:
             stated_amount = None
-        stated_currency = str((row.erp_report or {}).get("amount_currency") or "").upper()
+        stated_currency = str((row.erp_report or {}).get("amount_currency") or "").strip().upper()
         if (
             stated_amount is None
             or (amount is not None and amount != stated_amount)
             or invoice is None
-            or stated_currency != (invoice.currency or "").upper()
+            # A figure with no currency stated says nothing about what this
+            # invoice owes, the rule the sweep applies to the same facts
+            # (§386); never compared as a bare number (§160, §196).
+            or not stated_currency
+            or stated_currency != (invoice.currency or "").strip().upper()
         ):
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,

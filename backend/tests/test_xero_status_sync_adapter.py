@@ -532,6 +532,10 @@ def test_post_payment_never_overpays_the_bill(xero):
         (lambda x: x.bill(), {"pay_from_account_erp_id": None}, PAYMENT_ACCOUNT_NOT_MAPPED),
         (lambda x: x.bill(status="VOIDED"), {}, BILL_NOT_IN_ERP),
         (lambda x: x.bill(currency="GBP"), {}, CURRENCY_MISMATCH),
+        # Either side stating no currency is not "the same currency": refused,
+        # never posted as a bare number.
+        (lambda x: x.bill(currency=""), {}, CURRENCY_MISMATCH),
+        (lambda x: x.bill(), {"currency": ""}, CURRENCY_MISMATCH),
     ],
 )
 def test_post_payment_refuses_before_writing(xero, setup, payload, code):
@@ -565,6 +569,31 @@ def test_void_payment_deletes_ours_once(xero):
     again = asyncio.run(_adapter().void_payment(_payload()))
     assert again.success and again.erp_document_id is None
     assert len(xero.sent("POST", posted.erp_document_id)) == 1
+
+
+def test_void_payment_finds_ours_as_post_payment_does_not_only_on_the_bill(xero):
+    """``post_payment`` decides what is ours by ``GET Payments`` filtered on
+    our Reference; the void must use the same definition. A payment of ours
+    the bill's own ``Payments`` array does not list (unconfirmed live: #654)
+    is still ours and is still deleted."""
+    xero.bill()
+    posted = asyncio.run(_adapter().post_payment(_payload(amount=Decimal("200.00"))))
+    xero.bills[BILL]["Payments"] = []  # the bill's own array omits it
+    voided = asyncio.run(_adapter().void_payment(_payload(amount=Decimal("200.00"))))
+    assert voided.success and voided.erp_document_id == posted.erp_document_id
+    assert xero.payments[posted.erp_document_id]["Status"] == "DELETED"
+    assert len(xero.sent("POST", posted.erp_document_id)) == 1
+
+
+def test_void_payment_never_touches_a_deleted_or_a_persons_payment(xero):
+    xero.bill()
+    theirs = xero.pay(BILL, "50.00", reference="FeohLedger payment someone-else")
+    posted = asyncio.run(_adapter().post_payment(_payload(amount=Decimal("200.00"))))
+    xero.delete_payment(posted.erp_document_id)  # deleted in Xero already
+    voided = asyncio.run(_adapter().void_payment(_payload(amount=Decimal("200.00"))))
+    assert voided.success and voided.erp_document_id is None
+    assert xero.sent("POST", posted.erp_document_id) == []
+    assert xero.sent("POST", theirs) == []
 
 
 # ---------------------------------------------------------------------------
@@ -702,3 +731,21 @@ def test_the_paid_amount_names_the_bills_currency(xero):
     xero.pay(BILL, "250.00")
     report = _report(xero)
     assert (report.paid_amount, report.paid_currency) == (Decimal("250.00"), "ZAR")
+
+
+def test_a_report_says_whether_our_write_back_is_on_the_bill_and_what_else_came_off(xero):
+    """The status sync tells a credit recording our open discount from a
+    second settlement by these two facts (decisions §386)."""
+    xero.bill()
+    asyncio.run(_adapter().post_payment(_payload(amount=Decimal("245.00"))))
+    xero.credit(BILL, "5.00")
+    ours = _report(xero)
+    assert ours.state is ErpBillState.paid and ours.settled_by_credit
+    assert ours.our_payment_applied is True
+    assert ours.reduced_outside_amount == Decimal("5.00")
+
+    xero.bill(bill_id="no-write-back")
+    xero.credit("no-write-back", "250.00")
+    theirs = _report(xero, "no-write-back")
+    assert theirs.our_payment_applied is False
+    assert theirs.reduced_outside_amount == Decimal("250.00")

@@ -490,6 +490,17 @@ class ErpBillReport:
     #: or nothing readable paid it in cash: the bill was settled without the
     #: money leaving, so it must not be booked as a cash payment.
     settled_by_credit: bool = False
+    #: True when a payment FeohLedger wrote back (``post_payment``) is applied
+    #: to the bill now, as the ERP lists it. Set only by an adapter that can
+    #: tell (Xero: a payment carrying our marker); False = not stated, which
+    #: is how QuickBooks reports today.
+    our_payment_applied: bool = False
+    #: How much was taken off the bill beyond FeohLedger's own write-backs
+    #: (``total - due - ours``), exact, when the adapter can state it (Xero).
+    #: The status sync reads it to tell a bookkeeper recording the discount
+    #: our write-back left open from a second settlement (decisions §386).
+    #: None = not stated.
+    reduced_outside_amount: Decimal | None = None
     #: The cash the ERP shows a person applied to the bill outside FeohLedger,
     #: exact, when the adapter can state it (Xero: the sum of the bill's own
     #: payments that are not ours). Only for a bill paid in full in cash
@@ -801,6 +812,11 @@ class ErpAdapter:
     #: (``post_payment``). Only then may a confirmed push leave the invoice
     #: payable at ``posted_in_erp`` (``services/erp_status_sync``, §295).
     supports_status_sync: bool = False
+    #: True for an adapter whose bill reports set
+    #: ``ErpBillReport.match_by_reference`` (no marker of ours on the bill):
+    #: its bills match an invoice only within the realm the push recorded, so
+    #: the sweep never reads a bill only a realm-less push names (§386).
+    bills_match_by_reference: bool = False
 
     def __init__(self, config: dict):
         self.config = config

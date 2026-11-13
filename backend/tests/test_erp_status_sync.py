@@ -327,6 +327,7 @@ async def test_the_sweep_reads_changed_bills_and_applies_them(realdb, monkeypatc
     class FakeQbo:
         erp_type = "quickbooks_online"
         supports_status_sync = True
+        bills_match_by_reference = False
         changed_bills = AsyncMock(return_value=[BILL])
         bill_report = AsyncMock(
             return_value=_report(corr, ErpBillState.paid, external_payment_ids=("901",))
@@ -508,6 +509,7 @@ async def test_the_sweep_keeps_a_mark_and_reads_from_it_after_a_gap(realdb, monk
     class FakeQbo:
         erp_type = "quickbooks_online"
         supports_status_sync = True
+        bills_match_by_reference = False
         changed_bills = AsyncMock(return_value=[])
         bill_report = AsyncMock(return_value=ErpBillReport(bill_id=BILL, state=ErpBillState.open))
 
@@ -542,6 +544,7 @@ async def test_a_cdc_answer_too_full_to_trust_falls_back_to_reading_every_bill(r
     class FakeQbo:
         erp_type = "quickbooks_online"
         supports_status_sync = True
+        bills_match_by_reference = False
         changed_bills = AsyncMock(
             side_effect=ErpListingIncomplete("QuickBooks Online", "cdc Bill", ListingGap.truncated)
         )
@@ -820,30 +823,181 @@ async def test_a_xero_payment_in_another_currency_is_never_compared_as_a_number(
     assert row.erp_report["amount_currency"] == "ZAR"
 
 
+async def test_a_xero_payment_stating_no_currency_is_refused_as_a_mismatch(realdb):
+    from app.services.erp_adapters.xero import report_from_bill
+
+    inv_id, _ = await _seed(
+        realdb, status=InvoiceStatus.posted_in_erp, bill_id=XERO_BILL, realm=XERO_REALM
+    )
+    report = report_from_bill(_xero_bill("250.00", paid="250.00", currency=""), XERO_BILL)
+    assert report.paid_amount == Decimal("250.00") and report.paid_currency is None
+    await _apply_xero(realdb, report)
+    assert await _payments(realdb, inv_id) == []
+    [row] = await _exceptions(realdb, inv_id)
+    assert row.erp_report["refusal_code"] == "external_payment_amount_mismatch"
+
+
+async def test_a_live_claim_is_named_before_a_currency_mismatch(realdb):
+    """§309's live-claim refusal wins: a Xero payment in another currency on
+    an invoice FeohLedger's own run still holds is first a double payment,
+    and the row says so (the run is what a person must cancel)."""
+    from app.services.erp_adapters.xero import report_from_bill
+
+    inv_id, _ = await _seed(
+        realdb, status=InvoiceStatus.posted_in_erp, bill_id=XERO_BILL, realm=XERO_REALM
+    )
+    await _hold_in_a_draft_run(realdb, inv_id)
+    report = report_from_bill(_xero_bill("250.00", paid="250.00", currency="ZAR"), XERO_BILL)
+    await _apply_xero(realdb, report)
+    [flag] = await _exceptions(realdb, inv_id)
+    assert flag.exception_type == "payment_reconciliation"
+    assert flag.erp_report["refusal_code"] == "external_payment_in_run"
+    assert flag.erp_report["amount_currency"] == "ZAR"
+
+
+async def _hold_in_a_draft_run(realdb, inv_id) -> uuid.UUID:
+    from app.models.payment import PaymentRun
+
+    info = realdb.info("a")
+    run_id = uuid.uuid4()
+    async with realdb.sessionmaker("a")() as s:
+        s.add(
+            PaymentRun(
+                id=run_id,
+                organization_id=info.org_id,
+                status="draft",
+                total_amount=Decimal("250.00"),
+                initiated_by=info.users["ap_manager"],
+            )
+        )
+        await s.flush()
+        s.add(
+            Payment(
+                invoice_id=inv_id,
+                payment_run_id=run_id,
+                amount=Decimal("250.00"),
+                method="ach",
+                status="pending",
+                correlation_id=uuid.uuid4(),
+            )
+        )
+        await s.commit()
+    return run_id
+
+
+async def test_the_one_click_refuses_a_stated_amount_with_no_currency(realdb):
+    """The sweep refuses an amount stated in no currency; the one-click must
+    refuse the same facts, never compare the figure as a bare number."""
+    inv_id, _ = await _seed(
+        realdb, status=InvoiceStatus.posted_in_erp, bill_id=XERO_BILL, realm=XERO_REALM
+    )
+    async with realdb.sessionmaker("a")() as s:
+        invoice = await s.get(Invoice, inv_id)
+        # A blank currency on both sides: the case a bare comparison
+        # ("" == "") used to let through.
+        invoice.currency = ""
+        await s.flush()
+        await erp_status_sync.record_erp_reported_payment(
+            s,
+            invoice,
+            org=await _org(realdb),
+            erp_type="xero",
+            erp_document_id=XERO_BILL,
+            event_id=None,
+            amount=Decimal("250.00"),
+            amount_currency=None,
+        )
+        await s.commit()
+    [row] = await _exceptions(realdb, inv_id)
+    assert row.erp_report["amount"] == "250.00" and row.erp_report["amount_currency"] is None
+    body = {"method": "ach", "reference": XERO_BILL, "paid_on": utc_today().isoformat()}
+    async with realdb.client(key="a", role="admin") as c:
+        refused = await c.post(f"/api/exceptions/{row.id}/record-erp-payment", json=body)
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["code"] == "external_payment_amount_mismatch"
+    assert await _payments(realdb, inv_id) == []
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.posted_in_erp
+
+
 async def test_a_credit_recording_the_discount_after_our_payment_is_not_paid_twice(realdb):
     """Our write-back paid 248.00 with a 2.00 discount; the bookkeeper records
     the discount in Xero as a credit note, as the write-back's flag asked.
     Nothing left twice, so nothing says it did."""
     from app.services.erp_adapters.xero import report_from_bill
 
+    inv_id = await _paid_by_our_rail(realdb, amount="248.00", discount="2.00")
+    report = report_from_bill(_xero_bill_with_our_write_back("248.00", credited="2.00"), XERO_BILL)
+    assert report.settled_by_credit and report.external_payment_ids == ()
+    assert report.our_payment_applied and report.reduced_outside_amount == Decimal("2.00")
+    assert (await _apply_xero(realdb, report)).action == "unchanged"
+    assert await _exceptions(realdb, inv_id) == []
+
+
+async def _paid_by_our_rail(realdb, *, amount: str, discount: str | None = None):
+    """An invoice FeohLedger's own rail paid (not a payment recorded outside)."""
     inv_id, _ = await _seed(realdb, status=InvoiceStatus.paid, bill_id=XERO_BILL, realm=XERO_REALM)
     async with realdb.sessionmaker("a")() as s:
         s.add(
             Payment(
                 invoice_id=inv_id,
-                amount=Decimal("248.00"),
+                amount=Decimal(amount),
+                discount_amount=Decimal(discount) if discount else None,
                 method="ach",
                 status="completed",
                 provider="mock",
             )
         )
         await s.commit()
-    bill = _xero_bill("250.00", paid="248.00", credited="2.00")
+    return inv_id
+
+
+def _xero_bill_with_our_write_back(paid: str, *, credited: str) -> dict:
+    bill = _xero_bill("250.00", paid=paid, credited=credited)
     bill["Payments"][0]["Reference"] = f"FeohLedger payment {uuid.uuid4()}"
-    report = report_from_bill(bill, XERO_BILL)
+    return bill
+
+
+async def test_a_credit_settling_a_bill_our_write_back_never_reached_is_paid_twice(realdb):
+    """Our ACH paid 250.00 but the write-back was refused (no mapped account),
+    so Xero still showed 250.00 due. A bookkeeper then settles it with a
+    250.00 vendor credit: the bill has been settled twice, and a credit with
+    no payment of anyone else's must not hide that (money-path review, §386)."""
+    from app.services.erp_adapters.xero import report_from_bill
+
+    inv_id = await _paid_by_our_rail(realdb, amount="250.00")
+    report = report_from_bill(_xero_bill("250.00", credited="250.00"), XERO_BILL)
     assert report.settled_by_credit and report.external_payment_ids == ()
-    assert (await _apply_xero(realdb, report)).action == "unchanged"
-    assert await _exceptions(realdb, inv_id) == []
+    assert report.our_payment_applied is False
+
+    assert (await _apply_xero(realdb, report)).action == "double_payment_flagged"
+    [flag] = await _exceptions(realdb, inv_id)
+    assert flag.description_code == "exception.erp_paid_twice"
+
+
+async def test_a_credit_beyond_the_discount_our_write_back_left_open_is_paid_twice(realdb):
+    """Our write-back is on the bill, but the credit took off more than the
+    discount FeohLedger's payment took (10.00 against 2.00): the rest is a
+    second settlement, not the bookkeeper recording our discount."""
+    from app.services.erp_adapters.xero import report_from_bill
+
+    inv_id = await _paid_by_our_rail(realdb, amount="248.00", discount="2.00")
+    report = report_from_bill(_xero_bill_with_our_write_back("240.00", credited="10.00"), XERO_BILL)
+    assert report.our_payment_applied and report.reduced_outside_amount == Decimal("10.00")
+
+    assert (await _apply_xero(realdb, report)).action == "double_payment_flagged"
+    [flag] = await _exceptions(realdb, inv_id)
+    assert flag.description_code == "exception.erp_paid_twice"
+
+
+async def test_a_credit_after_our_undiscounted_payment_is_paid_twice(realdb):
+    """No discount was taken here, so there is no open discount for a credit to
+    record: any credit on top of our write-back is a second settlement."""
+    from app.services.erp_adapters.xero import report_from_bill
+
+    inv_id = await _paid_by_our_rail(realdb, amount="248.00")
+    report = report_from_bill(_xero_bill_with_our_write_back("248.00", credited="2.00"), XERO_BILL)
+    assert (await _apply_xero(realdb, report)).action == "double_payment_flagged"
+    assert len(await _exceptions(realdb, inv_id)) == 1
 
 
 async def test_a_changed_bill_no_invoice_was_pushed_as_is_never_read(realdb, monkeypatch):
@@ -858,6 +1012,7 @@ async def test_a_changed_bill_no_invoice_was_pushed_as_is_never_read(realdb, mon
     class FakeXero:
         erp_type = "xero"
         supports_status_sync = True
+        bills_match_by_reference = True
         changed_bills = AsyncMock(return_value=["keyed-by-hand", XERO_BILL])
         bill_report = AsyncMock(
             return_value=ErpBillReport(bill_id=XERO_BILL, state=ErpBillState.open)
@@ -866,6 +1021,38 @@ async def test_a_changed_bill_no_invoice_was_pushed_as_is_never_read(realdb, mon
     await _sweep_with(realdb, monkeypatch, FakeXero())
     read = [c.args[0] for c in FakeXero.bill_report.await_args_list]
     assert "keyed-by-hand" not in read and XERO_BILL in read
+
+
+async def test_a_xero_bill_only_a_realmless_push_names_is_never_read(realdb, monkeypatch):
+    """A Xero bill is matched by its id only within the recorded organisation,
+    so a push that recorded no realm can never match: reading its bill back
+    would spend Xero's daily allowance on a certain "unmatched". QuickBooks
+    still reads such bills, since its marker can match them."""
+    await _connect_xero(realdb)
+    await _seed(realdb, status=InvoiceStatus.posted_in_erp, bill_id=XERO_BILL, realm=None)
+
+    class FakeXero:
+        erp_type = "xero"
+        supports_status_sync = True
+        bills_match_by_reference = True
+        changed_bills = AsyncMock(return_value=[XERO_BILL])
+        bill_report = AsyncMock(
+            return_value=ErpBillReport(bill_id=XERO_BILL, state=ErpBillState.open)
+        )
+
+    await _sweep_with(realdb, monkeypatch, FakeXero())
+    read = [c.args[0] for c in FakeXero.bill_report.await_args_list]
+    assert XERO_BILL not in read
+
+    factory = realdb.sessionmaker("a")
+    realm = "quickbooks_online:any"
+    assert await erp_status_sync._bills_we_posted(factory, [XERO_BILL], realm) == [XERO_BILL]
+    assert (
+        await erp_status_sync._bills_we_posted(factory, [XERO_BILL], realm, by_reference=True) == []
+    )
+    assert (
+        await erp_status_sync._bills_we_posted(factory, [XERO_BILL], None, by_reference=True) == []
+    )
 
 
 async def test_a_bill_paid_in_xero_while_feohledger_holds_it_in_a_run_blocks(realdb):
@@ -988,6 +1175,7 @@ async def test_the_sweep_covers_xero_tenants(realdb, monkeypatch):
     class FakeXero:
         erp_type = "xero"
         supports_status_sync = True
+        bills_match_by_reference = True
         changed_bills = AsyncMock(return_value=[])
         bill_report = AsyncMock()
 

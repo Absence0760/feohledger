@@ -29,6 +29,11 @@ export interface ErpReport {
 	reference?: string | null;
 	paid_on?: string | null;
 	paid_on_reported?: boolean | null;
+	/** The cash the ERP states was paid, as an exact decimal string, and its
+	 *  ISO 4217 code (Xero, decisions §386); null when not stated (QuickBooks).
+	 *  The one-click record books this figure or nothing. */
+	amount?: string | null;
+	amount_currency?: string | null;
 	refusal_code?: string | null;
 	/** `po_rematch_clears`: the PO number matched, and the UTC day seen. */
 	po_number?: string | null;

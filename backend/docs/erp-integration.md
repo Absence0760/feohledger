@@ -376,8 +376,10 @@ Decisions §295; the phase-by-phase account is
   / `bill_payment_card_account`, our GL codes). Refusals are coded
   (`payment_account_not_mapped`, `bill_not_in_erp`, `payment_exceeds_balance`,
   `bill_payment_voided`, `currency_mismatch`, and the Intuit Fault codes) and
-  land on `payment.erp_post_failed` plus an `erp_reconciliation` exception. A
-  payment void voids the BillPayment too.
+  land on `payment.erp_post_failed` plus an `erp_reconciliation` exception.
+  `currency_mismatch` also covers a bill or a payment that states no currency
+  (QuickBooks states every bill's, the home one included): fail closed, never
+  posted as a bare number. A payment void voids the BillPayment too.
 - **Checked again at dispatch.** A bill paid in QuickBooks reaches us within
   seconds by webhook, or by the next sweep — too late for a run already
   executing. So every payment re-reads its bill from QuickBooks immediately
@@ -415,7 +417,10 @@ differs:
   Xero, so a bill carries no marker of ours. Its `InvoiceID` is a GUID Xero
   never reuses, so the report sets `match_by_reference` and the sync matches it
   by `erp_reference` within the realm the push recorded, exactly one invoice or
-  none (the way a deleted QuickBooks bill is matched).
+  none (the way a deleted QuickBooks bill is matched). A push that recorded no
+  realm can therefore never match, so the sweep does not read its bill back
+  either (`ErpAdapter.bills_match_by_reference` → `_bills_we_posted`);
+  QuickBooks still reads such bills, since its marker can match them.
 - **Paid, part-paid, credited.** `report_from_bill`: `deleted` for `DELETED` /
   `VOIDED`; `paid` for `Status == PAID` with nothing due; `partially_paid` /
   `open` by `AmountDue`; `unknown` when the bill's listed payments do not add
@@ -431,8 +436,10 @@ differs:
   Xero), the record is refused `amount_mismatch` and kept on its
   `paid_not_recorded` exception with the amount, rather than booking
   FeohLedger's figure as money that left. That row is payment-blocking (the
-  bill is paid there), a figure in another currency is refused the same way,
-  and the exception's one-click record books the stated figure or nothing.
+  bill is paid there), a figure in another currency or in none is refused the
+  same way (after the live-claim refusals, so a FeohLedger payment, run or card
+  on the invoice is named first, §309), and the exception's one-click record
+  books the stated figure or nothing, refusing one stated with no currency.
   QuickBooks states no amount yet and records what is owed, as before.
 - **The rail.** A Xero payment names the account it came from, not a rail: a
   `CREDITCARD` account reads as `card` (off the 1099), anything else as not
@@ -445,14 +452,23 @@ differs:
   write, and the create carries `Idempotency-Key`. A write-back someone deleted
   in Xero is refused `bill_payment_voided`, never posted over their decision.
   Refused before any write: `payment_account_not_mapped`, `bill_not_in_erp`,
-  `currency_mismatch`, `payment_exceeds_balance`. **A discount is not posted
+  `currency_mismatch` (also when the bill or the payment states no currency),
+  `payment_exceeds_balance`. **A discount is not posted
   as a payment.** A Xero payment has no discount field, so what reached the
   supplier is posted and the bill stays open by the discount; the write-back's
   `erp_payment_writeback_balance_open` flag (with the discount taken in
   `erp_report.discount_amount`) tells the bookkeeper to record it there, and
-  no credit note is created on their behalf (§295's answer, kept).
+  no credit note is created on their behalf (§295's answer, kept). The credit
+  they then record is not "paid twice" only when our write-back is on the bill
+  (`ErpBillReport.our_payment_applied`), nobody else's payment is, and what
+  came off beyond our write-back (`reduced_outside_amount`) is no more than the
+  discount FeohLedger's payment took. A credit on a bill our write-back never
+  reached (refused, say `payment_account_not_mapped`) is a second settlement
+  and raises `erp_paid_twice`, as does a credit larger than that discount.
 - **Void.** `void_payment` deletes our Xero payment (`POST Payments/{id}`
-  `{"Status": "DELETED"}`; Xero has no payment void). A reconciled payment
+  `{"Status": "DELETED"}`; Xero has no payment void). It finds "ours" exactly
+  as `post_payment` does, by `GET Payments?where=Reference==…` for this bill
+  (live ones only), never only in the bill's own `Payments` array. A reconciled payment
   cannot be deleted; that refusal is flagged for a person as for QuickBooks.
 - **Rate limits.** Xero allows 60 calls a minute per organisation, and a full
   reconciliation reads one to three per bill, so a status read that meets a
