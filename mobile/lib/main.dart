@@ -1,8 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/home_screen.dart';
 import 'package:feohledger_mobile/screens/login_screen.dart';
@@ -51,7 +52,7 @@ class APApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           navigatorKey: PushService.navigatorKey,
           locale: LocaleStore.instance.locale,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: appLocalizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           // Words and figures move together: this points `utils/money.dart`
           // and `utils/dates.dart` at the locale MaterialApp just resolved, so

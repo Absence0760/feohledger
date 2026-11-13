@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/invoice_status_labels.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
@@ -53,7 +54,7 @@ void main() {
         listenable: LocaleStore.instance,
         builder: (context, _) => MaterialApp(
           locale: LocaleStore.instance.locale,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: appLocalizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           // APApp's own wiring: the formatters follow the resolved locale, so
           // the figures move with the words.
