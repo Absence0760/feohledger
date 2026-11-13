@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';

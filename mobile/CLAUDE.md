@@ -14,7 +14,32 @@ This file holds the rules. The reference material lives in `mobile/docs/`:
 
 ## Stack
 
-- **Flutter 3.41+**, Dart 3.11+
+- **Flutter 3.50.0, pinned exactly**, Dart 3.14+. `environment: flutter:` in
+  `pubspec.yaml` is the single source: every `subosito/flutter-action` step
+  (`ci.yml`, `mobile-release.yml`) reads it via `flutter-version-file`, so a
+  new stable release can't change CI unannounced (3.50.0 did, deprecating the
+  in-framework Material library, in November 2026). Bump the SDK by editing that
+  one line, in a PR of its own. Pub enforces only the lower bound, so a newer
+  local SDK still resolves.
+- **Material comes from `package:material_ui`, not `package:flutter/material.dart`**
+  (deprecated in 3.50; migration guide:
+  https://docs.flutter.dev/release/breaking-changes/material-ui-and-cupertino-ui).
+  Import `package:material_ui/material_ui.dart` (and `cupertino_ui` for
+  Cupertino). `flutter/widgets`, `services`, `foundation`, `scheduler` and
+  `semantics` are unaffected. The two are different libraries with distinct
+  types: a legacy `Theme` / `MaterialLocalizations` is invisible to a
+  `material_ui` widget and vice versa.
+- **Localization delegates come from `appLocalizationsDelegates`**
+  (`lib/l10n/app_localizations_delegates.dart`), never the generated
+  `AppLocalizations.localizationsDelegates`. Flutter 3.50's gen-l10n still
+  emits the legacy `flutter_localizations` delegates there
+  (flutter/flutter#196475, fix in draft PR #194500), which register the
+  *legacy* `MaterialLocalizations` type, so outside `en` a `material_ui`
+  widget finds no `MaterialLocalizations` at all and fails its lookup.
+  `test/l10n/material_delegates_test.dart` pins the shared list and bans the
+  generated one. The generated file's two deprecated references are
+  silenced by a `header:` in `l10n.yaml`, scoped to the generated `lib/l10n/gen/` files;
+  drop it once gen-l10n emits `material_ui` delegates.
 - **iOS + Android** (single Dart codebase, dual platform targets)
 - **State management**: StatefulWidget + setState + ChangeNotifier singletons (no Bloc/Provider/Riverpod)
 - **HTTP**: `http` package + `flutter_secure_storage` for JWT

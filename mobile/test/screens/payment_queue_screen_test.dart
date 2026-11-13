@@ -1,12 +1,13 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/screens/payment_queue_screen.dart';
@@ -17,7 +18,7 @@ import 'package:feohledger_mobile/stores/payment_queue_store.dart';
 /// Wraps a screen in a MaterialApp carrying the localization delegates so
 /// `AppLocalizations.of(context)` resolves (defaults to English).
 Widget _localized(Widget home) => MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: home,
     );

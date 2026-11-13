@@ -17,7 +17,7 @@
 /// glyphs) can't be English and are ignored.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Every user-facing string currently in the tree, skipping the subtrees of
