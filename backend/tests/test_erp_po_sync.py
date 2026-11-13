@@ -402,7 +402,10 @@ def test_netsuite_list_pos_maps_suiteql_rows():
     # are closed, 505 is open (test_erp_netsuite_adapter.py maps the lines).
     lines_query = json.loads(client.post.await_args_list[1].kwargs["content"])["q"]
     assert "FROM transactionline" in lines_query
-    assert "IN (501, 505)" in lines_query
+    # Lines are read for every PO not closed or cancelled, an unissued one
+    # (PO-508, decisions §394) included, so it matches as soon as the ERP
+    # approves it.
+    assert "IN (501, 505, 508)" in lines_query
     assert client.post.await_count == 2
 
 
