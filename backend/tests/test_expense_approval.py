@@ -158,7 +158,13 @@ async def _make_report_with_expense(c, amount="100.00", category="travel", recei
 async def test_submit_blocks_on_missing_receipt(realdb):
     # Manager creates the receipt-required policy; clerk builds + submits.
     async with realdb.client(key="a", role="ap_manager") as c:
-        await _make_policy(c, name="ReceiptReq", category="travel", requires_receipt_above="10.00")
+        await _make_policy(
+            c,
+            name="ReceiptReq",
+            category="travel",
+            requires_receipt_above="10.00",
+            threshold_currency="USD",
+        )
     async with realdb.client(key="a", role="ap_clerk") as c:
         rid, eid = await _make_report_with_expense(c, amount="50.00", receipt=False)
         resp = await c.post(f"/api/expense-reports/{rid}/submit")
@@ -166,6 +172,22 @@ async def test_submit_blocks_on_missing_receipt(realdb):
     detail = resp.json()["detail"]
     codes = [v["code"] for v in detail["violations"]]
     assert "receipt_required" in codes
+    # Coded (decisions §378): the envelope is a `{code, message, params}`
+    # refusal that keeps its English `message` and its `violations` list, and
+    # each entry is itself coded with the figures its sentence needs.
+    assert detail["code"] == "expense_report_policy_blocked"
+    assert detail["message"] == "Report has blocking policy violations and cannot be submitted."
+    assert detail["params"] == {"count": len(detail["violations"])}
+    receipt = next(v for v in detail["violations"] if v["code"] == "receipt_required")
+    assert receipt["expense_id"] == eid
+    assert receipt["message"].startswith("A receipt is required")
+    assert receipt["params"] == {
+        "amount": "50.00",
+        "amount_currency": "USD",
+        "limit": "10.00",
+        "currency": "USD",
+        "comparison": "resolved",
+    }
 
     # Report did NOT transition.
     async with realdb.client(key="a", role="ap_clerk") as c:

@@ -175,8 +175,8 @@ dependency's own 403 stays a plain string.
 
 Not in the verdicts, because they depend on input the row does not hold:
 submit's blocking policy violations and unconvertible lines (its own 422 with
-the list), attach's per-line refusals, and match's expense-side refusals. The
-per-line and expense-side ones are coded too, from the same module:
+the list), attach's per-line refusals, and match's expense-side refusals. All
+of them are coded too, from the same module:
 
 | Refusal | Raised by | Code (status) · params |
 |---|---|---|
@@ -186,11 +186,15 @@ per-line and expense-side ones are coded too, from the same module:
 | Deleting an expense a card transaction is reconciled to | `DELETE /api/expenses/{id}` | `expense_card_reconciled` (409) · `card_transaction_id` |
 | `/match` onto an expense already reconciled to a card line | `card_match_expense_refusal` | `card_txn_expense_already_matched` (409) |
 | `/match` across currencies | `card_match_expense_refusal` | `card_txn_currency_mismatch` (409) · `transaction_currency`, `expense_currency` |
+| Submit with blocking policy violations | `report_policy_blocked_detail` | `expense_report_policy_blocked` (422) · `count`; `detail.violations` kept beside the coded keys, each entry coded by the policy engine ([Policy engine](#policy-engine-wf3)) |
+| Submit with attached lines that have no rate locked into the report currency | `report_lines_unconverted_detail` | `expense_report_lines_unconverted` (422) · `count`, `currency` (the report's); `detail.expense_ids` kept |
 
 The web registry (`frontend/src/lib/api/codedRefusals.ts`) states every one in
 the reader's language; mobile ships no expense or card screen, so it has no
-entries for them. Submit's two list-shaped 422s (`{message, violations}`,
-`{message, expense_ids}`) are not coded yet (`docs/followups.md`). Mutation responses carry no
+entries for them. The two submit 422s keep their lists and their English
+`message` (decisions §378): `api/expenses.submitReport` localizes the toast from
+the envelope's code, and the violation panel states each entry through
+`api/policyViolations.ts`. Mutation responses carry no
 `actions` (decisions §305), so the page re-reads the report after a decision.
 Parity per role × row state, owner and non-owner, is
 `tests/test_expense_action_verdicts.py`.
@@ -222,7 +226,7 @@ string-Decimal amounts — never PII.
 | GET | `/api/expense-reports/{id}/summary` | **(WF2)** Aggregate the report's attached expenses: `{ total, count, by_category: [{category, total, count}], by_status: [{status, total, count}] }`. SUMs run in Postgres over the `Numeric` column (exact); serialised as float to match `ExpenseResponse.amount` (read-only display rollup). Read RBAC (incl. CFO). |
 | PATCH | `/api/expense-reports/{id}` | Update mutable report fields. Owner only (**403** `expense_report_not_owner`). **409** once the report is locked (submitted/pending_approval/approved/reimbursed) — report-level fields (currency in particular) reinterpret a total the approval already ran against. |
 | POST | `/api/expense-reports/{id}/expenses` | Attach (or `detach: true`) expense ids; recomputes `total_amount`. Owner only — of the target, and of any report a line is moved off (**403** `expense_report_not_owner`). Each id is looked up in this tenant's `expenses` table, so a cross-tenant/unknown id is a 404. Detaching nulls `report_id` (the expense outlives the report). Composition is only mutable while the **target** report is a `draft` (**409** otherwise), and an expense can't be moved off a **locked** source report (**409**) — terminal `rejected`/`cancelled` reports stay detachable so their expenses can be re-reported. Every attached/detached line's `policy_violations` is re-evaluated, as every other expense write does: the attach locks a conversion that may resolve a threshold comparison, and it sets the line's owner, which pre-approval cover depends on (a report-currency change re-evaluates its lines for the same reason). |
-| POST | `/api/expense-reports/{id}/submit` | **(WF3)** `draft → submitted`. Runs the policy engine over the report's expenses; if any BLOCKING violation (missing required receipt, or required pre-approval absent) is present, returns **422** with `{ detail: { message, violations: [...] } }` and does NOT transition. On success stamps `submitted_at` and moves every child expense to `submitted`. Invalid source status → 422. RBAC `admin`/`ap_manager`/`ap_clerk`, and **only the owner** — anyone else is **403** `expense_report_not_owner`, checked before the status guard. Audited `expense_report.submitted`. |
+| POST | `/api/expense-reports/{id}/submit` | **(WF3)** `draft → submitted`. Runs the policy engine over the report's expenses; if any BLOCKING violation (missing required receipt, or required pre-approval absent) is present, returns **422** with `{ detail: { code: "expense_report_policy_blocked", message, params: { count }, violations: [...] } }` and does NOT transition. A line with no rate locked into the report currency is refused first, **422** `expense_report_lines_unconverted` with `params: { count, currency }` and `expense_ids`. On success stamps `submitted_at` and moves every child expense to `submitted`. Invalid source status → 422. RBAC `admin`/`ap_manager`/`ap_clerk`, and **only the owner** — anyone else is **403** `expense_report_not_owner`, checked before the status guard. Audited `expense_report.submitted`. |
 | POST | `/api/expense-reports/{id}/approve` | **(WF3)** `submitted → approved`. Segregation of duties: the approver must differ from the report's `employee_user_id` (reuses `approval_chain.check_segregation` → **403**) — the complete author set, because only the owner can compose, edit or submit a report. CFO gate: when `total_amount` exceeds `Organization.settings.expense_approval.cfo_threshold` (default `5000`, Decimal math), only `cfo`/`admin` may approve (else 403, coded `expense_cfo_required` with params `amount` — the report total in the reporting currency, `null` when it could not be expressed — `currency`, `limit` — `null` for a malformed or non-finite threshold — and `report_currency`; the SoD 403 is `approval_segregation`). Stamps `approved_at` + `approved_by` (the approver's user id) and moves child expenses to `approved`. Invalid source status → 422. RBAC `admin`/`ap_manager`/`cfo`. Gates: `expense_controls.report_approve_refusal` (the row's `actions.approve`). Audited `expense_report.approved`. |
 | POST | `/api/expense-reports/{id}/reject` | **(WF3)** `submitted → rejected`. Body `{ reason? }`. Returns each child expense to `draft` so they can be corrected and re-reported (`rejected` is terminal for the report row). Invalid source status → 422. **The report's owner is refused** (403 `expense_report_self_reject`, the same segregation rule as approve under its own sentence) — the decider is never the submitting employee, for reject as for approve; the endpoint used to accept it, so an owner with a manager role could record a review decision on their own claim and unlock its lines, and only the page stopped it. RBAC `admin`/`ap_manager` — deliberately NARROWER than approve, which also allows `cfo`. The frontend used one predicate for both, so a CFO saw no Approve button on exactly the over-threshold reports the CFO gate escalates TO them; the two are now split there as well. Audited `expense_report.rejected`. |
 
@@ -343,9 +347,25 @@ approved `ExpensePreapproval` coverage) from the tenant DB and hands them in:
 - `blocking_violations(violations)` filters to the `BLOCKING_CODES` subset
   (`receipt_required`, `preapproval_required`) — the ones that block submission.
 
-Each violation dict is `{code, message, policy_id?, limit?, actual?, currency?,
-comparison?, expense_currency?, expense_id?}` (advisory, PII-free — amounts and
-ISO codes only). `evaluate_expense` is wired into expense **create**, **PATCH**,
+Each violation dict is `{code, message, params, policy_id?, limit?, actual?,
+currency?, comparison?, expense_currency?, expense_id?}` (PII-free — amounts,
+ISO codes and the expense's own category only).
+
+`params` is what a client states the violation from, in the reader's language
+(decisions §378); `VIOLATION_PARAMS` is the catalogue, and every figure is an
+exact decimal string beside its ISO code, never a float:
+
+| Code | Params |
+|---|---|
+| every code | `amount` + `amount_currency` (the figure compared: converted into `currency` when the comparison resolved, the expense's face amount in its own currency when it fell closed), `limit` + `currency` (the threshold and its unit), `comparison` (`resolved` / `unresolved`) |
+| `category_limit` | + `category` — the expense's category, `null` when it has none |
+| `mileage_amount_mismatch` | + `miles`, `rate` (per mile, in `currency`), `direction` (`over` / `under`; `null` when unresolved) |
+
+`message` stays the server's English sentence and the flat keys stay as they
+were: the web falls back to `message` for a code it predates, a malformed
+param, or a row stored in `expenses.policy_violations` before `params` existed
+(the next write to the line refreshes it). The violation badge's title and the
+submit panel both read through `frontend/src/lib/api/policyViolations.ts`. `evaluate_expense` is wired into expense **create**, **PATCH**,
 and **receipt upload** as a best-effort refresh of `Expense.policy_violations`
 (a policy-engine error never breaks the write).
 
@@ -810,7 +830,14 @@ report aggregation, the blocking-subset filter, and the **currency dimension**:
 100 limit that bare numbers would have flagged, a lock into a third currency not
 reused, the per-threshold fail-closed table above (receipt demanded, receipt
 still clears it, pre-approval cover in the expense currency still satisfies,
-advisory limits flagged not blocking), and a PII-free violation payload.
+advisory limits flagged not blocking), a PII-free violation payload, and the
+coded `params` of every violation code against `VIOLATION_PARAMS` (resolved,
+fell closed, mileage over / under; decisions §378). The two coded submit 422s
+are pinned end to end in `test_expense_approval.py` (policy-blocked) and
+`test_expense_currency.py` (no locked rate); the web half is
+`frontend/src/lib/api/policyViolations.test.ts`, `codedRefusals.test.ts`,
+`expenses.test.ts` and the `de` e2e
+`tests-e2e/i18n/expense-submit-violation-localization.spec.ts`.
 
 `backend/tests/test_expense_preapprovals.py` (WF3, `realdb`) — pre-approval
 create (requester stamped from the caller), list + status filter, manager

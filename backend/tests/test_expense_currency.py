@@ -342,7 +342,17 @@ async def test_submit_blocks_a_legacy_unconverted_line(realdb):
     async with realdb.client(key="a", role="ap_clerk") as c:
         blocked = await c.post(f"/api/expense-reports/{rid}/submit")
     assert blocked.status_code == 422, blocked.text
-    assert eur in blocked.json()["detail"]["expense_ids"]
+    # Coded (decisions §378), with the English `message` and the `expense_ids`
+    # list kept as they were for a client that reads them.
+    assert blocked.json()["detail"] == {
+        "code": "expense_report_lines_unconverted",
+        "message": (
+            "1 expense(s) have no exchange rate locked into the report currency USD and "
+            "cannot be totalled. Re-attach them to lock a rate."
+        ),
+        "params": {"count": 1, "currency": "USD"},
+        "expense_ids": [eur],
+    }
 
 
 async def test_changing_the_report_currency_relocks_every_line(realdb):

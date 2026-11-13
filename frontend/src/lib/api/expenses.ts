@@ -330,7 +330,9 @@ function parseSubmitViolations(body: unknown): { violations: PolicyViolation[]; 
 		const violations = Array.isArray(obj.violations) ? obj.violations : [];
 		// A coded refusal (`expense_report_not_draft` on a report submitted
 		// from another tab) is stated in the reader's language, as the shared
-		// client states every other one (decisions §361).
+		// client states every other one (decisions §361) — and so are the two
+		// list-shaped ones, `expense_report_policy_blocked` and
+		// `expense_report_lines_unconverted`, whose lists are kept (§378).
 		const localized = localizeApiDetail(detail, m);
 		return {
 			violations,

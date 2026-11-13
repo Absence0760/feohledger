@@ -1118,6 +1118,43 @@ describe('the expense report and card reconciliation refusals (decisions §348, 
 		}
 	);
 
+	it.each([
+		['expense_report_policy_blocked', { count: 2 }, 'refusal.expenseReportPolicyBlocked'],
+		[
+			'expense_report_lines_unconverted',
+			{ count: 1, currency: 'eur' },
+			'refusal.expenseReportLinesUnconverted'
+		]
+	] as [string, Record<string, unknown>, MainMessageKey][])(
+		'states submit’s list-shaped 422 %s in every locale (decisions §378)',
+		(code, params, key) => {
+			const values = { count: params.count as number, currency: 'EUR' };
+			for (const [locale, messages] of LOCALES) {
+				const text = codedRefusalText(code, params, translator(messages, locale));
+				expect(text, `${locale} ${code}`).toBe(
+					interpolate((messages as Record<string, string>)[key], values, locale)
+				);
+				expect(text, `${locale} ${code}`).not.toMatch(/[{}#]/);
+				expect(text, `${locale} ${code}`).toContain(String(params.count));
+				if (params.currency) expect(text).toContain('EUR');
+			}
+		}
+	);
+
+	it.each([
+		['expense_report_policy_blocked', {}],
+		['expense_report_policy_blocked', { count: 0 }],
+		['expense_report_policy_blocked', { count: '2' }],
+		['expense_report_lines_unconverted', { count: 1 }],
+		['expense_report_lines_unconverted', { count: 1, currency: 'dollars' }],
+		['expense_report_lines_unconverted', { count: 1.5, currency: 'EUR' }]
+	] as [string, Record<string, unknown>][])(
+		'%s with params %j falls back to the server English',
+		(code, params) => {
+			expect(codedRefusalText(code, params, enT)).toBeNull();
+		}
+	);
+
 	it('reaches the transport from the raw endpoint detail, in the reader’s language', () => {
 		const raw = detail(
 			'card_txn_currency_mismatch',

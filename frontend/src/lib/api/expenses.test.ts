@@ -81,7 +81,63 @@ describe('submitReport states a coded refusal in the reader’s language', () =>
 		if (!result.ok) expect(result.message).toBe('server English');
 	});
 
-	it('still returns the policy-violation list intact', async () => {
+	it('localizes the coded policy-blocked 422 and keeps its coded violation list (§378)', async () => {
+		const violations = [
+			{
+				code: 'receipt_required',
+				message: 'A receipt is required for amounts above 5.00 EUR.',
+				params: {
+					amount: '50.00',
+					amount_currency: 'EUR',
+					limit: '5.00',
+					currency: 'EUR',
+					comparison: 'resolved'
+				},
+				expense_id: 'e1'
+			}
+		];
+		respond(
+			{
+				detail: {
+					code: 'expense_report_policy_blocked',
+					message: 'Report has blocking policy violations and cannot be submitted.',
+					params: { count: 1 },
+					violations
+				}
+			},
+			422
+		);
+		const result = await submitReport('r1');
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.violations).toEqual(violations);
+		expect(result.message).toBe(interpolate(de['refusal.expenseReportPolicyBlocked'], { count: 1 }, 'de'));
+		expect(result.message).not.toContain('blocking policy violations');
+	});
+
+	it('localizes the coded no-locked-rate 422', async () => {
+		respond(
+			{
+				detail: {
+					code: 'expense_report_lines_unconverted',
+					message:
+						'2 expense(s) have no exchange rate locked into the report currency USD and cannot be totalled. Re-attach them to lock a rate.',
+					params: { count: 2, currency: 'USD' },
+					expense_ids: ['e1', 'e2']
+				}
+			},
+			422
+		);
+		const result = await submitReport('r1');
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.violations).toEqual([]);
+		expect(result.message).toBe(
+			interpolate(de['refusal.expenseReportLinesUnconverted'], { count: 2, currency: 'USD' }, 'de')
+		);
+	});
+
+	it('still returns an uncoded (older backend) policy-violation list intact', async () => {
 		const violations = [{ code: 'receipt_required', message: 'Receipt required' }];
 		respond({ detail: { message: 'Report has blocking policy violations', violations } }, 422);
 		const result = await submitReport('r1');

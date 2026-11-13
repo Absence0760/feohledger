@@ -428,6 +428,22 @@ const BUILDERS: Record<string, Builder> = {
 			? null
 			: t('refusal.cardTxnCurrencyMismatch', { transactionCurrency, expenseCurrency });
 	},
+	// Report submit's two list-shaped 422s (decisions §378). The lists ride
+	// beside the coded keys (`violations`, each stated by
+	// `api/policyViolations.ts`, and `expense_ids`); this is the toast's sentence.
+	expense_report_policy_blocked: (p, t) => {
+		const count = p.count;
+		return typeof count === 'number' && Number.isInteger(count) && count > 0
+			? t('refusal.expenseReportPolicyBlocked', { count })
+			: null;
+	},
+	expense_report_lines_unconverted: (p, t) => {
+		const count = p.count;
+		const code = currency(p, 'currency');
+		return typeof count === 'number' && Number.isInteger(count) && count > 0 && code !== null
+			? t('refusal.expenseReportLinesUnconverted', { count, currency: code })
+			: null;
+	},
 	// `services/exception_lifecycle.py` — the SAME codes `/bulk/resolve`
 	// reports per skipped row, so the two doors agree on the names.
 	segregation_raiser: fixed('refusal.exceptionSegregationRaiser'),
