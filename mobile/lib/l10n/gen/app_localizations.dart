@@ -5049,6 +5049,171 @@ abstract class AppLocalizations {
   /// **'This invoice\'s payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment\'s run in Payments.'**
   String get exceptionDescriptionErpSyncBackFailed;
 
+  /// No description provided for @exceptionDescriptionExtractionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Extraction failed: {errorClass}'**
+  String exceptionDescriptionExtractionFailed(String errorClass);
+
+  /// No description provided for @exceptionDescriptionPositivePayAlteredAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Positive Pay return: check {checkNumber} altered amount'**
+  String exceptionDescriptionPositivePayAlteredAmount(String checkNumber);
+
+  /// No description provided for @exceptionDescriptionPositivePayNotOnFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Positive Pay return: check {checkNumber} not on issued file'**
+  String exceptionDescriptionPositivePayNotOnFile(String checkNumber);
+
+  /// No description provided for @exceptionDescriptionVendorBankChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor bank details changed; verify before payment.'**
+  String get exceptionDescriptionVendorBankChanged;
+
+  /// No description provided for @exceptionDescriptionComplianceHoldFindings.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment held for compliance review ({count, plural, one {{count} reason} other {{count} reasons}})'**
+  String exceptionDescriptionComplianceHoldFindings(int count);
+
+  /// No description provided for @exceptionDescriptionComplianceNoScreenableVendor.
+  ///
+  /// In en, this message translates to:
+  /// **'No screenable vendor on the invoice'**
+  String get exceptionDescriptionComplianceNoScreenableVendor;
+
+  /// No description provided for @exceptionDescriptionComplianceProviderUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Sanctions screening could not run: no adapter for the configured provider “{provider}”'**
+  String exceptionDescriptionComplianceProviderUnavailable(String provider);
+
+  /// No description provided for @exceptionDescriptionComplianceReviewRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor screening via {provider} requires review ({matchedList})'**
+  String exceptionDescriptionComplianceReviewRequired(
+    String provider,
+    String matchedList,
+  );
+
+  /// No description provided for @exceptionDescriptionComplianceReviewRequiredUnlisted.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor screening via {provider} requires review (see the screening record)'**
+  String exceptionDescriptionComplianceReviewRequiredUnlisted(String provider);
+
+  /// No description provided for @exceptionDescriptionComplianceUnrecognisedResult.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor screening via {provider} returned an unrecognised result “{result}”; treated as requiring review'**
+  String exceptionDescriptionComplianceUnrecognisedResult(
+    String provider,
+    String result,
+  );
+
+  /// No description provided for @exceptionDescriptionComplianceAdverseMedia.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor screening via {provider} found adverse media (negative news); AP review required'**
+  String exceptionDescriptionComplianceAdverseMedia(String provider);
+
+  /// No description provided for @exceptionDescriptionComplianceAdverseMediaUnnamedProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor screening found adverse media (negative news); AP review required'**
+  String get exceptionDescriptionComplianceAdverseMediaUnnamedProvider;
+
+  /// No description provided for @exceptionDescriptionComplianceAmlSpend.
+  ///
+  /// In en, this message translates to:
+  /// **'Trailing 12-month spend with this vendor would reach {projected} (threshold {threshold}); AP review required'**
+  String exceptionDescriptionComplianceAmlSpend(
+    String projected,
+    String threshold,
+  );
+
+  /// No description provided for @exceptionDescriptionComplianceAmlSpendPartial.
+  ///
+  /// In en, this message translates to:
+  /// **'Trailing 12-month spend with this vendor would reach at least {projected} (threshold {threshold}); AP review required. {excluded, plural, one {{excluded} payment was} other {{excluded} payments were}} left out for having no figure in the home currency, so the real total is higher'**
+  String exceptionDescriptionComplianceAmlSpendPartial(
+    String projected,
+    String threshold,
+    int excluded,
+  );
+
+  /// No description provided for @exceptionDescriptionPaymentAgedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment {paymentId} was still in flight after {hours}h and the reconciler marked it failed; the rail never confirmed, so the money may or may not have moved. The invoice is “{invoiceStatus}”. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.'**
+  String exceptionDescriptionPaymentAgedOut(
+    String paymentId,
+    String hours,
+    String invoiceStatus,
+  );
+
+  /// No description provided for @exceptionDescriptionPaymentDispatchInDoubt.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment {paymentId} failed during dispatch ({failureCode}) after the processor may already have accepted it, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.'**
+  String exceptionDescriptionPaymentDispatchInDoubt(
+    String paymentId,
+    String failureCode,
+  );
+
+  /// No description provided for @exceptionDescriptionPaymentDispatchInterruptedFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment {paymentId} failed, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.'**
+  String exceptionDescriptionPaymentDispatchInterruptedFailed(String paymentId);
+
+  /// No description provided for @exceptionDescriptionPaymentDispatchInterruptedCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment {paymentId} was cancelled, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.'**
+  String exceptionDescriptionPaymentDispatchInterruptedCancelled(
+    String paymentId,
+  );
+
+  /// No description provided for @exceptionDescriptionSettlementCurrencyMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Settlement currency mismatch: the processor reported {settledAmount} {settledCurrency} but this payment authorizes {authorizedAmount} {authorizedCurrency}. Money moved in a currency AP did not authorize — reconcile with the processor before releasing this invoice.'**
+  String exceptionDescriptionSettlementCurrencyMismatch(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+  );
+
+  /// No description provided for @exceptionDescriptionSettlementAmountOver.
+  ///
+  /// In en, this message translates to:
+  /// **'Settlement amount mismatch: the processor reported {settledAmount} {settledCurrency}, MORE than the authorized {authorizedAmount} {authorizedCurrency} (variance {variance}). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.'**
+  String exceptionDescriptionSettlementAmountOver(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  );
+
+  /// No description provided for @exceptionDescriptionSettlementAmountUnder.
+  ///
+  /// In en, this message translates to:
+  /// **'Settlement amount mismatch: the processor reported {settledAmount} {settledCurrency}, LESS than the authorized {authorizedAmount} {authorizedCurrency} (variance {variance}). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.'**
+  String exceptionDescriptionSettlementAmountUnder(
+    String settledAmount,
+    String settledCurrency,
+    String authorizedAmount,
+    String authorizedCurrency,
+    String variance,
+  );
+
   /// No description provided for @warningsPoMatchStatusMatched.
   ///
   /// In en, this message translates to:

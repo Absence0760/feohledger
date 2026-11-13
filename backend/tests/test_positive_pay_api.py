@@ -916,6 +916,148 @@ async def test_altered_cheque_raises_even_when_the_invoice_already_has_a_fraud_f
         await _clear_settings(realdb, org_id)
 
 
+async def test_return_exception_is_keyed_and_dedupes_on_code_with_a_legacy_arm(realdb):
+    """Decisions §358: the return's fraud_flag carries a catalogue code, and the
+    dedupe moved from the English description to code + `checkNumber`.
+
+    The transition is the risk. Rows raised before §358 have no code, only the
+    English the dedupe used to compare; a redelivered return processed after
+    the upgrade must still find them, or every return already in the queue is
+    raised a second time. And a coded row must match on its code, not its
+    English — otherwise the English is still the key.
+    """
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _set_check_account(realdb, org_id)
+    try:
+        vendor_id = await _add_vendor(mk, org_id, name="Keyed Return Co")
+        inv_legacy = await _add_invoice(
+            mk, org_id, vendor_id=vendor_id, invoice_number="INV-PPLEG", amount="700.00"
+        )
+        run_id = await _add_check_run(
+            mk, org_id, invoice_id=inv_legacy, check_number="CHKLEG01", amount="700.00"
+        )
+
+        async def _add_row(invoice_id, *, description, code=None, params=None):
+            async with mk() as s:
+                s.add(
+                    APException(
+                        organization_id=org_id,
+                        entity_id=await _default_entity_id(s),
+                        invoice_id=uuid.UUID(invoice_id) if invoice_id else None,
+                        exception_type="fraud_flag",
+                        severity="error",
+                        status="open",
+                        description=description,
+                        description_code=code,
+                        description_params=params,
+                    )
+                )
+                await s.commit()
+
+        async def _rows():
+            async with mk() as s:
+                return (
+                    (
+                        await s.execute(
+                            select(APException).where(
+                                APException.organization_id == org_id,
+                                APException.exception_type == "fraud_flag",
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+
+        # A pre-§358 row: English only, exactly the sentence the old code wrote.
+        await _add_row(inv_legacy, description="Positive Pay return: check CHKLEG01 altered amount")
+        # A pre-§358 standalone row for a cheque we never issued.
+        await _add_row(None, description="Positive Pay return: check CHKORPH1 not on issued file")
+        # A coded row whose English no longer matches what the template renders
+        # (a reworded template): it must still dedupe, on the code.
+        await _add_row(
+            None,
+            description="(reworded English)",
+            code="exception.positive_pay_not_on_file",
+            params={"checkNumber": "CHKORPH2"},
+        )
+        # A coded row for ANOTHER cheque must not absorb this one.
+        await _add_row(
+            None,
+            description="Positive Pay return: check CHKOTHER not on issued file",
+            code="exception.positive_pay_not_on_file",
+            params={"checkNumber": "CHKOTHER"},
+        )
+        before = len(await _rows())
+
+        async with realdb.client(key="a", role="ap_manager") as c:
+            file_id = (
+                await c.post(f"/api/positive-pay/payment-runs/{run_id}/check-issue", json={})
+            ).json()["id"]
+            resp = await c.post(
+                f"/api/positive-pay/{file_id}/process-return",
+                json={
+                    "presented_items": [
+                        {"check_number": "CHKLEG01", "amount": "9700.00"},  # legacy row
+                        {"check_number": "CHKORPH1", "amount": "50.00"},  # legacy row
+                        {"check_number": "CHKORPH2", "amount": "60.00"},  # coded row
+                        {"check_number": "CHKNEW01", "amount": "70.00"},  # nothing yet
+                    ]
+                },
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["amount_mismatches"] == 1
+        assert body["not_on_file"] == 3
+        # Only the cheque with no prior row raised anything.
+        assert body["exceptions_created"] == 1
+
+        rows = await _rows()
+        assert len(rows) == before + 1
+        (new,) = [r for r in rows if r.description_params == {"checkNumber": "CHKNEW01"}]
+        assert new.description_code == "exception.positive_pay_not_on_file"
+        assert new.description == "Positive Pay return: check CHKNEW01 not on issued file"
+        assert new.invoice_id is None
+
+        # A legacy row for the same cheque but the OTHER verdict does not
+        # absorb an altered-amount return: the verdict is part of the key.
+        inv_other = await _add_invoice(
+            mk, org_id, vendor_id=vendor_id, invoice_number="INV-PPVERD", amount="800.00"
+        )
+        run2 = await _add_check_run(
+            mk, org_id, invoice_id=inv_other, check_number="CHKVERD1", amount="800.00"
+        )
+        await _add_row(
+            inv_other, description="Positive Pay return: check CHKVERD1 not on issued file"
+        )
+        async with realdb.client(key="a", role="ap_manager") as c:
+            file2 = (
+                await c.post(f"/api/positive-pay/payment-runs/{run2}/check-issue", json={})
+            ).json()["id"]
+            resp2 = await c.post(
+                f"/api/positive-pay/{file2}/process-return",
+                json={"presented_items": [{"check_number": "CHKVERD1", "amount": "8800.00"}]},
+            )
+            assert resp2.json()["exceptions_created"] == 1
+            # ...and the coded row it raised dedupes the redelivery.
+            again = await c.post(
+                f"/api/positive-pay/{file2}/process-return",
+                json={"presented_items": [{"check_number": "CHKVERD1", "amount": "8800.00"}]},
+            )
+        assert again.json()["exceptions_created"] == 0
+        coded = [
+            r
+            for r in await _rows()
+            if r.description_code == "exception.positive_pay_altered_amount"
+            and r.description_params == {"checkNumber": "CHKVERD1"}
+        ]
+        assert len(coded) == 1
+        assert str(coded[0].invoice_id) == inv_other
+    finally:
+        await _clear_settings(realdb, org_id)
+
+
 async def test_process_return_classifies_against_persisted_snapshot_not_live_status(realdb):
     """Issue #178: a cheque issued (and appears on the file sent to the bank),
     then later VOIDED in the app, must still classify against what the bank

@@ -16540,3 +16540,59 @@ push and closing: a payment outside `LIVE_PAYMENT_TERMINAL_STATUSES`, a card not
   moved, so it is done". A completed payment is what `paid → done` is for; an
   `approved` invoice holding one is out of step already, and closing it hides
   that. The rail's own exits apply, as §309 says for the push.
+
+## 358. The direct `create_exception` callers are keyed too, and Positive Pay de-duplicates on the code (2026-11-13)
+
+**Context.** §240 keyed every `_ensure_exception` finding and §319 the ERP
+reconciliation rows, but six sites still opened an exception through
+`exception_service.create_exception` with composed English and no
+`description_code`: extraction failure, Positive Pay returns, the bank-change
+flag, compliance holds, the reconciler / in-doubt dispatch flag and settlement
+discrepancies. The queue rendered them in server English beside localized rows.
+
+**Decision.** Each sentence is an `exception.*` catalogue code
+(`invoice_warning_catalog.DIRECT_EXCEPTION_SPECS`), built by `exception_finding`
+and passed as `description` / `description_code` / `description_params`; the
+generator covers both clients.
+
+- **`extraction_failed` carries the exception class only.** `str(exc)` used to be
+  stored (truncated to 500 characters). A provider or parser error can quote the
+  document it failed on, so the message stays on the worker's log and audit
+  detail and never reaches the row every AP user reads.
+- **A compliance hold lists its reasons as findings under an always-present
+  frame.** `ComplianceDecision` gains `findings` beside `reasons` (same order,
+  same English), filled by every reason that can produce a `hold`; the
+  exception is `exception_findings("compliance_hold_findings", …,
+  frame_single=True)`. Each reason is a lower-case clause written to follow
+  "compliance_hold: ", so a lone reason is not a description by itself.
+  `failure_reason` is unchanged in shape. Refusal-only reasons stay uncoded:
+  no exception is opened for a refusal.
+- **A word picks the code, never a param** (§157's rule): MORE / LESS for a
+  settlement variance, `failed` / `cancelled` for an interrupted dispatch, a
+  screening result with or without a list name, adverse media with or without a
+  provider name, the AML alert with or without excluded payments.
+- **Settlement figures are `number`s beside `text` currency codes**, because a
+  currency mismatch has two currencies and one `currency` param labels one side
+  (§197).
+- **Positive Pay's dedupe moves to code + `checkNumber`, with a legacy arm.** A
+  coded open row matches on `description_code` and
+  `description_params->>'checkNumber'`; an uncoded row (raised before this)
+  matches on `description`. The new English fallback is byte-identical to the
+  old description, so the legacy arm catches every row already in the queue
+  and a redelivered return file re-raises nothing.
+- **A guard keeps it that way.** `tests/test_invoice_warning_catalog.py` fails
+  on any `create_exception` call under `app/` that passes no
+  `description_code`, except `services/review.py`'s rejection, whose
+  description is the reviewer's own words.
+
+**Rejected.**
+- *Backfilling codes onto old rows* by parsing their English: the scraping the
+  catalogue exists to retire (§240's reasoning). The legacy dedupe arm is a
+  comparison against a sentence we wrote, not a parse.
+- *Dropping the legacy arm and matching on code alone*: every return already in
+  the queue would be raised again on the first redelivery after deploy.
+- *Matching coded rows on `description` too*: it would keep the English as the
+  key, and a reworded template would then silently stop de-duplicating.
+- *Keeping the payment id out of the reconciliation sentences* (moving it to
+  machine detail as the ERP rows did): `erp_report` is ERP data, and the id is
+  the only thing that tells the reader which of an invoice's payments to chase.

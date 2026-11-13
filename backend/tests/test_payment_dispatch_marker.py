@@ -398,6 +398,18 @@ async def test_dismissing_a_stamped_hold_blocks_a_new_run(realdb):
         )
         assert resp.status_code == 200, resp.text
         assert await _open_reconciliation_flags(realdb, invoice_id) == 1
+        # Keyed (decisions §358); the dismissed payment's status picks the code.
+        async with realdb.sessionmaker("a")() as s:
+            flag = (
+                await s.execute(
+                    select(APException).where(
+                        APException.invoice_id == uuid.UUID(invoice_id),
+                        APException.exception_type == "payment_reconciliation",
+                    )
+                )
+            ).scalar_one()
+        assert flag.description_code == "exception.payment_dispatch_interrupted_failed"
+        assert flag.description_params == {"paymentId": str(payment_id)}
         rerun = await c.post(
             "/api/payments/runs", json={"items": [{"invoice_id": invoice_id, "method": "ach"}]}
         )

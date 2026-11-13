@@ -692,3 +692,39 @@ async def test_run_reconciler_loop_failure_logs_exception_class_not_message(capl
         assert record.exc_info is None
         assert not record.exc_text
     assert any("RuntimeError" in r.getMessage() for r in errors)
+
+
+@pytest.mark.asyncio
+async def test_the_aged_out_flag_is_a_catalogue_finding():
+    """Decisions §358: the reconciliation exception carries a code, with the
+    payment id, the age and the invoice's status as params, so the queue
+    reads it in the reviewer's language."""
+    from app.models.invoice import InvoiceStatus
+    from app.services.payment_reconciler import _flag_aged_out_payment
+
+    payment = SimpleNamespace(id=uuid.uuid4(), invoice_id=uuid.uuid4())
+    invoice = SimpleNamespace(id=payment.invoice_id, status=InvoiceStatus.approved, entity_id=None)
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=invoice)
+    none_open = MagicMock()
+    none_open.scalar = MagicMock(return_value=0)
+    db.execute = AsyncMock(return_value=none_open)
+    raised = AsyncMock()
+
+    with patch("app.services.exception_service.create_exception", raised):
+        await _flag_aged_out_payment(
+            db,
+            org=SimpleNamespace(id=uuid.uuid4()),
+            payment=payment,
+            age=timedelta(hours=49, minutes=30),
+        )
+
+    kw = raised.await_args.kwargs
+    assert kw["exception_type"] == "payment_reconciliation"
+    assert kw["description_code"] == "exception.payment_aged_out"
+    assert kw["description_params"] == {
+        "paymentId": str(payment.id),
+        "hours": "49.5",
+        "invoiceStatus": "approved",
+    }
+    assert kw["description"].startswith(f"Payment {payment.id} was still in flight after 49.5h")

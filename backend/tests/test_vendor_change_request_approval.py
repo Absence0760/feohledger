@@ -569,6 +569,9 @@ async def test_bank_change_approval_flags_payable_invoices(realdb):
         )
         assert len(payable_flags) == 1
         assert "bank details" in (payable_flags[0].description or "").lower()
+        # Keyed (decisions §358), so the queue reads it in the reviewer's language.
+        assert payable_flags[0].description_code == "exception.vendor_bank_changed"
+        assert payable_flags[0].description_params == {}
         # The in-review invoice (not in the payment queue) is NOT flagged.
         review_flags = (
             (

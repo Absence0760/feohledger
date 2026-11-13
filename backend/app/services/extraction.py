@@ -1243,12 +1243,20 @@ async def run_extraction(
 
         # Create exception record (shared chokepoint → emits `exception.raised`)
         from app.services.exception_service import create_exception
+        from app.services.invoice_warning_catalog import exception_finding
 
+        # The exception CLASS, never `str(exc)`: a provider or parser error's
+        # message can quote the document it choked on (a vendor's bank line, a
+        # tax id), and this row is what every AP user reads in the exception
+        # queue (decisions §358).
+        failed = exception_finding("extraction_failed", errorClass=type(exc).__name__)
         await create_exception(
             db,
             exception_type="extraction_failed",
             severity="error",
-            description=f"Extraction failed: {str(exc)[:500]}",
+            description=failed["message"],
+            description_code=failed["code"],
+            description_params=failed["params"],
             status="open",
             organization_id=invoice_org_id,
             invoice=invoice,  # exception follows its invoice (P2)

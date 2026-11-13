@@ -466,3 +466,43 @@ async def test_token_columns_round_trip_through_the_tenant_session(realdb):
             select(ExtractionUsage).where(ExtractionUsage.invoice_id == invoice_id)
         )
     assert (row.input_tokens, row.output_tokens, row.model) == (2400, 850, "claude-sonnet-5-5")
+
+
+@pytest.mark.asyncio
+async def test_the_failure_exception_is_keyed_and_never_stores_the_error_text():
+    """Decisions §358: the `extraction_failed` exception carries a catalogue
+    code with the exception CLASS as its one param. `str(exc)` used to be the
+    description; a provider or parser error can quote the document it choked
+    on, and this row is what every AP user reads in the queue."""
+    from app.services.extraction import run_extraction
+
+    invoice = _make_invoice()
+    re_fetched = _make_invoice()
+    re_fetched.id = invoice.id
+    re_fetched.organization_id = invoice.organization_id
+    db = _make_db(re_fetch_invoice=re_fetched)
+    leaked = "could not parse line: IBAN DE89370400440532013000"
+    raised = AsyncMock()
+
+    with _patch_extraction_internals(_successful_extraction_result()) as stack:
+        exploding_adapter = MagicMock()
+        exploding_adapter.provider_name = "mock"
+        exploding_adapter.extract = AsyncMock(side_effect=ValueError(leaked))
+        stack.enter_context(
+            patch(
+                "app.services.extraction_adapters.get_extraction_adapter",
+                return_value=exploding_adapter,
+            )
+        )
+        stack.enter_context(patch("app.services.exception_service.create_exception", raised))
+        await run_extraction(db, invoice)
+
+    (call,) = [
+        c for c in raised.await_args_list if c.kwargs["exception_type"] == "extraction_failed"
+    ]
+    kw = call.kwargs
+    assert kw["description_code"] == "exception.extraction_failed"
+    assert kw["description_params"] == {"errorClass": "ValueError"}
+    assert kw["description"] == "Extraction failed: ValueError"
+    for value in (kw["description"], str(kw["description_params"])):
+        assert "DE89" not in value and "parse line" not in value

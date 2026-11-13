@@ -2399,6 +2399,210 @@
   },
   "exceptionDescriptionErpPaymentVoidWritebackFailedUnnamed": "Your ERP still shows this bill paid by a payment that was voided in FeohLedger, because voiding it in the ERP failed. Void that payment in the ERP so the books agree.",
   "exceptionDescriptionErpSyncBackFailed": "This invoice's payment settled, but FeohLedger could not finish recording it, so the invoice has not moved to Paid although the money has gone. Nothing retries this automatically: use Retry ERP sync on the payment's run in Payments.",
+  "exceptionDescriptionExtractionFailed": "Extraction failed: {errorClass}",
+  "@exceptionDescriptionExtractionFailed": {
+    "placeholders": {
+      "errorClass": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPositivePayAlteredAmount": "Positive Pay return: check {checkNumber} altered amount",
+  "@exceptionDescriptionPositivePayAlteredAmount": {
+    "placeholders": {
+      "checkNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPositivePayNotOnFile": "Positive Pay return: check {checkNumber} not on issued file",
+  "@exceptionDescriptionPositivePayNotOnFile": {
+    "placeholders": {
+      "checkNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionVendorBankChanged": "Vendor bank details changed; verify before payment.",
+  "exceptionDescriptionComplianceHoldFindings": "Payment held for compliance review ({count, plural, one {{count} reason} other {{count} reasons}})",
+  "@exceptionDescriptionComplianceHoldFindings": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceNoScreenableVendor": "No screenable vendor on the invoice",
+  "exceptionDescriptionComplianceProviderUnavailable": "Sanctions screening could not run: no adapter for the configured provider “{provider}”",
+  "@exceptionDescriptionComplianceProviderUnavailable": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceReviewRequired": "Vendor screening via {provider} requires review ({matchedList})",
+  "@exceptionDescriptionComplianceReviewRequired": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      },
+      "matchedList": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceReviewRequiredUnlisted": "Vendor screening via {provider} requires review (see the screening record)",
+  "@exceptionDescriptionComplianceReviewRequiredUnlisted": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceUnrecognisedResult": "Vendor screening via {provider} returned an unrecognised result “{result}”; treated as requiring review",
+  "@exceptionDescriptionComplianceUnrecognisedResult": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      },
+      "result": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceAdverseMedia": "Vendor screening via {provider} found adverse media (negative news); AP review required",
+  "@exceptionDescriptionComplianceAdverseMedia": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceAdverseMediaUnnamedProvider": "Vendor screening found adverse media (negative news); AP review required",
+  "exceptionDescriptionComplianceAmlSpend": "Trailing 12-month spend with this vendor would reach {projected} (threshold {threshold}); AP review required",
+  "@exceptionDescriptionComplianceAmlSpend": {
+    "placeholders": {
+      "projected": {
+        "type": "String"
+      },
+      "threshold": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionComplianceAmlSpendPartial": "Trailing 12-month spend with this vendor would reach at least {projected} (threshold {threshold}); AP review required. {excluded, plural, one {{excluded} payment was} other {{excluded} payments were}} left out for having no figure in the home currency, so the real total is higher",
+  "@exceptionDescriptionComplianceAmlSpendPartial": {
+    "placeholders": {
+      "projected": {
+        "type": "String"
+      },
+      "threshold": {
+        "type": "String"
+      },
+      "excluded": {
+        "type": "int"
+      }
+    }
+  },
+  "exceptionDescriptionPaymentAgedOut": "Payment {paymentId} was still in flight after {hours}h and the reconciler marked it failed; the rail never confirmed, so the money may or may not have moved. The invoice is “{invoiceStatus}”. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.",
+  "@exceptionDescriptionPaymentAgedOut": {
+    "placeholders": {
+      "paymentId": {
+        "type": "String"
+      },
+      "hours": {
+        "type": "String"
+      },
+      "invoiceStatus": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPaymentDispatchInDoubt": "Payment {paymentId} failed during dispatch ({failureCode}) after the processor may already have accepted it, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.",
+  "@exceptionDescriptionPaymentDispatchInDoubt": {
+    "placeholders": {
+      "paymentId": {
+        "type": "String"
+      },
+      "failureCode": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPaymentDispatchInterruptedFailed": "Payment {paymentId} failed, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.",
+  "@exceptionDescriptionPaymentDispatchInterruptedFailed": {
+    "placeholders": {
+      "paymentId": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionPaymentDispatchInterruptedCancelled": "Payment {paymentId} was cancelled, but an earlier attempt to send it was interrupted after it may already have reached the processor, so the money may or may not have moved. Confirm with the processor and void or re-pay — this invoice is blocked from a new payment run until this is resolved.",
+  "@exceptionDescriptionPaymentDispatchInterruptedCancelled": {
+    "placeholders": {
+      "paymentId": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionSettlementCurrencyMismatch": "Settlement currency mismatch: the processor reported {settledAmount} {settledCurrency} but this payment authorizes {authorizedAmount} {authorizedCurrency}. Money moved in a currency AP did not authorize — reconcile with the processor before releasing this invoice.",
+  "@exceptionDescriptionSettlementCurrencyMismatch": {
+    "placeholders": {
+      "settledAmount": {
+        "type": "String"
+      },
+      "settledCurrency": {
+        "type": "String"
+      },
+      "authorizedAmount": {
+        "type": "String"
+      },
+      "authorizedCurrency": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionSettlementAmountOver": "Settlement amount mismatch: the processor reported {settledAmount} {settledCurrency}, MORE than the authorized {authorizedAmount} {authorizedCurrency} (variance {variance}). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.",
+  "@exceptionDescriptionSettlementAmountOver": {
+    "placeholders": {
+      "settledAmount": {
+        "type": "String"
+      },
+      "settledCurrency": {
+        "type": "String"
+      },
+      "authorizedAmount": {
+        "type": "String"
+      },
+      "authorizedCurrency": {
+        "type": "String"
+      },
+      "variance": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionDescriptionSettlementAmountUnder": "Settlement amount mismatch: the processor reported {settledAmount} {settledCurrency}, LESS than the authorized {authorizedAmount} {authorizedCurrency} (variance {variance}). Money moved at an amount AP did not authorize — reconcile with the processor before releasing this invoice.",
+  "@exceptionDescriptionSettlementAmountUnder": {
+    "placeholders": {
+      "settledAmount": {
+        "type": "String"
+      },
+      "settledCurrency": {
+        "type": "String"
+      },
+      "authorizedAmount": {
+        "type": "String"
+      },
+      "authorizedCurrency": {
+        "type": "String"
+      },
+      "variance": {
+        "type": "String"
+      }
+    }
+  },
   "warningsPoMatchStatusMatched": "Matched",
   "warningsPoMatchStatusMismatch": "Mismatch",
   "warningsPoMatchStatusPartial": "Partial",
