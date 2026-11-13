@@ -90,10 +90,17 @@ def test_not_raised_by_refresh_really_is_not():
 # --------------------------------------------------------------------------- #
 
 
+# Fixed ids: two `_inv()` calls must describe the same invoice unless a test
+# overrides a field, or every fingerprint comparison would differ by chance.
+_INV_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
+_VENDOR_ID = uuid.UUID("00000000-0000-4000-8000-000000000002")
+_ENTITY_ID = uuid.UUID("00000000-0000-4000-8000-000000000003")
+
+
 def _inv(**overrides):
     base = dict(
-        id=uuid.uuid4(),
-        vendor_id=uuid.uuid4(),
+        id=_INV_ID,
+        vendor_id=_VENDOR_ID,
         vendor_name="Acme",
         invoice_number="INV-1",
         amount=Decimal("1037.00"),
@@ -108,7 +115,7 @@ def _inv(**overrides):
         description=None,
         payment_method=None,
         po_number="PO-1",
-        entity_id=uuid.uuid4(),
+        entity_id=_ENTITY_ID,
         gl_account="6000",
         contract_id=None,
         po_match={"status": "mismatch", "po_total": 1000.0, "details": {"variance": 37.0}},
@@ -209,7 +216,7 @@ def test_vendor_fingerprint_reads_the_vendor_only():
     assert vendor_fingerprint(_inv(vendor_id=inv.vendor_id, amount=Decimal("1"))) == (
         vendor_fingerprint(inv)
     )
-    assert vendor_fingerprint(_inv()) != vendor_fingerprint(inv)
+    assert vendor_fingerprint(_inv(vendor_id=uuid.uuid4())) != vendor_fingerprint(inv)
 
 
 # --------------------------------------------------------------------------- #
