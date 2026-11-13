@@ -78,6 +78,19 @@ records). Per subject type:
   `virtual_cards` (the row stores `last_four` only; no PAN is ever persisted),
   `chat_messages`, `documents`, and `counts`.
 
+Beside `data`, the response carries **`record_counts`**: a typed
+`{section: count}` map over the sections a subject type has, from
+`privacy_export.bundle_record_counts` (a list counts its length; a capped
+collection or the document manifest counts its true `total`, so a truncated
+section still reports what is held). The counted sections are
+`privacy_export.DSAR_COUNTED_SECTIONS`; `/admin/privacy` lists them in the
+reader's language as the export's summary, so it never walks the bundle or
+quotes server prose (`docs/decisions.md` §360). A new list-shaped section must
+join that tuple — `tests/test_privacy.py` fails per subject type when one is
+missing — and gain a label in `frontend/src/lib/types/privacy.ts`, whose test
+reads the tuple. The persisted history row's `record_counts` is unchanged (the
+vendor bundle's `counts`).
+
 The collections that can grow without bound for one subject — `audit_events`,
 `notifications`, `expense_reports`, `expenses`, `chat_messages`, `contracts`
 and `virtual_cards` — are wrapped as `{ total, returned, truncated, items }` and

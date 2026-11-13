@@ -109,6 +109,48 @@ def _capped(rows: list, total: int) -> dict:
     }
 
 
+#: The bundle sections counted into the response's typed ``record_counts``.
+#: The admin page builds its "what this bundle holds" summary from these, in
+#: the reader's language, rather than from anything the server wrote in prose
+#: (docs/decisions.md §360). A new list-shaped section must be added here —
+#: ``tests/test_privacy_record_counts.py`` fails on one that is not — and the
+#: frontend label map (``frontend/src/lib/types/privacy.ts``) reads this tuple.
+DSAR_COUNTED_SECTIONS: tuple[str, ...] = (
+    "roles",
+    "push_devices",
+    "passkeys",
+    "audit_events",
+    "notifications",
+    "expense_reports",
+    "expenses",
+    "related_invoices",
+    "related_payments",
+    "portal_users",
+    "contracts",
+    "virtual_cards",
+    "chat_messages",
+    "documents",
+)
+
+
+def bundle_record_counts(bundle: dict) -> dict[str, int]:
+    """How many records each counted section of a DSAR bundle holds.
+
+    A list counts its length; a capped collection or the document manifest
+    counts its true ``total`` (not the returned page, so a truncated section
+    still reports what is held). Sections a subject type does not have are
+    absent rather than zero.
+    """
+    counts: dict[str, int] = {}
+    for section in DSAR_COUNTED_SECTIONS:
+        value = bundle.get(section)
+        if isinstance(value, list):
+            counts[section] = len(value)
+        elif isinstance(value, dict) and isinstance(value.get("total"), int):
+            counts[section] = value["total"]
+    return counts
+
+
 def _jsonable(value: Any) -> Any:
     """Coerce a column value to something JSON-serialisable.
 

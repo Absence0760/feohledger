@@ -38,6 +38,7 @@ from app.models.vendor import Vendor
 from app.models.vendor_user import VendorUser
 from app.models.workflow import AuditLog
 from app.utils.passwords import pwd_context
+from tests.test_privacy_record_counts import counted_sections_of
 
 # ---------------------------------------------------------------------------
 # Helpers — seed a vendor (+ portal user, invoice, payment) in a tenant.
@@ -104,6 +105,23 @@ async def _seed_vendor_with_records(tenant_mk, org_id, *, with_portal=True):
     return vendor_id, vendor_user_id, invoice_id
 
 
+def _assert_record_counts_cover(body: dict) -> None:
+    """``record_counts`` names every countable section of the bundle, exactly.
+
+    A section a builder gains without joining ``DSAR_COUNTED_SECTIONS`` would
+    be missing from the admin page's summary; this is where that fails.
+    """
+    from app.services.privacy_export import DSAR_COUNTED_SECTIONS
+
+    data = body["data"]
+    sections = counted_sections_of(data)
+    assert sections <= set(DSAR_COUNTED_SECTIONS), sections - set(DSAR_COUNTED_SECTIONS)
+    assert set(body["record_counts"]) == sections
+    for key, count in body["record_counts"].items():
+        value = data[key]
+        assert count == (len(value) if isinstance(value, list) else value["total"])
+
+
 # ---------------------------------------------------------------------------
 # DSAR export
 # ---------------------------------------------------------------------------
@@ -139,6 +157,9 @@ async def test_dsar_user_bundle(realdb):
     assert body["data"]["profile"]["email"] == realdb.email("a")
     assert "admin" in body["data"]["roles"]
     assert body["data"]["activity"]["audit_actions_authored"] >= 1
+    _assert_record_counts_cover(body)
+    assert body["record_counts"]["audit_events"] >= 1
+    assert body["record_counts"]["roles"] >= 1
 
 
 async def test_dsar_user_bundle_includes_device_registrations_and_locale(realdb):
@@ -216,6 +237,9 @@ async def test_dsar_vendor_contact_bundle(realdb):
     assert data["related_invoices"][0]["amount"] == "4200.50"  # Decimal-as-string
     assert len(data["related_payments"]) == 1
     assert data["counts"]["portal_users"] == 1
+    _assert_record_counts_cover(resp.json())
+    assert resp.json()["record_counts"]["related_invoices"] == 1
+    assert resp.json()["record_counts"]["portal_users"] == 1
 
 
 async def test_dsar_records_request_and_audits(realdb):
@@ -279,6 +303,7 @@ async def test_dsar_vendor_user_bundle(realdb):
     assert body["subject_id"] == str(vendor_user_id)
     assert body["data"]["profile"]["email"] == "portal@acmesupplies.test"
     assert body["data"]["profile"]["full_name"] == "Portal Person"
+    _assert_record_counts_cover(body)
 
 
 async def test_dsar_unknown_subject_404(realdb):
