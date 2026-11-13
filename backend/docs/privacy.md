@@ -9,7 +9,9 @@ Two coupled data-subject rights, implemented together under the admin-only
   irreversibly redact a subject's PII **while preserving the immutable financial
   + audit record**.
 
-Both are synchronous, admin-gated, and audited. Source:
+Both are admin-gated and audited. The export answers inline with each large
+section capped, and serves the complete, uncapped bundle as a separate streamed
+download (below). Source:
 `app/api/privacy.py`, `app/services/privacy_export.py`,
 `app/services/privacy_erasure.py`, `app/services/privacy_documents.py`,
 `app/utils/bank_masking.py`, `app/schemas/privacy.py`,
@@ -38,7 +40,7 @@ duplicate email).
 
 ## Endpoints
 
-All three routes are `require_roles(ROLE_ADMIN)` — the privacy-officer
+All four routes are `require_roles(ROLE_ADMIN)` — the privacy-officer
 privilege.
 
 ### `POST /api/privacy/dsar`
@@ -55,7 +57,11 @@ Resolves the subject (org/tenant-scoped), assembles the bundle, records a
   "subject_type": "vendor_contact",
   "subject_id": "...",
   "generated_at": "2026-06-19T...",
-  "data": { /* the portable bundle — see below */ }
+  "data": { /* the portable bundle — see below */ },
+  "record_counts": { "related_invoices": 1325, /* ... */ },
+  "complete": false,                        // a section below was cut
+  "truncated_sections": ["related_invoices", "related_payments"],
+  "full_bundle_url": "/api/privacy/dsar/<request_id>/bundle"
 }
 ```
 
@@ -92,19 +98,32 @@ reads the tuple. The persisted history row's `record_counts` is unchanged (the
 vendor bundle's `counts`).
 
 The collections that can grow without bound for one subject — `audit_events`,
-`notifications`, `expense_reports`, `expenses`, `chat_messages`, `contracts`
-and `virtual_cards` — are wrapped as `{ total, returned, truncated, items }` and
-capped at `privacy_export.MAX_EXPORT_ROWS` (1000) per collection. An export is a
-synchronous HTTP response; a user with three years of audit rows would otherwise
-build an unbounded JSON document in memory on the event loop. A truncated
-collection says so and reports its true total rather than silently shortening,
-and the vendor bundle's `counts` carry the true totals too. (Until 2026-10-05
-`expenses`, `contracts` and `virtual_cards` were limited WITHOUT the wrapper — a
-short list that claimed to be complete, with `counts` reporting the truncated
-length; `tests/test_privacy.py::test_dsar_every_limited_collection_reports_its_truncation`
-pins the fix.) The rest are plain lists returned in full: a vendor's
-`related_invoices`, `related_payments` and `portal_users`, a user's `passkeys`
-and `push_devices`, and the `documents` manifest.
+`notifications`, `expense_reports`, `expenses`, `chat_messages`, `contracts`,
+`virtual_cards`, a vendor's `related_invoices` and `related_payments`, and the
+`documents` manifest's listing — are wrapped as `{ total, returned, truncated,
+items }` (the manifest keeps its own shape and gains `returned` / `truncated`)
+and capped at `privacy_export.MAX_EXPORT_ROWS` (1000) per collection **in this
+response**. It is built whole in memory on the event loop, so it has to be
+bounded. A truncated collection says so and reports its true total, the vendor
+bundle's `counts` carry the true totals, and the response says it as a whole:
+`complete: false`, with `truncated_sections` naming each cut section. The small,
+naturally-bounded lists are returned whole: a user's `roles`, `passkeys` and
+`push_devices`, a vendor's `portal_users`. **Shape change (2026-11-13):**
+`related_invoices` and `related_payments` were plain arrays before §369 and are
+now capped objects; a consumer that read them as arrays reads `.items`.
+
+The cut is never the end of the answer — GDPR Art. 15 owes the subject every
+row. Every capped section is declared once in `privacy_export` as a `_Section`
+(a column select plus its serialiser), and the same declaration feeds the
+capped reader here and the streamed one below, so the preview and the complete
+bundle cannot disagree about what a section holds (`docs/decisions.md` §369).
+(Until 2026-11-13 a vendor's invoices and payments were returned whole in this
+response, unbounded; until 2026-10-05 `expenses`, `contracts` and
+`virtual_cards` were limited WITHOUT the wrapper. Guards:
+`tests/test_privacy_full_bundle.py`,
+`tests/test_privacy.py::test_dsar_every_limited_collection_reports_its_truncation`.)
+A user's `expenses` are every line on every one of their reports, joined — not
+only the lines of the reports this response happened to return.
 
 #### Banking data in a DSAR bundle
 
@@ -179,6 +198,40 @@ is refused too. The
 only to a caller holding the permission. Guards:
 `tests/test_privacy_unmasked_step_up.py`,
 `frontend/tests-e2e/admin/privacy-unmasked-step-up.spec.ts`.
+
+### `GET /api/privacy/dsar/{request_id}/bundle`
+
+The complete bundle for an export already requested: the same document as the
+`POST` response (envelope, `data`, `record_counts`), with `complete: true` and
+every section uncapped (`total == returned`, `truncated: false`). Served as a
+JSON attachment (`dsar-<request_id>.json`, `Cache-Control: no-store`); the
+`/admin/privacy` result offers it as **Download complete bundle**, prominently
+when the inline view was cut. Read at download time, so it reflects the
+records as they stand then; `generated_at` says when.
+
+- **Admin only**, like every privacy route. `request_id` must be a
+  `dsar_export` request of this org; an erasure's id, another tenant's id, or
+  one that names nothing is the same opaque 404.
+- **Always masked.** The `vendor` record is the only section carrying banking
+  data and it is never capped, so the `POST` response — where an unmasked
+  disclosure answers to its permission, justification, step-up and own audit
+  row — already holds it whole. The download unlocks nothing that gate guards.
+- **Streamed, never stored.** `privacy_export.stream_full_dsar_bundle` reads
+  each section off a server-side cursor (`yield_per=STREAM_CHUNK_ROWS`, 500)
+  and renders it in chunks into an anonymous `SpooledTemporaryFile`
+  (`app/utils/spooled_export.py`, shared with the SOX audit export): 1 MB in
+  memory, the rest on disk, writes off the event loop. Nothing goes to object
+  storage — a stored bundle would be a full copy of the subject's PII in a
+  bucket under Object Lock, which a later erasure could not remove
+  (`docs/decisions.md` §369).
+- **Audited per download, after rendering.** The whole body is rendered first,
+  then `privacy.dsar_export.full_bundle` is committed (subject UUID + type,
+  `banking_disclosure: "masked"`, the PII-free `record_counts`), then both
+  sessions are released and the bytes start. A database error while rendering
+  is a clean 500 with no audit row and no data sent; no byte leaves without its
+  row. The closing braces are emitted last, so an aborted transfer never parses
+  as a complete bundle. The routine `privacy.dsar_export` row also records
+  `complete` and `truncated_sections` (section names only).
 
 ### `POST /api/privacy/erasure`
 
@@ -330,7 +383,8 @@ the erasure service touches no `Numeric`/`Decimal` column.
 ## Audit trail
 
 Both operations write a **new** append-only audit row through `dispatch_audit`
-(`privacy.dsar_export` / `privacy.erasure`). Erasure **never** updates or deletes
+(`privacy.dsar_export` / `privacy.erasure`), and every download of a complete
+bundle writes its own `privacy.dsar_export.full_bundle`. Erasure **never** updates or deletes
 an existing `audit_log` row — it respects the migration-0022 immutability
 trigger (which rejects every DELETE and every UPDATE touching a column other than
 `shipped_at`). The financial/audit history of an erased subject's transactions
@@ -339,7 +393,8 @@ therefore survives erasure intact.
 The audit `details` and the persisted `DataSubjectRequest` row are **PII-free**:
 they carry only the resolved subject UUID + type + non-identifying counts —
 never the email / tax-id / bank details that the DSAR *bundle* itself contains.
-The bundle is returned in the HTTP response and is never logged or stored.
+The bundle is returned in the HTTP response (or the streamed download, through
+an anonymous temp file closed with the response) and is never logged or stored.
 
 ## Tenant isolation
 
@@ -383,6 +438,13 @@ credential material; erasure redacts every PII field; erasure leaves
 Invoice/Payment money fields **and** the append-only `audit_log` untouched;
 erasure deletes passkey rows and calls the existing session revocation; erasure
 idempotency; non-admin 403; and tenant isolation for both export and erasure.
+
+`backend/tests/test_privacy_full_bundle.py`: a vendor past the real cap gets
+every invoice and payment through the download; the cap contract (each cut
+section named, the download the same shape with `total == returned`); the
+download is masked, audited once per retrieval and PII-free; admin-only,
+tenant-scoped, a DSAR export's id only; and the renderer itself streams through
+a cursor in bounded chunks and never parses when cut short.
 
 `backend/tests/test_privacy_documents.py`: the masking reducers (including that
 an unknown key fails **closed**), the retain-vs-delete split asserted key by key,

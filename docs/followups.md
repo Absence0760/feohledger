@@ -1145,19 +1145,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to any of those messages, or the first
       non-English tenant running payment runs.
 
-- [ ] **(c) The DSAR export returns a vendor's invoices and payments uncapped.**
-      §237's truncation fix wrapped every `.limit()` collection in `_capped`, but
-      `services/privacy_export` returns a vendor subject's own invoices and payments
-      (and its portal users, a user's passkeys and push devices, and the document
-      manifest) in full. A supplier with years of volume builds one unbounded JSON
-      document in memory, in a synchronous response, on the event loop.
-      **Durable fix:** cap invoices and payments through `_capped` like the other
-      high-volume collections, and move a large export to an asynchronous job that
-      writes the bundle to object storage and hands back a signed URL. Paging a
-      DSAR response would not do, because the subject is owed the whole set.
-      **Trigger:** the first DSAR for a vendor with more than a few thousand
-      invoices, or the next change to `privacy_export`.
-
 - [ ] **(c) An expense that sits on no report has no owner, so anyone can rewrite it.**
       §241 made a report's lines owner-only, but `expenses` has no creator column.
       A loose line stays editable by any `admin` / `ap_manager` / `ap_clerk` until a
