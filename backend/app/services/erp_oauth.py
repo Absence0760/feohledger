@@ -1020,10 +1020,44 @@ async def park_pending_connect(
     browser's cookie names one connect at a time (§336). Raises
     ``CredentialCryptoError`` when it cannot be sealed.
     """
+    issued = int(time.time())
+    expiry = issued + pending_ttl()
+    await _store_pending(
+        org_id=org_id,
+        user_id=user_id,
+        provider=provider,
+        client_source=client_source,
+        browser_binding=browser_binding,
+        token_response=token_response,
+        companies=companies,
+        issued=issued,
+        expiry=expiry,
+        only_if_absent=False,
+    )
+    return datetime.fromtimestamp(expiry, UTC)
+
+
+async def _store_pending(
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    provider: str,
+    client_source: str,
+    browser_binding: str,
+    token_response: dict,
+    companies: list[ExternalCompany],
+    issued: int,
+    expiry: int,
+    only_if_absent: bool,
+) -> bool:
+    """Seal and store one pending record; False when ``only_if_absent`` found
+    another already there. ``issued`` is when ``token_response``'s lifetimes
+    were last true (``_aged`` counts from it); ``expiry`` ends the window."""
     if not browser_binding:
         raise ValueError("a browser binding is required")
-    ttl = pending_ttl()
-    issued = int(time.time())
+    ttl = expiry - issued
+    if ttl <= 0:
+        raise ValueError("the pending connect has lapsed")
     envelope = await credential_crypto.seal(
         json.dumps(token_response, separators=(",", ":"), default=str).encode(),
         _pending_context(org_id, provider, browser_binding),
@@ -1033,7 +1067,7 @@ async def park_pending_connect(
         "p": provider,
         "c": client_source,
         "i": issued,
-        "e": issued + ttl,
+        "e": expiry,
         "companies": [[c.id, c.name] for c in companies],
         "ct": _b64(envelope.ciphertext),
         "wk": _b64(envelope.wrapped_key),
@@ -1041,8 +1075,11 @@ async def park_pending_connect(
         "kid": envelope.key_id,
     }
     r = await app_redis.get_redis()
-    await r.setex(_pending_key(org_id, browser_binding), ttl, json.dumps(record))
-    return datetime.fromtimestamp(issued + ttl, UTC)
+    key, value = _pending_key(org_id, browser_binding), json.dumps(record)
+    if only_if_absent:
+        return bool(await r.set(key, value, ex=ttl, nx=True))
+    await r.setex(key, ttl, value)
+    return True
 
 
 def _parse_pending(raw: Any, user_id: uuid.UUID) -> dict | None:
@@ -1134,6 +1171,48 @@ async def take_pending_connect(
         raise CredentialCryptoError("A pending ERP connection could not be read.")
     elapsed = max(int(time.time()) - int(record.get("i") or 0), 0)
     return _pending_from(org_id, record, _aged(token_response, elapsed))
+
+
+async def restore_pending_connect(pending: PendingConnect, cookie_value: str | None) -> bool:
+    """Put back a consent :func:`take_pending_connect` spent, after the pick it
+    was taken for was refused at a step that needs the opened token (the
+    company linked elsewhere, the sealed store or the audit trail down), so
+    the admin can pick again without a new consent (decisions §355).
+
+    Same browser, admin, provider, companies and expiry. The token goes back
+    as it was taken, already aged, and is sealed afresh with ``issued`` = now,
+    so a later take ages it only by the time it waits from here. Never
+    replaces a newer connect this browser parked meanwhile (SET NX).
+    Best-effort, never raises: False when nothing was put back (no cookie, no
+    token, the window has closed, sealing or Redis failed, or a newer one is
+    there), and the pick is then spent, as it was before.
+    """
+    if not cookie_value or pending.token_response is None:
+        return False
+    issued, expiry = int(time.time()), int(pending.expires_at.timestamp())
+    if expiry <= issued:
+        return False
+    try:
+        return await _store_pending(
+            org_id=pending.org_id,
+            user_id=pending.user_id,
+            provider=pending.provider,
+            client_source=pending.client_source,
+            browser_binding=browser_binding(cookie_value),
+            token_response=pending.token_response,
+            companies=list(pending.companies),
+            issued=issued,
+            expiry=expiry,
+            only_if_absent=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort by contract; the pick stays spent
+        logger.warning(
+            "erp_oauth: %s pending connect not restored for org %s (%s)",
+            pending.provider,
+            pending.org_id,
+            exc.__class__.__name__,
+        )
+        return False
 
 
 async def discard_pending_connect(org_id: uuid.UUID, cookie_value: str | None) -> bool:

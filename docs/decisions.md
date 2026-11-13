@@ -16403,6 +16403,44 @@ cross-tenant check, the unique index and audit-first, with `picked_from` on
 wrapper around its confirmed realm. A cancelled or lapsed pick revokes nothing,
 for §337's reason.
 
+**Amended in review (round PR #707): which refusals spend the pick, and why
+none revokes.** The exchanged grant stays live at the provider whatever the pick
+ends in, so a refusal that spent the record left that grant with nothing left
+to use it, and the admin a second consent to give. Revoking is still ruled out
+on every path, and §337's reason covers each of them, not only QuickBooks':
+the revoke we can send is per token, but what it ends is the provider's to
+decide (Intuit's reaches the app's whole grant for a company; Xero's removes
+the connections the token holds), and a consent that lists several companies
+can include one this workspace is already connected to (a reconnect) or one
+another FeohLedger workspace holds (`already_linked`). Cutting a live
+connection, possibly another customer's, is worse than an unused grant that
+lapses with the provider's own refresh-token lifetime. Per path:
+
+- *An id the consent did not offer* and *the plan lost since the consent* need
+  no token, so they are now checked on a peek, before the GETDEL, and refuse
+  without spending (`erp_pick_unknown_company` is still audited). The admin
+  picks again, or picks once the plan covers the ERP, within the window. The
+  plan-lost case is the one where revoking was most tempting, since the
+  workspace may never connect; but the consent may still name the company the
+  workspace is connected to now, and its plan can come back.
+- *A provider no longer configured* drops the record (`erp_pick_expired`):
+  no pick can succeed, and without its spec there is no revoke endpoint to
+  call.
+- *A claim refusal* (`already_linked`, `credentials_unavailable`,
+  `audit_unavailable`) needs the opened token, so it comes after the GETDEL,
+  and `restore_pending_connect` puts the record back: same browser, admin,
+  companies and window (never extended), the token as aged so far, and never
+  over a newer connect that browser parked meanwhile (SET NX). The consent's
+  other company may be free, and the 503s are transient. Best-effort: if it
+  cannot be put back, the pick is spent as before.
+- *Cancel* (`DELETE …/pending`) drops the record and revokes nothing, for the
+  reason above.
+- *A token that cannot be opened* (`credentials_unavailable` at the take) is
+  spent: it cannot be used or revoked, and it lapses.
+
+A pick is still single-use where it matters: two picks cannot both link (the
+GETDEL), and a successful one leaves nothing to replay.
+
 The list fails closed: one row with an unaddressable id empties it
 (`no_external_tenant`), because dropping that row could leave a single company
 of several and link it unasked. Xero's list keeps its existing fallback to every
@@ -17331,20 +17369,35 @@ up to five years for QuickBooks, and the customer's ERP still listed the app.
   says the provider did not confirm; on `unsupported` it says to disconnect
   FeohLedger from the environment in Blackbaud. Both tell the admin to remove
   the app on the provider's side.
-- **Tenant deletion revokes best-effort.** Between the document sweep and the
-  control-plane delete, it reads `settings.erp.oauth` and the sealed tokens. It
-  uses the closure's own session when a self-service closure holds the org row,
-  inside a savepoint so a failed read cannot abort the closure's transaction
-  before its control-plane delete. Otherwise it uses a short session closed
-  before the provider is called. On the closure path the provider call (15 s
-  timeout at most) runs while the closure still holds its row locks; the
-  workspace is already dropped, so only writers to a doomed org wait. Then it
-  calls `erp_oauth.revoke_grant`. A tenant holds one grant, a single block with
-  two fixed sealed paths. The outcome (`revoked`, `failed`, `unsupported`, or
-  `unreadable` when the store cannot be opened) is on `TenantDeletionResult` and
-  in `format_confirmation`, with "the customer should remove FeohLedger from the
-  provider's connected apps" for anything but `revoked`. Nothing about it can
-  stop the deletion. The log line names the provider and the outcome, never a
+- **Tenant deletion revokes best-effort, and never under a lock.** Between the
+  document sweep and the control-plane delete, it reads `settings.erp.oauth`
+  and the sealed tokens (`_read_erp_grant`, which calls no provider). A tenant
+  holds one grant, a single block with two fixed sealed paths. Where the
+  provider is called depends on who holds the control-plane transaction:
+  - *Operator deletion* (`scripts/delete_tenant.py`, no `control_session`): the
+    read uses a short session closed before the provider is called, and the
+    control-plane delete opens its own transaction after. Nothing is locked
+    during the call.
+  - *Self-service closure* (`control_session`): the closure holds the org, user
+    and subscription rows `FOR UPDATE` until its caller commits. The read runs
+    on that session, inside a savepoint so a failed read cannot abort the
+    closure's transaction before its control-plane delete. The provider call
+    (15 s timeout at most) is queued with `post_commit` and runs once the
+    closure has committed, so no provider's latency is charged to a
+    transaction holding locks (root `CLAUDE.md`, `services/post_commit`). A
+    closure that rolls back drops the queued call: the organisation and its
+    sealed row survive, and the resumed closure reads and revokes again. An
+    outcome that needs no call (`unsupported`, `unreadable`, a read that
+    failed, an unknown provider) is decided at the read and not queued.
+  The outcome (`revoked`, `failed`, `unsupported`, or `unreadable` when the
+  store cannot be opened) is on `TenantDeletionResult`, and in
+  `format_confirmation`, with "the customer should remove FeohLedger from the
+  provider's connected apps" for anything but `revoked`. On a closure's result
+  it reads `after_commit` until the provider answers, then the outcome. A
+  closure writes no confirmation; its record is the log, a line when the call
+  is queued and one with the outcome (the runbook
+  `docs/founder-runbooks/workspace-closure.md` reads them). Nothing about it can
+  stop the deletion. The log lines name the provider and the outcome, never a
   token.
 
 **Why after the drop and the sweep, not first.** If revocation came first and
@@ -17356,10 +17409,16 @@ already-revoked token with an error, and the confirmation then says "NOT
 revoked" for a grant that is gone: the error is on the safe side.
 
 **Rejected.**
-- *Revoking after the control-plane commit*, with the tokens held in memory. A
-  closure's commit belongs to its caller, so `delete_tenant` cannot run
-  anything after it, and the operator's confirmation would have to be written
-  before the outcome was known.
+- *Calling the provider inside the closure's transaction.* This section first
+  shipped that way, on the argument that only writers to a doomed org would
+  wait. Review held it to the rule instead: up to 15 s of a third party's
+  latency on a transaction holding row locks is exactly what `post_commit`
+  exists to prevent, and the exemption would have to be re-argued at every
+  new writer to those rows.
+- *Revoking after the commit on the operator path too.* That path's commit is
+  `delete_tenant`'s own and nothing is locked during the call, and its written
+  confirmation must state the outcome. Only the closure's commit belongs to its
+  caller, so only that path needs `post_commit`.
 - *Failing the deletion when revocation fails.* A provider outage would keep a
   terminated customer's data past the DPA's 60 days, to protect a grant the
   customer can end themselves.

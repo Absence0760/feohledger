@@ -43,10 +43,14 @@ just before that step they are read once and the provider is asked to revoke
 the refresh token. Otherwise it stays valid at Intuit / Xero / Sage until it
 expires, up to five years for QuickBooks. It comes after the database drop and
 the document sweep, so a workspace whose drop failed is never left live with
-its ERP cut off. Best-effort: a refusal, an outage, a provider with no
-revocation endpoint (Blackbaud) or a store that cannot be opened never stops the
-deletion. The outcome goes into the written confirmation, so the operator can
-tell the customer what to remove on the provider's side. A consent parked for
+its ERP cut off. A self-service closure holds row locks on its control-plane
+transaction, so there the tokens are read inside it and the provider is called
+only once it has committed (``post_commit``): no provider's latency is charged
+to a transaction holding locks. Best-effort: a refusal, an outage, a provider
+with no revocation endpoint (Blackbaud) or a store that cannot be opened never
+stops the deletion. The outcome goes into the written confirmation (the
+operator's CLI) or the deletion log (a closure), so the operator can tell the
+customer what to remove on the provider's side. A consent parked for
 the company picker (decisions §355) is not revoked, for §337's reason, and
 lapses with its Redis TTL.
 
@@ -62,6 +66,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,6 +74,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import control_session_factory
 from app.services import storage
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.post_commit import enqueue_post_commit
 from app.services.tenant_provisioning import (
     CONTROL_TABLES,
     _assert_safe_db_name,
@@ -197,11 +203,13 @@ class TenantDeletionResult:
     database_dropped: bool
     control_rows_deleted: dict[str, int] = field(default_factory=dict)
     dry_run: bool = False
-    #: The tenant's ERP OAuth grant, revoked best-effort before its sealed
-    #: tokens went with the control plane (decisions §371): the provider key
-    #: and one of ``erp_oauth.REVOKED`` / ``REVOKE_FAILED`` /
-    #: ``REVOKE_UNSUPPORTED``, or :data:`GRANT_UNREADABLE`. Both None when the
-    #: tenant held no grant.
+    #: The tenant's ERP OAuth grant, read before its sealed tokens went with
+    #: the control plane and revoked best-effort (decisions §371): the
+    #: provider key and one of ``erp_oauth.REVOKED`` / ``REVOKE_FAILED`` /
+    #: ``REVOKE_UNSUPPORTED``, or :data:`GRANT_UNREADABLE`. On a closure's
+    #: session it reads :data:`GRANT_REVOKE_AFTER_COMMIT` until that session
+    #: commits and the provider has answered, then the outcome. Both None when
+    #: the tenant held no grant.
     erp_grant_provider: str | None = None
     erp_grant_revocation: str | None = None
 
@@ -209,6 +217,13 @@ class TenantDeletionResult:
 #: The sealed store could not be opened, so the tokens could not be read to
 #: revoke them. The deletion still proceeds; the confirmation says so.
 GRANT_UNREADABLE = "unreadable"
+
+#: The tokens were read on a closure's transaction, and the provider is told
+#: once that transaction commits (its locks released), never while it holds
+#: them. The result is updated with the outcome when the provider answers, and
+#: the outcome is logged either way. A rolled-back closure revokes nothing: its
+#: sealed row survives, and the resumed closure reads it again.
+GRANT_REVOKE_AFTER_COMMIT = "after_commit"
 
 _REMOVE_AT_PROVIDER = "the customer should remove FeohLedger from the provider's connected apps"
 
@@ -224,7 +239,39 @@ _GRANT_OUTCOME_TEXT = {
     GRANT_UNREADABLE: (
         "NOT revoked: the sealed tokens could not be opened; " + _REMOVE_AT_PROVIDER
     ),
+    GRANT_REVOKE_AFTER_COMMIT: (
+        "revocation requested once the closure commits; NOT yet confirmed, the outcome "
+        "is in the deletion log; unless it says revoked, " + _REMOVE_AT_PROVIDER
+    ),
 }
+
+
+@dataclass
+class _ErpGrant:
+    """What the deletion read about the tenant's ERP OAuth grant.
+
+    ``outcome`` is set when the read already decided it (unreadable, failed to
+    read); otherwise ``spec`` / ``erp_settings`` / ``oauth`` are what
+    ``erp_oauth.revoke_grant`` needs, and none of it needs a database."""
+
+    provider: str
+    outcome: str | None = None
+    spec: Any = None
+    erp_settings: dict = field(default_factory=dict)
+    oauth: dict = field(default_factory=dict)
+
+    async def revoke(self) -> str:
+        from app.services import erp_oauth
+
+        if self.outcome is not None:
+            return self.outcome
+        return await erp_oauth.revoke_grant(self.spec, self.erp_settings, self.oauth)
+
+
+def _log_grant_outcome(slug: str, provider: str, outcome: str) -> None:
+    """Provider and outcome only: never a token."""
+    log = logger.info if outcome == "revoked" else logger.warning
+    log("[tenant-deletion] %s: ERP OAuth grant (%s) %s", slug, provider, outcome)
 
 
 async def _load_plan(session, slug: str) -> TenantDeletionPlan:
@@ -323,7 +370,9 @@ async def delete_tenant(
     (`services/workspace_closure`) holds ``FOR UPDATE`` on the organisation row
     for its whole run, so that no user, subscription or setting can be added
     between its checks and the delete; deleting that row from any OTHER session
-    would wait on its own lock.
+    would wait on its own lock. The ERP grant's provider call is then queued
+    for after that commit (``post_commit``), so the returned result reads
+    :data:`GRANT_REVOKE_AFTER_COMMIT` until the provider answers.
     """
     async with control_session_factory() as session:
         plan = await _load_plan(session, slug)
@@ -363,15 +412,18 @@ async def delete_tenant(
     #     workspace whole AND connected. Best-effort: a provider that refuses or
     #     is unreachable must not keep a tenant alive, so the outcome is
     #     reported, never raised. Provider and outcome only in the log.
-    grant_provider, grant_revocation = await _revoke_erp_grant(plan, control_session)
-    if grant_provider is not None:
-        log = logger.info if grant_revocation == "revoked" else logger.warning
-        log(
-            "[tenant-deletion] %s: ERP OAuth grant (%s) %s",
-            slug,
-            grant_provider,
-            grant_revocation,
-        )
+    #     On a closure's session the provider is called after its commit (see
+    #     below), never while the closure holds its row locks.
+    grant = await _read_erp_grant(plan, control_session)
+    grant_revocation: str | None = None
+    if grant is not None:
+        if control_session is None:
+            grant_revocation = await grant.revoke()
+            _log_grant_outcome(slug, grant.provider, grant_revocation)
+        else:
+            grant_revocation = grant.outcome or GRANT_REVOKE_AFTER_COMMIT
+            if grant.outcome is not None:
+                _log_grant_outcome(slug, grant.provider, grant.outcome)
 
     # 3. The control plane, in one transaction: either the tenant is gone from
     #    it or nothing changed, never a half-deleted org.
@@ -388,33 +440,61 @@ async def delete_tenant(
         sum(deleted.values()),
         len(deleted),
     )
-    return TenantDeletionResult(
+    result = TenantDeletionResult(
         plan=plan,
         objects_deleted=objects_deleted,
         database_dropped=database_dropped,
         control_rows_deleted=deleted,
-        erp_grant_provider=grant_provider,
+        erp_grant_provider=grant.provider if grant is not None else None,
         erp_grant_revocation=grant_revocation,
     )
+    if grant is not None and grant_revocation == GRANT_REVOKE_AFTER_COMMIT:
+        _revoke_after_commit(control_session, slug, grant, result)
+    return result
 
 
-async def _revoke_erp_grant(
+def _revoke_after_commit(
+    session: AsyncSession, slug: str, grant: _ErpGrant, result: TenantDeletionResult
+) -> None:
+    """Queue the provider call for after ``session`` commits.
+
+    ``post_commit`` runs it once the closure's transaction has committed, so
+    every row lock it held is released first (root ``CLAUDE.md``: no third
+    party's latency is charged to a transaction holding locks). A rollback
+    drops it: the organisation and its sealed row are still there, and the
+    resumed closure reads and revokes again. Best-effort like the rest of the
+    step: ``revoke_grant`` never raises, and the outcome lands on ``result``
+    and in the log.
+    """
+
+    async def _job() -> None:
+        outcome = await grant.revoke()
+        result.erp_grant_revocation = outcome
+        _log_grant_outcome(slug, grant.provider, outcome)
+
+    logger.info(
+        "[tenant-deletion] %s: ERP OAuth grant (%s) to be revoked once the closure commits",
+        slug,
+        grant.provider,
+    )
+    enqueue_post_commit(session, _job, name="tenant-deletion-erp-revoke")
+
+
+async def _read_erp_grant(
     plan: TenantDeletionPlan, control_session: AsyncSession | None
-) -> tuple[str | None, str | None]:
-    """Revoke the tenant's ERP OAuth grant at the provider, if it holds one.
+) -> _ErpGrant | None:
+    """Read the tenant's ERP OAuth grant for revocation, or None with no grant.
 
-    ``(provider, outcome)``, or ``(None, None)`` with no grant. A tenant holds
-    at most one: ``settings.erp.oauth`` is a single block and its tokens two
-    fixed sealed paths.
+    A tenant holds at most one: ``settings.erp.oauth`` is a single block and
+    its tokens two fixed sealed paths. Calls no provider.
 
     Reads on ``control_session`` when given (a closure holding the org row),
     inside a SAVEPOINT, so a failed read (a lock timeout, say) rolls back to it
     and leaves the closure's transaction usable for the control-plane delete.
-    The provider call then runs while that closure still holds its row locks,
-    for up to the revoke's HTTP timeout; the workspace is already dropped, so
-    only writers to a doomed org wait. Without a ``control_session`` it reads on
-    a short session of its own, CLOSED before the provider is called.
-    Never raises: anything unexpected reads as ``failed``.
+    Without a ``control_session`` it reads on a short session of its own,
+    CLOSED before the caller calls the provider. Never raises: a store that
+    cannot be opened is :data:`GRANT_UNREADABLE`, anything else unexpected
+    ``failed``, each only when the metadata says a grant existed.
     """
     from app.services import erp_oauth
 
@@ -444,20 +524,25 @@ async def _revoke_erp_grant(
     except CredentialCryptoError:
         # The tokens cannot be read, so they cannot be revoked. Reported when
         # the metadata says a grant existed; the store is about to go anyway.
-        return (named, GRANT_UNREADABLE) if named else (None, None)
+        return _ErpGrant(named, outcome=GRANT_UNREADABLE) if named else None
     except Exception as exc:  # noqa: BLE001 — a deletion is never stopped by its courtesy call
         logger.warning(
             "[tenant-deletion] %s: ERP grant could not be read (%s)",
             plan.slug,
             exc.__class__.__name__,
         )
-        return (named, erp_oauth.REVOKE_FAILED) if named else (None, None)
+        return _ErpGrant(named, outcome=erp_oauth.REVOKE_FAILED) if named else None
 
     if not any(oauth.get(path.split(".", 1)[1]) for path in erp_oauth.TOKEN_PATHS):
-        return None, None
+        return None
     provider = str(oauth.get("provider") or "") or "unknown"
     spec = erp_oauth.load_providers().get(provider)
-    return provider, await erp_oauth.revoke_grant(spec, resolved, oauth)
+    grant = _ErpGrant(provider, spec=spec, erp_settings=resolved, oauth=oauth)
+    if spec is None or not erp_oauth.revoke_endpoint(spec):
+        # Nothing to call (an unknown provider, or Blackbaud's missing
+        # endpoint): decided now, so nothing waits for a commit.
+        grant.outcome = await erp_oauth.revoke_grant(spec, resolved, oauth)
+    return grant
 
 
 async def _delete_control_rows(session: AsyncSession, plan: TenantDeletionPlan) -> dict[str, int]:
