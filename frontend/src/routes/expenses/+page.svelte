@@ -1649,7 +1649,10 @@
 		</div>
 
 		{#if cardImportResult}
-			<section class="card-import-errors" aria-labelledby="card-import-errors-title">
+			<!-- A plain container, not a <section>: the list inside is the one
+			     "Rows not imported" region (ui/CsvImportErrors), and a labelled
+			     section around it would announce two landmarks with one name. -->
+			<div class="card-import-errors">
 				<div class="card-import-errors-head">
 					<h2 id="card-import-errors-title">{m('csvImport.result.errorsTitle')}</h2>
 					<button type="button" class="btn-secondary" onclick={() => (cardImportResult = null)}>
@@ -1663,7 +1666,7 @@
 					})}
 				</p>
 				<CsvImportErrors errors={cardImportResult.errors} />
-			</section>
+			</div>
 		{/if}
 
 		<div class="filter-row">

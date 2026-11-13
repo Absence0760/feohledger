@@ -57,6 +57,7 @@ Map<String, dynamic> _invoiceJson(
   String? approvedBy,
   List<Map<String, dynamic>>? warnings,
   Map<String, dynamic>? poMatch,
+  bool? financiallyLocked,
 }) =>
     {
       'id': id,
@@ -72,8 +73,24 @@ Map<String, dynamic> _invoiceJson(
       'approved_by': approvedBy,
       'warnings': warnings,
       'po_match': poMatch,
+      // What the server answers (`InvoiceResponse.financially_locked`,
+      // decisions §370): the app treats a missing field as locked, so a
+      // fixture that left it out would read every invoice as frozen.
+      'financially_locked': financiallyLocked ??
+          (_lockedStatuses.contains(status) ||
+              (status == 'failed' && approvedBy != null)),
       'created_at': '2026-01-01T12:00:00',
     };
+
+const _lockedStatuses = {
+  'approved',
+  'sending_to_erp',
+  'sent_to_erp',
+  'posted_in_erp',
+  'payment_scheduled',
+  'paid',
+  'done',
+};
 
 /// Pump bounded frames until [finder] is present (or attempts run out) so the
 /// screen's fetch resolves and the loading spinner leaves the tree. Never use
