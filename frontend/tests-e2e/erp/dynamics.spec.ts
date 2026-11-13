@@ -191,7 +191,10 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 		await syncErpVendors(page);
 		await syncErpGlAccounts(page);
 		const inv = await createApprovedInvoice(page, {
-			prefix: 'E2E-D365-VATNET',
+			// BC's Vendor Invoice No. is a Code[35], and the helper appends up
+			// to 21 characters: a prefix over 13 is refused doc_number_too_long
+			// before any call, whenever the random suffix runs to six digits.
+			prefix: 'E2E-D365-NET',
 			amount: '1234.56',
 			taxAmount: '205.76',
 			vendor: 'Fake BC Vendor A',
