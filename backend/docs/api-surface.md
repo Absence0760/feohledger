@@ -97,7 +97,10 @@ endpoint itself raises from, so a page that offers a control exactly when the
 verdict is `null` can never offer one that 403s / 409s, nor hide one that works.
 `role_not_permitted` is the coded form of the dependency's plain 403. The
 endpoints keep their existing `detail` shape (mobile reads it as text); the
-verdict carries the same sentence.
+verdict carries the same sentence. The expense-report and corporate-card
+endpoints are the exception: since decisions §361 every gate refusal there
+answers with the verdict's coded `detail` itself, its English kept as
+`message` (`backend/docs/expense-management.md` § Action verdicts).
 
 | Read | Field | Endpoint(s) judged | Gate |
 |---|---|---|---|

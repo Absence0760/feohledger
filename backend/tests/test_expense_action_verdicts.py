@@ -14,8 +14,9 @@ one place; decisions §305).
   repeat ignore is now refused instead of writing a second audit row.
 
 The parity property, per role and row state: verdict `None` exactly when the
-mutation succeeds, otherwise the code (coded detail) or the sentence (plain
-detail) of the refusal it answers with. Both sides are asked.
+mutation succeeds, otherwise exactly the coded detail of the refusal it
+answers with (decisions §361; only the role dependency's 403 stays a plain
+string). Both sides are asked.
 
 Requires the dev Postgres (`pnpm db:up`).
 """
@@ -49,12 +50,12 @@ def _assert_parity(verdict, resp, label):
         return
     assert resp.status_code in (403, 409, 422), (label, verdict, resp.text)
     detail = resp.json()["detail"]
-    if isinstance(detail, dict):
-        assert detail["code"] == verdict["code"], (label, verdict, detail)
-    elif verdict["code"] == "role_not_permitted":
+    if verdict["code"] == "role_not_permitted":
+        # `require_roles`' own plain-string 403, which every client reads.
         assert resp.status_code == 403, (label, resp.text)
-    else:
-        assert detail == verdict["message"], (label, verdict, detail)
+        return
+    # Every gate's refusal is the coded detail, the verdict exactly (§361).
+    assert detail == verdict, (label, verdict, detail)
 
 
 async def _default_entity(realdb) -> uuid.UUID:
@@ -264,7 +265,11 @@ async def test_an_ignored_transaction_is_not_ignored_twice(realdb):
     async with realdb.client(key=TENANT, role="ap_manager") as c:
         resp = await c.post(f"/api/corporate-card-transactions/{txn_id}/ignore")
     assert resp.status_code == 409
-    assert resp.json()["detail"] == "Transaction is already ignored"
+    assert resp.json()["detail"] == {
+        "code": "card_txn_already_ignored",
+        "message": "Transaction is already ignored",
+        "params": {},
+    }
     # The harm the refusal prevents: a second `card_txn.ignored` row for nothing.
     async with realdb.sessionmaker(TENANT)() as s:
         ignored_rows = (

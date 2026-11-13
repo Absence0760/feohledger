@@ -16596,3 +16596,39 @@ generator covers both clients.
 - *Keeping the payment id out of the reconciliation sentences* (moving it to
   machine detail as the ERP rows did): `erp_report` is ERP data, and the id is
   the only thing that tells the reader which of an invoice's payments to chase.
+
+## 361. Expense-report and corporate-card refusals are coded at the endpoint, not only in the verdict (§348 follow-up, 2026-11-13)
+
+**Decision.** Every `services/expense_controls` gate is now `coded=True`, so
+submit, approve, reject, attach / detach, match, create-expense, unmatch and
+ignore answer with exactly the `{code, message, params}` their row's verdict
+ships, instead of a plain string beside it. The same pass codes the refusals
+the verdicts cannot hold: a line edited, deleted or moved off a locked report
+(`expense_report_locked`, the gate moved into `expense_controls` with
+`LOCKED_REPORT_STATUSES`), an attached line with no FX source or no rate
+(`expense_fx_source_missing`, `expense_fx_rate_unavailable` with both
+currency codes), deleting a reconciled expense (`expense_card_reconciled`),
+and `/match`'s expense side (`card_txn_expense_already_matched`,
+`card_txn_currency_mismatch`, one `card_match_expense_refusal`). Each
+`message` is byte for byte the English the endpoint sent before, so a client
+reading `detail` as text — `formatApiDetail`, mobile's `ApiClient.errorMessage`
+— renders the same sentence. Statuses are unchanged.
+
+**The mobile half was a non-issue.** The follow-up kept the strings plain "so
+mobile keeps working", but mobile calls no expense-report or card endpoint, and
+its client already reads a coded `detail` by its `message`
+(`test/api/api_client_test.dart`). Mobile's registry therefore gets no entries:
+its header already scopes it to the surfaces mobile ships, and ARB strings for
+codes no screen can receive would be dead text in every locale.
+
+**The web submit path needed its own fix.** `api/expenses.submitReport`
+hand-rolls its fetch to keep the violation list, so it bypassed `api.ts`'s
+`localizeApiDetail`: a coded 403 or not-draft 422 reached the toast in
+English. It now builds its errors with `apiErrorFromBody` and localizes a
+coded 422 before falling back to `message`.
+
+**Not done:** submit's two list-shaped 422s (`{message, violations}` and
+`{message, expense_ids}`) stay uncoded; stating a policy violation in the
+reader's language is the policy engine's change, tracked in
+`docs/followups.md`. The role dependency's 403 stays a plain string, as
+everywhere (`role_not_permitted` is only its verdict form).

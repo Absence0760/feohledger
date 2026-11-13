@@ -54,7 +54,8 @@ Neither leg carries `ON DELETE`, so **the cycle constrains deletion**:
 `DELETE /api/expenses/{id}` is refused by Postgres while a card transaction
 still points at that expense. That refusal used to escape as an unhandled
 `ForeignKeyViolationError` — a 500 for an ordinary user action. The route now
-checks for a referencing transaction first and answers **409** naming it. It
+checks for a referencing transaction first and answers **409**
+`expense_card_reconciled` naming it. It
 deliberately does *not* unmatch on the caller's behalf: silently clearing a
 reconciliation as a side effect of deleting the row on the other side of the
 link is exactly the invisible state change `/ignore` refuses to make.
@@ -166,14 +167,30 @@ enforces) followed by the same gate the endpoint raises from, in
 | unmatch | `card_txn_unmatch_refusal` | `card_txn_not_matched` (409) |
 | ignore | `card_txn_ignore_refusal`: not matched, not already ignored | `card_txn_matched_not_ignorable`, `card_txn_already_ignored` (409) |
 
-A caller outside the role set gets `role_not_permitted`. The HTTP refusals keep
-the `detail` they always had (plain strings for the status / card ones, coded
-for owner, segregation and CFO); only the verdict carries a code for every one.
+A caller outside the role set gets `role_not_permitted`. The endpoints answer
+with the verdict's coded `detail` exactly — the `message` is the English the
+status and card refusals used to send as a plain string, so a client that reads
+`detail.message` as text still shows it (decisions §361). Only the role
+dependency's own 403 stays a plain string.
 
 Not in the verdicts, because they depend on input the row does not hold:
 submit's blocking policy violations and unconvertible lines (its own 422 with
-the list), attach's per-line refusals, and match's expense-side refusals (that
-expense already matched, a currency mismatch). Mutation responses carry no
+the list), attach's per-line refusals, and match's expense-side refusals. The
+per-line and expense-side ones are coded too, from the same module:
+
+| Refusal | Raised by | Code (status) · params |
+|---|---|---|
+| A line edited, deleted, re-receipted or moved off a locked report, or a locked report's own fields | `report_unlocked_refusal` (`LOCKED_REPORT_STATUSES`) | `expense_report_locked` (409) · `status` |
+| An attached line in another currency with no FX rate source configured | `api/expenses._lock_line_conversion` | `expense_fx_source_missing` (422) |
+| An attached line the FX source has no rate for | `api/expenses._lock_line_conversion` (`ExpenseConversionError`) | `expense_fx_rate_unavailable` (422) · `source_currency`, `report_currency` |
+| Deleting an expense a card transaction is reconciled to | `DELETE /api/expenses/{id}` | `expense_card_reconciled` (409) · `card_transaction_id` |
+| `/match` onto an expense already reconciled to a card line | `card_match_expense_refusal` | `card_txn_expense_already_matched` (409) |
+| `/match` across currencies | `card_match_expense_refusal` | `card_txn_currency_mismatch` (409) · `transaction_currency`, `expense_currency` |
+
+The web registry (`frontend/src/lib/api/codedRefusals.ts`) states every one in
+the reader's language; mobile ships no expense or card screen, so it has no
+entries for them. Submit's two list-shaped 422s (`{message, violations}`,
+`{message, expense_ids}`) are not coded yet (`docs/followups.md`). Mutation responses carry no
 `actions` (decisions §305), so the page re-reads the report after a decision.
 Parity per role × row state, owner and non-owner, is
 `tests/test_expense_action_verdicts.py`.
@@ -251,7 +268,7 @@ mutating handler can't reopen the hole.
 | POST | `/api/corporate-card-transactions/import-csv` | Import a card-feed CSV (`import_corporate_card_csv`). Columns: `external_txn_id,date,posted_date,merchant,amount,currency,card_last_four,card_ref`. Dedupes on `(org, external_txn_id)` — already-imported and in-file duplicate rows are skipped (counted). **Negative amounts are kept** (a refund / merchant credit / chargeback is a real feed line — same call as `CorporateCardTransactionBase.amount`, which omits `ge=0`); only an unparseable amount is a row error. All rows in one upload share an `import_batch`. Returns `ImportResult.to_dict()` (`{imported, skipped, errors}`). Audited `card_txn.imported`. Mutate `admin`/`ap_manager`. Declared before `/{txn_id}`. |
 | POST | `/api/corporate-card-transactions/sync-virtual-cards` | **(item 5)** Create card-transaction rows from this tenant's charged `VirtualCard` rows (`status in (charged, completed)` with `amount_charged`). Idempotent via the synthetic `external_txn_id = vc:<provider_card_id>`; already-synced cards are skipped. `virtual_card_id`/`amount`/`merchant`/`entity_id` carried over. Returns `{created, skipped}`. Audited `card_txn.virtual_cards_synced`. Mutate `admin`/`ap_manager`. Declared before `/{txn_id}`. |
 | GET | `/api/corporate-card-transactions/{id}/match-suggestions` | Ranked candidate expenses: `amount` exact (`Decimal ==`) + **`currency` equal** + `card_transaction_id IS NULL` + `expense_date` within ±5d of `txn_date`, ranked by fuzzy merchant similarity (token Jaccard) then date proximity. Returns `[{expense, score}]`. Read all roles. |
-| POST | `/api/corporate-card-transactions/{id}/match` | Body `{ expense_id }`. Reconcile: sets `txn.matched_expense_id` + `reconciliation_status=matched` AND `expense.card_transaction_id` + `expense.payment_method` (`virtual_card` when `txn.virtual_card_id` set, else `corporate_card`). **409** if either side already matched, or on a **currency mismatch**. Audited both sides (`card_txn.matched` + `expense.card_matched`). Mutate `admin`/`ap_manager`. |
+| POST | `/api/corporate-card-transactions/{id}/match` | Body `{ expense_id }`. Reconcile: sets `txn.matched_expense_id` + `reconciliation_status=matched` AND `expense.card_transaction_id` + `expense.payment_method` (`virtual_card` when `txn.virtual_card_id` set, else `corporate_card`). **409** if either side already matched (`card_txn_already_matched` / `card_txn_expense_already_matched`), or on a **currency mismatch** (`card_txn_currency_mismatch`). Audited both sides (`card_txn.matched` + `expense.card_matched`). Mutate `admin`/`ap_manager`. |
 | POST | `/api/corporate-card-transactions/{id}/unmatch` | Clear both sides; `reconciliation_status=unmatched`; **restore `expense.payment_method` from `payment_method_before_match`**. Audited both sides (`expense.card_unmatched` records the restored value, PII-free). Mutate `admin`/`ap_manager`. |
 | POST | `/api/corporate-card-transactions/{id}/ignore` | `reconciliation_status=ignored` (deliberately not reconciled — refunds/fees). **409** on a matched transaction (unmatch it first), and on one already ignored (a repeat used to write a second audit row for nothing). An ignored transaction can still be matched or turned into an expense — that is how an ignore is undone. Audited `card_txn.ignored`. Mutate `admin`/`ap_manager`. |
 | POST | `/api/corporate-card-transactions/{id}/create-expense` | Mint an `Expense` from the txn (`expense_date=txn_date`, merchant, amount, currency, `payment_method` per `virtual_card_id`, entity carried over), **refresh its `policy_violations`** (best-effort, same as every other expense write path), then match it both sides. **409** if the txn is already matched. Audited `expense.created` + the match pair. Mutate `admin`/`ap_manager`/`ap_clerk`. |
