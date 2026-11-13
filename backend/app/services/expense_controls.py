@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException, status
 
-from app.api.refusals import ActionRefusal
+from app.api.refusals import ActionRefusal, coded_refusal
 from app.models.expense import (
     CorporateCardTransaction,
     ExpenseReport,
@@ -56,6 +56,13 @@ EXPENSE_FX_SOURCE_MISSING = "expense_fx_source_missing"
 EXPENSE_FX_RATE_UNAVAILABLE = "expense_fx_rate_unavailable"
 #: Deleting an expense a card transaction is reconciled to.
 EXPENSE_CARD_RECONCILED = "expense_card_reconciled"
+#: Submit refused for BLOCKING policy violations. The 422's `detail` keeps its
+#: `violations` list beside the coded keys, each entry itself coded by the
+#: policy engine (`expense_policy.VIOLATION_PARAMS`; `docs/decisions.md` §378).
+EXPENSE_REPORT_POLICY_BLOCKED = "expense_report_policy_blocked"
+#: Submit refused because attached lines have no rate locked into the report
+#: currency (`ReportRollup.unconverted_ids`); `detail.expense_ids` is kept.
+EXPENSE_REPORT_LINES_UNCONVERTED = "expense_report_lines_unconverted"
 
 #: A report in one of these states has its total locked in for an approval
 #: decision: `submitted` / `pending_approval` (awaiting it) and `approved` /
@@ -74,6 +81,41 @@ LOCKED_REPORT_STATUSES = frozenset(
 #: `Organization.settings.expense_approval.cfo_threshold`, denominated in the
 #: org REPORTING currency.
 DEFAULT_CFO_THRESHOLD = Decimal("5000")
+
+
+def report_policy_blocked_detail(violations: list[dict]) -> dict:
+    """The submit 422's `detail` for blocking policy violations: the coded
+    `{code, message, params}` plus the `violations` list, whose key and entries
+    are unchanged for a client that reads them (§378). `params.count` is the
+    number of blocking violations."""
+    return {
+        **coded_refusal(
+            EXPENSE_REPORT_POLICY_BLOCKED,
+            "Report has blocking policy violations and cannot be submitted.",
+            count=len(violations),
+        ),
+        "violations": violations,
+    }
+
+
+def report_lines_unconverted_detail(
+    count: int, expense_ids: list[str], report_currency: str
+) -> dict:
+    """The submit 422's `detail` for lines with no locked rate: the coded
+    `{code, message, params}` (`count`, `currency` — the report's) plus the
+    `expense_ids` list, kept as it was (§378). `count` is the rollup's
+    `unconverted_count`, never the id list's length: a line with no id still
+    counts (`expense_currency.rollup_report_lines`)."""
+    return {
+        **coded_refusal(
+            EXPENSE_REPORT_LINES_UNCONVERTED,
+            f"{count} expense(s) have no exchange rate locked into the report currency "
+            f"{report_currency} and cannot be totalled. Re-attach them to lock a rate.",
+            count=count,
+            currency=report_currency,
+        ),
+        "expense_ids": list(expense_ids),
+    }
 
 
 def report_owner_refusal(report: ExpenseReport, actor_id: uuid.UUID) -> ActionRefusal | None:

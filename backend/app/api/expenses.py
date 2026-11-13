@@ -81,7 +81,9 @@ from app.services.expense_controls import (
     report_approve_refusal,
     report_compose_refusal,
     report_draft_refusal,
+    report_lines_unconverted_detail,
     report_owner_refusal,
+    report_policy_blocked_detail,
     report_reject_refusal,
     report_submit_refusal,
     report_unlocked_refusal,
@@ -1734,14 +1736,9 @@ async def submit_report(
     if rollup.unconverted_count:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "message": (
-                    f"{rollup.unconverted_count} expense(s) have no exchange rate locked "
-                    f"into the report currency {rollup.currency} and cannot be totalled. "
-                    "Re-attach them to lock a rate."
-                ),
-                "expense_ids": list(rollup.unconverted_ids),
-            },
+            detail=report_lines_unconverted_detail(
+                rollup.unconverted_count, list(rollup.unconverted_ids), rollup.currency
+            ),
         )
 
     cover: dict[str, Decimal] = {}
@@ -1776,10 +1773,7 @@ async def submit_report(
     if blocking:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "message": "Report has blocking policy violations and cannot be submitted.",
-                "violations": blocking,
-            },
+            detail=report_policy_blocked_detail(blocking),
         )
 
     report.status = ExpenseReportStatus.submitted

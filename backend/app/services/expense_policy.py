@@ -12,9 +12,17 @@ per-diem caps, and category limits all compare ``Decimal`` to ``Decimal``.
 A violation is a small JSON-serialisable dict::
 
     {"code": "category_limit", "message": "...", "policy_id": "<uuid>",
-     "limit": "100.00", "actual": "150.00"}
+     "limit": "100.00", "actual": "150.00", "currency": "USD",
+     "params": {"amount": "150.00", "amount_currency": "USD", "limit": "100.00",
+                "currency": "USD", "comparison": "resolved", "category": "travel"}}
 
-``code`` is one of the module-level ``VIOLATION_*`` constants. ``BLOCKING_CODES``
+``code`` is one of the module-level ``VIOLATION_*`` constants. ``params`` is the
+coded half a client states the violation from in the reader's language
+(``VIOLATION_PARAMS`` is the catalogue of which keys each code carries; money is
+an exact decimal string beside its ISO code, never a float). ``message`` stays
+the server's English sentence for a client that predates a code, and the flat
+``limit`` / ``actual`` / ``currency`` keys stay for the badges and the rows
+already stored in ``expenses.policy_violations`` (``docs/decisions.md`` §378). ``BLOCKING_CODES``
 names the subset that blocks report submission (missing required receipt, or a
 required pre-approval that is absent / not approved). Everything else is
 advisory and surfaces as a warning badge.
@@ -80,6 +88,33 @@ _MONEY_QUANT = Decimal("0.01")
 # docstring): the expense could not be expressed in the threshold's currency, so
 # the rule fell closed. Surfaced so the UI can explain the flag honestly.
 COMPARISON_UNRESOLVED = "unresolved"
+COMPARISON_RESOLVED = "resolved"
+
+# Mileage-mismatch direction (``params.direction``): which side of the
+# entitlement the claim fell on. ``None`` when the comparison was unresolved.
+MILEAGE_OVER = "over"
+MILEAGE_UNDER = "under"
+
+#: The params every violation carries, by code — what a client may rely on to
+#: state it (``frontend/src/lib/api/policyViolations.ts``). Common to all:
+#:
+#: - ``amount`` / ``amount_currency`` — the figure that was (or would have been)
+#:   compared: the converted amount in ``currency`` when the comparison resolved,
+#:   the expense's face amount in its own currency when it did not;
+#: - ``limit`` / ``currency`` — the policy's threshold and its unit;
+#: - ``comparison`` — ``"resolved"`` or ``"unresolved"`` (fell closed).
+#:
+#: ``category_limit`` adds ``category`` (the expense's own category, ``None``
+#: when it has none); ``mileage_amount_mismatch`` adds ``miles``, ``rate``
+#: (per mile, in ``currency``) and ``direction``. Every figure is ``str(Decimal)``.
+_COMMON_PARAMS = ("amount", "amount_currency", "limit", "currency", "comparison")
+VIOLATION_PARAMS: dict[str, tuple[str, ...]] = {
+    VIOLATION_CATEGORY_LIMIT: (*_COMMON_PARAMS, "category"),
+    VIOLATION_RECEIPT_REQUIRED: _COMMON_PARAMS,
+    VIOLATION_PREAPPROVAL_REQUIRED: _COMMON_PARAMS,
+    VIOLATION_PER_DIEM_EXCEEDED: _COMMON_PARAMS,
+    VIOLATION_MILEAGE_MISMATCH: (*_COMMON_PARAMS, "miles", "rate", "direction"),
+}
 
 
 def _as_decimal(value: Any) -> Decimal | None:
@@ -215,12 +250,26 @@ def _violation(
     expense_currency: str,
     unresolved: bool,
     extra: dict | None = None,
+    extra_params: dict | None = None,
 ) -> dict:
-    """Build one violation dict. PII-free by construction — amounts and ISO
-    currency codes only, never a merchant, a person, or a bank detail."""
+    """Build one violation dict. PII-free by construction — amounts, ISO
+    currency codes and the policy's own category only, never a merchant, a
+    person, or a bank detail.
+
+    ``params`` carries exactly the keys ``VIOLATION_PARAMS[code]`` names."""
+    params: dict = {
+        "amount": str(actual),
+        "amount_currency": expense_currency if unresolved else currency,
+        "limit": str(limit),
+        "currency": currency,
+        "comparison": COMPARISON_UNRESOLVED if unresolved else COMPARISON_RESOLVED,
+    }
+    if extra_params:
+        params.update(extra_params)
     entry = {
         "code": code,
         "message": message,
+        "params": params,
         "policy_id": policy_id,
         "limit": str(limit),
         "actual": str(actual),
@@ -325,6 +374,9 @@ def evaluate_expense(
                     currency=tcur,
                     expense_currency=expense_currency,
                     unresolved=unresolved,
+                    # The expense's category, as the English names it (the
+                    # policy's whenever it names one; NULL = uncategorised).
+                    extra_params={"category": category},
                 )
             )
 
@@ -438,16 +490,20 @@ def _mileage_violation(
     actual = amount if unresolved else comparable
     basis = f"{expectation.miles} mi x {expectation.rate}"
 
+    direction: str | None
     if unresolved:
+        direction = None
         message = (
             f"Claimed {amount} {expense_currency} cannot be converted to {cur} to check the "
             f"mileage entitlement of {expected} {cur} ({basis}); flagged for review."
         )
     elif comparable > expected + MILEAGE_TOLERANCE:
+        direction = MILEAGE_OVER
         message = (
             f"Claimed {actual} {cur} exceeds the mileage entitlement of {expected} {cur} ({basis})."
         )
     elif comparable < expected - MILEAGE_TOLERANCE:
+        direction = MILEAGE_UNDER
         message = (
             f"Claimed {actual} {cur} is below the mileage entitlement of "
             f"{expected} {cur} ({basis})."
@@ -467,6 +523,11 @@ def _mileage_violation(
         # Exact strings so an approver UI can show the working without
         # re-deriving it (and without money ever becoming a JS number).
         extra={"miles": str(expectation.miles), "rate": str(expectation.rate)},
+        extra_params={
+            "miles": str(expectation.miles),
+            "rate": str(expectation.rate),
+            "direction": direction,
+        },
     )
 
 
