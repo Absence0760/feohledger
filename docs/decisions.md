@@ -18158,3 +18158,55 @@ approves); `tests/test_exception_agents_missing_po.py` and
 only before any approval); `tests/test_vendor_merge.py` (each approved-unpaid
 status refuses, nothing moves; paid, done, failed extraction, recalled and
 rejected move; the count across duplicates; recall clears the way).
+
+## 380. The state machine's refusals are coded, every coded bulk skip keeps its code, and the company picker asks the server whether to stay open (§379 / §355 follow-up, 2026-11-13)
+
+**Context.** §379 left `vendor_merge_approved_unpaid` and the engine's
+once-approved sentences English-only, and §355's amendment kept the parked
+consent through most pick refusals while the settings page still closed its
+picker on every coded one and told the admin to "connect again".
+
+**Decision.**
+
+- **Every 409 `workflow_engine` raises is a `coded_refusal`**, not only the
+  once-approved ones: `invoice_transition_invalid` (no edge;
+  `params.status` / `params.target`), `invoice_transition_recall_only` (a
+  recall edge, same params), `invoice_once_approved_not_reread` /
+  `_not_to_draft` / `_not_closed_from_draft`. The generic "Cannot transition"
+  sentence reaches people through every door that transitions, and the bulk
+  skip is where they meet it most; coding three of the engine's five sentences
+  would leave the commonest one in English. Each `message` is the old English
+  byte for byte, so every client that reads `detail` as text (mobile's
+  `errorMessage`, `utils/http.detail_text`, `refusal_of`) reads the same
+  sentence.
+- **A bulk-status skip keeps the code of any coded refusal it carries**
+  (`api/invoices._refused_skip`), not only §357's close refusal: the approval
+  gates, resubmit and the engine now reach the list localized. A structured
+  detail without `params` (the GL-chart refusal) contributes its sentence only,
+  as before. The endpoint's own skip sentences stay English, tracked in
+  `docs/followups.md`.
+- **The picker closes only when the server holds nothing to pick.** After a
+  refused pick other than `erp_pick_expired`, the panel re-reads
+  `GET …/oauth/pending`: the record decides, not a client list of which codes
+  spend it. One code cannot say: `credentials_unavailable` is put back after a
+  claim refusal and spent when the token cannot be opened at the take, and a
+  put-back is best-effort. A failed re-read keeps the list already shown. The
+  picker drops a selection the re-read list no longer holds (a newer consent
+  from the same browser).
+
+**Rejected.**
+- *Branching the picker on the code* (close on the two that can spend, keep on
+  the rest): wrong for `credentials_unavailable` either way, and wrong for any
+  put-back that failed.
+- *A new code for the 409 a bulk row gets for each status pair*: the pair is
+  params; one sentence names both statuses by their labels.
+
+Tests: `tests/test_workflow_state_machine.py` (each engine code and its
+params); `tests/test_invoice_recall_approval.py` and
+`tests/test_bulk_status_controls.py` (the skip rows carry the engine codes,
+the recall-only edge on a never-approved `failed` row, a segregation skip's
+code); `frontend/src/lib/api/codedRefusals.test.ts` (every engine and merge
+code the backend defines has a sentence, each in six locales, the count and the
+statuses named, malformed params fall back);
+`frontend/tests-e2e/erp/xero-company-picker.spec.ts` (an unoffered company and
+`already_linked` keep the picker, and the same consent then links).
