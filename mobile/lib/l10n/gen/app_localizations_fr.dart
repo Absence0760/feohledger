@@ -3276,6 +3276,15 @@ class AppLocalizationsFr extends AppLocalizations {
       'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : la facture n\'est pas à un statut qui permet de la marquer comme payée. Vérifiez la facture, puis enregistrez le paiement de l\'ERP depuis cette exception ou résolvez-la.';
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedAmountMismatch(String erp) {
+    return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : le montant indiqué comme payé ne correspond pas à ce que cette facture doit dans FeohLedger, après avoirs et éventuel escompte pour paiement anticipé. Vérifiez la facture dans l\'ERP et dans FeohLedger, corrigez celle qui est erronée, puis enregistrez le paiement de l\'ERP depuis cette exception ou résolvez-la.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed =>
+      'Votre ERP indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : le montant indiqué comme payé ne correspond pas à ce que cette facture doit dans FeohLedger, après avoirs et éventuel escompte pour paiement anticipé. Vérifiez la facture dans l\'ERP et dans FeohLedger, corrigez celle qui est erronée, puis enregistrez le paiement de l\'ERP depuis cette exception ou résolvez-la.';
+
+  @override
   String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
     return '$erp indique que cette facture est payée, mais FeohLedger n\'a pas pu enregistrer ce paiement : FeohLedger a refusé de l\'enregistrer. Vérifiez la facture, puis enregistrez le paiement de l\'ERP depuis cette exception ou résolvez-la.';
   }

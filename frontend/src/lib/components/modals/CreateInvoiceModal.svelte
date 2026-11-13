@@ -1,4 +1,5 @@
 <script lang="ts">
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
 	import type { Invoice } from '#lib/types/invoice.ts';
 	import { api } from '#lib/api.ts';
 	import { listGlAccounts, listInvoiceChart } from '#lib/api/glAccounts.ts';
@@ -23,6 +24,8 @@
 	// `null` when nothing resolves, so the platform default is named here, where
 	// a form genuinely needs a value (decisions §200).
 	let currency = $state(orgCurrency.currency ?? DEFAULT_CURRENCY);
+	// Always a new record: the field follows the org currency until typed in.
+	let currencyTouched = $state(false);
 	let invoice_date = $state('');
 	let due_date = $state('');
 	let po_number = $state('');
@@ -141,7 +144,7 @@
 			</label>
 			<label>
 				<span>{m('invoices.modal.field.currency')}</span>
-				<input type="text" bind:value={currency} maxlength="3" />
+				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} testid="invoice-currency" />
 			</label>
 			<label>
 				<span>{m('invoices.modal.field.invoiceDate')}</span>

@@ -30,6 +30,15 @@ const HARDCODED_CURRENCY_OPTION = new RegExp(
 	`<option\\s+value="(${COMMON_CURRENCIES.join('|')})"`
 );
 
+// A money amount's currency typed into a bare `<input>` (the shape the seven
+// create forms used before they moved to `CurrencyInput`): no client check, so
+// a blank or `ÄÖÜ` came back as a raw 422. Narrow on purpose: only an input
+// BOUND to a variable named `currency`, the field a record's amount is
+// denominated in. Optional fields where blank means "inherit" (an entity's,
+// a policy threshold's, a catalog price's) and the workflow simulator's
+// input bind other names and are not entries this scan owns.
+const BARE_CURRENCY_INPUT = /<input\b[^>]*\bbind:value=\{currency\}/;
+
 describe('currency entry fields', () => {
 	it('scans the Svelte sources (guard against a glob that matches nothing)', () => {
 		expect(Object.keys(sources).length).toBeGreaterThan(50);
@@ -50,12 +59,32 @@ describe('currency entry fields', () => {
 		expect(offenders).toEqual([]);
 	});
 
-	it('the credit-memo form and the invoice default currency use CurrencyInput', () => {
+	it('no Svelte file binds a money currency to a bare text input', () => {
+		const offenders = Object.entries(sources)
+			.filter(([, src]) => BARE_CURRENCY_INPUT.test(src))
+			.map(([path]) => path);
+		expect(offenders).toEqual([]);
+	});
+
+	it('the bare-input scan matches the shape it forbids, and not CurrencyInput', () => {
+		expect(BARE_CURRENCY_INPUT.test('<input type="text" bind:value={currency} maxlength="3" />')).toBe(true);
+		expect(BARE_CURRENCY_INPUT.test('<CurrencyInput bind:value={currency} />')).toBe(false);
+		expect(BARE_CURRENCY_INPUT.test('<input type="text" bind:value={newCurrency} />')).toBe(false);
+	});
+
+	it('every money-entry currency field uses CurrencyInput', () => {
 		for (const path of [
 			'/src/routes/credit-memos/+page.svelte',
 			'/src/routes/organization/+page.svelte',
 			'/src/routes/bank-reconciliation/ImportStatementModal.svelte',
-			'/src/lib/components/modals/VendorStatementReconModal.svelte'
+			'/src/lib/components/modals/VendorStatementReconModal.svelte',
+			'/src/lib/components/modals/CreateInvoiceModal.svelte',
+			'/src/lib/components/modals/ExpenseModal.svelte',
+			'/src/lib/components/modals/BudgetModal.svelte',
+			'/src/lib/components/modals/RecurringModal.svelte',
+			'/src/lib/components/modals/ContractModal.svelte',
+			'/src/lib/components/modals/RequisitionModal.svelte',
+			'/src/lib/components/modals/IntakeModal.svelte'
 		]) {
 			expect(sources[path], path).toMatch(/<CurrencyInput\b/);
 		}

@@ -34,7 +34,7 @@ from app.services.workflow_engine import (
     transition_invoice,
 )
 from app.utils.currency_code import iso_currency_or_none
-from app.utils.dates import parse_ambiguous_date, resolve_day_first_preference, utc_today
+from app.utils.dates import parse_ambiguous_date, resolve_day_first_preference
 
 logger = logging.getLogger(__name__)
 
@@ -1135,8 +1135,11 @@ async def run_extraction(
             )
 
         if auto_approved:
-            invoice.approval_date = utc_today()
-            invoice.approved_by = "system (auto-approve)"
+            from app.services.approval_chain import record_final_approval
+
+            # The reader who asked for this read, or NULL for an unattended
+            # channel (decisions §389).
+            record_final_approval(invoice, approved_by="system (auto-approve)", actor_id=actor_id)
 
         await transition_invoice(
             db,

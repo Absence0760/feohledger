@@ -3083,6 +3083,15 @@ class AppLocalizationsJa extends AppLocalizations {
       'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書は支払済みにできるステータスではありません。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。';
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedAmountMismatch(String erp) {
+    return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。支払済みとされた金額が、クレジットメモと早期支払割引を反映した後に FeohLedger でこの請求書が支払うべき金額と一致しません。ERP と FeohLedger の請求書を確認して誤っている方を修正してから、この例外から ERP の支払いを記録するか、例外を解決してください。';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed =>
+      'ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。支払済みとされた金額が、クレジットメモと早期支払割引を反映した後に FeohLedger でこの請求書が支払うべき金額と一致しません。ERP と FeohLedger の請求書を確認して誤っている方を修正してから、この例外から ERP の支払いを記録するか、例外を解決してください。';
+
+  @override
   String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
     return '$erp はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。FeohLedger が記録を拒否しました。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。';
   }

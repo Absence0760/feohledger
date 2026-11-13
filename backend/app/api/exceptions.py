@@ -730,12 +730,16 @@ async def record_erp_payment(
     record on itself, and clearing it first in a separate request would leave a
     window in which the invoice is payable with nothing recorded.
     """
+    from decimal import Decimal
+
     from app.api.payments import (
         _external_refusal_http,
         _refuse_future_paid_on,
     )
+    from app.api.refusals import coded_refusal
     from app.schemas.payment import PaymentResponse
     from app.services.external_payment import (
+        REFUSAL_AMOUNT_MISMATCH,
         ExternalPaymentRefused,
         record_invoice_paid_outside,
     )
@@ -778,6 +782,39 @@ async def record_erp_payment(
         }.get(verdict.get("code"), http_status.HTTP_403_FORBIDDEN)
         raise HTTPException(status_code=status_code, detail=verdict)
 
+    # The ERP stated the cash it paid (Xero, decisions §386): that figure is the
+    # one recorded, never FeohLedger's own, so a row kept for
+    # `amount_mismatch` stays refused until the invoice or the bill is
+    # corrected. A body figure that disagrees with it is refused here.
+    amount = body.amount
+    stated = (row.erp_report or {}).get("amount")
+    if stated:
+        try:
+            stated_amount = Decimal(str(stated))
+        except ArithmeticError:
+            stated_amount = None
+        stated_currency = str((row.erp_report or {}).get("amount_currency") or "").strip().upper()
+        if (
+            stated_amount is None
+            or (amount is not None and amount != stated_amount)
+            or invoice is None
+            # A figure with no currency stated says nothing about what this
+            # invoice owes, the rule the sweep applies to the same facts
+            # (§386); never compared as a bare number (§160, §196).
+            or not stated_currency
+            or stated_currency != (invoice.currency or "").strip().upper()
+        ):
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=coded_refusal(
+                    REFUSAL_AMOUNT_MISMATCH,
+                    "The amount must equal what the ERP reports was paid.",
+                    amount=str(stated),
+                    currency=invoice.currency if invoice is not None else None,
+                ),
+            )
+        amount = stated_amount
+
     # Every refusal BEFORE anything is written: in `lambda` audit mode an audit
     # row leaves for SQS when it is dispatched, so resolving first and rolling
     # back on a refused record would ship an `exception.resolved` for a row
@@ -796,7 +833,7 @@ async def record_erp_payment(
             paid_on=body.paid_on,
             actor_id=user.id,
             source="user",
-            amount=body.amount,
+            amount=amount,
             answering_exception_ids=frozenset({row.id}),
             actor_name=user.full_name,
         )

@@ -347,7 +347,37 @@ async def _discount_predates_acceptance(
     return accepted_at is None or paid_on < accepted_at.astimezone(UTC).date()
 
 
-def _check_amount(stated: Decimal | None, owed: Decimal, currency: str | None) -> None:
+def _check_amount(
+    stated: Decimal | None,
+    owed: Decimal,
+    currency: str | None,
+    *,
+    stated_currency: str | None = None,
+    currency_stated: bool = False,
+) -> None:
+    """Refuse a stated amount that is not what is owed.
+
+    ``currency_stated`` says the figure came with a currency of its own (an
+    ERP's report), not keyed against this invoice: a missing one, or one
+    other than the invoice's, says nothing about what is owed here, so it is
+    refused the same way, never compared as a bare number (decisions §386).
+    """
+    if (
+        stated is not None
+        and currency_stated
+        and (
+            not (stated_currency or "").strip()
+            or stated_currency.strip().upper() != (currency or "").strip().upper()
+        )
+    ):
+        raise ExternalPaymentRefused(
+            Refusal(
+                REFUSAL_AMOUNT_MISMATCH,
+                "The payment is reported in another currency than the invoice's, or in none.",
+                http_status=422,
+                params={"amount": str(stated), "currency": stated_currency},
+            )
+        )
     if stated is not None and stated != owed:
         raise ExternalPaymentRefused(
             Refusal(
@@ -487,10 +517,17 @@ async def record_invoice_paid_outside(
     amount: Decimal | None = None,
     answering_exception_ids: frozenset[uuid.UUID] = frozenset(),
     actor_name: str | None = None,
+    amount_currency: str | None = None,
 ) -> RecordedPayment:
     """Record one invoice as paid outside FeohLedger. Never commits.
 
     The caller holds ``invoice`` FOR UPDATE (`get_invoice_for_update`).
+
+    ``amount`` is refused (``amount_mismatch``) unless it is what is owed. With
+    ``source="erp"`` it is the ERP's own figure, in ``amount_currency``, and a
+    missing or different currency is refused the same way. Both are judged
+    after the live-claim refusals, so a FeohLedger payment, run or card on the
+    invoice is named first (§309).
 
     ``answering_exception_ids`` names exceptions this record ANSWERS, so they do
     not refuse it on the blocking-exception gate. One caller passes any: the
@@ -545,7 +582,13 @@ async def record_invoice_paid_outside(
         # A standalone booking FeohLedger never dispatched: the customer paid it
         # themselves. Complete it in place rather than leave it holding the
         # live-payment slot. Its booked amount is what is owed.
-        _check_amount(amount, target.amount, invoice.currency)
+        _check_amount(
+            amount,
+            target.amount,
+            invoice.currency,
+            stated_currency=amount_currency,
+            currency_stated=source == "erp",
+        )
         await _complete(
             db,
             org=org,
@@ -562,7 +605,13 @@ async def record_invoice_paid_outside(
         return RecordedPayment(target, created=True)
 
     owed, discount_offer_id, discount_amount = await _amount_owed(db, invoice, paid_on=paid_on)
-    _check_amount(amount, owed, invoice.currency)
+    _check_amount(
+        amount,
+        owed,
+        invoice.currency,
+        stated_currency=amount_currency,
+        currency_stated=source == "erp",
+    )
     payment = Payment(
         invoice_id=invoice.id,
         entity_id=invoice.entity_id,

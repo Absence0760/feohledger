@@ -18570,3 +18570,452 @@ following the top dialog); `tests-e2e/a11y/modal-inert.spec.ts` (the page and
 then the under-dialog go inert, the toast region stays live, closing restores
 each and returns focus); `tests-e2e/a11y/recall-import-verify.spec.ts` at 320px
 is the axe guard that was red.
+
+## 385. Sage Accounting SA is driven by the 2.0.0 API as documented, not as assumed (#655, drafted 2026-10-23, landed 2026-11-13)
+
+**What happened.** A docs-against-code audit of `sage_accounting_za.py` (the
+ERP audit tracked in #655) found the adapter built on four things the SA API
+2.0.0 does not do, each hidden by a fake-erp surface that did them anyway:
+
+- **`SupplierInvoice/Save` renumbered every invoice.** Its
+  `useSystemDocumentNumber` parameter is "Default value is True. Use system
+  Document Number or Document Number provided." We never sent it, so Sage gave
+  each invoice its own sequence number, the supplier's number was lost in Sage,
+  and the duplicate-number guard could never match.
+- **The idempotency lookup filtered on strings.** "Filter and Orderby will not
+  work for string values of any kind" (DeveloperProgram.aspx). The lookup's
+  `Reference eq '…' or DocumentNumber eq '…'` therefore either 400s (every push
+  fails "idempotency lookup unavailable") or is ignored (every supplier with a
+  prior invoice reads as a duplicate, and past 100 invoices a retry after a
+  timed-out save can miss its own first attempt and post twice).
+- **Void called `SupplierInvoice/Delete`, which does not exist.** The 2.0.0
+  method list for SupplierInvoice is Get, Get/{id}, Save, Calculate, Email and
+  Export. The `posted_total_mismatch` cleanup leaned on it, so a wrongly-booked
+  invoice was reported "voided" by the fake and stayed live in real Sage.
+- **Paging had no order.** "If no default order clause is specified, you will
+  need to provide one"; unordered `$skip` pages can drop rows, and a dropped
+  row reads as a dead link to the chart and vendor syncs (§284).
+
+**Decisions.**
+
+1. **The save sends `useSystemDocumentNumber=false`**, and the number recorded
+   is the one Sage echoes back.
+2. **The idempotency lookup filters on integers and dates only** —
+   `SupplierId` plus a one-day `Date` window, ordered `ID desc`, every page —
+   and compares `Reference` / `DocumentNumber` in the adapter. Our own earlier
+   attempt has the same `Date`, so it is always in the window; a window too
+   long to read (10 pages) or a failed page fails closed. *Rejected:* walking a
+   supplier's whole invoice history on every push, to keep the duplicate-number
+   guard across all dates. It costs one call per 100 invoices against a limit
+   of 100 requests a minute and 5,000 a day per company; the guard now covers
+   the same day, and FeohLedger's own duplicate detection covers the rest.
+   `Date` became required for the push (`missing_dates`), which Sage requires
+   anyway.
+3. **`void_invoice` refuses, with no call.** The documented way to reverse a
+   supplier invoice is a `SupplierReturn` allocated against it. That changes
+   the supplier's balance and the VAT return, so — like §303's payment rule —
+   it is an accountant's decision, not one an automatic cleanup makes. The
+   mismatch message now says, truthfully, that the invoice could not be
+   voided. *Rejected:* posting the SupplierReturn automatically.
+4. **A refused save is coded and known to have created nothing**, the shape
+   §285 gave QuickBooks: 402 is `company_subscription_inactive`; any other 4xx
+   is classified from what Sage holds now (`Company.LockProcessing` +
+   `LockProcessingDate` → `period_closed`; `Active: false` on the supplier or
+   an account → `vendor_inactive` / `account_inactive`), else the new shared
+   code `bill_refused`. All carry `not_posted`, so none reads as "possibly
+   posted". Sage's `Message` / `ModelState` is never read into the result: it
+   can echo the invoice. Inactive suppliers and accounts are also refused
+   before the save, and inactive suppliers are now emitted `active=False` by
+   the vendor sync rather than linked as live payees.
+5. **401 and 429 stop, they don't retry.** Sage blocks a user for 24 hours
+   after 20 failed logins in an hour, and blocks a company for an hour on a 429
+   with "do not continue to make requests as this may extend the blocking
+   period". The shared `_RETRYABLE_CLIENT_STATUSES` treats both as retryable
+   (right for OAuth ERPs whose 401 means "refresh"), so this adapter overrides
+   it: a 401 anywhere is `not_connected`, a 429 on the save is non-retryable.
+6. **fake-erp's `/sageza` now behaves like the API**: string `$filter`
+   literals are 400, paging needs `$orderby`, the save keeps the supplier's
+   number only on `useSystemDocumentNumber=false`, there is no Delete, Date and
+   DueDate are required, and it refuses an inactive supplier, an inactive
+   account and a locked period. The adapter as it stood fails against it.
+
+**Not settled without a sandbox** (#654): whether a string `$filter` 400s or is
+ignored; the exact OData `datetime'…'` literal Sage accepts; Sage's 400 body
+for a locked period, an inactive supplier or account and a duplicate number;
+whether `Paid` turns true when a SupplierReturn (credit) is allocated (if so,
+`paid` must come from a SupplierPayment allocation, §303); whether a ZAR
+supplier reports a null or a home `CurrencyId`; the real account-category
+descriptions and PO status strings; and the Resellers (Sandbox) host, which
+`base_url` is deliberately not widened to until it is confirmed. The PO's
+supplier link by `SupplierId` (#652's Sage SA row) already landed in #670.
+
+**Porting note.** Drafted as §320 on `fix/erp-sage-accounting-za` and
+renumbered on landing (§320 was taken). Since the draft, every Sage SA sync
+listing (the PO listing included, §323) is read whole or raises, and a
+transport error is an incomplete listing too; the 401 stop composes with that,
+so a 401 on a sync listing is `ErpListingIncomplete`, never an uncoded error.
+`bill_refused` is deliberately shared (`base.ERP_REFUSAL_CODES`,
+`erpRefusals.ts`, six locales): the Sage UK and Intacct ports reuse it for a 4xx
+they cannot classify further.
+
+Tests: `backend/tests/test_erp_sage_accounting_za_adapter.py`,
+`frontend/tests-e2e/erp/sage-accounting-za.spec.ts`.
+
+## 386. Xero's bills sync back: matched by their id, recorded at Xero's cash, written back at the exact amount (issue #655 X1–X5, 2026-11-13)
+
+**Context.** §295 brought QuickBooks bills' payment status back and wrote our
+payments there, gated on `supports_status_sync`. Xero, the other direct OAuth
+ERP, still closed every push at `done`, so a bill paid in Xero never reached
+FeohLedger (the live Demo Company test's FEOH-INV-001). The 2026-10-23 audit of
+the Xero adapter against Xero's published API (#655) also found four reading
+errors (X1–X4) and a wrong rate-limit figure (X5). A WIP branch
+(`feat/erp-xero-status-sync`, `f8e5cee5`) drafted the work; this entry is the
+port onto main (with #707's company picker, ShortCode deep link and per-company
+vendor links in place) and its completion.
+
+**Decision — Xero reports back.** `XeroAdapter.supports_status_sync = True`.
+With `FEOH_ERP_STATUS_SYNC_ENABLED` on, a confirmed Xero push lands at
+`posted_in_erp`, and §295's table, §296's dispatch-time read, §309's live-claim
+refusals and §319's kept report apply unchanged. The sweep selects tenants by
+`dispatcher.status_sync_adapter_keys()`, derived from the adapter classes, so
+the next adapter that turns the capability on is swept with no second list.
+
+- **Matched by the bill's id, in any state.** Xero's `Reference` is
+  ACCREC-only, so a bill carries no marker of ours. An `InvoiceID` is a GUID
+  Xero never reuses, so the report sets `match_by_reference` and
+  `_matching_invoice_id` matches by `erp_reference` within the recorded realm,
+  exactly one invoice or none, the way QuickBooks' deleted bills already were.
+  A push that recorded no realm can therefore never match, so the sweep does
+  not read its bill either (`ErpAdapter.bills_match_by_reference`, which
+  `_bills_we_posted` asks; QuickBooks' marker can still match such a bill, so
+  it keeps reading them). Rejected: writing our correlation id into a line description (a person can
+  edit it, and it would print on the bill).
+- **"Paid" is read from the payments on the bill, never `Status` alone (§303).**
+  `AmountPaid` must equal the sum of the listed payments, or the report is
+  `unknown` (the dispatch check then holds). Credit notes, overpayments and
+  prepayments sit in `AmountCredited`, so a bill they settled is
+  `settled_by_credit`. Our write-backs are told apart by `Reference:
+  "FeohLedger payment <id>"`.
+- **The cash Xero shows is recorded, not FeohLedger's figure.** New
+  `ErpBillReport.paid_amount`: the exact cash a person applied outside us, set
+  only for a bill paid wholly in cash. The ERP-paid path passes it to
+  `record_invoice_paid_outside(amount=…)`, which records only when it equals
+  what the invoice owes here; anything else is refused `amount_mismatch`
+  (`external_payment_amount_mismatch`, a new `erp_paid_unrecorded_*` clause in
+  every locale) and kept on the `paid_not_recorded` row with the amount and its
+  currency, which the re-attempt and a merge never drop. A figure in another
+  currency than the invoice's, or none stated, is refused the same way, never
+  compared as a bare number. That check sits in `record_invoice_paid_outside`
+  beside the amount check (`source="erp"`), so it runs AFTER §309's live-claim
+  refusals: a payment in another currency on an invoice FeohLedger is also
+  paying is reported as the double payment it is (`in_run` / `payment_live` /
+  `card_live`), naming the claim a person must undo. Recording the owed figure, as QuickBooks still does
+  (it states no amount; `docs/followups.md`), would book money that did not
+  leave whenever a credit memo or an early-payment discount applies only here.
+  **The row is payment-blocking** (`amount_mismatch` joins
+  `DOUBLE_PAY_REFUSALS`): the bill is paid in full there, so paying it here is
+  the double payment, and an undispatched booking of ours surfaces exactly this
+  way (it is completed in place, and its figure is what disagrees). Leaning on
+  §296's dispatch read alone would leave it payable whenever status sync is
+  turned off. **The one-click record books the stated figure or nothing**:
+  `POST /api/exceptions/{id}/record-erp-payment` takes the row's stated amount
+  as the amount, so it refuses until a person corrects the invoice or the bill,
+  and a body figure that disagrees is a 422, as is a stated figure with no
+  currency (the sweep's rule on the same facts; a blank on both sides is not a
+  match). Before this, the dialog's
+  amount-less record would have booked FeohLedger's figure (and captured a
+  discount the supplier never granted) and closed the row.
+- **The channel is the sweep, plus an admin's "check now".** No Xero webhook is
+  wired (a follow-up). `changed_bills` reads `Invoices` and `Payments` with
+  `If-Modified-Since` from the connection's high-water mark, 1,000 rows a page,
+  counted against `SYNC_LISTING_MAX_ROWS` in rows. A connection consented
+  before `accounting.payments` (added to the scopes now) cannot list payments:
+  that 401/403 is an incomplete listing, so the pass reads every payable bill,
+  which needs only the invoices scope. The header is sent as Xero documents it,
+  `yyyy-mm-ddThh:mm:ss` in UTC. **Only bills an invoice was pushed as are read
+  back** (`sync_bills` → `_bills_we_posted`, for every adapter): a change feed
+  lists every bill the company changed, and reading the hand-keyed ones spends
+  Xero's daily allowance on bills that could only be unmatched. `POST
+  /api/organization/erp/oauth/status-sync` runs the same pass for one tenant:
+  admin-only, audited first (and its outcome after, a refusal included), four
+  an hour per tenant, and **run after the response (202)**, since a full
+  reconciliation at Xero's 60 calls a minute outlasts any HTTP timeout. One at a
+  time per tenant, by a 15-minute Redis claim the pass releases; a Redis that
+  cannot be reached falls back to the worker's own check, and a second pass is
+  then only as costly as two sweep ticks (the mark only ever moves to a pass's
+  own start).
+- **Xero's per-minute limit is waited out on status reads, once.** A full
+  reconciliation reads one to three calls per bill, so a tenant with more than
+  a few dozen payable bills met a 429 on every pass and the pass failed at the
+  same bill each time, never reading the rest. A status-sync GET answered 429
+  with a `Retry-After` of at most 60 s, and an `X-Rate-Limit-Problem` that is
+  absent or names a per-minute limit, sleeps that long and reads again, once
+  (`xero._status_get`). The header decides first because the daily cap can
+  carry a short `Retry-After` near midnight. That is Xero's pacing instruction, not a retry of an
+  unknown failure (guard rail 4), and it is bounded. A longer `Retry-After` is
+  the daily cap, and the pass fails with its mark unmoved. At the dispatch check
+  the 10 s bound cuts a wait short and the payment is held (§296). Pushes still
+  never wait: `services/erp`'s backoff owns their timing.
+- **The rail is best effort.** Reading which account paid costs two more calls
+  for a bill already known to be paid outside; a failure there is "not stated"
+  (1099-reportable), never a failed report, so it cannot turn a known
+  `erp_bill_not_open` into an unverified hold or stop a sweep at that bill.
+
+**Decision — the write-back.** `post_payment` applies a Xero Payment to the bill
+from the mapped pay-from account at the exact `Decimal` that reached the
+supplier (`dumps_exact_json`), idempotent in §295's two layers (our marker,
+looked up among all payments, deleted ones included; and `Idempotency-Key`).
+A write-back someone deleted in Xero is refused `bill_payment_voided`. Refused
+before any write: no account, a bill gone, another currency (or none stated on
+either side: fail closed, in the QuickBooks write-back too), or more than is
+due. **A discount is not a payment**: Xero's Payment has no discount field, so
+the bill is left open by the discount and flagged
+(`erp_payment_writeback_balance_open`, now carrying `discount_amount` in its
+`erp_report`), §295's conservative answer kept; booking it as a credit note is
+an opt-in for a product call (`docs/followups.md`). Following that flag's
+advice must not raise an alarm, so a credit after our payment is not "paid
+twice" when, and only when, every fact says it is that discount: the bill was
+settled by credit with no payment of anyone else's on it, **our write-back is
+on the bill** (`ErpBillReport.our_payment_applied`), and what came off beyond
+our write-back (`reduced_outside_amount`, `total - due - ours`) is no more than
+the `Payment.discount_amount` FeohLedger's own completed payments took. Without
+the write-back the bill still showed the whole amount due when our rail paid
+(say the write-back was refused `payment_account_not_mapped`), so a credit for
+it is a second settlement and raises `erp_paid_twice`; so does a credit larger
+than the discount, or one after a payment that took none. (A first draft keyed
+the exemption on "credit and no outside payment" alone, which hid exactly that
+case; the money-path review caught it.) QuickBooks states neither fact (it
+lists a credit as a $0 BillPayment anyway), so its rule is unchanged.
+`void_payment` deletes our Xero payment (Xero has no payment void), finding
+"ours" exactly as `post_payment` does, by `GET Payments` on our `Reference` for
+this bill, live ones only, never only among the bill's own `Payments`: two
+definitions would let a payment one sees go undeleted by the other. A
+reconciled one is refused by Xero and flagged.
+
+**Decision — the audit findings.**
+
+- **X1.** The vendor walk read `IsSupplier==true`, which Xero sets only once a
+  contact has a bill (and the API cannot set), so a new supplier was never
+  synced and its first push refused `vendor_not_linked` for good. It now reads
+  `IsSupplier==true OR IsCustomer==false`; customer-only contacts stay out. A
+  customer who becomes a supplier with no bill or PO is still missed (a
+  follow-up), and the opt-in live contract check asserts the OR is honoured.
+- **X2.** A bill create Xero refuses (HTTP 400 `ValidationException`,
+  `ErrorNumber: 10`, nothing created) is coded from facts read back, never
+  from its `Message` (which quotes the bill): contact not `ACTIVE` →
+  `vendor_inactive`; a line's account not `ACTIVE` → `account_inactive` with
+  our GL codes; dated on or before `PeriodLockDate` / `EndOfYearLockDate` →
+  `period_closed`. All non-retryable and `not_posted`, the codes QuickBooks uses
+  (§285). An unexplained validation failure is the plain failure, still
+  `not_posted`; anything but a ValidationException may have posted, as before.
+- **X3.** A contact is active only when `ContactStatus == ACTIVE`: `ARCHIVED`
+  and `GDPRREQUEST` (erased on request) are not payees.
+- **X4.** An account is active only when `Status == ACTIVE`: `DELETED` read as
+  active before.
+- **X5.** The documented "5,000 calls a day" holds only on Xero's Core tier and
+  above; the default Starter tier allows 1,000 per organisation and 5
+  connections. The adapter's references and the docs say so; moving the
+  platform app to Core before a sixth tenant is the operator step in #654.
+
+**Not verified live.** Everything above is against the published API, a
+stateful double (`test_xero_status_sync_adapter.py`) and fake-erp. Unconfirmed
+until a Demo Company pass (#654): the `If-Modified-Since` format Xero accepts,
+that `GET Payments` lists deleted payments, that a bill's own `Payments` array
+carries each payment's `Reference` (our marker; `report_from_bill` relies on
+it, `void_payment` no longer does), the `X-Rate-Limit-Problem` values, the `OR`
+filter, and the ValidationException body for each refusal.
+
+**Accepted residual.** A payment someone keys in Xero with our exact marker text
+(`FeohLedger payment <uuid>`) reads as ours. Checking the id against this
+invoice's payments would need a tenant read inside the adapter's report; the
+marker is a UUID nobody types by accident.
+
+Tests: `tests/test_xero_status_sync_adapter.py` (`bill_report`,
+`changed_bills`, `bills_for_payment`, `post_payment` idempotency and refusals,
+`void_payment` by the same lookup as the post, the fail-closed currency, the
+minute-limit wait, the paid amount, our write-back and the outside reduction on
+the report);
+`tests/test_erp_xero_adapter.py` (X1–X4); the Xero section of
+`tests/test_erp_status_sync.py` (real rows: recorded at Xero's amount, a
+mismatch kept and blocking and the one-click refused, another currency
+refused or none stated, §309's live claim named before a currency mismatch,
+the one-click refusing a currency-less figure, a credit after our discounted
+payment not paid twice, while a credit our write-back never reached, one past
+the discount and one after an undiscounted payment are,
+matched only in the recorded organisation, a hand-keyed bill and a realm-less
+push's bill never read, the
+sweep covers Xero, the on-request refusals, single-flight and its audit); `tests/test_erp_oauth.py` § status sync on request;
+`tests/test_erp_payment_writeback.py` (the discount on the balance flag);
+`tests/test_qbo_status_sync_adapter.py` (the QuickBooks write-back's
+fail-closed currency).
+
+## 387. The bulk-status endpoint's own skips are coded, reusing codes where the meaning is the same
+
+`POST /api/invoices/bulk/status` wrote seven skip sentences itself, in English
+only, beside rows its services already coded (§357, `_refused_skip`). Each now
+goes through `_coded_skip(coded_refusal(...))`, so the invoice list's toast
+(`localizeApiDetail` per row) states every row in the reader's language.
+
+- **Reused where the sentence means the same thing:** an entry-only caller's
+  source → `invoice_entry_window_closed` (`params.status`); a stale version →
+  `invoice_stale_approval` (it was the seventh uncoded skip, not in the
+  follow-up's list); blank fields → `invoice_required_fields_missing`
+  (`params.fields`).
+- **New, in `api/invoices.py`:** `invoice_bulk_not_found`,
+  `invoice_status_immutable` (`params.status`, the `invoice_not_completable`
+  shape, named by its label), `invoice_still_extracting`,
+  `invoice_recall_one_at_a_time`. Not reused: `invoice_not_completable` says
+  "only new or approved can be completed", which is false for an immutable row
+  under a non-`done` target; `invoice_transition_recall_only` is the engine's
+  edge refusal and needs `params.target`, while the bulk recall skip is the
+  endpoint declining before any edge is tried.
+- **Other bulk endpoints left uncoded on purpose:** vendors `/bulk/status` and
+  `/bulk/screen`, exceptions bulk resolve, expenses `/bulk/gl-code` write
+  English (or machine) `reason`s, but no page renders them — their toasts show
+  counts only — so coding them would add codes nobody states. The expenses
+  toast's own English splice is a follow-up.
+
+Guards: `tests/test_bulk_status_controls.py::test_every_skip_the_bulk_endpoint_writes_itself_is_coded`
+(no bare `BulkStatusSkip(` in the endpoint body) and the exact-row tests;
+`codedRefusals.test.ts` reverse-pins the codes in `api/invoices.py`.
+
+## 389. A receipt its own approver records after approving does not release the invoice (§267 follow-up, migration 0129, 2026-11-13)
+
+**The gap.** §267 refuses a receiver at approval. The reverse order was open:
+a manager approves an invoice held "billed beyond receipt", then records the
+goods receipt that lifts the hold, and the payment run pays it. One person
+both signed the invoice and counted the delivery in. `receipts_clear_hold`
+(and the agent coordinator's `_receipts_implicated`, which reads it) measured a
+recorder against the implicated set only, and nothing recorded a single-level
+approver by id: `approved_by` is a display name, and the audit log is not
+local under `FEOH_AUDIT_MODE=lambda` when the refresh runs. A chain's level
+approvals were already recorded by id in its state.
+
+**The two options, and the one taken.** The follow-up offered refusing the
+recorder at the receipt door, or letting the receipt stand but not count
+towards that invoice's hold. The hold is the fail-closed one, so it was
+chosen:
+
+- *It holds in any order of events.* The door sees only receipts recorded
+  after an approval through itself; the hold is re-asked at every refresh, so
+  it also catches a `po_number` re-pointed after approval onto a PO the
+  approver had already received, and a level approver whose chain is still
+  open.
+- *It refuses nothing that is true.* A receipt serves every invoice on its PO.
+  Refused at the door, an approver of one invoice could not book a delivery
+  for any of them, and the PO's other invoices, and the commerce sync, would
+  wait on someone else typing in a fact. Recorded, it counts towards the 3-way
+  leg and lifts the holds of every invoice its recorder did not approve; it is
+  only not evidence that releases their own approval.
+- *A wrong input leaves a hold for a person*, never a payment.
+
+**One rule, read in both orders.** `approval_chain.receiving_conflicts(
+receipt_recorders, approvers)` is the intersection. The approval door passes
+the would-be approver (`violates_receiving_segregation` now calls it); the
+hold passes the invoice's recorded approvers (`receiving_conflict_on`, read by
+`receipts_clear_hold` after its §262 check). The receipt side is always
+`receipt_recorders`, the approval door's own set (live, `manual`, a named
+recorder, every PO the invoice names, its own entity), so the two orders
+cannot disagree about which receipts count. The approval step's
+`require_segregation: false` lifts both, as §267 said. The queue's
+`settings.exceptions.require_segregation: false` also lifts the reverse order,
+because it switches off the auto-close's segregation limits altogether and the
+queue then lets anyone clear the row by hand: holding it in the auto-close
+would be a refusal nothing enforces, which is §267's own argument for not
+refusing receivers at the queue. The hold is read only when a `po_mismatch`
+row is open, so a refresh with nothing to release pays no extra queries.
+
+**The two orders serialise.** Without that, one person could send the approval
+and the receipt at once: the approval reads no receipt yet, the receipt's
+re-match reads the invoice as not yet approved, and both commit. Every human
+approval door already locks the invoice row (single and bulk approve, the
+email / Slack / Teams links, `/complete`), so the receipt's re-match now takes
+the invoices citing its PO `FOR UPDATE`, in id order, before re-reading them
+(`refresh_invoices_citing_pos(lock_invoices=True)`, set only by receipt entry).
+Whichever commits second sees the other. There is no lock cycle: the receipt
+holds its PO and then the invoices; the approval holds the invoice and reads
+receipts without a lock. The batch callers (QMS, ERP PO sync) do not lock: the
+ERP sync never clears a hold (§323), and neither adds a hand-typed receipt.
+The exception agents approve without the invoice lock; they act for the human
+who triggered the run, re-check `receipts_clear_hold` themselves, and a
+concurrent receipt by that same human is the residue left there.
+
+**Who approved, by id.** `approved_by` and the chain state were checked first.
+The chain state records every level approver by id and is reset exactly where
+an approval stops being in force (reject, recall), so it is read as is. A
+single-level approval recorded no id anywhere local, so migration 0129 adds
+`invoices.approved_by_user_id` (uuid, no FK). `approval_chain.
+record_final_approval` is now the one writer of an invoice's `approval_date`,
+`approved_by` and the id together (a source-scan test fails on any other
+write under `app/`, so a fourth approval site cannot set the display fields
+and forget the id); it is called at each of the three final approval sites: the
+approving person (`review.approve_invoice`, every door); `/complete`'s amount
+floor, whose caller §267 already treats as the effective approver; and
+extraction's auto-approve, whose reader asked for the approving read (§268).
+The nil-UUID system actor and NULL stamp NULL, never a sentinel a comparison
+could match. `approver_ids` is the stamp ∪ every chain approval.
+
+**A recall keeps the stamp**, as it keeps `approved_by` (§374): the next
+approval replaces it. A receipt the recalled approver types in meanwhile still
+does not release the invoice; once someone else approves, the hold is
+re-judged against them at the next refresh. That can leave a hold for a person
+a little longer than strictly needed, which is the safe error.
+
+**History is filled from evidence only (§141, §367).** The invoice's approval
+of record already names its approver: every final approval writes
+`invoice.approved` or `invoice.auto_approved` with the actor in the same
+transaction as `approved_by`, and `audit_log` is append-only. 0129 copies the
+actor of the latest such row (the one `approved_by` names, since each approval
+overwrites it), only when that row is alone at its instant and names a person
+of the invoice's organization, on invoices approved and not `done`. An earlier
+row is never a fallback for a latest one that names nobody. An invoice is only
+approved twice through a recall, and under `FEOH_AUDIT_MODE=lambda` a row's
+`created_at` is when the worker inserted it, not when the approval happened, so
+once a recall is on the record and two different people approved, nothing is
+stamped: "latest" is trusted only when there is nobody else it could have
+meant. **The backfill runs once.** An approval given by the previous release
+while the migration runs (before the new code serves) is not stamped and reads
+as "no approver known"; `BACKFILL_SQL` only fills NULLs and can be re-run
+safely after the deploy if that window mattered. No audit row is
+written for it: the column restates the row it was read from (0126's
+`decided_by_user_id` reasoning). What stays NULL, an unattended
+auto-approval or an approval whose row is missing, has nobody to refuse, and
+the receipt rule reads it as before.
+
+**What an independent person does.** The held row says the delivery has not
+been vouched for by anyone outside the approval. Either the approver's receipt
+is cancelled (cancelling can only raise a hold, so anyone with receipt entry
+may) and someone else records the delivery, which lifts the hold in that
+request; or someone else checks the delivery and resolves the row in the queue.
+
+**Left open** (`docs/followups.md`): the queue does not refuse the approver of
+record resolving the held `po_mismatch` by hand. `segregation_refusal` refuses
+the implicated set and the raiser, and §169 deliberately left approvers able to
+clear; adding an approver axis widens that policy for every door the predicate
+serves, so it is tracked rather than slipped in here.
+
+**Rejected:**
+- *Stamping the approver into `segregation_actor_ids`.* That set is who shaped
+  the payable's terms; it would refuse the approver their own re-approval
+  after a recall, which §374 allows.
+- *Failing closed on a NULL approver of a human approval.* NULL cannot tell an
+  unattended auto-approval from an unrecorded person without parsing the
+  display name, and refusing every auto-approved invoice's receipts would make
+  that channel's holds permanently manual.
+- *Reading the audit log at refresh time.* It fails open in lambda mode,
+  which is why the column exists.
+
+Tests: `tests/test_goods_receipt_entry.py` (approve then receipt holds; an
+independent recorder releases; cancel and re-record by someone else releases;
+one receipt over two invoices holds only its recorder's; a chain level
+approver; the approval-step and the queue opt-outs; an approval naming nobody;
+approving and receiving at once);
+`tests/test_approval_receiver_segregation.py` (receipt then approve still 403;
+the door and the floor stamp the approver; `receiving_conflicts`,
+`stamp_approver`, `approver_ids`; `record_final_approval` is the only writer); `tests/test_exception_agent_receipt_segregation.py`
+(the agent escalates on the approver's receipt, clears on an independent one);
+`tests/test_invoice_recall_approval.py` (the stamp survives a recall);
+`tests/test_invoice_clerk_entry.py` (extraction's auto-approve stamps its
+reader); `tests/test_migration_0129_invoice_approver_id.py` (literals pinned to
+the app, chain, parity, each backfill case including the two recall cases,
+idempotence, Alembic on a tenant and on the control plane).

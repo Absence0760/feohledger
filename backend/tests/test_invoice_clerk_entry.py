@@ -618,6 +618,9 @@ async def test_a_managers_own_document_still_auto_approves(realdb, monkeypatch):
 
     assert row.status is InvoiceStatus.approved
     assert row.approved_by == "system (auto-approve)"
+    # The reader who asked for the approving read is its approver by id
+    # (decisions §389), so their later receipt cannot release it.
+    assert row.approved_by_user_id == realdb.info("a").users["ap_manager"]
     assert audit.action == "invoice.auto_approved"
     assert audit.details["auto_approve_suppressed"] is None
 
@@ -640,6 +643,12 @@ async def test_clerk_bulk_resubmits_rejected_and_skips_what_is_past_entry(realdb
     body = resp.json()
     assert body["updated"] == 1
     assert {sk["id"] for sk in body["skipped"]} == {once_approved, extracting}
+    # The entry-window skip is coded, naming the row's status (decisions §387).
+    by_id = {sk["id"]: sk for sk in body["skipped"]}
+    assert by_id[once_approved]["code"] == "invoice_entry_window_closed"
+    assert by_id[once_approved]["params"] == {"status": "rejected"}
+    assert by_id[extracting]["code"] == "invoice_entry_window_closed"
+    assert by_id[extracting]["params"] == {"status": "pending"}
     assert (await _row(realdb, rejected)).status == InvoiceStatus.ready_for_review
     assert (await _row(realdb, once_approved)).status == InvoiceStatus.rejected
     assert (await _row(realdb, extracting)).status == InvoiceStatus.pending
@@ -749,7 +758,14 @@ async def test_bulk_status_reports_an_id_it_could_not_find(realdb):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["updated"] == 1
-    assert body["skipped"] == [{"id": missing, "reason": "invoice not found"}]
+    assert body["skipped"] == [
+        {
+            "id": missing,
+            "reason": "invoice not found",
+            "code": "invoice_bulk_not_found",
+            "params": {},
+        }
+    ]
 
 
 async def test_a_clerk_editing_their_own_entry_is_not_restamped(realdb):

@@ -25,6 +25,7 @@ import {
 	getInvoice,
 	loginAsSecondActor,
 	sendToErpAndAwaitTerminal,
+	statusSyncPushLanding,
 	syncErpGlAccounts,
 	syncErpPurchaseOrders,
 	syncErpVendors,
@@ -248,7 +249,7 @@ test.describe('/erp xero adapter against fake-erp', () => {
 			glAccount: '6100'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe(await statusSyncPushLanding(page));
 			const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
 			expect(bill.Type).toBe('ACCPAY');
 			expect(bill.Contact.ContactID).toBe('xero-contact-1');
@@ -277,7 +278,7 @@ test.describe('/erp xero adapter against fake-erp', () => {
 			glAccount: '6100'
 		});
 		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe(await statusSyncPushLanding(page));
 			const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
 			// Scoped to the organisation by fake-erp's ShortCode (`!fAkE1`), which
 			// the adapter reads after the post (backend decisions §354).
@@ -290,7 +291,8 @@ test.describe('/erp xero adapter against fake-erp', () => {
 			expect(posted.erp_document_id).toBe(bill.InvoiceID);
 			expect(posted.erp_document_url).toBe(link);
 
-			// The detail view at `done`, where the ERP section used to be hidden.
+			// The detail view once posted (`done`, or `posted_in_erp` with status
+			// sync on), where the ERP section used to be hidden.
 			await page.goto(`/invoices?id=${inv.id}`);
 			await expect(page.getByTestId('erp-reference')).toContainText(bill.InvoiceID);
 			const anchor = page.getByTestId('erp-reference-link');
@@ -355,8 +357,8 @@ test.describe('/erp xero adapter against fake-erp', () => {
 						timeout: 20_000,
 						message: 'the approved invoice never finished its automatic ERP send'
 					})
-					.toMatch(/^(done|failed)$/);
-				expect((await getInvoice(page, inv.id)).status).toBe('done');
+					.toMatch(/^(done|posted_in_erp|failed)$/);
+				expect((await getInvoice(page, inv.id)).status).toBe(await statusSyncPushLanding(page));
 
 				const trail = await auditActions(page, inv.id);
 				expect(trail.indexOf('invoice.erp_submitted')).toBeGreaterThan(
@@ -390,7 +392,7 @@ test.describe('/erp xero adapter against fake-erp', () => {
 				expect(await xeroBillsNumbered(request, inv.invoice_number)).toHaveLength(0);
 
 				// The person's click is still what sends it, and it posts once.
-				expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+				expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe(await statusSyncPushLanding(page));
 				expect(await xeroBillsNumbered(request, inv.invoice_number)).toHaveLength(1);
 			} finally {
 				await deleteInvoice(page, inv.id);

@@ -275,6 +275,7 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "tax_rate_unresolved",
         "missing_dates",
         "duplicate_document_number",
+        "bill_refused",
         # QuickBooks Online
         "doc_number_too_long",
         "currency_unknown",
@@ -453,8 +454,9 @@ class ErpBillState(enum.StrEnum):
 class ErpBillReport:
     """One bill as the ERP reports it, for ``services/erp_status_sync``.
 
-    PII-free by construction: ids, a state, a date and a rail. Never the
-    vendor, the memo text, or an amount beyond what decides the state.
+    PII-free by construction: ids, a state, a date, a rail and the cash paid.
+    Never the vendor, the memo text, or an amount beyond what decides the
+    state and what was paid.
     """
 
     bill_id: str
@@ -463,6 +465,12 @@ class ErpBillReport:
     #: the ``PrivateNote`` marker), or None when the bill carries none — a bill
     #: someone keyed in the ERP by hand, or one we can no longer read.
     correlation_id: str | None = None
+    #: True for an ERP that writes no marker of ours onto a bill but whose bill
+    #: ids are never reused within a company (Xero's InvoiceID is a GUID). The
+    #: sync then matches the bill by the invoice's ``erp_reference`` within the
+    #: connection realm the push recorded, in any state — not only a deleted
+    #: bill, as it does for an ERP that marks its bills (§386).
+    match_by_reference: bool = False
     #: The date of the latest payment the ERP applied that FeohLedger did NOT
     #: post itself, and that payment's rail as a ``Payment.method`` value
     #: (None = not stated; it then counts as 1099-reportable).
@@ -482,6 +490,30 @@ class ErpBillReport:
     #: or nothing readable paid it in cash: the bill was settled without the
     #: money leaving, so it must not be booked as a cash payment.
     settled_by_credit: bool = False
+    #: True when a payment FeohLedger wrote back (``post_payment``) is applied
+    #: to the bill now, as the ERP lists it. Set only by an adapter that can
+    #: tell (Xero: a payment carrying our marker); False = not stated, which
+    #: is how QuickBooks reports today.
+    our_payment_applied: bool = False
+    #: How much was taken off the bill beyond FeohLedger's own write-backs
+    #: (``total - due - ours``), exact, when the adapter can state it (Xero).
+    #: The status sync reads it to tell a bookkeeper recording the discount
+    #: our write-back left open from a second settlement (decisions §386).
+    #: None = not stated.
+    reduced_outside_amount: Decimal | None = None
+    #: The cash the ERP shows a person applied to the bill outside FeohLedger,
+    #: exact, when the adapter can state it (Xero: the sum of the bill's own
+    #: payments that are not ours). Only for a bill paid in full in cash
+    #: (``paid``, ``reduced_outside``, not ``settled_by_credit``). The status
+    #: sync then records the payment at THIS figure, and refuses (a person
+    #: decides) when it is not what the invoice owes here, rather than booking
+    #: FeohLedger's own figure as what left (decisions §386). None = not
+    #: stated (QuickBooks today): recorded at what is owed here, as before.
+    paid_amount: Decimal | None = None
+    #: The ISO 4217 code ``paid_amount`` is in (the bill's currency). The sync
+    #: compares it with the invoice's before comparing figures; a missing or
+    #: different one is refused like a different amount.
+    paid_currency: str | None = None
 
 
 @dataclass
@@ -780,6 +812,11 @@ class ErpAdapter:
     #: (``post_payment``). Only then may a confirmed push leave the invoice
     #: payable at ``posted_in_erp`` (``services/erp_status_sync``, §295).
     supports_status_sync: bool = False
+    #: True for an adapter whose bill reports set
+    #: ``ErpBillReport.match_by_reference`` (no marker of ours on the bill):
+    #: its bills match an invoice only within the realm the push recorded, so
+    #: the sweep never reads a bill only a realm-less push names (§386).
+    bills_match_by_reference: bool = False
 
     def __init__(self, config: dict):
         self.config = config

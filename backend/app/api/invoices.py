@@ -43,6 +43,7 @@ from app.api.invoice_entry import (
     stamp_entry_editor,
 )
 from app.api.invoice_version import (
+    INVOICE_STALE_APPROVAL,
     INVOICE_STALE_EDIT,
     STALE_APPROVAL_MESSAGE,
     matches_loaded_version,
@@ -2657,6 +2658,28 @@ BULK_STATUS_REFUSALS: dict[DBInvoiceStatus, str] = {
 }
 
 
+# The refusals `POST /bulk/status` states itself, beside the ones its services
+# and the state machine raise. Coded like those (`api/refusals.coded_refusal`)
+# so the list's toast states every skipped row in the reader's language; where
+# an existing code already means the same thing it is reused instead
+# (`invoice_entry_window_closed`, `invoice_stale_approval`,
+# `invoice_required_fields_missing`).
+
+#: An id that does not exist, or sits outside the selected entity.
+INVOICE_BULK_NOT_FOUND = "invoice_bulk_not_found"
+
+#: A row in `IMMUTABLE_STATUSES`; ``params.status`` (the
+#: `invoice_not_completable` shape).
+INVOICE_STATUS_IMMUTABLE = "invoice_status_immutable"
+
+#: `pending → new` on a row the extraction worker is still reading (§253).
+INVOICE_STILL_EXTRACTING = "invoice_still_extracting"
+
+#: `→ ready_for_review` on a row holding a recallable approval: a recall goes
+#: through `POST /{id}/recall-approval`, one invoice at a time (§374).
+INVOICE_RECALL_ONE_AT_A_TIME = "invoice_recall_one_at_a_time"
+
+
 def _skip_reason(exc: HTTPException, fallback: str) -> str:
     """The human-readable cause a bulk-status skip is reported with.
 
@@ -2786,7 +2809,9 @@ async def bulk_status_change(
     # reported rather than silently dropped from the batch.
     found = {inv.id for inv in invoices}
     skipped: list[BulkStatusSkip] = [
-        BulkStatusSkip(id=str(i), reason="invoice not found") for i in ids if i not in found
+        _coded_skip(i, coded_refusal(INVOICE_BULK_NOT_FOUND, "invoice not found"))
+        for i in ids
+        if i not in found
     ]
     # Bulk-approving must NOT bypass the approval controls. Routing a transition
     # straight to `approved` skipped segregation-of-duties, the max-amount cap,
@@ -2830,11 +2855,13 @@ async def bulk_status_change(
         # `rejected`, never approved before (same skip-and-report contract).
         if entry_only and (inv.status not in ENTRY_BULK_STATUS_SOURCES or not in_entry_window(inv)):
             skipped.append(
-                BulkStatusSkip(
-                    id=str(inv.id),
-                    reason=(
+                _coded_skip(
+                    inv.id,
+                    coded_refusal(
+                        INVOICE_ENTRY_WINDOW_CLOSED,
                         f"AP clerks can bulk-change only new or rejected invoices "
-                        f"that were never approved ({inv.status.value})"
+                        f"that were never approved ({inv.status.value})",
+                        status=inv.status.value,
                     ),
                 )
             )
@@ -2844,9 +2871,13 @@ async def bulk_status_change(
             continue
         if inv.status in IMMUTABLE_STATUSES:
             skipped.append(
-                BulkStatusSkip(
-                    id=str(inv.id),
-                    reason=f"invoice is in an immutable status ({inv.status.value})",
+                _coded_skip(
+                    inv.id,
+                    coded_refusal(
+                        INVOICE_STATUS_IMMUTABLE,
+                        f"invoice is in an immutable status ({inv.status.value})",
+                        status=inv.status.value,
+                    ),
                 )
             )
             continue
@@ -2856,9 +2887,12 @@ async def bulk_status_change(
             # back to draft by hand, the still-running extraction would then
             # land its own transition on top of whatever was keyed meanwhile.
             skipped.append(
-                BulkStatusSkip(
-                    id=str(inv.id),
-                    reason="the invoice is still being read; wait for extraction to finish",
+                _coded_skip(
+                    inv.id,
+                    coded_refusal(
+                        INVOICE_STILL_EXTRACTING,
+                        "the invoice is still being read; wait for extraction to finish",
+                    ),
                 )
             )
             continue
@@ -2868,7 +2902,11 @@ async def bulk_status_change(
             if expected_versions is not None:
                 seen = expected_versions.get(inv.id)
                 if seen is None or not matches_loaded_version(inv, seen):
-                    skipped.append(BulkStatusSkip(id=str(inv.id), reason=STALE_APPROVAL_MESSAGE))
+                    skipped.append(
+                        _coded_skip(
+                            inv.id, coded_refusal(INVOICE_STALE_APPROVAL, STALE_APPROVAL_MESSAGE)
+                        )
+                    )
                     continue
             try:
                 # A savepoint per row: `approve_invoice` can write before a
@@ -2933,11 +2971,12 @@ async def bulk_status_change(
             # RECALL_EDGES` — so a never-approved `failed` row falls through to
             # the generic branch and is skipped with that refusal.)
             skipped.append(
-                BulkStatusSkip(
-                    id=str(inv.id),
-                    reason=(
+                _coded_skip(
+                    inv.id,
+                    coded_refusal(
+                        INVOICE_RECALL_ONE_AT_A_TIME,
                         "an approval is recalled one invoice at a time, with a reason: "
-                        "use Recall approval on the invoice"
+                        "use Recall approval on the invoice",
                     ),
                 )
             )
@@ -2949,10 +2988,16 @@ async def bulk_status_change(
                 # for approval that the single-invoice submit would refuse.
                 missing = missing_required_fields(inv)
                 if missing:
+                    from app.api.workflow import INVOICE_REQUIRED_FIELDS_MISSING
+
                     skipped.append(
-                        BulkStatusSkip(
-                            id=str(inv.id),
-                            reason=f"Required fields missing: {', '.join(missing)}",
+                        _coded_skip(
+                            inv.id,
+                            coded_refusal(
+                                INVOICE_REQUIRED_FIELDS_MISSING,
+                                f"Required fields missing: {', '.join(missing)}",
+                                fields=missing,
+                            ),
                         )
                     )
                     continue

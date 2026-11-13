@@ -265,6 +265,10 @@ async def receipt_recorders_by_invoice(
     who is not implicated may already lift a ``po_mismatch`` through the
     auto-close (§262), and a refusal the machine would not honour is not a
     control.
+
+    The same set serves the reverse order (decisions §389): a receipt recorded
+    by anyone in :func:`approver_ids` does not lift the invoice's hold
+    (:func:`receiving_conflict_on`), so the two orders read one receipt set.
     """
     if not invoices:
         return {}
@@ -348,7 +352,116 @@ def violates_receiving_segregation(
         return False
     if actor_id is None:
         return False
-    return str(actor_id) in receipt_recorders
+    return bool(receiving_conflicts(receipt_recorders, {str(actor_id)}))
+
+
+def receiving_conflicts(
+    receipt_recorders: Collection[str], approvers: Collection[str]
+) -> frozenset[str]:
+    """The people who both recorded a receipt the invoice is billed against and
+    approved it — the ONE statement of the receiving rule (decisions §267,
+    §389), read in both orders:
+
+    * **receipt first, approval second** — the approval door passes the
+      would-be approver as ``approvers`` (:func:`violates_receiving_segregation`)
+      and refuses with ``approval_segregation_receiver``;
+    * **approval first, receipt second** — the PO-match auto-close passes the
+      invoice's recorded approvers (:func:`approver_ids`) and, while anyone is
+      in both sets, the receipt does not lift the invoice's payment hold
+      (:func:`receiving_conflict_on`, ``invoice_warnings.receipts_clear_hold``).
+
+    Both sides are stringified ids; ``receipt_recorders`` is always
+    :func:`receipt_recorders_by_invoice`'s set, so the two orders cannot
+    disagree about which receipts count."""
+    return frozenset(str(x) for x in receipt_recorders) & frozenset(str(x) for x in approvers)
+
+
+def stamp_approver(invoice: Invoice, actor_id: uuid.UUID | None) -> None:
+    """Record on ``invoice`` who gave the approval being written now, beside
+    ``approved_by`` / ``approval_date``. Every site that finally approves calls
+    it: ``review.approve_invoice`` (the person), ``/complete``'s amount floor
+    (its caller, the effective approver — §267), and extraction's auto-approve
+    (the reader who asked for the read). ``None`` and the nil-UUID system actor
+    that email intake and inbound PEPPOL dispatch under name nobody, so they
+    stamp NULL rather than a sentinel a later comparison could match."""
+    # Coerced: a queued job's payload can carry the id as a string.
+    person = uuid.UUID(str(actor_id)) if actor_id is not None else None
+    invoice.approved_by_user_id = None if person == uuid.UUID(int=0) else person
+
+
+def record_final_approval(
+    invoice: Invoice, *, approved_by: str | None, actor_id: uuid.UUID | None
+) -> None:
+    """Write the approval-of-record fields on ``invoice``: the date, the display
+    name, and who gave it by id (:func:`stamp_approver`). The ONE writer of
+    ``Invoice.approval_date`` / ``approved_by`` under ``app/``, so no approval
+    site can set the display fields and forget the id the receiving rule's
+    reverse order reads (decisions §389); ``tests/test_approval_receiver_
+    segregation.py`` fails on a write anywhere else."""
+    from app.utils.dates import utc_today
+
+    invoice.approval_date = utc_today()
+    invoice.approved_by = approved_by
+    stamp_approver(invoice, actor_id)
+
+
+def approver_ids(invoice: Invoice, instance: WorkflowInstance | None) -> frozenset[str]:
+    """Everyone who has approved ``invoice``, by id, stringified.
+
+    * ``Invoice.approved_by_user_id`` — the approval of record
+      (:func:`stamp_approver`). NULL on an invoice approved before migration
+      0129 whose approval audit row names nobody, and on a system approval.
+    * Every approval recorded on its multi-level chain
+      (``state_data.approval_levels.levels[].approvals[].user_id``), including a level
+      signed while later levels are still open: a level approver is in the
+      approval chain of the invoice, and the chain records them by id.
+
+    Both are reset only where an approval stops being in force — a reject or a
+    recall clears the chain, and the next approval overwrites the column — so
+    nothing here is read from the audit log, which under
+    ``FEOH_AUDIT_MODE=lambda`` is not local when a refresh runs."""
+    ids: set[str] = set()
+    stamped = getattr(invoice, "approved_by_user_id", None)
+    if stamped is not None:
+        ids.add(str(stamped))
+    chain = chain_state_of(getattr(instance, "state_data", None)) if instance else {}
+    levels = chain.get("levels") if isinstance(chain, dict) else None
+    for level in levels if isinstance(levels, list) else ():
+        if not isinstance(level, dict):
+            continue
+        approvals = level.get("approvals")
+        for approval in approvals if isinstance(approvals, list) else ():
+            if isinstance(approval, dict) and approval.get("user_id"):
+                ids.add(str(approval["user_id"]))
+    return frozenset(ids)
+
+
+async def receiving_conflict_on(
+    db: AsyncSession,
+    invoice: Invoice,
+    approval_config: dict,
+    *,
+    instance: WorkflowInstance | None = None,
+) -> frozenset[str]:
+    """Who both approved ``invoice`` and hand-recorded a live goods receipt it is
+    billed against — :func:`receiving_conflicts` over the invoice's recorded
+    approvers and :func:`receipt_recorders`. Empty when the approval step opted
+    out of segregation (the opt-out §267 honours at approval, so an org still
+    runs one policy) or when nobody has approved it. ``instance`` is the
+    invoice's workflow instance when the caller already holds it; ``None``
+    looks it up."""
+    if approval_config.get("require_segregation", True) is False:
+        return frozenset()
+    if instance is None:
+        instance = (
+            await db.execute(
+                select(WorkflowInstance).where(WorkflowInstance.invoice_id == invoice.id)
+            )
+        ).scalar_one_or_none()
+    approvers = approver_ids(invoice, instance)
+    if not approvers:
+        return frozenset()
+    return receiving_conflicts(await receipt_recorders(db, invoice), approvers)
 
 
 def check_receiving_segregation(

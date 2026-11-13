@@ -1045,8 +1045,8 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
 
         Refused before any write: no mapped pay-from account
         (``payment_account_not_mapped``), a bill no longer in QuickBooks
-        (``bill_not_in_erp``), another currency than the bill's
-        (``currency_mismatch``), or more than the bill still has open
+        (``bill_not_in_erp``), another currency than the bill's, or either
+        side stating none (``currency_mismatch``), or more than the bill still has open
         (``payment_exceeds_balance`` — posting it would overpay the bill).
         """
         if not payload.bill_id:
@@ -1067,8 +1067,11 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
                 )
             if existing is not None:
                 return erp_refusal(PROVIDER, BILL_PAYMENT_VOIDED)
-            bill_currency = str((bill.get("CurrencyRef") or {}).get("value") or "").upper()
-            if bill_currency and payload.currency and bill_currency != payload.currency.upper():
+            # Fail closed: QuickBooks states every bill's currency (the home
+            # one included), so a bill or a payment without one is not known
+            # to be in the same currency, and the figure is not posted.
+            bill_currency = str((bill.get("CurrencyRef") or {}).get("value") or "").strip().upper()
+            if not bill_currency or bill_currency != (payload.currency or "").strip().upper():
                 return _nothing_posted(erp_refusal(PROVIDER, CURRENCY_MISMATCH))
             balance = _dec(bill.get("Balance"))
             if balance is None or payload.amount > balance:
@@ -1093,8 +1096,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             else:
                 body["PayType"] = "Check"
                 body["CheckPayment"] = {"BankAccountRef": account}
-            if bill_currency:
-                body["CurrencyRef"] = {"value": bill_currency}
+            body["CurrencyRef"] = {"value": bill_currency}
             request_id = create_attempt_key(str(payload.payment_id), 1, REQUEST_ID_MAX)
             resp = await self._request(
                 "POST", "billpayment", params={"requestid": request_id}, body=body

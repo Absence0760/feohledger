@@ -9,6 +9,10 @@ this check, an uploader who typed in the missing receipt could have a colleague
 run the agents and see the hold cleared on evidence nobody independent
 produced. The coordinator re-checks the live match after the resolver's change,
 unwinds it, and escalates.
+
+The same holds for a receipt recorded by the invoice's own approver after
+approving (decisions §389): `receipts_clear_hold` refuses it, so the agent
+escalates whoever triggered the run.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ from app.services.exception_agents.base import (
     AgentEvaluation,
     ExceptionResolver,
 )
+from app.utils.dates import utc_today
 
 TENANT = "a"
 
@@ -49,7 +54,9 @@ class _AutoResolvingPoMismatchProbe(ExceptionResolver):
         )
 
 
-async def _seed(realdb, *, recorder_role: str, segregation: bool = True):
+async def _seed(
+    realdb, *, recorder_role: str, segregation: bool = True, approver_role: str | None = None
+):
     info = realdb.info(TENANT)
     settings: dict = {"exception_agents": {"autonomy_level": "aggressive"}}
     if not segregation:
@@ -93,7 +100,12 @@ async def _seed(realdb, *, recorder_role: str, segregation: bool = True):
             amount=Decimal("1037.00"),
             currency="USD",
             po_number=number,
-            status="ready_for_review",
+            status="approved" if approver_role else "ready_for_review",
+            approved_by="Approver" if approver_role else None,
+            approval_date=utc_today() if approver_role else None,
+            # Who approved it, by id (migration 0129) — what the reverse order
+            # of the receiving rule reads (decisions §389).
+            approved_by_user_id=info.users[approver_role] if approver_role else None,
             uploaded_by_id=info.users["ap_clerk"],
             organization_id=info.org_id,
             entity_id=ent,
@@ -153,6 +165,32 @@ async def test_an_agent_clears_it_when_someone_else_recorded_the_receipt(realdb,
 @pytest.mark.asyncio
 async def test_the_segregation_opt_out_lets_the_agent_clear_it(realdb, probe):
     mk, exc_id = await _seed(realdb, recorder_role="ap_clerk", segregation=False)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/exceptions/{exc_id}/agent-resolve")
+    assert res.status_code == 200, res.text
+    assert res.json()["decision"]["action_taken"] == "auto_resolved"
+
+
+@pytest.mark.asyncio
+async def test_an_agent_does_not_clear_a_hold_on_the_approvers_own_receipt(realdb, probe):
+    """The manager approved the invoice and then typed in the receipt; the admin
+    — who passes the coordinator's own gate — runs the agent. It escalates."""
+    mk, exc_id = await _seed(realdb, recorder_role="ap_manager", approver_role="ap_manager")
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/exceptions/{exc_id}/agent-resolve")
+    assert res.status_code == 200, res.text
+    decision = res.json()["decision"]
+    assert decision["action_taken"] == "escalated"
+    assert "goods receipt" in decision["rationale"]
+    async with mk() as s:
+        assert (await s.get(APException, exc_id)).status == "escalated"
+
+
+@pytest.mark.asyncio
+async def test_an_agent_clears_an_approved_invoices_hold_on_an_independent_receipt(realdb, probe):
+    """Recorded by the manager, approved by the admin: nobody did both, so the
+    receipt is independent evidence and the agent may clear it."""
+    mk, exc_id = await _seed(realdb, recorder_role="ap_manager", approver_role="admin")
     async with realdb.client(key=TENANT, role="ap_manager") as c:
         res = await c.post(f"/api/exceptions/{exc_id}/agent-resolve")
     assert res.status_code == 200, res.text

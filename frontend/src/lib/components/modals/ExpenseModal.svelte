@@ -1,4 +1,6 @@
 <script lang="ts">
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import type { Expense, ExpenseStatus } from '#lib/types/expense.ts';
 	import {
 		EXPENSE_PAYMENT_METHODS,
@@ -68,6 +70,12 @@
 	// it. `normalizeMoneyInput` decides shape with a regex, never `Number`.
 	let amount = $state<string | null>(moneyText(expense?.amount));
 	let currency = $state(expense?.currency ?? 'USD');
+	// An existing record opens on its own code; only a new one follows the
+	// org currency (`CurrencyInput` re-seeds an untouched field).
+	let currencyTouched = $state(Boolean(expense?.currency));
+	$effect(() => {
+		void orgCurrency.ensureLoaded();
+	});
 	let payment_method = $state(expense?.payment_method ?? 'out_of_pocket');
 	let gl_account_id = $state(expense?.gl_account_id ?? '');
 	let description = $state(expense?.description ?? '');
@@ -234,7 +242,7 @@
 			</label>
 			<label>
 				<span>{m('expenseModal.field.currency')}</span>
-				<input type="text" bind:value={currency} maxlength="3" disabled={!canEdit} />
+				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} disabled={!canEdit} testid="expense-currency" />
 			</label>
 			<label>
 				<span>{m('expenseModal.field.category')}</span>

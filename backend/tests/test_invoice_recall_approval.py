@@ -516,6 +516,11 @@ async def test_the_recall_is_audited_and_the_approval_row_is_untouched(realdb):
     assert recall.details["old_status"] == "approved"
     assert recall.details["new_status"] == "ready_for_review"
     assert (await _instance(realdb, invoice_id)).state_data["recall_count"] == 1
+    # Like `approved_by`, the approver's id survives the recall until the next
+    # approval replaces it (decisions §389): their receipt recorded meanwhile
+    # still cannot lift the invoice's hold.
+    admin = realdb.info(TENANT).users["admin"]
+    assert (await _row(realdb, invoice_id)).approved_by_user_id == admin
 
 
 # ── Re-approval re-runs the chain ──────────────────────────────────────────
@@ -585,6 +590,8 @@ async def test_bulk_status_does_not_recall(realdb, status):
     assert body["updated"] == 0
     (skip,) = body["skipped"]
     assert "Recall approval" in skip["reason"]
+    assert skip["code"] == "invoice_recall_one_at_a_time"
+    assert skip["params"] == {}
     assert (await _row(realdb, invoice_id)).status == status
     assert await _audit(realdb, invoice_id, RECALL) == []
 

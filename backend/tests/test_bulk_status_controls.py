@@ -124,6 +124,9 @@ async def test_bulk_approve_mix_reports_a_distinct_reason_per_skip(realdb):
     assert "segregation" in reasons_by_id[str(segregation_id)].lower()
     assert "immutable" not in reasons_by_id[str(segregation_id)].lower()
     assert "immutable" in reasons_by_id[str(immutable_id)].lower()
+    immutable_skip = next(s for s in body["skipped"] if s["id"] == str(immutable_id))
+    assert immutable_skip["code"] == "invoice_status_immutable"
+    assert immutable_skip["params"] == {"status": "done"}
     # The two reasons must actually differ — collapsing them defeats the point.
     assert reasons_by_id[str(segregation_id)] != reasons_by_id[str(immutable_id)]
 
@@ -480,6 +483,8 @@ async def test_bulk_approve_skips_a_row_edited_after_the_list_loaded(realdb):
     assert body["updated"] == 1
     assert [s["id"] for s in body["skipped"]] == [str(edited)]
     assert "changed after you loaded it" in body["skipped"][0]["reason"]
+    assert body["skipped"][0]["code"] == "invoice_stale_approval"
+    assert body["skipped"][0]["params"] == {}
 
     async with mk() as s:
         rows = {
@@ -562,7 +567,12 @@ async def test_bulk_submit_skips_an_invoice_missing_required_fields(realdb):
     body = resp.json()
     assert body["updated"] == 1
     assert body["skipped"] == [
-        {"id": str(blank_id), "reason": "Required fields missing: vendor, amount"}
+        {
+            "id": str(blank_id),
+            "reason": "Required fields missing: vendor, amount",
+            "code": "invoice_required_fields_missing",
+            "params": {"fields": ["vendor", "amount"]},
+        }
     ]
 
     async with mk() as s:
@@ -827,3 +837,47 @@ async def test_bulk_done_on_an_unclaimed_approved_invoice_writes_its_audit_row(r
             .all()
         )
     assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_bulk_draft_skip_of_an_invoice_still_being_read_is_coded(realdb):
+    """`pending → new` by hand is skipped while extraction runs, and the skip
+    carries a code the list states in the reader's language (decisions §387)."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed(mk, info.org_id, number="BULK-PEND-NEW", status=InvoiceStatus.pending)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status", json={"ids": [str(inv_id)], "status": "new"}
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated"] == 0
+    assert body["skipped"] == [
+        {
+            "id": str(inv_id),
+            "reason": "the invoice is still being read; wait for extraction to finish",
+            "code": "invoice_still_extracting",
+            "params": {},
+        }
+    ]
+
+
+def test_every_skip_the_bulk_endpoint_writes_itself_is_coded():
+    """Every skip `bulk_status_change` writes goes through `_coded_skip` (or
+    `_refused_skip`, which codes a coded refusal): a bare `BulkStatusSkip(...,
+    reason=...)` in its body is an English-only row beside localized ones."""
+    import inspect
+
+    from app.api import invoices
+
+    body = inspect.getsource(invoices.bulk_status_change)
+    assert "BulkStatusSkip(" not in body
+    for code in (
+        invoices.INVOICE_BULK_NOT_FOUND,
+        invoices.INVOICE_STATUS_IMMUTABLE,
+        invoices.INVOICE_STILL_EXTRACTING,
+        invoices.INVOICE_RECALL_ONE_AT_A_TIME,
+    ):
+        assert code.startswith("invoice_")

@@ -328,11 +328,15 @@ export async function qboStatusSyncEnabled(page: Page): Promise<boolean> {
 	return sweeps.some((s) => s.name === 'erp-status-sync' && s.enabled);
 }
 
-/** Where a confirmed QuickBooks push lands: `posted_in_erp` (still payable —
- *  QuickBooks reports its payment back) with status sync on, else `done`. */
-export async function qboPushLanding(page: Page): Promise<'done' | 'posted_in_erp'> {
+/** Where a confirmed push lands for an ERP whose bills report back
+ *  (QuickBooks §295, Xero §386): `posted_in_erp` (still payable — the ERP
+ *  reports its payment back) with status sync on, else `done`. */
+export async function statusSyncPushLanding(page: Page): Promise<'done' | 'posted_in_erp'> {
 	return (await qboStatusSyncEnabled(page)) ? 'posted_in_erp' : 'done';
 }
+
+/** {@link statusSyncPushLanding}, by the name the QuickBooks specs use. */
+export const qboPushLanding = statusSyncPushLanding;
 
 /** Read the ERP document id the adapter returned for a sent invoice, off the
  *  append-only audit trail: `invoice.erp_confirmed` carries

@@ -47,6 +47,10 @@ def new_bill(body: dict, bill_id: str) -> dict:
     """A created Bill: the request body plus what QuickBooks adds."""
     total = float(sum(Decimal(str(line.get("Amount") or 0)) for line in body.get("Line") or []))
     bill = {**body, "Id": bill_id, "SyncToken": "0", "TotalAmt": total, "Balance": total}
+    # QuickBooks states every bill's currency; a home-currency create sends
+    # none, and the company's home currency (the fake's preferences: USD) is
+    # what it stamps. The write-back refuses a bill without one.
+    bill.setdefault("CurrencyRef", {"value": "USD", "name": "United States Dollar"})
     bill["LinkedTxn"] = []
     touch(bill)
     return bill

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import type { Budget, BudgetDimension, BudgetSpend } from '#lib/types/budget.ts';
 	import { BUDGET_DIMENSIONS, BUDGET_DIMENSION_LABEL_KEYS } from '#lib/types/budget.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -39,6 +41,12 @@
 	// which may itself arrive as a JSON number.
 	let amount = $state(String(budget?.amount ?? ''));
 	let currency = $state(budget?.currency ?? 'USD');
+	// An existing record opens on its own code; only a new one follows the
+	// org currency (`CurrencyInput` re-seeds an untouched field).
+	let currencyTouched = $state(Boolean(budget?.currency));
+	$effect(() => {
+		void orgCurrency.ensureLoaded();
+	});
 	let notes = $state(budget?.notes ?? '');
 	/* eslint-enable svelte/state-referenced-locally */
 
@@ -227,7 +235,7 @@
 			</label>
 			<label>
 				<span>{m('budgets.modal.field.currency')}</span>
-				<input type="text" bind:value={currency} maxlength="3" disabled={!canEdit} />
+				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} disabled={!canEdit} testid="budget-currency" />
 			</label>
 			<label>
 				<span>{m('budgets.modal.field.period')}</span>

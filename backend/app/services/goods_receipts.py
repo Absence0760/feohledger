@@ -6,7 +6,9 @@ Why it is shaped this way (decisions §262):
   the idempotency replay and the ``GR-<po_number>-<n>`` auto-number are safe.
 * Every receipt stamps ``source = manual`` and its recorder: a receipt lifts a
   "billed beyond receipt" hold on its own, and the auto-close refuses one
-  recorded by someone implicated in the invoice.
+  recorded by someone implicated in the invoice, or by someone who approved it
+  (decisions §389). The receipt is never refused here: it is true, and it
+  counts for every other invoice on the PO.
 * Invoices citing the PO are re-matched in the same transaction, so the write
   and the holds it raises or lifts land together.
 """
@@ -471,6 +473,14 @@ async def _rematch(
 ) -> None:
     from app.services.invoice_warnings import refresh_invoices_citing_pos
 
+    # Locked: a receipt and an approval of one of these invoices serialise on
+    # the invoice row, so neither order of the receiving rule is raced past
+    # (decisions §389).
     await refresh_invoices_citing_pos(
-        db, org_id, {po_number}, org_settings=org_settings, caller="goods-receipts"
+        db,
+        org_id,
+        {po_number},
+        org_settings=org_settings,
+        caller="goods-receipts",
+        lock_invoices=True,
     )

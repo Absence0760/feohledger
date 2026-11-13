@@ -90,6 +90,16 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text)
     approval_date: Mapped[date | None] = mapped_column(Date)
     approved_by: Mapped[str | None] = mapped_column(String(255))
+    # Who gave the approval of record, by control-plane id — the person
+    # `approved_by` names for display. Stamped at every final approval
+    # (`approval_chain.stamp_approver`): the approving person, or the caller
+    # whose `/complete` the amount floor approved, or the reader whose
+    # extraction auto-approved; NULL when no person did. Like `approved_by` it
+    # survives a recall until the next approval replaces it. Read by the
+    # receiving rule's reverse order (`approval_chain.approver_ids`): a receipt
+    # its own approver hand-recorded does not lift the invoice's payment hold
+    # (decisions §389, migration 0129). No FK: a control-plane id.
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     rejected_by: Mapped[str | None] = mapped_column(String(255))
     uploaded_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     # Control-plane user ids (stringified UUIDs) implicated in this payable's

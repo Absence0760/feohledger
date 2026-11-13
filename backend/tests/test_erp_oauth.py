@@ -524,6 +524,7 @@ async def test_authorize_unknown_provider_404(realdb, platform_app):
         ("GET", f"/api/organization/erp/oauth/{PROVIDER}/authorize"),
         ("GET", "/api/organization/erp/oauth/status"),
         ("POST", "/api/organization/erp/oauth/disconnect"),
+        ("POST", "/api/organization/erp/oauth/status-sync"),
     ],
 )
 @pytest.mark.parametrize("role", ["ap_manager", "ap_clerk", "cfo", None])
@@ -2612,3 +2613,54 @@ def test_verified_browser_nonce_returns_only_a_well_formed_bound_value() -> None
     crafted = nonce[:-1] + ";"
     assert erp_oauth.verified_browser_nonce(crafted, erp_oauth.browser_binding(crafted)) is None
     assert erp_oauth.verified_browser_nonce(nonce, "") is None
+
+
+# ---------------------------------------------------------------------------
+# status sync on request (decisions §386)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.plan("scale")
+async def test_status_sync_now_is_refused_with_a_code_while_sync_is_off(realdb, monkeypatch):
+    from app.services import erp_status_sync
+
+    await _set_settings(realdb, {"erp": _config(_connected_block(realdb.info("a").org_id))})
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", False)
+    dispatch = AsyncMock(return_value=True)
+    monkeypatch.setattr(erp_status_sync, "dispatch_sync_org_now", dispatch)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/organization/erp/oauth/status-sync")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "status_sync_off"
+    dispatch.assert_not_awaited()
+    assert await _audit_actions(realdb) == []
+
+
+@pytest.mark.plan("scale")
+async def test_status_sync_now_is_audited_first_and_runs_after_the_response(realdb, monkeypatch):
+    from app.services import erp_status_sync
+
+    await _set_settings(realdb, {"erp": _config(_connected_block(realdb.info("a").org_id))})
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    dispatch = AsyncMock(return_value=True)
+    monkeypatch.setattr(erp_status_sync, "dispatch_sync_org_now", dispatch)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/organization/erp/oauth/status-sync")
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == {"started": True}
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args.args == (realdb.info("a").org_id,)
+    [row] = await _audit_actions(realdb)
+    assert row.action == "organization.erp_status_sync_requested"
+    assert row.details == {"provider": PROVIDER}
+
+
+@pytest.mark.plan("scale")
+async def test_status_sync_now_refuses_a_connection_that_needs_reconnecting(realdb, monkeypatch):
+    block = {**_connected_block(realdb.info("a").org_id), "needs_reconnect": True}
+    await _set_settings(realdb, {"erp": _config(block)})
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/organization/erp/oauth/status-sync")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "status_sync_needs_reconnect"

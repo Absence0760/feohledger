@@ -1,4 +1,6 @@
 <script lang="ts">
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import type {
 		RecurringTemplate,
 		RecurringCadence,
@@ -62,6 +64,12 @@
 	// here is a rounded figure on every future invoice.
 	let amount = $state(String(template?.amount ?? ''));
 	let currency = $state(template?.currency ?? 'USD');
+	// An existing record opens on its own code; only a new one follows the
+	// org currency (`CurrencyInput` re-seeds an untouched field).
+	let currencyTouched = $state(Boolean(template?.currency));
+	$effect(() => {
+		void orgCurrency.ensureLoaded();
+	});
 	let gl_account = $state(template?.gl_account ?? '');
 	let cost_center = $state(template?.cost_center ?? '');
 	let department = $state(template?.department ?? '');
@@ -284,7 +292,7 @@
 			</label>
 			<label>
 				<span>{m('recurring.modal.field.currency')}</span>
-				<input type="text" bind:value={currency} maxlength="3" disabled={!canEdit} />
+				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} disabled={!canEdit} testid="recurring-currency" />
 			</label>
 			<label>
 				<span>{m('recurring.modal.field.cadence')}</span>

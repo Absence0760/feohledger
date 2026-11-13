@@ -127,7 +127,7 @@ Shows invoices in payable statuses (`approved`, `sent_to_erp`, `posted_in_erp`, 
 
 An invoice sent to the ERP leaves this queue: a successful push ends at `done`,
 and the bill is paid from the ERP. The exception is an ERP with status sync on
-(QuickBooks, decisions §295): there the push lands at `posted_in_erp`, which
+(QuickBooks, decisions §295; Xero, §386): there the push lands at `posted_in_erp`, which
 stays payable here, and a payment from either side is reflected in the other. With the workflow's **Auto-send on approval**
 switch on (and a live ERP connected) that happens moments after approval, so
 such an invoice never waits here (`docs/decisions.md` §304). Tenants that pay
@@ -2505,6 +2505,24 @@ process dies first. Voiding a payment the ERP REPORTED opens the blocking
 again while QuickBooks may still show the bill paid, and nothing about that
 bill would ever be reported again. A bill settled in QuickBooks by a vendor
 credit is never booked as a cash payment; it is flagged (blocking).
+
+### Xero: the same, matched by bill id and recorded at Xero's amount
+
+Decisions §386 (`erp-integration.md` § Xero status sync-back and payment
+write-back). Everything above holds for a Xero push, with three differences.
+The status-sync sweep is Xero's only automatic channel (no webhook here), and
+an admin can run its pass for the tenant on request (`POST
+/api/organization/erp/oauth/status-sync`). A bill paid wholly in cash in Xero is
+recorded at **the cash Xero shows**, not at what FeohLedger reckons is owed:
+when the two differ (a credit memo or an early-payment discount applied only
+here, a total changed in Xero) the record is refused `amount_mismatch`, and
+the payment-blocking `paid_not_recorded` exception keeps Xero's amount for a
+person to settle; its one-click record books that amount or nothing.
+And a payment written back is a Xero Payment from the mapped account at the
+exact amount that reached the supplier. Xero payments carry no discount, so an
+early-payment discount taken here leaves the bill open by the discount, flagged
+for the bookkeeper with the discount in the flag's `erp_report`; no credit note
+is created on their behalf.
 
 The new `card` rail (`schemas/payment.PaymentMethod.card`) is a company card used
 OUTSIDE FeohLedger's card programme: recordable as paid outside, reported by

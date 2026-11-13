@@ -241,6 +241,28 @@ async def test_a_bill_left_partly_open_in_the_erp_is_flagged(realdb):
     assert flag.erp_report["erp_payment_id"] == "BP-9"
 
 
+async def test_a_discount_left_open_in_the_erp_is_named_on_the_flag(realdb):
+    """No ERP payment carries a discount (QuickBooks, Xero; §295, §386): the
+    amount that reached the supplier is posted, and the flag names the
+    discount the bookkeeper still has to record there."""
+    await _configure(realdb)
+    run_id, inv_id, pay_id = await _seed(realdb)
+    async with realdb.sessionmaker("a")() as s:
+        payment = await s.get(Payment, pay_id)
+        payment.amount = Decimal("98.00")
+        payment.discount_amount = Decimal("2.00")
+        await s.commit()
+    adapter = FakeQbo(
+        ErpPostResult(success=True, erp_document_id="BP-9", bill_balance_after=Decimal("2.00"))
+    )
+    await _sync(realdb, run_id, adapter)
+    [payload] = [c.args[0] for c in adapter.post_payment.await_args_list]
+    assert payload.amount == Decimal("98.00")
+    [flag] = await _rows(realdb, APException, invoice_id=inv_id)
+    assert flag.erp_report["kind"] == "payment_writeback_balance_open"
+    assert flag.erp_report["discount_amount"] == "2.00"
+
+
 async def test_a_bill_in_another_quickbooks_company_is_never_written_to(realdb):
     await _configure(realdb)
     run_id, inv_id, _ = await _seed(realdb, realm="quickbooks_online:sandbox-1")
