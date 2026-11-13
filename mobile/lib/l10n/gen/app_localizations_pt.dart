@@ -3267,6 +3267,15 @@ class AppLocalizationsPt extends AppLocalizations {
       'Seu ERP informa esta fatura como paga, mas o FeohLedger não conseguiu registrar esse pagamento: a fatura não está em um status que permita marcá-la como paga. Confira a fatura e depois registre o pagamento do ERP a partir desta exceção ou resolva-a.';
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedAmountMismatch(String erp) {
+    return '$erp informa esta fatura como paga, mas o FeohLedger não conseguiu registrar esse pagamento: o valor informado como pago não corresponde ao que esta fatura deve no FeohLedger, após notas de crédito e eventual desconto por pagamento antecipado. Confira a fatura no ERP e no FeohLedger, corrija a que estiver errada e depois registre o pagamento do ERP a partir desta exceção ou resolva-a.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed =>
+      'Seu ERP informa esta fatura como paga, mas o FeohLedger não conseguiu registrar esse pagamento: o valor informado como pago não corresponde ao que esta fatura deve no FeohLedger, após notas de crédito e eventual desconto por pagamento antecipado. Confira a fatura no ERP e no FeohLedger, corrija a que estiver errada e depois registre o pagamento do ERP a partir desta exceção ou resolva-a.';
+
+  @override
   String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
     return '$erp informa esta fatura como paga, mas o FeohLedger não conseguiu registrar esse pagamento: o FeohLedger recusou o registro. Confira a fatura e depois registre o pagamento do ERP a partir desta exceção ou resolva-a.';
   }
@@ -6847,6 +6856,15 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed =>
       'Seu ERP informa esta fatura como paga, mas o FeohLedger não conseguiu registrar esse pagamento: a fatura não está em um status que permita marcá-la como paga. Confira a fatura e depois registre o pagamento do ERP a partir desta exceção ou resolva-a.';
+
+  @override
+  String exceptionDescriptionErpPaidUnrecordedAmountMismatch(String erp) {
+    return '$erp informa esta fatura como paga, mas o FeohLedger não conseguiu registrar esse pagamento: o valor informado como pago não corresponde ao que esta fatura deve no FeohLedger, após notas de crédito e eventual desconto por pagamento antecipado. Confira a fatura no ERP e no FeohLedger, corrija a que estiver errada e depois registre o pagamento do ERP a partir desta exceção ou resolva-a.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed =>
+      'Seu ERP informa esta fatura como paga, mas o FeohLedger não conseguiu registrar esse pagamento: o valor informado como pago não corresponde ao que esta fatura deve no FeohLedger, após notas de crédito e eventual desconto por pagamento antecipado. Confira a fatura no ERP e no FeohLedger, corrija a que estiver errada e depois registre o pagamento do ERP a partir desta exceção ou resolva-a.';
 
   @override
   String exceptionDescriptionErpPaidUnrecordedOther(String erp) {

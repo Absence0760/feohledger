@@ -655,6 +655,8 @@ export const messages = {
 	'exceptions.description.erpPaidUnrecordedNothingToPayUnnamed': "ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。貸方票が請求書の全額にすでに充当されているため、記録する支払いはありません。ERP で請求書を確認してから、この例外を解決してください。",
 	'exceptions.description.erpPaidUnrecordedNotPayable': "{erp} はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書は支払済みにできるステータスではありません。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。",
 	'exceptions.description.erpPaidUnrecordedNotPayableUnnamed': "ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。この請求書は支払済みにできるステータスではありません。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。",
+	'exceptions.description.erpPaidUnrecordedAmountMismatch': "{erp} はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。支払済みとされた金額が、クレジットメモと早期支払割引を反映した後に FeohLedger でこの請求書が支払うべき金額と一致しません。ERP と FeohLedger の請求書を確認して誤っている方を修正してから、この例外から ERP の支払いを記録するか、例外を解決してください。",
+	'exceptions.description.erpPaidUnrecordedAmountMismatchUnnamed': "ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。支払済みとされた金額が、クレジットメモと早期支払割引を反映した後に FeohLedger でこの請求書が支払うべき金額と一致しません。ERP と FeohLedger の請求書を確認して誤っている方を修正してから、この例外から ERP の支払いを記録するか、例外を解決してください。",
 	'exceptions.description.erpPaidUnrecordedOther': "{erp} はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。FeohLedger が記録を拒否しました。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。",
 	'exceptions.description.erpPaidUnrecordedOtherUnnamed': "ご利用の ERP はこの請求書を支払済みと報告していますが、FeohLedger はその支払いを記録できませんでした。FeohLedger が記録を拒否しました。請求書を確認してから、この例外から ERP の支払いを記録するか、例外を解決してください。",
 	'exceptions.description.erpPaidWithdrawn': "{erp} はこの請求書を支払済みと報告しましたが、現在は支払済みと表示していません。FeohLedger はその支払いを記録していません。ERP で請求書を確認し、まだ未払いであればこの例外を解決して通常どおり支払ってください。",

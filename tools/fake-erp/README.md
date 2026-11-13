@@ -261,18 +261,37 @@ otherwise). Point the backend at it with
 `FEOH_ERP_XERO_API_BASE=http://localhost:12112/xero/api.xro/2.0`.
 
 - `GET /Organisation` — `Fake Xero Org` (ZAR, ZA, ShortCode `!fAkE1`, which the adapter reads after each confirmed push for the bill's organisation-scoped deep link).
-- `GET /Contacts?where=IsSupplier==true` — `xero-contact-1` *Fake Xero
-  Supplier Co* (the customer `xero-contact-2` is filtered out).
+- `GET /Contacts?where=IsSupplier==true OR IsCustomer==false` — `xero-contact-1`
+  *Fake Xero Supplier Co*, `xero-contact-4` (a new supplier with neither flag
+  set, decisions §386) and `xero-contact-5` (`GDPRREQUEST`, erased on request:
+  synced inactive); the customer `xero-contact-2` is filtered out.
+  `GET /Contacts/{id}` reads one (the refused-create explanation).
 - `GET /Accounts` — `xero-acc-6100` / `6200` (default tax type `INPUT`) and
   `xero-acc-6300` (no default tax type: a taxed bill is refused unless the org
-  sets `default_tax_type`).
+  sets `default_tax_type`), plus the pay-from accounts `xero-acc-090` (`BANK`)
+  and `xero-acc-800` (`CREDITCARD`); `GET /Accounts/{id}` reads one.
+- A bill create Xero refuses (an inactive contact or account) answers its
+  `ValidationException` shape: HTTP 400, `ErrorNumber: 10`.
 - `GET /PurchaseOrders` — `PO-XERO-401` (1250.00, AUTHORISED → open),
   `PO-XERO-402` (980.50, BILLED → closed).
 - `GET /Invoices` with `InvoiceNumbers` / `ContactIDs` / `Statuses` filters
   (the pre-create idempotency lookup); `PUT /Invoices` creates `xero-inv-<n>`
   and replays the original response for a repeated `Idempotency-Key`;
   `GET /Invoices/{id}`; `POST /Invoices/{id}` changes status (DELETED only
-  from DRAFT/SUBMITTED, VOIDED only from unpaid AUTHORISED).
+  from DRAFT/SUBMITTED, VOIDED only from unpaid AUTHORISED). Bills carry the
+  fields the status sync reads (`AmountDue` / `AmountPaid` / `AmountCredited`,
+  a `Payments` list, `/Date(<ms>+0000)/` dates, `UpdatedDateUTC`), and
+  `GET /Invoices` honours `If-Modified-Since` with `page` / `pageSize`.
+- Payments (status sync-back and write-back, decisions §386): `GET /Payments`
+  (deleted ones included; `where` on `Reference` / `PaymentType`,
+  `If-Modified-Since`, paged), `GET /Payments/{id}`, `PUT /Payments` (an
+  AUTHORISED bill, at most what is due, from a bank or card account; a
+  repeated `Idempotency-Key` replays), `POST /Payments/{id}`
+  `{"Status": "DELETED"}` (refused for a reconciled payment).
+- Test hooks `POST /xero/api.xro/2.0/__pay {"id", "amount"?, "account_id"?,
+  "date"?}` (a person pays the bill in Xero, from the bank unless
+  `account_id` says `xero-acc-800`) and `__credit {"id", "amount"}` (a credit
+  note allocated to the bill, counted in `AmountCredited`).
 - OAuth (the backend's real connect flow): `GET /xero/identity/connect/authorize`
   302s to a **registered** `redirect_uri` with a `code` (client `fake-xero-client`,
   `response_type=code`; anything else is a 400); `POST /xero/identity/connect/token`

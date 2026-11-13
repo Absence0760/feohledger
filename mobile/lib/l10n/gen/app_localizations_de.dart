@@ -3268,6 +3268,15 @@ class AppLocalizationsDe extends AppLocalizations {
       'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Die Rechnung hat keinen Status, in dem sie als bezahlt markiert werden kann. Prüfen Sie die Rechnung und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme oder lösen Sie sie.';
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedAmountMismatch(String erp) {
+    return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Der dort als bezahlt ausgewiesene Betrag entspricht nicht dem, was diese Rechnung in FeohLedger nach Gutschriften und einem etwaigen Skonto schuldet. Prüfen Sie die Rechnung im ERP und in FeohLedger, korrigieren Sie die fehlerhafte und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme oder lösen Sie sie.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed =>
+      'Ihr ERP meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: Der dort als bezahlt ausgewiesene Betrag entspricht nicht dem, was diese Rechnung in FeohLedger nach Gutschriften und einem etwaigen Skonto schuldet. Prüfen Sie die Rechnung im ERP und in FeohLedger, korrigieren Sie die fehlerhafte und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme oder lösen Sie sie.';
+
+  @override
   String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
     return '$erp meldet diese Rechnung als bezahlt, aber FeohLedger konnte diese Zahlung nicht erfassen: FeohLedger hat die Erfassung abgelehnt. Prüfen Sie die Rechnung und erfassen Sie dann die Zahlung aus dem ERP über diese Ausnahme oder lösen Sie sie.';
   }

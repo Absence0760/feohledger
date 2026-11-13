@@ -1164,10 +1164,18 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       captured. **Durable fix:** `credit_memos.discount_offer_id` (or a typed
       reason) and drop the amount match. **Trigger:** the next credit-memo or
       discounting change.
-- [ ] **(c) The ERP payment sync posts no amount yet.** `payment_erp_sync`
-      only logs. **Durable fix:** when `post_payment` is implemented, send
-      `discount_amount` beside `amount` so the ERP books the discount taken.
-      **Trigger:** the first real ERP payment-posting adapter.
+- [ ] **(c) An early-payment discount taken here is never booked in the ERP.**
+      The write-back posts the exact amount that reached the supplier
+      (QuickBooks and Xero; §295, §386), and neither ERP's payment carries a
+      discount, so the bill stays open there by the discount and the
+      `erp_payment_writeback_balance_open` flag (with `discount_amount` in its
+      `erp_report`) asks the bookkeeper to record it. **Durable fix:** an
+      opt-in per-org setting that books the discount as a vendor credit
+      (QuickBooks `VendorCredit`, a Xero ACCPAY credit note) applied to the
+      bill on write-back, idempotent on the payment id like the payment.
+      Needs a product call on whose books carry the discount account.
+      **Trigger:** the first customer who takes early-payment discounts with
+      status sync on.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
@@ -1361,22 +1369,80 @@ scope (§260) — do not fold them into any of these.
       (`existing_invoice_not_open`). **Durable fix:** decide whether we submit
       for approval and poll, or post only to companies without workflows, and
       document it. **Trigger:** the first BC customer with approval workflows.
-- [ ] **(c) A bill paid in any ERP but QuickBooks never reaches FeohLedger.**
-      Status sync-back (§295) covers adapters with `supports_status_sync`,
-      which today means QuickBooks only. For every other ERP a push still closes
-      at `done`, and `done` is terminal, so the ERP's later payment cannot be
-      recorded. The webhook's `Paid` and "record payment made outside" both
-      skip a `done` invoice. This is what the live Xero Demo Company test hit:
-      FEOH-INV-001 was paid in Xero and still reads `done`. The adapter
-      reads are now honest about paid versus credited (§303).
-      **Durable fix:** extend §295 per adapter: implement `bill_report` (and
-      `changed_bills` or a keyset poll where the ERP has no change feed) plus
-      `post_payment`, so `supports_status_sync` can be true and the push lands
-      at `posted_in_erp` under §296's dispatch-time read. Xero first. A design
-      that instead rests a pushed bill at the non-payable `sent_to_erp` was
-      built and is kept on the `feat/erp-status-sync` branch. It contradicts
-      §295's "either place may pay" decision and needs a product call before
-      reuse. **Trigger:** the first Xero tenant, or the live Xero re-test.
+- [ ] **(c) A bill paid in an ERP other than QuickBooks or Xero never reaches
+      FeohLedger.** Status sync-back (§295) covers adapters with
+      `supports_status_sync`: QuickBooks, and Xero since §386. For every other
+      ERP a push still closes at `done`, and `done` is terminal, so the ERP's
+      later payment cannot be recorded. The webhook's `Paid` and "record
+      payment made outside" both skip a `done` invoice. The adapter reads are
+      honest about paid versus credited (§303).
+      **Durable fix:** extend §295 per adapter as §386 did for Xero: implement
+      `bill_report` (and `changed_bills`, or a keyset poll where the ERP has no
+      change feed) plus `post_payment` / `void_payment`, so
+      `supports_status_sync` can be true and the push lands at
+      `posted_in_erp` under §296's dispatch-time read. `post_payment` posts the
+      exact `Decimal` that reached the supplier and never more than is open;
+      an early-payment discount is left open and flagged, as for QuickBooks and
+      Xero. Where the ERP states a bill's cash exactly, the report carries it
+      (`ErpBillReport.paid_amount`). A design that instead rests a pushed bill
+      at the non-payable `sent_to_erp` was built and is kept on the
+      `feat/erp-status-sync` branch. It contradicts §295's "either place may
+      pay" decision and needs a product call before reuse. **Trigger:** the
+      first tenant on one of those ERPs who pays bills in the ERP.
+- [ ] **(c) QuickBooks' status sync records what is owed here, not the cash
+      QuickBooks shows.** Xero's report states the cash paid outside us
+      (`ErpBillReport.paid_amount`, §386), so a payment that is not what the
+      invoice owes here is refused `amount_mismatch` and kept for a person.
+      QuickBooks' `bill_report` states no amount, so a bill paid there while a
+      credit memo or a discount applies only here is recorded at FeohLedger's
+      figure. **Durable fix:** sum the cash BillPayments' amounts applied to
+      the bill (`_applied_to`) into `paid_amount` for a bill paid wholly in
+      cash outside us, with a recorded-shape fixture (§318). **Trigger:** the
+      next change to the QuickBooks status reader, or the first such
+      mismatch seen live.
+- [ ] **(c) Xero bills reach FeohLedger only by the sweep or an admin's
+      request.** No Xero webhook is wired (§386), so a bill paid in Xero is
+      seen at the next `erp-status-sync` tick (or `POST
+      /api/organization/erp/oauth/status-sync`), and §296's dispatch-time read
+      is what stops a run paying it meanwhile. **Durable fix:** subscribe the
+      platform app to Xero's invoice webhooks (`x-xero-signature`, base64
+      HMAC-SHA256 with the webhook key, the intent-to-receive handshake),
+      dedupe by event, and read the named bill back as the QuickBooks webhook
+      does. Confirm against a live app first which events a bill payment
+      raises. **Trigger:** the first Xero tenant who pays in Xero and in
+      FeohLedger, or a sweep interval found too slow.
+- [ ] **(c) The ERP panel has no "check payments now" button.** `POST
+      /api/organization/erp/oauth/status-sync` (§386) is API-only.
+      **Durable fix:** a button on the ERP settings panel, shown when status
+      sync is on and the connected ERP reports back (the 409 codes say why it
+      cannot run), with its strings in every locale and an e2e spec.
+      **Trigger:** the first Xero tenant, or the live Xero re-test.
+- [ ] **(c) A Xero connection made before `accounting.payments` reads every
+      payable bill on every pass.** Its `Payments` change listing answers
+      401/403, which the sweep reads as an incomplete listing and falls back
+      to the full read (§386): correct, but it spends Xero's daily allowance
+      (1,000 calls on Starter) every tick, and nothing tells the admin why.
+      **Durable fix:** record the scope gap on the connection as a coded state
+      that `/status` and the ERP panel show ("reconnect to grant payments"),
+      and read only the incremental `Invoices` listing until then.
+      **Trigger:** the first pre-§386 Xero connection with status sync on.
+- [ ] **(c) The exception dialog does not show the amount the ERP reports
+      paid.** A `paid_not_recorded` row now keeps it (`erp_report.amount` /
+      `amount_currency`, §386), and the one-click record books it or refuses,
+      but `frontend/src/lib/types/erpReport.ts` has no field for it and the
+      dialog shows no figure, so a person sees the refusal without the number
+      to reconcile. **Durable fix:** add the fields to `ErpReport` and render
+      the amount in the invoice's currency (`frontend/docs/money-formatting.md`)
+      in the record dialog. **Trigger:** the first Xero tenant, or the next
+      change to the exception dialog.
+- [ ] **(c) A Xero customer who becomes a supplier is missed until its first
+      bill or PO.** The vendor sync reads `IsSupplier==true OR
+      IsCustomer==false` (§386): Xero sets `IsSupplier` only once a contact has
+      a bill, so a contact that is already a customer and has no bill and no
+      PO from us yet carries neither flag we can read, and its first push
+      refuses `vendor_not_linked`. **Durable fix:** a vendor-link search by
+      name or tax number against all contacts, run on demand from the vendor
+      page. **Trigger:** the first such refusal seen.
 - [ ] **(c) A bill already posted to the ERP can't be voided or recalled from
       FeohLedger.** `void_invoice` has no caller under `app/` beyond
       `posted_total`'s cleanup of a mismatched bill, and no user action voids

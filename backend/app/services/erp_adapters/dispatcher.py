@@ -76,6 +76,15 @@ def load_builtin_adapters() -> None:
         importlib.import_module(module)
 
 
+def status_sync_adapter_keys() -> tuple[str, ...]:
+    """Every registered adapter whose bills' payment status flows back
+    (``ErpAdapter.supports_status_sync``, decisions §295): the ERPs the
+    status-sync sweep reads. Derived from the classes, so an adapter that
+    turns the capability on is swept with no second list to update."""
+    load_builtin_adapters()
+    return tuple(sorted(k for k, cls in _ADAPTER_REGISTRY.items() if cls.supports_status_sync))
+
+
 def resolve_adapter_key(erp_config: dict) -> str:
     """The registry key ``get_erp_adapter`` would select for ``erp_config``.
 

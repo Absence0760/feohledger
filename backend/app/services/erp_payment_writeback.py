@@ -245,6 +245,12 @@ async def write_back_payment(
                         bill_id=bill_id,
                         erp_payment_id=result.erp_document_id,
                         bill_balance_after=str(result.bill_balance_after),
+                        # An early-payment discount taken here is the usual
+                        # reason: no ERP payment carries one (§295, §386), so
+                        # the bookkeeper records it there.
+                        discount_amount=(
+                            str(payment.discount_amount) if payment.discount_amount else None
+                        ),
                     ),
                 )
             await db.commit()
