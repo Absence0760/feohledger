@@ -933,22 +933,25 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change that touches more than one panel of
       `frontend/src/routes/organization/+page.svelte`.
 
-### Surfaced by the invoice document lock (2026-11-13)
+### Surfaced by the failed-push financial lock (2026-11-13)
 
-- [ ] **(c) An approved invoice's financial fields unlock when its ERP push
-      fails.** `_FINANCIALLY_LOCKED_STATUSES` (`backend/app/api/invoices.py`)
-      starts at `approved` but does not hold `failed`, and an approved invoice
-      whose push failed sits at `failed`. So `PATCH` and `PUT {id}/line-items`
-      let a manager change the amount, payee or lines there, and `/retry-erp`
-      then pushes (and the payment run pays) figures nobody approved. The
-      source document already closes this case (`invoice_entry.document_locked`,
-      decisions §363). **Durable fix:** gate the PATCH financial check and the
-      line-items check on the same predicate (status in the set, or `failed`
-      and `was_ever_approved`). Do it in the same change as the modal's
-      restated `FINANCIALLY_LOCKED_STATUSES` list, which would otherwise send
-      the frozen fields and 409 every save: serve the frozen-field set from
-      the server, or add `failed`-after-approval there too. **Trigger:** the
-      next change to either invoice edit route, or the money-path audit.
+- [ ] **(c) A financially locked invoice whose approved figures are wrong has
+      no way back to review.** `VALID_TRANSITIONS` gives `approved` no edge to
+      `rejected` or `new`, and `failed` only `pending` / `sending_to_erp`;
+      `POST /reject` refuses anything but `ready_for_review`
+      (`review.refuse_unless_in_review`). Yet the mobile lock notice
+      (`invoiceEditLockedNotice`: "reject the invoice, correct it, then approve
+      it again") and older code comments promise that exit. Today the only way
+      to correct a signed-off amount or payee is to delete the invoice and
+      re-enter it, which loses its trail on the row (the audit rows survive).
+      Decisions §370 extended the lock to a failed push after approval, so the
+      gap now covers that case as well. **Durable fix:** decide the exit, an
+      audited "send back to review" edge from `approved` / `failed`-after-approval
+      to `rejected` behind `invoice.approve` with its own segregation rule, or
+      keep delete-and-re-enter as the documented exit. Then make the mobile
+      notice and the web refusal sentence name that exit, in every locale.
+      **Trigger:** the next change to the invoice state machine or the
+      reject endpoint, or the money-path audit.
 
 ### Surfaced by the vendors table column fix (2026-10-06)
 

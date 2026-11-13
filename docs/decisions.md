@@ -16879,3 +16879,81 @@ new "Resubmit for Review" reads it.
 **Left open:** the financial fields themselves still unlock on an approved
 invoice's failed push (`docs/followups.md`). The document predicate covers that
 case. The PATCH and line-item gates do not yet.
+
+## 370. An approved invoice's failed push keeps its financial fields frozen, and the clients read the lock from the server (§363 follow-up, 2026-11-13)
+
+**The gap.** `PATCH /api/invoices/{id}` (on a financial field) and
+`PUT /{id}/line-items` refused only while the status was in
+`FINANCIALLY_LOCKED_STATUSES`, `approved` onward. An approved invoice whose ERP
+push failed sits at `failed`, which is not in the set. A manager could change
+its amount, payee or lines there, and `/retry-erp` then pushed, and the payment
+run then paid, figures nobody approved. §363 had already closed the same case
+for the source document. The web modal and the mobile edit sheet each restated
+the status list, so neither would have kept up with a server-side fix: they
+would have sent the frozen fields, and every save would have 409'd.
+
+**The rule.** One predicate, `models/invoice_status.financially_locked`:
+frozen from `approved` on, and at `failed` once the invoice was ever approved
+(`was_ever_approved`, now owned by the same module and re-exported by
+`api/invoice_entry`). A `failed` extraction, never approved, stays open: its
+corrected figures still meet approval.
+
+- **Fail closed.** The predicate names the open side: the pre-approval statuses
+  and a never-approved `failed`. A status added to the enum later is frozen
+  until someone decides otherwise. `tests/test_invoice_status_groups.py` pins it
+  to "in the set, or `failed` and approved" for every status that exists.
+- **Every door asks it.** `document_locked` (the file routes) is now the same
+  call. `invoice_entry.financial_lock_refusal` gives both edit doors a coded
+  409, `invoice_financially_locked` (`params.status`). There was no coded
+  financial-lock refusal before, only two English sentences.
+- **The web modal reads the server's verdict.** `GET /review-actions` gains
+  `edit_financials` (`invoice_entry.edit_financials_refusal`: entry roles, entry
+  window, then the lock, in the doors' order). The modal's
+  `FINANCIALLY_LOCKED_STATUSES` copy is gone. `financiallyLocked` is
+  `!isAllowed(verdict)`, so it is locked until the server answers. The money
+  inputs (vendor, amount, tax rate) render **disabled** while locked, and line
+  editing is hidden. The old modal left them editable and dropped them from the
+  save without a word. With a fail-closed verdict that would also swallow a
+  typed amount on a slow load, so disabling them is what makes failing closed
+  safe. A locked invoice states the refusal's sentence above the form.
+- **The mobile app reads it off the invoice.** Mobile has no `review-actions`
+  client, and its edit sheet only needs the invoice-level fact, not the
+  caller's verdict. So `InvoiceResponse` carries `financially_locked`, and
+  `Invoice.financiallyLocked` reads it. A missing field (an older backend, an
+  old offline cache, or an `Invoice` built without saying) is locked. The
+  status getter `InvoiceStatus.isFinanciallyLocked` is gone. The web modal
+  deliberately does not use the response field: its `status` moves under it
+  (approve, reset extraction), and the verdict is re-asked when it does.
+
+**Other readers of the locked sets, one by one:**
+- `IMMUTABLE_STATUSES` (`POST_APPROVAL_LOCKED_STATUSES`) in `PATCH`'s
+  whole-edit refusal, `DELETE`, `bulk/delete`, `bulk/status` and
+  `services/gl_recode`: unchanged. `failed` after approval is treated like
+  `approved`, not like an immutable status. Its metadata, GL coding included,
+  stays editable. GL coding moves no money and names no payee (`bulk-recode-gl`
+  changes only the GL code, §253). Delete is the exit an approved invoice
+  already has, and it still refuses an invoice with a live payment.
+- `_PEPPOL_SENDABLE_STATUSES`: unchanged. A failed ERP push is not cleared for
+  e-invoice transmission any more than before.
+- Credit-memo apply (`CREDITABLE_INVOICE_STATUSES`): unchanged. A credit does
+  not edit the approved figure. The payment nets it (`net_payable_amount`), the
+  same as on `approved`.
+- `/extract`: already refused any invoice ever approved, and that refusal is
+  broader than the lock (it also covers a reworked `new`). Left as it is.
+- The exception agents that re-point `vendor_id` (`missing_po`,
+  `multi_po_split`) act only at `ready_for_review`, before approval.
+
+**Rejected:**
+- *Adding `failed` to `FINANCIALLY_LOCKED_STATUSES`.* It would lock a failed
+  extraction, whose figures are exactly what needs keying.
+- *A served frozen-field list.* The field set (`_FINANCIAL_FIELDS`) never
+  varies by invoice. Only whether it applies varies, and that is one boolean.
+  The mobile `kFinancialInvoiceFields` mirror stays, pinned by its own test.
+- *Leaving the modal's money inputs editable and only dropping them from the
+  payload.* With a verdict that fails closed, a typed amount would vanish from a
+  save made before the verdict arrived.
+
+**Left open:** a locked invoice whose approved figures are wrong has no path
+back to review, because `approved` and `failed` have no edge to `rejected`. The
+mobile notice still promises "reject, correct, approve again"
+(`docs/followups.md`).
