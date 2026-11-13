@@ -4,7 +4,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import type { ImportResult } from '#lib/types/csvImport.ts';
-	import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
+	import CsvImportErrors from '#lib/components/ui/CsvImportErrors.svelte';
 
 	// Generic Day-0 CSV import flow shared by `/vendors` and `/invoices`:
 	// pick a file, upload it, show the skip-and-report result (every bad row
@@ -79,13 +79,7 @@
 			<p class="result-summary">
 				{m('csvImport.result.summary', { imported: result.imported, skipped: result.skipped })}
 			</p>
-			{#if result.errors.length > 0}
-				<ul class="error-list">
-					{#each result.errors as e (e.row)}
-						<li>{m('csvImport.result.rowError', { row: e.row, message: localizeApiDetail(e, m) ?? e.message })}</li>
-					{/each}
-				</ul>
-			{/if}
+			<CsvImportErrors errors={result.errors} />
 		</div>
 		<div class="modal-footer">
 			<button type="button" class="btn-outline" onclick={reset}>
@@ -177,18 +171,5 @@
 	.result-summary {
 		font-size: 0.88rem;
 		margin: 0 0 10px;
-	}
-
-	.error-list {
-		max-height: 260px;
-		overflow-y: auto;
-		margin: 0;
-		padding-left: 18px;
-		font-size: 0.8rem;
-		color: var(--danger);
-	}
-
-	.error-list li {
-		margin-bottom: 4px;
 	}
 </style>

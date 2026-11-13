@@ -234,6 +234,12 @@ CSV_AMOUNT_INVALID = "csv_amount_invalid"
 CSV_CURRENCY_REQUIRED = "csv_currency_required"
 #: A `currency` cell that is not a three-letter ISO 4217 code. Params: `value`.
 CSV_CURRENCY_INVALID = "csv_currency_invalid"
+#: A corporate-card feed `amount` that is blank or not a number (refunds and
+#: chargebacks are negative on a real feed, so a negative is NOT refused here,
+#: unlike `csv_amount_invalid`). Params: `value`.
+CSV_CARD_AMOUNT_INVALID = "csv_card_amount_invalid"
+#: A corporate-card feed `date` that is blank or not a date. Params: `value`.
+CSV_DATE_INVALID = "csv_date_invalid"
 #: A `status` cell that is no invoice status at all. Params: `value`.
 CSV_STATUS_INVALID = "csv_status_invalid"
 #: A real status an import may not land at (a live pipeline stage, issue
@@ -929,7 +935,10 @@ async def import_corporate_card_csv(
 
     Columns: ``external_txn_id``, ``date``, ``posted_date``, ``merchant``,
     ``amount``, ``currency``, ``card_last_four``, ``card_ref``. Column order
-    does not matter; unknown columns are ignored.
+    does not matter; unknown columns are ignored. ``currency`` is required per
+    row: a blank or malformed cell refuses that row (``csv_currency_required`` /
+    ``csv_currency_invalid``, :func:`_parse_currency`), never USD. Every row
+    error carries ``{code, params}`` beside the English ``message``.
 
     Idempotency: a row whose ``external_txn_id`` already exists for the org is
     skipped (counted in ``skipped``). The partial-unique index
@@ -949,7 +958,7 @@ async def import_corporate_card_csv(
     try:
         rows = _read_rows(csv_text)
     except csv.Error as exc:
-        result.errors.append(ImportRowError(row=0, message=f"Malformed CSV: {exc}"))
+        result.errors.append(_coded(0, CSV_MALFORMED, f"Malformed CSV: {exc}"))
         return result
 
     seen: set[str] = set()
@@ -968,15 +977,33 @@ async def import_corporate_card_csv(
         # amount is an error. A negative row never suggests a match (expenses
         # are non-negative) and is closed out via `/ignore`.
         if amount is None:
+            raw_amount = row.get("amount") or ""
             result.errors.append(
-                ImportRowError(row=i, message=f"amount invalid: {row.get('amount')!r}")
+                _coded(
+                    i,
+                    CSV_CARD_AMOUNT_INVALID,
+                    f"amount invalid: {raw_amount!r}",
+                    value=raw_amount,
+                )
             )
             result.skipped += 1
             continue
         if txn_date is None:
+            raw_date = row.get("date") or ""
             result.errors.append(
-                ImportRowError(row=i, message=f"date invalid: {row.get('date')!r}")
+                _coded(i, CSV_DATE_INVALID, f"date invalid: {raw_date!r}", value=raw_date)
             )
+            result.skipped += 1
+            continue
+        # A blank currency is refused, never read as USD, and a malformed one is
+        # refused rather than truncated: a GBP statement with no currency column
+        # would otherwise reconcile as dollars against USD expenses (the
+        # candidate query compares currencies exactly). The same helper and codes
+        # the invoice importer uses (decisions §372, §377).
+        currency, currency_error = _parse_currency(row.get("currency"))
+        if currency_error is not None:
+            currency_error.row = i
+            result.errors.append(currency_error)
             result.skipped += 1
             continue
 
@@ -1015,7 +1042,7 @@ async def import_corporate_card_csv(
             posted_date=_parse_date(row.get("posted_date"), day_first=day_first),
             merchant=(row.get("merchant") or None) or None,
             amount=amount,
-            currency=(row.get("currency") or "USD").upper()[:3],
+            currency=currency,
             card_last_four=last_four,
             card_ref=(row.get("card_ref") or None) or None,
             import_batch=import_batch,

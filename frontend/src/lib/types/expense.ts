@@ -5,6 +5,7 @@
 
 import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { ImportResult } from '#lib/types/csvImport.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 
@@ -586,13 +587,10 @@ export interface CardMatchSuggestion {
 	score: number;
 }
 
-// POST /import-csv returns the shared `ImportResult.to_dict()` — `imported` /
-// `skipped` / `errors`.
-export interface CardImportResult {
-	imported: number;
-	skipped: number;
-	errors: { row: number; message: string }[];
-}
+/** `POST /import-csv` — the shared skip-and-report shape. Every row error
+ *  carries `{code, params}` (decisions §377); render it with
+ *  `components/ui/CsvImportErrors.svelte`. */
+export type CardImportResult = ImportResult;
 
 // POST /sync-virtual-cards return shape — created vs already-imported.
 export interface SyncVirtualCardsResult {

@@ -65,7 +65,8 @@ export function uploadReconciliation(
 		vendor_id: string;
 		statement_date: string;
 		statement_reference?: string;
-		currency?: string;
+		/** Required: the upload refuses a blank currency, never assumes USD (decisions §377). */
+		currency: string;
 	}
 ): Promise<Reconciliation> {
 	return api.upload<Reconciliation>('/api/vendor-statements/upload', file, {

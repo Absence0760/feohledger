@@ -205,6 +205,48 @@ def refuse_due_before_invoice_date(invoice_date, due_date) -> None:
         )
 
 
+#: A statement upload (bank reconciliation, vendor statement) whose
+#: ``currency`` form field is blank or absent. The statement's currency is one
+#: field for the whole file, so it is refused for the upload, never defaulted to
+#: ``USD``: a GBP statement read as dollars matches the wrong payments
+#: (decisions §377, the statement-level twin of §372's per-row codes).
+STATEMENT_CURRENCY_REQUIRED = "statement_currency_required"
+#: The same field holding something that is not a three-letter ISO 4217 code.
+#: Params: ``value``.
+STATEMENT_CURRENCY_INVALID = "statement_currency_invalid"
+
+
+def statement_currency(raw: str | None) -> str:
+    """The normalized currency of an uploaded statement, or a coded 422.
+
+    Shape-checked by ``schemas.expense.normalize_iso_currency``, the one check
+    every currency boundary uses, so ``"usd"`` is stored ``USD`` and ``"EURO"``
+    is refused rather than overflowing the ``String(3)`` column.
+    """
+    from app.schemas.expense import normalize_iso_currency
+
+    value = (raw or "").strip()
+    if not value:
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(
+                STATEMENT_CURRENCY_REQUIRED,
+                "Choose the statement's currency (a three-letter code such as USD or EUR).",
+            ),
+        )
+    try:
+        return normalize_iso_currency(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(
+                STATEMENT_CURRENCY_INVALID,
+                f"{value!r} is not a three-letter currency code such as USD or EUR.",
+                value=value,
+            ),
+        ) from None
+
+
 #: An employee token presented on another workspace's page (``tenant.get_tenant``:
 #: the token's ``org`` claim is not the requested tenant). Still a 403 and still
 #: refused; coded so the SPA can tell this from an ordinary permission refusal

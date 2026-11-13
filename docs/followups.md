@@ -1108,19 +1108,16 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       the same content shapes and tests, and a Help row in the mobile app's
       settings that opens the web help for the user's tenant. **Trigger:** the
       first supplier onboarding at volume, or the first mobile-first customer.
-- [ ] **(c) The corporate-card CSV feed still defaults a blank currency to USD
-      and shows no row reasons.** `csv_import.import_corporate_card_csv` writes
-      `(currency or "USD").upper()[:3]`, the default decisions §372 removed from
-      the invoice importer, so a GBP card statement without a currency column
-      reconciles as USD (and a long cell is truncated). Refusing the row alone
-      is not enough: the expenses page's card import shows only the imported /
-      skipped counts (`routes/expenses/+page.svelte::handleCardCsv`), so a
-      refused row would vanish with no reason. **Durable fix:** refuse a blank
-      or malformed currency per row with the same `csv_currency_required` /
-      `csv_currency_invalid` codes and `_parse_currency`, and render the
-      returned `errors` through `localizeApiDetail` the way `ImportCsvModal`
-      does. **Trigger:** the next change to the card feed import, or the first
-      non-USD card programme.
+- [ ] **(c) A pasted vendor statement still defaults its currency to USD.**
+      `POST /api/vendor-statements` (manual / pasted lines) takes
+      `ReconciliationCreate.currency` with `default="USD"` and only a length
+      check, so an API client that omits it, or sends `usd`, gets a run matched
+      against the USD ledger or a lowercase code. The upload path refuses a
+      blank or malformed currency since decisions §377, and the web modal
+      always sends one from its list. **Durable fix:** make the field a
+      required `CurrencyCode` (no default) and update the test and spec
+      callers that omit it. **Trigger:** the next change to the vendor
+      statement API, or the first API integrator creating runs.
 - [ ] **(c) A custom role can't be granted invoice entry.** Entry is a role
       list by design (decisions §248). **Durable fix:** if a customer needs a
       non-clerk preparer role, add a non-sensitive permission tier the
