@@ -79,6 +79,10 @@ from app.schemas.vendor import (
     VendorChangeRequestResponse,
     VendorChangeReviewRequest,
     VendorCreate,
+    VendorErpLinkItem,
+    VendorErpLinksResponse,
+    VendorErpUnlinkRequest,
+    VendorErpUnlinkResponse,
     VendorResponse,
     VendorStatusCounts,
     VendorUpdate,
@@ -100,6 +104,11 @@ from app.services.sanctions_categories import (
     has_adverse_media,
 )
 from app.services.vendor_card_revocation import revoke_vendor_cards
+from app.services.vendor_erp_unlink import (
+    ErpUnlinkError,
+    unlink_vendor_erp_link,
+    vendor_erp_links,
+)
 from app.services.vendor_screening import screen_best_effort, screen_vendor_record
 from app.services.vendor_sync import sync_vendors_from_erp
 from app.services.vendor_tax_id import rekey_tax_id
@@ -1802,6 +1811,83 @@ async def cancel_vendor_cards(
         )
     await db.commit()
     return VendorCardRevocationResponse.from_result(revocation)
+
+
+def _erp_link_items(links) -> list[VendorErpLinkItem]:
+    return [
+        VendorErpLinkItem(realm=x.realm, erp_vendor_id=x.erp_vendor_id, placement=x.placement)
+        for x in links
+    ]
+
+
+@router.get("/{vendor_id}/erp-links", response_model=VendorErpLinksResponse)
+async def list_vendor_erp_links(
+    vendor_id: uuid.UUID,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: User = Depends(_VENDOR_READ),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """The vendor's ERP links, one per company: the row link (the company it was
+    last synced in) and each link kept for another company (decisions §356).
+    The same readers as the vendor detail."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    links = await vendor_erp_links(db, vendor)
+    return VendorErpLinksResponse(vendor_id=str(vendor.id), links=_erp_link_items(links))
+
+
+@router.post("/{vendor_id}/erp-links/unlink", response_model=VendorErpUnlinkResponse)
+async def unlink_vendor_erp(
+    vendor_id: uuid.UUID,
+    body: VendorErpUnlinkRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
+    org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Clear the vendor's link to a supplier record in one ERP company
+    (decisions §375, `services/vendor_erp_unlink`): the row link and the kept
+    link for that company. The way through a merge refused
+    `vendor_merge_erp_link_conflict` — unlink the stale record, then merge.
+
+    `vendor.manage`, like every other edit to the vendor master. 404
+    `vendor_erp_link_not_found` when the vendor holds no link there; 409
+    `vendor_erp_unlink_in_flight` (`params.invoices`) while one of its invoices
+    is in flight to that company. Writes `vendor.erp_unlinked` naming the realm
+    and every id cleared. The vendor's next push to that company is refused
+    `vendor_not_linked`, and a later sync may re-link it only by the normal
+    unique-name rule.
+    """
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
+    await _get_vendor_or_404(db, vendor_id)
+    try:
+        result = await unlink_vendor_erp_link(db, vendor_id=vendor_id, realm=body.realm)
+    except ErpUnlinkError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org_id,
+        actor_id=user.id,
+        action="vendor.erp_unlinked",
+        entity_type="vendor",
+        entity_id=vendor_id,
+        details={"realm": result.realm, "cleared": result.cleared},
+    )
+    await db.commit()
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    await db.refresh(vendor)
+    links = await vendor_erp_links(db, vendor)
+    return VendorErpUnlinkResponse(
+        realm=result.realm,
+        cleared=result.cleared,
+        vendor=VendorResponse.from_db(vendor),
+        links=_erp_link_items(links),
+    )
 
 
 @router.post("/sync-erp")

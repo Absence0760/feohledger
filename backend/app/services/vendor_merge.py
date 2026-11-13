@@ -55,7 +55,10 @@ Refusals (raised as ``VendorMergeError`` → mapped to 4xx by the API layer):
   * an ERP company in which the canonical and a duplicate (or two duplicates)
     are linked to DIFFERENT supplier records — the merge would have to choose
     which ERP supplier the merged vendor's bills post to, and it never guesses
-    (``VENDOR_MERGE_ERP_LINK_CONFLICT``, ``params.realms``).
+    (``VENDOR_MERGE_ERP_LINK_CONFLICT``, ``params.realms``). The steward
+    chooses instead: ``POST /api/vendors/{id}/erp-links/unlink`` clears the
+    stale record's link (``services/vendor_erp_unlink``, decisions §375), and
+    the merge then goes through.
 """
 
 from __future__ import annotations
@@ -312,7 +315,9 @@ def _plan_erp_links(
             VENDOR_MERGE_ERP_LINK_CONFLICT,
             "The canonical vendor and a duplicate are linked to different supplier "
             "records in the same ERP company, and a merge can't choose which one the "
-            "merged vendor posts to. Leave that duplicate out of this merge.",
+            "merged vendor posts to. Open the vendor whose record is stale, unlink it "
+            "from that ERP company under ERP links, then merge again, or leave that "
+            "duplicate out of this merge.",
             status_code=409,
             params={"realms": realms},
         )
