@@ -77,6 +77,28 @@ export interface Vendor {
 	card_revocation?: VendorCardRevocation | null;
 }
 
+// One of a vendor's ERP links (`GET /api/vendors/{id}/erp-links`, decisions
+// §356 / §375). `row` is the company the vendor was last synced in (`realm`
+// null when none was recorded); `kept` is a link kept for another company.
+export interface VendorErpLink {
+	realm: string | null;
+	erp_vendor_id: string;
+	placement: 'row' | 'kept';
+}
+
+export interface VendorErpLinksResponse {
+	vendor_id: string;
+	links: VendorErpLink[];
+}
+
+// `POST /api/vendors/{id}/erp-links/unlink`.
+export interface VendorErpUnlinkResponse {
+	realm: string | null;
+	cleared: { placement: 'row' | 'kept'; erp_vendor_id: string }[];
+	vendor: Vendor;
+	links: VendorErpLink[];
+}
+
 // One card a vendor-ineligibility write could not close (PII-free).
 export interface CardRevocationItem {
 	card_id: string;

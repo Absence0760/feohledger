@@ -494,6 +494,43 @@ class VendorBulkExportRequest(BaseModel):
     ids: list[str] = Field(..., min_length=1)
 
 
+class VendorErpLinkItem(BaseModel):
+    """One of a vendor's ERP links (`services/vendor_erp_unlink.ErpLinkView`).
+
+    `placement` `row` is the vendor's own `erp_vendor_id`, under the company it
+    was last synced in (`realm` null when none was recorded); `kept` is a link
+    kept for another company (`vendor_erp_links`, decisions §356)."""
+
+    realm: str | None
+    erp_vendor_id: str
+    placement: Literal["row", "kept"]
+
+
+class VendorErpLinksResponse(BaseModel):
+    """`GET /api/vendors/{id}/erp-links`."""
+
+    vendor_id: str
+    links: list[VendorErpLinkItem] = Field(default_factory=list)
+
+
+class VendorErpUnlinkRequest(BaseModel):
+    """`POST /api/vendors/{id}/erp-links/unlink` — the ERP company whose link to
+    clear. Required, and `null` is a value: it names the row link that records
+    no company, which a client must ask for explicitly (decisions §375)."""
+
+    realm: str | None = Field(...)
+
+
+class VendorErpUnlinkResponse(BaseModel):
+    """What the unlink cleared, the vendor as it now stands, and its remaining
+    links."""
+
+    realm: str | None
+    cleared: list[dict]
+    vendor: VendorResponse
+    links: list[VendorErpLinkItem] = Field(default_factory=list)
+
+
 class VendorStatusCounts(BaseModel):
     """`GET /api/vendors/counts` — whole-set tallies over the entity-scoped,
     search/source-filtered vendor population.

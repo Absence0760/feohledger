@@ -17504,6 +17504,91 @@ which needs a migration; repurposing an existing column (such as
 `erp_link_candidates` JSONB) would be the keyed-JSON shape §356 rejected for
 vendors, with no uniqueness per realm. It stays in `docs/followups.md`.
 
+## 375. A person can clear a vendor's ERP link in one company, never while an invoice is in flight there, and a later sync re-links it only by the ordinary rules (§373 follow-up, 2026-11-13)
+
+**The gap.** §373 refuses a merge where the canonical and a duplicate hold
+different ids in one ERP company (`vendor_merge_erp_link_conflict`), and left
+the steward one way forward: leave the duplicate out. Nothing could clear a
+vendor's link. No endpoint touched `erp_vendor_id` / `erp_link_realm` or a kept
+`vendor_erp_links` row, and merging the two suppliers in the ERP did not help,
+because a sync never re-judges a same-company link (§284, §356).
+
+**The action** (`services/vendor_erp_unlink.unlink_vendor_erp_link`, `POST
+/api/vendors/{id}/erp-links/unlink` with `{realm}`). It clears the vendor's link
+in one realm: the row link when its realm is that one, and the kept link for it.
+If both exist (§356 never makes that, but nothing in the schema forbids it), it
+clears both, so no link for that company is left for the push to read.
+`realm: null` names the row link that records no company. It is a required
+value, never a default, so an empty body cannot clear the unnamed link by
+accident. `GET /api/vendors/{id}/erp-links` lists the links for the vendor
+detail's readers, and the vendor modal's **ERP links** panel offers an armed
+two-click **Unlink** per company. The merge refusal's sentence now points at it.
+
+- **`vendor.manage`**, like every other edit to the vendor master (create,
+  edit, verify, reject, sync, merge). It is not a new permission. Clearing a link
+  moves no money and routes no bill: the vendor's next push to that company is
+  refused `vendor_not_linked` before any HTTP call. A split duty for it would
+  be one more grant with nothing to separate it from.
+- **Audited** as `vendor.erp_unlinked` with `{realm, cleared: [{placement,
+  erp_vendor_id}]}`. Ids only, the same floor as `vendor.merged`'s `erp_links`.
+- **Locks** the vendor, then its kept links, in the order a merge takes them, so
+  an unlink and a merge of the same vendor serialise rather than deadlock. The
+  vendor row is re-read under the lock (`populate_existing`), not taken from the
+  identity map.
+
+**"In flight" means anything that may still use the link, and it fails closed
+where the company is not on record.** Refused 409 `vendor_erp_unlink_in_flight`,
+`params.invoices` the count, no invoice named:
+
+- `sending_to_erp`, in **every** company. The push resolves the link when it
+  runs, under whatever connection it runs against, and no row records that
+  connection ahead of time;
+- `sent_to_erp` where the workflow state's `erp_realm` (written with the
+  confirmed push, §295) is that company, or is missing, or the realm asked for
+  is null. A link that names no company may be any company's;
+- `failed` where `services/erp.possibly_posted` is true, in every company. The
+  uncertain attempt's company is not recorded (an `erp_realm` in the state may
+  name an earlier push), and its retry or reconcile pushes again. A failure
+  that certainly posted nothing does not count: its retry meets
+  `vendor_not_linked`, which is the unlink's intended, visible consequence.
+
+From `posted_in_erp` on, a bill carries its own id. Status sync-back matches it
+by `erp_reference` within `erp_realm`, and the payment write-back posts against
+that bill id, so neither reads the vendor's link and an unlink cannot move that
+bill. **Rejected: refuse while any open bill exists** (`posted_in_erp` /
+`payment_scheduled`). It would block the unlink for as long as the vendor has
+payables, protecting nothing that reads the link. **Rejected: scope
+`sending_to_erp` to the current connection's realm.** That would need the
+control-plane config on this path and would still be wrong if the connection
+changes before the dispatch reads it. The status is transient, so refusing it
+everywhere costs a retry.
+
+A push that reaches `sending_to_erp` after the check reads the link in its own
+transaction. Before the unlink commits, it still sees the link and posts with
+it; that bill is then the in-flight one the next unlink is refused over. After
+the commit, it sees none and is refused `vendor_not_linked`. Neither posts to a
+supplier the vendor is not linked to, so the check needs no lock on the
+invoices.
+
+**A later sync follows the ordinary rules; the unlink is not a "never link"
+marker.** Nothing is kept for that company any more, so nothing is restored. The
+record is matched by id only if a vendor holds it, and it is adopted by name
+only when the name is unique among the pulled records and among the unlinked
+local vendors (§284). An ambiguous name is reported as a conflict and links
+nothing. A vendor still linked in that company is never a name candidate, so a
+sync cannot put the stale record onto the vendor a merge kept, which is the
+"wrong supplier" case that matters. The one re-attachment the rules allow is the
+same record back onto the vendor it was cleared from, by a unique name. It is
+audited `linked` and reported by the sync. A record that should never link
+again is made inactive (or merged) in the ERP, and inactive records are never
+linked or created. **Rejected: a tombstone the sync honours** (do not re-adopt
+this id onto this vendor). It needs a new column or table and so a migration,
+and it would block the legitimate re-link of a link cleared by mistake. The ERP
+is the place the stale record lives, and it already has the switch that keeps
+it out. **Rejected: reading the `vendor.erp_unlinked` audit rows as that
+tombstone.** The trail is evidence, not state. In `lambda` audit mode it is not
+written in the request's transaction either.
+
 ## 376. A GL account keeps its ERP link state for every company it was synced under, restored before rule 0 (§356/§373 follow-up, migration 0127, 2026-11-13)
 
 **The gap.** §356 gave vendors a link per company; `gl_accounts` still held

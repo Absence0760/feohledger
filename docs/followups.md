@@ -1337,19 +1337,6 @@ scope (§260) — do not fold them into any of these.
       (`existing_invoice_not_open`). **Durable fix:** decide whether we submit
       for approval and poll, or post only to companies without workflows, and
       document it. **Trigger:** the first BC customer with approval workflows.
-- [ ] **(c) No one can clear a vendor's ERP link, so an ERP-link merge
-      conflict can only be worked around.** A merge refuses
-      `vendor_merge_erp_link_conflict` where the canonical and a duplicate hold
-      different ids in one ERP company (decisions §373). The steward's only way
-      forward is to leave that duplicate out: no endpoint unlinks a vendor's row
-      link or deletes a kept `vendor_erp_links` row, and merging the two
-      suppliers in the ERP does not clear either, because a same-company link is
-      never re-judged by a sync. **Durable fix:** a `vendor.manage`-gated,
-      audited "unlink from this ERP company" action on the vendor (row link or
-      the kept link for one realm), with the push's `vendor_not_linked` as the
-      visible consequence, so the steward can drop the stale record's link and
-      re-run the merge. **Trigger:** the first merge refused with this code, or
-      the next change to vendor ERP-link editing.
 - [ ] **(c) A bill paid in any ERP but QuickBooks never reaches FeohLedger.**
       Status sync-back (§295) covers adapters with `supports_status_sync`,
       which today means QuickBooks only. For every other ERP a push still closes

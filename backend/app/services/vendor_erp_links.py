@@ -19,9 +19,12 @@ Two rules keep that safe, and both live here:
   about which company issued it; filing it under a guessed company is the
   manufactured evidence §141 refuses. It is dropped exactly as before.
 
-``services/vendor_sync`` is the only writer: it keeps the row's link before a
-sync under another company moves or drops it, and restores a kept link when a
-sync runs under that link's company again.
+``services/vendor_sync`` keeps the row's link before a sync under another
+company moves or drops it, and restores a kept link when a sync runs under that
+link's company again. Two other writers only ever remove or move a link: a
+vendor merge moves the duplicates' links to the canonical vendor
+(``services/vendor_merge``, §373), and a person clears a vendor's link in one
+company (``services/vendor_erp_unlink``, §375).
 """
 
 from __future__ import annotations

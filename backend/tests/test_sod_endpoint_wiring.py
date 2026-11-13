@@ -292,6 +292,9 @@ CASES = [
     # or the bulk endpoint becomes the way around it.
     ("/api/vendors/bulk/status", "POST", _VENDOR_MANAGE),
     ("/api/enrichment/vendors/consolidation/merge", "POST", _VENDOR_MANAGE),
+    # Clearing a vendor's ERP link in one company (decisions §375) — an edit to
+    # the vendor master like every other one here.
+    ("/api/vendors/{vendor_id}/erp-links/unlink", "POST", _VENDOR_MANAGE),
     # --- vendor.block: sticky payment block/unblock. ---
     ("/api/vendors/{vendor_id}/block", "POST", _VENDOR_BLOCK),
     # `cancel-cards` retries the card revocation a reject / deactivate (vendor

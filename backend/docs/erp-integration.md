@@ -1569,6 +1569,18 @@ merge's to choose. A NULL-realm link names no company, so it conflicts with
 any differing id on the other side (reported as realm `null`). The retired
 duplicate is left holding no link, so no later sync restores one onto it.
 
+**A person can clear a vendor's link in one company** (decisions §375,
+`services/vendor_erp_unlink`): `POST /api/vendors/{id}/erp-links/unlink`,
+`vendor.manage`, audited `vendor.erp_unlinked`. It clears the row link and the
+kept link for that realm, and is refused 409 `vendor_erp_unlink_in_flight`
+while one of the vendor's invoices is `sending_to_erp`, `sent_to_erp` to that
+company (or to an unrecorded one), or `failed` with its outcome unknown. That
+is the way through the merge conflict above. The vendor's next push there is
+refused `vendor_not_linked`; a later sync re-links the record only by the
+ordinary rules (by id, or a name unique on both sides), never onto a vendor
+still linked in that company. Detail: [vendor-management.md](vendor-management.md)
+§ Unlinking a vendor from one ERP company.
+
 **Merge.dev suppliers are Contacts.** Merge's Accounting API has no `/vendors`
 path and no Vendor model; the adapter lists `GET /contacts?is_supplier=true`
 with `expand=addresses,phone_numbers`, following `next` cursors, and any failed

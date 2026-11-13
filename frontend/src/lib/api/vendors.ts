@@ -7,6 +7,8 @@ import { triggerDownload } from '#lib/utils/download.ts';
 import type {
 	Vendor,
 	VendorCardRevocation,
+	VendorErpLinksResponse,
+	VendorErpUnlinkResponse,
 	SanctionsCheck,
 	ScreeningReviewQueueResponse,
 	VendorRisk,
@@ -220,6 +222,20 @@ export function rejectVendor(id: string): Promise<Vendor> {
 // `vendor.manage` or `vendor.block`.
 export function cancelVendorCards(id: string): Promise<VendorCardRevocation> {
 	return api.post<VendorCardRevocation>(`/api/vendors/${id}/cancel-cards`, {});
+}
+
+// The vendor's ERP links, one per company (the vendor detail's readers).
+export function getVendorErpLinks(id: string): Promise<VendorErpLinksResponse> {
+	return api.get<VendorErpLinksResponse>(`/api/vendors/${id}/erp-links`);
+}
+
+// Clear the vendor's link in one ERP company (`vendor.manage`, decisions §375).
+// `realm` null is the row link that records no company, asked for explicitly.
+export function unlinkVendorErpLink(
+	id: string,
+	realm: string | null
+): Promise<VendorErpUnlinkResponse> {
+	return api.post<VendorErpUnlinkResponse>(`/api/vendors/${id}/erp-links/unlink`, { realm });
 }
 
 // Vendor risk detail + recompute. recompute is admin / ap_manager.
