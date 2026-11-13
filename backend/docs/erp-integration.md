@@ -2965,7 +2965,10 @@ and calls `await self.access_token()`.
 | Route | Auth | Contract |
 |---|---|---|
 | `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan; called **credentialed** (`credentials: 'include'`) | `200 {"authorize_url"}` plus the HttpOnly nonce cookie `__Host-feoh_erp_oauth_nonce` on the API host (§ Bound to the browser that started it); the page navigates the browser to the URL. `404` unknown provider, `409` no app configured, `409` coded `erp_connect_platform_host` (`params.url` when there is a platform address to offer) when this host cannot carry the cookie — a custom domain, or an `Origin` not same-site with the API; `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
-| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant platform origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>` (the `FEOH_TENANT_URL_TEMPLATE` address, not a vanity one — that is where a connect starts; the vanity URL only when no template is set). Every answer given after the nonce cookie matched clears it; a forged, expired or mismatched state leaves it alone, so a junk-state link cannot break a connect in flight. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `browser_mismatch` (the browser lacks the nonce cookie the state's hash names — checked right after the state is burned, before the provider's answer or the code is looked at), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant` (no company id, or — QuickBooks — a `realmId` the new token cannot reach), `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
+| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant platform origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>` — or, when the consent reached several companies, links nothing and 302s with `&erp_choose_company=<provider>` (§ A consent that reaches several companies) (the `FEOH_TENANT_URL_TEMPLATE` address, not a vanity one — that is where a connect starts; the vanity URL only when no template is set). Every answer given after the nonce cookie matched clears it; a forged, expired or mismatched state leaves it alone, so a junk-state link cannot break a connect in flight. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `browser_mismatch` (the browser lacks the nonce cookie the state's hash names — checked right after the state is burned, before the provider's answer or the code is looked at), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant` (no company id, more than `oauth_base.COMPANY_LIST_MAX` (100) companies, or — QuickBooks — a `realmId` the new token cannot reach), `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
+| `GET /api/organization/erp/oauth/pending` | admin; **credentialed** | The consent parked for this browser and admin: `{provider, display_name, companies: [{id, name}], expires_at}`. Does not spend it. `409` coded `erp_pick_expired` for anything else (none parked, lapsed, used, another browser or another admin). Never a token. |
+| `POST /api/organization/erp/oauth/pending/select` | admin + `erp_integrations` plan; **credentialed** | `{company_id}` → `200 {connected, provider, external_tenant_id}`, the nonce cookie cleared. Spends the pending connect first (GETDEL), then links through the callback's own claim-and-link (`_claim_and_link`: realm lock, linked-elsewhere check, `organization.erp_connected` audit-first with `picked_from`). Coded refusals: `409 erp_pick_expired`, `409 erp_pick_unknown_company` (an id the consent did not offer; audited `organization.erp_connect_refused`), `409 already_linked`, `503 credentials_unavailable`, `503 audit_unavailable`; the plan gate's own `402`. |
+| `DELETE /api/organization/erp/oauth/pending` | admin; **credentialed** | Drops the parked consent, links nothing: `{discarded}` (idempotent), the cookie cleared and `organization.erp_connect_cancelled` written best-effort when one was dropped. The token is not revoked (§337's reason). |
 | `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked"}`. `503` when the credential store cannot be opened, with nothing changed. |
 | `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
 
@@ -3062,13 +3065,68 @@ tenant lookups (no stored connection to refresh yet), pinned by
 `tests/test_erp_oauth.py::test_every_oauth_adapter_api_client_refreshes_on_401`;
 end to end in `frontend/tests-e2e/erp/blackbaud-fe-nxt.spec.ts`.
 
+### A consent that reaches several companies (company picker)
+
+Xero (a consent can authorise several organisations) and Sage v3.1 (a login can
+reach several businesses) may answer one consent with more than one company. We
+never pick one of a customer's ledgers for them (decisions §355). The callback
+reads `OAuthErpAdapter.list_external_tenants` — Xero's and Sage's own lists; for
+every other provider the default wraps `resolve_external_tenant_id`, so
+QuickBooks keeps its realm confirmation (§337) and Blackbaud its token field —
+and then:
+
+- **none** (or more than `COMPANY_LIST_MAX`, or any row whose id is empty,
+  over-long or carries a control character — `oauth_base.clean_companies`
+  fails closed, since dropping that row could leave one company of several and
+  link it unasked): `erp_error=no_external_tenant`;
+- **one**: linked at once, exactly as before — no extra step;
+- **several**: nothing is linked. `erp_oauth.park_pending_connect` seals the
+  token response (`credential_crypto`, AAD = org + provider + browser binding)
+  and stores it in Redis under `erp:oauth:pending:<org>:<sha256(cookie)>`
+  with the admin's id and the `(id, name)` list, for one state lifetime
+  (`FEOH_ERP_OAUTH_STATE_TTL_SECONDS`). The callback renews the nonce cookie
+  for that window instead of spending it, and returns with
+  `?erp_choose_company=<provider>`.
+
+The settings page (`ErpCompanyPicker.svelte` inside `ErpConnectionPanel`)
+reads `GET …/pending` and posts the pick to `POST …/pending/select`. What keeps
+the picker from weakening §336 / §337:
+
+- **Same browser, same admin.** The pending connect is keyed on the cookie that
+  already matched at the callback, and records the admin who started the
+  connect. Every picker route is bearer-authenticated (admin) AND credentialed;
+  without that cookie, or as another user, there is nothing to find. A pick is
+  a bearer request, so a cross-site page cannot forge one, and nothing about
+  the pending connect is in a URL.
+- **Single-use and short-lived.** `select` GETDELs the record before any check,
+  so any refusal (an unknown id, the plan, `already_linked`) spends it, and a
+  replay finds nothing. A lapsed record (`e` past) reads as none.
+- **Confirmed companies only.** The list was read from the provider under the
+  new token; a `company_id` outside it links nothing
+  (`erp_pick_unknown_company`, audited). The link runs through the callback's
+  own `_claim_and_link`, so the realm lock, the cross-tenant check, the unique
+  index and audit-first apply unchanged.
+- **The token lifetimes age.** `take_pending_connect` subtracts the time the
+  consent waited from `expires_in` and the refresh lifetime, so the stored
+  expiry never runs later than the provider's.
+
+A cancelled or lapsed pick revokes nothing at the provider: as with a refused
+QuickBooks realm (§337), a revoke can reach the app's whole grant. Xero keeps
+every organisation the user authorised listed under the app's connections
+until the user removes them in Xero; only the picked one is used.
+
+fake-erp: `POST /xero/__organisations {"state", "count"}` arms the consent
+carrying that `state` to authorise `count` organisations; driven end to end by
+`frontend/tests-e2e/erp/xero-company-picker.spec.ts`.
+
 **Per-provider hooks on the spec.** The company id comes from
 `external_tenant_id_param` (a callback query parameter: QBO `realmId` — which
 nothing signs, so QuickBooks overrides the resolver to confirm it, below), from
 `external_tenant_id_token_field` (a token-response field: Blackbaud
 `environment_id`), or from an override of
-`OAuthErpAdapter.resolve_external_tenant_id` (Xero `GET /connections`, Sage's
-business lookup). `extra_token_headers(erp_settings)` adds headers to every
+`OAuthErpAdapter.resolve_external_tenant_id`. A provider whose consent can
+reach several companies (Xero `GET /connections`, Sage's business lookup)
+overrides `list_external_tenants` instead (above). `extra_token_headers(erp_settings)` adds headers to every
 token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
 or `body`. The resolver also receives the org's saved `settings.erp`
 (`erp_settings`), which QuickBooks reads for its `environment`.

@@ -16313,3 +16313,46 @@ migration across every tenant for a label. Also rejected: listing each
 shortened vendor name in the toast, since each one is up to 255 characters; the
 vendor line counts them and the response carries the names.
 
+
+## 355. A consent that reaches several companies waits, server-side, for the admin's pick (2026-11-12)
+
+**Context.** Xero (several organisations authorised in one consent) and Sage
+v3.1 (a login with several businesses) can answer one consent with more than
+one company. The callback resolved those to none and refused the connect
+(`no_external_tenant`), so such a customer could not connect at all. Picking one
+for them stays ruled out: we never choose a customer's ledger.
+
+**Decision.** The callback reads `OAuthErpAdapter.list_external_tenants`. One
+company links at once, as before; none is still `no_external_tenant`; several
+link nothing. The exchanged token is sealed (`credential_crypto`, AAD = org,
+provider, browser binding) and parked in Redis, keyed on the org and the hash of
+the nonce cookie that already matched (§336), with the starting admin's id and
+the provider's `(id, name)` list, for one `state` lifetime. The callback renews
+that cookie for the window and returns with `?erp_choose_company=<provider>`.
+The settings page lists the companies (`GET …/oauth/pending`) and posts the pick
+(`POST …/oauth/pending/select`). Both are admin, bearer-authenticated and
+credentialed, and find nothing for another browser or another admin
+(`erp_pick_expired`). `select` GETDELs the record before any check, so a pick is
+single-use whatever it ends in. It links only an id from the list the provider
+returned under the new token (`erp_pick_unknown_company` otherwise, audited),
+and links through the callback's own `_claim_and_link`: the realm lock, the
+cross-tenant check, the unique index and audit-first, with `picked_from` on
+`organization.erp_connected`. QuickBooks keeps §337: its list is the default
+wrapper around its confirmed realm. A cancelled or lapsed pick revokes nothing,
+for §337's reason.
+
+The list fails closed: one row with an unaddressable id empties it
+(`no_external_tenant`), because dropping that row could leave a single company
+of several and link it unasked. Xero's list keeps its existing fallback to every
+organisation the token reaches when none matches this consent's `authEventId`;
+each is still offered rather than linked, and the claim checks apply.
+
+**Rejected.**
+- *The pending handle in the redirect URL.* §336 rejected a URL-borne handle
+  for the confirm step, since the victim can leak it. Keying on the HttpOnly
+  cookie needs nothing in the URL.
+- *A second consent per company.* Xero's and Sage's consent screens do not let
+  us name one company, so the admin would meet the same list again.
+- *Storing the list on the grant and switching companies later.* Nobody has
+  asked to move a connection between companies, and a realm change already
+  re-judges every vendor and GL link (§284). One connect, one company.
