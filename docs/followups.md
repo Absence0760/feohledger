@@ -1144,13 +1144,27 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 - [ ] **(c) A pasted vendor statement still defaults its currency to USD.**
       `POST /api/vendor-statements` (manual / pasted lines) takes
       `ReconciliationCreate.currency` with `default="USD"` and only a length
-      check, so an API client that omits it, or sends `usd`, gets a run matched
-      against the USD ledger or a lowercase code. The upload path refuses a
+      check, so an API client that omits it gets a run matched against the
+      USD ledger (a malformed or lowercase code is refused or uppercased by
+      the shared `CurrencyCode` since decisions §381; the default is what is
+      left). The upload path refuses a
       blank or malformed currency since decisions §377, and the web modal
       always sends one from its list. **Durable fix:** make the field a
       required `CurrencyCode` (no default) and update the test and spec
       callers that omit it. **Trigger:** the next change to the vendor
       statement API, or the first API integrator creating runs.
+- [ ] **(c) Seven create forms take a currency as bare text, not `CurrencyInput`.**
+      `CreateInvoiceModal`, `ExpenseModal`, `BudgetModal`, `RecurringModal`,
+      `ContractModal`, `RequisitionModal` and `IntakeModal` bind a plain
+      `<input maxlength="3">`. Nothing limits them to a list (so they were not
+      the §377 / §381 defect), but nothing checks them before submit either: a
+      blank or `"ÄÖÜ"` now reaches the backend's shared `CurrencyCode` and comes
+      back as a raw 422, with no suggestions and no inline reason.
+      **Durable fix:** move each to `ui/CurrencyInput` (`preferred` from
+      `orgCurrency`, `bind:touched` set when the modal opens an existing
+      record), and update the specs that fill those fields. **Trigger:** the
+      next change to any of those modals, or the first report of a currency
+      422 from one.
 - [ ] **(c) A custom role can't be granted invoice entry.** Entry is a role
       list by design (decisions §248). **Durable fix:** if a customer needs a
       non-clerk preparer role, add a non-sensitive permission tier the
