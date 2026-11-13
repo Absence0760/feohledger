@@ -1,4 +1,5 @@
-"""Invoices an employee created before §131 get the uploader their audit row names (tenant).
+"""Invoices an employee created before §131 get the uploader their audit row names, and a
+cleared exception records who cleared it (tenant).
 
 The hole
 --------
@@ -63,10 +64,38 @@ So nothing is guessed, and the cases that are not certain stay NULL:
   evidence row beside a creation record of another channel or one with no
   actor. The invoice keeps the legacy NULL reading; a human can decide.
 
-Each invoice changed gets an ``invoice.segregation_backfilled`` audit row on its
-own correlation id — ``actor_id`` NULL, because nobody acted (§141's rule) — with
-the old and new uploader and the ids of the audit rows that named them, so an
-approval given before this ran stays legible as the one the rules then allowed.
+Each invoice changed gets an ``invoice.segregation_backfilled`` audit row filed
+under the invoice's ``correlation_id``, so it lands on that invoice's own SOX
+trail — ``actor_id`` NULL, because nobody acted (§141's rule) — with the old and
+new uploader and the ids of the audit rows that named them, so an approval given
+before this ran stays legible as the one the rules then allowed.
+
+Who cleared an exception: ``exceptions.decided_by_user_id``
+-----------------------------------------------------------
+Stamping the uploader refuses them the NEXT clearance, but not the one they
+already gave. Before this revision the importer could dismiss a ``duplicate`` or
+``fraud_flag`` on their own invoice (the NULL uploader let the decision through),
+and that dismissal kept its §286 fingerprint, which suppresses the finding on
+every refresh while the invoice is unchanged. So the suppression now re-asks
+segregation of the person who decided (``exception_lifecycle.clearance_stands``),
+and that needs the person on the row: the audit log cannot be read at refresh
+time, because under ``FEOH_AUDIT_MODE=lambda`` the decision's row is not local
+yet (0105's reason).
+
+* ``exceptions.decided_by_user_id`` — ``uuid``, nullable, no FK (a control-plane
+  id, as ``raised_by_user_id``). ``record_decision`` writes it on every resolve or
+  dismiss from now on: the person, or NULL for a detector or an agent.
+* Backfilled on rows already ``resolved`` / ``dismissed`` from their
+  ``exception.resolved`` / ``exception.dismissed`` audit rows, only when every
+  such row on the exception is a person's decision (an actor that is not the
+  system sentinel, no ``via``, the row's ``new_status`` equal to the exception's,
+  the same organization) and all name one person. Anything else stays NULL, and a
+  NULL decider on a payment-blocking row never suppresses: fail closed, one more
+  review. No audit row for this part: the column restates, verbatim, the audit
+  row it was read from, and changes nobody's rights.
+
+It runs before the uploader backfill, though the two are independent: neither
+statement reads what the other writes.
 
 Revision ID: 0126_uploader_audit_backfill
 Revises: 0125_vendor_erp_links
@@ -75,12 +104,15 @@ Create Date: 2026-11-13
 28 characters (``alembic_version.version_num`` is ``VARCHAR(32)``); the filename
 matches the id.
 
-TENANT DB ONLY: gated on ``invoices`` and ``audit_log`` existing, so a no-op on
-the control plane; fanned out by ``scripts/migrate_all_tenants.py``. Data only —
-no schema change, so model ↔ migration parity is unaffected, and a fresh tenant
-has no legacy row. Idempotent: a second run finds every invoice it stamped
-carrying an uploader, matches nothing and writes no audit row. ``downgrade`` is a
-no-op — see its docstring.
+TENANT DB ONLY: gated on ``exceptions`` / ``invoices`` and ``audit_log``
+existing, so a no-op on the control plane; fanned out by
+``scripts/migrate_all_tenants.py``. One schema change, ``ADD COLUMN IF NOT
+EXISTS``, mirrored on ``models.exception.Exception`` so a fresh tenant's
+``create_all`` builds the same column; a fresh tenant has no legacy row.
+Idempotent: a second run finds every invoice it stamped carrying an uploader and
+every exception it filled carrying a decider, matches nothing and writes no
+audit row. ``downgrade`` drops the column and leaves the data — see its
+docstring.
 """
 
 from sqlalchemy import text
@@ -131,8 +163,52 @@ CREATION_ACTIONS = (
 #: What this revision writes on each invoice it changes.
 BACKFILL_ACTION = "invoice.segregation_backfilled"
 
+#: ``exception_lifecycle.ACTION_RESOLVED`` / ``ACTION_DISMISSED`` — the rows a
+#: clearing decision writes (the test pins them).
+DECISION_ACTIONS = ("exception.resolved", "exception.dismissed")
+#: The statuses those decisions leave (``RESOLUTION_STATUSES``).
+CLEARED_STATUSES = ("resolved", "dismissed")
+
 _TERMINAL_SQL = ", ".join(f"'{status}'" for status in TERMINAL_STATUSES)
 _CREATION_SQL = ", ".join(f"'{action}'" for action in CREATION_ACTIONS)
+
+_DECISION_SQL = ", ".join(f"'{action}'" for action in DECISION_ACTIONS)
+_CLEARED_SQL = ", ".join(f"'{status}'" for status in CLEARED_STATUSES)
+
+ADD_DECIDER_SQL = "ALTER TABLE exceptions ADD COLUMN IF NOT EXISTS decided_by_user_id uuid"
+
+#: Who cleared each closed exception, copied from its decision rows, and only
+#: when every one of them is a person's and all name the same person.
+DECIDER_BACKFILL_SQL = f"""
+WITH decision AS (
+    SELECT
+        e.id AS exception_id,
+        a.actor_id,
+        (
+            a.actor_id IS NOT NULL
+            AND a.actor_id <> '{SYSTEM_ACTOR_ID}'::uuid
+            AND (a.details -> 'via') IS NULL
+            AND a.details ->> 'new_status' = e.status
+            AND a.organization_id = e.organization_id
+        ) IS TRUE AS names_person
+    FROM exceptions e
+    JOIN audit_log a ON a.entity_type = 'exception' AND a.entity_id = e.id
+    WHERE e.status IN ({_CLEARED_SQL})
+      AND e.decided_by_user_id IS NULL
+      AND a.action IN ({_DECISION_SQL})
+),
+named AS (
+    SELECT d.exception_id, (array_agg(d.actor_id))[1] AS actor_id
+    FROM decision d
+    GROUP BY d.exception_id
+    HAVING bool_and(d.names_person) AND count(DISTINCT d.actor_id) = 1
+)
+UPDATE exceptions e
+SET decided_by_user_id = n.actor_id
+FROM named n
+WHERE e.id = n.exception_id
+  AND e.decided_by_user_id IS NULL
+"""
 
 #: One statement: the UPDATE and its audit rows commit together or not at all.
 BACKFILL_SQL = f"""
@@ -218,17 +294,24 @@ def _has_table(name: str) -> bool:
 
 
 def upgrade() -> None:
-    if not (_has_table("invoices") and _has_table("audit_log")):
+    if not _has_table("audit_log"):
         return
-    op.execute(BACKFILL_SQL)
+    if _has_table("exceptions"):
+        op.execute(ADD_DECIDER_SQL)
+        op.execute(DECIDER_BACKFILL_SQL)
+    if _has_table("invoices"):
+        op.execute(BACKFILL_SQL)
 
 
 def downgrade() -> None:
-    """A no-op, on purpose.
+    """Drop ``decided_by_user_id``; leave the uploaders.
 
-    The revision changes data, not schema, and the stamped value is exactly what
-    the path would write today. Clearing it would re-open the segregation hole
-    this closes, and the ``invoice.segregation_backfilled`` rows, which
-    ``audit_log``'s append-only trigger keeps, would then describe a state the
-    invoices no longer have.
+    The column is read by nothing below this revision, so dropping it loses only
+    a copy of what the decision audit rows already say. The stamped uploaders
+    stay, on purpose: each is exactly what the path would write today, clearing
+    it would re-open the segregation hole this closes, and the
+    ``invoice.segregation_backfilled`` rows, which ``audit_log``'s append-only
+    trigger keeps, would then describe a state the invoices no longer have.
     """
+    if _has_table("exceptions"):
+        op.execute("ALTER TABLE exceptions DROP COLUMN IF EXISTS decided_by_user_id")

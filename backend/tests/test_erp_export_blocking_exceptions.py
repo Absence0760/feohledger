@@ -567,10 +567,16 @@ async def test_a_new_fraud_finding_is_still_raised_after_another_was_dismissed(r
         await _ensure_exception(s, inv, "fraud_flag", "info", round_flag)
         await s.commit()
     async with mk() as s:
+        # A person's dismissal, named: a payment-blocking row with no recorded
+        # decider never suppresses (`clearance_stands`, decisions §367).
         await s.execute(
             update(APException)
             .where(APException.invoice_id == inv_id)
-            .values(status="dismissed", resolved_by="Reviewer")
+            .values(
+                status="dismissed",
+                resolved_by="Reviewer",
+                decided_by_user_id=info.users["ap_manager"],
+            )
         )
         await s.commit()
 

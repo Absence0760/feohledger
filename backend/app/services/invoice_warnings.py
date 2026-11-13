@@ -2040,10 +2040,15 @@ async def _void_stale_finding_stamps(db: AsyncSession, invoice: Invoice) -> None
 
 
 async def _finding_cleared_by_a_person(
-    db: AsyncSession, invoice: Invoice, exception_type: str, fingerprint: str
+    db: AsyncSession,
+    invoice: Invoice,
+    exception_type: str,
+    fingerprint: str,
+    *,
+    org_settings: dict | None,
 ) -> bool:
     """Has a person already resolved or dismissed THIS finding on this invoice,
-    as it stands now? (decisions §286, §366)
+    as it stands now, and could they still? (decisions §286, §366, §367)
 
     Re-opening a row a reviewer had judged undid their verdict on the next
     refresh: ``POST /complete`` refreshes on every "Send to ERP", so a
@@ -2055,16 +2060,34 @@ async def _finding_cleared_by_a_person(
     clears the fingerprint on a decision no person made (a detector, an agent),
     and a row closed before its type was stamped has none, so neither ever
     suppresses.
+
+    A matching verdict also has to be one segregation would accept from its
+    decider TODAY (``exception_lifecycle.clearance_stands``, the same
+    ``segregation_refusal`` the decision met). Someone implicated after they
+    decided, an uploader migration 0126 named (§367) or an approval's
+    recaller (§374), no longer keeps their own clearance live; the finding is
+    raised again for someone independent. A clearance by anyone the invoice
+    does not implicate still suppresses. ``org_settings`` carries the queue's
+    opt-out; omitted, segregation is enforced, so the error is an extra
+    review, never a bypass.
     """
-    rows = await db.execute(
-        select(func.count()).where(
-            APException.invoice_id == invoice.id,
-            APException.exception_type == exception_type,
-            APException.status.in_(["resolved", "dismissed"]),
-            APException.finding_fingerprint == fingerprint,
+    from app.services.exception_lifecycle import clearance_stands
+
+    rows = (
+        (
+            await db.execute(
+                select(APException).where(
+                    APException.invoice_id == invoice.id,
+                    APException.exception_type == exception_type,
+                    APException.status.in_(["resolved", "dismissed"]),
+                    APException.finding_fingerprint == fingerprint,
+                )
+            )
         )
+        .scalars()
+        .all()
     )
-    return (rows.scalar() or 0) > 0
+    return any(clearance_stands(row, invoice, org_settings=org_settings) for row in rows)
 
 
 async def _ensure_exception(
@@ -2121,7 +2144,9 @@ async def _ensure_exception(
         # hashes the same when a person clears the row, so an edit made
         # while someone was deciding cannot ride their verdict.
         return  # already exists
-    if await _finding_cleared_by_a_person(db, invoice, exception_type, fingerprint):
+    if await _finding_cleared_by_a_person(
+        db, invoice, exception_type, fingerprint, org_settings=org_settings
+    ):
         return
 
     # Auto-routing: org settings can map exception_type → user UUID
