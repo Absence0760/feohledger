@@ -477,7 +477,10 @@ What the merge does, in one tenant transaction (`app/services/vendor_merge.py`):
   direction is allowed); an **ERP company where the canonical and a duplicate,
   or two duplicates, are linked to different supplier records** → 409
   `vendor_merge_erp_link_conflict`, with nothing moved (the merge would have to
-  pick which ERP supplier the merged vendor posts to; leave that duplicate out).
+  pick which ERP supplier the merged vendor posts to). The steward picks
+  instead: unlink the stale record from that company on its vendor
+  (`POST /api/vendors/{id}/erp-links/unlink`, the vendor modal's **ERP links**,
+  decisions §375) and merge again, or leave that duplicate out.
   Each is a coded refusal (`{code, message, params}`,
   `api/refusals.py::coded_refusal`) so the web app states it in the reader's
   language: `vendor_merge_self`, `vendor_merge_no_duplicates`,
