@@ -259,6 +259,16 @@
 			});
 	});
 
+	// Outside-click un-arms (ui-patterns § Per-row actions). A click on any
+	// Unlink in this panel is left to `unlinkErp`, which arms or confirms it;
+	// any other click — another panel's button, the modal body — clears it, so
+	// a "Confirm unlink" is never left armed for a later stray click.
+	function disarmUnlinkOnOutsideClick(e: MouseEvent) {
+		if (unlinkArmed === null) return;
+		const target = e.target as Element | null;
+		if (!target?.closest('[data-testid="vendor-erp-links"] .row-action')) unlinkArmed = null;
+	}
+
 	async function unlinkErp(link: VendorErpLink) {
 		const key = realmKey(link.realm);
 		if (unlinkArmed !== key) {
@@ -352,6 +362,8 @@
 	}
 </script>
 
+<svelte:window onclick={disarmUnlinkOnOutsideClick} />
+
 <Modal open ariaLabel={m('vendors.modal.dialogAria')} width="lg" {onclose}>
 	<h2>{vendor.name}</h2>
 
@@ -428,7 +440,7 @@
 	</section>
 
 	<section class="panel" data-testid="vendor-erp-links">
-		<h3>{m('vendors.modal.erp.heading')}</h3>
+		<h3 id="vendor-erp-links-heading">{m('vendors.modal.erp.heading')}</h3>
 		<p class="hint muted">{m('vendors.modal.erp.hint')}</p>
 
 		{#if loadingErpLinks}
@@ -439,51 +451,63 @@
 		{:else if erpLinks.length === 0}
 			<p class="muted" data-testid="vendor-erp-links-empty">{m('vendors.modal.erp.none')}</p>
 		{:else}
-			<table class="score-table">
-				<thead>
-					<tr>
-						<th scope="col">{m('vendors.modal.erp.colCompany')}</th>
-						<th scope="col">{m('vendors.modal.erp.colSupplier')}</th>
-						<th scope="col">{m('vendors.modal.erp.colLink')}</th>
-						{#if canUnlinkErp}
-							<th scope="col"><span class="visually-hidden">{m('vendors.modal.erp.colAction')}</span></th>
-						{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#each erpLinks as link (link.placement + ':' + realmKey(link.realm))}
-						{@const company = link.realm ?? m('vendors.modal.erp.noCompany')}
-						<tr data-testid="vendor-erp-link">
-							<th scope="row" class="erp-company">{company}</th>
-							<td>{link.erp_vendor_id}</td>
-							<td class="muted">
-								{link.placement === 'row'
-									? m('vendors.modal.erp.placementRow')
-									: m('vendors.modal.erp.placementKept')}
-							</td>
+			<!-- Four columns (an uppercase header, a raw supplier id, the Unlink
+			     button) do not fit a 320px dialog: the table pans inside this
+			     named, focusable region instead of the page scrolling sideways
+			     (WCAG 1.4.10 + 2.1.1; ui-patterns § tables). -->
+			<div
+				class="table-scroll"
+				role="region"
+				aria-labelledby="vendor-erp-links-heading"
+				tabindex="0"
+				data-testid="vendor-erp-links-scroll"
+			>
+				<table class="score-table erp-links-table">
+					<thead>
+						<tr>
+							<th scope="col">{m('vendors.modal.erp.colCompany')}</th>
+							<th scope="col">{m('vendors.modal.erp.colSupplier')}</th>
+							<th scope="col">{m('vendors.modal.erp.colLink')}</th>
 							{#if canUnlinkErp}
-								<td class="erp-action">
-									<RowAction
-										variant="danger"
-										armed={unlinkArmed === realmKey(link.realm)}
-										disabled={busy !== ''}
-										ariaLabel={m('vendors.modal.erp.unlinkAria', { id: link.erp_vendor_id, company })}
-										onclick={() => unlinkErp(link)}
-									>
-										{#if unlinking === realmKey(link.realm)}
-											{m('vendors.modal.erp.unlinking')}
-										{:else if unlinkArmed === realmKey(link.realm)}
-											{m('vendors.modal.erp.confirmUnlink')}
-										{:else}
-											{m('vendors.modal.erp.unlink')}
-										{/if}
-									</RowAction>
-								</td>
+								<th scope="col" class="actions-col"><span class="visually-hidden">{m('vendors.modal.erp.colAction')}</span></th>
 							{/if}
 						</tr>
-					{/each}
-				</tbody>
-			</table>
+					</thead>
+					<tbody>
+						{#each erpLinks as link (link.placement + ':' + realmKey(link.realm))}
+							{@const company = link.realm ?? m('vendors.modal.erp.noCompany')}
+							<tr data-testid="vendor-erp-link">
+								<th scope="row" class="erp-company">{company}</th>
+								<td>{link.erp_vendor_id}</td>
+								<td class="muted">
+									{link.placement === 'row'
+										? m('vendors.modal.erp.placementRow')
+										: m('vendors.modal.erp.placementKept')}
+								</td>
+								{#if canUnlinkErp}
+									<td class="actions">
+										<RowAction
+											variant="danger"
+											armed={unlinkArmed === realmKey(link.realm)}
+											disabled={busy !== ''}
+											ariaLabel={m('vendors.modal.erp.unlinkAria', { id: link.erp_vendor_id, company })}
+											onclick={() => unlinkErp(link)}
+										>
+											{#if unlinking === realmKey(link.realm)}
+												{m('vendors.modal.erp.unlinking')}
+											{:else if unlinkArmed === realmKey(link.realm)}
+												{m('vendors.modal.erp.confirmUnlink')}
+											{:else}
+												{m('vendors.modal.erp.unlink')}
+											{/if}
+										</RowAction>
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 		{/if}
 	</section>
 
@@ -750,8 +774,20 @@
 		font-weight: 500;
 		word-break: break-all;
 	}
-	.erp-action {
-		text-align: right;
+	.table-scroll {
+		overflow-x: auto;
+		max-width: 100%;
+	}
+	.erp-links-table {
+		min-width: 30rem;
+	}
+	.erp-links-table td {
+		overflow-wrap: anywhere;
+	}
+	.actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 		white-space: nowrap;
 	}
 	.enrich-empty {

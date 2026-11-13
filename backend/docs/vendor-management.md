@@ -283,7 +283,11 @@ kept link for it, both if both exist (`services/vendor_erp_unlink`, decisions
   are never linked or created.
 
 The vendor modal's **ERP links** panel lists the links and offers an armed
-two-click **Unlink** per company to `vendor.manage` holders.
+two-click **Unlink** per company to `vendor.manage` holders: a click anywhere
+else in the modal un-arms it. The table pans inside a named, focusable region
+(`role="region"`, `tabindex="0"`) rather than scrolling a 320px page sideways;
+`tests-e2e/vendors/erp-unlink.spec.ts` runs axe on it at desktop width and at
+320px.
 
 ### Every changed vendor writes an audit row
 
