@@ -841,6 +841,9 @@
 										type="button"
 										class="btn-secondary"
 										disabled={verifying || downloadingNacha || !isAllowed(run.actions?.nacha_verify)}
+										aria-describedby={run.actions?.nacha_verify
+											? 'run-nacha-verify-refusal'
+											: undefined}
 										data-testid="nacha-verify"
 										onclick={verifyBankFile}
 									>
@@ -854,6 +857,10 @@
 										type="button"
 										class="btn-discard"
 										disabled={downloadingNacha || !isAllowed(run.actions?.nacha_void)}
+										aria-describedby={run.actions?.nacha_void
+											? 'run-nacha-void-refusal'
+											: undefined}
+										data-testid="nacha-reject"
 										onclick={openReject}
 									>
 										{m('paymentRuns.runDetail.nachaReject')}
@@ -901,6 +908,24 @@
 									data-testid="run-nacha-export-refusal"
 								>
 									{refusalText(run.actions.nacha_export, m)}
+								</p>
+							{/if}
+							{#if showVerify && run.actions?.nacha_verify}
+								<p
+									class="panel-hint warn"
+									id="run-nacha-verify-refusal"
+									data-testid="run-nacha-verify-refusal"
+								>
+									{refusalText(run.actions.nacha_verify, m)}
+								</p>
+							{/if}
+							{#if showReject && run.actions?.nacha_void}
+								<p
+									class="panel-hint warn"
+									id="run-nacha-void-refusal"
+									data-testid="run-nacha-void-refusal"
+								>
+									{refusalText(run.actions.nacha_void, m)}
 								</p>
 							{/if}
 							{#if showRegenerate && run.actions?.nacha_regenerate}

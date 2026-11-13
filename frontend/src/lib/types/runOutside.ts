@@ -44,3 +44,28 @@ export function isRunControlOffered(
 ): boolean {
 	return isOffered(verdict) && !(verdict && hidden.includes(verdict.code));
 }
+
+/** One payment `verifyRunNacha` took out of the file, or could not vouch for. */
+export interface NachaVerifyItem {
+	payment_id: string;
+	invoice_id: string;
+	invoice_number: string | null;
+	/** The dispatcher's machine code (`erp_bill_not_open:paid`, `erp_bill_unverified`, …). */
+	reason: string;
+}
+
+/** What `POST /runs/{id}/nacha/verify` found (decisions §362). */
+export interface NachaVerifyResult {
+	id: string;
+	status: string;
+	/** `verified`: upload the file. `superseded`: do NOT upload it — payments were
+	 *  taken out; regenerate (or, with none left, the run is cancelled).
+	 *  `held`: some bills could not be read just now; verify again first. */
+	result: 'verified' | 'superseded' | 'held';
+	checked: number;
+	remaining: number;
+	removed: NachaVerifyItem[];
+	held: NachaVerifyItem[];
+	/** Whether the org's ERP reports bill payments back at all. */
+	erp_checked: boolean;
+}

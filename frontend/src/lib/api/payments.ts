@@ -16,6 +16,7 @@ import { api } from '#lib/api.ts';
 import type { Payment, PaymentMethod } from '#lib/types/payment.ts';
 import type { ExecutionModeResponse, NachaSecCode } from '#lib/types/paymentExecution.ts';
 import type { RetryFailedResult } from '#lib/types/runRetry.ts';
+import type { NachaVerifyItem, NachaVerifyResult } from '#lib/types/runOutside.ts';
 import { triggerDownload } from '#lib/utils/download.ts';
 
 /**
@@ -228,30 +229,9 @@ export function voidRunNachaExport(
 	});
 }
 
-/** One payment `verifyRunNacha` took out of the file, or could not vouch for. */
-export interface NachaVerifyItem {
-	payment_id: string;
-	invoice_id: string;
-	invoice_number: string | null;
-	/** The dispatcher's machine code (`erp_bill_not_open:paid`, `erp_bill_unverified`, …). */
-	reason: string;
-}
-
-/** What `POST /runs/{id}/nacha/verify` found (decisions §362). */
-export interface NachaVerifyResult {
-	id: string;
-	status: string;
-	/** `verified`: upload the file. `superseded`: do NOT upload it — payments were
-	 *  taken out; regenerate (or, with none left, the run is cancelled).
-	 *  `held`: some bills could not be read just now; verify again first. */
-	result: 'verified' | 'superseded' | 'held';
-	checked: number;
-	remaining: number;
-	removed: NachaVerifyItem[];
-	held: NachaVerifyItem[];
-	/** Whether the org's ERP reports bill payments back at all. */
-	erp_checked: boolean;
-}
+// `NachaVerifyResult` lives in the pure `#lib/types/runOutside.ts` so the e2e
+// tree can type its stubs against it; re-exported for existing importers.
+export type { NachaVerifyItem, NachaVerifyResult };
 
 /**
  * Verify an exported file before uploading it: re-read the ERP bill of every
