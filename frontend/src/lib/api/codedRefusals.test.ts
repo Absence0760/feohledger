@@ -864,6 +864,56 @@ describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
 	});
 });
 
+describe('the vendor ERP unlink refusals (`services/vendor_erp_unlink.py`, decisions §375)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+
+	it('states the not-found refusal as a fixed sentence in every shipped locale', () => {
+		expect(CODED_REFUSAL_CODES).toContain('vendor_erp_link_not_found');
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText('vendor_erp_link_not_found', {}, translator(messages, locale));
+			expect(text, locale).toBe(messages['refusal.vendorErpLinkNotFound']);
+			expect(text, locale).toBeTruthy();
+		}
+	});
+
+	it('counts the in-flight invoices, in every shipped locale', () => {
+		expect(CODED_REFUSAL_CODES).toContain('vendor_erp_unlink_in_flight');
+		for (const [locale, messages] of LOCALES) {
+			const t = translator(messages, locale);
+			const one = codedRefusalText('vendor_erp_unlink_in_flight', { invoices: 1 }, t);
+			const three = codedRefusalText('vendor_erp_unlink_in_flight', { invoices: 3 }, t);
+			expect(one, locale).toBeTruthy();
+			expect(three, `${locale} names the count`).toContain('3');
+			expect(one, locale).not.toBe(three);
+		}
+		expect(codedRefusalText('vendor_erp_unlink_in_flight', { invoices: 2 }, deT)).toContain(
+			'2 Rechnungen'
+		);
+	});
+
+	it.each([[{}], [{ invoices: 0 }], [{ invoices: '2' }], [{ invoices: 1.5 }]])(
+		'falls back to the server sentence for malformed params %j',
+		(params) => {
+			expect(codedRefusalText('vendor_erp_unlink_in_flight', params, deT)).toBeNull();
+		}
+	);
+
+	it('the merge conflict now points the steward at the unlink, in every locale', () => {
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText('vendor_merge_erp_link_conflict', {}, translator(messages, locale));
+			// The unlink action's own section heading is named in the sentence.
+			expect(text, locale).toContain(messages['vendors.modal.erp.heading']);
+		}
+	});
+});
+
 describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', () => {
 	const LOCALES = [
 		['en', en],

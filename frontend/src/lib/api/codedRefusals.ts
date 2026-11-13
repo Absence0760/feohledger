@@ -29,7 +29,8 @@
  *    email and name checks, the captcha, the verification link), the
  *    shared rate limiter's 429 on every surface it guards, and every vendor
  *    merge refusal (self-merge, cross-entity, a payments-blocked duplicate,
- *    an ERP company where both are linked to different supplier records);
+ *    an ERP company where both are linked to different supplier records), and
+ *    the refusals of the vendor ERP unlink that is that conflict's way through;
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -697,6 +698,15 @@ const BUILDERS: Record<string, Builder> = {
 	// Its `params.realms` names the ERP companies in conflict, for the API
 	// reader; the sentence does not need them (decisions §373).
 	vendor_merge_erp_link_conflict: fixed('refusal.vendorMergeErpLinkConflict'),
+	// Clearing a vendor's ERP link in one company (`services/vendor_erp_unlink.py`,
+	// decisions §375). The in-flight count is required: a sentence with no
+	// number is the server's job.
+	vendor_erp_link_not_found: fixed('refusal.vendorErpLinkNotFound'),
+	vendor_erp_unlink_in_flight: (p, t) => {
+		const n = p.invoices;
+		if (typeof n !== 'number' || !Number.isInteger(n) || n < 1) return null;
+		return t('refusal.vendorErpUnlinkInFlight', { n });
+	},
 	// Closing a workspace (`api/organization_close.py`, decisions §306). The
 	// refusal's blockers are listed by the page itself; the toast is the
 	// fixed sentence, and a blocker list this build cannot read falls back.
