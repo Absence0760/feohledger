@@ -203,6 +203,10 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'exception.erp_paid_unrecorded_not_payable': 'exceptions.description.erpPaidUnrecordedNotPayable',
 	// Your ERP reports this bill paid, but FeohLedger couldn't record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP's payment from this exception or resolve it.
 	'exception.erp_paid_unrecorded_not_payable_unnamed': 'exceptions.description.erpPaidUnrecordedNotPayableUnnamed',
+	// {erp} reports this bill paid, but FeohLedger couldn't record that payment because the amount it shows paid is not what this invoice owes in FeohLedger, after credit memos and any early-payment discount. Check the bill and the invoice, correct the one that is wrong, then record the ERP's payment from this exception or resolve it.
+	'exception.erp_paid_unrecorded_amount_mismatch': 'exceptions.description.erpPaidUnrecordedAmountMismatch',
+	// Your ERP reports this bill paid, but FeohLedger couldn't record that payment because the amount it shows paid is not what this invoice owes in FeohLedger, after credit memos and any early-payment discount. Check the bill and the invoice, correct the one that is wrong, then record the ERP's payment from this exception or resolve it.
+	'exception.erp_paid_unrecorded_amount_mismatch_unnamed': 'exceptions.description.erpPaidUnrecordedAmountMismatchUnnamed',
 	// {erp} reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP's payment from this exception or resolve it.
 	'exception.erp_paid_unrecorded_other': 'exceptions.description.erpPaidUnrecordedOther',
 	// Your ERP reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP's payment from this exception or resolve it.
@@ -411,6 +415,8 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'exception.erp_paid_unrecorded_nothing_to_pay_unnamed': {},
 	'exception.erp_paid_unrecorded_not_payable': { erp: 'text' },
 	'exception.erp_paid_unrecorded_not_payable_unnamed': {},
+	'exception.erp_paid_unrecorded_amount_mismatch': { erp: 'text' },
+	'exception.erp_paid_unrecorded_amount_mismatch_unnamed': {},
 	'exception.erp_paid_unrecorded_other': { erp: 'text' },
 	'exception.erp_paid_unrecorded_other_unnamed': {},
 	'exception.erp_paid_withdrawn': { erp: 'text' },

@@ -4925,6 +4925,18 @@ abstract class AppLocalizations {
   /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP\'s payment from this exception or resolve it.'**
   String get exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed;
 
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedAmountMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'{erp} reports this bill paid, but FeohLedger couldn\'t record that payment because the amount it shows paid is not what this invoice owes in FeohLedger, after credit memos and any early-payment discount. Check the bill and the invoice, correct the one that is wrong, then record the ERP\'s payment from this exception or resolve it.'**
+  String exceptionDescriptionErpPaidUnrecordedAmountMismatch(String erp);
+
+  /// No description provided for @exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because the amount it shows paid is not what this invoice owes in FeohLedger, after credit memos and any early-payment discount. Check the bill and the invoice, correct the one that is wrong, then record the ERP\'s payment from this exception or resolve it.'**
+  String get exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed;
+
   /// No description provided for @exceptionDescriptionErpPaidUnrecordedOther.
   ///
   /// In en, this message translates to:

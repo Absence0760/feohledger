@@ -3246,6 +3246,15 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP\'s payment from this exception or resolve it.';
 
   @override
+  String exceptionDescriptionErpPaidUnrecordedAmountMismatch(String erp) {
+    return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because the amount it shows paid is not what this invoice owes in FeohLedger, after credit memos and any early-payment discount. Check the bill and the invoice, correct the one that is wrong, then record the ERP\'s payment from this exception or resolve it.';
+  }
+
+  @override
+  String get exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed =>
+      'Your ERP reports this bill paid, but FeohLedger couldn\'t record that payment because the amount it shows paid is not what this invoice owes in FeohLedger, after credit memos and any early-payment discount. Check the bill and the invoice, correct the one that is wrong, then record the ERP\'s payment from this exception or resolve it.';
+
+  @override
   String exceptionDescriptionErpPaidUnrecordedOther(String erp) {
     return '$erp reports this bill paid, but FeohLedger couldn\'t record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP\'s payment from this exception or resolve it.';
   }

@@ -703,6 +703,71 @@ async def oauth_pending_discard(
     return DiscardPendingResponse(discarded=discarded)
 
 
+class StatusSyncNowResponse(BaseModel):
+    #: False when a pass for this tenant is already running on this server:
+    #: the one in flight reads the same changes, so none is started twice.
+    started: bool
+
+
+#: The English beside each coded 409 of ``POST /status-sync``.
+_STATUS_SYNC_REFUSALS = {
+    "status_sync_off": "Payment status sync is turned off on this server.",
+    "status_sync_unsupported": (
+        "The connected ERP does not report its bills' payments back to FeohLedger."
+    ),
+    "status_sync_needs_reconnect": "Reconnect the ERP, then check its payments again.",
+}
+#: On-request passes per tenant per hour. Each one spends ERP API calls from a
+#: daily allowance Xero meters per organisation (1,000 on its Starter tier), and
+#: one that has to read every payable bill back can spend a lot of it.
+_STATUS_SYNC_NOW_LIMIT = 4
+_STATUS_SYNC_NOW_WINDOW_SECONDS = 3600
+
+
+@router.post("/status-sync", status_code=202, response_model=StatusSyncNowResponse)
+async def oauth_status_sync_now(
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+):
+    """Run the status-sync sweep's pass for this tenant now (decisions §386).
+
+    For a bill just paid in the ERP: the sweep runs every few hours, and an
+    ERP with no webhook here (Xero) has no faster channel. The pass is the
+    sweep's own (``erp_status_sync.sync_org_now``), so every change it makes
+    is the audited change the sweep would have made. It runs after the
+    response (202): a full reconciliation reads every payable bill, which at
+    Xero's 60 calls a minute outlasts any HTTP timeout. The invoices it moves
+    show up as they would after a sweep tick.
+
+    Admin-only, audited first (``organization.erp_status_sync_requested``;
+    the pass's outcome follows as ``organization.erp_status_synced``), and
+    rate-limited per tenant (429, four an hour), since every pass spends the
+    ERP's API allowance; one at a time per tenant (``started: false``). 409
+    with a code when no pass can run: status sync off, an ERP that does not
+    report back, a connection that needs reconnecting.
+    """
+    from app.services import erp_status_sync
+    from app.services.rate_limit import check_rate_limit
+
+    refused = await erp_status_sync.status_sync_now_refusal(org)
+    if refused is not None:
+        raise HTTPException(
+            status_code=409, detail=coded_refusal(refused, _STATUS_SYNC_REFUSALS[refused])
+        )
+    await check_rate_limit(
+        "erp_status_sync_now",
+        limit=_STATUS_SYNC_NOW_LIMIT,
+        window_seconds=_STATUS_SYNC_NOW_WINDOW_SECONDS,
+        subject=str(org.id),
+    )
+    provider = (((org.settings or {}).get("erp") or {}).get("oauth") or {}).get("provider")
+    await _record_or_503(
+        org.id, user.id, "organization.erp_status_sync_requested", {"provider": provider}
+    )
+    started = await erp_status_sync.dispatch_sync_org_now(org.id, actor_id=user.id)
+    return StatusSyncNowResponse(started=started)
+
+
 async def _record_or_503(org_id: uuid.UUID, actor_id: uuid.UUID, action: str, details: dict):
     """Write an audit row or refuse with 503 — the audit-first rule (§239)."""
     try:

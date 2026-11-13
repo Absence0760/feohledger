@@ -15,6 +15,14 @@ Two directions of the same fact meet here:
   webhook (``api/erp_webhook.quickbooks_webhook`` → :func:`process_qbo_events`)
   and for the change-data-capture sweep (:func:`run_status_sync_once`), which
   is the backstop: Intuit does not guarantee delivery.
+* **Xero status sync-back** (decisions §386). Xero has no webhook here, so the
+  sweep is its only automatic channel (``changed_bills`` reads
+  ``If-Modified-Since`` listings), and an admin can run the same pass for one
+  tenant on request (:func:`dispatch_sync_org_now`, ``POST
+  /api/organization/erp/oauth/status-sync``). Its bills carry no marker of
+  ours, so a report is matched by its never-reused id within the recorded
+  realm (``ErpBillReport.match_by_reference``), and the cash a person paid is
+  recorded at Xero's own figure (``ErpBillReport.paid_amount``).
 
 **What closes the double-payment risk.** With status sync on
 (``FEOH_ERP_STATUS_SYNC_ENABLED``, :func:`status_sync_active`) a confirmed
@@ -45,8 +53,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
@@ -92,15 +101,23 @@ PAYABLE_HERE = frozenset(
 #: Refusals meaning FeohLedger still holds its own claim on paying the invoice
 #: (`services/external_payment`). Raised as the BLOCKING `payment_reconciliation`
 #: type, because that claim proceeding after the ERP paid is a double payment.
+#:
+#: `amount_mismatch` is one too (decisions §386). It arises only when the ERP
+#: stated the cash it paid in full and that is not what the invoice owes here,
+#: so the bill IS paid there and paying it here is the double payment. It is
+#: also how an undispatched booking of ours surfaces (`record_invoice_paid_
+#: outside` completes that one in place, and its figure is what disagrees), and
+#: no automatic re-attempt can clear it without a person correcting one side.
 DOUBLE_PAY_REFUSALS = frozenset(
     {
         "external_payment_in_run",
         "external_payment_payment_live",
         "external_payment_card_live",
+        "external_payment_amount_mismatch",
     }
 )
 
-#: The adapter whose bills sync back today (the only ``supports_status_sync``).
+#: QuickBooks Online: the adapter whose CloudEvents webhook this module serves.
 QBO_PROVIDER = "quickbooks_online"
 
 
@@ -294,6 +311,10 @@ def _merged_report(old: dict | None, new: dict, *, keep_refusal: bool) -> dict:
     if not new.get("erp_document_id") and old.get("reference"):
         merged["reference"] = old["reference"]
         merged["erp_document_id"] = old.get("erp_document_id")
+    if new.get("amount") is None and old.get("amount") is not None:
+        # A report that states no amount never erases one the ERP stated.
+        merged["amount"] = old["amount"]
+        merged["amount_currency"] = old.get("amount_currency")
     merged["first_reported_at"] = old.get("first_reported_at") or old.get("reported_at")
     if keep_refusal and old.get("refusal_code"):
         merged["refusal_code"] = old["refusal_code"]
@@ -428,6 +449,8 @@ async def record_erp_reported_payment(
     paid_on: date | None = None,
     method: str | None = None,
     paid_on_reported: bool | None = None,
+    amount: Decimal | None = None,
+    amount_currency: str | None = None,
 ) -> bool:
     """Book the ERP's `Paid` as a payment made outside FeohLedger.
 
@@ -447,9 +470,19 @@ async def record_erp_reported_payment(
     ``paid_on_reported`` says whether ``paid_on`` came from the ERP. A
     re-attempt (:func:`retry_erp_reported_payments`) passes the stored flag,
     since by then ``paid_on`` is always set.
+
+    ``amount`` is the cash the ERP says was paid, when it states it exactly
+    (``ErpBillReport.paid_amount``). It is recorded only when it is what the
+    invoice owes here; anything else is refused ``amount_mismatch`` and kept
+    for a person, never booked at FeohLedger's own figure (decisions §386).
+    ``amount_currency`` is the currency the ERP states it in; with an amount,
+    a missing or different one from the invoice's is refused the same way.
+    None records what is owed here.
     """
     from app.services.external_payment import (
+        REFUSAL_AMOUNT_MISMATCH,
         ExternalPaymentRefused,
+        Refusal,
         record_invoice_paid_outside,
     )
 
@@ -478,6 +511,20 @@ async def record_erp_reported_payment(
     paid_on = paid_on or utc_today()
     reference = erp_paid_reference(erp_type, erp_document_id, event_id)
     try:
+        if amount is not None and (
+            not amount_currency
+            or amount_currency.strip().upper() != (invoice.currency or "").strip().upper()
+        ):
+            # A figure in another currency (or none stated) says nothing about
+            # what this invoice owes; comparing the numbers would.
+            raise ExternalPaymentRefused(
+                Refusal(
+                    REFUSAL_AMOUNT_MISMATCH,
+                    "The ERP reports the payment in another currency than the invoice's.",
+                    http_status=422,
+                    params={"amount": str(amount), "currency": amount_currency},
+                )
+            )
         await record_invoice_paid_outside(
             db,
             org=org,
@@ -487,6 +534,7 @@ async def record_erp_reported_payment(
             paid_on=paid_on,
             actor_id=None,
             source="erp",
+            amount=amount,
         )
     except ExternalPaymentRefused as exc:
         # When FeohLedger itself still has a claim on paying this invoice — a
@@ -516,6 +564,8 @@ async def record_erp_reported_payment(
                 "reference": reference,
                 "paid_on": paid_on.isoformat(),
                 "paid_on_reported": paid_on_reported,
+                "amount": str(amount) if amount is not None else None,
+                "amount_currency": amount_currency if amount is not None else None,
                 "refusal_code": exc.refusal.code,
                 "reported_at": datetime.now(UTC).isoformat(),
             },
@@ -708,7 +758,8 @@ async def retry_erp_reported_payments(
             facts = fresh[0].erp_report or {}
             try:
                 paid_on = date.fromisoformat(str(facts.get("paid_on")))
-            except ValueError:
+                amount = Decimal(str(facts["amount"])) if facts.get("amount") else None
+            except (ValueError, ArithmeticError):
                 return False
             return await record_erp_reported_payment(
                 db,
@@ -720,6 +771,8 @@ async def retry_erp_reported_payments(
                 paid_on=paid_on,
                 method=reported_payment_method(facts.get("method")),
                 paid_on_reported=bool(facts.get("paid_on_reported")),
+                amount=amount,
+                amount_currency=facts.get("amount_currency"),
             )
     except Exception:  # noqa: BLE001 — isolated follow-on; logged with its traceback
         # ids only — no vendor, no amount, no reference.
@@ -752,7 +805,7 @@ async def _mark_retry_failed(db: AsyncSession, invoice_id: uuid.UUID) -> None:
 
 
 # ---------------------------------------------------------------------------
-# QuickBooks status sync-back
+# Status sync-back (QuickBooks Online, Xero)
 # ---------------------------------------------------------------------------
 
 
@@ -793,7 +846,10 @@ async def _matching_invoice_id(
     keyed in the ERP by hand, or copied, matches nothing. A deleted bill can no
     longer be read, so it is matched by the reference alone, and only within
     the connection realm the push recorded (QuickBooks numbers bills per
-    company, so a sandbox bill id names something else in production).
+    company, so a sandbox bill id names something else in production). An ERP
+    that writes no marker onto its bills but never reuses a bill id (Xero,
+    ``ErpBillReport.match_by_reference``) is matched the same way in every
+    state (§386). Either way exactly one invoice must name the bill.
     """
     bill_id = str(report.bill_id)
     if report.correlation_id:
@@ -817,7 +873,8 @@ async def _matching_invoice_id(
         if recorded and realm and recorded != realm:
             return None
         return invoice_id
-    if report.state is not ErpBillState.deleted or not realm:
+    by_reference = report.state is ErpBillState.deleted or report.match_by_reference
+    if not by_reference or not realm:
         return None
     rows = (
         await db.execute(
@@ -934,6 +991,8 @@ async def apply_bill_report(
                 event_id=event_id,
                 paid_on=reported_paid_on(report.paid_on),
                 method=reported_payment_method(report.payment_method),
+                amount=report.paid_amount,
+                amount_currency=report.paid_currency,
             )
             action = "paid_recorded"
         elif status == InvoiceStatus.payment_scheduled:
@@ -946,7 +1005,16 @@ async def apply_bill_report(
                 erp_report=detail,
             )
             action = "double_payment_flagged" if opened else action
-        elif status == InvoiceStatus.paid and await _paid_through_feohledger(db, invoice.id):
+        elif (
+            status == InvoiceStatus.paid
+            # Credit alone, with no payment of anyone else's on the bill, moved
+            # no money twice: it is the bookkeeper recording the discount or
+            # short settlement our write-back left open, as its flag asked
+            # (§386). (QuickBooks lists a credit as a $0 BillPayment, so there
+            # this never holds and the rule is unchanged.)
+            and not (report.settled_by_credit and not report.external_payment_ids)
+            and await _paid_through_feohledger(db, invoice.id)
+        ):
             # FeohLedger's own rail paid it (its write-back missing or
             # refused) and a person paid it in QuickBooks too: the money has
             # left twice. A payment recorded as made OUTSIDE FeohLedger is
@@ -1406,6 +1474,28 @@ async def _resolved_erp(org: Organization) -> dict | None:
         return await provider_config(org, "erp", db=ctrl) or None
 
 
+async def _bills_we_posted(factory, bill_ids: list[str], realm: str | None) -> list[str]:
+    """The bills of ``bill_ids`` some invoice here was pushed as, under
+    ``realm`` (or before realms were recorded), in their order.
+
+    A change feed lists every bill the company changed, most of them keyed in
+    the ERP by hand. Reading those back spends the ERP's API allowance (Xero
+    meters a day's calls per organisation) on bills ``apply_bill_report``
+    could only answer "unmatched" for, so they are not read at all: a bill no
+    invoice names as its ``erp_reference`` matches nothing whatever its state.
+    """
+    if not bill_ids:
+        return []
+    reference = WorkflowInstance.state_data["erp_reference"].astext
+    recorded = WorkflowInstance.state_data["erp_realm"].astext
+    query = select(reference).where(reference.in_(bill_ids))
+    if realm:
+        query = query.where(or_(recorded == realm, recorded.is_(None)))
+    async with factory() as db:
+        ours = {str(r) for r in (await db.execute(query)).scalars() if r}
+    return [b for b in bill_ids if b in ours]
+
+
 async def sync_bills(org: Organization, bill_ids: list[str], *, event_id: str | None) -> int:
     """Read each bill back and apply it to the tenant. Returns how many changed
     something. Raises on a failed read (the caller decides what that means)."""
@@ -1418,7 +1508,7 @@ async def sync_bills(org: Organization, bill_ids: list[str], *, event_id: str | 
     realm = connection_realm(erp_config)
     factory = async_sessionmaker(get_tenant_engine(org.db_name), expire_on_commit=False)
     changed = 0
-    for bill_id in dict.fromkeys(bill_ids):
+    for bill_id in await _bills_we_posted(factory, list(dict.fromkeys(bill_ids)), realm):
         report = await adapter.bill_report(bill_id)
         async with factory() as db:
             outcome = await apply_bill_report(
@@ -1631,7 +1721,7 @@ async def sync_org(org: Organization, *, now: datetime, result: StatusSyncResult
         result.invoices_changed += await sync_bills(org, bill_ids, event_id=None)
     result.voids_pending += await resume_pending_voids(org)
     await update_connection_metadata(
-        QBO_PROVIDER,
+        str(oauth_meta.get("provider") or adapter.erp_type),
         org.id,
         str(oauth_meta.get("connection_id") or ""),
         {SYNCED_THROUGH_KEY: now.isoformat()},
@@ -1639,11 +1729,15 @@ async def sync_org(org: Organization, *, now: datetime, result: StatusSyncResult
 
 
 async def run_status_sync_once(*, now: datetime | None = None) -> StatusSyncResult:
-    """One pass over every tenant connected to QuickBooks: ask its company for
-    the bills and bill payments changed since its last complete pass (at least
-    the lookback window) and apply each bill; read back every still-payable
-    bill when CDC cannot vouch for the gap. Re-applying a report changes
-    nothing. One tenant's failure never stops the others."""
+    """One pass over every tenant connected to an ERP whose bills sync back
+    (QuickBooks Online, Xero — ``status_sync_adapter_keys``): ask its company
+    for the bills and bill payments changed since its last complete pass (at
+    least the lookback window) and apply each bill; read back every
+    still-payable bill when the change feed cannot vouch for the gap.
+    Re-applying a report changes nothing. One tenant's failure never stops the
+    others."""
+    from app.services.erp_adapters.dispatcher import status_sync_adapter_keys
+
     result = StatusSyncResult()
     if not settings.erp_status_sync_enabled:
         return result
@@ -1653,7 +1747,9 @@ async def run_status_sync_once(*, now: datetime | None = None) -> StatusSyncResu
         orgs = (
             (
                 await ctrl.execute(
-                    select(Organization).where(oauth["provider"].astext == QBO_PROVIDER)
+                    select(Organization).where(
+                        oauth["provider"].astext.in_(status_sync_adapter_keys())
+                    )
                 )
             )
             .scalars()
@@ -1681,6 +1777,152 @@ async def run_status_sync_once(*, now: datetime | None = None) -> StatusSyncResu
             result.failures,
         )
     return result
+
+
+#: Why an admin's on-request pass cannot run (``POST
+#: /api/organization/erp/oauth/status-sync`` answers 409 with the code).
+STATUS_SYNC_OFF = "status_sync_off"
+STATUS_SYNC_UNSUPPORTED = "status_sync_unsupported"
+STATUS_SYNC_NEEDS_RECONNECT = "status_sync_needs_reconnect"
+
+
+async def status_sync_now_refusal(org: Organization) -> str | None:
+    """Why this tenant cannot run a status-sync pass on request, or None.
+
+    The same conditions the sweep skips a tenant on: status sync off, an ERP
+    whose bills do not report back (or a tenant that has switched away from
+    the one it connected), a connection that needs reconnecting."""
+    from app.services.erp_adapters.dispatcher import status_sync_adapter_keys
+
+    if not settings.erp_status_sync_enabled:
+        return STATUS_SYNC_OFF
+    oauth_meta = ((org.settings or {}).get("erp") or {}).get("oauth") or {}
+    if oauth_meta.get("provider") not in status_sync_adapter_keys():
+        return STATUS_SYNC_UNSUPPORTED
+    if oauth_meta.get("needs_reconnect"):
+        return STATUS_SYNC_NEEDS_RECONNECT
+    adapter = _adapter_or_none(await _resolved_erp(org) or {})
+    if adapter is None or not adapter.supports_status_sync:
+        return STATUS_SYNC_UNSUPPORTED
+    return None
+
+
+async def sync_org_now(org: Organization, *, now: datetime | None = None) -> StatusSyncResult:
+    """The sweep's pass for ONE tenant ("a bill was just paid in the ERP;
+    bring it in now" rather than at the next tick).
+
+    Exactly :func:`sync_org`, so it is as safe beside the sweep as two sweep
+    ticks are: every report is applied under the invoice row lock and
+    re-applying one changes nothing, and each pass moves the high-water mark
+    only to its own start, after it completed (a slower pass finishing later
+    can only move it back, which re-reads more, never less). Raises on a
+    failed read; the caller checks :func:`status_sync_now_refusal` first."""
+    result = StatusSyncResult(orgs_scanned=1)
+    await sync_org(org, now=now or datetime.now(UTC), result=result)
+    return result
+
+
+#: Orgs with an on-request pass running in this process, and the tasks
+#: themselves (asyncio holds only a weak reference to a task).
+_now_running: set[uuid.UUID] = set()
+_now_tasks: set[asyncio.Task] = set()
+#: The cross-worker claim on a tenant's on-request pass (Redis), and how long
+#: it holds if the process dies mid-pass without releasing it.
+_NOW_LOCK_PREFIX = "erpstatussync:now:"
+_NOW_LOCK_SECONDS = 15 * 60
+
+
+async def _release_now_lock(org_id: uuid.UUID) -> None:
+    from app.redis import get_redis
+
+    try:
+        await (await get_redis()).delete(f"{_NOW_LOCK_PREFIX}{org_id}")
+    except Exception as exc:  # noqa: BLE001 — the claim expires on its own
+        logger.warning("[erp-status-sync] could not release the claim: %s", type(exc).__name__)
+
+
+async def _sync_org_now_task(org_id: uuid.UUID, actor_id: uuid.UUID | None) -> None:
+    """Run :func:`sync_org_now` for an admin's request, after the response.
+    Never raises: every outcome is audited (``organization.erp_status_synced``)
+    and logged, and the sweep's next tick reads the same changes again after a
+    failed pass (its mark has not moved)."""
+    from app.services.audit_dispatch import dispatch_auth_audit
+
+    details: dict[str, object] = {}
+    try:
+        async with control_session_factory() as ctrl:
+            org = await ctrl.get(Organization, org_id)
+        if org is None:
+            details["outcome"] = "refused"
+        else:
+            details["provider"] = (((org.settings or {}).get("erp") or {}).get("oauth") or {}).get(
+                "provider"
+            )
+            refused = await status_sync_now_refusal(org)
+            if refused is not None:
+                # Changed between the request and the task: nothing to read with.
+                details.update(outcome="refused", refusal=refused)
+            else:
+                result = await sync_org_now(org)
+                details.update(
+                    outcome="completed",
+                    bills_read=result.bills_read,
+                    invoices_changed=result.invoices_changed,
+                    full_reconciliation=bool(result.full_reconciliations),
+                )
+    except Exception as exc:  # noqa: BLE001 — a failed read is the ERP's answer
+        details.update(outcome="failed", error=exc.__class__.__name__)
+        logger.warning(
+            "[erp-status-sync] on-request pass for org %s failed: %s",
+            org_id,
+            exc.__class__.__name__,
+        )
+    finally:
+        _now_running.discard(org_id)
+        await _release_now_lock(org_id)
+    try:
+        await dispatch_auth_audit(
+            organization_id=org_id,
+            actor_id=actor_id,
+            action="organization.erp_status_synced",
+            entity_id=org_id,
+            entity_type="organization",
+            details=details,
+        )
+    except Exception as exc:  # noqa: BLE001 — the request itself was audited first
+        logger.warning(
+            "[erp-status-sync] outcome audit for org %s failed: %s", org_id, exc.__class__.__name__
+        )
+
+
+async def dispatch_sync_org_now(org_id: uuid.UUID, *, actor_id: uuid.UUID | None) -> bool:
+    """Start an on-request pass for one tenant, off the request (the
+    ``dispatch_qbo_events`` shape): a full reconciliation reads every payable
+    bill, which at Xero's 60 calls a minute outlasts any HTTP timeout.
+
+    False when one is already running for this tenant, on this worker or (by a
+    Redis claim) on any other: a second pass would read the same changes and
+    spend the ERP's API allowance twice. A Redis that cannot be reached falls
+    back to this worker's own check; a second pass is then only as costly as
+    two sweep ticks, never unsafe."""
+    from app.redis import get_redis
+
+    if org_id in _now_running:
+        return False
+    try:
+        claimed = await (await get_redis()).set(
+            f"{_NOW_LOCK_PREFIX}{org_id}", "1", nx=True, ex=_NOW_LOCK_SECONDS
+        )
+    except Exception as exc:  # noqa: BLE001 — see the docstring
+        logger.warning("[erp-status-sync] claim unavailable: %s", type(exc).__name__)
+        claimed = True
+    if not claimed:
+        return False
+    _now_running.add(org_id)
+    task = asyncio.create_task(_sync_org_now_task(org_id, actor_id), name="erp-status-sync-now")
+    _now_tasks.add(task)
+    task.add_done_callback(_now_tasks.discard)
+    return True
 
 
 async def run_status_sync_loop() -> None:

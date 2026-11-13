@@ -765,6 +765,11 @@ ERP_UNRECORDED_REASONS: dict[str, str] = {
         "the invoice is not at a status that can be marked paid. Check the invoice, then "
         "record the ERP's payment from this exception or resolve it."
     ),
+    "amount_mismatch": (
+        "the amount it shows paid is not what this invoice owes in FeohLedger, after credit "
+        "memos and any early-payment discount. Check the bill and the invoice, correct the "
+        "one that is wrong, then record the ERP's payment from this exception or resolve it."
+    ),
     "other": (
         "FeohLedger refused to record it. Check the invoice, then record the ERP's payment "
         "from this exception or resolve it."

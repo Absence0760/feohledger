@@ -241,6 +241,8 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'exception.erp_paid_unrecorded_nothing_to_pay_unnamed': {},
   'exception.erp_paid_unrecorded_not_payable': {'erp': 'text'},
   'exception.erp_paid_unrecorded_not_payable_unnamed': {},
+  'exception.erp_paid_unrecorded_amount_mismatch': {'erp': 'text'},
+  'exception.erp_paid_unrecorded_amount_mismatch_unnamed': {},
   'exception.erp_paid_unrecorded_other': {'erp': 'text'},
   'exception.erp_paid_unrecorded_other_unnamed': {},
   'exception.erp_paid_withdrawn': {'erp': 'text'},
@@ -987,6 +989,14 @@ String? _localizeWarningCode(
     // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because the invoice is not at a status that can be marked paid. Check the invoice, then record the ERP's payment from this exception or resolve it.
     case 'exception.erp_paid_unrecorded_not_payable_unnamed':
       return l.exceptionDescriptionErpPaidUnrecordedNotPayableUnnamed;
+    // {erp} reports this bill paid, but FeohLedger couldn't record that payment because the amount it shows paid is not what this invoice owes in FeohLedger, after credit memos and any early-payment discount. Check the bill and the invoice, correct the one that is wrong, then record the ERP's payment from this exception or resolve it.
+    case 'exception.erp_paid_unrecorded_amount_mismatch':
+      final erp = _text(p['erp'], currency);
+      if (erp == null) return null;
+      return l.exceptionDescriptionErpPaidUnrecordedAmountMismatch(erp);
+    // Your ERP reports this bill paid, but FeohLedger couldn't record that payment because the amount it shows paid is not what this invoice owes in FeohLedger, after credit memos and any early-payment discount. Check the bill and the invoice, correct the one that is wrong, then record the ERP's payment from this exception or resolve it.
+    case 'exception.erp_paid_unrecorded_amount_mismatch_unnamed':
+      return l.exceptionDescriptionErpPaidUnrecordedAmountMismatchUnnamed;
     // {erp} reports this bill paid, but FeohLedger couldn't record that payment because FeohLedger refused to record it. Check the invoice, then record the ERP's payment from this exception or resolve it.
     case 'exception.erp_paid_unrecorded_other':
       final erp = _text(p['erp'], currency);
