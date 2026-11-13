@@ -18570,3 +18570,160 @@ following the top dialog); `tests-e2e/a11y/modal-inert.spec.ts` (the page and
 then the under-dialog go inert, the toast region stays live, closing restores
 each and returns focus); `tests-e2e/a11y/recall-import-verify.spec.ts` at 320px
 is the axe guard that was red.
+
+## 386. Xero's bills sync back: matched by their id, recorded at Xero's cash, written back at the exact amount (issue #655 X1–X5, 2026-11-13)
+
+**Context.** §295 brought QuickBooks bills' payment status back and wrote our
+payments there, gated on `supports_status_sync`. Xero, the other direct OAuth
+ERP, still closed every push at `done`, so a bill paid in Xero never reached
+FeohLedger (the live Demo Company test's FEOH-INV-001). The 2026-10-23 audit of
+the Xero adapter against Xero's published API (#655) also found four reading
+errors (X1–X4) and a wrong rate-limit figure (X5). A WIP branch
+(`feat/erp-xero-status-sync`, `f8e5cee5`) drafted the work; this entry is the
+port onto main (with #707's company picker, ShortCode deep link and per-company
+vendor links in place) and its completion.
+
+**Decision — Xero reports back.** `XeroAdapter.supports_status_sync = True`.
+With `FEOH_ERP_STATUS_SYNC_ENABLED` on, a confirmed Xero push lands at
+`posted_in_erp`, and §295's table, §296's dispatch-time read, §309's live-claim
+refusals and §319's kept report apply unchanged. The sweep selects tenants by
+`dispatcher.status_sync_adapter_keys()`, derived from the adapter classes, so
+the next adapter that turns the capability on is swept with no second list.
+
+- **Matched by the bill's id, in any state.** Xero's `Reference` is
+  ACCREC-only, so a bill carries no marker of ours. An `InvoiceID` is a GUID
+  Xero never reuses, so the report sets `match_by_reference` and
+  `_matching_invoice_id` matches by `erp_reference` within the recorded realm,
+  exactly one invoice or none, the way QuickBooks' deleted bills already were.
+  Rejected: writing our correlation id into a line description (a person can
+  edit it, and it would print on the bill).
+- **"Paid" is read from the payments on the bill, never `Status` alone (§303).**
+  `AmountPaid` must equal the sum of the listed payments, or the report is
+  `unknown` (the dispatch check then holds). Credit notes, overpayments and
+  prepayments sit in `AmountCredited`, so a bill they settled is
+  `settled_by_credit`. Our write-backs are told apart by `Reference:
+  "FeohLedger payment <id>"`.
+- **The cash Xero shows is recorded, not FeohLedger's figure.** New
+  `ErpBillReport.paid_amount`: the exact cash a person applied outside us, set
+  only for a bill paid wholly in cash. The ERP-paid path passes it to
+  `record_invoice_paid_outside(amount=…)`, which records only when it equals
+  what the invoice owes here; anything else is refused `amount_mismatch`
+  (`external_payment_amount_mismatch`, a new `erp_paid_unrecorded_*` clause in
+  every locale) and kept on the `paid_not_recorded` row with the amount and its
+  currency, which the re-attempt and a merge never drop. A figure in another
+  currency than the invoice's, or none stated, is refused the same way, never
+  compared as a bare number. Recording the owed figure, as QuickBooks still does
+  (it states no amount; `docs/followups.md`), would book money that did not
+  leave whenever a credit memo or an early-payment discount applies only here.
+  **The row is payment-blocking** (`amount_mismatch` joins
+  `DOUBLE_PAY_REFUSALS`): the bill is paid in full there, so paying it here is
+  the double payment, and an undispatched booking of ours surfaces exactly this
+  way (it is completed in place, and its figure is what disagrees). Leaning on
+  §296's dispatch read alone would leave it payable whenever status sync is
+  turned off. **The one-click record books the stated figure or nothing**:
+  `POST /api/exceptions/{id}/record-erp-payment` takes the row's stated amount
+  as the amount, so it refuses until a person corrects the invoice or the bill,
+  and a body figure that disagrees is a 422. Before this, the dialog's
+  amount-less record would have booked FeohLedger's figure (and captured a
+  discount the supplier never granted) and closed the row.
+- **The channel is the sweep, plus an admin's "check now".** No Xero webhook is
+  wired (a follow-up). `changed_bills` reads `Invoices` and `Payments` with
+  `If-Modified-Since` from the connection's high-water mark, 1,000 rows a page,
+  counted against `SYNC_LISTING_MAX_ROWS` in rows. A connection consented
+  before `accounting.payments` (added to the scopes now) cannot list payments:
+  that 401/403 is an incomplete listing, so the pass reads every payable bill,
+  which needs only the invoices scope. The header is sent as Xero documents it,
+  `yyyy-mm-ddThh:mm:ss` in UTC. **Only bills an invoice was pushed as are read
+  back** (`sync_bills` → `_bills_we_posted`, for every adapter): a change feed
+  lists every bill the company changed, and reading the hand-keyed ones spends
+  Xero's daily allowance on bills that could only be unmatched. `POST
+  /api/organization/erp/oauth/status-sync` runs the same pass for one tenant:
+  admin-only, audited first (and its outcome after, a refusal included), four
+  an hour per tenant, and **run after the response (202)**, since a full
+  reconciliation at Xero's 60 calls a minute outlasts any HTTP timeout. One at a
+  time per tenant, by a 15-minute Redis claim the pass releases; a Redis that
+  cannot be reached falls back to the worker's own check, and a second pass is
+  then only as costly as two sweep ticks (the mark only ever moves to a pass's
+  own start).
+- **Xero's per-minute limit is waited out on status reads, once.** A full
+  reconciliation reads one to three calls per bill, so a tenant with more than
+  a few dozen payable bills met a 429 on every pass and the pass failed at the
+  same bill each time, never reading the rest. A status-sync GET answered 429
+  with a `Retry-After` of at most 60 s, and an `X-Rate-Limit-Problem` that is
+  absent or names a per-minute limit, sleeps that long and reads again, once
+  (`xero._status_get`). The header decides first because the daily cap can
+  carry a short `Retry-After` near midnight. That is Xero's pacing instruction, not a retry of an
+  unknown failure (guard rail 4), and it is bounded. A longer `Retry-After` is
+  the daily cap, and the pass fails with its mark unmoved. At the dispatch check
+  the 10 s bound cuts a wait short and the payment is held (§296). Pushes still
+  never wait: `services/erp`'s backoff owns their timing.
+- **The rail is best effort.** Reading which account paid costs two more calls
+  for a bill already known to be paid outside; a failure there is "not stated"
+  (1099-reportable), never a failed report, so it cannot turn a known
+  `erp_bill_not_open` into an unverified hold or stop a sweep at that bill.
+
+**Decision — the write-back.** `post_payment` applies a Xero Payment to the bill
+from the mapped pay-from account at the exact `Decimal` that reached the
+supplier (`dumps_exact_json`), idempotent in §295's two layers (our marker,
+looked up among all payments, deleted ones included; and `Idempotency-Key`).
+A write-back someone deleted in Xero is refused `bill_payment_voided`. Refused
+before any write: no account, a bill gone, another currency, or more than is
+due. **A discount is not a payment**: Xero's Payment has no discount field, so
+the bill is left open by the discount and flagged
+(`erp_payment_writeback_balance_open`, now carrying `discount_amount` in its
+`erp_report`), §295's conservative answer kept; booking it as a credit note is
+an opt-in for a product call (`docs/followups.md`). Following that flag's
+advice must not raise an alarm: a bill FeohLedger paid that then shows a credit
+and no payment of anyone else's is not "paid twice" (QuickBooks lists a credit
+as a $0 BillPayment, so its rule is unchanged). `void_payment` deletes our
+Xero payment (Xero has no payment void); a reconciled one is refused by Xero
+and flagged.
+
+**Decision — the audit findings.**
+
+- **X1.** The vendor walk read `IsSupplier==true`, which Xero sets only once a
+  contact has a bill (and the API cannot set), so a new supplier was never
+  synced and its first push refused `vendor_not_linked` for good. It now reads
+  `IsSupplier==true OR IsCustomer==false`; customer-only contacts stay out. A
+  customer who becomes a supplier with no bill or PO is still missed (a
+  follow-up), and the opt-in live contract check asserts the OR is honoured.
+- **X2.** A bill create Xero refuses (HTTP 400 `ValidationException`,
+  `ErrorNumber: 10`, nothing created) is coded from facts read back, never
+  from its `Message` (which quotes the bill): contact not `ACTIVE` →
+  `vendor_inactive`; a line's account not `ACTIVE` → `account_inactive` with
+  our GL codes; dated on or before `PeriodLockDate` / `EndOfYearLockDate` →
+  `period_closed`. All non-retryable and `not_posted`, the codes QuickBooks uses
+  (§285). An unexplained validation failure is the plain failure, still
+  `not_posted`; anything but a ValidationException may have posted, as before.
+- **X3.** A contact is active only when `ContactStatus == ACTIVE`: `ARCHIVED`
+  and `GDPRREQUEST` (erased on request) are not payees.
+- **X4.** An account is active only when `Status == ACTIVE`: `DELETED` read as
+  active before.
+- **X5.** The documented "5,000 calls a day" holds only on Xero's Core tier and
+  above; the default Starter tier allows 1,000 per organisation and 5
+  connections. The adapter's references and the docs say so; moving the
+  platform app to Core before a sixth tenant is the operator step in #654.
+
+**Not verified live.** Everything above is against the published API, a
+stateful double (`test_xero_status_sync_adapter.py`) and fake-erp. Unconfirmed
+until a Demo Company pass (#654): the `If-Modified-Since` format Xero accepts,
+that `GET Payments` lists deleted payments, that a bill's own `Payments` array
+carries each payment's `Reference` (our marker; `report_from_bill` and
+`void_payment` rely on it), the `X-Rate-Limit-Problem` values, the `OR`
+filter, and the ValidationException body for each refusal.
+
+**Accepted residual.** A payment someone keys in Xero with our exact marker text
+(`FeohLedger payment <uuid>`) reads as ours. Checking the id against this
+invoice's payments would need a tenant read inside the adapter's report; the
+marker is a UUID nobody types by accident.
+
+Tests: `tests/test_xero_status_sync_adapter.py` (`bill_report`,
+`changed_bills`, `bills_for_payment`, `post_payment` idempotency and refusals,
+`void_payment`, the minute-limit wait, the paid amount);
+`tests/test_erp_xero_adapter.py` (X1–X4); the Xero section of
+`tests/test_erp_status_sync.py` (real rows: recorded at Xero's amount, a
+mismatch kept and blocking and the one-click refused, another currency
+refused, §309's live claim blocks, a credit after our payment not paid twice,
+matched only in the recorded organisation, a hand-keyed bill never read, the
+sweep covers Xero, the on-request refusals, single-flight and its audit); `tests/test_erp_oauth.py` § status sync on request;
+`tests/test_erp_payment_writeback.py` (the discount on the balance flag).

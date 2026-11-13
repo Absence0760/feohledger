@@ -260,7 +260,7 @@ After sending an invoice to the ERP, the system needs to know when the ERP has p
 | Method | How it works | When to use |
 |---|---|---|
 | **Webhook** | ERP calls our endpoint when status changes | Preferred — real-time, no polling cost |
-| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support — **designed, not built** for the generic case (below); QuickBooks Online has its change-data-capture sweep (§295) |
+| **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support — **designed, not built** for the generic case (below); QuickBooks Online has its change-data-capture sweep (§295), and Xero its `If-Modified-Since` sweep (§386) |
 
 **Webhook endpoint:** `POST /api/erp/webhook/{erp_type}`
 
@@ -327,10 +327,11 @@ past a timeout. The adapters' reads are ready for it: since decisions §303 `pai
 means the ERP's own paid status or a payment it records, never a zero balance
 alone, and a bill with nothing owing but no visible payment reads
 `settled_no_payment` (for a person, never recorded). Tracked in
-`docs/followups.md` ("A bill paid in any ERP but QuickBooks never reaches
-FeohLedger"). QuickBooks
-Online is the exception: its status comes back through its own webhook and a
-change-data-capture sweep (next section).
+`docs/followups.md` ("A bill paid in an ERP other than QuickBooks or Xero
+never reaches FeohLedger"). QuickBooks Online and Xero are the exceptions:
+QuickBooks' status comes back through its own webhook and a change-data-capture
+sweep, Xero's through the same sweep reading its `If-Modified-Since` listings
+(next two sections).
 
 **A paid report may carry the ERP's own payment date and rail.** The generic
 body accepts optional `paid_on` (`YYYY-MM-DD`) and `payment_method` (a
@@ -385,6 +386,87 @@ Decisions §295; the phase-by-phase account is
   refused `erp_bill_not_open:<state>` with the blocking
   `payment_reconciliation`; unreadable → held `erp_bill_unverified`, never paid
   blind. The NACHA export runs the same read.
+
+### Xero status sync-back and payment write-back
+
+Decisions §386 extends §295 to Xero (`XeroAdapter.supports_status_sync`), so
+with `FEOH_ERP_STATUS_SYNC_ENABLED` on a confirmed Xero push lands payable at
+`posted_in_erp` too, and everything in the section above (the dispatch-time
+read, `apply_bill_report`'s table, the write-back, the void) applies. What
+differs:
+
+- **No webhook; the sweep and an admin's "check now".** No Xero webhook is
+  wired here (`docs/followups.md`), so the `erp-status-sync` sweep is the
+  channel:
+  `changed_bills` reads `GET Invoices?where=Type=="ACCPAY"` and `GET
+  Payments?where=PaymentType=="ACCPAYPAYMENT"`, both with `If-Modified-Since`
+  set to the connection's high-water mark (`yyyy-mm-ddThh:mm:ss`, UTC), 1,000
+  rows a page, whole or `ErpListingIncomplete` (then every payable bill is read
+  back). Only bills an invoice here was pushed as are read back; the rest of
+  what the organisation changed is never read. A connection
+  consented before `accounting.payments` was asked for cannot list payments;
+  that is an incomplete listing, so the sweep falls back to the full read,
+  which needs only the invoices scope. For a bill just paid in Xero, an admin
+  can run the same pass for the tenant now: `POST
+  /api/organization/erp/oauth/status-sync` (admin, audited first, four an hour
+  per tenant, one at a time, 202 and the pass runs after the response; 409
+  `status_sync_off` / `status_sync_unsupported` / `status_sync_needs_reconnect`).
+- **Matched by the bill id, in every state.** `Reference` is ACCREC-only in
+  Xero, so a bill carries no marker of ours. Its `InvoiceID` is a GUID Xero
+  never reuses, so the report sets `match_by_reference` and the sync matches it
+  by `erp_reference` within the realm the push recorded, exactly one invoice or
+  none (the way a deleted QuickBooks bill is matched).
+- **Paid, part-paid, credited.** `report_from_bill`: `deleted` for `DELETED` /
+  `VOIDED`; `paid` for `Status == PAID` with nothing due; `partially_paid` /
+  `open` by `AmountDue`; `unknown` when the bill's listed payments do not add
+  up to its `AmountPaid`, or it is not an ACCPAY bill. Credit notes,
+  overpayments and prepayments sit in `AmountCredited`, never among the
+  payments, so a bill they settled is `settled_by_credit` and never booked as
+  cash (§303). Our own write-backs carry `Reference: "FeohLedger payment
+  <id>"`; anything else that took the bill down is outside us.
+- **Recorded at Xero's own amount.** A bill paid wholly in cash outside us
+  states that cash exactly (`ErpBillReport.paid_amount`), and the sync records
+  the payment at it. When it is not what the invoice owes here (a credit memo
+  or an early-payment discount applied in FeohLedger only, a total edited in
+  Xero), the record is refused `amount_mismatch` and kept on its
+  `paid_not_recorded` exception with the amount, rather than booking
+  FeohLedger's figure as money that left. That row is payment-blocking (the
+  bill is paid there), a figure in another currency is refused the same way,
+  and the exception's one-click record books the stated figure or nothing.
+  QuickBooks states no amount yet and records what is owed, as before.
+- **The rail.** A Xero payment names the account it came from, not a rail: a
+  `CREDITCARD` account reads as `card` (off the 1099), anything else as not
+  stated. A rail that cannot be read for any reason (no payments scope, a 429,
+  an outage) is not stated, never a failed report.
+- **Write-back.** `post_payment` `PUT`s a Payment against the bill from the
+  mapped account, the exact `Decimal` amount (`dumps_exact_json`), dated the
+  payment's settlement day. Idempotent in two layers: our marker is looked up
+  (`GET Payments?where=Reference==…`, deleted payments included) before any
+  write, and the create carries `Idempotency-Key`. A write-back someone deleted
+  in Xero is refused `bill_payment_voided`, never posted over their decision.
+  Refused before any write: `payment_account_not_mapped`, `bill_not_in_erp`,
+  `currency_mismatch`, `payment_exceeds_balance`. **A discount is not posted
+  as a payment.** A Xero payment has no discount field, so what reached the
+  supplier is posted and the bill stays open by the discount; the write-back's
+  `erp_payment_writeback_balance_open` flag (with the discount taken in
+  `erp_report.discount_amount`) tells the bookkeeper to record it there, and
+  no credit note is created on their behalf (§295's answer, kept).
+- **Void.** `void_payment` deletes our Xero payment (`POST Payments/{id}`
+  `{"Status": "DELETED"}`; Xero has no payment void). A reconciled payment
+  cannot be deleted; that refusal is flagged for a person as for QuickBooks.
+- **Rate limits.** Xero allows 60 calls a minute per organisation, and a full
+  reconciliation reads one to three per bill, so a status read that meets a
+  429 with a `Retry-After` within the minute (and an `X-Rate-Limit-Problem`
+  absent or naming a per-minute limit) waits it out once and reads again
+  (`xero._status_get`). A longer `Retry-After` is the daily cap (1,000 calls
+  per organisation on Xero's Starter tier, 5,000 on Core and above), and the
+  pass fails with its mark unmoved. Pushes never wait (`services/erp`'s backoff
+  owns their timing).
+
+Tests: `backend/tests/test_xero_status_sync_adapter.py` (the adapter against a
+stateful Xero double), the Xero section of `test_erp_status_sync.py` (real
+rows), and `test_erp_oauth.py` § status sync on request. Fake surface:
+`tools/fake-erp/README.md` § Xero.
 
 ### Live QuickBooks contract check
 
@@ -2324,8 +2406,12 @@ credentials: `FEOH_ERP_XERO_CLIENT_ID` / `_SECRET` (empty → unavailable, no
 fallback); `FEOH_ERP_XERO_AUTHORIZE_URL` / `_TOKEN_URL` override the identity
 endpoints, which dev points at fake-erp so the connect flow runs locally
 (`frontend/tests-e2e/erp/xero.spec.ts`). Scopes are Xero's granular set (`accounting.invoices`,
-`accounting.contacts.read`, `accounting.settings.read`, `offline_access`),
-which apps created on or after 2026-03-02 must use.
+`accounting.payments`, `accounting.contacts.read`, `accounting.settings.read`,
+`offline_access`), which apps created on or after 2026-03-02 must use.
+`accounting.payments` (status sync-back and payment write-back, §386) was added
+after the first connections: one consented before it reads bills' payments
+only through the bills themselves and cannot write a payment back until an
+admin reconnects.
 
 **`settings.erp` keys:** `oauth` (written by `erp_oauth` only),
 `bill_status` (`AUTHORISED` default, or `DRAFT`), `default_tax_type`
@@ -2334,8 +2420,10 @@ which apps created on or after 2026-03-02 must use.
 | Method | Xero call | Notes |
 |---|---|---|
 | `test_connection` | `GET Organisation` | |
-| `list_vendors` | `GET Contacts?where=IsSupplier==true&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); archived contacts `active=False`. Xero sets `IsSupplier` only once a contact has a bill, so a supplier you have only sent purchase orders to is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone |
-| `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived accounts `active=False` |
+| `list_vendors` | `GET Contacts?where=IsSupplier==true OR IsCustomer==false&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); only an `ACTIVE` contact is `active` (`ARCHIVED`, and `GDPRREQUEST` for one erased on request, are not). Xero sets `IsSupplier` only once a contact has a bill (and it cannot be set through the API), so a supplier with no bill yet carries neither flag: `IsCustomer==false` reads it, and customer-only contacts stay out. A supplier sent a PO is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone. A contact that is already a customer and becomes a supplier with no bill and no PO is still missed (`docs/followups.md`) |
+| `list_gl_accounts` | `GET Accounts` | `Class` → account_type; only an `ACTIVE` account is `active` (`ARCHIVED` and `DELETED` are not) |
+| `bill_report` / `changed_bills` / `bills_for_payment` | `GET Invoices/{id}`, `GET Payments/{id}` + `GET Accounts/{id}` for the rail; `GET Invoices` + `GET Payments` with `If-Modified-Since` | § Xero status sync-back and payment write-back |
+| `post_payment` / `void_payment` | `GET Payments?where=Reference==…`, `PUT Payments`; `POST Payments/{id}` `{"Status": "DELETED"}` | same section |
 | `list_pos` | `GET PurchaseOrders` | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`, a 429, transport error or unreadable page included); `PurchaseOrderNumber` is the PO number (Xero's free-text `Reference` is not read); vendor linked by `Contact.ContactID`; `BILLED` → closed, `DELETED` → cancelled, everything else (DRAFT / SUBMITTED / AUTHORISED) → open; a numbered PO with no usable `Total` skipped and named `unpriceable` (`list_pos_report`), never synced at 0 |
 | `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |
 | `get_invoice_status` | `GET Invoices/{id}` | DRAFT/SUBMITTED → draft; AUTHORISED → open, or partially_paid when `AmountPaid > 0`; PAID → paid; VOIDED/DELETED → cancelled |
@@ -2396,10 +2484,23 @@ which apps created on or after 2026-03-02 must use.
   non-retryable `previous_bill_removed`. Refusing at the first removed bill was
   rejected: the correlation id is the invoice's for life, so that refusal would
   leave the invoice unpostable even after the tax type was fixed.
-- **Rate limits** (60/min, 5,000/day per tenant): HTTP 429 →
+- **Rate limits** (60/min per organisation; per day 1,000 on Xero's Starter
+  tier, 5,000 on Core and above): HTTP 429 →
   `"Xero post failed: HTTP 429 (rate_limited)"`, `Retry-After` kept in the
   in-memory `raw_response`. No sleep loop; `services/erp`'s retry backoff
   owns the timing.
+- **A create Xero refuses is coded, and not "possibly posted"** (§285's rule,
+  §386). Xero answers every failed validation with HTTP 400, `Type:
+  ValidationException`, `ErrorNumber: 10`, creating nothing, and its
+  `Message` quotes the bill, so the reason is established from facts read
+  back, in Xero's order: the contact not `ACTIVE` → `vendor_inactive`; an
+  account a line names not `ACTIVE` (or gone from the chart) →
+  `account_inactive` with our GL codes in `params.accounts`; the bill dated on
+  or before the organisation's `PeriodLockDate` / `EndOfYearLockDate` →
+  `period_closed`. Each is non-retryable with `not_posted`. A validation
+  failure none of them explains is the plain HTTP failure, still `not_posted`.
+  A read that fails explains nothing. Anything but a ValidationException (5xx,
+  429, 401) is the plain failure as before, which may have posted.
 - Failures go through `erp_failure_message`; no response body is persisted.
 
 Tests: `backend/tests/test_erp_xero_adapter.py`. Fake surface:
@@ -2414,7 +2515,8 @@ every other run skips it. It is read-only: every request is a GET.
 
 It asserts that Xero still:
 
-- honours the `IsSupplier==true` filter, and the `Status` filter on
+- honours the `IsSupplier==true` filter and the vendor walk's
+  `IsSupplier==true OR IsCustomer==false`, and the `Status` filter on
   `PurchaseOrders`;
 - returns contacts by `Contacts?IDs=`;
 - uses only PO, bill and account-class values the adapter maps (an unmapped PO
