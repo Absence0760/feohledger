@@ -18570,3 +18570,33 @@ following the top dialog); `tests-e2e/a11y/modal-inert.spec.ts` (the page and
 then the under-dialog go inert, the toast region stays live, closing restores
 each and returns focus); `tests-e2e/a11y/recall-import-verify.spec.ts` at 320px
 is the axe guard that was red.
+
+## §387 — The bulk-status endpoint's own skips are coded, reusing codes where the meaning is the same
+
+`POST /api/invoices/bulk/status` wrote seven skip sentences itself, in English
+only, beside rows its services already coded (§357, `_refused_skip`). Each now
+goes through `_coded_skip(coded_refusal(...))`, so the invoice list's toast
+(`localizeApiDetail` per row) states every row in the reader's language.
+
+- **Reused where the sentence means the same thing:** an entry-only caller's
+  source → `invoice_entry_window_closed` (`params.status`); a stale version →
+  `invoice_stale_approval` (it was the seventh uncoded skip, not in the
+  follow-up's list); blank fields → `invoice_required_fields_missing`
+  (`params.fields`).
+- **New, in `api/invoices.py`:** `invoice_bulk_not_found`,
+  `invoice_status_immutable` (`params.status`, the `invoice_not_completable`
+  shape, named by its label), `invoice_still_extracting`,
+  `invoice_recall_one_at_a_time`. Not reused: `invoice_not_completable` says
+  "only new or approved can be completed", which is false for an immutable row
+  under a non-`done` target; `invoice_transition_recall_only` needs a
+  `target` the recall skip would have to invent nothing for but still reads as
+  an engine edge, so the bulk bar keeps its own sentence.
+- **Other bulk endpoints left uncoded on purpose:** vendors `/bulk/status` and
+  `/bulk/screen`, exceptions bulk resolve, expenses `/bulk/gl-code` write
+  English (or machine) `reason`s, but no page renders them — their toasts show
+  counts only — so coding them would add codes nobody states. The expenses
+  toast's own English splice is a follow-up.
+
+Guards: `tests/test_bulk_status_controls.py::test_every_skip_the_bulk_endpoint_writes_itself_is_coded`
+(no bare `BulkStatusSkip(` in the endpoint body) and the exact-row tests;
+`codedRefusals.test.ts` reverse-pins the codes in `api/invoices.py`.
