@@ -390,6 +390,35 @@ const BUILDERS: Record<string, Builder> = {
 	card_txn_not_matched: fixed('refusal.cardTxnNotMatched'),
 	card_txn_matched_not_ignorable: fixed('refusal.cardTxnMatchedNotIgnorable'),
 	card_txn_already_ignored: fixed('refusal.cardTxnAlreadyIgnored'),
+	// …and the endpoints' own refusals that are not in a row's verdict
+	// (decisions §361): a line on a locked report, an attached line with no
+	// rate into the report currency, deleting a reconciled expense, and
+	// `/match`'s checks on the chosen expense.
+	expense_report_locked: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.expenseReportLocked', {
+					status: statusLabel(status, expenseReportStatusLabelKey, t)
+				});
+	},
+	expense_fx_source_missing: fixed('refusal.expenseFxSourceMissing'),
+	expense_fx_rate_unavailable: (p, t) => {
+		const source = currency(p, 'source_currency');
+		const target = currency(p, 'report_currency');
+		return source === null || target === null
+			? null
+			: t('refusal.expenseFxRateUnavailable', { source, target });
+	},
+	expense_card_reconciled: fixed('refusal.expenseCardReconciled'),
+	card_txn_expense_already_matched: fixed('refusal.cardTxnExpenseAlreadyMatched'),
+	card_txn_currency_mismatch: (p, t) => {
+		const transactionCurrency = currency(p, 'transaction_currency');
+		const expenseCurrency = currency(p, 'expense_currency');
+		return transactionCurrency === null || expenseCurrency === null
+			? null
+			: t('refusal.cardTxnCurrencyMismatch', { transactionCurrency, expenseCurrency });
+	},
 	// `services/exception_lifecycle.py` — the SAME codes `/bulk/resolve`
 	// reports per skipped row, so the two doors agree on the names.
 	segregation_raiser: fixed('refusal.exceptionSegregationRaiser'),

@@ -985,3 +985,90 @@ describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', 
 		).toBeNull();
 	});
 });
+
+describe('the expense report and card reconciliation refusals (decisions §348, §361)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+	const controls = readFileSync(
+		new URL('../../../../backend/app/services/expense_controls.py', import.meta.url).pathname,
+		'utf8'
+	);
+
+	it('states every code `expense_controls` defines', () => {
+		const codes = [...controls.matchAll(/^[A-Z_]+ = "([a-z_]+)"$/gm)].map((x) => x[1]);
+		expect(codes).toContain('expense_report_locked');
+		expect(codes).toContain('card_txn_currency_mismatch');
+		for (const code of codes) {
+			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
+		}
+	});
+
+	it.each([
+		['expense_fx_source_missing', 'refusal.expenseFxSourceMissing'],
+		['expense_card_reconciled', 'refusal.expenseCardReconciled'],
+		['card_txn_expense_already_matched', 'refusal.cardTxnExpenseAlreadyMatched']
+	] as [string, MainMessageKey][])('%s is the fixed sentence %s in every locale', (code, key) => {
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, `${locale} ${code}`).toBe((messages as Record<string, string>)[key]);
+			expect(text, `${locale} ${code}`).toBeTruthy();
+		}
+	});
+
+	it.each([
+		['expense_report_locked', { status: 'approved' }, ['expenses.reports.status.approved']],
+		['expense_fx_rate_unavailable', { source_currency: 'xyz', report_currency: 'USD' }, []],
+		['card_txn_currency_mismatch', { transaction_currency: 'USD', expense_currency: 'EUR' }, []]
+	] as [string, Record<string, unknown>, MessageKey[]][])(
+		'%s fills its params in every locale',
+		(code, params, labels) => {
+			for (const [locale, messages] of LOCALES) {
+				const text = codedRefusalText(code, params, translator(messages, locale));
+				expect(text, `${locale} ${code}`).toBeTruthy();
+				expect(text, `${locale} ${code}`).not.toContain('{');
+				for (const v of Object.values(params)) {
+					if (labels.length === 0) expect(text).toContain(String(v).toUpperCase());
+				}
+			}
+			for (const label of labels) {
+				expect(codedRefusalText(code, params, enT)).toContain(EN_ALL[label]);
+			}
+		}
+	);
+
+	it.each([
+		['expense_report_locked', {}],
+		['expense_fx_rate_unavailable', { source_currency: 'XYZ' }],
+		['expense_fx_rate_unavailable', { source_currency: 'XYZ', report_currency: 'dollars' }],
+		['card_txn_currency_mismatch', { transaction_currency: 'USD', expense_currency: null }]
+	] as [string, Record<string, unknown>][])(
+		'%s with params %j falls back to the server English',
+		(code, params) => {
+			expect(codedRefusalText(code, params, enT)).toBeNull();
+			expect(localizeApiDetail(detail(code, params), deT)).toBeNull();
+		}
+	);
+
+	it('reaches the transport from the raw endpoint detail, in the reader’s language', () => {
+		const raw = detail(
+			'card_txn_currency_mismatch',
+			{ transaction_currency: 'USD', expense_currency: 'EUR' },
+			'Currency mismatch: transaction is USD, expense is EUR.'
+		);
+		const out = localizeApiDetail(raw, deT);
+		expect(out).toBe(
+			interpolate(
+				de['refusal.cardTxnCurrencyMismatch'],
+				{ transactionCurrency: 'USD', expenseCurrency: 'EUR' },
+				'de'
+			)
+		);
+		expect(out).not.toContain('Currency mismatch');
+	});
+});
