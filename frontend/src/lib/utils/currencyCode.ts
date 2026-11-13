@@ -12,11 +12,24 @@
 import { DEFAULT_CURRENCY, currencyOptions } from './money.ts';
 
 const ISO_SHAPE = /^[A-Z]{3}$/;
+// Checked BEFORE uppercasing: `toUpperCase()` maps some non-ASCII letters onto
+// ASCII ("ß" → "SS"), so "uß" would otherwise pass as "USS". The backend's
+// `utils/currency_code` applies the same order (decisions §381).
+const ASCII_SHAPE = /^[A-Za-z]{3}$/;
 
 /** `raw` uppercased and trimmed when it has the ISO 4217 shape, else `null`. */
 export function normalizeCurrencyCode(raw: string | null | undefined): string | null {
-	const code = (raw ?? '').trim().toUpperCase();
-	return ISO_SHAPE.test(code) ? code : null;
+	const code = (raw ?? '').trim();
+	return ASCII_SHAPE.test(code) ? code.toUpperCase() : null;
+}
+
+/**
+ * `text` with its ASCII letters uppercased and everything else left alone, for
+ * a field that uppercases as the user types. A full `toUpperCase()` would turn
+ * a typed "ß" into "SS" under the cursor and manufacture a valid-looking code.
+ */
+export function upperAsciiLetters(text: string): string {
+	return text.replace(/[a-z]+/g, (s) => s.toUpperCase());
 }
 
 /** Why `raw` cannot be submitted as a currency, or `null` when it can. */

@@ -432,7 +432,12 @@ test.describe('/credit-memos — edit and link-at-create', () => {
 			await expect(vendorPicker(modal)).toHaveValue(new RegExp(escapeRegExp(vendor.name)));
 
 			await modal.locator('input[type="number"]').fill('88.50');
-			await modal.getByLabel('Currency').selectOption('EUR');
+			// Free entry (decisions §381): PLN is off the common shortlist, which
+			// the old <select> was limited to, so this could not be keyed before.
+			const currency = modal.getByTestId('cm-currency');
+			await expect(currency).toHaveValue('USD');
+			await currency.fill('pln');
+			await expect(currency).toHaveValue('PLN');
 
 			const patched = page.waitForRequest(
 				(r) => r.method() === 'PATCH' && r.url().endsWith(`/api/credit-memos/${memo.id}`)
@@ -443,11 +448,11 @@ test.describe('/credit-memos — edit and link-at-create', () => {
 			await modal.getByRole('button', { name: 'Save', exact: true }).click();
 			// Only what changed — never a re-assertion of the untouched fields
 			// over whatever a concurrent editor just saved.
-			expect((await patched).postDataJSON()).toEqual({ amount: '88.5', currency: 'EUR' });
+			expect((await patched).postDataJSON()).toEqual({ amount: '88.5', currency: 'PLN' });
 			const resp = await saved;
 			expect(resp.status()).toBe(200);
 			const body = (await resp.json()) as { currency: string; status: string };
-			expect(body.currency).toBe('EUR');
+			expect(body.currency).toBe('PLN');
 			expect(body.status).toBe('open');
 
 			await expect(modal).toBeHidden();
