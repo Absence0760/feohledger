@@ -16253,7 +16253,8 @@ declares `deepmerge ^4.3.1`, so neither a bump nor an override can remove it.
   `pnpm.auditConfig.ignoreGhsas` names the advisory while the resolved version
   has no patch entry, and if the `osv-scanner.toml` entry loses its expiry.
 - `pnpm.auditConfig.ignoreGhsas` in `frontend/package.json` carries the same
-  exception for `pnpm audit`, so `audit.yml` needs no change. The
+  exception for `pnpm audit`, so `audit.yml`'s threshold and steps need no
+  change for it. The
   `osv-scanner.toml` entry now names the patch and expires 2027-02-10, ~90
   days, rather than §350's six months.
 

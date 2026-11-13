@@ -80,14 +80,9 @@ jobs:
             --description "Findings from the scheduled pnpm audit workflow" \
             2>/dev/null || true
 
-          # Find this workflow's OWN tracking issue: open, labelled, opened
-          # by github-actions[bot], with exactly TRACKING_TITLE. The label
-          # alone is not enough — humans apply it too, and on 2026-11-09 the
-          # old label-only lookup overwrote the body of a human issue (#694).
-          # Only the workflow token can author as github-actions[bot], so the
-          # author check is what makes this safe; the title pins it to this
-          # workflow rather than any other bot-opened issue. If one exists,
-          # update its body; otherwise create a new one.
+          # Match only this workflow's own tracking issue: humans apply the
+          # label too. Only the workflow token can author as
+          # github-actions[bot], and the exact title pins it to this workflow.
           existing=$(gh issue list --repo "$REPO" --state open \
             --label dependency-audit --author app/github-actions \
             --json number,title,author \
@@ -113,8 +108,6 @@ jobs:
           TRACKING_TITLE: "pnpm audit: vulnerabilities detected"
         run: |
           set -euo pipefail
-          # Same bot-authored + exact-title match as the step above; never
-          # close a human issue that merely carries the label.
           existing=$(gh issue list --repo "$REPO" --state open \
             --label dependency-audit --author app/github-actions \
             --json number,title,author \

@@ -23,6 +23,8 @@ from sqlalchemy import select
 
 from app.models.gl_account import GL_CODE_MAX_LENGTH, GLAccount
 from app.services.erp_adapters.base import GLAccountPayload
+from app.services.erp_adapters.dynamics_365_bc import _bc_account_to_payload
+from app.services.erp_adapters.netsuite import _netsuite_account_to_payload
 from app.services.erp_adapters.quickbooks_online import QuickBooksOnlineAdapter
 from app.services.erp_record_names import SHORTENED_MARK, fit_name
 from app.services.gl_account_sync import (
@@ -325,6 +327,17 @@ async def test_the_quickbooks_mapping_no_longer_cuts_the_name_itself(realdb):
     rows = [{"Id": "9", "Name": "Leaf", "FullyQualifiedName": long_path}]
     (account,) = await _qbo_payloads(rows)
     assert account.name == long_path
+
+
+def test_the_business_central_and_netsuite_mappings_no_longer_cut_the_name():
+    """Like QuickBooks, they hand the sync the whole name for the one rule."""
+    long_name = "Consulting " * 40
+    bc = _bc_account_to_payload(
+        {"id": "g-1", "number": "6100", "displayName": long_name, "accountType": "Posting"}
+    )
+    ns = _netsuite_account_to_payload({"id": 7, "acctnumber": "6100", "fullname": long_name})
+    assert bc is not None and bc.name == long_name
+    assert ns is not None and ns.name == long_name
 
 
 async def test_a_reported_parent_is_named_by_our_code_and_a_top_level_one_clears_it(realdb):
