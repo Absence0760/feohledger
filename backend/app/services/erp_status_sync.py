@@ -21,8 +21,15 @@ Two directions of the same fact meet here:
   tenant on request (:func:`dispatch_sync_org_now`, ``POST
   /api/organization/erp/oauth/status-sync``). Its bills carry no marker of
   ours, so a report is matched by its never-reused id within the recorded
-  realm (``ErpBillReport.match_by_reference``), and the cash a person paid is
-  recorded at Xero's own figure (``ErpBillReport.paid_amount``).
+  realm (``ErpBillReport.match_by_reference``).
+
+**The cash the ERP shows is what is recorded.** Both QuickBooks and Xero state
+the cash a person applied to a bill paid wholly in cash outside FeohLedger
+(``ErpBillReport.paid_amount`` / ``paid_currency``, decisions §386, §393), and
+:func:`record_erp_reported_payment` books it only when it is what the invoice
+owes here; any other figure, or currency, is refused ``amount_mismatch`` and
+kept on a payment-blocking row for a person. One path for every ERP: no
+adapter's figure is special-cased here.
 
 **What closes the double-payment risk.** With status sync on
 (``FEOH_ERP_STATUS_SYNC_ENABLED``, :func:`status_sync_active`) a confirmed
@@ -918,7 +925,13 @@ async def apply_bill_report(
     paid outside us     payable here, partly or      blocking payment_reconciliation:
     (vendor credit)     wholly by a credit           settled without money leaving
     paid outside us     approved / sent / posted     recorded as paid outside, with
-    (cash)                                           the ERP's date and rail
+    (cash)                                           the ERP's date, rail and cash
+                                                     figure; a figure that is not
+                                                     what is owed here is refused
+                                                     and kept, blocking
+    paid outside us     approved / sent / posted,    blocking payment_reconciliation:
+    beside our live     (voided here, not there)     no one payment states what left
+    write-back
     paid outside us     payment_scheduled            blocking payment_reconciliation:
                                                      FeohLedger is paying it too
     paid outside us     paid by a FeohLedger rail    erp_reconciliation: the
@@ -969,6 +982,25 @@ async def apply_bill_report(
                 erp_report=detail,
             )
             action = "credit_settlement_flagged" if opened else action
+        elif (
+            status in ERP_PAID_RECORDABLE
+            and report.our_payment_applied
+            and report.paid_amount is None
+        ):
+            # Our own write-back is still on the bill while the invoice is
+            # payable here (voided here, and the ERP void did not land), and
+            # someone paid the rest outside us. No one payment states what
+            # left, so nothing is booked at FeohLedger's figure: a person
+            # reconciles it, and no run pays it meanwhile (§393).
+            opened = await open_erp_reconciliation_exception(
+                db,
+                invoice,
+                org_id=org.id,
+                exception_type=PAYMENT_RECONCILIATION_EXCEPTION_TYPE,
+                finding=exception_finding("erp_partly_paid_outside"),
+                erp_report=detail,
+            )
+            action = "partial_payment_flagged" if opened else action
         elif status in ERP_PAID_RECORDABLE:
             await record_erp_reported_payment(
                 db,

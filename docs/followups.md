@@ -1389,17 +1389,19 @@ scope (§260) — do not fold them into any of these.
       `feat/erp-status-sync` branch. It contradicts §295's "either place may
       pay" decision and needs a product call before reuse. **Trigger:** the
       first tenant on one of those ERPs who pays bills in the ERP.
-- [ ] **(c) QuickBooks' status sync records what is owed here, not the cash
-      QuickBooks shows.** Xero's report states the cash paid outside us
-      (`ErpBillReport.paid_amount`, §386), so a payment that is not what the
-      invoice owes here is refused `amount_mismatch` and kept for a person.
-      QuickBooks' `bill_report` states no amount, so a bill paid there while a
-      credit memo or a discount applies only here is recorded at FeohLedger's
-      figure. **Durable fix:** sum the cash BillPayments' amounts applied to
-      the bill (`_applied_to`) into `paid_amount` for a bill paid wholly in
-      cash outside us, with a recorded-shape fixture (§318). **Trigger:** the
-      next change to the QuickBooks status reader, or the first such
-      mismatch seen live.
+- [ ] **(c) A bill the ERP shows paid on two rails keeps no record of the
+      split.** One `Payment` row holds one rail, so QuickBooks' cheque-plus-card
+      bill is recorded with no rail (§393): its card part is over-reported on
+      the payer's 1099, and nothing on the payment or its audit row says which
+      rails paid how much. Xero is worse: its `bill_report` reads the rail of
+      `_latest_cash_payment` alone (`_payment_rail`, two calls), so bank then
+      card is booked as all card, under-reported. **Durable fix:** the report
+      carries each cash payment's rail and amount (no account data); the
+      ERP-paid record writes that breakdown into its audit details, the 1099
+      aggregate splits a recorded payment by it, and Xero reads the account of
+      every cash payment, stating `card` only when all are card. **Trigger:**
+      the first bill paid on two rails seen live, or the next 1099 aggregate
+      change.
 - [ ] **(c) Xero bills reach FeohLedger only by the sweep or an admin's
       request.** No Xero webhook is wired (§386), so a bill paid in Xero is
       seen at the next `erp-status-sync` tick (or `POST

@@ -440,7 +440,8 @@ differs:
   same way (after the live-claim refusals, so a FeohLedger payment, run or card
   on the invoice is named first, §309), and the exception's one-click record
   books the stated figure or nothing, refusing one stated with no currency.
-  QuickBooks states no amount yet and records what is owed, as before.
+  QuickBooks states its cash the same way, through the same path (§393;
+  `quickbooks-online-adapter.md` § Phases 3–5 as built).
 - **The rail.** A Xero payment names the account it came from, not a rail: a
   `CREDITCARD` account reads as `card` (off the 1099), anything else as not
   stated. A rail that cannot be read for any reason (no payments scope, a 429,

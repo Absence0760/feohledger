@@ -78,6 +78,10 @@ def apply_payment(
             {"Amount": float(amount), "LinkedTxn": [{"TxnId": bill["Id"], "TxnType": "Bill"}]}
         ],
     }
+    if bill.get("CurrencyRef"):
+        # A BillPayment is in its bill's currency, and says so; the status
+        # sync reads it beside the bill's (decisions §393).
+        record["CurrencyRef"] = dict(bill["CurrencyRef"])
     touch(record)
     bill["Balance"] = float(Decimal(str(bill["Balance"])) - amount)
     link = {"TxnId": payment_id, "TxnType": bill_payment_link_type(pay_type)}

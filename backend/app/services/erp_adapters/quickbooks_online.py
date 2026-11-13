@@ -924,7 +924,15 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         BillPayments are read through the bill's ``LinkedTxn``, so a payment we
         wrote (its ``PrivateNote`` carries our marker) is told apart from one a
         person made in QuickBooks: a bill paid only by our own write-back is
-        not news (``paid_only_by_us``). Only ids, a date and a rail leave here.
+        not news (``paid_only_by_us``). Only ids, a date, a rail and the cash
+        applied leave here.
+
+        For a bill paid wholly in cash outside FeohLedger the report states that
+        cash exactly (``paid_amount``: what the person's BillPayment lines
+        applied to THIS bill, never their ``TotalAmt``, which can pay several
+        bills) and the bill's currency (``paid_currency``), so the status sync
+        records QuickBooks' figure, or refuses ``amount_mismatch`` when it is
+        not what the invoice owes here (decisions §386, §393).
         """
         resp = await self._request("GET", f"bill/{bill_id}", timeout=15)
         if resp.status_code != 200:
@@ -963,20 +971,41 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         outside = (total - balance - ours_applied) if reduced_outside else Decimal(0)
         cash_applied = sum((_applied_to(p, str(bill.get("Id"))) for p in cash), Decimal(0))
         latest = max(cash, key=lambda p: str(p.get("TxnDate") or ""), default=None)
+        # Anything but cash took part, or the cash we can read does not cover
+        # what left the bill outside us: settled without (all) the money
+        # leaving, so a person decides, and nothing is booked as cash.
+        settled_by_credit = reduced_outside and (
+            len(cash) < len(external) or cash_applied < outside
+        )
         return ErpBillReport(
             bill_id=str(bill.get("Id") or bill_id),
             state=state,
             correlation_id=_bill_correlation(bill),
             paid_on=_txn_date(latest.get("TxnDate")) if latest else None,
-            payment_method=_PAY_TYPE_METHODS.get(str(latest.get("PayType"))) if latest else None,
+            payment_method=_cash_rail(cash),
             external_payment_ids=tuple(str(p.get("Id")) for p in external if p.get("Id")),
             paid_only_by_us=bool(ours) and not reduced_outside,
             reduced_outside=reduced_outside,
-            # Anything but cash took part, or the cash we can read does not
-            # cover what left the bill outside us: settled without (all) the
-            # money leaving, so a person decides, and nothing is booked as cash.
-            settled_by_credit=reduced_outside
-            and (len(cash) < len(external) or cash_applied < outside),
+            settled_by_credit=settled_by_credit,
+            # Our live write-back on the bill. Beside an outside reduction on an
+            # invoice payable here (a void here whose QuickBooks void did not
+            # land), the sync blocks rather than book the whole figure (§393).
+            our_payment_applied=bool(ours),
+            # The cash a person applied in QuickBooks, exact, so the payment is
+            # recorded at what left and never at what FeohLedger reckons was
+            # owed (§393, Xero's rule from §386). Stated only for a bill paid
+            # wholly in cash by others: a credit-settled bill is never booked as
+            # cash, a part-paid one is never recorded, and one we part-paid
+            # ourselves is not one payment a record could state.
+            paid_amount=(
+                cash_applied
+                if state is ErpBillState.paid
+                and reduced_outside
+                and not settled_by_credit
+                and not ours
+                else None
+            ),
+            paid_currency=_cash_currency(bill, cash),
         )
 
     async def bills_for_payment(self, payment_id: str) -> list[str]:
@@ -1340,6 +1369,37 @@ def _is_cash_payment(record: dict) -> bool:
         if not links or not all(isinstance(t, dict) and t.get("TxnType") == "Bill" for t in links):
             return False
     return True
+
+
+def _currency(record: dict) -> str | None:
+    return str((record.get("CurrencyRef") or {}).get("value") or "").strip().upper() or None
+
+
+def _cash_currency(bill: dict, cash: list[dict]) -> str | None:
+    """The currency the cash on ``bill`` is in: the bill's own ``CurrencyRef``
+    (QuickBooks states it on every bill, the home currency included). None —
+    which the status sync refuses as a mismatch, never compares as a bare
+    number — when the bill states none, or a cash payment states another
+    (decisions §393)."""
+    currency = _currency(bill)
+    if currency is None:
+        return None
+    for payment in cash:
+        stated = _currency(payment)
+        if stated is not None and stated != currency:
+            return None
+    return currency
+
+
+def _cash_rail(cash: list[dict]) -> str | None:
+    """The rail of the cash a person paid the bill with, as a ``Payment.method``.
+
+    One rail only when every cash payment used it. A bill paid part by cheque
+    and part by card has no one rail an ERP-paid record could state, so it is
+    not stated, which counts as 1099-reportable (decisions §393), rather than
+    the latest payment's rail standing for all of it."""
+    rails = {_PAY_TYPE_METHODS.get(str(p.get("PayType"))) for p in cash}
+    return rails.pop() if len(rails) == 1 else None
 
 
 def _is_voided_payment(record: dict) -> bool:
