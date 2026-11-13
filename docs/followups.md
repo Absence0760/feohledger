@@ -1347,21 +1347,16 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
 
-- [ ] **(c) A VAT-registered Business Central company cannot post at all.** The
-      adapter reads back `totalAmountIncludingTax` and, when BC adds VAT on top
-      of the approved gross, deletes the draft and refuses
-      (`posted_total_mismatch`). That is safe, but such a company is blocked.
-      **Durable fix:** send net line amounts plus BC tax codes, so BC's computed
-      total equals the approved gross. **Trigger:** the first customer on a
-      VAT-registered BC company.
-- [ ] **(c) A Business Central user can edit a draft between our total check
-      and our post.** The adapter reads the draft's `totalAmountIncludingTax`
-      and then calls `Microsoft.NAV.post`; an edit in that window posts a total
-      nobody approved, and the success path does not read the posted invoice
-      back. **Durable fix:** after the post, read the posted invoice's total and
-      treat a mismatch as `posted_total_mismatch` (an accountant must reverse a
-      posted invoice in BC; we never delete one). **Trigger:** the first BC
-      customer whose staff edit purchase drafts.
+- [ ] **(c) A Business Central VAT-company push whose draft read was lost
+      cannot be finished by the retry.** The read failure names the gross
+      draft, so `services/erp` records it as the orphan, but the retry's
+      lookup cannot tell that draft from a BC user's and refuses it
+      `posted_total_mismatch`, left in BC (decisions §391); someone deletes it
+      in BC and retries. **Durable fix:** pass the recorded orphan id to
+      `post_invoice` (an `InvoicePayload` field), and let the BC adapter treat
+      a found draft with that id as its own, so it may reprice it. **Trigger:**
+      the first such refusal on a live BC tenant, or the next change to the
+      orphan plumbing in `services/erp`.
 - [ ] **(c) Business Central approval workflows are not handled.** A post step
       that fails after the draft is created is now a retryable failure, and a
       retry finishes the draft. But a BC company with purchase-approval
@@ -1456,11 +1451,10 @@ scope (§260) — do not fold them into any of these.
       voided there, or the recall stays refused. **Trigger:** the first
       customer who needs to recall a pushed bill, or the live void test now
       pending.
-- [ ] **(c) Business Central's vendor sync stores `paymentTermsId` (a GUID) as
-      the payment-terms text, and NetSuite's PO sync pulls no lines.**
-      **Durable fix:** resolve BC's `paymentTerms` code; pull NetSuite PO lines
-      through SuiteQL. **Trigger:** the first BC customer relying on synced
-      terms, or the PO sync starting to store lines.
+- [ ] **(c) NetSuite's PO sync pulls no lines.** (Business Central's half —
+      the vendor sync storing the `paymentTermsId` GUID as the terms text —
+      landed with decisions §391.) **Durable fix:** pull NetSuite PO lines
+      through SuiteQL. **Trigger:** the PO sync starting to store lines.
 - [ ] **(c) The OAuth adapters have no Playwright spec.** The ERP e2e suite
       covers Merge.dev, NetSuite and Business Central; the setup panel's spec
       covers the connect UI with a mocked status. **Durable fix:** fake-erp
@@ -1730,10 +1724,10 @@ scope (§260) — do not fold them into any of these.
 - [ ] **(c) Two adapters still drop or mislabel records the syncs read as
       evidence.** (1) Sage Accounting (UK) skips ledgers with
       `included_in_chart: false`, so a row linked to one reads as a dead link.
-      (2) Business Central's vendor `blocked` is not mapped to `active=False`,
-      so a blocked vendor can be linked or created as a payee. **Durable
-      fix:** emit the out-of-chart ledger with `active=False` and map
-      `blocked`. **Trigger:** the next change to either adapter's listings.
+      (2) ~~Business Central's vendor `blocked` is not mapped to
+      `active=False`~~ — landed with decisions §391 (`blocked` and
+      `directPosting`). **Durable fix:** emit the out-of-chart ledger with
+      `active=False`. **Trigger:** the next change to the Sage (UK) listings.
       (Merge.dev's half — account `status` and the GL parent id — landed
       2026-10-26 with the Contacts vendor fix.)
 - [ ] **(c) Vendor linking has three gaps of its own.** (1)
