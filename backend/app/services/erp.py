@@ -59,6 +59,15 @@ ATTEMPT_INVOICE_DATES_KEY = "erp_attempt_invoice_dates"
 ORPHAN_DOCUMENT_ID_KEY = "erp_orphan_document_id"
 ORPHAN_DOCUMENT_NUMBER_KEY = "erp_orphan_document_number"
 _ORPHAN_KEYS = (ORPHAN_DOCUMENT_ID_KEY, ORPHAN_DOCUMENT_NUMBER_KEY)
+#: True when the recorded orphan is a document this push itself created
+#: (``ErpPostResult.erp_document_is_own``), not one an attempt found. Only then
+#: is its id handed back as ``InvoicePayload.own_orphan_document_id``, so an
+#: adapter may treat it as its own; a found document's id never is (§397).
+ORPHAN_DOCUMENT_OWN_KEY = "erp_orphan_document_own"
+#: With the flag: the adapter's digest of that document at creation
+#: (``ErpPostResult.erp_document_fingerprint``), handed back so it can tell the
+#: document is unchanged (``InvoicePayload.own_orphan_document_fingerprint``).
+ORPHAN_DOCUMENT_FINGERPRINT_KEY = "erp_orphan_document_fingerprint"
 
 #: ``WorkflowInstance.state_data`` key: True once an attempt of this push
 #: reached the adapter and did not come back with a success, so the ERP may
@@ -672,7 +681,9 @@ async def _call_erp(
     second one. A failure that reports the bill it left in the ERP has that
     bill's ids kept the same way (``ORPHAN_DOCUMENT_ID_KEY`` /
     ``ORPHAN_DOCUMENT_NUMBER_KEY``) and carried on the raised error; a success
-    clears them. The caller's commit persists all of it, except
+    clears them. When the adapter says it created that bill itself
+    (``erp_document_is_own``) that is kept too, and the id goes back to the
+    adapter as ``payload.own_orphan_document_id``. The caller's commit persists all of it, except
     ``OUTCOME_UNKNOWN_KEY = True``, which is committed here before the call.
     """
     # Pin how much we know about earlier attempts before this one writes
@@ -717,6 +728,11 @@ async def _call_erp(
     refs = await _resolve_erp_refs(db, invoice, line_items, config)
     payload = _build_payload(invoice, line_items, refs)
     payload.pending_job_id = state.get(PENDING_JOB_KEY)
+    # Strictly `is True`: a row written before the key existed records no
+    # proof the orphan was ours, and is read as not ours.
+    if state.get(ORPHAN_DOCUMENT_OWN_KEY) is True:
+        payload.own_orphan_document_id = state.get(ORPHAN_DOCUMENT_ID_KEY) or None
+        payload.own_orphan_document_fingerprint = state.get(ORPHAN_DOCUMENT_FINGERPRINT_KEY)
     attempt_dates = _attempt_dates(state)
     dates_before = state.get(ATTEMPT_INVOICE_DATES_KEY)
     payload.prior_invoice_dates = [d for d in attempt_dates if d != payload.invoice_date]
@@ -767,7 +783,12 @@ async def _call_erp(
         if result.pending_job_id != payload.pending_job_id:
             new_state[PENDING_JOB_KEY] = result.pending_job_id
         if result.success:
-            for key in (*_ORPHAN_KEYS, ATTEMPT_INVOICE_DATES_KEY):
+            for key in (
+                *_ORPHAN_KEYS,
+                ORPHAN_DOCUMENT_OWN_KEY,
+                ORPHAN_DOCUMENT_FINGERPRINT_KEY,
+                ATTEMPT_INVOICE_DATES_KEY,
+            ):
                 new_state.pop(key, None)
         elif result.not_posted:
             # This attempt left nothing in the ERP: its date names no bill.
@@ -778,6 +799,14 @@ async def _call_erp(
         elif result.erp_document_id or result.erp_document_number:
             new_state[ORPHAN_DOCUMENT_ID_KEY] = result.erp_document_id
             new_state[ORPHAN_DOCUMENT_NUMBER_KEY] = result.erp_document_number
+            # Written only as True: a document an attempt found, not made,
+            # replaces the orphan AND drops any earlier claim to it.
+            if result.erp_document_is_own and result.erp_document_id:
+                new_state[ORPHAN_DOCUMENT_OWN_KEY] = True
+                new_state[ORPHAN_DOCUMENT_FINGERPRINT_KEY] = result.erp_document_fingerprint
+            else:
+                new_state.pop(ORPHAN_DOCUMENT_OWN_KEY, None)
+                new_state.pop(ORPHAN_DOCUMENT_FINGERPRINT_KEY, None)
         instance.state_data = new_state
 
     if not result.success:

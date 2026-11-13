@@ -1234,6 +1234,7 @@ async def d365_get_purchase_invoice(
     record = STATE["d365_invoices"].get(doc_id)
     if record is None:
         raise _d365_error(404, "BadRequest_NotFound", f"No purchaseInvoice with id {doc_id}.")
+    _d365_maybe_lose_read(company_id, record)
     return copy.deepcopy(record)
 
 
@@ -3625,6 +3626,40 @@ D365_VAT_COMPANIES: dict[str, Decimal] = {"fake-vat-co": Decimal("20")}
 # spec opts in by `company_id` without touching shared state.
 D365_EDITED_BEFORE_POST_COMPANIES: dict[str, Decimal] = {"fake-edit-co": Decimal("10.00")}
 
+# VAT companies (20%, as `fake-vat-co`) where the read of the FIRST draft made
+# for each vendor invoice number answers 503: the create went through and its
+# read-back was lost, so the push records the draft as its own orphan and the
+# retry finds it (decisions §397). The value is what a BC user adds to that
+# draft, as a line, before the retry reads it — None for no edit. Keyed by
+# company and invoice number, so a spec opts in by `company_id` and no other
+# worker's draft is affected.
+D365_LOST_READ_COMPANIES: dict[str, Decimal | None] = {
+    "fake-vat-lostread-co": None,
+    "fake-vat-lostedit-co": Decimal("10.00"),
+}
+D365_VAT_COMPANIES.update({company: Decimal("20") for company in D365_LOST_READ_COMPANIES})
+
+
+def _d365_maybe_lose_read(company_id: str, record: dict) -> None:
+    """Raise the 503 a `D365_LOST_READ_COMPANIES` company answers to the first
+    read of its first draft per invoice number, applying the BC user's edit."""
+    if company_id not in D365_LOST_READ_COMPANIES or record.get("status") != "Draft":
+        return
+    lost = STATE.setdefault("d365_lost_reads", set())
+    key = (company_id, record.get("vendorInvoiceNumber"))
+    if key in lost:
+        return
+    lost.add(key)
+    extra = D365_LOST_READ_COMPANIES[company_id]
+    if extra is not None:
+        lines = record["purchaseInvoiceLines"]
+        lines.append({**lines[0], "description": "Added in BC", "unitCost": float(extra)})
+        record.update(
+            _d365_invoice_totals(json.dumps({"purchaseInvoiceLines": lines}).encode(), company_id)
+        )
+        record["@odata.etag"] = f'{record["@odata.etag"][:-1]}-edited"'
+    raise _d365_error(503, "ServiceUnavailable", "The service is temporarily unavailable.")
+
 
 def _d365_invoice_totals(raw_body: bytes, company_id: str) -> dict:
     """`totalAmountExcludingTax` / `totalTaxAmount` / `totalAmountIncludingTax`
@@ -3712,6 +3747,28 @@ async def d365_company_information(request: Request, environment: str, company_i
     `currencyCode` is the company's LCY."""
     _require_d365_auth(request)
     return {"id": f"ci-{company_id}", "displayName": "Fake BC Company", "currencyCode": D365_LOCAL_CURRENCY}
+
+
+@d365_sync.get(
+    "/{environment}/api/v2.0/companies({company_id})/purchaseInvoices({doc_id})/purchaseInvoiceLines"
+)
+async def d365_list_purchase_invoice_lines(
+    request: Request, environment: str, company_id: str, doc_id: str
+) -> dict:
+    """A purchaseInvoice's lines, as the adapter reads them to tell whether a
+    draft it recorded is still exactly what it sent. Each carries an id and a
+    sequence beside the fields it was created with, as BC's do."""
+    _require_d365_auth(request)
+    record = STATE["d365_invoices"].get(doc_id)
+    if record is None:
+        raise _d365_error(404, "BadRequest_NotFound", f"No purchaseInvoice with id {doc_id}.")
+    lines = record.get("purchaseInvoiceLines") or []
+    return {
+        "value": [
+            {"id": f"{doc_id}-line-{i}", "documentId": doc_id, "sequence": 10000 * (i + 1), **line}
+            for i, line in enumerate(copy.deepcopy(lines))
+        ]
+    }
 
 
 @d365_sync.get("/{environment}/api/v2.0/companies({company_id})/purchaseOrders")

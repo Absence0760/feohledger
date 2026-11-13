@@ -19141,6 +19141,9 @@ onto main after #670, which had since introduced `tax_not_itemised` and
   before the retry. Accepted, because the alternative deletes a person's work
   silently; the failed read names the draft so the push records it as an
   orphan, and recognising that recorded id as ours is a follow-up.
+  *Amended by §397:* a found draft with the id our own create recorded, still
+  exactly what we sent, is ours and is repriced or deleted as a fresh one;
+  every other found draft is still never touched.
 - **A found `Paid` invoice is refused, not reported posted**
   (`existing_invoice_not_open`). With the new key it may be the same bill
   keyed and paid by hand in BC, perhaps before or without our approval. BC
@@ -19474,3 +19477,102 @@ outcomes); `tests/test_erp_reported_payment_recovery.py` (rows now carry the
 stated figure); `tests/test_qbo_recorded_replay.py` (the paid amount per
 recorded scenario); `frontend/src/lib/api/codedRefusals.test.ts` (the 409's
 sentence).
+
+## 397. Business Central recognises its own lost-read draft by the id its create recorded, and only while it is unedited (§391 follow-up, 2026-11-15)
+
+**Context.** §391 made every draft the duplicate lookup finds untouchable,
+because the lookup's key (vendor + Vendor Invoice No.) also matches a bill a
+BC user keyed by hand. The cost it accepted: a VAT company's push whose read
+after the create was lost could not be finished by the retry. The read failure
+names the gross draft, so `services/erp` records it as the orphan, but the
+retry found it, could not tell it from a person's, and refused it
+`posted_total_mismatch`, left in BC. Someone had to delete it before retrying.
+
+**Decision.**
+- **Ownership is recorded, never inferred.** `ErpPostResult` gains
+  `erp_document_is_own`: true only when the document it names is one this push
+  created (in this attempt, or an earlier one's it recognised). `_call_erp`
+  keeps `state_data["erp_orphan_document_own"] = true` beside the orphan id,
+  only when the result says so, and drops it whenever a failure names a
+  document the adapter merely found. Beside it goes
+  `erp_orphan_document_fingerprint`: the three totals BC answered our create
+  with. The next attempt gets both (`InvoicePayload.own_orphan_document_id` /
+  `_fingerprint`); a row from before the flag existed, or one with no
+  fingerprint, is read as not ours. So a BC user's draft, once named by a
+  refusal, can never come back as "ours" on a later retry.
+- **Only that exact id counts.** A lookup hit is ours only when its id equals
+  the recorded one (a GUID compared case-insensitively). Any other hit, even
+  one identical to what we would send, keeps §391's rule: never deleted, never
+  repriced.
+- **And only while it is still what we sent.** Before acting on it, the
+  adapter requires the draft's `totalAmountExcludingTax` / `totalTaxAmount` /
+  `totalAmountIncludingTax` to equal the recorded fingerprint. This is what
+  catches a line moved to another tax group: `taxCode` is a field we never
+  send, so the lines look unchanged and only the tax moves (money-path
+  review), and any `payToVendorId` to be the bill's own vendor (we never send
+  one, so another means a BC user redirected the payee). It then reads the
+  draft's lines (`GET purchaseInvoices({id})/purchaseInvoiceLines`)
+  and requires them to equal, as a multiset, our gross or our net lines in
+  every field we send (type, account, description, quantity, unit cost);
+  `totalAmountExcludingTax` to equal those lines' sum, which catches a field we
+  never send (a line discount, prices made tax-inclusive); the invoice and due
+  dates we sent; and the invoice's currency (blank read as the company's LCY,
+  as §391). A gross match is handled as a draft just created, so BC's VAT on
+  top gets the one net reprice; a net match is not repriced again (a mismatch
+  is deleted and refused, as for a net draft we just made).
+- **Edited, or no longer a draft: it is no longer ours.** It gets exactly the
+  found treatment §391 gives anyone's record: a draft at another total refused
+  `posted_total_mismatch` and left in BC, a `Paid` one refused
+  `existing_invoice_not_open`, an `Open` one accepted only at the approved
+  total and currency. Its refusal does not claim it as ours, so the next retry
+  will not either. No new refusal code: the found treatment's codes already say
+  what happened, and a person who edited the draft now owns it.
+- A failed read before the draft is judged (its record, its lines, the
+  company's LCY) is a retryable failure naming the draft, and it KEEPS the
+  claim: nothing was deleted or posted, and the next attempt judges the same
+  id afresh. Dropping it there would strand our draft after one 503 (money-path
+  review). A failure that names no document leaves the recorded id and claim
+  as they were, even when the draft has since been deleted (by our refusal's
+  own DELETE, say): the id then matches nothing, because BC does not reuse
+  ids, so the stale entry is harmless.
+
+**Left open, accepted.** A create whose response was lost outright (a timeout
+or 5xx after BC made the draft) reports no id, so nothing is recorded and the
+retry cannot recognise the draft: it still needs deleting in BC, as §391
+describes. Recognising it would need us to choose the id before the create;
+whether API v2.0 honours a client-supplied `id` on a purchaseInvoice POST is
+undocumented, and nothing here has run against a live BC tenant (#654). The
+lines comparison assumes BC returns a line's `unitCost`, `description` and
+`accountId` as we sent them, and the fingerprint assumes BC's create response
+states the draft's three totals. If a live tenant does otherwise, our own
+drafts read as edited or unproven and fall back to §391's behaviour, which is
+safe. The DELETE before a reprice carries the etag from the header read,
+which comes before the lines read. A line edited between the two is stopped
+only if BC moves the header's etag when a line changes, which is undocumented
+(as it was already for a draft just created).
+
+**Rejected:**
+- *Recognising our draft by its shape alone* (gross lines, approved
+  excluding-tax total). A BC user keying the same bill makes the same shape;
+  that is what §391 refuses to delete.
+- *Recognising it by an etag recorded at create.* Whether BC moves the
+  header's etag for a line edit, or for its own post-insert recalculation, is
+  undocumented. The header's totals are computed from the lines, so they
+  answer the question that matters (is the money still what we sent?), and
+  the lines comparison covers the rest.
+- *Refusing an edited own draft outright, even at the approved total.* That
+  makes a draft we once made stricter than one a person keyed from scratch,
+  for the same facts; handing it to the found treatment keeps one rule for
+  every draft a person has shaped.
+
+Tests: `backend/tests/test_erp_adapter_idempotency.py` (a lost-read VAT draft
+repriced by the retry and posted; a created-then-lost draft marked ours; a
+hand-keyed identical draft untouched even with an orphan recorded; our draft
+edited seven ways, tax group and pay-to vendor included, refused and left; our draft found `Paid`
+refused as any; a failed lines read retryable and keeping the claim; a
+recorded id with no fingerprint not ours); `backend/tests/test_erp_push_flow.py` (only a
+created orphan is handed back, a found one drops the claim, a legacy row is
+not ours; success clears the flag); `frontend/tests-e2e/erp/dynamics.spec.ts`
+against fake-erp's `fake-vat-lostread-co` / `fake-vat-lostedit-co` (first
+draft read per invoice number answers 503, the second company also adding a
+10.00 line first) and a draft keyed by hand in `fake-vat-co`.
