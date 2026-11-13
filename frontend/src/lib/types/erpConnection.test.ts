@@ -23,6 +23,8 @@ import {
 	destinationChanged,
 	erpTestResultText,
 	readOAuthReturn,
+	pickRefusalKey,
+	PICK_REFUSAL_KEYS,
 	secretIsSaved,
 	selectedProviderKey,
 	type ErpProvider
@@ -331,6 +333,44 @@ describe('readOAuthReturn', () => {
 		const long = readOAuthReturn(new URLSearchParams(`erp_error=${'x'.repeat(500)}`));
 		expect(long?.kind === 'error' && long.code.length).toBe(64);
 		expect(readOAuthReturn(new URLSearchParams('section=erp'))).toBeNull();
+	});
+});
+
+describe('readOAuthReturn: the company picker', () => {
+	it('reads erp_choose_company as a pick to make, and strips it', () => {
+		expect(readOAuthReturn(new URLSearchParams('section=erp&erp_choose_company=xero'))).toEqual({
+			kind: 'choose',
+			provider: 'xero'
+		});
+		expect(
+			withoutOAuthReturn(new URL('https://acme.test/organization?section=erp&erp_choose_company=xero'))
+		).toBe('/organization?section=erp');
+	});
+
+	it('lets an error win over a pick', () => {
+		expect(
+			readOAuthReturn(new URLSearchParams('erp_choose_company=xero&erp_error=state_expired'))
+		).toEqual({ kind: 'error', code: 'state_expired' });
+	});
+});
+
+describe('pickRefusalKey', () => {
+	it('states every pick refusal the server codes', () => {
+		for (const code of [
+			'erp_pick_expired',
+			'erp_pick_unknown_company',
+			'already_linked',
+			'credentials_unavailable',
+			'audit_unavailable'
+		]) {
+			expect(pickRefusalKey(code)).toBe(PICK_REFUSAL_KEYS[code as keyof typeof PICK_REFUSAL_KEYS]);
+		}
+	});
+
+	it('leaves an unknown code to the server sentence', () => {
+		expect(pickRefusalKey('something_new')).toBeNull();
+		expect(pickRefusalKey('toString')).toBeNull();
+		expect(pickRefusalKey(null)).toBeNull();
 	});
 });
 

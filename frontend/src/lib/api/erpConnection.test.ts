@@ -80,3 +80,30 @@ describe('startErpOAuth', () => {
 		expect(init.credentials).toBeUndefined();
 	});
 });
+
+describe('the company picker calls (decisions §355)', () => {
+	// The pending connect is keyed on the same HttpOnly nonce cookie, so every
+	// picker call must carry it; a plain fetch would read as `erp_pick_expired`.
+	it('reads, picks and discards with credentials included', async () => {
+		fetchMock.mockImplementation(
+			async () =>
+				new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+		);
+		const { getErpPendingConnect, selectErpCompany, discardErpPendingConnect } = await import(
+			'./erpConnection.ts'
+		);
+		await getErpPendingConnect();
+		await selectErpCompany('fake-xero-tenant-2');
+		await discardErpPendingConnect();
+		const calls = fetchMock.mock.calls as [string, RequestInit][];
+		expect(calls.map(([url, init]) => [url, init.method ?? 'GET', init.credentials])).toEqual([
+			['http://api.test/api/organization/erp/oauth/pending', 'GET', 'include'],
+			['http://api.test/api/organization/erp/oauth/pending/select', 'POST', 'include'],
+			['http://api.test/api/organization/erp/oauth/pending', 'DELETE', 'include']
+		]);
+		expect(JSON.parse(String(calls[1][1].body))).toEqual({ company_id: 'fake-xero-tenant-2' });
+		for (const [, init] of calls) {
+			expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer jwt-1');
+		}
+	});
+});

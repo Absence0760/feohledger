@@ -278,6 +278,12 @@ otherwise). Point the backend at it with
   and bound to its `redirect_uri`, and rotates refresh tokens; `GET /xero/connections`
   (bearer must be one it issued) lists the one organisation, tenant
   `fake-xero-tenant-1`. Wired up by the committed `FEOH_ERP_XERO_*` dev values.
+- Test hook `POST /xero/__organisations {"state", "count"}` — the consent
+  carrying that `state` (read it from the backend's `authorize_url`) authorises
+  `count` organisations, so `GET /xero/connections` under its token also lists
+  `fake-xero-tenant-2` … `fake-xero-tenant-N` (*Fake Xero Org 2* …): the
+  backend then offers its company picker instead of linking one (decisions
+  §355). Scoped to that one consent, so parallel workers are unaffected.
 - Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
   "amount_paid"?}`. The backend reads `PAID` as paid only with `amount_paid`
   above zero; `PAID` with nothing paid is a bill settled by credit note
