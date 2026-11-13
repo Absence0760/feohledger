@@ -96,7 +96,7 @@
 		</button>
 		<button
 			type="button"
-			class="btn-secondary"
+			class="btn-cancel"
 			disabled={submitting}
 			onclick={oncancel}
 			data-testid="erp-company-cancel"
@@ -192,33 +192,5 @@
 		flex-wrap: wrap;
 		gap: 12px;
 		margin-top: 14px;
-	}
-
-	.btn-primary,
-	.btn-secondary {
-		padding: 8px 18px;
-		border-radius: 6px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-primary {
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-	}
-
-	.btn-secondary {
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-	}
-
-	.btn-primary:disabled,
-	.btn-secondary:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 </style>

@@ -3189,7 +3189,13 @@ and then:
   `?erp_choose_company=<provider>`.
 
 The settings page (`ErpCompanyPicker.svelte` inside `ErpConnectionPanel`)
-reads `GET …/pending` and posts the pick to `POST …/pending/select`. What keeps
+reads `GET …/pending` and posts the pick to `POST …/pending/select`. It reads
+on **every** admin mount, not only when `?erp_choose_company=` is present: the
+panel strips that parameter on mount, so a reload, or coming back to
+`/organization` while the consent is still parked, finds the picker again. On a
+plain mount the `409 erp_pick_expired` (or a 404) is "nothing parked" and says
+nothing; only a return that asked for the pick reports it as lapsed
+(`tests-e2e/erp/xero-company-picker.spec.ts`). What keeps
 the picker from weakening §336 / §337:
 
 - **Same browser, same admin.** The pending connect is keyed on the cookie that

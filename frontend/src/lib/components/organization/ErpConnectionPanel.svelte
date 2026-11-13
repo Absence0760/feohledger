@@ -152,9 +152,17 @@
 	let pending = $state<ErpPendingConnect | null>(null);
 	let pendingLoading = $state(false);
 	let picking = $state(false);
-	/** The callback asked for a pick; read once the user is known to be an
-	 *  admin (a non-admin's read would only 403). */
+	/** Whether a parked consent should be looked for: set on EVERY mount, not
+	 *  only when the callback's `?erp_choose_company=` is present. The panel
+	 *  strips that parameter on mount, so a reload, or coming back to the page
+	 *  while the consent is still parked, would otherwise lose the picker the
+	 *  server is still holding. Read once the user is known to be an admin (a
+	 *  non-admin's read would only 403). */
 	let pickRequested = $state(false);
+	/** The callback itself asked for the pick: a consent that is gone by now
+	 *  is worth saying so. On a plain mount, nothing parked is the normal case
+	 *  and says nothing. */
+	let pickExplicit = false;
 	let statusEl = $state<HTMLParagraphElement | null>(null);
 
 	const groups = $derived(catalog ? groupProviders(catalog.providers) : []);
@@ -340,16 +348,17 @@
 		const next = withoutOAuthReturn(url);
 		if (next) stripOAuthReturn(next);
 		if (ret?.kind === 'choose') {
-			pickRequested = true;
+			pickExplicit = true;
 		} else {
 			oauthReturn = ret;
 		}
+		pickRequested = true;
 	});
 
 	$effect(() => {
 		if (!pickRequested || !userLoaded) return;
 		pickRequested = false;
-		if (!readOnly) void loadPending();
+		if (!readOnly) void loadPending(pickExplicit);
 	});
 
 	/** The picker is gone: move focus to the sentence saying what happened, so
@@ -371,12 +380,25 @@
 		return err instanceof Error ? err.message : m('org.toast.saveFailed');
 	}
 
-	async function loadPending() {
+	/** Nothing is parked: the server answers 409 `erp_pick_expired` (it folds
+	 *  "none", "lapsed" and "not this browser" together), and a 404 means the
+	 *  same. */
+	function isNothingPending(err: unknown): boolean {
+		return (
+			err instanceof ApiError &&
+			(err.status === 404 || (err.status === 409 && err.code === 'erp_pick_expired'))
+		);
+	}
+
+	async function loadPending(explicit: boolean) {
 		pendingLoading = true;
 		try {
 			pending = await getErpPendingConnect();
 		} catch (err) {
-			setStatus(pickFailure(err, m('org.erp.oauth.yourErp')), 'failure');
+			// On a plain mount nothing parked is the normal case, not a failure.
+			if (explicit || !isNothingPending(err)) {
+				setStatus(pickFailure(err, m('org.erp.oauth.yourErp')), 'failure');
+			}
 		} finally {
 			pendingLoading = false;
 		}

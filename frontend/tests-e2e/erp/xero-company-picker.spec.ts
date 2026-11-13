@@ -9,6 +9,7 @@ import {
 	tenantBase,
 	test
 } from '../fixtures/helpers';
+import { expectNoA11yViolations } from '../a11y/axe-helper';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import { FAKE_ERP_BASE } from './helpers';
 
@@ -32,6 +33,12 @@ import { FAKE_ERP_BASE } from './helpers';
  *   1. Pick — the picker lists both organisations as a named radio group;
  *      choosing the second connects exactly that one.
  *   2. Cancel — nothing is connected, and the pending connect is gone.
+ *   3. Reload — the return parameter is stripped on mount, so the picker is
+ *      found again by reading the parked consent on EVERY admin mount, not
+ *      only when `?erp_choose_company=` is in the address.
+ *   4. Nothing parked — a plain visit says nothing (the read's 409 is the
+ *      normal case there, not a failure).
+ *   5. axe — the picker at desktop width and at 320px (WCAG 1.4.10).
  */
 
 const PROVIDER = 'xero';
@@ -56,7 +63,9 @@ async function consentToTwoOrganisations(page: Page): Promise<string> {
 
 	const consent = await page.request.get(authorize_url, { maxRedirects: 0 });
 	expect(consent.status(), await consent.text()).toBe(302);
-	const landed = await page.request.get(consent.headers()['location'], { maxRedirects: 0 });
+	const landed = await page.request.get(consent.headers()['location'], {
+		maxRedirects: 0
+	});
 	expect(landed.status()).toBe(302);
 	const home = new URL(landed.headers()['location']);
 	expect(home.pathname).toBe('/organization');
@@ -75,7 +84,9 @@ async function oauthStatus(page: Page) {
 
 async function disconnect(page: Page): Promise<void> {
 	const headers = await authedTenantHeaders(page);
-	await page.request.post(`${API_BASE}/api/organization/erp/oauth/disconnect`, { headers });
+	await page.request.post(`${API_BASE}/api/organization/erp/oauth/disconnect`, {
+		headers
+	});
 	await page.request.patch(`${API_BASE}/api/organization`, {
 		headers: { ...headers, 'Content-Type': 'application/json' },
 		data: { settings: { erp: null } }
@@ -89,7 +100,9 @@ test.describe('/erp company picker against fake-erp Xero', () => {
 	});
 
 	test.afterAll(async ({ browser }) => {
-		const context = await browser.newContext({ baseURL: tenantBase(currentTenantSlug()) });
+		const context = await browser.newContext({
+			baseURL: tenantBase(currentTenantSlug())
+		});
 		const page = await context.newPage();
 		await signInAndWait(page);
 		await disconnect(page);
@@ -104,7 +117,9 @@ test.describe('/erp company picker against fake-erp Xero', () => {
 		await page.goto(landing);
 		const picker = page.getByTestId('erp-company-picker');
 		await expect(picker).toBeVisible();
-		const group = picker.getByRole('group', { name: 'Choose the Xero company to connect' });
+		const group = picker.getByRole('group', {
+			name: 'Choose the Xero company to connect'
+		});
 		await expect(group.getByRole('radio')).toHaveCount(2);
 		// The return parameter is spent from the address bar.
 		await expect(page).not.toHaveURL(/erp_choose_company/);
@@ -143,5 +158,55 @@ test.describe('/erp company picker against fake-erp Xero', () => {
 		});
 		expect(gone.status()).toBe(409);
 		expect((await gone.json()).detail.code).toBe('erp_pick_expired');
+	});
+
+	test('a reload keeps the picker while the consent is still parked', async ({ page }) => {
+		const landing = await consentToTwoOrganisations(page);
+		await page.goto(landing);
+		const picker = page.getByTestId('erp-company-picker');
+		await expect(picker).toBeVisible();
+		await expect(page).not.toHaveURL(/erp_choose_company/);
+
+		// The parameter is gone from the address; the server still holds the
+		// consent, and the reloaded panel finds it.
+		await page.reload();
+		await expect(picker).toBeVisible();
+		await expect(picker.getByRole('radio')).toHaveCount(2);
+
+		// Leaving and coming back (a plain /organization, no parameter) too.
+		await page.goto('/organization');
+		await expect(picker).toBeVisible();
+		await picker.getByTestId('erp-company-cancel').click();
+		await expect(picker).toHaveCount(0);
+	});
+
+	test('a plain visit with nothing parked shows no picker and no failure', async ({ page }) => {
+		const read = page.waitForResponse((r) =>
+			r.url().includes('/api/organization/erp/oauth/pending')
+		);
+		await page.goto('/organization');
+		expect((await read).status()).toBe(409);
+		await expect(page.getByTestId('erp-company-picker')).toHaveCount(0);
+		// The status line (always mounted, a live region) stays empty.
+		await expect(page.getByTestId('erp-status')).toHaveText('');
+	});
+
+	test('the picker has no axe violations at desktop width or at 320px', async ({ page }) => {
+		const landing = await consentToTwoOrganisations(page);
+		await page.goto(landing);
+		const picker = page.getByTestId('erp-company-picker');
+		await expect(picker).toBeVisible();
+		await expectNoA11yViolations(page);
+
+		await page.setViewportSize({ width: 320, height: 720 });
+		await expect(picker).toBeVisible();
+		await expectNoA11yViolations(page);
+		const overflow = await page.evaluate(
+			() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+		);
+		expect(overflow, 'the picker scrolls the page sideways at 320px').toBeLessThanOrEqual(1);
+
+		await picker.getByTestId('erp-company-cancel').click();
+		await expect(picker).toHaveCount(0);
 	});
 });

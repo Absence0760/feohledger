@@ -815,9 +815,13 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	cursor: pointer;
 	font-family: inherit;
 }
-.btn-cancel:hover {
+.btn-cancel:hover:not(:disabled) {
 	color: var(--text);
 	border-color: var(--border-strong);
+}
+.btn-cancel:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 /* --- Filter chips (FilterChips) --- */
