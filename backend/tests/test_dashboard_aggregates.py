@@ -620,7 +620,8 @@ async def test_touchless_rate_excludes_a_csv_imported_rejection(realdb):
     await _seed_statuses(realdb, [(InvoiceStatus.approved, True)])
     await _import_invoices(
         realdb,
-        "invoice_number,vendor_name,amount,status\nHIST-R1,Legacy Supplies,500.00,rejected\n",
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "HIST-R1,Legacy Supplies,500.00,USD,rejected\n",
     )
     async with realdb.client(key=TENANT, role="admin") as c:
         body = (await c.get("/api/dashboard")).json()
@@ -651,10 +652,10 @@ async def test_touchless_rate_excludes_a_csv_imported_done_row_from_both_legs(re
 
     await _import_invoices(
         realdb,
-        "invoice_number,vendor_name,amount,status\n"
-        "HIST-D1,Legacy Supplies,100.00,done\n"
-        "HIST-D2,Legacy Supplies,200.00,done\n"
-        "HIST-D3,Legacy Supplies,300.00,paid\n",
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "HIST-D1,Legacy Supplies,100.00,USD,done\n"
+        "HIST-D2,Legacy Supplies,200.00,USD,done\n"
+        "HIST-D3,Legacy Supplies,300.00,USD,paid\n",
     )
     async with realdb.client(key=TENANT, role="admin") as c:
         body = (await c.get("/api/dashboard")).json()

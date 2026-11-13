@@ -321,9 +321,9 @@ async def test_invoice_csv_import_audits_each_invoice_on_its_own_trail(realdb):
     from app.models.invoice import Invoice
 
     csv_text = (
-        "invoice_number,vendor_name,amount,status\n"
-        "INV-IMP-1,Historic Supplier,1250.00,paid\n"
-        "INV-IMP-2,Historic Supplier,90.00,new\n"
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "INV-IMP-1,Historic Supplier,1250.00,USD,paid\n"
+        "INV-IMP-2,Historic Supplier,90.00,USD,new\n"
     )
     async with realdb.client(key="a") as client:
         resp = await client.post(
@@ -373,7 +373,8 @@ async def test_invoice_csv_import_audits_the_vendor_stub_it_mints(realdb):
             files={
                 "file": (
                     "invoices.csv",
-                    b"invoice_number,vendor_name,amount\nINV-STUB-1,Brand New Payee,10.00\n",
+                    b"invoice_number,vendor_name,amount,currency\n"
+                    b"INV-STUB-1,Brand New Payee,10.00,USD\n",
                     "text/csv",
                 )
             },

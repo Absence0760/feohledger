@@ -70,8 +70,8 @@ test.describe('the GL-chart refusal is localized', () => {
 		await expect(modal).toBeVisible();
 
 		const csv =
-			'invoice_number,vendor_name,amount,status,gl_account\n' +
-			`${MARK}-001,${MARK} Vendor,10.00,new,${unknownCode}\n`;
+			'invoice_number,vendor_name,amount,currency,status,gl_account\n' +
+			`${MARK}-001,${MARK} Vendor,10.00,USD,new,${unknownCode}\n`;
 		await modal.locator('input[type="file"]').setInputFiles({
 			name: 'invoices.csv',
 			mimeType: 'text/csv',

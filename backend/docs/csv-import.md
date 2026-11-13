@@ -20,8 +20,8 @@ payment to an unverified vendor is blocked. See `backend/app/api/invoice_entry.p
 
 | Endpoint | What it does |
 |---|---|
-| `POST /api/vendors/import-csv` | Bulk-create vendors. Dedup by `code` > case-insensitive `name`. |
-| `POST /api/invoices/import-csv` | Bulk-create invoices. Unknown vendors get auto-created stubs. An exact `(vendor, invoice_number)` repeat is skipped; a number that is the same once formatting is ignored is a row error (§ Near-duplicate invoice numbers). |
+| `POST /api/vendors/import-csv` | Bulk-create vendors. Dedup by `code` > case-insensitive `name`, within the selected entity (§ Vendors resolve within the import's entity). |
+| `POST /api/invoices/import-csv` | Bulk-create invoices. Each row's vendor resolves within the selected entity; unknown vendors get auto-created stubs there. Every row must carry a `currency`. An exact `(vendor, invoice_number)` repeat is skipped; a number that is the same once formatting is ignored is a row error (§ Near-duplicate invoice numbers). |
 
 Both accept `multipart/form-data` with a single `file` field. Response is
 JSON with `imported`, `skipped`, and a per-row `errors` list. Files must
@@ -64,10 +64,10 @@ should review them on the Vendors page before paying any invoices.
 | Column | Required | Notes |
 |---|---|---|
 | `invoice_number` | yes | |
-| `vendor_name` | either | Resolved case-insensitive against existing vendors |
-| `vendor_code` | either | Tried first; falls back to name |
+| `vendor_name` | either | Resolved case-insensitive against the import entity's vendors (and unstamped ones) |
+| `vendor_code` | either | Tried first; falls back to name. Same scope |
 | `amount` | yes | Accepts `1234.56`, `"$1,234.56"`, `"1,000"` (quote if it contains commas!) |
-| `currency` | no | Default `USD` |
+| `currency` | yes | Three-letter ISO 4217 code (`USD`, `eur`, ` GBP ` — case and spaces are normalized). **No default**: a blank cell, or no `currency` column, refuses the row (§ A blank currency refuses the row). |
 | `invoice_date` | no | `YYYY-MM-DD`, `MM/DD/YYYY`, `DD/MM/YYYY`, `YYYY/MM/DD` |
 | `due_date` | no | Same formats |
 | `po_number` | no | |
@@ -79,9 +79,9 @@ should review them on the Vendors page before paying any invoices.
 Example:
 
 ```csv
-invoice_number,vendor_name,amount,invoice_date,due_date,status,po_number
-INV-1001,Acme Supplies,1250.00,2025-12-01,2026-01-01,done,PO-9001
-INV-1002,Globex Corp,"$2,500.50",2026-01-15,2026-02-15,paid,
+invoice_number,vendor_name,amount,currency,invoice_date,due_date,status,po_number
+INV-1001,Acme Supplies,1250.00,USD,2025-12-01,2026-01-01,done,PO-9001
+INV-1002,Globex Corp,"$2,500.50",USD,2026-01-15,2026-02-15,paid,
 ```
 
 ## Choosing the right status
@@ -119,9 +119,74 @@ A row refused for its GL code carries the refusal **structured**, beside its
 on_lines, foreign: [...], retired: [...], unknown: [...]}` — the same body the
 invoice write paths send as their 422 `detail` (`gl_chart.ChartRefusal.body`).
 The web import modal states it in the reader's language from `code` and falls
-back to `message`. The near-duplicate refusals (§ Near-duplicate invoice
-numbers) carry `{code, params}` the same way; every other row error is still
-just `{row, message}`.
+back to `message`. Every other row error carries `{code, params}` beside `row`
+and `message` (§ Every row error is coded).
+
+## A blank currency refuses the row
+
+`currency` is required on every invoice row. A blank cell — or a file with no
+`currency` column at all — is a per-row error,
+`{row, message, code: "csv_currency_required", params: {}}`, and a cell that is
+not a three-letter code (`EURO`, `US$`, `$`) is
+`code: "csv_currency_invalid"`, `params: {value}`. Neither row is imported, and
+neither leaves a vendor stub behind (both are refused before vendor
+resolution).
+
+The importer used to stamp `USD` on a blank cell and truncate a long one
+(`EURO` became `EUR`, `US Dollar` became `US `). A Day-0 file from a EUR or GBP
+tenant whose export simply lacks the column then landed every payable labelled
+in dollars, which the approval gates, the reporting-currency rollups and the
+payment run all read as the truth. A missing currency stays missing
+(`docs/decisions.md` §160/§196/§200), and there is no honest evidence to fill it
+from: a vendor record carries no billing currency, and `Entity.currency` is the
+currency the entity *reports* in, not the one a supplier bills it in. So the
+row is refused and the file is fixed (`docs/decisions.md` §372). Add the column
+with the invoice's real currency, even when every row is `USD`.
+
+## Vendors resolve within the import's entity
+
+Both importers run under one entity — the selected one (`X-Entity-ID`), or the
+tenant default — and every row and every auto-created stub lands there. Vendor
+lookups are scoped the same way: the import entity's own vendors **∪ vendors
+with no entity** (unstamped), the rule the invoice matcher uses
+(`vendor_matching.scope_vendor_candidates`, `docs/multi-entity.md` § Vendor
+matching). The entity's own row wins over an unstamped one of the same name.
+
+- **Invoice import.** A row naming `Acme` in entity A links A's `Acme` (or an
+  unstamped one), never entity B's. If only B has one, A gets its own
+  `unverified` stub. The importer used to search the whole tenant, so a row
+  could link another subsidiary's supplier record — and `Invoice.vendor_id` is
+  what the credit-memo guard compares and what the vendor's spend rollup and
+  bank details are read from.
+- **Vendor import.** A row is skipped as a duplicate only when the import
+  entity (or an unstamped row) already holds that `code` or `name`. It used to
+  be skipped when any subsidiary held it, leaving the importing entity with no
+  vendor at all.
+- Either lookup used to raise `MultipleResultsFound` (a 500 for the whole file)
+  once the same supplier existed under two entities; the scoped lookup takes
+  the first row of a deterministic order instead.
+
+## Every row error is coded
+
+Each row error carries a stable `code` and the `params` its sentence needs, and
+the web import modal (`ImportCsvModal.svelte`, shared by `/vendors` and
+`/invoices`) states it in the reader's language through
+`frontend/src/lib/api/codedRefusals.ts`, falling back to `message`:
+
+| `code` | Importer | `params` | Raised when |
+|---|---|---|---|
+| `csv_malformed` | both | — | The file is not parseable CSV (reported as row 0). |
+| `csv_vendor_name_required` | vendors | — | `name` is blank. |
+| `csv_invoice_number_required` | invoices | — | `invoice_number` is blank. |
+| `csv_vendor_required` | invoices | — | Both `vendor_name` and `vendor_code` are blank. |
+| `csv_amount_invalid` | invoices | `value` | `amount` is blank, unparseable, negative or too wide (§ Amount range). |
+| `csv_currency_required` | invoices | — | `currency` is blank or missing. |
+| `csv_currency_invalid` | invoices | `value` | `currency` is not a three-letter code. |
+| `csv_status_invalid` | invoices | `value` | `status` is no invoice status. |
+| `csv_status_not_importable` | invoices | `status` | A live pipeline stage (§ Choosing the right status). |
+| `csv_status_records_history` | invoices | `status` | `done` / `paid` (or a blank status) from a caller without admin / AP manager. |
+| `gl_codes_outside_chart` | invoices | its own body | § Choosing the right status. |
+| `csv_invoice_number_matches_*` | invoices | see below | § Near-duplicate invoice numbers. |
 
 ## Live rows are checked for warnings on import
 
@@ -162,7 +227,11 @@ row silently would be worse: it may be a genuinely different invoice.
 So, per row, for the vendor the row resolves to:
 
 1. **Byte-exact repeat** of an invoice already linked to that vendor → skipped
-   silently, counted in `skipped`, no error (unchanged).
+   silently, counted in `skipped`, no error — when that invoice is in the
+   import's entity (or either side is unstamped). If the only repeat is in
+   **another entity** (a shared, unstamped vendor), the row is refused with the
+   existence-only `csv_invoice_number_matches_other_entity` error of case 2
+   instead of vanishing with no reason (decisions §372).
 2. **Same number once normalized** as an invoice already linked to that vendor
    → not imported; a row error naming the existing invoice:
    `{row, message, code: "csv_invoice_number_matches_existing", params:
@@ -362,5 +431,8 @@ can correct it. See `api-reference.md` § Money and quantity fields.)
 | `amount invalid: '99999999999999999999'` | The amount exceeds `Numeric(15, 2)`'s 13 integer digits. Check for a misplaced decimal separator or a column shift. |
 | `status invalid: '2026-03-01'` | An amount had an unquoted comma and shifted all columns. Wrap comma-containing values in double quotes. |
 | Many `vendor_name or vendor_code is required` errors | The vendor column name in the CSV doesn't match. Rename it before upload. |
+| Every row says `currency is required` | The file has no `currency` column (or it is named differently). Add one with each invoice's real currency — there is no default, not even `USD`. |
+| `currency invalid: 'EURO'` | Use the three-letter ISO 4217 code (`EUR`). |
+| An invoice linked to a new `unverified` vendor although the supplier exists | The existing vendor belongs to another entity. Import under that entity (switch entity first), or keep the new stub as this entity's own record of the supplier. |
 | `invoice_number 'INV-1' is the same invoice number as existing invoice 'INV-001' …` | The ledger already holds that invoice for this vendor under a differently formatted number. Use the existing number, or enter the row by hand if it is a different invoice. |
 | Duplicate vendors show up twice | Customer export has inconsistent casing. Add a `code` column to dedup cleanly. |

@@ -17274,6 +17274,77 @@ revoked" for a grant that is gone: the error is on the safe side.
 - *Regenerating the Blackbaud client secret* as a way to revoke. Blackbaud says
   it does not invalidate refresh tokens, and it would cut every tenant at once.
 
+## 372. CSV import resolves vendors within its entity, refuses a blank currency, and codes every row error (follow-up, 2026-11-13)
+
+Three defects in `services/csv_import`, fixed together because they share the
+row loop and the report shape.
+
+**Vendor resolution is scoped to the import's entity ∪ unstamped vendors.** The
+invoice importer resolved a row's vendor by code, then name, across the whole
+tenant, so a row imported into subsidiary A could link B's supplier record —
+the mislink the invoice matcher's scope exists to prevent
+(`docs/multi-entity.md` § Vendor matching), since `Invoice.vendor_id` is
+what the credit-memo guard compares and what the spend rollup and bank details
+are read from. The vendor importer had the mirror flaw: a row was skipped when
+*any* subsidiary held the code or name, leaving A with no vendor. Both lookups
+also used `scalar_one_or_none()`, a 500 for the whole file once the same
+supplier existed under two entities. The rule is not restated:
+`vendor_matching.scope_vendor_candidates` is now the single statement of
+`apply_entity_scope(..., include_shared=True)` plus the own-entity-first order,
+`_candidate_query` builds on it, and `csv_import._find_vendor` applies it with
+`.limit(1)`. NULL is admitted for the reason the matcher admits it: excluding an
+unstamped supplier would silently mint a duplicate. The importer keeps no status
+filter (unlike the matcher): an import has always resolved to an existing
+`inactive` / `rejected` record, and changing that would mint a fresh,
+verifiable stub beside a supplier someone deliberately retired. The exact
+`(vendor, invoice_number)` dedup moved to an ordered `.limit(1)` too, because an
+unstamped vendor can carry the same number in two entities. A repeat in the
+import's own entity (or an unstamped one) is still the silent skip; a repeat
+that exists only in another entity is now the existence-only
+`csv_invoice_number_matches_other_entity` refusal the near match already gave,
+instead of a row dropped with no reason.
+
+**A blank currency refuses the row** (`csv_currency_required`), and a cell that
+is not three letters is `csv_currency_invalid` rather than truncated by
+`upper()[:3]`. The shape check is `schemas.expense.normalize_iso_currency`, the
+one every other currency boundary uses. Considered: deriving it. Rejected,
+because nothing on hand is evidence of what a supplier billed. `Vendor` has no
+currency column, and `Entity.currency` is the entity's *reporting* currency
+(NULL means the org's): a UK subsidiary pays EUR suppliers. §160/§196/§200 say a
+missing currency stays missing, and `Invoice.currency` cannot hold "unknown"
+(it is NOT NULL; `docs/followups.md` tracks that column), so the only honest
+outcome is a refused row the operator fixes in the file. Also rejected: a
+file-level "assume currency X" form field. It would be the same default with a
+checkbox in front of it, and a Day-0 file that mixes currencies is exactly the
+one it gets wrong. The cost is real and accepted: a single-currency USD tenant's
+file now needs the column. The refusal runs before vendor resolution, so a
+refused row leaves no stub.
+
+**Every row error is coded.** The near-duplicate and GL-chart refusals already
+were; the rest were English-only `{row, message}`, so `ImportCsvModal` showed
+them in English in every locale. They now carry `{code, params}` through one
+`_coded` helper (`csv_malformed`, `csv_vendor_name_required`,
+`csv_invoice_number_required`, `csv_vendor_required`, `csv_amount_invalid`,
+`csv_currency_required`, `csv_currency_invalid`, `csv_status_invalid`,
+`csv_status_not_importable`, `csv_status_records_history`), registered in
+`codedRefusals.ts` with sentences in all six locales. `params` are the cell as
+written, not a localized label: the reader has to find and edit that cell in the
+file. `message` stays as the English fallback.
+
+**Scope.** The invoice importer (`POST /api/invoices/import-csv`) is the only
+CSV path that creates invoices; the vendor importer shared the entity flaw and
+is fixed here; there is no PO CSV import. The corporate-card feed
+(`import_corporate_card_csv`) has the same `or "USD"` default but its page shows
+no row reasons, so refusing there needs UI work too; it is tracked in
+`docs/followups.md`.
+
+Guards: `tests/test_csv_import.py` (blank / malformed / missing-column currency, an exact repeat held only by
+another entity,
+a mixed file reported per row with codes, the two-entity vendor scope at the
+service and the endpoint, the scoped vendor dedup, uploader stamped on every
+scoped row), `frontend/src/lib/api/codedRefusals.test.ts` (each code stated in
+every locale, fallback on missing params).
+
 ## 373. A vendor merge moves the duplicates' ERP links, company by company, and refuses two different ids in one company (§356 follow-up, 2026-11-13)
 
 **The gap.** §356 left the merge alone: `services/vendor_merge` moved every

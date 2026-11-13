@@ -9,12 +9,13 @@ export interface ImportRowError {
 	row: number;
 	/** The server's English sentence — the fallback rendering. */
 	message: string;
-	/** Present when the row was refused for a reason the client localizes: the
-	 *  refusal's structured body sits beside `row` (today only the GL-chart
-	 *  refusal — `code: 'gl_codes_outside_chart'` plus its params; see
-	 *  `api/glChartRefusal.ts`). Render through `localizeApiDetail(error, m) ??
-	 *  error.message`. */
+	/** The refusal's code. Every vendor and invoice import row error carries
+	 *  one: the GL-chart refusal's structured body (`gl_codes_outside_chart`,
+	 *  see `api/glChartRefusal.ts`) or `{code, params}` (the `csv_*` codes in
+	 *  `api/codedRefusals.ts`, decisions §372). Render through
+	 *  `localizeApiDetail(error, m) ?? error.message`. */
 	code?: string;
+	params?: Record<string, unknown>;
 }
 
 export interface ImportResult {
