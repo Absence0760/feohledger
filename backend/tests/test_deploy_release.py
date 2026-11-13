@@ -523,15 +523,18 @@ def test_prune_drops_platform_blocks_and_moves_vanity_blocks_to_the_new_snippet(
 
     assert result.returncode == 0, result.stderr
     after = (tmp_path / "tenants.caddy").read_text()
-    for host in ("acme.app.example.com {", "beta.app.example.com {", "\napp.example.com {"):
-        assert host not in after, host
+    # Whole lines, not substrings: the operator's commented-out copy of a
+    # block below must survive, and it contains the same text after a "# ".
+    lines = after.splitlines()
+    for host in ("acme.app.example.com {", "beta.app.example.com {", "app.example.com {"):
+        assert host not in lines, host
     # A whole block goes, extra directives and all: no orphan brace or directive.
     assert "X-Extra" not in after
     # A vanity host stays and serves the same page through the new snippet; a
     # dot in the domain is a literal dot, not "any character".
     assert "shop.acmecorp.com {\n\timport vanity\n}" in after
     assert "appXexample.com {\n\timport vanity\n}" in after
-    assert "\timport spa\n" not in after
+    assert "\timport spa" not in lines
     # Comments are the operator's and are left alone.
     assert after.startswith("# acme.app.example.com {\n#\timport spa\n# }\n")
     for host in ("acme.app.example.com", "beta.app.example.com", "app.example.com"):
@@ -847,9 +850,10 @@ def test_the_first_deploy_of_this_layout_prunes_the_legacy_host_list_before_the_
     after = stack.hosts.read_text()
     assert "acme.app.example.com" not in after
     assert "shop.acmecorp.com {\n\timport vanity\n}" in after
-    assert "acme.app.example.com" in result.stdout, "the dropped hosts are listed"
+    listed = {line.strip() for line in result.stdout.splitlines()}
+    assert {"acme.app.example.com"} <= listed, "the dropped hosts are listed"
     # The one vanity host is this VM's TLS to check.
-    assert "https://shop.acmecorp.com/" in stack.curled()
+    assert stack.curled() >= {"https://shop.acmecorp.com/"}
 
 
 def test_a_missing_host_list_is_seeded_from_the_example(stack: Stack) -> None:

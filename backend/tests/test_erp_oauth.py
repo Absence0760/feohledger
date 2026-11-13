@@ -2450,3 +2450,18 @@ def test_clean_companies_fails_closed_on_an_unaddressable_id(bad):
     from app.services.erp_adapters.oauth_base import clean_companies
 
     assert clean_companies([("a", "A"), (bad, "bad")]) == []
+
+
+def test_verified_browser_nonce_returns_only_a_well_formed_bound_value() -> None:
+    """The company pick re-sets the nonce cookie from this, never from the raw
+    request value: a value is returned only when it has the nonce's shape and
+    hashes to the state's binding."""
+    nonce = erp_oauth.new_browser_nonce()
+    binding = erp_oauth.browser_binding(nonce)
+    assert erp_oauth.verified_browser_nonce(nonce, binding) == nonce
+    assert erp_oauth.verified_browser_nonce(nonce, erp_oauth.browser_binding("other")) is None
+    assert erp_oauth.verified_browser_nonce(None, binding) is None
+    assert erp_oauth.verified_browser_nonce("", binding) is None
+    crafted = nonce[:-1] + ";"
+    assert erp_oauth.verified_browser_nonce(crafted, erp_oauth.browser_binding(crafted)) is None
+    assert erp_oauth.verified_browser_nonce(nonce, "") is None

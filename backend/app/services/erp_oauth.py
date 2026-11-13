@@ -116,6 +116,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import re
 import secrets
 import time
 import uuid
@@ -360,6 +361,22 @@ def browser_matches(cookie_value: str | None, binding: str) -> bool:
     if not cookie_value or not binding:
         return False
     return hmac.compare_digest(browser_binding(cookie_value), binding)
+
+
+_BROWSER_NONCE_SHAPE = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+def verified_browser_nonce(cookie_value: str | None, binding: str) -> str | None:
+    """The callback's cookie value when it is the nonce this state was bound to.
+
+    Returns the value only when it has :func:`new_browser_nonce`'s shape and
+    hashes to ``binding`` (:func:`browser_matches`); otherwise None. A caller
+    that sets the cookie again (the company pick renews it) writes this
+    verified value, never the raw request cookie.
+    """
+    if not cookie_value or not _BROWSER_NONCE_SHAPE.fullmatch(cookie_value):
+        return None
+    return cookie_value if browser_matches(cookie_value, binding) else None
 
 
 def browser_cookie_attributes() -> dict[str, Any]:

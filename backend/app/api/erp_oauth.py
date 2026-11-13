@@ -793,9 +793,10 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
     # state is spent, not left for another try) and before anything else — the
     # provider's answer, the code, the admin's roles — so a browser that did
     # not start the connect learns nothing more than that.
-    if not erp_oauth.browser_matches(
+    browser_nonce = erp_oauth.verified_browser_nonce(
         request.cookies.get(erp_oauth.BROWSER_COOKIE), bound["browser_binding"]
-    ):
+    )
+    if browser_nonce is None:
         logger.warning("erp_oauth: callback from a browser that did not start it (org %s)", org.id)
         # Evidence of a possible login-CSRF attempt, on the starting admin's
         # trail. Best-effort: nothing was linked, so there is nothing for a
@@ -888,9 +889,7 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
         # Renew the cookie for the pick's window: the one it carries was set
         # at /authorize and lapses with that state.
         attrs = {**erp_oauth.browser_cookie_attributes(), "max_age": erp_oauth.pending_ttl()}
-        resp.set_cookie(
-            erp_oauth.BROWSER_COOKIE, request.cookies[erp_oauth.BROWSER_COOKIE], **attrs
-        )
+        resp.set_cookie(erp_oauth.BROWSER_COOKIE, browser_nonce, **attrs)
         return resp
 
     refused = await _claim_and_link(

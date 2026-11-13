@@ -38,6 +38,14 @@ if [ -f "$STUB_DIR/rules" ]; then
 		[ "$tool" = "$name" ] || continue
 		case "$*" in
 		*"$pattern"*)
+			# A rule whose rc ends in "!" answers once: the first matching call
+			# gets it, later ones fall through to the next rule (or exit 0).
+			case "$rc" in *!)
+				mark="$STUB_DIR/once.$(printf '%s' "$tool|$pattern" | cksum | cut -d' ' -f1)"
+				[ -e "$mark" ] && continue
+				: > "$mark"
+				rc=${rc%!} ;;
+			esac
 			[ -z "$out" ] || printf '%b' "$out"
 			exit "$rc"
 			;;
@@ -76,8 +84,12 @@ class Deploy:
     def env_file(self, text: str) -> None:
         (self.dir / ".env").write_text(text)
 
-    def rule(self, tool: str, pattern: str, rc: int = 0, out: str = "") -> None:
-        self.rules.append(f"{tool}|{pattern}|{rc}|{out}")
+    def rule(
+        self, tool: str, pattern: str, rc: int = 0, out: str = "", *, once: bool = False
+    ) -> None:
+        """``once`` answers only the first matching call, e.g. a backup listing
+        that a successful deletion empties before the script lists it again."""
+        self.rules.append(f"{tool}|{pattern}|{rc}{'!' if once else ''}|{out}")
 
     def run(
         self, *args: str, path: str | None = None, extra_env: dict[str, str] | None = None
@@ -200,7 +212,7 @@ def test_remove_tenant_already_deleted_skips_the_data_leg_visibly(tmp_path: Path
     d = _deploy(tmp_path, "remove-tenant.sh")
     d.env_file(LOCAL_ENV)
     d.rule("docker", "--dry-run", 4)
-    d.rule("aws", "list-object-versions", 0, BACKUP_LISTING)
+    d.rule("aws", "list-object-versions", 0, BACKUP_LISTING, once=True)
 
     result = d.run("acme", "--yes")
 
@@ -219,7 +231,7 @@ def test_remove_tenant_never_touches_caddy(tmp_path: Path) -> None:
     d.env_file(LOCAL_ENV)
     vanity = "shop.acmecorp.com {\n\timport vanity\n}\n"
     (d.dir / "tenants.caddy").write_text(vanity)
-    d.rule("aws", "list-object-versions", 0, BACKUP_LISTING)
+    d.rule("aws", "list-object-versions", 0, BACKUP_LISTING, once=True)
 
     result = d.run("acme", "--yes")
 
