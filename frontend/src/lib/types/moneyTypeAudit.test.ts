@@ -68,6 +68,11 @@ const sources = Object.entries(RAW)
  * once every candidate in it is either retyped or judged here.
  */
 const JUDGED_NOT_MONEY: Record<string, Record<string, string>> = {
+	'lib/types/runOutside.ts': {
+		// NACHA verify (decisions §362): how many payments are left in the file
+		// after the ones whose bill was paid in the ERP were taken out.
+		'NachaVerifyResult.remaining': 'a count of payments left in the file, not money'
+	},
 	'lib/types/bankReconciliation.ts': {
 		// Pagination row count of the whole statement set, not money.
 		'BankStatementListResponse.total': 'pagination row count'
