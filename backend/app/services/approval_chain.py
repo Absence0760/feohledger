@@ -429,7 +429,8 @@ def approver_ids(invoice: Invoice, instance: WorkflowInstance | None) -> frozens
     for level in levels if isinstance(levels, list) else ():
         if not isinstance(level, dict):
             continue
-        for approval in level.get("approvals") or ():
+        approvals = level.get("approvals")
+        for approval in approvals if isinstance(approvals, list) else ():
             if isinstance(approval, dict) and approval.get("user_id"):
                 ids.add(str(approval["user_id"]))
     return frozenset(ids)

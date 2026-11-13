@@ -116,10 +116,11 @@ class FakeSage:
         self.save_body = None
         self.save_params: dict = {}
 
-    def _paged(self, rows):
+    def _paged(self, rows, request: httpx.Request | None = None):
         """Sage's envelope over the page ``$skip`` / ``$top`` ask for (max 100),
-        ordered by ``$orderby`` when it names ``ID``."""
-        params = self._request.url.params
+        ordered by ``$orderby`` when it names ``ID``. A test's own handler that
+        answers before ``handler`` runs passes its ``request``."""
+        params = (request or self._request).url.params
         if params.get("$orderby", "").startswith("ID"):
             rows = sorted(rows, key=lambda r: r.get("ID", 0), reverse="desc" in params["$orderby"])
         skip = int(params.get("$skip") or 0)
@@ -939,9 +940,9 @@ def test_list_pos_carries_the_supplier_id_list_vendors_reports():
 
     def handler(request, _orig=fake.handler):
         if request.url.path.endswith("/Supplier/Get"):
-            return fake._paged(suppliers)
+            return fake._paged(suppliers, request)
         if request.url.path.endswith("/PurchaseOrder/Get"):
-            return fake._paged(orders)
+            return fake._paged(orders, request)
         return _orig(request)
 
     fake.handler = handler
@@ -964,7 +965,7 @@ def test_a_po_with_no_total_is_reported_skipped():
 
     def handler(request, _orig=fake.handler):
         if request.url.path.endswith("/PurchaseOrder/Get"):
-            return fake._paged(orders)
+            return fake._paged(orders, request)
         return _orig(request)
 
     fake.handler = handler
