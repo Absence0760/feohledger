@@ -169,6 +169,10 @@ async def test_a_refused_report_keeps_the_erp_payment_as_data(realdb):
         "reference": "BILL-145",
         "paid_on": "2026-10-20",
         "paid_on_reported": True,
+        # QuickBooks states no cash figure: the row keeps the same shape as a
+        # Xero report, with the amount and its currency not stated (§386).
+        "amount": None,
+        "amount_currency": None,
         "refusal_code": "external_payment_blocking_exception",
         "reported_at": row.erp_report["reported_at"],
     }
