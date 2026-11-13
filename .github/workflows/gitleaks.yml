@@ -50,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           # `fetch-depth: 0` is required for the full-history scan
           # on the scheduled run. Push/PR triggers ignore the depth
           # because they have access to the base ref via the

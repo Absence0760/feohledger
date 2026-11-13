@@ -33,6 +33,15 @@ SARIF_ACTIONS = {
     "ossf/scorecard-action",
 }
 
+# Actions that upload SARIF themselves when an input says so, and not
+# otherwise. zizmor-action uploads through codeql-action/upload-sarif unless
+# `advanced-security` is false (supply-chain-scan.yml, decisions §349). Scorecard
+# does not allowlist it, like gitleaks-action below, so its job-level grant may
+# still be reported there; this test pins that the grant is at least used.
+SARIF_ACTIONS_BY_INPUT = {
+    "zizmorcore/zizmor-action": ("advanced-security", True),
+}
+
 TOP_LEVEL_EXCEPTIONS = {
     # One job, and gitleaks-action uploads its own SARIF. A job-level grant
     # would be the same token on the same job, and Scorecard does not
@@ -54,8 +63,14 @@ def _grants_security_events(permissions) -> bool:
 def _uploads_sarif(job: dict) -> bool:
     for step in job.get("steps", []):
         uses = step.get("uses", "")
-        if uses.split("@")[0] in SARIF_ACTIONS:
+        action = uses.split("@")[0]
+        if action in SARIF_ACTIONS:
             return True
+        if action in SARIF_ACTIONS_BY_INPUT:
+            name, default = SARIF_ACTIONS_BY_INPUT[action]
+            value = (step.get("with") or {}).get(name, default)
+            if value is True or str(value).lower() == "true":
+                return True
     return False
 
 
@@ -126,3 +141,33 @@ def test_guard_catches_a_job_grant_without_sarif(tmp_path):
     assert _job_grant_problems("bad.yml", tmp_path) == [
         "bad.yml: job 'build' grants security-events: write but uploads no SARIF"
     ]
+
+
+@pytest.mark.parametrize(
+    ("with_", "uploads"),
+    [({}, True), ({"advanced-security": True}, True), ({"advanced-security": False}, False)],
+)
+def test_zizmor_action_uploads_sarif_only_with_advanced_security(tmp_path, with_, uploads):
+    step = {"uses": "zizmorcore/zizmor-action@" + "0" * 40}
+    if with_:
+        step["with"] = with_
+    (tmp_path / "scan.yml").write_text(
+        yaml.safe_dump(
+            {
+                "permissions": {},
+                "jobs": {
+                    "zizmor": {
+                        "permissions": {"security-events": "write"},
+                        "runs-on": "ubuntu-latest",
+                        "steps": [step],
+                    }
+                },
+            }
+        )
+    )
+    expected = (
+        []
+        if uploads
+        else ["scan.yml: job 'zizmor' grants security-events: write but uploads no SARIF"]
+    )
+    assert _job_grant_problems("scan.yml", tmp_path) == expected

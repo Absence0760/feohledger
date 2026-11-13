@@ -22,14 +22,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, Request
-from jose import jwt
 
-from app.config import settings
+from app.utils import jwt_hs256
 
 
 def _mint(payload: dict) -> str:
     """Sign a JWT with the app's real secret so `decode_token` accepts it."""
-    return jwt.encode(payload, settings.secret_key, algorithm="HS256")
+    return jwt_hs256.encode(payload)
 
 
 def _ctrl_db_returning(org):

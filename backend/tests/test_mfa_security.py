@@ -29,9 +29,11 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from jose import jwt
+from joserfc import jwt
+from joserfc.jwk import OctKey
 
 from app.config import settings
+from app.utils import jwt_hs256
 
 
 class _FakeRedis:
@@ -196,7 +198,7 @@ async def test_email_otp_uses_constant_time_compare(fake_redis):
 
 def _mint_challenge_payload(payload: dict) -> str:
     """Bypass `create_challenge_token` to forge edge-case payloads."""
-    return jwt.encode(payload, settings.secret_key, algorithm="HS256")
+    return jwt_hs256.encode(payload)
 
 
 async def test_challenge_token_rejected_when_expired():
@@ -259,7 +261,9 @@ async def test_challenge_token_rejected_when_signed_with_wrong_secret():
         "jti": str(uuid.uuid4()),
         "exp": datetime.now(UTC) + timedelta(minutes=5),
     }
-    bad = jwt.encode(payload, "wrong-secret", algorithm="HS256")
+    bad = jwt.encode(
+        {"alg": "HS256"}, payload, OctKey.import_key("wrong-secret-of-at-least-14-bytes")
+    )
     with pytest.raises(ValueError):
         await mfa.decode_challenge_token(bad)
 
@@ -306,7 +310,7 @@ def test_challenge_token_ttl_matches_settings():
     user_id = uuid.uuid4()
     minted_at = time.time()
     token = mfa.create_challenge_token(user_id)
-    payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+    payload = jwt_hs256.decode(token)
 
     ttl_observed = payload["exp"] - minted_at
     # Allow ±5s of clock skew between the mint and the read.

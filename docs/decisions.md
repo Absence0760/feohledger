@@ -16080,3 +16080,153 @@ matched or turned into an expense; that is how an ignore is undone. Not in the
 verdicts, because they depend on input the row does not hold: submit's blocking
 policy violations, attach's per-line refusals, and match's checks on the chosen
 expense.
+
+## 349. zizmor and osv-scanner run advisory in their own workflow, outside `CI gate`, until the baseline is fixed (2026-11-08)
+
+**Decision.** `.github/workflows/supply-chain-scan.yml` runs two scanners on
+every pull request, push to `main` and a weekly schedule: zizmor 1.31.1 over
+`.github/workflows` and `dependabot.yml`, and osv-scanner 2.7.0 over every
+tracked lockfile (both `pnpm-lock.yaml`, `mobile/pubspec.lock`, the
+`tools/fake-*` requirements). Both upload SARIF to code scanning (categories
+`zizmor`, `osv-scanner`) and write a job summary, and neither fails on a
+finding: zizmor exits 0 in SARIF mode, and the osv step accepts exit 1
+(vulnerabilities found) and 128 (no packages) and fails on anything else, so a
+broken scan never reads as clean. The workflow is not called from `ci.yml`,
+unlike `security.yml`, because a fold would gate on the scanners completing
+(an OSV database or GitHub API outage) rather than on what they found. zizmor
+comes from zizmor-action pinned by SHA, which installs the wheel by hash;
+osv-scanner is the release binary checked against a pinned sha256, because
+`osv-scanner-action` resolves its Docker image by a mutable tag. osv-scanner
+runs `--offline-vulnerabilities`, so no package list leaves the runner, and
+zizmor's online audits call only the GitHub API. **Gaps:**
+`backend/pyproject.toml` has no lockfile, so the backend's Python dependencies
+are invisible to it (Trivy's image scan covers what is installed in the image);
+Gradle has no lockfiles; Terraform providers are not in OSV. **Making them
+blocking** waits on the current findings being fixed and a CISO / Security
+Analyst sign-off; the change then is calling the workflow from `ci.yml` or a
+code-scanning ruleset naming both tools.
+
+## 350. The supply-chain baseline is fixed at the root, and the backend's locks are scanned too (2026-11-11)
+
+**Decision.** The fix pass for §349's baseline. zizmor 1.31.1, regular
+persona, `--offline` on the merged tree: **77 findings (19 high, 42 medium,
+2 low, 14 informational) became 2 (0 high, 0 medium, 2 low, 0
+informational).** The online audits §349 also measured add 41
+`ref-version-mismatch` mediums (118 in all); each pin was resolved against its
+repository's tags and all 41 are fixed. Fixed rather than waived wherever a fix
+exists:
+
+- `dependabot-auto-merge.yml` moved from `pull_request_target` to
+  `pull_request`: GitHub runs a Dependabot PR's `pull_request` workflow with the
+  `permissions:` it declares, so the base-branch context bought nothing and
+  handed a write token to a workflow every PR can trigger. It and all three
+  `dependabot-lockfile.yml` jobs gate on `github.event.pull_request.user.login`,
+  not the spoofable `github.actor`, which names whoever caused the event. The
+  cost: a conflicting PR has no merge ref and so no run, and a conflicting PR
+  cannot auto-merge anyway.
+- `vm-deploy.yml`'s SPA build restores no cache (`package-manager-cache:
+  false`): a cache is writable by any default-branch run and that build is what
+  production serves.
+- Every checkout whose job never uses git credentials sets
+  `persist-credentials: false` (31, `claude.yml` included: claude-code-action
+  strips the persisted credential and authenticates with its own token).
+- Every pin comment names the release its SHA is (codeql-action v4.39.3, not
+  `v4`; setup-python v7.1.0, not v6.1.0; and five more Dependabot had bumped
+  under a stale comment). Every Dependabot entry waits out a 7-day `cooldown`,
+  the age rule §349's hand-made pins follow.
+- `aws-deploy.yml` passes `vars.*` and step outputs to its scripts through
+  `env:` instead of expanding them into the script text.
+
+**Waived inline, each with its reason, because there is no fix:**
+`dependabot-lockfile.yml` keeps `pull_request_target` (its push job needs a
+write token without a PAT; the resolver jobs run PR code read-only and name no
+secret, the header's design); `pr-title-lint.yml` keeps it so a conflicting PR
+still gets its title linted, and its workflow-level `read-all` dropped to none;
+`claude.yml`'s `issue_comment` has no alternative trigger and runs only for the
+authorized owner; and the ten `unpinned-images` findings on the CI service
+containers, whose refs come from `compose_image_refs.sh`, which refuses any ref
+that is not `repo:tag@sha256:<digest>` (§203) where zizmor cannot see it.
+**Left:** two low `self-repository` findings on `ci.yml`'s local action
+references, which want GitHub's `$/` syntax that actionlint cannot read yet.
+
+**osv-scanner.** §349 called `backend/pyproject.toml` unlocked. It is not:
+`backend/requirements.lock` and `requirements-dev.lock` are uv-compiled,
+hash-pinned pip requirements, which the recursive walk skips for their `.lock`
+names. The workflow now names each with `--lockfile requirements.txt:<path>`,
+by glob, so a renamed lock fails the scan rather than dropping out of it. That
+surfaced python-jose 3.5.0 (GHSA-3qf3-8w2g-rqmx, critical) and its dependency
+ecdsa 0.19.2 (GHSA-wj6h-64fc-37mp, high). `opentelemetry-api` 1.45.0
+(GHSA-xcq7-p3pf-p88h) is fixed by moving both `tools/fake-*` locks to 1.45.2.
+The other three have no patched release and are ignored by advisory ID in a
+root `osv-scanner.toml`, passed with `--config` so it reaches every lockfile,
+with `ignoreUntil = 2027-05-11` and a drop condition each: python-jose is used
+only for HS256 with a symmetric key and `algorithms=["HS256"]` on every decode,
+which the DER-key confusion needs unrestricted; nothing calls ecdsa's signing
+API; deepmerge 4.3.1 reaches only vite-plugin-svelte's build-time option merge.
+**Rejected:** an ID-less package ignore, which would hide the next advisory, and
+per-directory configs, which `--config` would override anyway.
+
+**Still open:** replacing python-jose with joserfc (already a dependency), which
+drops two of the three ignores; and making the scans blocking, which is adding
+`zizmor` (then `osv-scanner`) to the Code scanning gate ruleset beside CodeQL
+after a CISO / Security Analyst sign-off, not a `needs:` in `ci.yml`. Both are
+in `docs/followups.md`.
+
+## 351. The backend's own tokens move from python-jose to joserfc, byte for byte (2026-11-11)
+
+**Decision.** Closes §350's first "still open" item. Every token the backend
+mints for itself — the employee and supplier-portal access tokens and both MFA
+challenge tokens — is now signed and verified by one module,
+`backend/app/utils/jwt_hs256.py`, over joserfc. `api/deps.py` and
+`services/mfa.py` call its `encode` / `decode`; python-jose is gone from
+`pyproject.toml`, and with it python-jose, ecdsa and rsa from both locks. The
+two `osv-scanner.toml` ignores §350 added for them (GHSA-3qf3-8w2g-rqmx,
+GHSA-wj6h-64fc-37mp) are deleted rather than left to expire. joserfc was
+already a dependency (1.7.7, `services/sso.py` and the NetSuite adapter), so no
+new package enters the image.
+
+**Compatibility is exact, not approximate.** python-jose wrote the header as
+`{"alg":"HS256","typ":"JWT"}` (sorted keys) and the payload as compact JSON with
+`datetime` time claims as integer seconds. joserfc's default header puts its
+own `typ` first, so the module passes the header whole with
+`default_type=None`; its payload encoding already matched. The result is the
+same token for the same claims, byte for byte, so a session minted before the
+deploy verifies after it and nobody is logged out. `tests/test_jwt_hs256.py`
+pins that against literals the pre-migration mint functions produced under
+python-jose (access, vendor access, both challenge types, and an expired
+access token), the way `tests/test_bcrypt_sha256_compat.py` pins passlib's
+hashes (§151): it asserts each literal decodes to its claims, re-encodes to the
+identical string, and passes `decode_token`, `get_current_user` and the MFA
+decoders.
+
+**Verification keeps python-jose's rules.** `algorithms=["HS256"]` only (`none`,
+`HS384`/`HS512`, `RS256` refused before a key is used); the key is an `OctKey`,
+which in joserfc 1.7.7 refuses an asymmetric public key as HMAC material
+outright, the class GHSA-3qf3-8w2g-rqmx is about. `exp` / `nbf` / `iat` are
+checked when present with no leeway. python-jose also refused an `aud` when the
+caller named no audience; joserfc's registry type-checks `sub` and `jti` as
+python-jose did but accepts any `aud`, so the module refuses `aud` itself. It
+also refuses a non-finite `exp` / `nbf` / `iat`: JSON admits `NaN` and
+`Infinity`, joserfc's numeric check accepts any float, and `NaN < now` is
+false, so a signed `"exp": NaN` would never expire (python-jose's `int()`
+refused it). A non-object payload is refused. Every failure is one
+`InvalidTokenError`, mapped exactly as `JWTError` was: a 401 `"Invalid token"`
+in `decode_token`, the same `ValueError` in the MFA decoders. Malformed input
+(bad segments, bad base64, bad JSON) was checked to raise only that exception,
+so no token shape can reach a 500.
+
+**Two differences, both tightening, neither reachable by a token we mint:**
+joserfc rejects an `iat` in the future (python-jose only type-checked it), and
+it rejects a string `exp` that python-jose would have parsed with `int()`. No
+token we issue carries `iat`, and every `exp` is an integer.
+
+**Rejected:** requiring `exp`. Every token we have ever minted carries one, so
+it would cost nothing in production, but python-jose did not require it, a
+handful of tenant-isolation tests mint without it, and an auth-library swap is the
+wrong change to also move a validation rule in. A token without `exp` can only
+be minted with `FEOH_SECRET_KEY`, which already forges anything. Pinned by
+`test_token_without_exp_is_accepted_as_python_jose_did`, so changing it is a
+decision. Also rejected: calling joserfc directly in `deps.py` and `mfa.py` as
+python-jose was, which would duplicate the extra claim checks and the error
+mapping in two places; `security-patterns.sh`'s `bypass-decode-token` rule now
+allows `jwt.decode` only in `utils/jwt_hs256.py` and `services/sso.py`.

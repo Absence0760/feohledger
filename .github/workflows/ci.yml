@@ -45,6 +45,8 @@ jobs:
       bundle: ${{ steps.filter.outputs.bundle }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -122,6 +124,8 @@ jobs:
       minio: ${{ steps.refs.outputs.minio }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The reader's own tests come first. An empty `services.<id>.image` does
       # not fail a job — GitHub just starts no container — so what has to be
       # proven is that the reader refuses, not that it reads.
@@ -147,9 +151,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6.1.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           # Match backend/Dockerfile — runtime parity catches bugs
           # that only manifest on 3.14 (e.g. removed deprecated APIs).
@@ -289,7 +295,7 @@ jobs:
         # Stock postgres:16 doesn't ship the extension; CI without
         # this fails with "extension 'vector' is not available".
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.postgres }}
+        image: ${{ needs.compose-images.outputs.postgres }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -304,7 +310,7 @@ jobs:
 
       redis:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.redis }}
+        image: ${{ needs.compose-images.outputs.redis }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         ports:
           - 6379:6379
         options: >-
@@ -319,9 +325,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6.1.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           # Match backend/Dockerfile — runtime parity catches bugs
           # that only manifest on 3.14 (e.g. removed deprecated APIs).
@@ -425,7 +433,7 @@ jobs:
         # A failing shard's durations are still real measurements; only a
         # cancelled run (no session finish, no file) is skipped.
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-durations-shard-${{ matrix.shard }}
           path: backend/.test_durations
@@ -442,9 +450,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.0.2
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -545,9 +555,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.21.1
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           cache: true
@@ -605,9 +617,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.21.1
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           cache: true
@@ -629,6 +643,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Icons match their masters
         run: python3 assets/check_icons.py
       # A guard only ever run against correct assets proves nothing: this
@@ -647,6 +663,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Lint
@@ -697,6 +715,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install the compose version deploy/bootstrap-vm.sh pins
         run: scripts/install_vm_compose.sh
       - name: Render compose.prod.yml in local and external mode; any warning fails
@@ -740,7 +760,7 @@ jobs:
         # Stock postgres:16 doesn't ship the extension; CI without
         # this fails with "extension 'vector' is not available".
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.postgres }}
+        image: ${{ needs.compose-images.outputs.postgres }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -772,7 +792,7 @@ jobs:
 
       redis:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.redis }}
+        image: ${{ needs.compose-images.outputs.redis }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         ports:
           - 6379:6379
         options: >-
@@ -824,9 +844,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Backend
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           # Match backend/Dockerfile (3.14-slim).
           python-version: "3.14"
@@ -835,7 +857,7 @@ jobs:
 
       # Frontend toolchain set up alongside Python so the next two
       # install steps can run in parallel.
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.0.2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -968,7 +990,7 @@ jobs:
         run: pnpm build
 
       - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
@@ -1022,7 +1044,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Suffix with shard so the 4 parallel jobs don't collide on
           # the upload-artifact name — `upload-artifact` rejects
@@ -1035,7 +1057,7 @@ jobs:
 
       - name: Upload backend log on failure
         if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-log-shard-${{ matrix.shard }}
           path: /tmp/backend.log
@@ -1058,7 +1080,7 @@ jobs:
     services:
       postgres:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.postgres }}
+        image: ${{ needs.compose-images.outputs.postgres }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -1074,7 +1096,7 @@ jobs:
           --health-retries=5
       redis:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.redis }}
+        image: ${{ needs.compose-images.outputs.redis }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         ports:
           - 6379:6379
         options: >-
@@ -1110,14 +1132,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: backend/requirements-dev.lock
 
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.0.2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -1194,7 +1218,7 @@ jobs:
         run: pnpm build
 
       - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
@@ -1265,7 +1289,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report-service-e2e
           path: |
@@ -1299,7 +1323,7 @@ jobs:
     services:
       postgres:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.postgres }}
+        image: ${{ needs.compose-images.outputs.postgres }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -1315,7 +1339,7 @@ jobs:
           --health-retries=5
       redis:
         # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
-        image: ${{ needs.compose-images.outputs.redis }}
+        image: ${{ needs.compose-images.outputs.redis }} # zizmor: ignore[unpinned-images] -- compose_image_refs.sh refuses any ref not repo:tag@sha256:<digest>
         ports:
           - 6379:6379
         options: >-
@@ -1341,14 +1365,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: backend/requirements-dev.lock
 
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.0.2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -1416,7 +1442,7 @@ jobs:
         run: pnpm build
 
       - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
@@ -1461,7 +1487,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report-erp-e2e
           path: |
@@ -1511,8 +1537,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.0.2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -1551,7 +1579,7 @@ jobs:
         run: pnpm build
 
       - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
@@ -1581,7 +1609,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report-day-one-e2e
           path: |
