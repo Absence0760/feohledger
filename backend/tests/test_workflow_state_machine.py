@@ -84,6 +84,9 @@ def test_no_outgoing_edges_target_a_predecessor_other_than_explicit_resets():
         # the invoice back at draft for manual entry instead of calling the
         # model. Refused to humans by `POST /bulk/status`.
         (InvoiceStatus.pending, InvoiceStatus.new),
+        # Recalling an approval (decisions §374): only through
+        # `POST /{id}/recall-approval`, refused by `POST /bulk/status`.
+        (InvoiceStatus.approved, InvoiceStatus.ready_for_review),
     }
 
     # Build a notion of "linear progress" order. Anything that goes

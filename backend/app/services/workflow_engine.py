@@ -52,6 +52,10 @@ VALID_TRANSITIONS: dict[InvoiceStatus, set[InvoiceStatus]] = {
         InvoiceStatus.sending_to_erp,
         InvoiceStatus.payment_scheduled,
         InvoiceStatus.done,
+        # Recalling the approval (decisions §374): only through
+        # `POST /{id}/recall-approval` (`review.recall_refusal`: no live
+        # payment or card, no bill in the ERP). `POST /bulk/status` refuses it.
+        InvoiceStatus.ready_for_review,
     },
     InvoiceStatus.rejected: {InvoiceStatus.ready_for_review, InvoiceStatus.new},
     InvoiceStatus.sending_to_erp: {InvoiceStatus.sent_to_erp, InvoiceStatus.failed},
@@ -63,7 +67,14 @@ VALID_TRANSITIONS: dict[InvoiceStatus, set[InvoiceStatus]] = {
     InvoiceStatus.payment_scheduled: {InvoiceStatus.paid, InvoiceStatus.approved},
     InvoiceStatus.paid: {InvoiceStatus.done, InvoiceStatus.approved},
     InvoiceStatus.done: set(),  # terminal
-    InvoiceStatus.failed: {InvoiceStatus.pending, InvoiceStatus.sending_to_erp},
+    InvoiceStatus.failed: {
+        InvoiceStatus.pending,
+        InvoiceStatus.sending_to_erp,
+        # Recalling the approval of a failed ERP push (decisions §374) — the
+        # same door and gate as from `approved`; a never-approved `failed`
+        # extraction is refused there (`review.holds_recallable_approval`).
+        InvoiceStatus.ready_for_review,
+    },
 }
 
 # The step-type vocabulary lives in ONE module (services/workflow_step_types.py)

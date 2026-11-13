@@ -74,20 +74,51 @@ def test_groups_partition_the_statuses():
     assert set(IN_REVIEW_STATUSES) == pre - {S.rejected}
 
 
+#: The recall edge (decisions §374) takes an approval back to review; what
+#: lies behind it reaches money only through a fresh approval, so the walks
+#: from `approved` stop there.
+_BEFORE_APPROVAL = set(PRE_APPROVAL_STATUSES)
+
+
 def test_open_ap_is_what_approval_reaches_before_payment_or_close():
-    assert set(OPEN_AP_STATUSES) == _reachable(S.approved, stop={S.paid, S.done, S.failed})
+    assert set(OPEN_AP_STATUSES) == _reachable(
+        S.approved, stop={S.paid, S.done, S.failed, *_BEFORE_APPROVAL}
+    )
 
 
 def test_approved_or_beyond_is_what_approval_reaches():
-    assert set(APPROVED_OR_BEYOND_STATUSES) == _reachable(S.approved, stop={S.failed})
+    assert set(APPROVED_OR_BEYOND_STATUSES) == _reachable(
+        S.approved, stop={S.failed, *_BEFORE_APPROVAL}
+    )
 
 
 def test_approved_or_beyond_is_forward_closed():
-    """Once in the set, no edge leaves it except into `failed` — so the set can
-    never lose an invoice that is still on its way to being paid."""
+    """Once in the set, no edge leaves it except into `failed`, or the recall
+    of an approval back to review — so the set can never lose an invoice that
+    is still on its way to being paid. A recalled invoice is not: it meets
+    approval again (decisions §374)."""
     for status in APPROVED_OR_BEYOND_STATUSES:
         for nxt in VALID_TRANSITIONS[status]:
-            assert nxt in APPROVED_OR_BEYOND_STATUSES or nxt is S.failed, (status, nxt)
+            recall = status is S.approved and nxt is S.ready_for_review
+            assert nxt in APPROVED_OR_BEYOND_STATUSES or nxt is S.failed or recall, (status, nxt)
+
+
+def test_the_only_edges_back_before_approval_are_the_recalls():
+    """`approved` and `failed` reach `ready_for_review` only by the recall door
+    (`review.recall_refusal`), and `failed → pending` is the re-extraction
+    `/extract` refuses once an invoice was approved; no other approved-or-beyond
+    status has an edge into the pre-approval statuses."""
+    back = {
+        (status, nxt)
+        for status in (*APPROVED_OR_BEYOND_STATUSES, S.failed)
+        for nxt in VALID_TRANSITIONS[status]
+        if nxt in _BEFORE_APPROVAL
+    }
+    assert back == {
+        (S.approved, S.ready_for_review),
+        (S.failed, S.ready_for_review),
+        (S.failed, S.pending),
+    }
 
 
 def test_post_approval_locked_is_approved_or_beyond_minus_approved():

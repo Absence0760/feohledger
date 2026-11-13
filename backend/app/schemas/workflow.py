@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.api.pagination import PageMeta
 
@@ -386,6 +386,22 @@ class ApproveRequest(BaseModel):
 
 class RejectRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class RecallApprovalRequest(BaseModel):
+    """`POST /api/invoices/{id}/recall-approval`. The reason is required: it is
+    what the next approver reads, on the `invoice.approval_recalled` audit row,
+    about why signed-off figures came back (decisions §374)."""
+
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("A reason is required to recall an approval.")
+        return stripped
 
 
 # ---------- response schemas ----------

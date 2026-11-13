@@ -2908,6 +2908,25 @@ async def bulk_status_change(
                 continue
             await refresh_warnings(db, inv, org_settings=org.settings)
             updated += 1
+        elif target == DBInvoiceStatus.ready_for_review and inv.status in (
+            DBInvoiceStatus.approved,
+            DBInvoiceStatus.failed,
+        ):
+            # `approved` / `failed → ready_for_review` is a RECALL of the
+            # approval (decisions §374): one invoice at a time, with a reason,
+            # through `POST /{id}/recall-approval` and its claim / ERP gate
+            # (`review.recall_refusal`). A bare transition here would skip all
+            # of it, and the SoD stamp and chain reset with it.
+            skipped.append(
+                BulkStatusSkip(
+                    id=str(inv.id),
+                    reason=(
+                        "an approval is recalled one invoice at a time, with a reason: "
+                        "use Recall approval on the invoice"
+                    ),
+                )
+            )
+            continue
         else:
             if target == DBInvoiceStatus.ready_for_review:
                 # The `/complete` submit's own required-field check, so the bulk

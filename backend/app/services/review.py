@@ -41,6 +41,35 @@ APPROVAL_CFO_REQUIRED = "approval_cfo_required"
 #: never offer a decision on an invoice that is not in review.
 INVOICE_NOT_IN_REVIEW = "invoice_not_in_review"
 
+# ── Recalling an approval (decisions §374) ─────────────────────────────────
+
+#: `POST /api/invoices/{id}/recall-approval` on an invoice holding no approval
+#: it can take back: anything but `approved`, or a `failed` ERP push after an
+#: approval. ``params.status``. The clients hide the action on this code.
+INVOICE_NOT_RECALLABLE = "invoice_not_recallable"
+#: Refused because the ERP may already hold the invoice's bill: a confirmed
+#: push (``erp_document_id``, or an approved invoice a void walked back from
+#: ``posted_in_erp``), or a failed push that may have created one
+#: (``services/erp.possibly_posted``). A bill there can be paid there, and
+#: nothing in FeohLedger recalls it yet (``docs/followups.md``, void-erp).
+INVOICE_RECALL_IN_ERP = "invoice_recall_in_erp"
+#: Refused because one of our rails is already paying the invoice: a live
+#: payment (a staged, approved, exported or executed run) or a live virtual
+#: card, read by ``erp_export_gate.live_claims`` (decisions §309 / §357).
+#: ``params.claim`` is ``payment`` / ``virtual_card``.
+INVOICE_RECALL_CLAIMED = "invoice_recall_claimed"
+
+_RECALL_CLAIM_MESSAGES = {
+    "payment": (
+        "FeohLedger is already paying this invoice: it has a live payment. Cancel its "
+        "payment run or void the payment before recalling the approval."
+    ),
+    "virtual_card": (
+        "A virtual card has been issued to pay this invoice. Cancel the card before "
+        "recalling the approval."
+    ),
+}
+
 
 async def _fetch_invoice_bytes(invoice: Invoice) -> bytes | None:
     """Best-effort S3 fetch of the invoice file for RAG embedding.
@@ -823,6 +852,130 @@ async def reject_invoice(
         clear_chain_state(state_data)
         instance.state_data = state_data
 
+    return invoice
+
+
+def holds_recallable_approval(invoice: Invoice) -> bool:
+    """Whether ``invoice``'s status holds an approval a recall can take back:
+    `approved`, or `failed` once it was ever approved (an approved invoice's
+    failed ERP push — `models/invoice_status.financially_locked`'s second case).
+    A `failed` extraction was never approved; there is nothing to recall."""
+    from app.models.invoice_status import was_ever_approved
+
+    if invoice.status == InvoiceStatus.approved:
+        return True
+    return invoice.status == InvoiceStatus.failed and was_ever_approved(invoice)
+
+
+async def recall_refusal(db: AsyncSession, invoice: Invoice, *, actor) -> dict | None:
+    """What `POST /{id}/recall-approval` would answer ``actor`` for ``invoice``
+    right now — the coded refusal, or None. The ONE rule: the door raises from
+    it under the row lock, and ``GET /review-actions`` serves it as
+    ``recall_approval``, so neither client restates it (decisions §374).
+
+    In order:
+
+    1. the permission the approve and reject doors require (`invoice.approve`)
+       — taking an approval back is the approver's duty, not entry's;
+    2. :func:`holds_recallable_approval` (``invoice_not_recallable``);
+    3. the ERP may hold the bill (``invoice_recall_in_erp``): a confirmed push
+       left ``erp_document_id``, or the push's own record says a bill may exist
+       (``services/erp.possibly_posted`` — fail-closed: an attempt whose outcome
+       is unknown counts). Named before a claim because nothing in FeohLedger
+       clears it, so nobody cancels a run only to meet it next;
+    4. a live payment or virtual card (``invoice_recall_claimed``), read by
+       ``erp_export_gate.live_claims`` — the rails' own predicates, so "live"
+       reads here as it does for the run builder, the card mint, the ERP push
+       and closing. A payment run holds its invoices through exactly these
+       payment rows, so this is also "the invoice is in a payment run".
+
+    Call it on a row locked for update, as the door does: the run builder, the
+    card mint and the ERP push each lock the invoice too, so no claim or push
+    lands between this read and the transition.
+    """
+    from app.api.deps import holds_any_permission
+    from app.api.permissions import PERM_INVOICE_APPROVE
+    from app.api.refusals import role_not_permitted
+    from app.services.erp import possibly_posted
+    from app.services.erp_export_gate import live_claims
+
+    if not holds_any_permission(actor, {PERM_INVOICE_APPROVE}):
+        return role_not_permitted()
+    if not holds_recallable_approval(invoice):
+        return coded_refusal(
+            INVOICE_NOT_RECALLABLE,
+            "Only an approved invoice, or one whose ERP push failed after approval, "
+            "can have its approval recalled.",
+            status=invoice.status.value,
+        )
+    instance = await get_workflow_instance(db, invoice.id)
+    state = getattr(instance, "state_data", None) if instance is not None else None
+    if invoice.erp_document_id or possibly_posted(state):
+        return coded_refusal(
+            INVOICE_RECALL_IN_ERP,
+            "The ERP may already hold a bill for this invoice, and a bill there can be "
+            "paid there. Correct or void it in the ERP; its approval can't be recalled "
+            "from FeohLedger.",
+        )
+    claim = (await live_claims(db, [invoice.id])).get(invoice.id)
+    if claim is not None:
+        return coded_refusal(INVOICE_RECALL_CLAIMED, _RECALL_CLAIM_MESSAGES[claim], claim=claim)
+    return None
+
+
+async def recall_approval(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    actor_id: uuid.UUID,
+    reason: str,
+) -> Invoice:
+    """Take back ``invoice``'s approval and return it to `ready_for_review`
+    (decisions §374). The caller has locked the row and asked
+    :func:`recall_refusal`.
+
+    * **Nothing is erased.** The `invoice.approved` audit row and its signature
+      stay where they are; this writes its own append-only
+      `invoice.approval_recalled` row naming the approval it recalls
+      (``approved_by`` / ``approval_date``) and the reason. The row's
+      ``approved_by`` / ``approval_date`` keep naming that approval until a new
+      one overwrites them, so ``was_ever_approved`` stays true: an AP clerk's
+      entry window stays shut and the document is not re-read.
+    * **The recaller joins the segregation set.** Whoever reopens signed
+      figures disputes them, and is usually the one who corrects them, so a
+      second person signs the corrected version
+      (``approval_chain.add_implicated_actor``).
+    * **The chain re-runs from level 0.** The chain state is cleared, as a
+      rejection clears it, so the next approval re-routes the chain against the
+      invoice as it then stands and the max-amount and CFO gates are read
+      again — none of the recalled approval's levels carry over.
+    """
+    from app.services.approval_chain import add_implicated_actor, clear_chain_state
+
+    from_status = invoice.status.value
+    recalled = {
+        "approved_by": invoice.approved_by,
+        "approval_date": invoice.approval_date.isoformat() if invoice.approval_date else None,
+    }
+    add_implicated_actor(invoice, actor_id)
+    await transition_invoice(
+        db,
+        invoice,
+        InvoiceStatus.ready_for_review,
+        actor_id=actor_id,
+        action_name="invoice.approval_recalled",
+        details={"reason": reason, "recalled_from": from_status, "recalled_approval": recalled},
+    )
+
+    instance = await get_workflow_instance(db, invoice.id)
+    if instance is not None:
+        state_data = dict(instance.state_data or {})
+        state_data["recall_count"] = state_data.get("recall_count", 0) + 1
+        clear_chain_state(state_data)
+        instance.state_data = state_data
+        # A fresh review step for the approval queue, as a resubmit opens.
+        await create_workflow_step(db, instance, "review")
+        instance.current_step = 1  # review step index
     return invoice
 
 
