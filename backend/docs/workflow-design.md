@@ -46,7 +46,7 @@ pending ──────────> new                      (AI reading pau
 ready_for_review ─> approved                 (reviewer approves)
 ready_for_review ─> rejected                 (reviewer rejects)
 rejected ─────────> ready_for_review         (re-submitted after edits)
-rejected ─────────> new                      (requires full re-upload)
+rejected ─────────> new                      (requires full re-upload; never for an invoice ever approved, decisions §379)
 approved ─────────> sending_to_erp           (ERP submission initiated)
 approved ─────────> payment_scheduled        (direct schedule — no ERP step)
 approved ─────────> done                     (no further steps → terminal)
@@ -497,6 +497,24 @@ re-read would rewrite signed-off figures, and a once-approved invoice that then
 failed extraction would read as an approved push failure that `/retry-erp`
 re-pushes. The supplier-portal resubmit therefore skips the re-read for such an
 invoice.
+
+**A recalled invoice gets back to approval only through a person** (decisions
+§379). Draft is where the unattended exits start: `/complete`'s amount-floor
+auto-approve (`new → approved`, approved by "system (below threshold)") and its
+close with no approval step (`new → done`). So, for an invoice that was ever
+approved, the engine also refuses `→ new` (recall, reject, then
+`POST /bulk/status → new` used to land it there with the financial lock off)
+and `new → done`; from `rejected` the way back is resubmit, to
+`ready_for_review`. `/complete` reads the stamp before the floor would set its
+own: a row already at `new` with a stamp is submitted for review whatever the
+workflow says (`api/workflow.approval_applies`), and the floor never fires for
+it. Recalling or rejecting also starts a new **review round**
+(`rejection_count` + `recall_count`), and an Approve link in an email, Slack or
+Teams message from an earlier round stops working
+([email-approval.md](email-approval.md)). The exception agents that would fill
+an empty `vendor_id` from a purchase order escalate instead on such an invoice
+([exception-agents.md](exception-agents.md)), and a vendor merge never moves an
+approved invoice still to be paid ([vendor-management.md](vendor-management.md)).
 
 A bill already in the ERP is not recalled here: correct or void it in the ERP
 (the `void-erp` action is a product call tracked in `docs/followups.md`).

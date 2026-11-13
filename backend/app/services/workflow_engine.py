@@ -197,8 +197,21 @@ def validate_transition(current: InvoiceStatus, target: InvoiceStatus) -> None:
         )
 
 
+#: Why a once-approved invoice may not go back to draft (decisions §374, §379).
+ONCE_APPROVED_NOT_TO_DRAFT = (
+    "This invoice has already been approved, so it can't go back to draft. "
+    "Resubmit it for review instead."
+)
+#: Why a once-approved invoice may not be closed from draft without a fresh
+#: approval (§379). Reached only by a row written before that rule.
+ONCE_APPROVED_NOT_CLOSED_FROM_DRAFT = (
+    "This invoice has already been approved once, so it can't be closed without "
+    "being approved again. Submit it for review."
+)
+
+
 def _refuse_outside_the_recall(invoice: Invoice, target: InvoiceStatus, action_name: str) -> None:
-    """The two engine-level rules the recall's edges need (decisions §374).
+    """The engine-level rules the recall's edges need (decisions §374, §379).
 
     * :data:`RECALL_EDGES` are walked by the recall alone.
     * An invoice that was ever approved never re-enters ``pending``. Extraction
@@ -208,6 +221,19 @@ def _refuse_outside_the_recall(invoice: Invoice, target: InvoiceStatus, action_n
       reached `failed` through a re-read would be pushed, and then paid, on
       figures nobody approved. `/extract` already refused it; this holds it for
       `POST /bulk/status`, the portal resubmit and any future door.
+    * Nor does it re-enter ``new`` (§379). Draft is where the unattended exits
+      start: `/complete`'s amount-floor auto-approve (`new → approved`) and its
+      close with no approval step (`new → done`). Recall, reject, then
+      `POST /bulk/status → new` used to land a recalled invoice there, its
+      financial lock off; anyone outside the segregation set could re-point the
+      payee, and the floor then approved it as "system (below threshold)" with
+      nobody independent signing. From `rejected` the one way back is
+      `→ ready_for_review` (resubmit), where a person approves.
+    * And it never leaves ``new`` for ``done`` (§379): a row that reached draft
+      with a stamp before the rule above cannot be closed without a second
+      approval. (`new → approved` cannot be held here — every approval site sets
+      the stamp before its transition — so `/complete` reads the stamp before
+      the floor stamps it and sends such a row to review.)
     """
     if (invoice.status, target) in RECALL_EDGES and action_name != RECALL_ACTION:
         raise HTTPException(
@@ -217,12 +243,9 @@ def _refuse_outside_the_recall(invoice: Invoice, target: InvoiceStatus, action_n
                 "except by recalling the approval"
             ),
         )
-    # `was_ever_approved`'s reading, through getattr: unit tests drive the
-    # engine with bare namespaces that carry no approval stamp at all.
-    ever_approved = getattr(invoice, "approval_date", None) is not None or bool(
-        getattr(invoice, "approved_by", None)
-    )
-    if target == InvoiceStatus.pending and ever_approved:
+    if not ever_approved(invoice):
+        return
+    if target == InvoiceStatus.pending:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -230,6 +253,20 @@ def _refuse_outside_the_recall(invoice: Invoice, target: InvoiceStatus, action_n
                 "again. Recall its approval and correct it instead."
             ),
         )
+    if target == InvoiceStatus.new:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ONCE_APPROVED_NOT_TO_DRAFT)
+    if invoice.status == InvoiceStatus.new and target == InvoiceStatus.done:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=ONCE_APPROVED_NOT_CLOSED_FROM_DRAFT
+        )
+
+
+def ever_approved(invoice) -> bool:
+    """`models/invoice_status.was_ever_approved`, read through getattr: unit
+    tests drive the engine with bare namespaces that carry no approval stamp."""
+    return getattr(invoice, "approval_date", None) is not None or bool(
+        getattr(invoice, "approved_by", None)
+    )
 
 
 async def get_invoice_for_update(db: AsyncSession, invoice_id: uuid.UUID) -> Invoice:
