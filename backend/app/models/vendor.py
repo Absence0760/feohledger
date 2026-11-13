@@ -2,7 +2,17 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Index, Numeric, String, Text, text
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -58,7 +68,8 @@ class Vendor(Base, EntityMixin, TimestampMixin):
     #: The ERP company ``erp_vendor_id`` was linked under
     #: (``services/erp_link_realm``) — QuickBooks numbers vendors per company,
     #: so a link from another realm is never posted to. NULL: linked before
-    #: migration 0115.
+    #: migration 0115. The vendor's links in OTHER companies are kept in
+    #: ``vendor_erp_links`` (:class:`VendorErpLink`, migration 0125).
     erp_link_realm: Mapped[str | None] = mapped_column(Text)
 
     # 1099 / W-9 tax data. See backend/docs/tax-1099.md.
@@ -123,3 +134,40 @@ class Vendor(Base, EntityMixin, TimestampMixin):
     portal_users: Mapped[list["VendorUser"]] = relationship(  # noqa: F821
         back_populates="vendor", cascade="all, delete-orphan"
     )
+
+
+class VendorErpLink(Base, TimestampMixin):
+    """A vendor's link to an ERP company it is NOT currently linked under
+    (migration 0125, docs/decisions.md §356).
+
+    ``vendors.erp_vendor_id`` + ``erp_link_realm`` hold one link: the one made
+    in the company the vendor was last synced under. A sync under another
+    company used to drop it, so switching ERP (or QuickBooks sandbox ↔
+    production) and back lost every link the name rule could not re-derive.
+    Now the link that leaves the row is kept here under its realm, and the next
+    sync under that realm puts it back (``services/vendor_erp_links``).
+
+    At most one per ``(vendor_id, realm)``, and never for the realm the vendor
+    row itself holds: a sync under realm R first restores R's row from here, so
+    after it no link for R remains in this table. ``realm`` is always named —
+    a NULL-realm (pre-0115 or no-realm) link says nothing about which company
+    issued it, so it is never kept here. Nothing here is ever posted to
+    directly: the push resolves a vendor through
+    ``vendor_erp_links.vendor_erp_ids``, under the current realm only.
+    """
+
+    __tablename__ = "vendor_erp_links"
+    __table_args__ = (
+        UniqueConstraint("vendor_id", "realm", name="uq_vendor_erp_links_vendor_realm"),
+        Index("ix_vendor_erp_links_organization_id_realm", "organization_id", "realm"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    vendor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False
+    )
+    #: ``services/erp_link_realm.connection_realm`` of the connection the link
+    #: was made under. Never NULL (class docstring).
+    realm: Mapped[str] = mapped_column(Text, nullable=False)
+    erp_vendor_id: Mapped[str] = mapped_column(String(255), nullable=False)

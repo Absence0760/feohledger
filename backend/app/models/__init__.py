@@ -67,7 +67,7 @@ from app.models.supplier_chat import (
 )
 from app.models.tax_filing import Tax1099Filing
 from app.models.user import Role, User, UserRole
-from app.models.vendor import Vendor
+from app.models.vendor import Vendor, VendorErpLink
 from app.models.vendor_change_request import VendorChangeRequest
 from app.models.vendor_priors import VendorExtractionPrior
 from app.models.vendor_statement_recon import (
@@ -172,6 +172,7 @@ __all__ = [
     "Tax1099Filing",
     "Vendor",
     "VendorChangeRequest",
+    "VendorErpLink",
     "VendorExtractionPrior",
     "VendorStatementReconciliation",
     "VendorStatementReconLine",

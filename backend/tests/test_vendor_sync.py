@@ -22,6 +22,7 @@ _QUIET = {
     "deactivated": 0,
     "codes_cleared": 0,
     "realm_adopted": 0,
+    "restored": 0,
     "values_too_long": [],
     "names_shortened": [],
     "realm": None,

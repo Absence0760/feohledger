@@ -28,7 +28,7 @@ from sqlalchemy import func, select, text, update
 
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
-from app.models.vendor import Vendor
+from app.models.vendor import Vendor, VendorErpLink
 from app.models.workflow import AuditLog
 from app.services.erp_adapters.base import (
     ErpListingIncomplete,
@@ -803,6 +803,225 @@ async def test_a_vendor_pull_with_no_realm_leaves_named_company_links_alone(real
     assert squeaky.id != acme_id
     assert (squeaky.erp_vendor_id, squeaky.erp_link_realm) == ("57", None)
     assert (result["unlinked"], result["updated"], result["created"]) == ([], 0, 1)
+
+
+# ---------------------------------------------------------------------------
+# A link is kept for the company that issued it (decisions §356)
+# ---------------------------------------------------------------------------
+
+
+async def _kept(realdb) -> set[tuple[str, str, str]]:
+    """Every kept link as (vendor name, realm, erp id)."""
+    async with realdb.sessionmaker(TENANT)() as s:
+        rows = await s.execute(
+            select(Vendor.name, VendorErpLink.realm, VendorErpLink.erp_vendor_id).join(
+                Vendor, Vendor.id == VendorErpLink.vendor_id
+            )
+        )
+        return {tuple(r) for r in rows.all()}
+
+
+async def _changes(realdb, vendor_id) -> list[dict]:
+    async with realdb.sessionmaker(TENANT)() as s:
+        rows = await s.execute(
+            select(AuditLog)
+            .where(AuditLog.action == "vendor.synced_from_erp")
+            .where(AuditLog.entity_id == vendor_id)
+        )
+        return [r.details for r in rows.scalars().all()]
+
+
+async def _push_vendor_id(realdb, vendor_id, erp_config):
+    from app.services.erp import _resolve_erp_refs
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        refs = await _resolve_erp_refs(
+            s, _invoice(realdb.info(TENANT).org_id, vendor_id), [], erp_config
+        )
+    return refs.vendor_erp_id
+
+
+async def test_switching_erp_never_pushes_the_old_id_and_switching_back_restores_it(realdb):
+    """QuickBooks set Acme's "57". Under NetSuite the push refuses it (the
+    vendor is unlinked there) and a NetSuite sync links NetSuite's own id —
+    without losing QuickBooks'. Back on QuickBooks the push posts "57" again at
+    once, and the next sync puts it back on the row, keeping NetSuite's."""
+    acme_id = await _add(
+        realdb, Vendor, name="Acme", erp_vendor_id="57", erp_link_realm=PROD, source="erp_sync"
+    )
+
+    # Switched to NetSuite, before any sync: not linked there, so refused.
+    assert await _push_vendor_id(realdb, acme_id, NS_CFG) is None
+
+    result = await _vsync(realdb, [_vendor("NS-9", "Acme")], realm=NS)
+    acme = (await _vendors(realdb))["Acme"]
+    assert (acme.id, acme.erp_vendor_id, acme.erp_link_realm) == (acme_id, "NS-9", NS)
+    assert (result["unlinked"], result["created"], result["restored"]) == (["Acme"], 0, 0)
+    assert await _kept(realdb) == {("Acme", PROD, "57")}
+    assert await _push_vendor_id(realdb, acme_id, NS_CFG) == "NS-9"
+    # Reconnected to QuickBooks: its own link, at once, before any sync.
+    assert await _push_vendor_id(realdb, acme_id, PROD_CFG) == "57"
+    # Another QuickBooks company is neither.
+    assert await _push_vendor_id(realdb, acme_id, SANDBOX_CFG) is None
+
+    # Two "Acme" in QuickBooks now: the name rule alone could link neither.
+    result = await _vsync(realdb, [_vendor("57", "Acme"), _vendor("58", "Acme")], realm=PROD)
+    async with realdb.sessionmaker(TENANT)() as s:
+        acme = await s.get(Vendor, acme_id)
+    assert (acme.erp_vendor_id, acme.erp_link_realm) == ("57", PROD)
+    assert (result["restored"], result["unlinked"], result["conflicts"]) == (1, [], [])
+    assert await _kept(realdb) == {("Acme", NS, "NS-9")}
+    assert await _push_vendor_id(realdb, acme_id, NS_CFG) == "NS-9"
+
+    changes = {d["change"]: d for d in await _changes(realdb, acme_id)}
+    assert {c: d["erp_vendor_id"] for c, d in changes.items()} == {
+        "unlinked": "57",
+        "linked": "NS-9",
+        "restored": "57",
+    }
+    assert (changes["unlinked"]["from_realm"], changes["unlinked"]["kept"]) == (PROD, True)
+    assert (changes["restored"]["from_realm"], changes["restored"]["to_realm"]) == (NS, PROD)
+
+
+async def test_a_move_kept_by_evidence_keeps_the_old_companys_copy(realdb):
+    """A production company copied from the sandbox keeps Acme's "57" (§284's
+    evidence rule), and the sandbox's link is kept too, so a return there
+    restores it rather than re-judging it."""
+    acme_id = await _add(
+        realdb, Vendor, name="Acme", erp_vendor_id="57", erp_link_realm=SANDBOX, source="erp_sync"
+    )
+    await _vsync(realdb, [_vendor("57", "Acme")], realm=PROD)
+    async with realdb.sessionmaker(TENANT)() as s:
+        acme = await s.get(Vendor, acme_id)
+    assert (acme.erp_vendor_id, acme.erp_link_realm) == ("57", PROD)
+    assert await _kept(realdb) == {("Acme", SANDBOX, "57")}
+    (change,) = await _changes(realdb, acme_id)
+    assert (change["change"], change["kept"]) == ("realm_changed", True)
+
+
+async def test_a_link_with_no_realm_is_never_kept(realdb):
+    """A pre-0115 link names no company; filing it under one would be a guess
+    (§141). It is dropped exactly as before."""
+    acme_id = await _add(realdb, Vendor, name="Acme", erp_vendor_id="57", source="erp_sync")
+    result = await _vsync(realdb, [_vendor("57", "Squeaky Kleen Car Wash")], realm=PROD)
+    assert result["unlinked"] == ["Acme"]
+    assert await _kept(realdb) == set()
+    (change,) = await _changes(realdb, acme_id)
+    assert change["change"] == "unlinked" and "kept" not in change
+
+
+async def test_a_kept_link_another_vendor_now_holds_is_dropped_not_restored(realdb):
+    """Two payees must never claim one ERP supplier: a kept "57" whose id a
+    vendor already holds in that company is dropped and reported."""
+    acme_id = await _add(realdb, Vendor, name="Acme", source="erp_sync")
+    await _add(
+        realdb, Vendor, name="Beta", erp_vendor_id="57", erp_link_realm=PROD, source="erp_sync"
+    )
+    await _add(realdb, VendorErpLink, vendor_id=acme_id, realm=PROD, erp_vendor_id="57")
+
+    result = await _vsync(realdb, [_vendor("57", "Beta")], realm=PROD)
+    vendors = await _vendors(realdb)
+    assert vendors["Acme"].erp_vendor_id is None
+    assert (vendors["Beta"].erp_vendor_id, vendors["Beta"].erp_link_realm) == ("57", PROD)
+    assert (result["restored"], result["unlinked"]) == (0, ["Acme"])
+    assert await _kept(realdb) == set()
+    (change,) = await _changes(realdb, acme_id)
+    assert (change["change"], change["kept"]) == ("unlinked", False)
+
+
+async def test_two_kept_links_claiming_one_id_are_both_dropped(realdb):
+    """Which of two payees a kept "57" belongs to is a guess, so neither gets it."""
+    acme_id = await _add(realdb, Vendor, name="Acme", source="erp_sync")
+    beta_id = await _add(realdb, Vendor, name="Beta", source="erp_sync")
+    for vid in (acme_id, beta_id):
+        await _add(realdb, VendorErpLink, vendor_id=vid, realm=PROD, erp_vendor_id="57")
+
+    result = await _vsync(realdb, [_vendor("99", "Gamma")], realm=PROD)
+    vendors = await _vendors(realdb)
+    assert (vendors["Acme"].erp_vendor_id, vendors["Beta"].erp_vendor_id) == (None, None)
+    assert (result["restored"], sorted(result["unlinked"])) == (0, ["Acme", "Beta"])
+    assert await _kept(realdb) == set()
+    for vid in (acme_id, beta_id):
+        (change,) = await _changes(realdb, vid)
+        assert (change["change"], change["reason"]) == ("unlinked", "erp_id_taken")
+
+
+async def test_a_link_from_another_company_is_not_adopted_onto_an_id_held_here(realdb):
+    """Beta holds production "57". Acme's sandbox "57" matches production's
+    record by tax id, but adopting it would make two payees one supplier: it
+    is unlinked (and kept for the sandbox) instead."""
+    acme_id = await _add(
+        realdb,
+        Vendor,
+        name="Acme",
+        tax_id="12-3456789",
+        erp_vendor_id="57",
+        erp_link_realm=SANDBOX,
+        source="erp_sync",
+    )
+    await _add(
+        realdb, Vendor, name="Beta", erp_vendor_id="57", erp_link_realm=PROD, source="erp_sync"
+    )
+    result = await _vsync(realdb, [_vendor("57", "Beta", tax_id="12-3456789")], realm=PROD)
+    vendors = await _vendors(realdb)
+    assert vendors["Acme"].erp_vendor_id is None
+    assert (vendors["Beta"].erp_vendor_id, vendors["Beta"].erp_link_realm) == ("57", PROD)
+    assert result["unlinked"] == ["Acme"]
+    assert await _kept(realdb) == {("Acme", SANDBOX, "57")}
+    (change,) = await _changes(realdb, acme_id)
+    assert (change["change"], change["kept"]) == ("unlinked", True)
+
+
+async def test_a_restore_replaces_a_link_that_names_no_company(realdb):
+    """A no-realm (mock) sync linked Acme to a fixture id after its production
+    link was kept. Back on production, the kept link wins and the fixture link,
+    which names no company, is dropped and audited, not kept."""
+    acme_id = await _add(realdb, Vendor, name="Acme", erp_vendor_id="ERP-V001", source="erp_sync")
+    await _add(realdb, VendorErpLink, vendor_id=acme_id, realm=PROD, erp_vendor_id="57")
+
+    result = await _vsync(realdb, [_vendor("57", "Acme")], realm=PROD)
+    acme = (await _vendors(realdb))["Acme"]
+    assert (acme.erp_vendor_id, acme.erp_link_realm) == ("57", PROD)
+    assert (result["restored"], result["unlinked"]) == (1, [])
+    assert await _kept(realdb) == set()
+    changes = {d["change"]: d for d in await _changes(realdb, acme_id)}
+    assert changes["unlinked"]["erp_vendor_id"] == "ERP-V001"
+    assert changes["unlinked"]["from_realm"] is None and "kept" not in changes["unlinked"]
+    assert (changes["restored"]["from_realm"], changes["restored"]["to_realm"]) == (None, PROD)
+
+
+async def test_a_pull_with_no_realm_neither_keeps_nor_restores(realdb):
+    acme_id = await _add(realdb, Vendor, name="Acme", source="erp_sync")
+    await _add(realdb, VendorErpLink, vendor_id=acme_id, realm=PROD, erp_vendor_id="57")
+    result = await _vsync(realdb, [_vendor("ERP-V001", "Fixture Co")], realm=None)
+    assert result["restored"] == 0
+    assert await _kept(realdb) == {("Acme", PROD, "57")}
+    assert (await _vendors(realdb))["Acme"].erp_vendor_id is None
+
+
+async def test_a_deleted_vendor_takes_its_kept_links_with_it(realdb):
+    acme_id = await _add(realdb, Vendor, name="Acme", source="erp_sync")
+    await _add(realdb, VendorErpLink, vendor_id=acme_id, realm=PROD, erp_vendor_id="57")
+    async with realdb.sessionmaker(TENANT)() as s:
+        await s.execute(text("DELETE FROM vendors WHERE id = :id"), {"id": acme_id})
+        await s.commit()
+    assert await _kept(realdb) == set()
+
+
+async def test_vendor_endpoint_reports_restored_links(realdb, restore_settings):
+    await _set_erp(realdb, PROD_CFG)
+    acme_id = await _add(
+        realdb, Vendor, name="Acme", erp_vendor_id="NS-9", erp_link_realm=NS, source="erp_sync"
+    )
+    await _add(realdb, VendorErpLink, vendor_id=acme_id, realm=PROD, erp_vendor_id="57")
+    with _adapter(vendors=[VendorPayload(erp_vendor_id="57", name="Acme")]):
+        async with realdb.client(key=TENANT, role="ap_manager") as c:
+            resp = await c.post("/api/vendors/sync-erp")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert (body["restored"], body["unlinked"]) == (1, [])
+    assert "1 relinked (linked when this ERP company was connected before)" in body["message"]
+    assert await _kept(realdb) == {("Acme", NS, "NS-9")}
 
 
 def _failing_adapter():

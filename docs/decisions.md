@@ -16313,3 +16313,79 @@ migration across every tenant for a label. Also rejected: listing each
 shortened vendor name in the toast, since each one is up to 255 characters; the
 vendor line counts them and the response carries the names.
 
+
+## 356. A vendor keeps its ERP link for every company it was linked in; only the current company's is ever pushed (migration 0125, 2026-11-12)
+
+**What the follow-up said, and what was left of it.** "A vendor holds one
+`erp_vendor_id`, whichever ERP set it; a tenant that switches ERP posts the old
+ERP's ids." It predates §284. Since §284 a link records its realm,
+`"<adapter>:<company>"`, and the push and the PO sync resolve only links of the
+current realm, so the posting half was already closed: a push to ERP B refuses
+an id ERP A set as `vendor_not_linked`, before any HTTP call. (The "name or code
+stored where the ERP gave no id" half was closed with it: every adapter's
+`erp_vendor_id` is the ERP's own record key, and an id-less record is skipped.)
+What remained was the single slot. The first sync under B re-judged A's link by
+evidence and dropped it, so a tenant that went back to A, or flipped QuickBooks
+sandbox → production → sandbox, re-derived its links from names. Every vendor
+whose name was ambiguous in the pull came back unlinked, and every invoice to
+it was refused until someone linked it by hand.
+
+**The shape: the row keeps the current company's link, and `vendor_erp_links`
+keeps the rest** (`services/vendor_erp_links`). The table holds one row per
+`(vendor_id, realm)` (unique, FK `ON DELETE CASCADE`), never for the realm the
+vendor row itself holds and never for a NULL realm. `services/vendor_sync` is
+its only writer:
+
+- a link leaving the row under a named realm, dropped or moved by §284's
+  evidence rule, is first filed under that realm (`change: unlinked` /
+  `realm_changed` carries `kept: true`);
+- a sync under realm R begins by putting R's kept links back on their rows
+  (`change: restored`, counted `restored`, "N relinked" in the response). Each
+  row's own named link is filed in turn, so after the sync no link for R is
+  kept. A restored link is not re-judged, because a same-company link never
+  is; it left the row only because a sync ran elsewhere;
+- the push and the PO sync read a vendor's link through one accessor,
+  `vendor_erp_ids`: the row's link when it is live in the current realm (the
+  §284 rule, legacy trust included), else the link kept for exactly that realm.
+  So a tenant back on A posts A's ids at once, before any sync.
+
+Two guards keep a restore from making two payees one ERP supplier. A kept id
+that another vendor already holds in R, or that two kept links claim, is
+dropped and reported `unlinked` (`kept: false`). And the re-judge pass no
+longer adopts a link whose id a vendor already holds in R; before, that left
+two rows on one id and the next lookup's `scalar_one_or_none` aborted the sync.
+
+**Rejected: the link table as the only store** (dropping
+`vendors.erp_vendor_id` / `erp_link_realm`). It is the more normalised design,
+but it changes what the public `erp_vendor_id` means (relative to a realm the
+serializer would have to resolve per request), touches the frontend and mobile
+mirrors, and rewrites the realm rules §284 and §287 pinned with live QuickBooks
+evidence, all to store the same facts. The row's pair is what a person sees and
+what the adapters' tests and the PO sync were written against. The kept table
+adds only what was being lost. **Rejected: keyed JSON (`{realm: id}`) on
+`vendors`.** It allows no uniqueness per realm and no index for "which vendor
+holds id X here", and the restore guard needs both. **Rejected: keying by ERP
+type.** One adapter covers many companies, and QuickBooks reuses ids across
+them (§284). The key has to be the realm, not the ERP.
+
+**Existing rows: no backfill (§141).** Every link a vendor holds today is still
+on its row with its realm, and stays there, so nothing live is lost. The links
+earlier syncs dropped are named only in `vendor.synced_from_erp` audit rows.
+Those record that a link was dropped at some moment, not that the id still names
+the supplier in that company. Filing them as live links would post on a reading
+of history nobody re-checked. A NULL-realm link (pre-0115, or made by a no-realm
+sync) is never kept either. Nothing recorded which company set it, and the org's
+ERP at migration time is not evidence of that: §284 already declined to adopt
+NULL links on a snapshot except for the push's narrow legacy trust, and a kept
+link would be restored without any re-judging. A NULL link a named sync cannot
+vouch for is dropped, as before.
+
+**Not changed.** A vendor merge moves no ERP link: the duplicate keeps its row
+link and its kept links, as it always kept `erp_vendor_id`, so the canonical
+vendor can be unlinked in a realm only the duplicate was linked in. A sync with no
+realm (`mock`, or an OAuth ERP with no consent) neither keeps nor restores,
+because it speaks for no company (§287). GL accounts still hold one link per
+row. They are matched by code, which survives a switch, so a return to A
+re-links them by code, except for rows a person confirmed (`erp_link_confirmed_at`)
+or left waiting with candidates. Both residuals are tracked in
+`docs/followups.md`.

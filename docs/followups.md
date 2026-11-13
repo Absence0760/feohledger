@@ -1499,12 +1499,26 @@ scope (§260) — do not fold them into any of these.
       (`no_external_tenant`). **Durable fix:** a company picker after consent,
       stored with the grant. **Trigger:** the first customer whose consent
       covers more than one company.
-- [ ] **(c) A vendor holds one `erp_vendor_id`, whichever ERP set it.** A tenant
-      that switches ERP posts the old ERP's ids, and the new ERP rejects them,
-      and some syncs stored a name or code where the ERP gave no id. **Durable
-      fix:** key the id by ERP (a `vendor_erp_links` table, or `{erp_type: id}`)
-      and resolve by the active ERP. **Trigger:** the first tenant that
-      switches ERP.
+- [ ] **(c) A GL account holds one ERP link, whichever company set it.**
+      Vendors keep a link per company (`vendor_erp_links`, decisions §356);
+      `gl_accounts` still holds one, and a chart sync under another company
+      drops it. A return to the first company re-links most rows by code, but
+      not a link a person confirmed (`erp_link_confirmed_at`) or a row waiting
+      with `erp_link_candidates`: those need deciding again. **Durable fix:**
+      keep the link that leaves a chart row under its realm, as
+      `vendor_erp_links` does, and restore it in rule 0 before re-judging.
+      **Trigger:** the first tenant that switches ERP company and back with
+      confirmed links, or the next change to rule 0 in `services/gl_account_sync`.
+- [ ] **(c) A vendor merge leaves the ERP links on the retired duplicate.**
+      `services/vendor_merge` moves no `erp_vendor_id`, and since decisions
+      §356 no kept `vendor_erp_links` row either. When the duplicate held the
+      ERP link, the canonical vendor's invoices are refused `vendor_not_linked`
+      while the id sits on the inactive duplicate, and a later sync under a
+      kept realm restores that link onto the duplicate too. **Durable fix:**
+      the merge moves each realm's link (row and kept) to the canonical vendor
+      where the canonical has none in that realm, and reports any realm where
+      both hold different ids instead of choosing one. **Trigger:** the next
+      change to `vendor_merge`, or a merged vendor refused `vendor_not_linked`.
 - [ ] **(c) A bill paid in any ERP but QuickBooks never reaches FeohLedger.**
       Status sync-back (§295) covers adapters with `supports_status_sync`,
       which today means QuickBooks only. For every other ERP a push still closes

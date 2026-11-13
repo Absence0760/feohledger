@@ -1495,6 +1495,36 @@ vendor linked to one becomes `inactive` (never the reverse). Business Central
 and Merge.dev vendors with no `id` are skipped, never keyed by the vendor No.,
 `remote_id` or name.
 
+**A vendor keeps its link for every company it was linked in** (decisions
+§356, `services/vendor_erp_links`, migration 0125). The row's `erp_vendor_id` +
+`erp_link_realm` is the link in the company the vendor was last synced under.
+When a sync under another company drops that link, or moves it by the evidence
+rule above, the link is first filed in `vendor_erp_links` under its own realm
+(the audit row's `kept: true`). The next sync under that realm puts it back on
+the row before anything else runs (`change: restored`, `restored` in the
+response, "N relinked" in its message), and files the row's own named link in
+turn. So switching ERP, or QuickBooks sandbox to production, and back restores
+the links the tenant had, including vendors whose names the pull makes
+ambiguous. Three rules hold:
+
+- **The push never uses an id another ERP or company set.** `services/erp`
+  and the PO sync resolve a vendor through `vendor_erp_ids`: the row's link
+  when it is live in the current realm, else the link kept for exactly that
+  realm. A vendor with neither is unlinked there, and the push refuses it
+  `vendor_not_linked` before any HTTP call. A tenant back on a company it used
+  before posts that company's ids at once, before any sync.
+- **No payee shares an ERP supplier.** A kept id that another vendor already
+  holds in that company, or that two kept links claim, is dropped
+  (`unlinked`, `kept: false`) instead of restored. A link from another company
+  is not adopted onto an id a vendor already holds here.
+- **Only a named realm is kept.** A NULL-realm link (pre-0115, or made by a
+  no-realm sync) names no company, so it is dropped as before. A no-realm sync
+  neither keeps nor restores anything. No link was backfilled: the ones earlier
+  syncs dropped appear only in audit rows, which are history, not live links.
+
+A vendor merge moves no ERP link: the duplicate keeps its own, kept links
+included. GL accounts still hold one link per row (`docs/followups.md`).
+
 **Merge.dev suppliers are Contacts.** Merge's Accounting API has no `/vendors`
 path and no Vendor model; the adapter lists `GET /contacts?is_supplier=true`
 with `expand=addresses,phone_numbers`, following `next` cursors, and any failed

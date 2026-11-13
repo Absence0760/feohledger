@@ -19,13 +19,10 @@ from app.services.erp_adapters import (
 from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, NOT_CONNECTED
 from app.services.erp_adapters.deep_links import erp_document_url
 from app.services.erp_export_gate import erp_export_refusal
-from app.services.erp_link_realm import (
-    connection_realm,
-    legacy_links_trusted,
-    live_link_clause,
-)
+from app.services.erp_link_realm import connection_realm, legacy_links_trusted
 from app.services.erp_status_sync import status_sync_active
 from app.services.gl_chart import resolve_erp_account_ids
+from app.services.vendor_erp_links import vendor_erp_ids
 from app.services.workflow_engine import (
     complete_workflow,
     get_invoice_for_update,
@@ -152,14 +149,22 @@ async def _resolve_erp_refs(
     trust_legacy = legacy_links_trusted(erp_config, realm)
     vendor_erp_id: str | None = None
     if invoice.vendor_id is not None:
-        stmt = select(Vendor.erp_vendor_id).where(
-            Vendor.id == invoice.vendor_id,
-            Vendor.organization_id == invoice.organization_id,
-        )
-        live = live_link_clause(Vendor.erp_link_realm, realm, trust_legacy=trust_legacy)
-        if live is not None:
-            stmt = stmt.where(live)
-        vendor_erp_id = (await db.execute(stmt)).scalar_one_or_none() or None
+        # The vendor's link in THIS company (services/vendor_erp_links): the
+        # row's when it was made here, else one kept from an earlier connection
+        # here. Never a link another ERP or company set (§284, §356).
+        vendor = (
+            await db.execute(
+                select(Vendor.id, Vendor.erp_vendor_id, Vendor.erp_link_realm).where(
+                    Vendor.id == invoice.vendor_id,
+                    Vendor.organization_id == invoice.organization_id,
+                )
+            )
+        ).one_or_none()
+        if vendor is not None:
+            ids = await vendor_erp_ids(
+                db, invoice.organization_id, [vendor], realm=realm, trust_legacy=trust_legacy
+            )
+            vendor_erp_id = ids.get(vendor.id)
     codes = [invoice.gl_account, *(li.gl_account for li in line_items)]
     account_erp_ids = await resolve_erp_account_ids(
         db,

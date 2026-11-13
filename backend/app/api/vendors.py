@@ -1873,6 +1873,10 @@ async def sync_vendors_from_erp_endpoint(
         )
     if result["unlinked"]:
         message += f"; {len(result['unlinked'])} unlinked (linked under another ERP company)"
+    if result["restored"]:
+        message += (
+            f"; {result['restored']} relinked (linked when this ERP company was connected before)"
+        )
     return {"success": True, "message": message, **result}
 
 

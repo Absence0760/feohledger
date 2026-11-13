@@ -649,7 +649,9 @@ async def test_an_attempt_that_left_nothing_gives_its_date_slot_back():
 # ---------------------------------------------------------------------------
 
 
-def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None, open_exceptions=()):
+def _line_items_db(
+    rows, *, vendor_erp_id="ERP-V-1", vendor_realm=None, accounts=None, open_exceptions=()
+):
     """A fake AsyncSession answering the four reads `_call_erp` makes, routed
     by the table each statement selects from:
 
@@ -661,7 +663,9 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None, open_excepti
       `test_erp_export_blocking_exceptions.py`);
     * `_fetch_line_items` — the given rows, in the order given (mirrors the
       real query's ORDER BY);
-    * the vendor link — `vendor_erp_id` (None models an unlinked vendor);
+    * the vendor link — `vendor_erp_id` (None models an unlinked vendor),
+      linked under `vendor_realm` (None: a pre-0115 link, which counts only
+      where the config names no company — pass the config's realm otherwise);
     * the chart — `accounts`, `(code, entity_id, erp_account_id[,
       erp_link_realm])` rows, which `gl_chart.resolve_erp_account_ids` folds
       (its SQL filter is proven against a real tenant in the realdb tests
@@ -699,7 +703,18 @@ def _line_items_db(rows, *, vendor_erp_id="ERP-V-1", accounts=None, open_excepti
             return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: rows))
         if "FROM vendors" in sql:
             db.calls.append("vendors")
-            return SimpleNamespace(scalar_one_or_none=lambda: vendor_erp_id)
+            # The vendor's row link, which `vendor_erp_links.vendor_erp_ids`
+            # folds under the config's realm.
+            return SimpleNamespace(
+                one_or_none=lambda: SimpleNamespace(
+                    id=uuid.uuid4(), erp_vendor_id=vendor_erp_id, erp_link_realm=vendor_realm
+                )
+            )
+        if "FROM vendor_erp_links" in sql:
+            # No link kept from an earlier connection (§356; proven against a
+            # real tenant in `test_erp_link_realm.py`).
+            db.calls.append("vendor_erp_links")
+            return SimpleNamespace(all=lambda: [])
         if "FROM gl_accounts" in sql:
             db.calls.append("gl_accounts")
             return SimpleNamespace(
@@ -1536,6 +1551,8 @@ def _merge_send(status: int):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("status", "attempts"), [(400, 1), (422, 1), (503, 3), (429, 3)])
 async def test_send_to_erp_retries_only_an_answer_that_can_change(status, attempts):
+    from app.services.erp_link_realm import connection_realm
+
     inv, recorder, cfg, resp = _merge_send(status)
     sleep_mock = AsyncMock()
     with (
@@ -1546,7 +1563,9 @@ async def test_send_to_erp_retries_only_an_answer_that_can_change(status, attemp
     ):
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=resp)
-        await send_to_erp_internal(_line_items_db([]), inv, erp_config=cfg)
+        # Linked in the Merge.dev realm the config names, so the push posts.
+        db = _line_items_db([], vendor_realm=connection_realm(cfg))
+        await send_to_erp_internal(db, inv, erp_config=cfg)
 
     assert inv.status == InvoiceStatus.failed
     assert client.post.await_count == attempts

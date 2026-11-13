@@ -292,6 +292,7 @@ CLOSURE_ALLOWED: dict[str, str] = {
         "Bank-detail changes that were approved block on their own."
     ),
     "gl_accounts": "The chart of accounts, typically pulled from an ERP that stays its record.",
+    "vendor_erp_links": "A vendor's links to ERP companies it is not synced under now.",
     "entities": "The workspace's own legal-entity list.",
     "expense_policies": "Configuration, not a transaction.",
     "budgets": "Planning figures; spend against them is computed from guarded records.",
