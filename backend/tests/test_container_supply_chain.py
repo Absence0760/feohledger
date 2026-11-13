@@ -381,7 +381,8 @@ def test_workflow_actions_are_pinned_by_full_sha() -> None:
     A tag can be moved to other code after review; a sha cannot. The trailing
     tag comment is what Dependabot's `github-actions` ecosystem reads to bump
     the pin, and what a reviewer reads to know which release it is. Local
-    actions (`./…`) are part of this repo and exempt.
+    actions and reusable workflows (`$/…`, GitHub's self-repository form, and
+    the older `./…`) are part of this repo at the running commit and exempt.
     """
     assert WORKFLOWS, "no .github/workflows found — every workflow guard would pass vacuously"
     bad = [
@@ -389,7 +390,7 @@ def test_workflow_actions_are_pinned_by_full_sha() -> None:
         for workflow in WORKFLOWS
         for line in workflow.read_text().splitlines()
         if (match := _USES.match(line))
-        and not match["ref"].startswith("./")
+        and not match["ref"].startswith(("$/", "./"))
         and not (_PINNED_ACTION.match(match["ref"]) and re.match(r"\s+#\s*\S", match["rest"]))
     ]
     assert not bad, f"actions not pinned to a full sha with a `# <tag>` comment: {bad}"

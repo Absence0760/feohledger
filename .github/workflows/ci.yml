@@ -1642,7 +1642,7 @@ jobs:
     name: Web bundle budget
     needs: [changes]
     if: needs.changes.outputs.bundle == 'true'
-    uses: ./.github/workflows/web-bundle-budget.yml
+    uses: $/.github/workflows/web-bundle-budget.yml
 
   # CodeQL (Python, TypeScript/JavaScript, GitHub Actions) and Trivy on the
   # backend image, from security.yml, a reusable workflow. Runs on EVERY pull
@@ -1666,7 +1666,7 @@ jobs:
       contents: read
       security-events: write
       actions: read
-    uses: ./.github/workflows/security.yml
+    uses: $/.github/workflows/security.yml
 
   # Single required status check for branch protection. `main` requires
   # only this context; it fans in on every job above via `needs` +

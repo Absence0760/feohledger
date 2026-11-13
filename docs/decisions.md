@@ -16737,3 +16737,34 @@ coded 422 before falling back to `message`.
 reader's language is the policy engine's change, tracked in
 `docs/followups.md`. The role dependency's 403 stays a plain string, as
 everywhere (`role_not_permitted` is only its verdict form).
+
+## 365. The two same-repository workflow calls use `$/`, and the zizmor baseline is empty (§350 follow-up, 2026-11-13)
+
+**Decision.** `ci.yml` calls `security.yml` and `web-bundle-budget.yml` as
+`$/.github/workflows/…` instead of `./.github/workflows/…`. That clears the two
+low `self-repository` findings §350 left, so zizmor 1.31.1 (regular persona)
+reports **no findings at any severity**: offline on this tree, and online on
+`origin/main` in CI run 43081175409, whose only results were those two. The
+workflows changed since §350 (the Flutter `flutter-version-file` pin in
+`ci.yml` and `mobile-release.yml`, and `audit.yml`'s tracking-issue scoping)
+add no `uses:` change and no finding. `$/` resolves to this repository at the
+running commit, the same code `./` named, without depending on the checked-out
+workspace. GitHub made it GA on github.com on 2026-07-30 and recommends it.
+It needs runner 2.336.0 or newer, and every job here runs on a GitHub-hosted
+runner.
+
+§350 deferred this on the belief that actionlint, run by the CI workflow lint,
+rejected `$/`. Nothing in this repository runs actionlint, so nothing blocked
+it. The two tools that do read these references accept `$/`. Scorecard 5.6.0,
+the release bundled in the pinned scorecard-action v2.5.0, counts `$/` as a
+local reference for Pinned-Dependencies. The repo's own guards now take both
+forms: `test_workflow_actions_are_pinned_by_full_sha` exempts `$/` like `./`,
+and `test_workflow_token_permissions` follows a `$/` call into the called
+workflow. Without that second change it would have stopped following
+`security.yml` and reported `ci.yml`'s `security-events: write` as unused.
+
+**Rejected:** an inline `# zizmor: ignore[self-repository]`. That audit has a
+fix, and §350's rule is to fix rather than waive wherever a fix exists. Also
+rejected: keeping `./` until a GHES mirror needs it. `$/` is unavailable on
+GHES, but this repository runs only on github.com.
+
