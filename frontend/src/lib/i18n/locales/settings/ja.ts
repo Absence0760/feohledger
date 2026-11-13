@@ -344,7 +344,7 @@ export const messages = {
 	'org.erp.oauth.pick.loading': '{erp} の会社を読み込んでいます…',
 	'org.erp.oauth.pick.noneSelected': '先に会社を選択してください。',
 	'org.erp.oauth.pick.expired': 'この接続は会社の選択を待っていません。期限切れ、使用済み、または別のブラウザーで開始された接続です。もう一度接続して会社を選択してください。',
-	'org.erp.oauth.pick.unknownCompany': 'その会社はこの接続で提示されていないため、何も接続されませんでした。もう一度接続して会社を選択してください。',
+	'org.erp.oauth.pick.unknownCompany': 'その会社はこの接続で提示されていないため、何も接続されませんでした。一覧から会社を選択してください。',
 	'org.erp.oauth.connectFromPlatform': '{erp} への接続は、カスタムドメインではなく FeohLedger のアドレスから開始する必要があります。そちらでこのページを開き、もう一度接続してください:',
 	'org.erp.oauth.connectFromPlatformLink': 'FeohLedger のアドレスで「組織 → ERP」を開く',
 	'org.erp.oauth.connectUnavailableHere': 'このアドレスからは {erp} に接続できません。API をアプリと同じドメインで提供するよう、FeohLedger の運用担当者に依頼してください。',

@@ -345,7 +345,7 @@ export const messages = {
 	'org.erp.oauth.pick.loading': 'Carregando suas empresas do {erp}…',
 	'org.erp.oauth.pick.noneSelected': 'Escolha uma empresa primeiro.',
 	'org.erp.oauth.pick.expired': 'Esta conexão não está mais aguardando a escolha de uma empresa: expirou, já foi usada ou foi iniciada em outro navegador. Conecte novamente para escolher uma.',
-	'org.erp.oauth.pick.unknownCompany': 'Essa empresa não foi oferecida por esta conexão, então nada foi conectado. Conecte novamente para escolher uma.',
+	'org.erp.oauth.pick.unknownCompany': 'Essa empresa não foi oferecida por esta conexão, então nada foi conectado. Escolha uma da lista.',
 	'org.erp.oauth.connectFromPlatform': 'A conexão com {erp} precisa começar pelo seu endereço do FeohLedger, não por um domínio personalizado. Abra esta página lá e conecte novamente:',
 	'org.erp.oauth.connectFromPlatformLink': 'Abrir Organização → ERP no seu endereço do FeohLedger',
 	'org.erp.oauth.connectUnavailableHere': 'A conexão com {erp} não está disponível neste endereço. Peça ao operador do FeohLedger para servir a API no mesmo domínio do aplicativo.',
