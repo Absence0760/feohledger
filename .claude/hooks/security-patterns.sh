@@ -163,11 +163,13 @@ while IFS= read -r m; do
 done < <(hits 'datetime\.utcnow\(\)')
 
 # ----- RULE: jwt.decode outside the central decoder -----------------------
-# Why: `app.api.deps.decode_token` pins `algorithms=["HS256"]` and turns
-# JWTError into a 401. A direct `jwt.decode` call elsewhere is liable
-# to skip those guards — or worse, accept `algorithms=["HS256","none"]`.
+# Why: `app.utils.jwt_hs256.decode` pins `algorithms=["HS256"]` and checks
+# the time claims; `app.api.deps.decode_token` turns its InvalidTokenError
+# into a 401. A direct `jwt.decode` call elsewhere is liable to skip those
+# guards — or worse, accept `algorithms=["HS256","none"]`. sso.py verifies
+# IdP ID tokens (asymmetric, JWKS) and is the one other allowed caller.
 # Bug class: anyone shortcutting around the decoder.
-if [[ "$FILE" != *"app/api/deps.py" && "$FILE" != *"app/services/mfa.py" && "$FILE" != *"app/services/sso.py" ]]; then
+if [[ "$FILE" != *"app/utils/jwt_hs256.py" && "$FILE" != *"app/services/sso.py" ]]; then
   while IFS= read -r m; do
     ln="${m%%:*}"
     register "bypass-decode-token" "$ln" \

@@ -95,9 +95,12 @@ isolation this project relies on. Find both classes of bug in one pass.
      to cover the body AND be scoped to that tenant's secret — see
      `/audit-webhooks`.
 
-5. **JWT decode discipline.** `app/api/deps.decode_token` is the
-   single chokepoint that enforces `algorithms=["HS256"]` and turns
-   `JWTError` into 401. Any other call site that does `jwt.decode(...)`
+5. **JWT decode discipline.** `app/utils/jwt_hs256.decode` is the
+   single chokepoint that enforces `algorithms=["HS256"]` (joserfc) and
+   raises one `InvalidTokenError`, which `app/api/deps.decode_token` turns
+   into a 401 and the MFA decoders into a `ValueError`. `services/sso.py`
+   (IdP ID tokens, asymmetric algorithms only) is the one other allowed
+   `jwt.decode`. Any other call site that does `jwt.decode(...)`
    inline (especially with a permissive `algorithms=` argument) is a
    finding. `get_tenant` is allowed to call `decode_token` for the
    cross-tenant guard; nothing else should reimplement it.

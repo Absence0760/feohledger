@@ -932,20 +932,15 @@ async def test_an_existing_row_cannot_be_changed_while_the_closure_runs(realdb, 
 async def test_a_token_without_a_workspace_claim_cannot_close_another_workspace(realdb, trial):
     """`get_tenant` skips a token with no `org` claim; the route checks the
     account's own workspace itself."""
-    from jose import jwt
+    from app.utils import jwt_hs256
 
-    from app.api.deps import ALGORITHM
-    from app.config import settings as app_settings
-
-    token = jwt.encode(
+    token = jwt_hs256.encode(
         {
             "sub": str(realdb.info("a").users["admin"]),
             "typ": "user",
             "jti": str(uuid.uuid4()),
             "exp": datetime.now(UTC) + timedelta(minutes=5),
         },
-        app_settings.secret_key,
-        algorithm=ALGORITHM,
     )
     async with realdb.client(key="t", role=None) as c:
         c.headers["Authorization"] = f"Bearer {token}"

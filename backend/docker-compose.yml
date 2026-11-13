@@ -19,7 +19,7 @@ services:
     # is safe — the image is binary-compatible with the same data directory.
     # The `-pg16` suffix is what holds the Postgres major: Dependabot only
     # proposes tags of the same shape, and a major is a data-directory upgrade.
-    image: pgvector/pgvector:0.8.7-pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+    image: pgvector/pgvector:0.8.7-pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -36,7 +36,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7.4.12-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+    image: redis:7.4.12-alpine@sha256:c5d34a98396a4775e223c74e929162c35c5a2182901ba26b50ade939941ce14b
     ports:
       - "6379:6379"
     healthcheck:
@@ -79,7 +79,7 @@ services:
   # (feohledger-app) and two test users (demo@acme.com, newhire@acme.com),
   # both password `demo`.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41
     profiles: ["idp"]
     command: ["start-dev", "--import-realm"]
     environment:
@@ -109,7 +109,7 @@ services:
   # up with `pnpm idp:up`, then `pnpm scim:seed` sets the matching token on the
   # acme tenant. Full walkthrough: ../../docs/local-sso-keycloak.md § Authentik.
   authentik-postgres:
-    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16.15-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
     profiles: ["idp"]
     environment:
       POSTGRES_USER: authentik
@@ -124,7 +124,7 @@ services:
       retries: 10
 
   authentik-redis:
-    image: redis:7.4.12-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+    image: redis:7.4.12-alpine@sha256:c5d34a98396a4775e223c74e929162c35c5a2182901ba26b50ade939941ce14b
     profiles: ["idp"]
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     healthcheck:
@@ -240,7 +240,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:0.40.13@sha256:b2f0122c476bc9fe7ce679d8bb4bd555351e25e2554eefb156f61cb0a89cf429
+    image: ollama/ollama:0.40.15@sha256:0e59999e0e8f9fd4e704bd788a89b7e4cad399367fb1365f8c102ac662288761
     profiles: ["ai"]
     ports:
       - "11435:11434"
@@ -315,7 +315,7 @@ services:
   # instead of the real internet — view rendered HTML at http://localhost:8025.
   # Opt-in under the `mail` profile (`pnpm mail:up`). Captures only; never relays.
   mailpit:
-    image: axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+    image: axllent/mailpit:v1.33.0@sha256:9b3a463be15354c0f0eba91697d80e3e0d8a5623ef0e627cacc836bc17fd5231
     profiles: ["mail"]
     ports:
       - "1025:1025"   # SMTP — FEOH_SMTP_PORT

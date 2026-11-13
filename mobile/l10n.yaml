@@ -13,3 +13,14 @@ output-localization-file: app_localizations.dart
 output-class: AppLocalizations
 output-dir: lib/l10n/gen
 nullable-getter: false
+# Flutter 3.50's gen-l10n template still imports `flutter_localizations` and
+# lists its legacy GlobalMaterialLocalizations / GlobalCupertinoLocalizations
+# delegates in `AppLocalizations.localizationsDelegates`, both deprecated in
+# favour of `material_ui` / `cupertino_ui` (flutter/flutter#196475; the fix,
+# #194500, is an unmerged draft). No option selects the new delegates, and
+# the file is regenerated on every `flutter pub get`, so it can't be edited.
+# This header silences that one diagnostic in the generated lib/l10n/gen/ files only;
+# hand-written code is analyzed in full. The app does NOT use that list: it
+# uses `appLocalizationsDelegates` (lib/l10n/app_localizations_delegates.dart).
+# Remove this line once gen-l10n emits the material_ui delegates.
+header: "// ignore_for_file: deprecated_member_use"

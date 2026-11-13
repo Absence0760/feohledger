@@ -62,7 +62,7 @@ name: Dependabot lockfile sync
 #                         and nothing else: no install, no resolver, no script
 #                         from the PR head ever executes here.
 #
-# Every input this workflow trusts (the actor, the head ref, the head SHA, the
+# Every input this workflow trusts (the PR author, the head ref, the head SHA, the
 # head repo) comes from the event payload — read from the API, not from any
 # file a PR could write.
 #
@@ -132,6 +132,7 @@ name: Dependabot lockfile sync
 # job, collapses the split into the pwn-request this is written to avoid.
 
 on:
+  # zizmor: ignore[dangerous-triggers] -- the push job needs a write token without a PAT (see the header); the resolver jobs check out the PR head read-only, with no credentials and no secret, and the write job runs only git and cp.
   pull_request_target:
     branches: [main]
     # Only the manifests whose locks this workflow owns. A github-actions,
@@ -163,12 +164,15 @@ env:
 jobs:
   frontend:
     name: Regenerate pnpm lockfile
-    # Dependabot-authored PRs only, and only same-repo branches. Dependabot
+    # Dependabot-authored PRs only, and only same-repo branches. The author
+    # is `pull_request.user.login`, not `github.actor`: the actor names
+    # whoever caused this one event, so it is not who opened the PR (the
+    # spoofable check zizmor's bot-conditions names). Dependabot
     # opens its PRs from branches in this repo, so a fork head here would mean
     # something other than what this workflow is for — and the push job could
     # not write to it anyway.
     if: >-
-      github.actor == 'dependabot[bot]'
+      github.event.pull_request.user.login == 'dependabot[bot]'
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -191,7 +195,7 @@ jobs:
         # version is declared; passing a version here is how four different
         # pnpm versions ended up writing one lockfile. See frontend/CLAUDE.md
         # § The lockfile.
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -322,7 +326,7 @@ jobs:
   backend:
     name: Regenerate pip locks
     if: >-
-      github.actor == 'dependabot[bot]'
+      github.event.pull_request.user.login == 'dependabot[bot]'
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -397,7 +401,7 @@ jobs:
     # "a bad lockfile gets committed anyway".
     if: >-
       !cancelled()
-      && github.actor == 'dependabot[bot]'
+      && github.event.pull_request.user.login == 'dependabot[bot]'
       && github.event.pull_request.head.repo.full_name == github.repository
       && (needs.frontend.result == 'success' || needs.backend.result == 'success')
     runs-on: ubuntu-latest

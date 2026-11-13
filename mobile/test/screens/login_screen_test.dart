@@ -1,10 +1,11 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/login_screen.dart';
 import 'package:feohledger_mobile/widgets/brand_mark.dart';
@@ -12,7 +13,7 @@ import 'package:feohledger_mobile/widgets/brand_mark.dart';
 /// Wraps the screen in a localized MaterialApp (defaults to `en`) so
 /// `AppLocalizations.of(context)` resolves and the English assertions hold.
 Widget _host(Widget home) => MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: home,
     );

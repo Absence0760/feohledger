@@ -564,12 +564,7 @@ cryptography==50.0.2 \
     #   backend (pyproject.toml)
     #   joserfc
     #   pyopenssl
-    #   python-jose
     #   webauthn
-ecdsa==0.19.2 \
-    --hash=sha256:62635b0ac1ca2e027f82122b5b81cb706edc38cd91c63dda28e4f3455a2bf930 \
-    --hash=sha256:840f5dc5e375c68f36c1a7a5b9caad28f95daa65185c9253c0c08dd952bb7399
-    # via python-jose
 fastapi==0.162.0 \
     --hash=sha256:3785963de305dd09912426cb81f2d230fce98ab3521cdfe97265c8d14983128c \
     --hash=sha256:6a22c1e2e6e32e0633ee7e170f00009a29b8228b16feb219ee42f32fd8d88a8f
@@ -1251,8 +1246,6 @@ pyasn1==0.6.5 \
     # via
     #   backend (pyproject.toml)
     #   pyasn1-modules
-    #   python-jose
-    #   rsa
     #   webauthn
 pyasn1-modules==0.4.2 \
     --hash=sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a \
@@ -1448,10 +1441,6 @@ python-dotenv==1.2.4 \
     #   backend (pyproject.toml)
     #   pydantic-settings
     #   uvicorn
-python-jose==3.5.0 \
-    --hash=sha256:abd1202f23d34dfad2c3d28cb8617b90acf34132c7afd60abd0b0b7d3cb55771 \
-    --hash=sha256:fb4eaa44dbeb1c26dcc69e4bd7ec54a1cb8dd64d3b4d81ef08d90ff453f2b01b
-    # via backend (pyproject.toml)
 python-multipart==0.0.32 \
     --hash=sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e \
     --hash=sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23
@@ -1550,10 +1539,6 @@ reportlab==5.1.0 \
     --hash=sha256:59fdbaec5efe437095ad1d7292ec9a271c8ca2d3ec75e889c6e61400929b90df \
     --hash=sha256:6878200464527e87672d19e9f7cfc6bb890e3a6931e74ac6a1a8d1754aa55671
     # via backend (pyproject.toml)
-rsa==4.9.1 \
-    --hash=sha256:68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762 \
-    --hash=sha256:e7bdbfdb5497da4c07dfd35530e1a902659db6ff241e39d9953cad06ebd0ae75
-    # via python-jose
 s3transfer==0.19.2 \
     --hash=sha256:ba0309fd86be3c27dbf78cdd813c13c5e1df16e5874b99d2535ebbdfb9892993 \
     --hash=sha256:d8168eccca828cbb2cd573675333f3bddd254313a9c42494b84c76b539e8ba25
@@ -1659,9 +1644,7 @@ simplejson==4.1.1 \
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
-    # via
-    #   ecdsa
-    #   python-dateutil
+    # via python-dateutil
 snapshot-restore-py==1.0.0 \
     --hash=sha256:38f99e696793790f54658e71c68c7a8a40cea877c81232b5052383b1301aceba \
     --hash=sha256:4d27f82fb6f09968f422501e9c3c2dea48a46cd19dc798eb7d6cbc57523c8004

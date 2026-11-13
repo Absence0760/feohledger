@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/invoice_detail_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
@@ -19,7 +20,7 @@ import '../support/role_permissions.dart';
 /// Wraps the screen in a MaterialApp carrying the localization delegates so
 /// `AppLocalizations.of(context)` resolves (defaults to English).
 Widget _localized() => MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: const InvoiceDetailScreen(invoiceId: '1'),
     );
@@ -1099,7 +1100,7 @@ void main() {
       final navigator = GlobalKey<NavigatorState>();
       await tester.pumpWidget(MaterialApp(
         navigatorKey: navigator,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: appLocalizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: const Scaffold(body: Text('list')),
       ));

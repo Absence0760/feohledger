@@ -10,7 +10,8 @@ the place to check before raising either.
 | Node | **24** (Active LTS, EOL 2028-04-30) | `node-version:` on every `setup-node` step in `.github/workflows/` — `ci.yml` (×4), `sso-e2e`, `web-bundle-budget`, `compliance-drift`, `vm-deploy`, `audit` |
 | pnpm | **10.12.4** | `packageManager` in the root **and** `frontend/package.json`; no workflow passes a `version:` input |
 | Python | **3.12+** | `backend/pyproject.toml` |
-| Dart | **^3.11.4** | `environment.sdk` in `mobile/pubspec.yaml` (the Flutter 3.41+ floor in the root `CLAUDE.md` is not declared in the pubspec) |
+| Flutter | **3.50.0** | `environment.flutter` in `mobile/pubspec.yaml`, the one source: every `subosito/flutter-action` step in `ci.yml` (×2) and `mobile-release.yml` (×2) reads it through `flutter-version-file`. Pub enforces only its lower bound, so a newer local SDK still resolves |
+| Dart | **^3.14.0** | `environment.sdk` in `mobile/pubspec.yaml` (Flutter 3.50.0 ships Dart 3.14.0) |
 
 There is no `.nvmrc` and no `engines` block in either `package.json`, so the
 workflow pins are the whole story for CI — **plus** the production frontend

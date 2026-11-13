@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The line that says a rendered rollup is only PARTLY converted: some of the
 /// rows behind it had no exchange rate into the reporting currency and were
