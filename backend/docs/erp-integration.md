@@ -360,6 +360,13 @@ Decisions §295; the phase-by-phase account is
   a bill QuickBooks paid, part-paid or deleted. The tenant is found through the
   control-plane realm index (`uq_organizations_erp_oauth_company`, migration
   0117), which also makes "one tenant per QuickBooks company" a database rule.
+  A tenant the sweep would skip (`status_sync_now_refusal`: status sync off,
+  a connection that needs reconnecting) is skipped by the webhook too, before
+  any QuickBooks read, so with status sync off a delivery never acts on an
+  invoice the push closed at `done` (decisions §392, the rule Xero's webhook
+  keeps). The dedup store unreachable is our failure, a bodyless 503; any
+  event claim the delivery took before the failure is released first, so
+  Intuit's redelivery is not deduped away.
 - **How a bill's payments are found.** A Bill names each BillPayment applied
   to it in its `LinkedTxn`, typed by how it was paid: `BillPaymentCheck` (a
   bank/cheque payment, which is what Pay Bills from a bank account records) or

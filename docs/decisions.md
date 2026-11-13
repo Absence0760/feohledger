@@ -19290,6 +19290,23 @@ server verdict was chosen over showing the button everywhere and letting the
 panel (the operator's flag, the ERP's capability) or already sees there (the
 reconnect state), §382's reasoning for the bank-file panel.
 
+**The QuickBooks webhook keeps both rules too (amended, round 8).** Two of
+the Xero rules above were new, and `POST /api/erp/webhook/quickbooks` lagged
+them. Now `erp_status_sync.claim_qbo_events` releases the claims it already
+made and re-raises when the dedup store fails partway through a delivery
+(the route's 503 dispatches nothing, so a kept claim would dedupe Intuit's
+redelivery away), and `process_qbo_event` skips a tenant
+`status_sync_now_refusal` refuses before any QuickBooks read (with status
+sync off a push closes the invoice at `done`, and `apply_bill_report` would
+otherwise open an `erp_reconciliation` on it for a bill deleted there). The
+rule is called, not restated: the adapter's own `supports_status_sync` check
+in the handler went with it. QuickBooks' answers are unchanged: a silent 204
+for every rejection, since Intuit runs no handshake. Tests:
+`tests/test_qbo_webhook.py` (a mid-delivery failure releasing only its own
+claims, every refusal skipped for bill and bill-payment events, and on real
+rows a `done` invoice left untouched with status sync off beside the same
+delivery reaching it with sync on).
+
 **Not verified live.** That paying a bill in Xero raises an `INVOICE` UPDATE
 for it (a payment has no category of its own), that `eventDateUtc` repeats
 exactly on a retry, that every delivery carries `tenantType`, and the exact

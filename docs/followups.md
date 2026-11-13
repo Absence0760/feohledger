@@ -1382,20 +1382,6 @@ scope (§260) — do not fold them into any of these.
       cash outside us, with a recorded-shape fixture (§318). **Trigger:** the
       next change to the QuickBooks status reader, or the first such
       mismatch seen live.
-- [ ] **(c) The QuickBooks webhook lags two rules the Xero one keeps (§392).**
-      `erp_status_sync.claim_qbo_events` claims a delivery's events one by
-      one, so a dedup store failing on the second leaves the first claimed
-      while the route answers 503: Intuit's redelivery is then deduped away
-      and that change waits for the CDC sweep. And `process_qbo_event` does
-      not ask `status_sync_now_refusal`, so with status sync off (or a
-      connection needing reconnect) a delivery still reads the bill and
-      `apply_bill_report` acts on a `done` invoice, which the sweep never
-      does. **Durable fix:** release the claims made before a failure and
-      re-raise (as `erp_xero_webhook.claim_xero_events` does), and skip a
-      tenant `status_sync_now_refusal` refuses, each with its test in
-      `tests/test_qbo_webhook.py`. **Trigger:** the next change to
-      `erp_status_sync.py`'s QuickBooks webhook path (left alone in round 8
-      while the QuickBooks lane held the file).
 - [ ] **(c) A Xero connection made before `accounting.payments` reads every
       payable bill on every pass.** Its `Payments` change listing answers
       401/403, which the sweep reads as an incomplete listing and falls back
