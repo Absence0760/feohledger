@@ -180,6 +180,7 @@ CASES = [
     # reject, and a custom role from which `invoice.approve` was stripped must
     # not be able to reject through the back door. Same permission as approve.
     ("/api/invoices/{invoice_id}/reject", "POST", _INVOICE_APPROVE),
+    ("/api/invoices/{invoice_id}/recall-approval", "POST", _INVOICE_APPROVE),
     # --- payment.execute: the routes that actually move money, or that decide
     # an already-moved payment's fate in AP's favour. These are the reason the
     # SoD layer exists at all, so they are pinned individually rather than left
