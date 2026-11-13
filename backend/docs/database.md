@@ -142,6 +142,10 @@ decimal comparison rather than binary drift.
 #### Extraction priors
 - `vendor_extraction_priors` — per-vendor correction cache. Unique on `(vendor_id, field_name)`. Populated when reviewers correct fields during approval; applied to low-confidence extractions for the same vendor.
 
+#### Vendors
+- `vendors` — supplier master. `erp_vendor_id` + `erp_link_realm` are its ERP link in the company it was last synced under (decisions §284)
+- `vendor_erp_links` — its links in every other named ERP company (migration 0125): one per `(vendor_id, realm)`, filed by the vendor sync when a link leaves the row and restored by the next sync under that realm; the push reads a link only for the current realm (`services/vendor_erp_links`, decisions §356, `erp-integration.md` § GL accounts and vendors are linked by the ERP's unique key)
+
 #### Procurement (for 3-way matching)
 - `purchase_orders` — PO header (vendor, total, **currency**, status). `currency` is nullable with no default (migration 0099): the code the PO's source knew, NULL when none said — see `docs/decisions.md` §197
 - `po_line_items` — PO lines
@@ -223,6 +227,7 @@ Migrations may target either the control plane or tenant DBs — never both. Eac
 | 0123     | Tenant  | `purchase_orders` | Adds `purchase_orders.total_unverifiable_reason` varchar(40) — set by the ERP PO sync when the ERP still has the PO but the adapter could not price it exactly; the PO match refuses to compare against the row while it is set. No backfill (decisions §323). |
 | 0121     | Tenant  | `exceptions` | Adds `exceptions.erp_report` jsonb — what the ERP reported, as data, on the reconciliation rows the ERP paths open (the payment it reported and could not be recorded, with the refusal code). No backfill (decisions §319). |
 | 0124     | Tenant  | `payments`   | Adds `payments.dispatch_attempted_at` timestamptz, the in-doubt dispatch marker committed before every dispatch attempt and cleared when its outcome is recorded; backfills it on `pending` payments of `executing` runs, the rows a crashed pass leaves (`payments.md` § A dispatch attempt is marked, durably, before it starts). |
+| 0125     | Tenant  | `vendors`    | Creates `vendor_erp_links` — a vendor's ERP link in each company it is not currently synced under (`vendor_id` FK `ON DELETE CASCADE`, `realm` text NOT NULL, `erp_vendor_id` varchar(255); UNIQUE `(vendor_id, realm)`, index `(organization_id, realm)`). No backfill (decisions §356). |
 
 > Migration 0022 may need renumbering or a merge revision at integration time — sibling features built on parallel branches may also claim `0022` (all branch off `0021_scim_bearer_hash`).
 
@@ -564,6 +569,7 @@ gate fails if a model is added without being classified.
    - `InvoiceLineItem` — invoice_id, item_code, description, quantity, unit_price, total, gl_account
    - `InvoiceExtractionResult` — invoice_id, method, confidence, raw_result (JSONB)
    - `Vendor` — name, code, tax_id, status (active/unverified/inactive/rejected), source (manual/erp_sync/ai_extracted)
+   - `VendorErpLink` — a vendor's ERP link in a company it is not currently synced under, one per (vendor, realm); restored by the next sync under that realm (migration 0125, decisions §356)
    - `PurchaseOrder` — po_number, vendor_id, total, currency (nullable, no default — migration 0099), status
    - `POLineItem` — po_id, description, quantity, unit_price, total, catalog_item_id + sku (item identity, migration 0111 — `sku` is a snapshot, never re-joined; decisions §273)
    - `GoodsReceipt` — gr_number, po_id, received_date, status, source, recorded_by_user_id, idempotency_key

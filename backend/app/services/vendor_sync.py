@@ -16,6 +16,15 @@ overwrite its name. A link from another realm — or from before realms were
 recorded — is kept only when the pulled record with that id is recognisably the
 same supplier (same name, or the same tax id); otherwise it is dropped, audited
 (``change: "unlinked"``), and the record is matched afresh like any other.
+
+**A link that leaves the row is kept for its own company** (docs/decisions.md
+§356, ``services/vendor_erp_links``). Moved or dropped, a link made under a
+named company is filed in ``vendor_erp_links`` under that realm, and the next
+sync under that realm restores it before anything else runs (``change:
+"restored"``), keeping the link it displaces in turn. So a tenant that switches
+ERP, or QuickBooks sandbox to production, and back gets the links it had rather
+than whatever the name rule can re-derive. A NULL-realm link names no company
+and is never kept.
 Between two NAMED companies that name or tax id must also be unique in the
 pull: one another record shares is not evidence that this colliding id is the
 same supplier (a pre-0115 link, overwhelmingly into the same company, keeps
@@ -42,9 +51,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.vendor import Vendor
+from app.models.vendor import Vendor, VendorErpLink
 from app.services.audit_dispatch import dispatch_audit
 from app.services.erp_record_names import fit_name
+from app.services.vendor_erp_links import keep_link
 from app.services.vendor_screening import screen_best_effort
 from app.services.vendor_tax_id import rekey_tax_id
 
@@ -127,7 +137,7 @@ async def sync_vendors_from_erp(
 
     Returns summary: {created, updated, unchanged: int, conflicts: list of
     {"name", "reason", "erp_vendor_ids"}, unlinked: names whose link this run
-    dropped, deactivated / codes_cleared / realm_adopted: int,
+    dropped, deactivated / codes_cleared / realm_adopted / restored: int,
     values_too_long: {"name", "erp_vendor_id", "fields"} per record with a
     field too long to store (:data:`_BOUNDED_FIELDS`; field NAMES only),
     names_shortened: {"name", "erp_vendor_id"} per record whose name did not
@@ -177,6 +187,11 @@ async def sync_vendors_from_erp(
         # An empty pull proves nothing (module docstring): the pass below would
         # read every link's absence from it as "another company's vendor".
         return _summary(realm=realm)
+    # -- links kept from an earlier connection to this company --------------
+    restored = 0
+    if realm is not None:
+        restored = await _restore_kept_links(db, organization_id, realm, audited, unlinked)
+
     linked = (
         (
             await db.execute(
@@ -189,6 +204,9 @@ async def sync_vendors_from_erp(
         .scalars()
         .all()
     )
+    # The ids vendors already hold in this company: a link judged in from
+    # another company may not make a second vendor claim one of them.
+    held = {v.erp_vendor_id for v in linked if realm is not None and v.erp_link_realm == realm}
     for vendor in linked:
         if vendor.erp_link_realm == realm or realm is None:
             # Same company, or a pull that names none and so cannot judge a
@@ -196,26 +214,38 @@ async def sync_vendors_from_erp(
             continue
         record = by_id.get(vendor.erp_vendor_id)
         unique_only = vendor.erp_link_realm is not None
-        if record is not None and _same_vendor(
-            vendor, record, evidence_counts if unique_only else None
+        if (
+            record is not None
+            and vendor.erp_vendor_id not in held
+            and _same_vendor(vendor, record, evidence_counts if unique_only else None)
         ):
             if vendor.erp_link_realm is None:
                 realm_adopted += 1
             else:
+                # Kept under the old company too, so a return there restores it.
+                await keep_link(db, vendor)
                 audited.append(
                     (
                         vendor,
                         "realm_changed",
                         vendor.erp_vendor_id,
-                        {"from_realm": vendor.erp_link_realm, "to_realm": realm},
+                        {"from_realm": vendor.erp_link_realm, "to_realm": realm, "kept": True},
                     )
                 )
             vendor.erp_link_realm = realm
+            held.add(vendor.erp_vendor_id)
             continue
         # Another company's id, or one this pull cannot vouch for: never
-        # matched by it, never posted to (the push already refuses it).
+        # matched by it, never posted to (the push already refuses it). A link
+        # from a named company is kept for when that company is connected again.
+        kept = await keep_link(db, vendor)
         audited.append(
-            (vendor, "unlinked", vendor.erp_vendor_id, {"from_realm": vendor.erp_link_realm})
+            (
+                vendor,
+                "unlinked",
+                vendor.erp_vendor_id,
+                {"from_realm": vendor.erp_link_realm, **({"kept": True} if kept else {})},
+            )
         )
         unlinked.append(vendor.name)
         vendor.erp_vendor_id = None
@@ -409,6 +439,7 @@ async def sync_vendors_from_erp(
         deactivated=deactivated,
         codes_cleared=codes_cleared,
         realm_adopted=realm_adopted,
+        restored=restored,
         values_too_long=too_long,
         names_shortened=[
             {"name": erp_v["name"], "erp_vendor_id": erp_id}
@@ -416,6 +447,113 @@ async def sync_vendors_from_erp(
             if (erp_id := str(erp_v.get("erp_vendor_id") or "")) in shortened
         ],
     )
+
+
+async def _restore_kept_links(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    realm: str,
+    audited: list,
+    unlinked: list[str],
+) -> int:
+    """Put back every link kept for ``realm`` (``services/vendor_erp_links``)
+    onto its vendor's row, keeping whatever link the row held under its own
+    company in turn. Returns how many were restored; after this no link for
+    ``realm`` remains kept.
+
+    A kept link was made in this company and left the row only because a sync
+    ran under another one, so it is exactly as good as a link that never left:
+    it is restored without re-judging, as a same-company link is never
+    re-judged. Two exceptions, each dropped and reported ``unlinked``: an id
+    another vendor already holds here, or one two kept links claim — either
+    would make two payees one ERP supplier. A NULL-realm link the row holds
+    (only a no-realm sync makes one once a link has been kept) is dropped for
+    the restored one: it names no company.
+    """
+    kept = (
+        (
+            await db.execute(
+                select(VendorErpLink)
+                .where(
+                    VendorErpLink.organization_id == organization_id,
+                    VendorErpLink.realm == realm,
+                )
+                .order_by(VendorErpLink.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not kept:
+        return 0
+    held = set(
+        (
+            await db.execute(
+                select(Vendor.erp_vendor_id).where(
+                    Vendor.organization_id == organization_id,
+                    Vendor.erp_link_realm == realm,
+                    Vendor.erp_vendor_id.is_not(None),
+                )
+            )
+        ).scalars()
+    )
+    claims = Counter(link.erp_vendor_id for link in kept)
+    # By subquery, not an id list: the kept set grows with the vendor master,
+    # and a bind list past the driver's parameter limit would abort the sync.
+    vendors = {
+        v.id: v
+        for v in (
+            await db.execute(
+                select(Vendor).where(
+                    Vendor.id.in_(
+                        select(VendorErpLink.vendor_id).where(
+                            VendorErpLink.organization_id == organization_id,
+                            VendorErpLink.realm == realm,
+                        )
+                    )
+                )
+            )
+        ).scalars()
+    }
+    restored = 0
+    for link in kept:
+        vendor = vendors[link.vendor_id]
+        erp_id = link.erp_vendor_id
+        await db.delete(link)
+        if vendor.erp_link_realm == realm:
+            # The row already holds this company's link; it wins.
+            continue
+        if erp_id in held or claims[erp_id] > 1:
+            audited.append(
+                (
+                    vendor,
+                    "unlinked",
+                    erp_id,
+                    {"from_realm": realm, "kept": False, "reason": "erp_id_taken"},
+                )
+            )
+            if not vendor.erp_vendor_id:
+                # Listed only when the vendor is left with no link at all.
+                unlinked.append(vendor.name)
+            continue
+        previous = vendor.erp_link_realm
+        if vendor.erp_vendor_id:
+            if not await keep_link(db, vendor):
+                audited.append((vendor, "unlinked", vendor.erp_vendor_id, {"from_realm": previous}))
+        audited.append(
+            (
+                vendor,
+                "restored",
+                erp_id,
+                {"from_realm": previous, "to_realm": realm},
+            )
+        )
+        vendor.erp_vendor_id = erp_id
+        vendor.erp_link_realm = realm
+        held.add(erp_id)
+        restored += 1
+    await db.flush()
+    return restored
 
 
 def _fit_names(erp_vendors: list[dict]) -> tuple[list[dict], set[str]]:
@@ -457,6 +595,7 @@ def _summary(
     deactivated: int = 0,
     codes_cleared: int = 0,
     realm_adopted: int = 0,
+    restored: int = 0,
     values_too_long: list[dict] | None = None,
     names_shortened: list[dict] | None = None,
 ) -> dict:
@@ -469,6 +608,7 @@ def _summary(
         "deactivated": deactivated,
         "codes_cleared": codes_cleared,
         "realm_adopted": realm_adopted,
+        "restored": restored,
         "values_too_long": values_too_long or [],
         "names_shortened": names_shortened or [],
         "realm": realm,
@@ -521,8 +661,10 @@ async def _audit_synced(
     ``extra`` says when that cleared a legacy ``code`` or deactivated it),
     ``linked`` (a manually-created vendor adopted by the ERP id, which can also
     promote it out of ``unverified``), ``unlinked`` (a link from another ERP
-    company dropped; ``erp_vendor_id`` is the id it held) and ``realm_changed``
-    (the same supplier found under the same id in the new company). ``extra``
+    company dropped; ``erp_vendor_id`` is the id it held, and ``kept`` says it
+    was filed in ``vendor_erp_links`` for that company), ``realm_changed`` (the
+    same supplier found under the same id in the new company) and ``restored``
+    (a link kept from an earlier connection to this company put back). ``extra``
     carries the realms involved, which name ERP companies, not people.
 
     PII-free: the vendor's name and code — the same two fields the

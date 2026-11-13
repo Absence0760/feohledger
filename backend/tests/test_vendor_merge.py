@@ -585,6 +585,13 @@ _VENDOR_FK_NOT_PLAIN_REASSIGNED = {
     "vendor_extraction_priors": (
         "unique (vendor_id, field_name) — merged specially, not plain-reassigned"
     ),
+    # A duplicate's links to ERP companies it left stay with it, exactly as its
+    # own `vendors.erp_vendor_id` does (a merge moves no ERP link), and the
+    # table is unique on (vendor_id, realm), so a blind UPDATE could collide.
+    "vendor_erp_links": (
+        "the duplicate's ERP links stay with it, like vendors.erp_vendor_id; "
+        "unique (vendor_id, realm)"
+    ),
 }
 
 
