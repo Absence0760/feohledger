@@ -411,6 +411,15 @@ async def test_bill_report_reads_the_recorded_bill_as_it_was_paid(scenario):
         assert report.external_payment_ids == ()
     if fixture.get("correlation_id"):
         assert report.correlation_id == fixture["correlation_id"].lower()
+    # The cash QuickBooks shows is stated only for a bill paid wholly in cash
+    # by a person (decisions §393): then it is the whole bill, in the bill's
+    # own currency. Never for a credit, a part-payment, a void or our own.
+    bill = _body(fixture, f"bill/{fixture['bill_id']}")["Bill"]
+    if state is ErpBillState.paid and outside and not by_credit:
+        assert report.paid_amount == Decimal(str(bill["TotalAmt"]))
+        assert report.paid_currency == bill["CurrencyRef"]["value"].upper()
+    else:
+        assert report.paid_amount is None
 
 
 async def test_bill_report_reads_a_deleted_bill_as_deleted():
@@ -501,7 +510,10 @@ BILL_READS = {
     "VendorRef.value",
     "MetaData.LastUpdatedTime",
 }
+#: ``CurrencyRef.value`` on a payment is read beside its bill's, so a payment
+#: stating another currency is never recorded as the bill's cash (§393).
 PAYMENT_READS = {
+    "CurrencyRef.value",
     "Id",
     "SyncToken",
     "TotalAmt",

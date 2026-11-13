@@ -493,8 +493,8 @@ class ErpBillReport:
     settled_by_credit: bool = False
     #: True when a payment FeohLedger wrote back (``post_payment``) is applied
     #: to the bill now, as the ERP lists it. Set only by an adapter that can
-    #: tell (Xero: a payment carrying our marker); False = not stated, which
-    #: is how QuickBooks reports today.
+    #: tell (Xero and QuickBooks: a live payment carrying our marker); False =
+    #: not stated.
     our_payment_applied: bool = False
     #: How much was taken off the bill beyond FeohLedger's own write-backs
     #: (``total - due - ours``), exact, when the adapter can state it (Xero).
@@ -504,12 +504,15 @@ class ErpBillReport:
     reduced_outside_amount: Decimal | None = None
     #: The cash the ERP shows a person applied to the bill outside FeohLedger,
     #: exact, when the adapter can state it (Xero: the sum of the bill's own
-    #: payments that are not ours). Only for a bill paid in full in cash
-    #: (``paid``, ``reduced_outside``, not ``settled_by_credit``). The status
-    #: sync then records the payment at THIS figure, and refuses (a person
-    #: decides) when it is not what the invoice owes here, rather than booking
-    #: FeohLedger's own figure as what left (decisions §386). None = not
-    #: stated (QuickBooks today): recorded at what is owed here, as before.
+    #: payments that are not ours; QuickBooks: what the person's cash
+    #: BillPayments' lines applied to this bill). Only for a bill paid in full
+    #: in cash (``paid``, ``reduced_outside``, not ``settled_by_credit``). The
+    #: status sync then records the payment at THIS figure, and refuses (a
+    #: person decides) when it is not what the invoice owes here, rather than
+    #: booking FeohLedger's own figure as what left (decisions §386, §393).
+    #: None = not stated: an adapter that cannot say is recorded at what is
+    #: owed here; a bill our own write-back part-paid (``our_payment_applied``)
+    #: blocks for a person instead, since no one payment states it (§393).
     paid_amount: Decimal | None = None
     #: The ISO 4217 code ``paid_amount`` is in (the bill's currency). The sync
     #: compares it with the invoice's before comparing figures; a missing or

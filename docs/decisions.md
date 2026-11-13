@@ -19326,3 +19326,85 @@ delivery verifying); `tests/test_rbac.py` (the route's alternate gate);
 `src/lib/api/codedRefusals.test.ts` (the three codes);
 `tests-e2e/erp/xero-status-sync.spec.ts` (the webhook against fake-erp, a
 forged delivery, the handshake, the panel's button).
+
+## 393. QuickBooks' bills are recorded at the cash QuickBooks shows, as Xero's are (follow-up of §386, 2026-11-14)
+
+**The gap.** §386 made Xero's report state the cash a person paid outside us
+(`ErpBillReport.paid_amount`), so a payment that is not what the invoice owes
+here is refused `amount_mismatch` and kept, blocking, for a person. QuickBooks'
+`bill_report` stated no amount, so the ERP-paid path booked FeohLedger's own
+figure. A bill paid in full in QuickBooks while a credit memo or an
+early-payment discount applied only here was recorded at the smaller figure, as
+money that left, and the difference vanished from the ledger.
+
+**The rule.** `QuickBooksOnlineAdapter.bill_report` states `paid_amount` and
+`paid_currency` on exactly Xero's condition: a bill `paid`, reduced outside us,
+not `settled_by_credit`, and no write-back of ours on it.
+
+- **The figure is what the lines applied to this bill.** It is the sum of
+  `_applied_to(payment, bill)` over the person's cash BillPayments
+  (`_is_cash_payment`, §317), never a payment's `TotalAmt`, because one
+  BillPayment can pay several bills.
+- **The currency is the bill's `CurrencyRef`.** QuickBooks states it on every
+  bill, the home currency included, which `post_payment` already relies on. It
+  is None when the bill states none, or when a cash payment states another
+  currency. The sync refuses None as a mismatch and never compares a bare
+  number (§386).
+- **§303's paid-versus-credited rule is unchanged.** Any vendor credit, journal
+  entry or unreadable reduction beside the cash makes the bill
+  `settled_by_credit`, so no amount is stated and the bill blocks as a credit
+  settlement. A cheque and a card together are both cash, so the figure is
+  their sum.
+- **No one rail, no rail.** A bill paid part by cheque and part by card had
+  the later payment's rail stand for the whole figure. It is now not stated,
+  which counts as 1099-reportable. One `Payment` row cannot hold two rails, and
+  the conservative reading is the one §303 already takes for an unstated rail.
+  The cost is an over-report: the card part lands on the payer's 1099-NEC
+  although the card settlement entity reports it on a 1099-K, and nothing
+  records the split yet. Before, the later payment's rail stood for the whole
+  figure and could leave a cheque off the 1099. Keeping the split, and Xero's
+  same latest-rail shape, are tracked in `docs/followups.md`.
+- **Our own live write-back beside outside cash blocks.** QuickBooks now states
+  `our_payment_applied`, as Xero does. When it is set, the outside reduction is
+  real, no amount is stated, and the invoice is payable here, the sync opens a
+  blocking `payment_reconciliation` (`erp_partly_paid_outside`) and books
+  nothing. That only happens after a void here whose ERP void did not land.
+  Before, such a bill was recorded at the whole owed figure although only the
+  outside part left (the money-path review's example: our 245.00 still standing,
+  a 5.00 cheque, 250.00 booked as cash). The branch is in the shared path, so
+  Xero gets it too.
+
+**One path.** Nothing in `erp_status_sync` or `external_payment` names
+QuickBooks. `apply_bill_report` already passed `report.paid_amount` /
+`paid_currency` to `record_erp_reported_payment`, and the amount and currency
+checks in `record_invoice_paid_outside` run after §309's live-claim
+refusals, so the webhook, the sweep, the re-attempt (§319) and the one-click
+record all apply the QuickBooks figure the way they apply Xero's.
+`amount_mismatch` is in `DOUBLE_PAY_REFUSALS`, so the row blocks.
+
+**Rejected.**
+- *Stating `TotalAmt − Balance`.* That is what left the bill, not what the cash
+  says. It would agree with the balance by construction and hide a cash read
+  that does not cover it, which §317 already turns into `settled_by_credit`.
+- *Stating an amount on a bill we part-paid.* Xero refuses the same: no single
+  payment a record could state.
+
+**Not verified live.** No recording exists yet under
+`tools/fake-erp/fixtures/qbo_recorded/` (the replay names its skips), so the
+replay now also asserts the meaning: a bill paid wholly by cheque or card
+states its whole total in its own currency, and every other scenario states
+none. That runs when the operator records. The fake's BillPayment now carries
+its bill's `CurrencyRef`, as real BillPayments do, and `PAYMENT_READS` names
+it.
+
+Tests: `tests/test_qbo_status_sync_adapter.py` (cash in full; lines on this
+bill only; cheque plus card summed with no rail; partial; a vendor credit
+beside a cheque or a card; our own part-payment or full write-back, and a voided
+one not applied; the bill's currency, none, or a payment in another, with the
+amount still stated); `tests/test_erp_status_sync.py` (real rows: recorded at
+QuickBooks' figure, cheque plus card at their sum, partial and credit-settled
+blocking with nothing booked, a credit memo here refused `amount_mismatch` with
+QuickBooks' figure kept, blocking and refused by the one-click, the bill in
+another currency or none and a payment in another refused, outside cash beside
+our live write-back blocking); `tests/test_qbo_recorded_replay.py` (the paid
+amount per recorded scenario).

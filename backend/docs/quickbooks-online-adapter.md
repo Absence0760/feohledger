@@ -126,6 +126,25 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   linked to a `Bill` and nothing else, so a journal-entry credit cleared in Pay
   Bills, or a $0 payment not noted as voided, is never booked as a cheque
   (decisions §317).
+- **The cash QuickBooks shows is stated** (decisions §393, Xero's rule from
+  §386). For a bill `paid` wholly in cash outside us (reduced outside, not
+  `settled_by_credit`, no write-back of ours on it) `bill_report` sets
+  `paid_amount`: the sum of what the person's cash BillPayments' lines applied
+  to THIS bill (`_applied_to`, never a payment's `TotalAmt`, which can pay
+  several bills), and `paid_currency`: the bill's `CurrencyRef` (None when the
+  bill states none, or a cash payment states another). The shared ERP-paid path
+  records the payment at that figure, and refuses `amount_mismatch` when it is
+  not what the invoice owes here (a credit memo or an early-payment discount
+  applied in FeohLedger only, a total edited in QuickBooks), keeping it on a
+  payment-blocking `paid_not_recorded` row; a figure in another currency or
+  none is refused the same way. Partly paid, credit-settled (a vendor credit
+  beside a cheque or card included, §303) and our own write-backs state no
+  amount. A bill paid part by cheque and part by card is cash at their sum, but
+  no one rail paid it, so its rail is not stated (1099-reportable), not the
+  later payment's. A live write-back of ours on the bill is stated
+  (`our_payment_applied`): beside an outside reduction on an invoice payable
+  here (voided here, the QuickBooks void not landed) the sync opens a blocking
+  `payment_reconciliation` rather than book the owed figure.
 - `apply_bill_report` matches a bill to its invoice by the marker's correlation
   id AND the invoice's `erp_reference` (a deleted bill, which cannot be read, by
   `erp_reference` within the recorded realm only), row-locks it, and:
@@ -133,7 +152,7 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   | Bill in QuickBooks | Invoice here | Result |
   |---|---|---|
   | settled outside us, by a vendor credit (in part or whole) | payable here | blocking `payment_reconciliation`; no cash payment is booked |
-  | paid outside us, in cash | approved / sent / posted | recorded as paid outside FeohLedger (the ERP-paid path, `record_erp_reported_payment`), with QuickBooks' date and rail → `paid`, out of the queue |
+  | paid outside us, in cash | approved / sent / posted | recorded as paid outside FeohLedger (the ERP-paid path, `record_erp_reported_payment`), at QuickBooks' cash figure, with its date and rail → `paid`, out of the queue; a figure (or currency) that is not what is owed here is refused `amount_mismatch` and kept on a blocking row (§393) |
   | paid outside us | payment_scheduled | blocking `payment_reconciliation`: FeohLedger is paying it too |
   | paid outside us | paid by a FeohLedger rail | `erp_reconciliation`: paid twice (a payment recorded as made outside is taken to be that same payment) |
   | paid only by our write-back | any | nothing |
@@ -479,8 +498,8 @@ reader real QuickBooks never matched (§317).
 
 | Scenario file (`tools/fake-erp/fixtures/qbo_recorded/`) | What the replay asserts |
 |---|---|
-| `bill_paid_by_check.json`, `bill_paid_by_credit_card.json` | `paid`, reduced outside, NOT by credit, rail `check` / `card`, the payment's date, its id external |
-| `bill_part_paid.json` | `partially_paid`, reduced outside, cash by cheque |
+| `bill_paid_by_check.json`, `bill_paid_by_credit_card.json` | `paid`, reduced outside, NOT by credit, rail `check` / `card`, the payment's date, its id external, `paid_amount` the bill's whole total in its `CurrencyRef` (§393) |
+| `bill_part_paid.json` | `partially_paid`, reduced outside, cash by cheque, no `paid_amount` |
 | `bill_vendor_credit.json` | `paid`, reduced outside, `settled_by_credit`, no date or rail booked |
 | `bill_paid_by_feohledger.json` | `paid_only_by_us`, not reduced outside, nothing external |
 | `bill_payment_voided.json` | `open`, the voided payment not external |
