@@ -1,5 +1,7 @@
 <script lang="ts">
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
@@ -22,6 +24,12 @@
 	// backend accepts a string-decimal for money (rail: money is exact).
 	let amount = $state('1000.00');
 	let currency = $state('USD');
+	// The simulated invoice's currency: free ISO 4217 entry, seeded from the
+	// org's currency like every money form (decisions §381).
+	let currencyTouched = $state(false);
+	$effect(() => {
+		void orgCurrency.ensureLoaded();
+	});
 	let vendorId = $state('');
 	let glAccount = $state('');
 	let costCenter = $state('');
@@ -73,7 +81,7 @@
 				</label>
 				<label>
 					{m('workflows.mgmt.sim.currency')}
-					<input type="text" bind:value={currency} aria-label={m('workflows.mgmt.sim.currency')} maxlength="3" />
+					<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} testid="sim-currency" />
 				</label>
 				<label>
 					{m('workflows.mgmt.sim.vendorId')}
