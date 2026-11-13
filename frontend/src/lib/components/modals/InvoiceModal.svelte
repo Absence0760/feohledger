@@ -52,6 +52,7 @@
 	} from '#lib/api/invoices.ts';
 	import { isAllowed, isOffered, refusalText } from '#lib/api/actionVerdicts.ts';
 	import RecallApprovalModal from '#lib/components/modals/RecallApprovalModal.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { listInvoiceChart } from '#lib/api/glAccounts.ts';
 	import { glAccountOptionLabel, type GlAccountOption } from '#lib/types/glAccount.ts';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
@@ -679,16 +680,40 @@
 	// (an open duplicate, a live payment, a held vendor) and learned why only
 	// from the 409. `undefined` = not yet answered = offer nothing.
 	let verdicts = $state<InvoiceActionVerdicts | undefined>(undefined);
+	// The verdict read failed: stated above the form with a Retry (`ui/LoadError`)
+	// rather than leaving every money field, file control and workflow action
+	// silently disabled. Still fail closed — `verdicts` is `undefined` here.
+	let verdictsFailed = $state(false);
+	// The invoice + status the held `verdicts` judged. Not reactive: it only
+	// decides whether a re-ask may keep the previous answer on screen.
+	let verdictsJudged: { id: string; status: string } | null = null;
 	const verdictsSequence = createRequestSequencer();
 	async function loadVerdicts() {
 		const ticket = verdictsSequence.start();
-		verdicts = undefined;
+		const judging = { id: invoice.id, status };
+		verdictsFailed = false;
+		// A re-ask for the SAME invoice at the SAME status (a save moved only
+		// `loadedVersion`) keeps the previous verdict until the new one lands:
+		// resetting it would disable, mid-edit, the very input the reader is
+		// focused in, and re-enable it a round trip later. A new status is a
+		// different question (approval freezes the money fields), so that drops
+		// the old answer and fails closed until the server says otherwise.
+		if (verdictsJudged?.id !== judging.id || verdictsJudged.status !== judging.status) {
+			verdicts = undefined;
+		}
 		try {
 			const verdict = await getReviewActions(invoice.id);
-			if (verdictsSequence.canCommit(ticket)) verdicts = verdict;
+			if (!verdictsSequence.canCommit(ticket)) return;
+			verdicts = verdict;
+			verdictsJudged = judging;
 		} catch {
+			if (!verdictsSequence.canCommit(ticket)) return;
 			// Unknown stays unknown: no decision is offered on a verdict the
-			// server never gave.
+			// server never gave — and a stale one is not carried past a failed
+			// re-ask either.
+			verdicts = undefined;
+			verdictsJudged = null;
+			verdictsFailed = true;
 		}
 	}
 	// Re-asked whenever the version this modal holds moves (`loadedVersion`
@@ -699,7 +724,11 @@
 		void loadedVersion;
 		void status;
 		if (invoice.id) void loadVerdicts();
-		else verdicts = undefined;
+		else {
+			verdicts = undefined;
+			verdictsJudged = null;
+			verdictsFailed = false;
+		}
 	});
 	// The assignee clause is presentation, not a server rule: the endpoint
 	// accepts any approver, and docs/followups.md tracks deciding whether
@@ -795,10 +824,17 @@
 	let financiallyLocked = $derived(!isAllowed(financialsVerdict));
 	// The one refusal worth stating beside the fields: the lock itself. A role
 	// or a clerk's closed window is already why nothing here can be saved.
+	// The way out is named only when the server says it is open: "recall the
+	// approval" while `recall_approval` is allowed, otherwise the plain freeze
+	// sentence — from `sent_to_erp` on the recall is always refused, and a
+	// refused-but-offered recall (a bill the ERP may hold, a live payment or
+	// card) states its own reason beside the Recall Approval button.
 	let financialsLockedNote = $derived(
-		financialsVerdict?.code === INVOICE_FINANCIALLY_LOCKED
-			? refusalText(financialsVerdict, m)
-			: ''
+		financialsVerdict?.code !== INVOICE_FINANCIALLY_LOCKED
+			? ''
+			: isAllowed(recallVerdict)
+				? m('invoices.modal.financialsLocked.recall')
+				: refusalText(financialsVerdict, m)
 	);
 	// `PUT /{id}/line-items`: the same verdict — its door is the same check.
 	let canEditLines = $derived(canWrite && !financiallyLocked);
@@ -1979,6 +2015,15 @@
 						</section>
 					{/if}
 
+					{#if verdictsFailed}
+						<!-- The verdict read failed: every control it gates stays
+						     disabled (fail closed), and this says why, with a way back. -->
+						<LoadError
+							message={m('invoices.modal.verdictsLoadError')}
+							onretry={() => void loadVerdicts()}
+							testId="invoice-verdicts-error"
+						/>
+					{/if}
 					{#if financialsLockedNote}
 						<p class="financials-locked" data-testid="financials-locked">{financialsLockedNote}</p>
 					{/if}

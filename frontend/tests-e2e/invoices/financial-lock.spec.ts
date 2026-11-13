@@ -112,6 +112,104 @@ test.describe('invoice modal — the financial lock follows the server verdict',
 		expect(tenantPsql(`SELECT amount FROM invoices WHERE id='${id}'`).trim()).toBe('42.17');
 	});
 
+	test('past the recall (sent to the ERP), the lock states the freeze without promising a recall', async ({
+		page
+	}) => {
+		// `recall_approval` refuses every status from `sent_to_erp` on
+		// (`invoice_not_recallable`, decisions §374), so the sentence must not
+		// tell the reader to recall: it reads the recall verdict, not a status.
+		const number = `${PREFIX}-SENT-${Date.now()}`;
+		const id = await createAtFailed(page, number, { approved: true });
+		tenantPsql(`UPDATE invoices SET status='sent_to_erp' WHERE id='${id}'`);
+		const modal = await openWithVerdict(page, id, number);
+
+		await expect(modal.getByTestId('financials-locked')).toHaveText(
+			'The amount, payee and line items cannot be changed once the invoice is approved: they are what the approver signed off and what will be paid.'
+		);
+		await expect(modal.getByTestId('recall-approval')).toHaveCount(0);
+		await expect(field(modal, 'Amount')).toBeDisabled();
+	});
+
+	test('a failed verdict read says so with a Retry, and stays locked until it answers', async ({
+		page
+	}) => {
+		const number = `${PREFIX}-ABORT-${Date.now()}`;
+		const id = await createAtFailed(page, number, { approved: false });
+		let failNext = true;
+		await page.route(
+			(url) => url.pathname === `/api/invoices/${id}/review-actions`,
+			async (route) => {
+				if (failNext) {
+					failNext = false;
+					await route.abort();
+				} else {
+					await route.continue();
+				}
+			}
+		);
+		await page.goto(`/invoices?id=${id}`);
+		const modal = page.locator('div.modal[role="dialog"]');
+		await expect(modal.locator('header h2')).toContainText(number);
+
+		const error = modal.getByTestId('invoice-verdicts-error');
+		await expect(error).toHaveText(
+			/Couldn't check which actions you can take on this invoice, so its amount, payee, lines, file and workflow actions stay locked\./
+		);
+		await expect(error).toHaveAttribute('role', 'alert');
+		// Fail closed: no verdict, no money edits.
+		await expect(field(modal, 'Amount')).toBeDisabled();
+
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/review-actions`) && r.status() === 200
+		);
+		await error.getByRole('button', { name: 'Retry' }).click();
+		await verdict;
+		await expect(error).toHaveCount(0);
+		await expect(field(modal, 'Amount')).toBeEnabled();
+	});
+
+	test('a line-item save keeps the previous verdict while the re-ask is in flight', async ({
+		page
+	}) => {
+		// A line save advances `loadedVersion` and re-asks the verdict, at the
+		// same status: the same question. The money input the reader may be in
+		// must not flicker disabled under them while the answer is on its way.
+		const number = `${PREFIX}-REASK-${Date.now()}`;
+		const id = await createAtFailed(page, number, { approved: false });
+		const modal = await openWithVerdict(page, id, number);
+		await expect(field(modal, 'Amount')).toBeEnabled();
+
+		let release: () => void = () => {};
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const reask = page.waitForRequest((r) => r.url().endsWith(`/api/invoices/${id}/review-actions`));
+		await page.route(
+			(url) => url.pathname === `/api/invoices/${id}/review-actions`,
+			async (route) => {
+				await held;
+				await route.continue();
+			}
+		);
+		await modal.getByRole('button', { name: '+ Add Line' }).click();
+		await modal.getByLabel('Line 1 description').fill('Re-ask keeps the verdict');
+		await modal.getByLabel('Line 1 total').fill('42.17');
+		const put = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/line-items`) && r.request().method() === 'PUT'
+		);
+		await modal.getByRole('button', { name: 'Save Line Items' }).click();
+		expect((await put).ok()).toBeTruthy();
+		await reask;
+		// The re-ask is held: the previous verdict is still the one in force.
+		await expect(field(modal, 'Amount')).toBeEnabled();
+		await expect(modal.getByRole('button', { name: '+ Add Line' })).toBeVisible();
+
+		const answered = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/review-actions`) && r.status() === 200
+		);
+		release();
+		await answered;
+		await expect(field(modal, 'Amount')).toBeEnabled();
+	});
+
 	test('a failed extraction (never approved) keeps the money fields editable', async ({ page }) => {
 		const number = `${PREFIX}-READ-${Date.now()}`;
 		const id = await createAtFailed(page, number, { approved: false });
