@@ -186,6 +186,24 @@ class Payment(Base, EntityMixin, TimestampMixin):
     # `/resume` proves nothing about what the crashed pass sent.
     dispatch_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # The payee this payment released money to (migration 0128, decisions §383),
+    # stamped by `services/payee_stamp.stamp_payee` at the rail / card dispatch,
+    # the NACHA export and a record of payment outside FeohLedger. A void
+    # compares it with who a re-payment would pay, because a vendor merge moves
+    # paid invoices and a bank change skips them while they are paid.
+    #
+    # `payee_vendor_id` is history, so it is deliberately NOT a `vendor_id` FK:
+    # a merge must not move it (`vendor_merge.VENDOR_FK_CHILDREN`), and no FK
+    # ties a vendor's lifecycle to the payments that once paid it.
+    # `payee_bank_fingerprint` is a keyed HMAC of the vendor's whole
+    # `bank_details` (`payee_stamp.bank_fingerprint`), never a number. All
+    # three NULL: no money released since 0128, or paid before it — nothing is
+    # backfilled, because today's details are exactly what cannot stand in for
+    # the ones paid (§141).
+    payee_vendor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    payee_bank_fingerprint: Mapped[str | None] = mapped_column(String(80))
+    payee_recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # What the PROCESSOR said it actually settled, as reported on its webhook
     # (or re-fetched via `PaymentAdapter.fetch_settlement` for a rail whose
     # event body carries no amount). `amount` above is the AUTHORIZATION — what

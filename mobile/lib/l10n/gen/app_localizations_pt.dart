@@ -3428,6 +3428,14 @@ class AppLocalizationsPt extends AppLocalizations {
       'Os dados bancários do fornecedor foram alterados; verifique antes do pagamento.';
 
   @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      'O beneficiário mudou desde o último pagamento desta fatura; verifique antes de pagar novamente.';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      'O fornecedor foi mesclado desde o último pagamento desta fatura, e esse pagamento não registrou beneficiário; verifique antes de pagar novamente.';
+
+  @override
   String exceptionDescriptionComplianceHoldFindings(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -7000,6 +7008,14 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get exceptionDescriptionVendorBankChanged =>
       'Os dados bancários do fornecedor foram alterados; verifique antes do pagamento.';
+
+  @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      'O beneficiário mudou desde o último pagamento desta fatura; verifique antes de pagar novamente.';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      'O fornecedor foi mesclado desde o último pagamento desta fatura, e esse pagamento não registrou beneficiário; verifique antes de pagar novamente.';
 
   @override
   String exceptionDescriptionComplianceHoldFindings(int count) {

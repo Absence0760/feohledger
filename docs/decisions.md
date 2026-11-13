@@ -18310,3 +18310,146 @@ the field and the four verdicts on a run exported before the switch, Verify
 accepted in both modes with the claim kept, no panel on a processor draft);
 `frontend/tests-e2e/payments/nacha-verify.spec.ts` (an exported run, switched
 to processor: the panel shows Verify enabled and the two refusals' sentences).
+
+## 383. A payment records the payee it paid, and a void flags a re-payment to another one (§379 follow-up, migration 0128, 2026-11-13)
+
+**The gap.** §379 lets a merge move `paid` invoices (their payee is history),
+and `POST /api/payments/{id}/void` sends one back to `approved`. The re-payment
+reads the bank details of whichever vendor the invoice names now, so a paid
+invoice merged onto another vendor and voided was re-paid to the canonical's
+account with no flag. `reflag_voided_invoice_for_bank_change` (§286) only asked
+about approved bank changes on the invoice's current vendor, and `Payment`
+recorded no payee to compare against.
+
+**The rule.** Every payment records, at the step that releases its money, the
+payee it pays: `payee_vendor_id`, `payee_bank_fingerprint` and
+`payee_recorded_at` (`services/payee_stamp.stamp_payee`). The steps are:
+
+- the rail and card dispatch (`_execute_single_payment`), from the read the
+  order is built from, after every refusal and compliance hold and immediately
+  before the processor or card call, so a stamp means money was instructed.
+  It is carried in `_ORDER_FIELDS`, so a rolled-back attempt that reached the
+  processor keeps it;
+- the NACHA export, after every refusal, so the commit the ERP check keeps
+  never holds a stamp for an unbuilt file;
+- a payment recorded outside FeohLedger (`external_payment._complete`, which
+  serves the user's record, the run record and the ERP-reported payment). An
+  entry of an `exported` file keeps the payee its file carried; a rejected
+  file's stamp is replaced, since it paid nobody.
+
+A merge records, on each duplicate it retires for the first time, where it went
+and who merged it (`vendors.merged_into_vendor_id` / `merged_by_user_id` /
+`merged_at`), in its own transaction.
+
+The void reads the invoice's vendor `FOR SHARE` and asks
+`flag_repayment_payee_change`. A different vendor, or the same vendor with a
+different bank fingerprint, opens the `fraud_flag` `payee_changed_since_paid`.
+That type already blocks every run, dispatch, record-outside and ERP push, and
+its clearing already runs the payment-blocking segregation rule. One flag is
+opened **per person whose act re-pointed the payee**, each with that person as
+its raiser, so none of them can clear their own:
+
+- vendor differs → every steward on the merge chain from the paid vendor to the
+  current one, walked through the retired vendors' own records (only a merge
+  moves a paid invoice's vendor; an approved one is financially locked);
+- bank differs → every approver of a bank change since the stamp.
+
+**Why per person, along the chain.** The money-path review found that "the
+latest merge into the current vendor" names the wrong person: a later,
+unrelated merge into the same canonical (or a no-op re-run of the same merge)
+took over the raiser, and the steward who actually moved the invoice could then
+clear the flag. A chain D → B → C by two stewards moved the payee twice. A merge
+has no dual control of its own, so this flag is the only independent look at it.
+One `raised_by_user_id` names one person, so each gets a row; a person can
+still clear someone else's, which takes two people acting together.
+**Rejected: reading the merge from its `vendor.merged` audit row.** In `lambda`
+audit mode that row lands asynchronously or not at all, and a money gate must
+not wait on audit delivery; the record on the vendor is written with the merge.
+The audit row is read only for a merge from before 0128, which has no record:
+the earliest row naming the vendor a duplicate, so a re-run never re-attributes
+it.
+
+**Why `FOR SHARE`.** A bank-change approval updates the vendor and then flags
+the vendor's payable invoices, which the voided one is not until the void
+commits. Without the lock each side read the other's state from before it and
+neither flagged, which was already true of §286's re-flag. With it, whichever
+runs second sees the first: the void reads the new details, or the approval
+sees an `approved` invoice.
+
+- **The fingerprint** is HMAC-SHA256 over the canonical JSON of the whole
+  `bank_details` blob and the tenant id, keyed by a domain-separated derivation
+  of `FEOH_SECRET_KEY`, tagged `v1:`. Whole blob, because the dual control
+  already treats any change to it as a bank change and an allowlist would miss
+  the next key that steers money (`counterparty_id`, a cheque's
+  `mailing_address`). Keyed, because an unkeyed hash of a routing and an
+  account number is brute-forceable. Tenant in the message, so one account paid
+  by two tenants does not fingerprint alike. **Rejected: storing the last four
+  digits** (already shown everywhere): two accounts sharing a last-4 would
+  compare equal, which is the BEC case. **Rejected: a dedicated key**: a new
+  secret to provision for a comparison whose failure mode is one extra flag. A
+  key rotation changes every fingerprint, so a void after it flags once: the
+  fail-closed direction (`docs/secrets-rotation.md`).
+- **`payee_vendor_id` is not a `vendor_id` FK.** It is history: the merge must
+  never move it (its name keeps it out of `VENDOR_FK_CHILDREN`'s drift guard on
+  purpose), and nothing should tie a vendor row's lifecycle to the payments
+  that once paid it.
+- **The comparison runs at the void, not in the run builder.** The void is the
+  one moment a paid invoice re-enters the queue, and a flag raised there stops
+  the ERP push too (`fraud_flag` is in `ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`),
+  which a run-builder check would not: a bill pushed after the void can be paid
+  from the ERP. After the void the invoice is approved and unpaid, so a later
+  merge is refused (§379) and a later bank change flags it (§286); nothing else
+  re-points it between the void and the re-payment. A second comparison in the
+  builder would have to re-decide a flag a person already cleared (§366), for no
+  case the void misses. The run builder is unchanged.
+- **A stamped payment no longer runs the §286 re-flag**: its fingerprint
+  answers "did the bank details change" for every route, including one that
+  bypasses a change request, and running both raised two flags for one cause.
+- **De-duplicated on the finding and the raiser, not on the type**
+  (`flag_invoice_for_bank_change`, which now takes the finding code). The old
+  type-wide count let an open Positive Pay or detector `fraud_flag`, raised by
+  nobody, absorb a bank-change flag, so a person clearing that unrelated row
+  cleared a payee change they never saw. Folding a second approver's change
+  into the first approver's open row did the same for the second approver. This
+  applies to `vendor_bank_changed` too, and §286's re-flag now flags once per
+  approver since the payment. A pre-§358 row with no code is matched on its
+  English.
+
+**A payment with no stamp** (paid before 0128) is never compared, and nothing is
+backfilled. §141's reasoning holds exactly: the vendor's details today are what
+may differ from the ones paid, so stamping them would absolve every change made
+since, and there is no honest record to recover. **Rejected: fail closed on
+every unstamped void.** It would flag every void of a pre-migration payment
+for no fact at all. The one fact on record is a merge into the invoice's vendor
+after the payment was booked (a retired vendor's record, or for an older merge
+its audit row, if it moved anything). Then the invoice may have moved, and the
+void raises `payee_unrecorded_after_merge`, once per steward of those merges. A
+canonical's own invoice voided after an unrelated merge is flagged too; that
+costs one look and is the price of not inventing a payee. For a pre-0128 merge
+the audit row is the only evidence, so in `lambda` mode a row that never landed
+means no flag. That residue shrinks to nothing as pre-0128 payments age out, and
+every merge since is on the vendor. The §286 re-flag still answers an unstamped
+payment's bank change. A raiser that cannot be found is `NULL`: the flag still
+blocks, and anyone outside the invoice's implicated set clears it.
+
+Tests: `tests/test_payment_payee_stamp.py`:
+- the fingerprint;
+- the stamp at the rail, card, NACHA, single and run record-outside and
+  ERP-reported steps; none on booking, a compliance hold or a refused export;
+  an exported entry's payee kept and a rejected file's replaced;
+- the merge record, first merge wins; the merge leaves the payment's stamp;
+- merge → void flags, blocks the run and the ERP gate, the steward is refused
+  the clear and an independent person clears it;
+- a later unrelated merge or a re-run does not take over the flag; both
+  stewards of a chain are each refused their own;
+- same payee raises nothing; bank changes raise one flag per approver;
+- a bank change racing the void is flagged;
+- an unrelated fraud flag does not absorb the payee flag, and another person's
+  change gets its own row;
+- the unstamped cases.
+
+Also `tests/test_payment_dispatch_db_error.py` (the stamp survives a
+post-processor rollback and is absent when nothing was sent),
+`tests/test_migration_0128_payee_and_merge_stamp.py`, and
+`tests/test_payment_run_actions.py` / `tests/test_exception_raiser_stamping.py`
+updated for the new call.

@@ -54,6 +54,7 @@ The riskiest secret in the system — leaks let an attacker forge any user's ses
    ```
    Update `FEOH_SECRET_KEY` (flat key `secret_key`) to the new value, and the same key in the VM's encrypted deploy env.
 3. Deploy. **Every existing JWT becomes invalid immediately** — all users are forced to re-login. This is the intended behaviour.
+   The key also derives the payee bank fingerprint a payment records (`services/payee_stamp.py`, decisions §383), so after a rotation a void of a payment made before it raises one `payee_changed_since_paid` flag on that invoice, which a person outside its implicated set clears. That is the fail-closed direction and needs no action beyond clearing.
 4. Record the rotation in the compliance vendor's evidence locker (date, who rotated, ticket if any).
 
 If you need a graceful rollover, support two keys (current + previous) for one rotation cycle. Not implemented today — accepted because forced re-login is acceptable for the user count.

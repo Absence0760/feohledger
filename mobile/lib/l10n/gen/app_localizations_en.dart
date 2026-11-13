@@ -3407,6 +3407,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Vendor bank details changed; verify before payment.';
 
   @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      'Payee changed since this invoice was last paid; verify before paying again.';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      'Vendor merged since this invoice was last paid, and that payment recorded no payee; verify before paying again.';
+
+  @override
   String exceptionDescriptionComplianceHoldFindings(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

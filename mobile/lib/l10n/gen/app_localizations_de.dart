@@ -3429,6 +3429,14 @@ class AppLocalizationsDe extends AppLocalizations {
       'Bankverbindung des Lieferanten geändert; vor der Zahlung prüfen.';
 
   @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      'Zahlungsempfänger seit der letzten Zahlung dieser Rechnung geändert; vor erneuter Zahlung prüfen.';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      'Lieferant seit der letzten Zahlung dieser Rechnung zusammengeführt, und diese Zahlung hat keinen Zahlungsempfänger erfasst; vor erneuter Zahlung prüfen.';
+
+  @override
   String exceptionDescriptionComplianceHoldFindings(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

@@ -275,6 +275,10 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'exception.positive_pay_not_on_file': 'exceptions.description.positivePayNotOnFile',
 	// Vendor bank details changed; verify before payment.
 	'exception.vendor_bank_changed': 'exceptions.description.vendorBankChanged',
+	// Payee changed since this invoice was last paid; verify before paying again.
+	'exception.payee_changed_since_paid': 'exceptions.description.payeeChangedSincePaid',
+	// Vendor merged since this invoice was last paid, and that payment recorded no payee; verify before paying again.
+	'exception.payee_unrecorded_after_merge': 'exceptions.description.payeeUnrecordedAfterMerge',
 	// Payment held for compliance review ({count, plural, one {# reason} other {# reasons}})
 	'exception.compliance_hold_findings': 'exceptions.description.complianceHoldFindings',
 	// no screenable vendor on invoice
@@ -443,6 +447,8 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'exception.positive_pay_altered_amount': { checkNumber: 'text' },
 	'exception.positive_pay_not_on_file': { checkNumber: 'text' },
 	'exception.vendor_bank_changed': {},
+	'exception.payee_changed_since_paid': {},
+	'exception.payee_unrecorded_after_merge': {},
 	'exception.compliance_hold_findings': { count: 'count' },
 	'exception.compliance_no_screenable_vendor': {},
 	'exception.compliance_provider_unavailable': { provider: 'text' },

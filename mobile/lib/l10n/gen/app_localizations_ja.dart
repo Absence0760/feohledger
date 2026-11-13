@@ -3244,6 +3244,14 @@ class AppLocalizationsJa extends AppLocalizations {
       '仕入先の銀行口座情報が変更されました。支払い前に確認してください。';
 
   @override
+  String get exceptionDescriptionPayeeChangedSincePaid =>
+      '前回の支払い以降、この請求書の支払先が変更されました。再度支払う前に確認してください。';
+
+  @override
+  String get exceptionDescriptionPayeeUnrecordedAfterMerge =>
+      '前回の支払い以降に仕入先が統合されましたが、その支払いには支払先が記録されていません。再度支払う前に確認してください。';
+
+  @override
   String exceptionDescriptionComplianceHoldFindings(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

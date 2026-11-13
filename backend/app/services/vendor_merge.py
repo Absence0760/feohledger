@@ -125,6 +125,9 @@ __all__ = [
 # field_name)``) and is therefore NOT in this plain-reassign list — see below.
 # So is ``VendorErpLink`` (unique ``(vendor_id, realm)``, and a realm the
 # canonical is already linked in must not gain a second link): ``_plan_erp_links``.
+# ``payments.payee_vendor_id`` is deliberately in neither: it records the vendor a
+# payment PAID (migration 0128), and moving it would erase exactly what the void
+# compares to catch a merged invoice being re-paid to the canonical (§383).
 VENDOR_FK_CHILDREN: tuple[type, ...] = (
     Invoice,
     PurchaseOrder,
@@ -419,6 +422,7 @@ async def merge_vendors(
     *,
     canonical_vendor_id: uuid.UUID,
     duplicate_vendor_ids: list[uuid.UUID],
+    merged_by_user_id: uuid.UUID | None,
 ) -> VendorMergeResult:
     """Fold ``duplicate_vendor_ids`` into ``canonical_vendor_id``.
 
@@ -429,7 +433,8 @@ async def merge_vendors(
     reassignment). Row-locks all involved vendors first.
 
     Idempotent: a re-run after a completed merge moves zero rows and
-    deactivates nothing.
+    deactivates nothing. ``merged_by_user_id`` is the steward, recorded on each
+    duplicate retired for the first time (``Vendor.merged_by_user_id``).
     """
     # De-dupe the requested duplicates, preserving order, and refuse self-merge /
     # empty set up front (cheap, before any lock).
@@ -633,6 +638,15 @@ async def merge_vendors(
         if dup.status != "inactive":
             dup.status = "inactive"
             result.deactivated_vendor_ids.append(d)
+        # The durable merge record (migration 0128, decisions §383): where this
+        # duplicate went and who sent it. First merge wins, so a re-run (or a
+        # later merge of an already-retired vendor) never re-attributes the
+        # merge that actually moved its invoices.
+        if dup.merged_into_vendor_id is None:
+            dup.merged_into_vendor_id = canonical_vendor_id
+            dup.merged_by_user_id = merged_by_user_id
+            # The database clock, the one `payments.created_at` is on.
+            dup.merged_at = func.now()
 
     await db.flush()
     return result

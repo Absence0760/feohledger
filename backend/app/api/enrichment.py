@@ -646,6 +646,7 @@ async def merge_vendor_consolidation(
             db,
             canonical_vendor_id=canonical_id,
             duplicate_vendor_ids=duplicate_ids,
+            merged_by_user_id=user.id,
         )
     except VendorMergeError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

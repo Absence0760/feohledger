@@ -62,6 +62,17 @@ class Vendor(Base, EntityMixin, TimestampMixin):
     verified_by: Mapped[str | None] = mapped_column(String(255))
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Set once, when a merge retires this vendor into another (migration 0128,
+    # decisions §383): the canonical it went into, who merged it and when.
+    # First merge wins; a re-run leaves it. The void walks these pointers from
+    # the vendor a payment PAID to the one its invoice names now, to name the
+    # people whose merges re-pointed the payee. Durable in the merge's own
+    # transaction, so it never waits on audit delivery (`lambda` mode).
+    # `merged_by_user_id` is a control-plane user id, no FK.
+    merged_into_vendor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    merged_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # ERP sync
     erp_vendor_id: Mapped[str | None] = mapped_column(String(255))  # vendor ID in the external ERP
     erp_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

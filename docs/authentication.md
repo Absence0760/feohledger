@@ -1529,6 +1529,9 @@ The second axis exists because the first cannot reach the BEC chain above: the
 approver of a vendor bank-detail change is not the uploader of the invoices that
 change re-points. `api/vendors._flag_payable_invoices_for_bank_change` is
 therefore the **one** raise site that records an actor, and it records the
+approver. The same helper raises the void's re-payment flag
+(`services/payee_stamp`, decisions §383), recording whoever re-pointed the payee
+since the voided payment: the vendor merge's actor, or the bank change's
 approver.
 
 Everything else records NULL, deliberately and with a stated reason. Nine of

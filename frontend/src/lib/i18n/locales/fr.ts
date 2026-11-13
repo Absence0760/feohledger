@@ -699,6 +699,8 @@ export const messages = {
 	'exceptions.description.positivePayAlteredAmount': "Retour Positive Pay : chèque {checkNumber} au montant modifié",
 	'exceptions.description.positivePayNotOnFile': "Retour Positive Pay : chèque {checkNumber} absent du fichier d’émission",
 	'exceptions.description.vendorBankChanged': "Les coordonnées bancaires du fournisseur ont changé ; vérifiez-les avant le paiement.",
+	'exceptions.description.payeeChangedSincePaid': "Le bénéficiaire a changé depuis le dernier paiement de cette facture ; vérifiez-le avant de payer à nouveau.",
+	'exceptions.description.payeeUnrecordedAfterMerge': "Le fournisseur a été fusionné depuis le dernier paiement de cette facture, et ce paiement n'a enregistré aucun bénéficiaire ; vérifiez avant de payer à nouveau.",
 	'exceptions.description.complianceHoldFindings': "Paiement suspendu pour contrôle de conformité ({count, plural, one {# motif} other {# motifs}})",
 	'exceptions.description.complianceNoScreenableVendor': "Aucun fournisseur vérifiable sur la facture",
 	'exceptions.description.complianceProviderUnavailable': "Le contrôle des sanctions n’a pas pu s’exécuter : aucun adaptateur pour le fournisseur configuré « {provider} »",
