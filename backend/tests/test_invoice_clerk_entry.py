@@ -618,6 +618,9 @@ async def test_a_managers_own_document_still_auto_approves(realdb, monkeypatch):
 
     assert row.status is InvoiceStatus.approved
     assert row.approved_by == "system (auto-approve)"
+    # The reader who asked for the approving read is its approver by id
+    # (decisions §389), so their later receipt cannot release it.
+    assert row.approved_by_user_id == realdb.info("a").users["ap_manager"]
     assert audit.action == "invoice.auto_approved"
     assert audit.details["auto_approve_suppressed"] is None
 

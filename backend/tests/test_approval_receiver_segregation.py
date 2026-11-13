@@ -20,7 +20,12 @@ against it. Real-Postgres harness (`realdb`). Pinned here:
   * the approval step's `require_segregation: false` opt-out lifts it;
   * the batch lookup is two statements whatever the batch size (no N+1);
   * receivers are NOT in `implicated_actors` — the set
-    `receipts_clear_hold` measures a receipt's recorder against.
+    `receipts_clear_hold` measures a receipt's recorder against;
+  * the reverse order's inputs (decisions §389): every approval site stamps
+    who approved by id (`stamp_approver`), `approver_ids` reads that stamp and
+    every chain level's approvals, and `receiving_conflicts` is the one rule
+    both orders read. The hold side is pinned in `test_goods_receipt_entry.py`
+    and `test_exception_agent_receipt_segregation.py`.
 """
 
 from __future__ import annotations
@@ -38,9 +43,13 @@ from app.models.procurement import GoodsReceipt, POLineItem, PurchaseOrder
 from app.models.workflow import WorkflowDefinition, WorkflowInstance
 from app.services.approval_chain import (
     APPROVAL_SEGREGATION_RECEIVER,
+    CHAIN_STATE_KEY,
+    approver_ids,
     implicated_actors,
     receipt_recorders,
     receipt_recorders_by_invoice,
+    receiving_conflicts,
+    stamp_approver,
     violates_receiving_segregation,
 )
 from app.utils.dates import utc_today
@@ -160,6 +169,12 @@ async def test_the_receiver_cannot_approve_and_someone_else_can(realdb):
     approved = await _approve(realdb, "admin", inv_id)
     assert approved.status_code == 200, approved.text
     assert await _status(realdb, inv_id) == InvoiceStatus.approved
+    # The approval of record names the admin by id (migration 0129, §389).
+    async with realdb.sessionmaker(TENANT)() as s:
+        stamped = (
+            await s.execute(select(Invoice.approved_by_user_id).where(Invoice.id == inv_id))
+        ).scalar_one()
+    assert stamped == realdb.info(TENANT).users["admin"]
 
 
 async def test_bulk_approve_skips_the_receivers_rows_and_names_the_rule(realdb):
@@ -393,3 +408,137 @@ async def test_the_complete_amount_floor_does_not_auto_approve_for_the_receiver(
     finally:
         async with realdb.client(key=TENANT, role="admin") as c:
             await c.patch(f"/api/workflows/{workflow_id}", json={"steps": original})
+
+
+# --------------------------------------------------------------------------- #
+# The reverse order's inputs (decisions §389)
+# --------------------------------------------------------------------------- #
+
+
+def test_one_rule_reads_both_orders():
+    """`receiving_conflicts` is the intersection both doors read: the approval
+    door passes the would-be approver, the hold passes the recorded approvers."""
+    a, b, c = (str(uuid.uuid4()) for _ in range(3))
+    assert receiving_conflicts({a, b}, {b, c}) == frozenset({b})
+    assert receiving_conflicts({a}, {c}) == frozenset()
+    assert receiving_conflicts({a}, ()) == frozenset()
+    # Mixed UUID / str inputs compare as strings.
+    assert receiving_conflicts({a}, {uuid.UUID(a)}) == frozenset({a})
+
+
+def test_stamp_approver_names_a_person_and_never_a_sentinel():
+    from types import SimpleNamespace
+
+    person = uuid.uuid4()
+    row = SimpleNamespace(approved_by_user_id=uuid.uuid4())
+    stamp_approver(row, person)
+    assert row.approved_by_user_id == person
+    stamp_approver(row, str(person))  # a queued job's string id
+    assert row.approved_by_user_id == person
+    stamp_approver(row, uuid.UUID(int=0))  # email intake / PEPPOL's system actor
+    assert row.approved_by_user_id is None
+    stamp_approver(row, None)
+    assert row.approved_by_user_id is None
+
+
+def test_approver_ids_reads_the_stamp_and_every_chain_level():
+    from types import SimpleNamespace
+
+    final, level0, level1 = (uuid.uuid4() for _ in range(3))
+    inv = SimpleNamespace(approved_by_user_id=final)
+    instance = SimpleNamespace(
+        state_data={
+            CHAIN_STATE_KEY: {
+                "current_level": 2,
+                "levels": [
+                    {"approvals": [{"user_id": str(level0)}]},
+                    {"approvals": [{"user_id": str(level1)}, {"user_id": str(final)}]},
+                ],
+            }
+        }
+    )
+    assert approver_ids(inv, instance) == frozenset({str(final), str(level0), str(level1)})
+    # No chain, no stamp: nobody.
+    assert approver_ids(SimpleNamespace(approved_by_user_id=None), None) == frozenset()
+    # A chain cleared by a reject or a recall names nobody from it.
+    cleared = SimpleNamespace(state_data={"rejection_count": 1})
+    assert approver_ids(SimpleNamespace(approved_by_user_id=None), cleared) == frozenset()
+    # Corrupt chain state is not a crash on the refresh path.
+    corrupt = SimpleNamespace(state_data={CHAIN_STATE_KEY: {"levels": ["x", {"approvals": 3}]}})
+    assert approver_ids(SimpleNamespace(approved_by_user_id=None), corrupt) == frozenset()
+
+
+async def test_the_complete_amount_floor_stamps_its_caller_as_the_approver(realdb):
+    """The floor makes `/complete`'s caller the effective approver (§267), so the
+    caller is who the reverse order refuses: the floor stamps them by id while
+    `approved_by` keeps its "system (below threshold)" display."""
+    async with realdb.client(key=TENANT, role="admin") as c:
+        wfs = (await c.get("/api/workflows")).json()["items"]
+        workflow_id = next(w for w in wfs if w["is_active"])["id"]
+        original = (await c.get(f"/api/workflows/{workflow_id}")).json()["steps_config"]["steps"]
+    steps = [dict(s) for s in original]
+    for step in steps:
+        if step["type"] == "approval":
+            step["enabled"] = True
+            step["config"] = {
+                **step.get("config", {}),
+                "required": True,
+                "auto_approve_below": "5000.00",
+            }
+    try:
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.patch(f"/api/workflows/{workflow_id}", json={"steps": steps})
+            assert resp.status_code == 200, resp.text
+        async with realdb.client(key=TENANT, role="ap_manager") as c:
+            created = await c.post(
+                "/api/invoices",
+                # Its own vendor and a small figure, so the floor's
+                # same-vendor aggregate reads this invoice alone.
+                json={
+                    "vendor": f"Floor Stamp Supplies {uuid.uuid4().hex[:6]}",
+                    "invoice_number": f"RX-{uuid.uuid4().hex[:8]}",
+                    "amount": "125.00",
+                    "currency": "USD",
+                },
+            )
+        assert created.status_code == 201, created.text
+        inv_id = uuid.UUID(created.json()["id"])
+        async with realdb.client(key=TENANT, role="admin") as c:
+            done = await c.post(f"/api/invoices/{inv_id}/complete")
+        assert done.status_code == 200, done.text
+        assert done.json()["status"] == "approved"
+        async with realdb.sessionmaker(TENANT)() as s:
+            inv = await s.get(Invoice, inv_id)
+        assert inv.approved_by == "system (below threshold)"
+        assert inv.approved_by_user_id == realdb.info(TENANT).users["admin"]
+    finally:
+        async with realdb.client(key=TENANT, role="admin") as c:
+            await c.patch(f"/api/workflows/{workflow_id}", json={"steps": original})
+
+
+def test_only_record_final_approval_writes_the_approval_of_record():
+    """The reverse order reads `approved_by_user_id`, and an approval that set
+    the display fields without it would read as "nobody approved" — the hole
+    back, silently. So `approval_chain.record_final_approval` is the one writer
+    of an invoice's `approval_date` / `approved_by` under `app/`, and it stamps
+    the id with them. (Requisitions and expense reports have an
+    `approved_by` uuid of their own and are not invoices.)"""
+    import re
+    from pathlib import Path
+
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    owner = app_root / "services" / "approval_chain.py"
+    write = re.compile(r"\b(\w+)\.(approval_date|approved_by)\s*=(?!=)")
+    offenders = []
+    for path in app_root.rglob("*.py"):
+        if path == owner:
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            for match in write.finditer(line):
+                if match.group(1) in {"req", "report"}:
+                    continue
+                offenders.append(f"{path.relative_to(app_root)}:{lineno}: {line.strip()}")
+    assert offenders == [], offenders
+    assert "record_final_approval(" in (app_root / "services" / "review.py").read_text()
+    assert "record_final_approval(" in (app_root / "api" / "workflow.py").read_text()
+    assert "record_final_approval(" in (app_root / "services" / "extraction.py").read_text()

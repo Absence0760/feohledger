@@ -22,7 +22,6 @@ from app.services.workflow_engine import (
     get_workflow_instance,
     transition_invoice,
 )
-from app.utils.dates import utc_today
 
 _log = logging.getLogger(__name__)
 
@@ -767,8 +766,11 @@ async def approve_invoice(
             return invoice
 
     # All approvals satisfied (or single-level) — finalize
-    invoice.approval_date = utc_today()
-    invoice.approved_by = actor_name
+    from app.services.approval_chain import record_final_approval
+
+    # By id, beside the display name: a receipt this approver hand-records
+    # afterwards must not lift the invoice's payment hold (decisions §389).
+    record_final_approval(invoice, approved_by=actor_name, actor_id=actor_id)
 
     # Digital signature on the approval (SOX non-repudiation): an HMAC-SHA256
     # "timestamp + user hash" over the canonical approval facts (invoice id +

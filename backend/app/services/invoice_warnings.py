@@ -891,6 +891,7 @@ async def refresh_invoices_citing_pos(
     best_effort: bool = False,
     erp_po_sync: dict | None = None,
     entity_id=None,
+    lock_invoices: bool = False,
 ) -> None:
     """Re-run warnings (and so PO matching) on every invoice citing a PO number.
 
@@ -917,6 +918,16 @@ async def refresh_invoices_citing_pos(
     unstamped ones, so another subsidiary's invoice citing the same number gets
     no note about a PO it does not match against; and ``paid`` / ``done``
     invoices are left alone, since a hold on money already paid stops nothing.
+
+    ``lock_invoices`` takes each invoice ``FOR UPDATE`` (in id order) before
+    re-reading it. Goods-receipt entry sets it, so a receipt and an approval of
+    an invoice on its PO serialise on the invoice row, which the approval doors
+    already lock (single and bulk approve, the email / Slack / Teams links,
+    ``/complete``): whichever commits second sees the other, and one person
+    cannot approve and receive concurrently past both orders of the receiving
+    rule (decisions §267, §389). The receipt holds its PO lock and then takes
+    the invoices; the approval holds the invoice and reads receipts unlocked,
+    so the two never wait on each other in a cycle.
     """
     po_numbers = {n for n in po_numbers if n}
     if not po_numbers:
@@ -932,6 +943,12 @@ async def refresh_invoices_citing_pos(
 
             query = query.where(Invoice.status.not_in(_ERP_SYNC_SKIPPED_STATUSES))
             query = apply_entity_scope(query, Invoice, entity_id, include_shared=True)
+        if lock_invoices:
+            query = (
+                query.order_by(Invoice.id)
+                .with_for_update(of=Invoice)
+                .execution_options(populate_existing=True)
+            )
         invoices = (await db.execute(query)).scalars().all()
         for inv in invoices:
             await refresh_warnings(db, inv, org_settings=org_settings, erp_po_sync=erp_po_sync)
@@ -1410,7 +1427,10 @@ async def _close_cleared_po_exceptions(
       "billed beyond receipt" ``po_mismatch``. While any live manual receipt on
       the matched PO was recorded by someone implicated in the invoice — or by
       nobody it can name — a ``po_mismatch`` row stays for a human
-      (``receipts_clear_hold``; decisions §262). Deliberately coarse: it does
+      (``receipts_clear_hold``; decisions §262). So it does while anyone who
+      approved the invoice recorded a live manual receipt it is billed against:
+      approving first and receiving second is still one person doing both
+      (§389). Deliberately coarse: it does
       not try to work out which finding the receipt cleared, because leaving a
       row for a person is the safe error. Receipts with no ``source`` predate
       receipt entry, when no app user could type one in, and are trusted as
@@ -1439,7 +1459,11 @@ async def _close_cleared_po_exceptions(
     segregation = exception_segregation_enabled(org_settings)
     relink_allowed = not segregation or await _pre_approval_with_segregation(db, invoice)
     inspection_ok = not segregation or await _inspection_clears_hold(db, invoice, inspection_id)
-    receipts_ok = not segregation or await receipts_clear_hold(db, invoice, po_id)
+    receipts_ok = (
+        not segregation
+        or not any(row.exception_type == "po_mismatch" for row in rows)
+        or await receipts_clear_hold(db, invoice, po_id)
+    )
     still_found: set[str] = set()
     if segregation and _status_str(invoice.status) not in _PRE_APPROVAL_STATUSES:
         strict = strictest_rule_for_any_commodity(org_settings, vendor_id=invoice.vendor_id)
@@ -1531,11 +1555,22 @@ async def _inspection_clears_hold(
 
 async def receipts_clear_hold(db: AsyncSession, invoice: Invoice, po_id: str | None) -> bool:
     """Whether the receipts the matcher counts on ``po_id`` may lift a
-    ``po_mismatch`` — False while any live hand-entered receipt on it has an
-    unknown recorder or one implicated in the invoice (decisions §262). Read by
-    ``_close_cleared_po_exceptions`` and by the exception-agent coordinator, so
-    an agent cannot do what the auto-close refuses. No matched PO means no
-    receipt evidence was read at all."""
+    ``po_mismatch``. False while either holds:
+
+    * any live hand-entered receipt on it has an unknown recorder or one
+      implicated in the invoice (decisions §262);
+    * anyone who approved the invoice — the approval of record or any level of
+      its chain — hand-recorded a live receipt it is billed against
+      (``approval_chain.receiving_conflict_on``, decisions §389). This is §267's
+      receiving rule in the other order: the approval door refuses a receiver,
+      and here the receipt an approver typed in afterwards is not evidence that
+      releases their own invoice. The receipt set is the approval door's own
+      (``receipt_recorders``, every PO the invoice names), and the approval
+      step's ``require_segregation: false`` lifts it as it lifts §267.
+
+    Read by ``_close_cleared_po_exceptions`` and by the exception-agent
+    coordinator, so an agent cannot do what the auto-close refuses. No matched
+    PO means no receipt evidence was read at all."""
     if not po_id:
         return True
     from app.models.procurement import GR_SOURCE_MANUAL, GoodsReceipt
@@ -1563,10 +1598,18 @@ async def receipts_clear_hold(db: AsyncSession, invoice: Invoice, po_id: str | N
         .scalars()
         .all()
     )
-    return all(
+    if not all(
         recorder is not None and not violates_segregation(invoice, recorder, {})
         for recorder in recorders
-    )
+    ):
+        return False
+    from app.services.approval_chain import receiving_conflict_on
+    from app.services.review import resolve_approval_config
+    from app.services.workflow_engine import get_workflow_instance
+
+    instance = await get_workflow_instance(db, invoice.id)
+    approval_config = await resolve_approval_config(db, invoice, instance)
+    return not await receiving_conflict_on(db, invoice, approval_config or {}, instance=instance)
 
 
 async def _refresh_contract_compliance(
