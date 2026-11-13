@@ -292,6 +292,9 @@ class MissingPOResolver(ExceptionResolver):
         from app.services.exception_agents.resolvers.amount_mismatch import (
             NotApprovable as _NotApprovable,
         )
+        from app.services.exception_agents.resolvers.amount_mismatch import (
+            refuse_payee_change_after_approval,
+        )
         from app.services.invoice_warnings import refresh_warnings
         from app.services.po_matching import match_invoice_under_org_rules
         from app.services.review import approve_invoice
@@ -355,6 +358,12 @@ class MissingPOResolver(ExceptionResolver):
             cfo_threshold, gate_amount
         ):
             raise _NotApprovable(locked.status)
+
+        # The payee of an invoice approved once (a recalled one, back in
+        # review) is a person's to choose, never the agent's (decisions §379).
+        # Asked before any mutation, like the gates above.
+        if locked.vendor_id is None:
+            refuse_payee_change_after_approval(locked, po.vendor_id)
 
         # Link by po_number (+ align vendor_id so the matcher's vendor leg holds).
         locked.po_number = po.po_number

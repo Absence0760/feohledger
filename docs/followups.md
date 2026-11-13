@@ -889,6 +889,30 @@ or is a sibling of a fix that needs its own pass.
       fixtures that call it on other statuses. **Trigger:** the next change to
       `services/erp.py` or either dispatcher.
 
+### Surfaced by the money-path review of the recall (2026-11-13, decisions §379)
+
+- [ ] **(c) A paid invoice merged onto another vendor, then voided, is re-paid
+      to the canonical's bank details unflagged.** A vendor merge moves `paid`
+      invoices (their payee is history), and `POST /api/payments/{id}/void`
+      sends one back to `approved`. `reflag_voided_invoice_for_bank_change`
+      only asks about bank-detail changes on the invoice's current vendor, so a
+      re-payment after a merge goes to the canonical's account with no flag.
+      `Payment` records no payee to compare against. **Durable fix:** stamp the
+      paid vendor on the payment (`payments.vendor_id`, a tenant migration) and
+      have the void raise the bank-change `fraud_flag` when the invoice's
+      vendor is no longer that one. **Trigger:** the next change to the void
+      path or to `services/vendor_merge.py`, or the first merge of a vendor
+      whose paid invoices could still be voided.
+- [ ] **(c) Three new refusals read in English only.** The web app has no
+      sentence for `vendor_merge_approved_unpaid` (`codedRefusals.ts` falls back
+      to the server's message), and the engine's two once-approved refusals
+      (`workflow_engine.ONCE_APPROVED_NOT_TO_DRAFT` /
+      `ONCE_APPROVED_NOT_CLOSED_FROM_DRAFT`) are plain strings, so a bulk skip
+      shows them uncoded. **Durable fix:** a `codedRefusals.ts` entry and the
+      six locales for the merge code (with its `count`), and coded refusals for
+      the two engine sentences, mapped the same way. **Trigger:** the next change
+      to `frontend/src/lib/api/codedRefusals.ts` or to the engine's refusals.
+
 ### Surfaced by the vendors table column fix (2026-10-06)
 
 - [ ] **(c) A vendor you've just created can be invisible in the list.**

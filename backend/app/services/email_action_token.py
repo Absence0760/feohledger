@@ -15,7 +15,8 @@ credential: there is no JWT and no session. The token binds, under an
 HMAC-SHA256 signature, the exact facts the action will run against:
 
     tenant_slug + invoice_id + actor_id (the reviewer) + action + expiry + jti
-    + facts (a digest of the invoice the message displayed)
+    + facts (a digest of the invoice the message displayed, and of its review
+      round)
 
 The ``facts`` claim is what ties a decision to the version the reviewer was
 shown. A message can sit in an inbox or channel for days, and the invoice can be
@@ -28,6 +29,18 @@ from the row under the lock and refuses an approval that no longer matches
 (the in-app counterpart is ``api/invoice_version.py``). A token without the
 claim does not verify at all: it was minted before the claim existed, and
 failing it closed costs a reviewer one sign-in.
+
+The digest also binds the invoice's **review round** (:func:`round_from_state_data`): how
+many times a round of review has ended without the invoice moving on, by a
+rejection or by a recall of its approval (decisions §379). A message belongs to
+the round it was sent in. Without the round, an Approve link from the first
+review still worked after a recall, or after an in-app reject and resubmit, as
+long as the eight displayed facts were unchanged — and line items, tax and the
+reason the approval was taken back are not among them. The round is read from
+the invoice's workflow instance by both sides (``services/review.
+approval_message_facts`` and ``review.review_round_of``), and a round of 0
+leaves the digest exactly as it was before the round existed, so links minted
+for an invoice never rejected or recalled keep working across the deploy.
 
 Because the platform holds the signing key (sops + KMS in deployed envs), the
 token cannot be forged or tampered with — flipping the action, the invoice, or
@@ -48,7 +61,13 @@ Single-use is enforced two ways, layered:
   1. the workflow state machine — approve/reject move the invoice out of
      ``ready_for_review``, so a replay can't re-fire the same decision; and
   2. a Redis consume at the endpoint on the token's **pair** — which also closes
-     the resubmit-replay window (a stale link used after a reject→resubmit cycle).
+     the resubmit-replay window (a stale link used after a reject→resubmit cycle)
+     for a message whose own link did the rejecting.
+
+A message whose links were never clicked is not consumed at all, so the consume
+cannot retire it when its round ends in the app (a reject there, or a recall).
+The review round in the digest does: its Approve link fails the facts check in
+every later round, with no Redis state to lose.
 
 The Approve and Reject tokens minted for one message share a ``pid`` (pair id)
 claim, and the endpoint consumes :attr:`ActionToken.consume_key` — the pair, not
@@ -112,9 +131,25 @@ class ActionToken:
         return f"pair:{self.pair_id}" if self.pair_id else self.jti
 
 
-def digest_of_invoice(invoice) -> str:
+def round_from_state_data(state_data: dict | None) -> int:
+    """The review round of an invoice whose workflow instance holds
+    ``state_data``: rounds ended by a rejection (``rejection_count``, bumped by
+    ``review.reject_invoice``) plus rounds ended by a recall (``recall_count``,
+    ``review.recall_approval``). Both counters only grow, so neither side can
+    meet an earlier round's number again. A missing or malformed counter reads
+    as 0."""
+    total = 0
+    for key in ("rejection_count", "recall_count"):
+        value = (state_data or {}).get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            total += value
+    return total
+
+
+def digest_of_invoice(invoice, *, review_round: int) -> str:
     """The digest an approval message's tokens bind: what the message showed
-    about the invoice, plus what decides who is paid, how and when.
+    about the invoice, plus what decides who is paid, how and when, plus the
+    review round the message was sent in (:func:`round_from_state_data`).
 
     Displayed: invoice number, vendor name, amount + currency. Not displayed
     but bound, because each changes the payment the approval releases: the
@@ -131,21 +166,25 @@ def digest_of_invoice(invoice) -> str:
     only disagree when the invoice did. Duck-typed: this module stays free of
     model imports. The amount is the exact two-place decimal string, never a
     float; an absent value is an empty string, never a default.
+
+    ``review_round`` is appended only when it is above 0, so the digest of an
+    invoice never rejected or recalled is byte for byte what it was before the
+    round was bound, and links already in inboxes still verify (decisions §379).
     """
     amount = invoice.amount
-    canonical = json.dumps(
-        [
-            invoice.invoice_number or "",
-            invoice.vendor_name or "",
-            str(invoice.vendor_id) if invoice.vendor_id else "",
-            f"{amount:.2f}" if amount is not None else "",
-            invoice.currency or "",
-            invoice.payment_method or "",
-            invoice.due_date.isoformat() if invoice.due_date else "",
-            str(invoice.entity_id) if invoice.entity_id else "",
-        ],
-        separators=(",", ":"),
-    )
+    facts = [
+        invoice.invoice_number or "",
+        invoice.vendor_name or "",
+        str(invoice.vendor_id) if invoice.vendor_id else "",
+        f"{amount:.2f}" if amount is not None else "",
+        invoice.currency or "",
+        invoice.payment_method or "",
+        invoice.due_date.isoformat() if invoice.due_date else "",
+        str(invoice.entity_id) if invoice.entity_id else "",
+    ]
+    if review_round > 0:
+        facts.append(f"round:{review_round}")
+    canonical = json.dumps(facts, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
@@ -157,14 +196,18 @@ FACTS_CHANGED_MESSAGE = (
 )
 
 
-def approval_facts_changed(decoded: ActionToken, invoice) -> bool:
-    """True when an APPROVE token no longer describes ``invoice``.
+def approval_facts_changed(decoded: ActionToken, invoice, *, review_round: int) -> bool:
+    """True when an APPROVE token no longer describes ``invoice`` in its
+    current review round (``review_round``, read from the locked row's workflow
+    instance by the door — ``services/review.review_round_of``).
 
     Reject is deliberately not bound: sending an invoice back for correction
     is safe whatever it now says, and a reviewer who saw something wrong in the
     message should still be able to bounce it.
     """
-    return decoded.action == ACTION_APPROVE and decoded.facts != digest_of_invoice(invoice)
+    return decoded.action == ACTION_APPROVE and decoded.facts != digest_of_invoice(
+        invoice, review_round=review_round
+    )
 
 
 def _b64url_encode(raw: bytes) -> str:

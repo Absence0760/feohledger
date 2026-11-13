@@ -437,6 +437,9 @@ class MultiPOSplitResolver(ExceptionResolver):
         from app.services.exception_agents.resolvers.amount_mismatch import (
             NotApprovable as _NotApprovable,
         )
+        from app.services.exception_agents.resolvers.amount_mismatch import (
+            refuse_payee_change_after_approval,
+        )
         from app.services.po_matching import match_invoice_under_org_rules
         from app.services.review import approve_invoice
         from app.services.workflow_engine import get_invoice_for_update
@@ -513,6 +516,12 @@ class MultiPOSplitResolver(ExceptionResolver):
         # for a split, so we write the snapshot directly — never re-running
         # refresh_warnings, which would re-raise a `no_po` exception). The invoice
         # AMOUNT is left exactly as-is.
+        # The payee of an invoice approved once (a recalled one, back in
+        # review) is a person's to choose, never the agent's (decisions §379).
+        # Asked before any mutation, like the gates above.
+        if locked.vendor_id is None:
+            refuse_payee_change_after_approval(locked, rows[0].vendor_id)
+
         combined_ref = ",".join(str(t[1]) for t in triples)
         locked.po_number = combined_ref
         if locked.vendor_id is None and rows[0].vendor_id is not None:

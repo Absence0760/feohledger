@@ -347,6 +347,29 @@ def awaiting_review(invoice: Invoice) -> bool:
     return invoice.status == InvoiceStatus.ready_for_review
 
 
+async def review_round_of(db: AsyncSession, invoice_id: uuid.UUID) -> int:
+    """The invoice's review round (``email_action_token.round_from_state_data``:
+    rounds ended by a rejection or a recall), read from its workflow instance.
+    No instance is round 0. The one reading both sides of an out-of-app
+    approval use: :func:`approval_message_facts` when a message is minted, and
+    the email, Slack and Teams doors against the locked row (decisions §379)."""
+    from app.services.email_action_token import round_from_state_data
+
+    instance = await get_workflow_instance(db, invoice_id)
+    return round_from_state_data(instance.state_data if instance is not None else None)
+
+
+async def approval_message_facts(db: AsyncSession, invoice: Invoice) -> str:
+    """``email_action_token.digest_of_invoice`` of ``invoice`` in its current
+    review round: what every `invoice_assigned` notification binds its Approve /
+    Reject actions to. A link minted in one round fails the facts check in any
+    later one, so a recall or an in-app reject retires the earlier round's
+    messages without anyone having to click them."""
+    from app.services.email_action_token import digest_of_invoice
+
+    return digest_of_invoice(invoice, review_round=await review_round_of(db, invoice.id))
+
+
 def refuse_unless_in_review(invoice: Invoice) -> None:
     """409 ``invoice_not_in_review`` unless :func:`awaiting_review`.
 
@@ -1097,7 +1120,6 @@ async def assign_reviewer(
     # is the one notifiable event that does not flow through transition_invoice,
     # so it's dispatched explicitly here. Never breaks the assignment.
     from app.models.notification import EVENT_INVOICE_ASSIGNED
-    from app.services.email_action_token import digest_of_invoice
     from app.services.notification_dispatch import notify_event
     from app.services.notification_templates import InvoiceContext
 
@@ -1119,7 +1141,9 @@ async def assign_reviewer(
                 amount=invoice.amount,
                 currency=invoice.currency or "USD",
             ),
-            action_facts=digest_of_invoice(invoice),
+            # The round too (decisions §379): a recall or an in-app reject
+            # later retires this message's Approve link.
+            action_facts=await approval_message_facts(db, invoice),
             actor_id=actor_id,
         )
     except Exception:  # noqa: BLE001 — never let a notification bug break assignment

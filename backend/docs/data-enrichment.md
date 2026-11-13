@@ -480,17 +480,25 @@ What the merge does, in one tenant transaction (`app/services/vendor_merge.py`):
   pick which ERP supplier the merged vendor posts to). The steward picks
   instead: unlink the stale record from that company on its vendor
   (`POST /api/vendors/{id}/erp-links/unlink`, the vendor modal's **ERP links**,
-  decisions §375) and merge again, or leave that duplicate out.
+  decisions §375) and merge again, or leave that duplicate out. A
+  **duplicate holding approved invoices still to be paid** → 409
+  `vendor_merge_approved_unpaid`, `params.count` (decisions §379): re-pointed,
+  they would be paid to the canonical's bank details, which their approver
+  never saw. Pay them or recall their approvals, then merge
+  ([vendor-management.md](vendor-management.md), the merge's payee rule).
   Each is a coded refusal (`{code, message, params}`,
   `api/refusals.py::coded_refusal`) so the web app states it in the reader's
   language: `vendor_merge_self`, `vendor_merge_no_duplicates`,
   `vendor_merge_canonical_not_found`, `vendor_merge_duplicate_not_found`,
   `vendor_merge_cross_entity`, `vendor_merge_blocked_duplicate`,
-  `vendor_merge_erp_link_conflict`, plus the endpoint's own
-  `vendor_merge_invalid_id` for an id that is not a UUID. `params` is empty
-  except on the ERP-link conflict, whose `realms` lists the ERP companies in
-  conflict (sorted, `null` for an unnamed one) — no vendor name, tax id or bank
-  detail rides on a refusal.
+  `vendor_merge_erp_link_conflict`, `vendor_merge_approved_unpaid`, plus the
+  endpoint's own `vendor_merge_invalid_id` for an id that is not a UUID.
+  `params` is empty except on the ERP-link conflict, whose `realms` lists the
+  ERP companies in conflict (sorted, `null` for an unnamed one), and on
+  `vendor_merge_approved_unpaid`, whose `count` is how many invoices — no vendor
+  name, tax id or bank detail rides on a refusal. (The web app has no localized
+  sentence for `vendor_merge_approved_unpaid` yet and shows the server's
+  English one, `docs/followups.md`.)
 
 ### Frontend UI
 

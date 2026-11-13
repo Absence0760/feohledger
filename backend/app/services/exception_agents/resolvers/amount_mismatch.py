@@ -276,3 +276,26 @@ class AmountMismatchResolver(ExceptionResolver):
 
 # Re-exported for the coordinator's escalate-on-_NotApprovable guard.
 NotApprovable = _NotApprovable
+
+
+class PayeeFixedByApproval(_NotApprovable):
+    """Raised by a resolver that would set the payee (``vendor_id``) of an
+    invoice that was approved once (``models/invoice_status.was_ever_approved``)
+    — in practice a recalled one back in review (decisions §374, §379). The
+    approver signed a payee; only a person picks a different one, and a second
+    person then signs it. Raised before any mutation, so the escalation carries
+    nothing of the apply."""
+
+
+def refuse_payee_change_after_approval(invoice, new_vendor_id) -> None:
+    """The one guard every vendor-setting resolver asks before it writes
+    ``vendor_id`` (``missing_po``, ``multi_po_split``): raise
+    :class:`PayeeFixedByApproval` when the write would change the payee of an
+    invoice that was ever approved. Filling a never-approved invoice's empty
+    payee, or a write that leaves it as it is, passes."""
+    from app.models.invoice_status import was_ever_approved
+
+    if new_vendor_id is None or new_vendor_id == invoice.vendor_id:
+        return
+    if was_ever_approved(invoice):
+        raise PayeeFixedByApproval(invoice.status)

@@ -188,6 +188,23 @@ async def close_refusals(db: AsyncSession, invoices) -> dict[uuid.UUID, dict]:
     return refusals
 
 
+async def approval_applies(db: AsyncSession, org_id: uuid.UUID, invoice: Invoice) -> bool:
+    """Whether `/complete` must send ``invoice`` to a person for approval: its
+    frozen workflow has an approval step, or it was approved once before,
+    whatever the workflow says (decisions §379).
+
+    A once-approved invoice reaches approval again only through a human
+    approval at `ready_for_review`. The engine keeps it out of `new` since §379
+    (`workflow_engine._refuse_outside_the_recall`), so this reads only a row
+    that got to draft with its stamp before that rule. For one, `/complete`
+    submits it for review instead of closing it unapproved (`new → done`, which
+    the engine refuses for it too), and the amount floor stays off (the door's
+    own check, since the floor stamps the row before its transition)."""
+    if was_ever_approved(invoice):
+        return True
+    return await is_step_enabled(db, org_id, "approval", invoice_id=invoice.id)
+
+
 def _completes_to_done(invoice: Invoice, *, approval_enabled: bool, erp_enabled: bool) -> bool:
     """Whether `/complete` on this (completable) invoice closes it to `done`:
     a `new` one with no approval step, or an `approved` one with no ERP step.
@@ -263,7 +280,7 @@ async def workflow_action_refusals(
     else:
         complete = complete_status_refusal(invoice)
         if complete is None:
-            approval_enabled = await is_step_enabled(db, org.id, "approval", invoice_id=invoice.id)
+            approval_enabled = await approval_applies(db, org.id, invoice)
             complete = complete_entry_refusal(actor, invoice, approval_enabled=approval_enabled)
             if complete is None:
                 erp_enabled = await is_step_enabled(db, org.id, "erp_export", invoice_id=invoice.id)
@@ -851,6 +868,10 @@ async def complete_invoice(
     - approved + ERP enabled → triggers ERP dispatch
     - approved + no ERP → done
 
+    An invoice that was ever approved counts as "approval enabled" and never
+    meets the amount floor (:func:`approval_applies`, decisions §379): its
+    figures were reopened after a sign-off, so a person signs them again.
+
     An entry-only caller (an AP clerk) may take only the first: submitting a
     `new` invoice for review is the end of entry, while closing an invoice with
     no approval step, or pushing an approved one to the ERP, is past it. Their
@@ -869,7 +890,11 @@ async def complete_invoice(
     refused = complete_status_refusal(invoice)
     if refused is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
-    approval_enabled = await is_step_enabled(db, org_id, "approval", invoice_id=invoice.id)
+    # Read before anything below stamps the row: the floor sets `approved_by`
+    # ahead of its transition. A once-approved invoice goes to a person
+    # whatever the workflow says (decisions §379).
+    once_approved = was_ever_approved(invoice)
+    approval_enabled = await approval_applies(db, org_id, invoice)
     entry_only = is_entry_only(user)
     refused = complete_entry_refusal(user, invoice, approval_enabled=approval_enabled)
     if refused is not None:
@@ -971,6 +996,9 @@ async def complete_invoice(
                 ),
             )
             and not entry_only
+            # An approval was given once and recalled (or the row predates
+            # §379): the corrected figures need a person, never the floor.
+            and not once_approved
             and not violates_segregation(invoice, user.id, approval_config)
             and not violates_receiving_segregation(
                 user.id, await receipt_recorders(db, invoice), approval_config

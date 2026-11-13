@@ -215,6 +215,11 @@ async def email_action_confirm_page(
         invoice = (
             await db.execute(select(Invoice).where(Invoice.id == decoded.invoice_id))
         ).scalar_one_or_none()
+        # The round the invoice is in now (decisions §379), read in the same
+        # session: a link from a round a recall or a rejection ended is stale.
+        current_round = (
+            await review_svc.review_round_of(db, invoice.id) if invoice is not None else 0
+        )
 
     if invoice is None:
         return _invalid_link_page()
@@ -226,7 +231,7 @@ async def email_action_confirm_page(
         )
     # The page shows the invoice as it is NOW; an Approve link minted for other
     # figures must not ask the reviewer to confirm these ones.
-    if approval_facts_changed(decoded, invoice):
+    if approval_facts_changed(decoded, invoice, review_round=current_round):
         return _info_page("Invoice has changed", FACTS_CHANGED_MESSAGE)
     return _confirm_page(token, decoded.action, invoice)
 
@@ -339,7 +344,9 @@ async def _apply_action(
         )
     # Re-checked under the row lock: the confirm page's check ran on a read
     # that an edit may have overtaken since.
-    if approval_facts_changed(decoded, invoice):
+    if approval_facts_changed(
+        decoded, invoice, review_round=await review_svc.review_round_of(db, invoice.id)
+    ):
         return _ActionResult(False, _info_page("Invoice has changed", FACTS_CHANGED_MESSAGE))
 
     if decoded.action == ACTION_APPROVE:

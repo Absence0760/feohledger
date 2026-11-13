@@ -618,7 +618,10 @@ async def merge_vendor_consolidation(
     per-table reassigned counts; no ``tax_id`` / bank / address). Refuses
     self-merge, an empty duplicate set, an unknown vendor (404), a
     cross-entity merge and a payments-blocked duplicate into an unblocked
-    canonical (422), and an ERP company where the canonical and a duplicate are
+    canonical (422), a duplicate holding approved invoices still to be paid
+    (409, ``params.count`` — merged, they would pay the canonical's bank
+    details, which their approver never saw; decisions §379), and an ERP
+    company where the canonical and a duplicate are
     linked to different supplier records (409, ``params.realms``) — each a
     coded refusal (``services/vendor_merge``'s ``VENDOR_MERGE_*``) a client
     states in the reader's language. Each duplicate's ERP links (row and kept)

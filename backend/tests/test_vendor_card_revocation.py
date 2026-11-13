@@ -81,6 +81,7 @@ async def _seed_card(
     *,
     status: str = "created",
     payment_status: str | None = None,
+    invoice_status: InvoiceStatus = InvoiceStatus.approved,
 ) -> uuid.UUID:
     """One invoice + its card (and, with `payment_status`, the payment it
     settles). Each card gets its own invoice — one live card per invoice."""
@@ -94,7 +95,7 @@ async def _seed_card(
             vendor_id=vendor_id,
             amount=Decimal("125.00"),
             currency="USD",
-            status=InvoiceStatus.approved,
+            status=invoice_status,
             correlation_id=uuid.uuid4(),
         )
         s.add(inv)
@@ -264,11 +265,13 @@ async def test_merge_onto_an_unpayable_canonical_cancels_the_inherited_card(
     realdb, mk, cards_enabled
 ):
     """The merge re-homes the duplicate's card onto the canonical; when the
-    canonical is itself un-payable that card must not stay spendable."""
+    canonical is itself un-payable that card must not stay spendable. The
+    card's invoice is paid: on an approved one still to be paid the merge is
+    refused outright (decisions §379, the test below)."""
     org_id = cards_enabled
     canonical = await _seed_vendor(mk, org_id, name="Canonical Co", status="inactive")
     duplicate = await _seed_vendor(mk, org_id, name="Canonical Co Dup")
-    card_id = await _seed_card(mk, org_id, duplicate)
+    card_id = await _seed_card(mk, org_id, duplicate, invoice_status=InvoiceStatus.paid)
 
     async with realdb.client(key=TENANT, role="admin") as c:
         resp = await c.post(
@@ -289,7 +292,7 @@ async def test_merge_onto_a_payable_canonical_leaves_the_card_live(realdb, mk, c
     org_id = cards_enabled
     canonical = await _seed_vendor(mk, org_id, name="Keep Co")
     duplicate = await _seed_vendor(mk, org_id, name="Keep Co Dup")
-    card_id = await _seed_card(mk, org_id, duplicate)
+    card_id = await _seed_card(mk, org_id, duplicate, invoice_status=InvoiceStatus.paid)
 
     async with realdb.client(key=TENANT, role="admin") as c:
         resp = await c.post(
@@ -299,6 +302,28 @@ async def test_merge_onto_a_payable_canonical_leaves_the_card_live(realdb, mk, c
     assert resp.status_code == 200, resp.text
     assert resp.json()["card_revocations"] == []
     assert await _card_status(mk, card_id) == "created"
+
+
+async def test_a_live_card_on_an_approved_invoice_refuses_the_merge(realdb, mk, cards_enabled):
+    """A card minted for an approved invoice leaves it approved and unpaid, so
+    the merge refuses (decisions §379): the card stays on the duplicate, live,
+    and nothing is revoked. Its exits are the card's own (charge or cancel)."""
+    org_id = cards_enabled
+    canonical = await _seed_vendor(mk, org_id, name="Hold Co", status="inactive")
+    duplicate = await _seed_vendor(mk, org_id, name="Hold Co Dup")
+    card_id = await _seed_card(mk, org_id, duplicate)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post(
+            "/api/enrichment/vendors/consolidation/merge",
+            json={"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(duplicate)]},
+        )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "vendor_merge_approved_unpaid"
+    async with mk() as s:
+        card = await s.get(VirtualCard, card_id)
+        assert card.vendor_id == duplicate
+        assert card.status == "created"
 
 
 # ---------------------------------------------------------------------------

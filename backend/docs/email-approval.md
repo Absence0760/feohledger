@@ -25,7 +25,9 @@ tenant_slug + invoice_id + actor_id (the reviewer) + action + expiry + jti + fac
 (invoice number, vendor name, amount + currency) plus what decides the payment
 (vendor id, payment method, due date, entity) — computed from the row by
 `email_action_token.digest_of_invoice` and handed to `notify_event` as
-`action_facts` by the caller that sends the assignment. An email can sit in an inbox for
+`action_facts` by the caller that sends the assignment
+(`services/review.approval_message_facts`, the one way every sender computes
+it). An email can sit in an inbox for
 days, and the invoice can be edited meanwhile; the Approve link approves **only
 the figures its message showed**. Both the confirmation page and the POST
 recompute the digest from the invoice (the POST under the row lock) and, on a
@@ -35,6 +37,20 @@ bound: sending an invoice back is safe whatever it now says. A token without the
 claim (minted before it existed) does not verify at all. The in-app counterpart
 is `expected_updated_at` on `POST /api/invoices/{id}/approve`
 (`docs/decisions.md` §263).
+
+The digest also binds the invoice's **review round** (`docs/decisions.md`
+§379): rounds ended by a rejection (`rejection_count`) plus rounds ended by a
+recall of the approval (`recall_count`), both in the invoice's
+`WorkflowInstance.state_data` (`email_action_token.round_from_state_data`,
+read by `services/review.review_round_of`). A message belongs to the round it
+was sent in, so after a recall, or an in-app reject and resubmit, the earlier
+round's Approve link answers "This invoice changed after this message was
+sent" even when the eight facts above are unchanged — line items, tax and the
+reason the approval was recalled are not among them. Round 0 leaves the digest
+byte for byte as it was before the round was bound, so links for an invoice
+never rejected or recalled kept working across the deploy; links already sent
+for an invoice in a later round stopped working then, which costs that
+reviewer one sign-in. An invoice with no workflow instance stays at round 0.
 
 Because the signing key is held only by the platform (sops + KMS in deployed
 envs), the token cannot be forged, and flipping the action, the invoice, or the
@@ -129,6 +145,10 @@ why (e.g. "this invoice requires CFO approval — please sign in").
   (`FEOH_EMAIL_ACTION_TTL_HOURS`, default 7 days). Nothing to do but wait one
   TTL; every link minted since carries a `pid`. A refused attempt (segregation, CFO gate, wrong status…)
   releases the pair, so the reviewer can still use the other link.
+- **Review round in the digest** — the pair consume retires a message only when
+  one of its own links was clicked. A message whose round ended in the app (a
+  reject there, or a recall) is retired by the round instead, with no Redis
+  state to lose.
 
 ## The email link
 
@@ -170,10 +190,14 @@ unset key simply disables the feature everywhere.
 
 - `tests/test_email_action_token.py` — pure token: round-trip, wrong key,
   tampered payload/signature, action-flip, expiry, empty-key fail-closed, link
-  builder.
+  builder, the review round (round 0 keeps the old digest, each round its own,
+  a first-round link refused in a later one), and that every assignment sender
+  binds `approval_message_facts`.
 - `tests/test_email_actions.py` (realdb) — GET renders + doesn't mutate, POST
   approve + single-use replay, POST reject + exception row, invalid/tampered/
-  no-key tokens, segregation block, non-approver role, wrong-status no-op, and
-  the assigned-invoice email link injection.
+  no-key tokens, segregation block, non-approver role, wrong-status no-op,
+  the assigned-invoice email link injection, and a first-round link refused
+  after a recall (and after an in-app reject and resubmit) while a link sent in
+  the new round approves.
 - Auth-gating is covered by `tests/test_rbac.py` (both routes are in
   `ALTERNATE_AUTH`).

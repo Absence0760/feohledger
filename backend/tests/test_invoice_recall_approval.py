@@ -48,6 +48,7 @@ async def _invoice(
     state_data: dict | None = None,
     erp_document_id: str | None = None,
     claim: str | None = None,
+    approval_enabled: bool = True,
 ) -> uuid.UUID:
     """One invoice in the given state, with a workflow instance whose snapshot
     carries ``approval_config``. A distinct amount and number per row and no
@@ -86,7 +87,7 @@ async def _invoice(
                 {
                     "number": 2,
                     "type": "approval",
-                    "enabled": True,
+                    "enabled": approval_enabled,
                     "config": approval_config or _SEGREGATED,
                 }
             ]
@@ -588,14 +589,12 @@ async def test_bulk_status_does_not_recall(realdb, status):
     assert await _audit(realdb, invoice_id, RECALL) == []
 
 
-async def test_a_recalled_invoice_is_never_read_again_so_it_cannot_pose_as_a_failed_push(
-    realdb,
-):
-    """The approval stamps outlive the recall (`was_ever_approved` stays true),
-    and `failed` with a stamp reads as "an approved invoice whose push failed",
-    which `/retry-erp` re-pushes. So a once-approved invoice must never reach
-    `failed` by a re-read: recall → reject → back to draft → `pending` is
-    refused at the engine, and nothing is offered for retry."""
+async def test_a_recalled_and_rejected_invoice_cannot_go_back_to_draft(realdb):
+    """The path the money-path review found (decisions §379): recall, reject,
+    `POST /bulk/status → new`. Draft is where `/complete`'s floor auto-approves
+    and its no-approval-step branch closes, with the financial lock off, so the
+    payee could be re-pointed there and approved by nobody independent. The
+    engine refuses the edge; the way back to approval is resubmit, to a person."""
     invoice_id = await _invoice(realdb)
     assert (await _recall(realdb, "ap_manager", invoice_id)).status_code == 200
     async with realdb.client(key=TENANT, role="admin") as c:
@@ -604,7 +603,29 @@ async def test_a_recalled_invoice_is_never_read_again_so_it_cannot_pose_as_a_fai
         resp = await c.post(
             "/api/invoices/bulk/status", json={"ids": [str(invoice_id)], "status": "new"}
         )
-        assert resp.json()["updated"] == 1, resp.text
+        body = resp.json()
+        assert body["updated"] == 0, body
+        (skip,) = body["skipped"]
+        assert "can't go back to draft" in skip["reason"]
+        assert (await _row(realdb, invoice_id)).status == InvoiceStatus.rejected
+
+        resp = await c.post(f"/api/invoices/{invoice_id}/resubmit")
+        assert resp.status_code == 200, resp.text
+    assert (await _row(realdb, invoice_id)).status == InvoiceStatus.ready_for_review
+    assert await _audit(realdb, invoice_id, "invoice.auto_approved") == []
+
+
+async def test_a_once_approved_draft_is_never_read_again_so_it_cannot_pose_as_a_failed_push(
+    realdb,
+):
+    """The approval stamps outlive the recall (`was_ever_approved` stays true),
+    and `failed` with a stamp reads as "an approved invoice whose push failed",
+    which `/retry-erp` re-pushes. So a once-approved invoice must never reach
+    `failed` by a re-read. A row that sits at `new` with a stamp (written before
+    §379 kept such rows out of draft) is refused `→ pending` at the engine, and
+    nothing is offered for retry."""
+    invoice_id = await _invoice(realdb, status=InvoiceStatus.new)
+    async with realdb.client(key=TENANT, role="admin") as c:
         resp = await c.post(
             "/api/invoices/bulk/status", json={"ids": [str(invoice_id)], "status": "pending"}
         )
@@ -616,6 +637,60 @@ async def test_a_recalled_invoice_is_never_read_again_so_it_cannot_pose_as_a_fai
         resp = await c.post(f"/api/invoices/{invoice_id}/retry-erp")
         assert resp.status_code == 409
         assert resp.json()["detail"]["code"] == "invoice_not_erp_retryable"
+
+
+@pytest.mark.parametrize("approved", [False, True], ids=["never-approved", "once-approved"])
+async def test_the_amount_floor_never_approves_a_once_approved_invoice(realdb, approved):
+    """`/complete`'s below-threshold auto-approve on a draft: it fires for a
+    never-approved invoice (the control), and never for one approved once,
+    which goes to a person instead (decisions §379). The door reads the stamp
+    before the floor would set its own."""
+    floor = {"require_segregation": True, "auto_approve_below": "5000.00"}
+    invoice_id = await _invoice(
+        realdb,
+        status=InvoiceStatus.new,
+        approved=approved,
+        amount="123.45",
+        approval_config=floor,
+    )
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/complete")
+    assert resp.status_code == 200, resp.text
+    auto = await _audit(realdb, invoice_id, "invoice.auto_approved")
+    row = await _row(realdb, invoice_id)
+    if not approved:
+        assert resp.json()["status"] == "approved"
+        assert len(auto) == 1
+        return
+    assert resp.json()["status"] == "ready_for_review"
+    assert row.status == InvoiceStatus.ready_for_review
+    assert auto == []
+    # The stamps still name the original approval, not "system (below threshold)".
+    assert row.approved_by == "Original Approver"
+
+
+async def test_a_once_approved_draft_is_not_closed_without_an_approval_step(realdb):
+    """With no approval step `/complete` closes a draft to `done` unapproved.
+    A once-approved invoice goes to review instead (the verdict says the same),
+    and `POST /bulk/status → done` is refused for it at the engine."""
+    invoice_id = await _invoice(realdb, status=InvoiceStatus.new, approval_enabled=False)
+
+    assert (await _verdict(realdb, "ap_manager", invoice_id))["complete"] is None
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status", json={"ids": [str(invoice_id)], "status": "done"}
+        )
+        body = resp.json()
+        assert body["updated"] == 0, body
+        (skip,) = body["skipped"]
+        assert "can't be closed without being approved again" in skip["reason"]
+        assert (await _row(realdb, invoice_id)).status == InvoiceStatus.new
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/invoices/{invoice_id}/complete")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "ready_for_review"
+    assert await _audit(realdb, invoice_id, "invoice.completed") == []
 
 
 async def test_the_engine_walks_the_recall_edges_only_for_the_recall(realdb):

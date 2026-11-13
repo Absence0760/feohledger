@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from app.models.contract import Contract, ContractStatus, ContractType
@@ -25,6 +26,7 @@ from app.models.vendor import Vendor, VendorErpLink
 from app.models.vendor_priors import VendorExtractionPrior
 from app.models.workflow import AuditLog
 from app.services.vendor_merge import (
+    VENDOR_MERGE_APPROVED_UNPAID,
     VENDOR_MERGE_BLOCKED_DUPLICATE,
     VENDOR_MERGE_CANONICAL_NOT_FOUND,
     VENDOR_MERGE_CROSS_ENTITY,
@@ -69,7 +71,10 @@ async def _default_entity_id(mk):
         return (await s.execute(select(Entity.id).where(Entity.is_default.is_(True)))).scalar_one()
 
 
-async def _seed_invoice(mk, org_id, vendor_id, *, number, entity_id):
+async def _seed_invoice(
+    mk, org_id, vendor_id, *, number, entity_id, status=InvoiceStatus.new, approved=False
+):
+    from datetime import date
     from decimal import Decimal
 
     async with mk() as s:
@@ -80,7 +85,9 @@ async def _seed_invoice(mk, org_id, vendor_id, *, number, entity_id):
             vendor_name="x",
             amount=Decimal("100.00"),
             vendor_id=vendor_id,
-            status=InvoiceStatus.new,
+            status=status,
+            approved_by="Original Approver" if approved else None,
+            approval_date=date(2026, 11, 1) if approved else None,
         )
         s.add(inv)
         await s.commit()
@@ -941,3 +948,166 @@ def test_vendor_fk_exemptions_are_current_and_justified():
         assert table in discovered, (
             f"exempted table {table!r} no longer carries a vendor_id column — drop the exemption"
         )
+
+
+# ---------------------------------------------------------------------------
+# Payee continuity: an approved invoice still to be paid never changes vendor
+# (decisions §379)
+# ---------------------------------------------------------------------------
+
+_UNPAID_APPROVAL_MESSAGE = (
+    "{n} approved invoice(s) of the duplicate vendors are still to be paid. Merged, "
+    "they would be paid to the canonical vendor's bank details, which their "
+    "approver never saw. Pay them, or recall their approvals, then merge."
+)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        InvoiceStatus.approved,
+        InvoiceStatus.sending_to_erp,
+        InvoiceStatus.sent_to_erp,
+        InvoiceStatus.posted_in_erp,
+        InvoiceStatus.payment_scheduled,
+        # An approved invoice's failed ERP push: `/retry-erp` re-pushes it.
+        InvoiceStatus.failed,
+    ],
+)
+async def test_merge_refuses_a_duplicate_holding_an_approved_unpaid_invoice(realdb, status):
+    """Re-pointed, the run or the ERP push would pay the canonical's bank
+    details for an invoice signed for the duplicate's. Refused with the count,
+    and nothing moves: not the invoice, not the duplicate's other rows."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    ent = await _default_entity_id(mk)
+    tag = uuid.uuid4().hex[:6]
+    canonical = await _seed_vendor(mk, org_id, name=f"Payee Keep {tag}")
+    dup = await _seed_vendor(mk, org_id, name=f"Payee Keep Dup {tag}")
+    held = await _seed_invoice(
+        mk, org_id, dup, number=f"HELD-{tag}", entity_id=ent, status=status, approved=True
+    )
+    draft = await _seed_invoice(mk, org_id, dup, number=f"DRAFT-{tag}", entity_id=ent)
+
+    body = {"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(dup)]}
+    async with realdb.client(key="a", role="ap_manager") as client:
+        r = await client.post(_MERGE_URL, json=body)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == {
+        "code": VENDOR_MERGE_APPROVED_UNPAID,
+        "message": _UNPAID_APPROVAL_MESSAGE.format(n=1),
+        "params": {"count": 1},
+    }
+    async with mk() as s:
+        assert (await s.get(Invoice, held)).vendor_id == dup
+        assert (await s.get(Invoice, draft)).vendor_id == dup
+        assert (await s.get(Vendor, dup)).status == "active"
+    assert await _audit_merge_rows(mk, canonical) == []
+
+
+@pytest.mark.parametrize(
+    ("status", "approved"),
+    [
+        # Money has moved: the payee is history, folded like every other row.
+        (InvoiceStatus.paid, True),
+        (InvoiceStatus.done, True),
+        # A failed EXTRACTION, never approved: its next approval signs the
+        # canonical payee.
+        (InvoiceStatus.failed, False),
+        # A recalled invoice back in review keeps its stamps; the next approval
+        # signs the canonical payee too.
+        (InvoiceStatus.ready_for_review, True),
+        (InvoiceStatus.rejected, True),
+    ],
+)
+async def test_merge_moves_invoices_whose_payee_a_new_approval_or_history_owns(
+    realdb, status, approved
+):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    ent = await _default_entity_id(mk)
+    tag = uuid.uuid4().hex[:6]
+    canonical = await _seed_vendor(mk, org_id, name=f"Payee Move {tag}")
+    dup = await _seed_vendor(mk, org_id, name=f"Payee Move Dup {tag}")
+    inv = await _seed_invoice(
+        mk, org_id, dup, number=f"MOVE-{tag}", entity_id=ent, status=status, approved=approved
+    )
+
+    body = {"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(dup)]}
+    async with realdb.client(key="a", role="ap_manager") as client:
+        r = await client.post(_MERGE_URL, json=body)
+    assert r.status_code == 200, r.text
+    async with mk() as s:
+        assert (await s.get(Invoice, inv)).vendor_id == canonical
+
+
+async def test_merge_counts_approved_unpaid_invoices_across_every_duplicate(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    ent = await _default_entity_id(mk)
+    tag = uuid.uuid4().hex[:6]
+    canonical = await _seed_vendor(mk, org_id, name=f"Count Co {tag}")
+    dup1 = await _seed_vendor(mk, org_id, name=f"Count Co One {tag}")
+    dup2 = await _seed_vendor(mk, org_id, name=f"Count Co Two {tag}")
+    for i, (vendor, status) in enumerate(
+        [
+            (dup1, InvoiceStatus.approved),
+            (dup1, InvoiceStatus.payment_scheduled),
+            (dup2, InvoiceStatus.posted_in_erp),
+            # Not counted: paid.
+            (dup2, InvoiceStatus.paid),
+        ]
+    ):
+        await _seed_invoice(
+            mk, org_id, vendor, number=f"CNT-{tag}-{i}", entity_id=ent, status=status, approved=True
+        )
+    # The canonical's own approved invoices are not the merge's to move.
+    await _seed_invoice(
+        mk,
+        org_id,
+        canonical,
+        number=f"CNT-{tag}-own",
+        entity_id=ent,
+        status=InvoiceStatus.approved,
+        approved=True,
+    )
+
+    body = {"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(dup1), str(dup2)]}
+    async with realdb.client(key="a", role="ap_manager") as client:
+        r = await client.post(_MERGE_URL, json=body)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["params"] == {"count": 3}
+
+
+async def test_a_recall_clears_the_way_and_the_next_approval_signs_the_canonical(realdb):
+    """The way through: recall the approval (the invoice goes back to review),
+    merge, and the invoice now names the canonical payee for its next approval."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    ent = await _default_entity_id(mk)
+    tag = uuid.uuid4().hex[:6]
+    canonical = await _seed_vendor(mk, org_id, name=f"Recall Way {tag}")
+    dup = await _seed_vendor(mk, org_id, name=f"Recall Way Dup {tag}")
+    inv = await _seed_invoice(
+        mk,
+        org_id,
+        dup,
+        number=f"RW-{tag}",
+        entity_id=ent,
+        status=InvoiceStatus.approved,
+        approved=True,
+    )
+
+    body = {"canonical_vendor_id": str(canonical), "duplicate_vendor_ids": [str(dup)]}
+    async with realdb.client(key="a", role="ap_manager") as client:
+        assert (await client.post(_MERGE_URL, json=body)).status_code == 409
+        r = await client.post(
+            f"/api/invoices/{inv}/recall-approval", json={"reason": "Payee is a duplicate"}
+        )
+        assert r.status_code == 200, r.text
+        r = await client.post(_MERGE_URL, json=body)
+        assert r.status_code == 200, r.text
+    async with mk() as s:
+        row = await s.get(Invoice, inv)
+        assert row.vendor_id == canonical
+        assert row.status == InvoiceStatus.ready_for_review

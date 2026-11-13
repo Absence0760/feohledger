@@ -52,6 +52,11 @@ Refusals (raised as ``VendorMergeError`` → mapped to 4xx by the API layer):
     canonical — would silently make its held invoices payable once
     reassigned. Merging a clean vendor into an already-blocked canonical is
     fine (tightens, never bypasses, the block),
+  * a duplicate holding approved invoices still to be paid
+    (``VENDOR_MERGE_APPROVED_UNPAID``, ``params.count``, decisions §379): the
+    approver signed the duplicate's payee, and re-pointed, the invoice would be
+    paid to the canonical's bank details. Pay them, or recall their approvals
+    (``POST /api/invoices/{id}/recall-approval``), then merge,
   * an ERP company in which the canonical and a duplicate (or two duplicates)
     are linked to DIFFERENT supplier records — the merge would have to choose
     which ERP supplier the merged vendor's bills post to, and it never guesses
@@ -66,8 +71,8 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.refusals import coded_refusal
@@ -75,8 +80,9 @@ from app.models.adaptive_suggestion import WorkflowSuggestion
 from app.models.contract import Contract
 from app.models.credit_memo import CreditMemo
 from app.models.discount import DiscountOffer
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_embedding import InvoiceEmbedding
+from app.models.invoice_status import PRE_APPROVAL_STATUSES
 from app.models.procurement import (
     Catalog,
     CatalogItem,
@@ -95,6 +101,7 @@ from app.models.virtual_card import VirtualCard
 
 __all__ = [
     "VENDOR_FK_CHILDREN",
+    "VENDOR_MERGE_APPROVED_UNPAID",
     "VENDOR_MERGE_BLOCKED_DUPLICATE",
     "VENDOR_MERGE_CANONICAL_NOT_FOUND",
     "VENDOR_MERGE_CROSS_ENTITY",
@@ -152,8 +159,58 @@ VENDOR_MERGE_DUPLICATE_NOT_FOUND = "vendor_merge_duplicate_not_found"
 VENDOR_MERGE_CROSS_ENTITY = "vendor_merge_cross_entity"
 VENDOR_MERGE_BLOCKED_DUPLICATE = "vendor_merge_blocked_duplicate"
 VENDOR_MERGE_ERP_LINK_CONFLICT = "vendor_merge_erp_link_conflict"
+#: A duplicate holds approved invoices still to be paid (decisions §379).
+#: ``params.count`` is how many, across every duplicate.
+VENDOR_MERGE_APPROVED_UNPAID = "vendor_merge_approved_unpaid"
 #: Raised by the endpoint, not here: a request id that is not a UUID at all.
 VENDOR_MERGE_INVALID_ID = "vendor_merge_invalid_id"
+
+#: Where an invoice's money has already left: its payee is history, and a merge
+#: folds it into the canonical vendor's (the same reading as the bank-change
+#: flag's, `api/vendors._MONEY_MOVED_STATUSES`).
+_MONEY_MOVED_STATUSES = (InvoiceStatus.paid, InvoiceStatus.done)
+
+
+def approved_unpaid_clause():
+    """SQL for "approved, and its money not yet moved": the invoices a merge
+    may not re-point (decisions §379). ``models/invoice_status.
+    financially_locked`` minus `paid` / `done` — every status past approval
+    still on its way to a payment run or an ERP push, and `failed` only with an
+    approval stamp (a failed push, not a failed extraction). The population the
+    bank-change flag covers (§286), for the same reason.
+
+    Fail-closed like the lock: it names the open side (the pre-approval
+    statuses and the two where money has moved), so a status added to the
+    enum later is held until someone decides otherwise."""
+    return and_(
+        Invoice.status.notin_([*PRE_APPROVAL_STATUSES, *_MONEY_MOVED_STATUSES]),
+        or_(
+            Invoice.status != InvoiceStatus.failed,
+            Invoice.approval_date.is_not(None),
+            func.coalesce(Invoice.approved_by, "") != "",
+        ),
+    )
+
+
+async def _approved_unpaid_count(db: AsyncSession, vendor_ids: list[uuid.UUID]) -> int:
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(Invoice)
+            .where(Invoice.vendor_id.in_(vendor_ids), approved_unpaid_clause())
+        )
+    ).scalar_one()
+
+
+def _approved_unpaid_refusal(count: int) -> VendorMergeError:
+    return VendorMergeError(
+        VENDOR_MERGE_APPROVED_UNPAID,
+        f"{count} approved invoice(s) of the duplicate vendors are still to be paid. "
+        "Merged, they would be paid to the canonical vendor's bank details, which "
+        "their approver never saw. Pay them, or recall their approvals, then merge.",
+        status_code=409,
+        params={"count": count},
+    )
 
 
 class VendorMergeError(Exception):
@@ -459,6 +516,17 @@ async def merge_vendors(
                     status_code=422,
                 )
 
+    # Payee continuity (decisions §379): an approved invoice still to be paid
+    # was signed for the duplicate's payee and bank details. Re-pointed, the run
+    # and the ERP push would pay the canonical's, which no approver saw and no
+    # bank-change dual control covered. Refused, with nothing written, until
+    # those invoices are paid (their payee is then history, folded like the
+    # rest) or recalled (back in review, where the next approval signs the
+    # canonical payee).
+    held = await _approved_unpaid_count(db, duplicates)
+    if held:
+        raise _approved_unpaid_refusal(held)
+
     # ERP links: planned in full before anything is written, so a conflicting
     # realm refuses the merge with nothing moved. The kept links are locked with
     # the vendors: a concurrent sync files and restores them.
@@ -484,14 +552,21 @@ async def merge_vendors(
     )
 
     # 1. Reassign every plain vendor_id FK child table duplicate → canonical.
+    #    Invoices never move while approved and unpaid, even if one was approved
+    #    after the count above (an approval locks the invoice, not its vendor):
+    #    the UPDATE re-reads each row it waits on, leaves such a row behind, and
+    #    the recount refuses the merge. The caller never commits a refusal.
     for model in VENDOR_FK_CHILDREN:
-        res = await db.execute(
-            update(model)
-            .where(model.vendor_id.in_(duplicates))
-            .values(vendor_id=canonical_vendor_id)
-        )
+        stmt = update(model).where(model.vendor_id.in_(duplicates))
+        if model is Invoice:
+            stmt = stmt.where(~approved_unpaid_clause())
+        res = await db.execute(stmt.values(vendor_id=canonical_vendor_id))
         if res.rowcount:
             result.reassigned[model.__tablename__] = res.rowcount
+        if model is Invoice:
+            held = await _approved_unpaid_count(db, duplicates)
+            if held:
+                raise _approved_unpaid_refusal(held)
 
     # 2. VendorExtractionPrior — unique (vendor_id, field_name). A blind reassign
     #    would violate that constraint two different ways: where the CANONICAL
