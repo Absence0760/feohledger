@@ -693,8 +693,8 @@ async def sync_pos_from_erp(
                     existing_po.vendor_id = vendor_id
                     changed = True
             # The lines are the ERP's too (decisions §327). A payload with none
-            # (a headers-only adapter, NetSuite) leaves the stored lines alone:
-            # silence is not a correction.
+            # (a headers-only adapter, or a closed NetSuite PO, §398) leaves the
+            # stored lines alone: silence is not a correction.
             mark: str | None = None
             if erp_po.line_items:
                 outcome = await _refresh_po_lines(db, existing_po, erp_po.line_items)

@@ -19765,3 +19765,147 @@ not ours; success clears the flag); `frontend/tests-e2e/erp/dynamics.spec.ts`
 against fake-erp's `fake-vat-lostread-co` / `fake-vat-lostedit-co` (first
 draft read per invoice number answers 503, the second company also adding a
 10.00 line first) and a draft keyed by hand in `fake-vat-co`.
+
+## 398. NetSuite posts by ids, reads its own PO sign, and counts a bill posted only when NetSuite shows it approved (issue #655 N1–N5, 2026-11-15)
+
+**Context.** The 2026-10-23 docs-versus-code audit listed NetSuite findings
+N1–N5; the report itself is not in the repo, so each was re-derived from the
+issue's text, its cross-cutting classes and Oracle's SuiteTalk REST docs. N1
+(the TBA signer put the query inside the signed URI) landed with §320 and N5
+(a synced PO linked to its vendor by name) with #652; both were re-checked
+against the code and stand. N6 (OAuth 2.0) is §320. This entry is N2–N4, the
+PO lines `docs/followups.md` kept open, and the classes #655 asks of every
+adapter. Nothing here has run against a NetSuite account (#654).
+
+**Decision.**
+- **N2 — the idempotency lookup is `GET /vendorBill/eid:<correlation id>`.**
+  Oracle documents `eid:` for addressing any record by external id, and shows
+  the collection query `?q=externalId IS "…"` only as a workaround for an id
+  holding a pipe; integrators report NetSuite refusing that query on
+  transaction records, which would fail every push at its lookup. A miss is a
+  404 whose `o:errorCode` is `NONEXISTENT_ID`; any other 404, or a 200 we
+  cannot parse, fails the push as before (a lookup that could not be made is
+  not a miss). The hit is the bill itself, so it is not read twice.
+- **N3 — the currency is posted by internal id, and the PO total by its
+  magnitude.** A reference's `refName` is its display text (`getFieldText`:
+  the currency record's name, which an administrator can rename), so
+  `{"refName": "USD"}` named no currency reliably, and a bill NetSuite
+  defaulted to the vendor's currency would have passed a total check that
+  compares figures only. The adapter reads the active currency whose
+  `symbol` (ISO code, the column the PO sync already trusts) is the
+  invoice's, posts `{"id": …}`, and confirms the read-back bill's
+  `currency.id`. None active, or not an ISO code: `currency_not_set_up`
+  (new), `not_posted` when the lookup has just shown no bill of ours exists.
+  A failed read is retryable. A found bill in another currency is
+  `posted_total_mismatch`, as BC's is (§391). Separately, SuiteQL states a
+  transaction header in posting sign and a purchase order's is the
+  vendor-side credit, so `foreigntotal` reads -2,100.50 for an order the UI
+  shows at 2,100.50; stored as read, no invoice could match a NetSuite PO and
+  every open-PO rollup subtracted it. The total is now `abs(foreigntotal)`.
+  Sources are integrators' (an ODBC report, a published SuiteQL query that
+  negates it), not Oracle's, so this is a sandbox item.
+- **N4 — a bill counts as posted only when NetSuite shows it approved.** Under
+  approval routing a bill is created Pending Approval and posts nothing to
+  the GL. It used to be reported posted, which closes the invoice at `done`
+  (NetSuite has no status sync), so a bill NetSuite's approver then rejected
+  would be paid by nobody. After the total and currency checks, the bill's
+  `approvalStatus` (1 pending, 3 rejected) and `status` (a word, a refName or
+  a `VendBill:` letter, all read alike) decide: Open or Paid In Full, not
+  pending or rejected → success; Pending Approval or anything unreadable →
+  `bill_not_posted` (new); rejected or cancelled → `bill_rejected` (new).
+  Both leave the bill: the approval is NetSuite's to give, and `retry-erp`
+  after it finds the bill by `eid:` and reports it posted, so it is never
+  created twice. BC's `existing_invoice_not_open` was the first choice for a
+  rejected bill and was dropped in money-path review: its sentence ("no
+  longer a draft, so it can't be changed from here") reads as a live bill,
+  which invites closing an invoice that nothing will pay. The total check still
+  runs first, so a mismatched pending bill is deleted as before.
+  *Rejected:* setting `approvalStatus` to Approved on the create. It would
+  overrule the customer's own NetSuite control with FeohLedger's approval,
+  and only a role holding the approve permission can do it anyway.
+- **Coded create refusals (§285's class).** A create NetSuite answers with a
+  4xx a re-send cannot change is coded from facts read back, and is
+  `not_posted` only once the `eid:` lookup, made again, misses: the 4xx may be
+  NetSuite's duplicate-externalId answer to a second create racing the first
+  (an SQS redelivery after a lost response), so a hit goes through the posted
+  checks as our bill, and a lookup that cannot be made leaves the refusal
+  fail-closed. The facts, in order: the base accounting period holding the
+  bill's date closed, A/P-locked or all-locked → `period_closed`; the vendor
+  gone or `isinactive` → `vendor_inactive`; an account gone or inactive →
+  `account_inactive` naming our codes; otherwise the shared `bill_refused`
+  (§385). NetSuite's body is never read for the cause: its `o:errorCode` is a
+  generic `USER_ERROR` / `INVALID_CONTENT` and its `detail` echoes the
+  submitted fields. A read that fails is "don't know", never "inactive". Only
+  integer internal ids are spliced into SuiteQL. 401, 408, 409, 423, 425, 429
+  and 5xx stay uncoded and retryable.
+- **Paid versus credited (§303's table gains a row).** NetSuite sets Paid In
+  Full when a vendor credit is applied as well as a vendor payment, so
+  `get_invoice_status` reads what was applied to the bill
+  (`NextTransactionLineLink` where `previousdoc` is the bill): `paid` only
+  when every link is a `VendPymt` and together they are exactly the bill's
+  total; a credit, any other link, a shortfall, or rows of mixed sign (a
+  payment and its reversal) is `settled_no_payment`; a failed read is
+  `unknown`. No caller reads it today (§303), so nothing
+  changes at runtime.
+
+  | Adapter | `paid` when | Nothing owing otherwise |
+  |---|---|---|
+  | NetSuite | Paid In Full and the applied links are all `VendPymt`, summing to the bill's `total` | `settled_no_payment` |
+
+- **PO lines (the `docs/followups.md` entry).** After the headers, the lines
+  of every PO not closed or cancelled are read from `transactionline`
+  (`mainline = 'F' AND taxline = 'F'`), 100 PO ids a query, each chunk read
+  whole or the listing raises `ErpListingIncomplete`. The sync then refreshes
+  stored lines by §327's rule; a closed or cancelled PO is sent without lines,
+  which leaves the stored ones alone. Reading only the live POs keeps each
+  read inside `SYNC_LISTING_MAX_ROWS` for an account with years of orders,
+  and a chunk that still runs past it is read again in halves, down to one PO
+  (only a single PO past the bound raises). Lines are debits and read
+  positive; a PO whose line amounts sum negative (credit sign, as the header
+  is stated) has its line totals and quantities negated, so the 3-way receipt
+  value never mixes signs. A line NetSuite closed is kept: the header total
+  still counts it, and dropping it would unlink a receipt recorded against
+  it. An expense line's `gl_account` is the chart sync's code for its account
+  (`acctnumber`, else its name); an item line's account is the item's own,
+  so it carries none. *Rejected:* one query over every PO's lines (it hits
+  the listing bound long before the headers do).
+- **Payment terms were already stored by code.** BC's half of the old
+  follow-up stored a GUID (§391). NetSuite's vendor sync reads
+  `BUILTIN.DF(terms)`, the term record's name ("Net 30"), which is the only
+  identifier a NetSuite term has besides its internal id; nothing changed,
+  and `test_erp_vendor_sync_adapter.py` pins it.
+
+**Draft and pending-approval POs.** A PO in Pending Supervisor Approval (`A`)
+is the PO-status lane's (§394, `models/procurement.UNISSUED_PO_STATUS`), whose
+change maps it in the same file; this entry does not touch that mapping. Its
+lines are read like any other live PO's.
+
+**Sandbox-only (#654).** That NetSuite answers the `eid:` miss with 404
+`NONEXISTENT_ID`; that `refName` on a reference is display-only on input; the
+sign of `foreigntotal` and of PO line `quantity` / `foreignamount` (taken as
+stated, lines being debits); the `accountingperiod`, `currency`,
+`transactionline` and `NextTransactionLineLink` columns used; the status and
+`approvalStatus` shapes a vendorBill GET returns; the duplicate-externalId
+answer to a racing create; whether closed PO lines (`isclosed`) should count;
+and that Paid In Full is set by an applied vendor credit.
+
+Tests: `tests/test_erp_netsuite_adapter.py` (the adapter against fake-erp's
+NetSuite routes in process: a clean push by currency id, the `eid:` retry, a
+pending bill refused and left then posted once approved, a rejected one, the
+currency, period, vendor and account refusals, PO totals and lines; mocked:
+line chunks, a failed line read, a lookup 404 that is not a miss, an
+unreadable currency, `bill_refused`, retryable create answers, a found bill
+in another currency, every status shape, paid versus credited; the
+money-path review's follow-ups: a refused create whose bill exists after all,
+a second lookup that fails, a hit that is not plainly ours, a truncated line
+chunk split in halves, credit-sign lines, a payment and its reversal);
+`tests/test_erp_adapter_idempotency.py`, `test_erp_adapter_money_exact.py`,
+`test_erp_adapter_error_pii.py`, `test_erp_push_flow.py`,
+`test_erp_netsuite_auth.py`, `test_erp_void_invoice.py`,
+`test_erp_po_sync.py` (the new request sequence);
+`frontend/src/lib/api/erpRefusals.test.ts` (the two codes);
+`frontend/tests-e2e/erp/netsuite.spec.ts` (PO lines and sign, a pending bill
+completed after approval, a closed period). fake-erp's NetSuite section now
+answers `eid:`, SuiteQL `currency`, `accountingperiod` and `transactionline`,
+refuses a currency given by `refName`, refuses a bill dated in its closed
+January 2020, states PO headers negative and gives bills an `approvalStatus`.

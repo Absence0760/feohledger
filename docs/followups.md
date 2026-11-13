@@ -1423,10 +1423,6 @@ scope (§260) — do not fold them into any of these.
       voided there, or the recall stays refused. **Trigger:** the first
       customer who needs to recall a pushed bill, or the live void test now
       pending.
-- [ ] **(c) NetSuite's PO sync pulls no lines.** (Business Central's half —
-      the vendor sync storing the `paymentTermsId` GUID as the terms text —
-      landed with decisions §391.) **Durable fix:** pull NetSuite PO lines
-      through SuiteQL. **Trigger:** the PO sync starting to store lines.
 - [ ] **(c) The OAuth adapters have no Playwright spec.** The ERP e2e suite
       covers Merge.dev, NetSuite and Business Central; the setup panel's spec
       covers the connect UI with a mocked status. **Durable fix:** fake-erp
@@ -2296,7 +2292,13 @@ as oversights.
       that `rest_webservices` alone covers SuiteQL, the exact `aud` NetSuite
       compares (its doc pages differ in the domain they show), the token
       endpoint's real error bodies, and whether `expires_in` arrives as a
-      number or a string (both are read).
+      number or a string (both are read). The same pass checks what decisions
+      §398 read from docs and integrators' reports: the `eid:` lookup's 404
+      `NONEXISTENT_ID` miss, `refName` being display-only on a reference, the
+      sign of a PO's `foreigntotal` and line amounts, the `currency`,
+      `accountingperiod`, `transactionline` and `NextTransactionLineLink`
+      columns, the vendorBill `status` / `approvalStatus` shapes, and that an
+      applied vendor credit sets Paid In Full.
       **Why blocked:** needs a NetSuite account with an integration record and
       a mapped certificate — a design partner's sandbox or the SuiteCloud
       Developer Network.

@@ -353,7 +353,7 @@ def test_netsuite_list_pos_maps_suiteql_rows():
       {"id": "501", "tranid": "PO-501", "status": "B", "vendorid": 25, "vendorname": "Acme",
        "foreigntotal": 99999999999999.99, "currency": "usd", "duedate": "2026-06-01"},
       {"id": "502", "tranid": "PO-502", "status": "H", "vendorname": null,
-       "foreigntotal": 640.00, "currency": null, "duedate": null},
+       "foreigntotal": -640.00, "currency": null, "duedate": null},
       {"id": "503", "tranid": "PO-503", "status": "C", "foreigntotal": 10},
       {"id": "504", "tranid": "PO-504", "status": "G", "foreigntotal": 10},
       {"id": "505", "tranid": "PO-505", "status": "F", "foreigntotal": 10},
@@ -388,14 +388,22 @@ def test_netsuite_list_pos_maps_suiteql_rows():
     assert pos[0].expected_delivery_date == date(2026, 6, 1)
     assert pos[1].currency is None  # never defaulted
     assert pos[1].expected_delivery_date is None
+    # SuiteQL states a PO header in posting sign (decisions §398).
     assert pos[1].total == Decimal("640.00")
 
-    query = json.loads(client.post.await_args.kwargs["content"])["q"]
+    header_call = client.post.await_args_list[0]
+    query = json.loads(header_call.kwargs["content"])["q"]
     assert "FROM transaction" in query and "'PurchOrd'" in query
     assert "t.entity AS vendorid" in query
     # Dates through TO_CHAR: SuiteQL otherwise formats them per user preference.
     assert "TO_CHAR(t.duedate, 'YYYY-MM-DD')" in query
-    assert client.post.await_args.kwargs["headers"]["Prefer"] == "transient"
+    assert header_call.kwargs["headers"]["Prefer"] == "transient"
+    # Then the lines of the live POs only: 501, 503 is cancelled, 502 / 504
+    # are closed, 505 is open (test_erp_netsuite_adapter.py maps the lines).
+    lines_query = json.loads(client.post.await_args_list[1].kwargs["content"])["q"]
+    assert "FROM transactionline" in lines_query
+    assert "IN (501, 505)" in lines_query
+    assert client.post.await_count == 2
 
 
 def test_netsuite_po_links_to_the_vendor_id_list_vendors_reports_even_after_a_rename():

@@ -328,6 +328,9 @@ async def set_status(body: dict) -> dict:
         raise ProviderError(404, {"detail": "unknown provider or id"})
     if provider == "netsuite":
         store[doc_id]["status"] = {"id": status.lower(), "refName": status}
+        # An approver acting in NetSuite moves the approval status with it.
+        approval = {"pendingapproval": "1", "rejected": "3"}.get(status.lower(), "2")
+        store[doc_id]["approvalStatus"] = {"id": approval}
     else:
         store[doc_id]["status"] = status
     return {"status": "ok"}
@@ -893,37 +896,6 @@ async def netsuite_list_vendors(request: Request, limit: int = 1000) -> dict:
     }
 
 
-_NETSUITE_EXTERNAL_ID_Q = re.compile(r'externalId\s+IS\s+"([^"]*)"', re.IGNORECASE)
-
-
-@netsuite.get("/vendorBill")
-async def netsuite_list_vendor_bills(request: Request, q: str | None = None) -> dict:
-    """Collection query — only supports the ``externalId IS "..."`` shape our
-    own adapter sends. Backs the pre-create idempotency lookup (issue #143):
-    NetSuite enforces externalId uniqueness per record type, so a retried push
-    after a lost response finds the already-created bill here instead of
-    creating a second one via POST."""
-    _require_netsuite_auth(request)
-    items: list[dict] = []
-    if q:
-        match = _NETSUITE_EXTERNAL_ID_Q.match(q.strip())
-        if match:
-            external_id = match.group(1)
-            items = [
-                {"links": [], "id": doc_id}
-                for doc_id, rec in STATE["netsuite_bills"].items()
-                if rec.get("externalId") == external_id
-            ]
-    return {
-        "links": [],
-        "count": len(items),
-        "hasMore": False,
-        "items": items,
-        "offset": 0,
-        "totalResults": len(items),
-    }
-
-
 def _netsuite_invalid_ref(field: str) -> ProviderError:
     return _netsuite_error(400, "INVALID_KEY_OR_REF", f"Invalid {field} reference key.")
 
@@ -944,6 +916,15 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
     lines = (body.get("expense") or {}).get("items") or []
     if not lines:
         raise _netsuite_error(400, "USER_ERROR", "You must enter at least one line item.")
+    # The currency is a record reference by internal id; a `refName` alone
+    # (display text) names no record here.
+    currency = _netsuite_active_currency((body.get("currency") or {}).get("id"))
+    if currency is None:
+        raise _netsuite_invalid_ref("currency")
+    if _netsuite_period_closed(body.get("tranDate")):
+        raise _netsuite_error(
+            400, "USER_ERROR", "The accounting period for this transaction date is closed."
+        )
     account_ids = {a["id"] for a in NETSUITE_ACCOUNT_FIXTURES}
     total = Decimal(0)
     for line in lines:
@@ -964,7 +945,7 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
         "dueDate": body.get("dueDate"),
         "memo": body.get("memo"),
         "externalId": body.get("externalId"),
-        "currency": body.get("currency"),
+        "currency": {"id": currency["id"], "refName": currency["symbol"]},
         "entity": body.get("entity"),
         "expense": body.get("expense"),
         "total": total,
@@ -972,6 +953,13 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
             {"id": "pendingApproval", "refName": "Pending Approval"}
             if pending
             else {"id": "open", "refName": "Open"}
+        ),
+        # Under approval routing a bill carries its approval status; a
+        # routed vendor's starts Pending Approval (1), the rest Approved (2).
+        "approvalStatus": (
+            {"id": "1", "refName": "Pending Approval"}
+            if pending
+            else {"id": "2", "refName": "Approved"}
         ),
     }
     # Real NetSuite responds 204 No Content with the new record URL in Location.
@@ -984,8 +972,24 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
 @netsuite.get("/vendorBill/{doc_id}")
 async def netsuite_get_vendor_bill(request: Request, doc_id: str) -> Response:
     """The record, ``total`` included. Money goes out as JSON number literals
-    with every digit (``_netsuite_json``), never through a float."""
+    with every digit (``_netsuite_json``), never through a float.
+
+    ``eid:<external id>`` addresses the bill by its ``externalId``, as NetSuite
+    lets any record URL do — the adapter's pre-create idempotency lookup
+    (issue #143): NetSuite enforces externalId uniqueness per record type, so
+    a retried push after a lost response finds the bill it already created.
+    No such bill is NetSuite's 404 ``NONEXISTENT_ID``."""
     _require_netsuite_auth(request)
+    if doc_id.startswith("eid:"):
+        external_id = doc_id.removeprefix("eid:")
+        doc_id = next(
+            (
+                bill_id
+                for bill_id, rec in STATE["netsuite_bills"].items()
+                if str(rec.get("externalId") or "").lower() == external_id.lower()
+            ),
+            doc_id,
+        )
     record = STATE["netsuite_bills"].get(doc_id)
     if record is None:
         raise _netsuite_error(404, "NONEXISTENT_ID", f"That record does not exist. id: {doc_id}")
@@ -3986,6 +3990,8 @@ NETSUITE_SUITEQL_VENDOR_FIXTURES: list[dict] = [
 # (B = Pending Receipt, H = Closed), `currency` the currency's ISO symbol,
 # `vendorid` the `t.entity` internal id — a NETSUITE_SUITEQL_VENDOR_FIXTURES
 # `id` — and `vendorname` its display name (`BUILTIN.DF(t.entity)`).
+# `foreigntotal` is in posting sign, as SuiteQL states a PO's header: the
+# vendor-side credit, so negative for an order the UI shows at 2,100.50.
 NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
     {
         "id": "501",
@@ -3993,7 +3999,7 @@ NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
         "status": "B",
         "vendorid": "25",
         "vendorname": "Fake NetSuite Vendor A",
-        "foreigntotal": 2100.50,
+        "foreigntotal": -2100.50,
         "currency": "USD",
         "duedate": "2026-06-01",
     },
@@ -4003,11 +4009,110 @@ NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
         "status": "H",
         "vendorid": "26",
         "vendorname": "Fake NetSuite Vendor B",
-        "foreigntotal": 640.00,
+        "foreigntotal": -640.00,
         "currency": "GBP",
         "duedate": None,
     },
 ]
+
+# SuiteQL `transactionline` rows of the POs above (mainline and tax lines
+# already left out, as the adapter's query asks). PO-FAKE-NS-501 has an item
+# line (`itemid` set; its account is the item's) and an expense line coded to
+# 6100; together 2,100.50. The closed PO-FAKE-NS-502's lines are never read.
+NETSUITE_SUITEQL_PO_LINE_FIXTURES: list[dict] = [
+    {
+        "poid": "501",
+        "lineid": "1",
+        "itemid": "910",
+        "item": "FAKE-NS-WIDGET",
+        "memo": "Widgets",
+        "quantity": 10,
+        "rate": 150.05,
+        "foreignamount": 1500.50,
+        "acctnumber": "5000",
+        "accountname": "Fake NS Inventory",
+    },
+    {
+        "poid": "501",
+        "lineid": "2",
+        "itemid": None,
+        "item": None,
+        "memo": "Installation",
+        "quantity": None,
+        "rate": None,
+        "foreignamount": 600.00,
+        "acctnumber": "6100",
+        "accountname": "Fake NS Office Supplies",
+    },
+    {
+        "poid": "502",
+        "lineid": "1",
+        "itemid": "911",
+        "item": "FAKE-NS-GADGET",
+        "memo": None,
+        "quantity": 4,
+        "rate": 160.00,
+        "foreignamount": 640.00,
+        "acctnumber": "5000",
+        "accountname": "Fake NS Inventory",
+    },
+]
+
+# SuiteQL `currency` rows: a bill's `currency` must be the id of an active
+# one (`netsuite_create_vendor_bill`); `symbol` is the ISO code.
+NETSUITE_SUITEQL_CURRENCY_FIXTURES: list[dict] = [
+    {"id": "1", "symbol": "USD", "isinactive": "F"},
+    {"id": "2", "symbol": "GBP", "isinactive": "F"},
+    {"id": "4", "symbol": "EUR", "isinactive": "F"},
+    {"id": "6", "symbol": "CAD", "isinactive": "T"},
+]
+
+# SuiteQL `accountingperiod` rows (base periods only). January 2020 is closed,
+# so a bill dated in it is refused and the adapter codes it `period_closed`.
+NETSUITE_SUITEQL_PERIOD_FIXTURES: list[dict] = [
+    {
+        "id": "101",
+        "startdate": "2020-01-01",
+        "enddate": "2020-01-31",
+        "isyear": "F",
+        "isquarter": "F",
+        "isadjust": "F",
+        "closed": "T",
+        "aplocked": "T",
+        "alllocked": "T",
+    },
+    {
+        "id": "182",
+        "startdate": "2026-11-01",
+        "enddate": "2026-11-30",
+        "isyear": "F",
+        "isquarter": "F",
+        "isadjust": "F",
+        "closed": "F",
+        "aplocked": "F",
+        "alllocked": "F",
+    },
+]
+
+
+def _netsuite_active_currency(currency_id: object) -> dict | None:
+    return next(
+        (
+            c
+            for c in NETSUITE_SUITEQL_CURRENCY_FIXTURES
+            if c["id"] == currency_id and c["isinactive"] != "T"
+        ),
+        None,
+    )
+
+
+def _netsuite_period_closed(tran_date: object) -> bool:
+    day = str(tran_date or "")[:10]
+    return bool(day) and any(
+        p["startdate"] <= day <= p["enddate"] and "T" in (p["closed"], p["aplocked"])
+        for p in NETSUITE_SUITEQL_PERIOD_FIXTURES
+    )
+
 
 _SUITEQL_VENDOR_Q = re.compile(r"^\s*SELECT\b.*\bFROM\s+vendor\b", re.IGNORECASE | re.DOTALL)
 _SUITEQL_PO_Q = re.compile(
@@ -4015,15 +4120,34 @@ _SUITEQL_PO_Q = re.compile(
 )
 
 
+_SUITEQL_PO_LINE_Q = re.compile(
+    r"^\s*SELECT\b.*\bFROM\s+transactionline\b", re.IGNORECASE | re.DOTALL
+)
+_SUITEQL_CURRENCY_Q = re.compile(
+    r"^\s*SELECT\b.*\bFROM\s+currency\b", re.IGNORECASE | re.DOTALL
+)
+_SUITEQL_PERIOD_Q = re.compile(
+    r"^\s*SELECT\b.*\bFROM\s+accountingperiod\b", re.IGNORECASE | re.DOTALL
+)
+
+
 def _netsuite_suiteql_table(query: str) -> list[dict] | None:
     """The fixture rows a SuiteQL query reads, or None for one the fake
-    doesn't answer (a 400, as real SuiteQL gives an invalid query)."""
+    doesn't answer (a 400, as real SuiteQL gives an invalid query). The
+    fake ignores a WHERE clause and returns the whole table; the adapter
+    filters the rows by the ids it asked for itself."""
     if _SUITEQL_ACCOUNT_Q.match(query):
         return NETSUITE_ACCOUNT_FIXTURES
     if _SUITEQL_VENDOR_Q.match(query):
         return NETSUITE_SUITEQL_VENDOR_FIXTURES
     if _SUITEQL_PO_Q.match(query):
         return NETSUITE_SUITEQL_PO_FIXTURES
+    if _SUITEQL_PO_LINE_Q.match(query):
+        return NETSUITE_SUITEQL_PO_LINE_FIXTURES
+    if _SUITEQL_CURRENCY_Q.match(query):
+        return NETSUITE_SUITEQL_CURRENCY_FIXTURES
+    if _SUITEQL_PERIOD_Q.match(query):
+        return NETSUITE_SUITEQL_PERIOD_FIXTURES
     return None
 
 

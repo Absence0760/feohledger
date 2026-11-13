@@ -64,7 +64,7 @@ def _payload(**overrides) -> InvoicePayload:
 def _ns_bill(total: str | None, status: str = "open") -> MagicMock:
     """A NetSuite ``GET /vendorBill/{id}`` response carrying ``total`` as a
     JSON number literal (the adapter parses the raw bytes, never a float)."""
-    fields = [f'"id": "42", "status": {{"id": "{status}"}}']
+    fields = [f'"id": "42", "status": {{"id": "{status}"}}', '"currency": {"id": "1"}']
     if total is not None:
         fields.append(f'"total": {total}')
     resp = _mock_response(200, {})
@@ -84,8 +84,21 @@ def _ns_adapter() -> NetSuiteAdapter:
     )
 
 
-_NS_MISS = _mock_response(200, {"items": [], "count": 0})
+#: The `GET /vendorBill/eid:<id>` lookup's miss: NetSuite's 404 NONEXISTENT_ID.
+_NS_MISS = _mock_response(404, {"o:errorDetails": [{"o:errorCode": "NONEXISTENT_ID"}]})
 _NS_CREATED = _mock_response(204, None, headers={"Location": "https://x/vendorBill/42"})
+#: The SuiteQL currency read: USD is internal id 1.
+_NS_USD = _mock_response(200, {})
+# SuiteQL bodies are parsed from the raw bytes (`loads_exact_json`).
+_NS_USD.content = b'{"items": [{"id": "1", "symbol": "USD"}], "hasMore": false}'
+
+
+def _ns_found(total: str | None, status: str = "open") -> MagicMock:
+    """The lookup's hit: the bill itself, as `GET /vendorBill/eid:<id>`
+    answers, id 9001."""
+    resp = _ns_bill(total, status)
+    resp.content = resp.content.replace(b'"id": "42"', b'"id": "9001"')
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -131,28 +144,21 @@ def test_netsuite_post_invoice_short_circuits_when_external_id_already_exists():
     adapter = _ns_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(
-            side_effect=[
-                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
-                _ns_bill("100.00"),
-            ]
-        )
-        client.post = AsyncMock(
-            side_effect=AssertionError("must not POST when externalId already exists")
-        )
+        client.get = AsyncMock(return_value=_ns_found("100.00"))
+        # The one POST is the SuiteQL currency read — never a vendorBill create.
+        client.post = AsyncMock(return_value=_NS_USD)
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
 
     assert result.success, result.message
     assert result.erp_document_id == "9001"
     assert "idempotent" in result.message.lower()
-    client.post.assert_not_awaited()
+    client.post.assert_awaited_once()
+    assert client.post.await_args.args[0].endswith("/query/v1/suiteql?limit=100&offset=0")
 
-    # The lookup query carries the correlation_id as the externalId filter.
-    lookup_url = client.get.await_args_list[0].args[0]
-    assert "externalId" in lookup_url
-    assert "corr-existing" in lookup_url
-    # Then the found bill itself is read back.
-    assert client.get.await_args_list[1].args[0].endswith("/vendorBill/9001")
+    # The lookup addresses the bill by its external id (Oracle's `eid:` form),
+    # and its answer is the bill itself: no second read.
+    client.get.assert_awaited_once()
+    assert client.get.await_args.args[0].endswith("/vendorBill/eid:corr-existing")
 
 
 def test_netsuite_idempotent_hit_with_a_different_total_is_not_success():
@@ -163,13 +169,12 @@ def test_netsuite_idempotent_hit_with_a_different_total_is_not_success():
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(
             side_effect=[
-                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
-                _ns_bill("110.00"),
+                _ns_found("110.00"),
                 # void_invoice's own status read: approved, so left alone.
                 _mock_response(200, {"status": {"id": "open"}}),
             ]
         )
-        client.post = AsyncMock()
+        client.post = AsyncMock(return_value=_NS_USD)
         client.delete = AsyncMock()
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
 
@@ -177,7 +182,7 @@ def test_netsuite_idempotent_hit_with_a_different_total_is_not_success():
     assert result.retryable is False
     assert result.message.startswith("NetSuite post failed: posted_total_mismatch")
     assert "could not be deleted" in result.message
-    client.post.assert_not_awaited()
+    client.post.assert_awaited_once()  # the currency read, never a create
     client.delete.assert_not_awaited()
 
 
@@ -185,12 +190,8 @@ def test_netsuite_idempotent_hit_with_no_total_is_unconfirmed():
     adapter = _ns_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(
-            side_effect=[
-                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
-                _ns_bill(None),
-            ]
-        )
+        client.get = AsyncMock(return_value=_ns_found(None))
+        client.post = AsyncMock(return_value=_NS_USD)
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
 
     assert result.success is False
@@ -213,7 +214,7 @@ def test_netsuite_created_bill_whose_total_differs_is_deleted_while_pending():
                 _mock_response(200, {"status": {"id": "pendingApproval"}}),
             ]
         )
-        client.post = AsyncMock(return_value=_NS_CREATED)
+        client.post = AsyncMock(side_effect=[_NS_USD, _NS_CREATED])
         client.delete = AsyncMock(return_value=_mock_response(204, None))
         result = _run(adapter.post_invoice(_payload()))
 
@@ -237,7 +238,7 @@ def test_netsuite_created_bill_whose_total_differs_is_left_when_approved():
                 _mock_response(200, {"status": {"id": "open"}}),
             ]
         )
-        client.post = AsyncMock(return_value=_NS_CREATED)
+        client.post = AsyncMock(side_effect=[_NS_USD, _NS_CREATED])
         client.delete = AsyncMock()
         result = _run(adapter.post_invoice(_payload()))
 
@@ -261,7 +262,7 @@ def test_netsuite_created_bill_compares_its_total_exactly():
                     _mock_response(200, {"status": {"id": "open"}}),
                 ]
             )
-            client.post = AsyncMock(return_value=_NS_CREATED)
+            client.post = AsyncMock(side_effect=[_NS_USD, _NS_CREATED])
             client.delete = AsyncMock()
             result = _run(_ns_adapter().post_invoice(_payload()))
         assert result.success is ok, (total, result.message)
@@ -281,7 +282,7 @@ def test_netsuite_created_bill_that_cannot_be_read_back_is_unconfirmed():
         with patch("httpx.AsyncClient") as cm:
             client = cm.return_value.__aenter__.return_value
             client.get = AsyncMock(side_effect=gets)
-            client.post = AsyncMock(return_value=created)
+            client.post = AsyncMock(side_effect=[_NS_USD, created])
             client.delete = AsyncMock()
             result = _run(_ns_adapter().post_invoice(_payload()))
         assert result.success is False
@@ -300,13 +301,13 @@ def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(side_effect=[_NS_MISS, _ns_bill("100.00")])
-        client.post = AsyncMock(return_value=_NS_CREATED)
+        client.post = AsyncMock(side_effect=[_NS_USD, _NS_CREATED])
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-new")))
 
     assert result.success, result.message
     assert result.erp_document_id == "42"
     assert client.get.await_count == 2  # the lookup, then the read-back
-    client.post.assert_awaited_once()
+    assert client.post.await_count == 2  # the currency read, then the create
     # Synchronous create: `respond-async` would answer with a job, not the bill.
     assert "Prefer" not in client.post.await_args.kwargs["headers"]
     # The bill names its vendor (`entity`) and the expense line's account by
@@ -315,6 +316,9 @@ def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
 
     body = json.loads(client.post.await_args.kwargs["content"])
     assert body["entity"] == {"id": "00000000-0000-0000-0000-0000000000a1"}
+    # The currency by its internal id too: a reference's `refName` is display
+    # text (the currency record's name), not its ISO code.
+    assert body["currency"] == {"id": "1"}
     assert body["expense"]["items"] == [
         {"account": {"id": "ERP-6000"}, "amount": 100.00, "memo": "INV-1"}
     ]

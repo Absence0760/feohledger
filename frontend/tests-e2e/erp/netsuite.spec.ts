@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
+import type { Page } from '@playwright/test';
 import {
 	API_BASE,
 	authedTenantHeaders,
@@ -15,6 +16,7 @@ import {
 	deleteInvoice,
 	erpFailureFromAudit,
 	erpReferenceFromAudit,
+	getInvoice,
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
 	setErpSettings,
@@ -48,10 +50,19 @@ import {
  *      it is never posted by name.
  *   4. PO sync — one SuiteQL query over `transaction` (type PurchOrd); the
  *      status letter maps onto open / closed and the ISO currency is kept.
+ *      SuiteQL states the header total in posting sign (negative); it is
+ *      stored at the UI's positive figure, and a live PO's lines come from a
+ *      second query over `transactionline` (decisions §398).
  *   5. Posted total — on the fake's 10%-taxed account 6400 NetSuite books more
  *      than was approved; the adapter reads the bill's `total` back and fails
  *      `posted_total_mismatch`, deleting the bill only while it is Pending
  *      Approval (vendor "Fake NetSuite Vendor Routed").
+ *   6. Posted means approved — an untaxed bill for the routed vendor starts
+ *      Pending Approval, so the push is refused `bill_not_posted` and the bill
+ *      is left; once approved in NetSuite, a retry finds it by `eid:` and
+ *      completes without a second bill.
+ *   7. Coded refusals — a bill dated in the fake's closed January 2020 is
+ *      refused by NetSuite and coded `period_closed` from the period itself.
  *
  * The vendor sync is SuiteQL too (`SELECT … FROM vendor`): the REST `/vendor`
  * collection carries no names. The full send proves it stored the ids.
@@ -71,6 +82,22 @@ const NETSUITE_ERP_CONFIG = {
 	token_id: 'fake-token-id',
 	token_secret: 'fake-token-secret'
 };
+
+/** The id of the bill a refused push left in NetSuite, as the failure's
+ *  append-only `invoice.erp_failed` row records it (`erp_document_id`). */
+async function leftBillId(page: Page, invoiceId: string): Promise<string> {
+	const resp = await page.request.get(`${API_BASE}/api/invoices/${invoiceId}/audit-log`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status()).toBe(200);
+	const rows = (await resp.json()) as Array<{
+		action: string;
+		details: { erp_document_id?: string } | null;
+	}>;
+	const id = rows.find((r) => r.action === 'invoice.erp_failed')?.details?.erp_document_id;
+	expect(id, 'the refused push names the bill it left').toMatch(/^\d+$/);
+	return id!;
+}
 
 test.describe('/erp netsuite adapter against fake-erp', () => {
 	test.beforeAll(async () => {
@@ -212,6 +239,86 @@ test.describe('/erp netsuite adapter against fake-erp', () => {
 		expect(open!.status).toBe('open');
 		expect(closed!.status).toBe('closed');
 		expect(closed!.currency).toBe('GBP');
+		// The fake states both headers negative, as SuiteQL does.
+		expect(Number(closed!.total)).toBeCloseTo(640, 2);
+
+		// The live PO's lines came from `transactionline`: an item line and
+		// an expense line, 1,500.50 + 600.00.
+		const list = await page.request.get(`${API_BASE}/api/purchase-orders?page_size=100`, {
+			headers: await authedTenantHeaders(page)
+		});
+		expect(list.status()).toBe(200);
+		const { items } = (await list.json()) as {
+			items: Array<{ po_number: string; line_items: Array<{ total: number | string }> }>;
+		};
+		const withLines = items.find((p) => p.po_number === 'PO-FAKE-NS-501');
+		expect(withLines?.line_items.map((l) => Number(l.total)).sort((a, b) => a - b)).toEqual([
+			600, 1500.5
+		]);
+	});
+
+	test('a bill pending approval is not posted, and completes once approved in NetSuite', async ({
+		page
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-NS-ROUTED',
+			amount: '410.20',
+			// Under approval routing in the fake: its bills start Pending Approval.
+			vendor: 'Fake NetSuite Vendor Routed',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'NetSuite post refused: bill_not_posted ' +
+					'(the bill is in NetSuite and was left there: NetSuite does not show it approved)'
+			);
+
+			// The approver acts in NetSuite; the retry finds the same bill.
+			const billId = await leftBillId(page, inv.id);
+			const approved = await fetch(`${FAKE_ERP_BASE}/__set-status`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ provider: 'netsuite', id: billId, status: 'open' })
+			});
+			expect(approved.ok, `approve the bill in the fake (${approved.status})`).toBe(true);
+
+			const retried = await page.request.post(`${API_BASE}/api/invoices/${inv.id}/retry-erp`, {
+				headers: await authedTenantHeaders(page),
+				data: {}
+			});
+			expect(retried.status(), 'retry-erp accepted').toBe(202);
+			await expect
+				.poll(async () => (await getInvoice(page, inv.id)).status, { timeout: 20_000 })
+				.toBe('done');
+			expect(await erpReferenceFromAudit(page, inv.id)).toBe(billId);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a bill dated in a closed period is coded period_closed', async ({ page }) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-NS-CLOSED',
+			amount: '75.00',
+			vendor: 'Fake NetSuite Vendor A',
+			glAccount: '6100',
+			// The fake's January 2020 is closed (NETSUITE_SUITEQL_PERIOD_FIXTURES).
+			invoiceDate: '2020-01-15',
+			dueDate: '2020-02-14'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'NetSuite post refused: period_closed (HTTP 400, invalid_request)'
+			);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
 	});
 });
 

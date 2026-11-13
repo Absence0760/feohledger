@@ -936,22 +936,30 @@ async def test_call_erp_posts_netsuite_by_vendor_and_account_id():
     # The line makes the approved 100.00, so it posts as its own expense line
     # (lines that do not add up collapse onto the header account instead).
     rows = [_line_item(gl_account="6000", total=Decimal("100.00"))]
+    # The `eid:` lookup's miss: NetSuite's 404 NONEXISTENT_ID.
     lookup = AsyncMock()
-    lookup.status_code = 200
-    lookup.json = lambda: {"items": []}
+    lookup.status_code = 404
+    lookup.json = lambda: {"o:errorDetails": [{"o:errorCode": "NONEXISTENT_ID"}]}
+    # The SuiteQL currency read: USD is internal id 1.
+    currency = AsyncMock()
+    currency.status_code = 200
+    currency.content = b'{"items": [{"id": "1", "symbol": "USD"}], "hasMore": false}'
     created = AsyncMock()
     created.status_code = 204
     created.headers = {"Location": "https://x/vendorBill/1001"}
     created.content = b""
-    # The read-back: NetSuite booked exactly the approved 100.00.
+    # The read-back: NetSuite booked exactly the approved 100.00, in USD, and
+    # shows the bill approved (Open).
     readback = AsyncMock()
     readback.status_code = 200
-    readback.content = b'{"id": "1001", "total": 100.00}'
+    readback.content = (
+        b'{"id": "1001", "total": 100.00, "currency": {"id": "1"}, "status": {"id": "open"}}'
+    )
 
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(side_effect=[lookup, readback])
-        client.post = AsyncMock(return_value=created)
+        client.post = AsyncMock(side_effect=[currency, created])
         ref = await _call_erp(_line_items_db(rows), _invoice(), _NETSUITE_CFG)
 
     assert ref == "1001"

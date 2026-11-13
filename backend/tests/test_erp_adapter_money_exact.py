@@ -272,8 +272,18 @@ def _netsuite_adapter() -> NetSuiteAdapter:
 def _netsuite_bill_readback(total_literal: str) -> MagicMock:
     """``GET /vendorBill/{id}`` with ``total`` as a raw JSON number literal."""
     resp = _mock_response(200, {})
-    resp.content = f'{{"id": "42", "total": {total_literal}}}'.encode()
+    resp.content = (
+        f'{{"id": "42", "total": {total_literal}, '
+        '"currency": {"id": "1"}, "status": {"id": "open"}}'
+    ).encode()
     return resp
+
+
+#: The pre-create `eid:` lookup's miss, and the SuiteQL currency read.
+_NETSUITE_MISS = _mock_response(404, {"o:errorDetails": [{"o:errorCode": "NONEXISTENT_ID"}]})
+_NETSUITE_USD = _mock_response(200, {})
+# SuiteQL bodies are parsed from the raw bytes (`loads_exact_json`).
+_NETSUITE_USD.content = b'{"items": [{"id": "1", "symbol": "USD"}], "hasMore": false}'
 
 
 def _netsuite_post(payload) -> str:
@@ -282,18 +292,22 @@ def _netsuite_post(payload) -> str:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(
             side_effect=[
-                _mock_response(200, {"items": [], "count": 0}),
+                _NETSUITE_MISS,
                 # NetSuite booked exactly what was approved.
                 _netsuite_bill_readback(exact_number_literal(payload.amount)),
             ]
         )
         client.post = AsyncMock(
-            return_value=_mock_response(204, None, headers={"Location": "https://x/vendorBill/42"})
+            side_effect=[
+                _NETSUITE_USD,
+                _mock_response(204, None, headers={"Location": "https://x/vendorBill/42"}),
+            ]
         )
         result = _run(adapter.post_invoice(payload))
     assert result.success, result.message
     assert client.post.await_args.kwargs["headers"]["Content-Type"] == "application/json"
-    return _posted_body_text(client)
+    # The second POST is the create (the first is the currency read).
+    return _posted_body_text(client, call_index=1)
 
 
 def test_netsuite_reads_the_booked_total_back_exactly():
@@ -305,15 +319,16 @@ def test_netsuite_reads_the_booked_total_back_exactly():
             client = cm.return_value.__aenter__.return_value
             client.get = AsyncMock(
                 side_effect=[
-                    _mock_response(200, {"items": [], "count": 0}),
+                    _NETSUITE_MISS,
                     _netsuite_bill_readback(literal),
                     _mock_response(200, {"status": {"id": "open"}}),
                 ]
             )
             client.post = AsyncMock(
-                return_value=_mock_response(
-                    204, None, headers={"Location": "https://x/vendorBill/42"}
-                )
+                side_effect=[
+                    _NETSUITE_USD,
+                    _mock_response(204, None, headers={"Location": "https://x/vendorBill/42"}),
+                ]
             )
             client.delete = AsyncMock()
             result = _run(_netsuite_adapter().post_invoice(_payload()))

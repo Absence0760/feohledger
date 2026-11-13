@@ -192,8 +192,23 @@ def test_netsuite_void_reports_false_when_netsuite_refuses(ns):
 )
 def test_netsuite_status_reads_the_real_status_shape(ns, status, expected):
     """`refName` "Paid In Full" lower-cased is "paid in full", which never
-    matched the "paidinfull" key: a paid bill polled as unknown."""
+    matched the "paidinfull" key: a paid bill polled as unknown. (Paid In Full
+    is `paid` only when vendor payments cover the bill, decisions §303 / §398:
+    here one VendPymt for the whole total, the case
+    `test_erp_netsuite_adapter.py` varies.)"""
+    import json
+
+    bill = _resp(200, {"status": status})
+    bill.content = json.dumps({"id": "1001", "total": 100, "status": status}).encode()
+    links = _resp(200)
+    links.content = json.dumps(
+        {
+            "items": [{"previousdoc": "1001", "nexttype": "VendPymt", "foreignamount": -100}],
+            "hasMore": False,
+        }
+    ).encode()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_resp(200, {"status": status}))
+        client.get = AsyncMock(return_value=bill)
+        client.post = AsyncMock(return_value=links)
         assert _run(ns.get_invoice_status("1001")) == expected

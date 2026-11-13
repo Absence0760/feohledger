@@ -834,7 +834,7 @@ POST /vendorBill
   "tranId": "INV-2024-001",
   "tranDate": "2026-04-01",
   "dueDate": "2026-05-01",
-  "currency": { "refName": "USD" },
+  "currency": { "id": "1" },
   "externalId": "<correlation_id>",
   "expense": {
     "items": [
@@ -849,10 +849,14 @@ sublist needs an item record we never have), amounts as exact JSON number
 literals. The create is **synchronous** — no `Prefer: respond-async`, which
 would answer 202 with a *job* in `Location` instead of the bill — and NetSuite
 answers 204 with the new record's URL in `Location`. The adapter then reads that
-record back and checks its `total` (§ NetSuite: SuiteQL syncs and void →
-Posted total).
+record back and checks its `total`, its `currency` and that NetSuite shows it
+approved (§ NetSuite: SuiteQL syncs and void → Posted total, Posted means
+approved). `currency` is the internal id of the active currency whose ISO
+`symbol` is the invoice's, read by SuiteQL before the create: a reference's
+`refName` is display text (the currency record's name), never an input we
+trust (decisions §398).
 
-**Status:** `approvalStatus` — `1` (pending), `2` (approved). `status` — `Open`, `Paid In Full`, `Voided`
+**Status:** `approvalStatus` — `1` (pending), `2` (approved), `3` (rejected). `status` — `Open`, `Paid In Full`, `Pending Approval`, `Rejected`, `Cancelled` (letters `VendBill:A`–`E` read alike)
 
 **Webhook support:** SuiteScript User Event Scripts or RESTlets for callbacks. SuiteTalk also supports Saved Search polling.
 
@@ -1226,7 +1230,7 @@ vendor whose number happened to equal it.
 
 | Adapter | Vendor | Accounts |
 |---|---|---|
-| `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount`, `memo`), since the `item` sublist needs an item record we never send. The lines are the shared `bill_lines.bill_lines` projection — NetSuite keeps no line rules of its own: `amount` is the line's tax-inclusive gross (its total, else quantity × unit price; a unit price with no quantity refuses `line_amount_missing` rather than being priced as quantity 1), exact Decimal; an uncoded line takes the header account; a coded line with no id, or a bill with no account at all, refuses `account_not_linked`, never moved onto the header account; lines that do not sum to the approved amount refuse `amount_mismatch`, and several tax-exclusive lines with header-only tax refuse `tax_not_itemised`. `memo` is the line's description, else the invoice's, else its number. NetSuite then totals the bill itself, so the booked `total` is read back after the create (§ NetSuite: SuiteQL syncs and void → Posted total). |
+| `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount`, `memo`), since the `item` sublist needs an item record we never send. The lines are the shared `bill_lines.bill_lines` projection — NetSuite keeps no line rules of its own: `amount` is the line's tax-inclusive gross (its total, else quantity × unit price; a unit price with no quantity refuses `line_amount_missing` rather than being priced as quantity 1), exact Decimal; an uncoded line takes the header account; a coded line with no id, or a bill with no account at all, refuses `account_not_linked`, never moved onto the header account; lines that do not sum to the approved amount refuse `amount_mismatch`, and several tax-exclusive lines with header-only tax refuse `tax_not_itemised`. `memo` is the line's description, else the invoice's, else its number. NetSuite then totals the bill itself, so the booked `total` is read back after the create (§ NetSuite: SuiteQL syncs and void → Posted total). A create NetSuite refuses with a final 4xx is coded from facts read back (`period_closed` / `vendor_inactive` / `account_inactive` / `bill_refused`, § Coded refusals there). |
 | `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Every line is an `Account` line on **`accountId`** = the account GUID the BC chart sync stored, never `lineObjectNumber` (the No.). The lines are the shared `bill_lines.bill_lines` rule: an uncoded line takes the header account, a coded line with no id or a bill with no account at all refuses `account_not_linked`. See § Business Central: chart, POs and void. |
 | `merge_dev` | `contact` (Merge object id); refuses `vendor_not_linked` | A line's `account` is the Merge account id. A coded line with no id refuses `account_not_linked`; an uncoded line sends none (Merge allows it). |
 
@@ -1912,7 +1916,7 @@ target ERP actually supports:
 | Adapter | Mechanism |
 |---|---|
 | `merge_dev` | `X-Idempotency-Key: <correlation_id>` header on `POST /invoices` — Merge's unified API returns the ORIGINAL response for a repeated key instead of creating a second invoice. |
-| `netsuite` | Pre-create lookup: `GET /vendorBill?q=externalId IS "<correlation_id>"` (NetSuite enforces `externalId` uniqueness per record type). A match short-circuits `post_invoice` to a success referencing the existing bill — once its `total` reads back as the approved amount (the same check as a fresh create); only a miss proceeds to `POST /vendorBill`. |
+| `netsuite` | Pre-create lookup: `GET /vendorBill/eid:<correlation_id>`, Oracle's form for addressing a record by external id (NetSuite enforces `externalId` uniqueness per record type). The collection query `?q=externalId IS "…"` it replaced is documented only as a pipe workaround and reported refused on transactions (decisions §398, N2). A miss is a 404 whose `o:errorCode` is `NONEXISTENT_ID`; any other 404 or an unreadable 200 fails the push. A hit is the bill itself and short-circuits `post_invoice` to success only when its `total` is the approved amount, its `currency` the invoice's and NetSuite shows it approved (the same checks as a fresh create); only a miss proceeds to `POST /vendorBill`. |
 | `dynamics_365_bc` | Pre-create lookup on BC's own duplicate key: `GET purchaseInvoices?$filter=vendorId eq <vendor guid> and vendorInvoiceNumber eq '<NUMBER>'` (upper-cased, since `Vendor Invoice No.` is a `Code[35]` field; a quote doubled). API v2.0's purchaseInvoice has no `externalDocumentNumber`, so the old filter on it failed every push. More than one hit refuses `duplicate_document_number`; a 200 whose body is not a collection is a retryable failure, never a miss. A hit found `Paid` refuses `existing_invoice_not_open` whatever its total — BC has paid a bill we cannot prove we sent, and since BC has no status sync, success would close the invoice at `done` as our own push, with that payment recorded nowhere here. Any other hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount **and** its `currencyCode` is the invoice's (a blank code is BC's local currency, read from `GET companyInformation`; any difference, or an LCY BC does not state, refuses `posted_total_mismatch`; a failed LCY read is retryable); a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` at the approved total and in the invoice's currency (an earlier attempt whose post step failed or whose response was lost) is finished: `Microsoft.NAV.post` re-run and the posted total read back — never a second create. A `Draft` at any other total may be a BC user's own draft of this bill, so it is refused `posted_total_mismatch` and **left in BC, never deleted or repriced** (decisions §391); a coded post refusal of a found draft leaves it in BC too. **The one exception is our own draft** (decisions §397): a `Draft` whose id is the one an earlier attempt recorded from its own create (`own_orphan_document_id`), and which is still exactly what we sent — its three totals equal to the ones BC answered our create with (which catches a line's tax group changed, a field we never send), its lines (`GET purchaseInvoices({id})/purchaseInvoiceLines`: type, account, description, quantity, unit cost, as a multiset), `totalAmountExcludingTax` equal to those lines' sum, the dates we sent, and the invoice's currency — is handled as a draft just created: a gross one BC taxed on top is repriced to the net, a net one is not repriced again, and a mismatch is deleted. Any other id, an edited draft, or one no longer a draft gets the found treatment above. A failed read before the draft is judged is retryable, touches nothing and keeps the claim for the next attempt. A create whose response was lost outright reports no id, so its draft is never recognised and still needs deleting in BC before the retry. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
 
 The local `fake-erp` mock implements the matching server-side behavior (a
@@ -3280,7 +3284,7 @@ same way, since its `skipped` report covers only what it read.
 |---|---|---|
 | `list_vendors` | `SELECT id, entityid, companyname, email, phone, BUILTIN.DF(terms) AS terms, isinactive FROM vendor` | The REST `/vendor` collection returns ids and links only — no names — so the old record-API sync could not have named a vendor. Name = `companyname`, else `entityid` (an individual); code = `entityid` (an `entityid` longer than `vendors.code` is not written and is reported in `values_too_long`); inactive vendors emitted `active=False`; a row with no `id` skipped. |
 | `list_gl_accounts` | `SELECT id, acctnumber, fullname, accttype, isinactive FROM account` | unchanged (§ ERP references) |
-| `list_pos` | `transaction` where `type = 'PurchOrd'`, `t.entity AS vendorid`, `BUILTIN.DF(t.entity) AS vendorname`, `foreigntotal`, `currency.symbol`, `TO_CHAR(duedate, 'YYYY-MM-DD')` | Headers only — the PO sync stores no ERP lines. `vendorid` (the vendor's internal id, the same `vendor.id` `list_vendors` reports as `erp_vendor_id`) fills `PoPayload.vendor_erp_id`, so the PO links to its vendor by id and a rename on either side, or two vendors sharing a name, cannot mislink it; the name is the fallback only (issue #652). Status letter A (Pending Supervisor Approval) → unissued (decisions §394), C → cancelled, G / H → closed, else open. Dates go through `TO_CHAR` because SuiteQL formats them per the user's preference. |
+| `list_pos` | `transaction` where `type = 'PurchOrd'`, `t.entity AS vendorid`, `BUILTIN.DF(t.entity) AS vendorname`, `foreigntotal`, `currency.symbol`, `TO_CHAR(duedate, 'YYYY-MM-DD')`; then `transactionline` (`mainline = 'F' AND taxline = 'F'`) for the POs not closed or cancelled, 100 ids a query | The total is `abs(foreigntotal)`: SuiteQL states a PO header in posting sign, the vendor-side credit, so -2,100.50 for an order the UI shows at 2,100.50 (decisions §398, N3). Lines carry `memo` (else the item's name) as the description, `quantity`, `rate`, `foreignamount` as the total, the item's name as `item_code`, and for an expense line (no item) the chart sync's code for its account (`acctnumber`, else its name); the sync refreshes stored lines by §327's rule, and a closed or cancelled PO is sent without lines, leaving the stored ones alone. A chunk past `SYNC_LISTING_MAX_ROWS` is re-read in halves down to one PO; any other failed line read (or one PO past the bound) fails the whole listing. Lines summing negative are read in the UI's sign (totals and quantities negated); a line NetSuite closed is kept, since the header still counts it. `vendorid` (the vendor's internal id, the same `vendor.id` `list_vendors` reports as `erp_vendor_id`) fills `PoPayload.vendor_erp_id`, so the PO links to its vendor by id and a rename on either side, or two vendors sharing a name, cannot mislink it; the name is the fallback only (issue #652). Status letter A (Pending Supervisor Approval) → unissued (decisions §394), C → cancelled, G / H → closed, else open. Dates go through `TO_CHAR` because SuiteQL formats them per the user's preference. |
 
 **Void.** The REST record service has no void: its record actions name neither
 `vendorBill` nor a void action
@@ -3314,10 +3318,47 @@ retry never reports an earlier mismatched bill as posted. This is the shape of
 `posted_total.check_posted_total`, kept in the adapter only because that
 helper's message says "voided" and NetSuite's REST service deletes.
 
-**Status mapping** reads `status.id` (`paidInFull`) or `status.refName` with
-its spaces removed (`Paid In Full`). It used to lower-case `refName` only, so a
-real paid bill (`"paid in full"`) never matched `paidinfull` and polled as
-`unknown`.
+**Posted means approved (N4).** After the total and currency match, the bill
+counts as posted only when NetSuite shows it so: `status` Open or Paid In Full
+and `approvalStatus` neither `1` (pending) nor `3` (rejected); a bill in an
+account without approval routing carries no `approvalStatus`. Pending Approval,
+or a status the adapter cannot read, is non-retryable `bill_not_posted`;
+rejected or cancelled is `bill_rejected` (a person removes or re-enters it in
+NetSuite first). Both leave the bill in
+NetSuite, where the approval belongs: `retry-erp` after it is approved finds
+the bill by `eid:` and reports it posted, never creating a second one. Reporting
+a pending bill posted used to close the invoice at `done` (NetSuite has no
+status sync), with nothing left to pay it if NetSuite's approver rejected it.
+
+**Coded refusals.** A create answered with a 4xx a re-send cannot change
+(`base.erp_status_retryable`) is coded from facts read back by SuiteQL, and is
+`not_posted` only when the `eid:` lookup, made again, misses (a racing second
+create gets NetSuite's duplicate-externalId refusal while our bill exists; a
+hit goes through the posted checks instead). The facts, in order: the base `accountingperiod` holding
+the bill's date is `closed`, `aplocked` or `alllocked` → `period_closed`; the
+vendor is gone or `isinactive` → `vendor_inactive`; an account is gone or
+inactive → `account_inactive` (our codes in `params.accounts`); otherwise the
+shared `bill_refused`. The message is `NetSuite post refused: <code> (HTTP 400,
+invalid_request)`. NetSuite's error body is never read for the cause (its
+`detail` echoes the submitted fields). A failed read is "don't know", never
+"inactive"; only integer internal ids are spliced into a query. An invoice
+currency with no active NetSuite currency is `currency_not_set_up` before the
+create; an unreadable currency is a retryable failure.
+
+**Status mapping** reads `status.id` (`paidInFull`), `status.refName` with
+its spaces removed (`Paid In Full`), or a status letter (`B`, `VendBill:B`).
+It used to lower-case `refName` only, so a real paid bill (`"paid in full"`)
+never matched `paidinfull` and polled as `unknown`. **Paid In Full is `paid`
+only for cash** (decisions §303, §398): NetSuite sets it when a vendor credit
+is applied too, so `get_invoice_status` reads `NextTransactionLineLink` for
+the bill and returns `paid` only when every applied link is a `VendPymt` and
+they sum, all of one sign, to the bill's `total`; a credit, any other link, a
+shortfall or a payment beside its reversal is `settled_no_payment`, and a
+failed read `unknown`.
+
+**Not verified live (#654):** the `eid:` miss shape, `refName` being display-only
+on input, the sign of `foreigntotal` and of line amounts, the SuiteQL columns
+above, and the vendorBill status shapes.
 
 fake-erp serves all of the above: BC `accounts` (three posting accounts plus a
 heading and a blocked one), `purchaseOrders` (`PO-FAKE-BC-401` in local
@@ -3328,7 +3369,13 @@ etag or `*`, else 412; drafts only; posting moves the etag), a 400 for an
 every purchaseInvoice (company `fake-vat-co` adds 20% VAT on top of the lines),
 and a 400 for posting a non-draft; NetSuite SuiteQL
 `vendor` and `transaction` rows (`PO-FAKE-NS-501` open USD, `PO-FAKE-NS-502`
-closed GBP), `DELETE vendorBill/{id}` (pending approval only), and a `total`
+closed GBP, both headers negative as SuiteQL states them), `transactionline`
+rows (501's item and expense lines), `currency` (USD 1, GBP 2, EUR 4, CAD
+inactive) and `accountingperiod` (January 2020 closed) rows,
+`GET vendorBill/eid:{externalId}` (404 `NONEXISTENT_ID` on a miss), a 400 for
+a bill whose `currency` is not an active currency's id or whose date is in a
+closed period, an `approvalStatus` on every vendorBill (`__set-status` moves
+it with the status), `DELETE vendorBill/{id}` (pending approval only), and a `total`
 on every vendorBill — account `123` (code `6400`) carries a 10% tax code, so
 its lines book more than was sent, and vendor `28` ("Fake NetSuite Vendor
 Routed") is under approval routing, so its bills start Pending Approval. Both
@@ -3341,13 +3388,17 @@ Tests: `test_erp_gl_sync.py`, `test_erp_po_sync.py`,
 check, draft resumption, a failed post step; NetSuite lines as the shared
 projection, the posted-total read-back on create and on the `externalId`
 re-find), `test_erp_adapter_money_exact.py` (the read-back total parsed
-exactly),
+exactly), `test_erp_netsuite_adapter.py` (decisions §398: the adapter against
+fake-erp's NetSuite routes in process — `eid:` lookup, currency by id, posted
+means approved, coded refusals, PO sign and lines — plus paid versus credited),
 `test_erp_adapter_error_pii.py` (BC `account_not_linked`),
 `test_erp_base_url_overrides.py` (BC `base_url` host allowlist + SSRF guard,
 NetSuite `account_id` validation), `frontend/tests-e2e/erp/dynamics.spec.ts`
 (the 1,200 / 20% VAT refusal against fake-erp), and
 `frontend/tests-e2e/erp/netsuite.spec.ts` (a taxed bill refused, deleted when
-pending approval and left when approved).
+pending approval and left when approved; an untaxed pending bill refused
+`bill_not_posted` and completed by `retry-erp` once approved; a closed period
+coded `period_closed`; PO lines and the positive total).
 ## Connecting an OAuth ERP (QuickBooks Online, Xero, Sage Accounting, Blackbaud)
 
 These ERPs have no client-credentials grant: the customer's admin consents in
