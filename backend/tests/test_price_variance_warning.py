@@ -83,12 +83,21 @@ def _make_db(
     Queries ``refresh_warnings`` issues that we care about:
       - vendor lookup                          → scalar_one_or_none()
       - duplicate count / generic counts       → scalar()
-      - existing price_variance exception count → scalar()
+      - open exception rows / person-cleared count → .scalars().all() / scalar()
       - draft line items (this invoice)        → .all() rows w/ _mapping
       - history line items (vendor, joined)    → .all() rows w/ _mapping
     """
     draft_lines = draft_lines or []
     history_lines = history_lines or []
+    open_rows = [
+        MagicMock(
+            exception_type="price_variance",
+            description_code="price_variance_over",
+            description_params={},
+            finding_fingerprint="stamp",
+        )
+        for _ in range(existing_price_exc)
+    ]
 
     def _scalar_result(value):
         r = MagicMock()
@@ -115,8 +124,16 @@ def _make_db(
         if "from invoice_line_items" in q:
             return _rows_result(draft_lines)
         if "from exceptions" in q:
-            # price_variance dedup count (or any _ensure_exception precheck)
-            return _scalar_result(existing_price_exc)
+            # `_ensure_exception` reads the open rows (`.scalars().all()`), then
+            # counts a person-cleared one (decisions §366); the stale-stamp
+            # check reads rows too. An existing exception is an OPEN row.
+            r = _scalar_result(0 if "count(" in q else existing_price_exc)
+            r.scalars = MagicMock(
+                return_value=MagicMock(
+                    all=MagicMock(return_value=[] if "count(" in q else open_rows)
+                )
+            )
+            return r
         if "count(" in q:
             return _scalar_result(0)  # duplicate count etc.
         # historical amounts (stat anomaly) etc.
