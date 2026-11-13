@@ -100,34 +100,38 @@ class ErpStatusPanel extends StatelessWidget {
     final reference = _reference;
     // The bill's own page in the ERP, when the backend built one (decisions
     // §302, §354). A linked reference is its own semantics node so it stays
-    // actionable; everything else is announced as one merged summary.
+    // actionable, and the nodes around it keep the screen's order.
     final linked =
         reference != null && ExternalLink.safeUri(invoice.erpDocumentUrl) != null;
+    // Each detail row, with what a screen reader announces for it. The two
+    // are built together so the announcement cannot drop a row the screen
+    // shows (the last update used to be visible and never read).
     final rows = <Widget>[];
-    if (info?.erpDocumentId != null && info!.erpDocumentId!.isNotEmpty) {
-      rows.add(_kv(l.erpStatusDocumentId, _text(info.erpDocumentId!)));
+    final announced = <String>[];
+    void addRow(String label, String value, {bool error = false}) {
+      rows.add(_kv(label, _text(value, error: error)));
+      announced.add('$label $value');
     }
-    if (info?.lastError != null && info!.lastError!.isNotEmpty) {
-      rows.add(_kv(l.erpStatusError, _text(info.lastError!, error: true)));
+
+    final documentId = info?.erpDocumentId;
+    if (documentId != null && documentId.isNotEmpty) {
+      addRow(l.erpStatusDocumentId, documentId);
+    }
+    final lastError = info?.lastError;
+    if (lastError != null && lastError.isNotEmpty) {
+      addRow(l.erpStatusError, lastError, error: true);
     }
     if (info != null) {
-      final by = info.actor != null ? ' by ${info.actor}' : '';
-      rows.add(_kv(l.erpStatusLastUpdate,
-          _text('${info.actionLabel}$by · ${formatDateTime(info.time)}')));
+      final actor = info.actor;
+      final action = actor != null
+          ? l.erpStatusActionBy(info.actionLabel, actor)
+          : info.actionLabel;
+      addRow(l.erpStatusLastUpdate, '$action · ${formatDateTime(info.time)}');
     }
     if (rows.isEmpty && reference == null) {
       // ERP-bound status but no audit detail yet (e.g. sending in flight).
-      rows.add(_kv(l.erpStatusStatus, _text(invoice.status.label)));
+      addRow(l.erpStatusStatus, invoice.status.label);
     }
-
-    // One merged announcement for the panel (minus a linked reference, which
-    // announces itself).
-    final summary = [
-      l.erpStatusTitle,
-      if (reference != null && !linked) '${l.erpStatusReference} $reference',
-      if (info?.erpDocumentId != null) '${l.erpStatusDocumentId} ${info!.erpDocumentId}',
-      if (info?.lastError != null) '${l.erpStatusError} ${info!.lastError}',
-    ].join(', ');
 
     final header = Row(
       children: [
@@ -164,30 +168,42 @@ class ErpStatusPanel extends StatelessWidget {
 
     final Widget body;
     if (linked) {
+      // Three nodes in the order they sit on screen: the title, the reference
+      // (its label, then the link with its own action), then the details
+      // merged. One summary read before the reference put the details ahead
+      // of the row that comes first visually (WCAG 1.3.2).
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Semantics(
-            label: summary,
+            label: l.erpStatusTitle,
             excludeSemantics: true,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [header, const SizedBox(height: 8)],
             ),
           ),
-          // Announced as "ERP Reference", then the link with its own action.
           referenceRow!,
-          ExcludeSemantics(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: rows,
+          if (rows.isNotEmpty)
+            Semantics(
+              key: const ValueKey('erp-status-details'),
+              label: announced.join(', '),
+              excludeSemantics: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: rows,
+              ),
             ),
-          ),
         ],
       );
     } else {
+      // Nothing actionable: one merged announcement, in screen order.
       body = Semantics(
-        label: summary,
+        label: [
+          l.erpStatusTitle,
+          if (reference != null) '${l.erpStatusReference} $reference',
+          ...announced,
+        ].join(', '),
         excludeSemantics: true,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

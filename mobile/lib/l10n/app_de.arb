@@ -283,7 +283,8 @@
   "invoiceEditNotSet": "Nicht festgelegt",
   "invoiceEditInvalidAmount": "Gültigen Betrag eingeben (z. B. 1234,56)",
   "invoiceEditClearDueDate": "Fälligkeitsdatum löschen",
-  "invoiceEditLockedNotice": "Genehmigt — Zahlungsempfänger und Betrag sind gesperrt. Zum Ändern die Genehmigung zurücknehmen, die Rechnung korrigieren und erneut genehmigen lassen.",
+  "invoiceEditLockedNotice": "Genehmigt — Zahlungsempfänger und Betrag sind gesperrt.",
+  "invoiceEditLockedNoticeRecall": "Genehmigt — Zahlungsempfänger und Betrag sind gesperrt. Zum Ändern die Genehmigung zurücknehmen, die Rechnung korrigieren und erneut genehmigen lassen.",
   "invoiceEditLockedHelper": "Nach der Genehmigung gesperrt",
   "invoiceEditDueDateHint": "Fälligkeitsdatum, aktuell {value}. Zum Ändern doppeltippen.",
 
@@ -301,6 +302,7 @@
   "erpStatusDocumentId": "Dokument-ID",
   "erpStatusError": "Fehler",
   "erpStatusLastUpdate": "Letzte Aktualisierung",
+  "erpStatusActionBy": "{action} von {actor}",
   "erpStatusStatus": "Status",
   "erpStatusOpensInErp": "öffnet die Rechnung im ERP",
   "externalLinkOpenFailed": "Der Link konnte nicht geöffnet werden",

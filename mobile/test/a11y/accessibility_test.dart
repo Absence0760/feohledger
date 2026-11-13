@@ -25,6 +25,7 @@ import 'package:feohledger_mobile/screens/exception_detail_screen.dart';
 import 'package:feohledger_mobile/screens/exceptions_screen.dart';
 import 'package:feohledger_mobile/screens/inspection_detail_screen.dart';
 import 'package:feohledger_mobile/screens/inspections_screen.dart';
+import 'package:feohledger_mobile/screens/invoice_detail_screen.dart';
 import 'package:feohledger_mobile/screens/invoices_screen.dart';
 import 'package:feohledger_mobile/screens/login_screen.dart';
 import 'package:feohledger_mobile/screens/notifications_screen.dart';
@@ -530,6 +531,89 @@ void main() {
       await expectLater(tester, meetsGuideline(textContrastGuideline));
       handle.dispose();
     });
+  });
+
+  // "Recall approval" on the detail screen (backend decisions §374): the
+  // bottom-bar action an approved invoice offers from the server's
+  // `recall_approval` verdict, enabled, and disabled beside its refusal.
+  group('InvoiceDetailScreen recall action', () {
+    setUpAll(() async {
+      OfflineStore.instance.debugUseMemory();
+    });
+
+    setUp(() async {
+      InvoiceStore.instance.reset();
+      FlutterSecureStorage.setMockInitialValues({});
+      await OfflineStore.instance.clear();
+      ApiClient().debugConfigure();
+    });
+
+    http.Response json(Object body) => http.Response(jsonEncode(body), 200,
+        headers: {'content-type': 'application/json'});
+
+    for (final (name, verdict) in [
+      ('allowed', null),
+      (
+        'refused with its reason',
+        {
+          'code': 'invoice_recall_claimed',
+          'message': 'server english',
+          'params': {'claim': 'payment'},
+        },
+      ),
+    ]) {
+      testWidgets('meets tap-target, label and contrast guidelines ($name)',
+          (tester) async {
+        tester.view.physicalSize = const Size(1200, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final handle = tester.ensureSemantics();
+        ApiClient().debugConfigure(
+          client: MockClient((req) async {
+            final path = req.url.path;
+            if (path == '/api/auth/login') {
+              return json({'access_token': 'tok'});
+            }
+            if (path.endsWith('/auth/me')) {
+              return json({
+                'id': 'u1',
+                'email': 'demo@acme.com',
+                'full_name': 'Demo User',
+                'organization_id': 'org1',
+                'roles': ['ap_manager'],
+              });
+            }
+            if (path.endsWith('/review-actions')) {
+              return json({'recall_approval': verdict});
+            }
+            if (path.endsWith('/audit-log')) return json(<Object>[]);
+            if (path == '/api/invoices/1') {
+              return json({
+                ..._invoiceJson('1'),
+                'status': 'approved',
+                'approved_by': 'Some Approver',
+              });
+            }
+            return http.Response('not found', 404);
+          }),
+        );
+        await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+        await tester.pumpWidget(
+          _screenHost(const InvoiceDetailScreen(invoiceId: '1')),
+        );
+        await _pumpUntil(tester, find.text('Recall approval'));
+        expect(find.text('Recall approval'), findsOneWidget);
+
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        handle.dispose();
+      });
+    }
   });
 
   group('AdvancedSearchSheet', () {

@@ -979,7 +979,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get invoiceEditClearDueDate => '支払期日をクリア';
 
   @override
-  String get invoiceEditLockedNotice =>
+  String get invoiceEditLockedNotice => '承認済み — 支払先と金額は固定されています。';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
       '承認済み — 支払先と金額は固定されています。変更するには承認を取り消し、請求書を修正してから、改めて承認を受けてください。';
 
   @override
@@ -1032,6 +1035,11 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get erpStatusLastUpdate => '最終更新';
+
+  @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action（$actor）';
+  }
 
   @override
   String get erpStatusStatus => 'ステータス';

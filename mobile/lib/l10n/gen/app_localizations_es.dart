@@ -1086,6 +1086,10 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
+      'Aprobada: el beneficiario y el importe están bloqueados.';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
       'Aprobada: el beneficiario y el importe están bloqueados. Para cambiarlos, retire la aprobación, corrija la factura y haga que se apruebe de nuevo.';
 
   @override
@@ -1138,6 +1142,11 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get erpStatusLastUpdate => 'Última actualización';
+
+  @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action por $actor';
+  }
 
   @override
   String get erpStatusStatus => 'Estado';

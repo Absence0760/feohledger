@@ -1089,6 +1089,10 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get invoiceEditLockedNotice =>
+      'Approuvée — le bénéficiaire et le montant sont figés.';
+
+  @override
+  String get invoiceEditLockedNoticeRecall =>
       'Approuvée — le bénéficiaire et le montant sont figés. Pour les modifier, retirez l\'approbation, corrigez la facture puis faites-la approuver de nouveau.';
 
   @override
@@ -1141,6 +1145,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get erpStatusLastUpdate => 'Dernière mise à jour';
+
+  @override
+  String erpStatusActionBy(String action, String actor) {
+    return '$action par $actor';
+  }
 
   @override
   String get erpStatusStatus => 'Statut';

@@ -675,7 +675,14 @@
   "invoiceEditNotSet": "Not set",
   "invoiceEditInvalidAmount": "Enter a valid amount (e.g. 1234.56)",
   "invoiceEditClearDueDate": "Clear due date",
-  "invoiceEditLockedNotice": "Approved — the payee and amount are frozen. To change them, recall the approval, correct the invoice, then have it approved again.",
+  "invoiceEditLockedNotice": "Approved — the payee and amount are frozen.",
+  "@invoiceEditLockedNotice": {
+    "description": "Edit sheet notice on a financially locked invoice whose approval cannot be recalled from here (past the recall, or no recall verdict)."
+  },
+  "invoiceEditLockedNoticeRecall": "Approved — the payee and amount are frozen. To change them, recall the approval, correct the invoice, then have it approved again.",
+  "@invoiceEditLockedNoticeRecall": {
+    "description": "Edit sheet notice on a financially locked invoice when the server says this user may recall its approval (review-actions recall_approval allowed)."
+  },
   "invoiceEditLockedHelper": "Frozen after approval",
   "invoiceEditDueDateHint": "Due date, currently {value}. Double tap to change.",
   "@invoiceEditDueDateHint": {
@@ -708,6 +715,14 @@
   "erpStatusDocumentId": "Document ID",
   "erpStatusError": "Error",
   "erpStatusLastUpdate": "Last update",
+  "erpStatusActionBy": "{action} by {actor}",
+  "@erpStatusActionBy": {
+    "description": "ERP panel last-update value: the audit action and who performed it.",
+    "placeholders": {
+      "action": { "type": "String" },
+      "actor": { "type": "String" }
+    }
+  },
   "erpStatusStatus": "Status",
   "erpStatusOpensInErp": "opens the bill in the ERP",
   "externalLinkOpenFailed": "Couldn't open the link",
