@@ -191,8 +191,19 @@ export const EXPENSE_REPORT_STATUS_TONES: Record<ExpenseReportStatus, BadgeTone>
 // string the badge tooltip renders.
 export interface PolicyViolation {
 	code: string;
+	/** The server's English sentence — the fallback for a code (or a stored
+	 *  row) this build cannot state. Render through `policyViolationText`. */
 	message: string;
+	/**
+	 * What the sentence is stated from (`expense_policy.VIOLATION_PARAMS`,
+	 * decisions §378): `amount` / `amount_currency`, `limit` / `currency`,
+	 * `comparison`, plus `category` or `miles` / `rate` / `direction` by code.
+	 * Absent on a row stored before the params existed.
+	 */
+	params?: Record<string, unknown>;
 	policy_id?: string;
+	/** The report line the violation is on — set on the submit 422's list. */
+	expense_id?: string;
 	/** Exact decimal strings — money never round-trips as a JS number. */
 	limit?: string;
 	actual?: string;

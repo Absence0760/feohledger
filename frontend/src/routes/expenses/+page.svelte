@@ -32,6 +32,7 @@
 	import { expenseStore } from '#lib/stores/expenses.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { isAllowed, refusalText, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
+	import { policyViolationText } from '#lib/api/policyViolations.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listGlAccounts,
@@ -800,7 +801,7 @@
 
 	// --- Violation badge helpers (shared by expenses + report-detail rows) ---
 	function violationTitle(list: PolicyViolation[]): string {
-		return list.map((v) => v.message).join('; ');
+		return list.map((v) => policyViolationText(v, m)).join('; ');
 	}
 
 	function switchTab(next: Tab) {
@@ -1360,8 +1361,10 @@
 					<div class="violation-panel">
 						<strong>{m('expenses.reports.submitBlocked')}</strong>
 						<ul>
-							{#each submitViolations as v (v.code + (v.policy_id ?? ''))}
-								<li>{v.message}</li>
+							<!-- One line can breach one policy's rule once, so the key is
+							     (line, policy, code); the same policy on two lines is two items. -->
+							{#each submitViolations as v (`${v.expense_id ?? ''}:${v.policy_id ?? ''}:${v.code}`)}
+								<li>{policyViolationText(v, m)}</li>
 							{/each}
 						</ul>
 					</div>
