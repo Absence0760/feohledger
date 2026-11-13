@@ -42,6 +42,13 @@ import {
  *      never claimed.
  *   5. Currency — a USD invoice is refused for a ZAR company
  *      (`currency_not_supported`), never booked as if it were rand.
+ *   6. Locked period — Sage's refusal of the save is coded `period_closed`
+ *      from the company's lock date, not reported as "possibly posted".
+ *
+ * The fake behaves like the 2.0.0 API where the old adapter did not: a string
+ * `$filter` is answered 400, paging needs `$orderby`, the save keeps the
+ * supplier's number only with `useSystemDocumentNumber=false`, and there is no
+ * `SupplierInvoice/Delete`.
  */
 
 const SAGE_ZA_ERP_CONFIG = {
@@ -56,6 +63,8 @@ const SAGE_ZA_ERP_CONFIG = {
 
 const SUPPLIER = 'Fake Sage ZA Supplier A';
 const PROVIDER = 'Sage Accounting (ZA)';
+/** Sage marks both dates Required; the adapter refuses without them. */
+const DATES = { invoiceDate: '2026-10-01', dueDate: '2026-10-31' };
 
 /** A supplier invoice straight from the fake, as Sage holds it. */
 async function sageInvoice(request: APIRequestContext, id: string) {
@@ -97,6 +106,7 @@ test.describe('/erp sage_accounting_za adapter against fake-erp', () => {
 			amount: '1150.00',
 			taxAmount: '150.00',
 			currency: 'ZAR',
+			...DATES,
 			vendor: SUPPLIER,
 			glAccount: '6100'
 		});
@@ -107,7 +117,9 @@ test.describe('/erp sage_accounting_za adapter against fake-erp', () => {
 			// The fake only saves lines carrying a known tax type and totals
 			// them, so the VAT-inclusive gross landing exactly is the proof.
 			expect(posted.Total).toBe('1150.00');
-			expect([posted.DocumentNumber, posted.Reference]).toContain(inv.invoice_number);
+			// The supplier's own number, not Sage's sequence: the save says
+			// `useSystemDocumentNumber=false` (Sage's default is true).
+			expect(posted.DocumentNumber).toBe(inv.invoice_number);
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}
@@ -121,6 +133,7 @@ test.describe('/erp sage_accounting_za adapter against fake-erp', () => {
 			amount: '1150.00',
 			taxAmount: '100.00',
 			currency: 'ZAR',
+			...DATES,
 			vendor: SUPPLIER,
 			glAccount: '6100'
 		});
@@ -139,6 +152,7 @@ test.describe('/erp sage_accounting_za adapter against fake-erp', () => {
 			prefix: 'E2E-SAGEZA-NOVAT',
 			amount: '1150.00',
 			currency: 'ZAR',
+			...DATES,
 			vendor: SUPPLIER,
 			glAccount: '6100'
 		});
@@ -146,6 +160,32 @@ test.describe('/erp sage_accounting_za adapter against fake-erp', () => {
 			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
 			expect(await erpFailureFromAudit(page, inv.id)).toBe(
 				`${PROVIDER} post refused: tax_not_stated`
+			);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('an invoice dated in a locked period is refused as period_closed', async ({ page }) => {
+		// The fake company locks processing up to 2020-12-31. Sage refuses the
+		// save; the adapter reads the lock date back and codes it, and the
+		// attempt is known to have created nothing.
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-SAGEZA-LOCK',
+			amount: '1150.00',
+			taxAmount: '150.00',
+			currency: 'ZAR',
+			invoiceDate: '2020-06-01',
+			dueDate: '2020-06-30',
+			vendor: SUPPLIER,
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				`${PROVIDER} post refused: period_closed`
 			);
 		} finally {
 			await deleteInvoice(page, inv.id);
@@ -160,6 +200,7 @@ test.describe('/erp sage_accounting_za adapter against fake-erp', () => {
 			amount: '1150.00',
 			taxAmount: '150.00',
 			currency: 'USD',
+			...DATES,
 			vendor: SUPPLIER,
 			glAccount: '6100'
 		});
