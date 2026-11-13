@@ -375,8 +375,8 @@ async def _write_recurring_patch(c, realdb, entity_id, code):
 
 async def _import_csv(c, entity_id, rows: list[tuple[str, str, str]]):
     """rows: (invoice_number, status, gl_account)."""
-    lines = ["invoice_number,vendor_name,amount,status,gl_account"]
-    lines += [f"{n},Csv Vendor {n},10.00,{st},{gl}" for n, st, gl in rows]
+    lines = ["invoice_number,vendor_name,amount,currency,status,gl_account"]
+    lines += [f"{n},Csv Vendor {n},10.00,USD,{st},{gl}" for n, st, gl in rows]
     return await c.post(
         "/api/invoices/import-csv",
         files={"file": ("invoices.csv", ("\n".join(lines) + "\n").encode(), "text/csv")},
@@ -715,9 +715,9 @@ async def test_approve_refuses_a_gl_correction_from_another_entitys_chart(realdb
 async def test_csv_import_refuses_the_row_and_leaves_nothing_behind(realdb, chart):
     entity_a, _ = chart
     csv_bytes = (
-        "invoice_number,vendor_name,amount,status,gl_account\n"
-        f"GLC-CSV-1,Csv Kept Vendor,10.00,new,{A_OWN}\n"
-        f"GLC-CSV-2,Csv Refused Vendor,20.00,new,{B_OWN}\n"
+        "invoice_number,vendor_name,amount,currency,status,gl_account\n"
+        f"GLC-CSV-1,Csv Kept Vendor,10.00,USD,new,{A_OWN}\n"
+        f"GLC-CSV-2,Csv Refused Vendor,20.00,USD,new,{B_OWN}\n"
     ).encode()
     async with realdb.client(key=TENANT, role="ap_manager") as c:
         resp = await c.post(

@@ -1141,14 +1141,19 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       the same content shapes and tests, and a Help row in the mobile app's
       settings that opens the web help for the user's tenant. **Trigger:** the
       first supplier onboarding at volume, or the first mobile-first customer.
-- [ ] **(c) CSV import resolves vendors across entities and defaults a blank
-      currency to USD.** A row can link another subsidiary's vendor, and a
-      blank currency cell becomes `"USD"` against the rule that a missing
-      currency stays missing. Its "records history" row error also has no
-      message code, so it reads in English in every locale. **Durable fix:**
-      scope vendor matching to the import's entity, refuse a blank currency
-      per row, and key the row errors through the message catalogue.
-      **Trigger:** the next change to CSV import.
+- [ ] **(c) The corporate-card CSV feed still defaults a blank currency to USD
+      and shows no row reasons.** `csv_import.import_corporate_card_csv` writes
+      `(currency or "USD").upper()[:3]`, the default decisions §372 removed from
+      the invoice importer, so a GBP card statement without a currency column
+      reconciles as USD (and a long cell is truncated). Refusing the row alone
+      is not enough: the expenses page's card import shows only the imported /
+      skipped counts (`routes/expenses/+page.svelte::handleCardCsv`), so a
+      refused row would vanish with no reason. **Durable fix:** refuse a blank
+      or malformed currency per row with the same `csv_currency_required` /
+      `csv_currency_invalid` codes and `_parse_currency`, and render the
+      returned `errors` through `localizeApiDetail` the way `ImportCsvModal`
+      does. **Trigger:** the next change to the card feed import, or the first
+      non-USD card programme.
 - [ ] **(c) A custom role can't be granted invoice entry.** Entry is a role
       list by design (decisions §248). **Durable fix:** if a customer needs a
       non-clerk preparer role, add a non-sensitive permission tier the

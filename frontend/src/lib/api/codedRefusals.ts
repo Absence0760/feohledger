@@ -721,6 +721,35 @@ const BUILDERS: Record<string, Builder> = {
 			? null
 			: t('refusal.csvInvoiceNumberMatchesRow', { number, other, row });
 	},
+	// Every other CSV-import row error (`services/csv_import`, decisions §372).
+	// `value` / `status` are the cell as written, so the reader can find it in
+	// the file; a blank `amount` cell has its own sentence.
+	csv_malformed: fixed('refusal.csvMalformed'),
+	csv_vendor_name_required: fixed('refusal.csvVendorNameRequired'),
+	csv_invoice_number_required: fixed('refusal.csvInvoiceNumberRequired'),
+	csv_vendor_required: fixed('refusal.csvVendorRequired'),
+	csv_amount_invalid: (p, t) => {
+		if (typeof p.value !== 'string') return null;
+		const value = str(p, 'value');
+		return value === null ? t('refusal.csvAmountMissing') : t('refusal.csvAmountInvalid', { value });
+	},
+	csv_currency_required: fixed('refusal.csvCurrencyRequired'),
+	csv_currency_invalid: (p, t) => {
+		const value = str(p, 'value');
+		return value === null ? null : t('refusal.csvCurrencyInvalid', { value });
+	},
+	csv_status_invalid: (p, t) => {
+		const value = str(p, 'value');
+		return value === null ? null : t('refusal.csvStatusInvalid', { value });
+	},
+	csv_status_not_importable: (p, t) => {
+		const status = str(p, 'status');
+		return status === null ? null : t('refusal.csvStatusNotImportable', { status });
+	},
+	csv_status_records_history: (p, t) => {
+		const status = str(p, 'status');
+		return status === null ? null : t('refusal.csvStatusRecordsHistory', { status });
+	},
 	// Why `POST /api/cards/generate` minted nothing for one invoice
 	// (`services/card_issuance.CARD_SKIP_MESSAGES`) — one per gate.
 	card_skip_not_found: fixed('refusal.cardSkipNotFound'),

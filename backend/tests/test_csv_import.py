@@ -36,6 +36,15 @@ from app.services.csv_import import (
 )
 
 
+def _result(value):
+    """A fake `Result` answering one row (or none) through either accessor the
+    importer uses — `scalar_one_or_none()` or the ordered `scalars().first()`."""
+    result = MagicMock()
+    result.scalar_one_or_none = MagicMock(return_value=value)
+    result.scalars.return_value.first.return_value = value
+    return result
+
+
 class _StubSession:
     """Minimal AsyncSession stub: always returns None on select, tracks added objects."""
 
@@ -46,9 +55,7 @@ class _StubSession:
 
     async def execute(self, _stmt):
         # Always say "no matching row" — importer treats everything as new.
-        result = MagicMock()
-        result.scalar_one_or_none = MagicMock(return_value=None)
-        return result
+        return _result(None)
 
     def add(self, obj):
         self.added.append(obj)
@@ -205,9 +212,9 @@ async def test_import_vendors_handles_empty_file():
 @pytest.mark.asyncio
 async def test_import_invoices_happy_path():
     csv_text = (
-        "invoice_number,vendor_name,amount,invoice_date,due_date,status\n"
-        "INV-001,Acme,1000.00,2026-01-15,2026-02-15,done\n"
-        'INV-002,Acme,"$2,500.50",2026-02-01,2026-03-01,paid\n'
+        "invoice_number,vendor_name,amount,currency,invoice_date,due_date,status\n"
+        "INV-001,Acme,1000.00,USD,2026-01-15,2026-02-15,done\n"
+        'INV-002,Acme,"$2,500.50",USD,2026-02-01,2026-03-01,paid\n'
     )
     db = _StubSession()
 
@@ -237,7 +244,9 @@ async def test_import_invoices_stamps_the_importer_as_uploader(stub_refresh_warn
 
     actor_id = uuid.uuid4()
     csv_text = (
-        "invoice_number,vendor_name,amount,status\nINV-U1,Acme,100.00,new\nINV-U2,Acme,200.00,new\n"
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "INV-U1,Acme,100.00,USD,new\n"
+        "INV-U2,Acme,200.00,USD,new\n"
     )
     db = _StubSession()
 
@@ -250,7 +259,11 @@ async def test_import_invoices_stamps_the_importer_as_uploader(stub_refresh_warn
 
 @pytest.mark.asyncio
 async def test_import_invoices_bad_amount_is_row_error():
-    csv_text = "invoice_number,vendor_name,amount\nINV-001,Acme,not-a-number\nINV-002,Acme,100.00\n"
+    csv_text = (
+        "invoice_number,vendor_name,amount,currency\n"
+        "INV-001,Acme,not-a-number,USD\n"
+        "INV-002,Acme,100.00,USD\n"
+    )
     db = _StubSession()
 
     result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
@@ -276,7 +289,9 @@ async def test_import_invoices_missing_vendor_identifier_is_row_error():
 
 @pytest.mark.asyncio
 async def test_import_invoices_rejects_invalid_status():
-    csv_text = "invoice_number,vendor_name,amount,status\nINV-001,Acme,100.00,not-a-status\n"
+    csv_text = (
+        "invoice_number,vendor_name,amount,currency,status\nINV-001,Acme,100.00,USD,not-a-status\n"
+    )
     db = _StubSession()
 
     result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
@@ -294,7 +309,9 @@ async def test_import_invoices_rejects_live_pipeline_status():
     — issue #174. Only new/done/paid/rejected are importable."""
     db = _StubSession()
     for bad in ("approved", "ready_for_review", "payment_scheduled", "sending_to_erp"):
-        csv_text = f"invoice_number,vendor_name,amount,status\nINV-X,Acme,100.00,{bad}\n"
+        csv_text = (
+            f"invoice_number,vendor_name,amount,currency,status\nINV-X,Acme,100.00,USD,{bad}\n"
+        )
         result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
         assert result.imported == 0, bad
         assert result.skipped == 1, bad
@@ -306,7 +323,9 @@ async def test_import_invoices_rejects_live_pipeline_status():
 async def test_import_invoices_allows_safe_terminal_statuses(stub_refresh_warnings):
     db = _StubSession()
     for ok in ("new", "done", "paid", "rejected"):
-        csv_text = f"invoice_number,vendor_name,amount,status\nINV-{ok},Acme,100.00,{ok}\n"
+        csv_text = (
+            f"invoice_number,vendor_name,amount,currency,status\nINV-{ok},Acme,100.00,USD,{ok}\n"
+        )
         result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
         assert result.imported == 1, f"{ok}: {result.to_dict()}"
 
@@ -321,11 +340,11 @@ async def test_import_invoices_refreshes_warnings_on_live_rows_only(stub_refresh
     db = _StubSession()
     settings = {"fraud_rules": {"round_amount_enabled": False}}
     csv_text = (
-        "invoice_number,vendor_name,amount,status\n"
-        "INV-R1,Acme,100.00,new\n"
-        "INV-R2,Acme,200.00,done\n"
-        "INV-R3,Acme,300.00,paid\n"
-        "INV-R4,Acme,400.00,rejected\n"
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "INV-R1,Acme,100.00,USD,new\n"
+        "INV-R2,Acme,200.00,USD,done\n"
+        "INV-R3,Acme,300.00,USD,paid\n"
+        "INV-R4,Acme,400.00,USD,rejected\n"
     )
     result = await import_invoices_csv(db, uuid.uuid4(), csv_text, org_settings=settings)
     assert result.imported == 4, result.to_dict()
@@ -346,12 +365,12 @@ async def test_import_invoices_without_historical_refuses_done_and_paid(stub_ref
 
     db = _StubSession()
     csv_text = (
-        "invoice_number,vendor_name,amount,status\n"
-        "INV-H1,Hist A,100.00,done\n"
-        "INV-H2,Hist B,100.00,paid\n"
-        "INV-H3,Hist C,100.00,\n"
-        "INV-O1,Open D,100.00,new\n"
-        "INV-O2,Open E,100.00,rejected\n"
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "INV-H1,Hist A,100.00,USD,done\n"
+        "INV-H2,Hist B,100.00,USD,paid\n"
+        "INV-H3,Hist C,100.00,USD,\n"
+        "INV-O1,Open D,100.00,USD,new\n"
+        "INV-O2,Open E,100.00,USD,rejected\n"
     )
     result = await import_invoices_csv(db, uuid.uuid4(), csv_text, allow_historical=False)
 
@@ -374,15 +393,12 @@ async def test_import_invoices_dedupes_existing_invoice():
 
     async def execute_fake(_stmt):
         call_count["n"] += 1
-        result = MagicMock()
         # First call(s) = vendor lookups (return None → vendor will be created).
         # Then the invoice dedup lookup returns the existing invoice.
         stmt_str = str(_stmt).lower()
         if "invoice" in stmt_str and "invoice_number" in stmt_str:
-            result.scalar_one_or_none = MagicMock(return_value=existing_invoice)
-        else:
-            result.scalar_one_or_none = MagicMock(return_value=None)
-        return result
+            return _result(existing_invoice)
+        return _result(None)
 
     db = AsyncMock()
     db.execute = execute_fake
@@ -390,7 +406,7 @@ async def test_import_invoices_dedupes_existing_invoice():
     db.add = MagicMock(side_effect=lambda o: db.added.append(o))
     db.flush = AsyncMock()
 
-    csv_text = "invoice_number,vendor_name,amount\nINV-001,Acme,100.00\n"
+    csv_text = "invoice_number,vendor_name,amount,currency\nINV-001,Acme,100.00,USD\n"
     result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
 
     assert result.imported == 0
@@ -411,16 +427,13 @@ async def test_import_invoices_dedupes_existing_invoice():
 def _stmt_aware_db(*, vendor_by_code=None, vendor_by_name=None, invoice_existing=None):
     async def execute_fake(_stmt):
         s = str(_stmt).lower()
-        result = MagicMock()
         if "invoice" in s and "invoice_number" in s:
-            result.scalar_one_or_none = MagicMock(return_value=invoice_existing)
-        elif "lower(vendors.name)" in s:
-            result.scalar_one_or_none = MagicMock(return_value=vendor_by_name)
-        elif "vendors.code" in s:
-            result.scalar_one_or_none = MagicMock(return_value=vendor_by_code)
-        else:
-            result.scalar_one_or_none = MagicMock(return_value=None)
-        return result
+            return _result(invoice_existing)
+        if "lower(vendors.name)" in s:
+            return _result(vendor_by_name)
+        if "vendors.code" in s:
+            return _result(vendor_by_code)
+        return _result(None)
 
     db = AsyncMock()
     db.execute = execute_fake
@@ -453,7 +466,7 @@ async def test_import_vendors_reuses_existing_by_name_when_no_code():
 async def test_import_invoices_reuses_existing_vendor_by_code():
     vendor = MagicMock(id=uuid.uuid4(), name="Acme")
     db = _stmt_aware_db(vendor_by_code=vendor)  # invoice dedup → None, so not skipped
-    csv_text = "invoice_number,vendor_name,vendor_code,amount\nINV-1,Acme,V001,100\n"
+    csv_text = "invoice_number,vendor_name,vendor_code,amount,currency\nINV-1,Acme,V001,100,EUR\n"
     result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
 
     assert result.imported == 1
@@ -488,7 +501,7 @@ async def test_import_invoices_normalizes_currency_and_persists_dates():
 
     assert result.imported == 1
     invoice = next(o for o in db.added if type(o).__name__ == "Invoice")
-    assert invoice.currency == "USD"  # lower-cased input, upper()[:3]
+    assert invoice.currency == "USD"  # lower-cased input, normalized
     assert invoice.invoice_date is not None
     assert (invoice.invoice_date.month, invoice.invoice_date.day) == (3, 15)
     assert invoice.due_date is not None
@@ -599,8 +612,8 @@ async def test_import_vendors_endpoint_rejects_oversized_file(realdb):
 
 async def test_import_invoices_endpoint_accepts_normal_upload(realdb):
     csv_bytes = (
-        b"invoice_number,vendor_name,amount,invoice_date,status\n"
-        b"INV-900,Acme,123.45,2026-01-15,done\n"
+        b"invoice_number,vendor_name,amount,currency,invoice_date,status\n"
+        b"INV-900,Acme,123.45,USD,2026-01-15,done\n"
     )
     file = {"file": ("invoices.csv", csv_bytes, "text/csv")}
     async with realdb.client(key="a", role="ap_manager") as c:
@@ -620,7 +633,8 @@ async def test_import_invoices_endpoint_stamps_uploaded_by_id(realdb):
 
     actor_id = realdb.info("a").users["ap_manager"]
     csv_bytes = (
-        b"invoice_number,vendor_name,amount,status\nIMP-SOD-1,SoD Import Vendor,750.00,new\n"
+        b"invoice_number,vendor_name,amount,currency,status\n"
+        b"IMP-SOD-1,SoD Import Vendor,750.00,USD,new\n"
     )
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
@@ -650,7 +664,8 @@ async def test_import_then_self_approve_is_blocked_by_segregation(realdb):
     from app.models.invoice import Invoice, InvoiceStatus
 
     csv_bytes = (
-        b"invoice_number,vendor_name,amount,status\nIMP-SOD-2,SoD Import Vendor 2,900.00,new\n"
+        b"invoice_number,vendor_name,amount,currency,status\n"
+        b"IMP-SOD-2,SoD Import Vendor 2,900.00,USD,new\n"
     )
     async with realdb.client(key="a", role="ap_manager") as c:
         imported = await c.post(
@@ -712,7 +727,9 @@ async def test_import_live_row_flags_duplicate_on_import(realdb):
     await _seed_existing_invoice(
         realdb, number="DUP-77", vendor_name="Dupe Supplies", amount="1234.56", status="paid"
     )
-    csv_bytes = b"invoice_number,vendor_name,amount,status\nDUP-77,Dupe Supplies,1234.56,new\n"
+    csv_bytes = (
+        b"invoice_number,vendor_name,amount,currency,status\nDUP-77,Dupe Supplies,1234.56,USD,new\n"
+    )
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/invoices/import-csv",
@@ -755,7 +772,9 @@ async def test_import_reports_a_normalized_number_match_naming_the_existing_invo
     mk = realdb.sessionmaker("a")
     async with mk() as s:
         first = await import_invoices_csv(
-            s, org_id, "invoice_number,vendor_name,amount,status\nINV-001,Norm Co,10.00,new\n"
+            s,
+            org_id,
+            "invoice_number,vendor_name,amount,currency,status\nINV-001,Norm Co,10.00,USD,new\n",
         )
         await s.commit()
     assert first.imported == 1
@@ -768,10 +787,10 @@ async def test_import_reports_a_normalized_number_match_naming_the_existing_invo
         res = await import_invoices_csv(
             s,
             org_id,
-            "invoice_number,vendor_name,amount,status\n"
-            "INV-1,Norm Co,10.00,new\n"
-            "INV-001,Norm Co,10.00,new\n"
-            "INV-1,Other Co,10.00,new\n",
+            "invoice_number,vendor_name,amount,currency,status\n"
+            "INV-1,Norm Co,10.00,USD,new\n"
+            "INV-001,Norm Co,10.00,USD,new\n"
+            "INV-1,Other Co,10.00,USD,new\n",
         )
         await s.commit()
 
@@ -844,7 +863,7 @@ async def test_a_near_match_in_another_entity_is_refused_without_naming_it(reald
         res = await import_invoices_csv(
             s,
             org_id,
-            "invoice_number,vendor_name,amount,status\nINV-1,Shared Co,10.00,new\n",
+            "invoice_number,vendor_name,amount,currency,status\nINV-1,Shared Co,10.00,USD,new\n",
             entity_id=entity_a,
         )
         await s.commit()
@@ -872,9 +891,9 @@ async def test_import_reports_two_rows_of_one_file_that_normalize_equal(realdb):
         res = await import_invoices_csv(
             s,
             org_id,
-            "invoice_number,vendor_name,amount,status\n"
-            "2026-0007,Batch Co,10.00,new\n"
-            "2026 7,Batch Co,10.00,new\n",
+            "invoice_number,vendor_name,amount,currency,status\n"
+            "2026-0007,Batch Co,10.00,USD,new\n"
+            "2026 7,Batch Co,10.00,USD,new\n",
         )
         await s.commit()
 
@@ -914,7 +933,9 @@ async def test_import_historical_row_is_not_flagged(realdb):
     await _seed_existing_invoice(
         realdb, number="DUP-78", vendor_name="Dupe Supplies", amount="99.10", status="paid"
     )
-    csv_bytes = b"invoice_number,vendor_name,amount,status\nDUP-78,Dupe Supplies,99.10,paid\n"
+    csv_bytes = (
+        b"invoice_number,vendor_name,amount,currency,status\nDUP-78,Dupe Supplies,99.10,USD,paid\n"
+    )
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/invoices/import-csv",
@@ -944,9 +965,9 @@ async def test_import_invoices_endpoint_ap_clerk_imports_open_ap_only(realdb):
 
     clerk_id = realdb.info("a").users["ap_clerk"]
     csv_bytes = (
-        b"invoice_number,vendor_name,amount,status\n"
-        b"IMP-CLERK-1,Clerk Import Vendor,120.00,new\n"
-        b"IMP-CLERK-2,Clerk Import Vendor,80.00,paid\n"
+        b"invoice_number,vendor_name,amount,currency,status\n"
+        b"IMP-CLERK-1,Clerk Import Vendor,120.00,USD,new\n"
+        b"IMP-CLERK-2,Clerk Import Vendor,80.00,USD,paid\n"
     )
     async with realdb.client(key="a", role="ap_clerk") as c:
         resp = await c.post(
@@ -972,7 +993,7 @@ async def test_import_invoices_endpoint_ap_clerk_imports_open_ap_only(realdb):
 
 async def test_import_invoices_endpoint_cfo_still_forbidden(realdb):
     """Import opened to the AP clerk, not to the CFO (`INVOICE_IMPORT_ROLES`)."""
-    csv_bytes = b"invoice_number,vendor_name,amount,status\nIMP-CFO-1,V,1.00,new\n"
+    csv_bytes = b"invoice_number,vendor_name,amount,currency,status\nIMP-CFO-1,V,1.00,USD,new\n"
     async with realdb.client(key="a", role="cfo") as c:
         resp = await c.post(
             "/api/invoices/import-csv",
@@ -982,7 +1003,10 @@ async def test_import_invoices_endpoint_cfo_still_forbidden(realdb):
 
 
 async def test_import_invoices_endpoint_ap_manager_still_imports_history(realdb):
-    csv_bytes = b"invoice_number,vendor_name,amount,status\nIMP-MGR-H1,Mgr Hist Vendor,5.00,paid\n"
+    csv_bytes = (
+        b"invoice_number,vendor_name,amount,currency,status\n"
+        b"IMP-MGR-H1,Mgr Hist Vendor,5.00,USD,paid\n"
+    )
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(
             "/api/invoices/import-csv",
@@ -1080,11 +1104,11 @@ async def test_import_invoices_stamps_provenance_on_every_row(stub_refresh_warni
     first)."""
     db = _StubSession()
     csv_text = (
-        "invoice_number,vendor_name,amount,status\n"
-        "INV-P1,Acme,100.00,new\n"
-        "INV-P2,Acme,200.00,done\n"
-        "INV-P3,Acme,300.00,paid\n"
-        "INV-P4,Acme,400.00,rejected\n"
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "INV-P1,Acme,100.00,USD,new\n"
+        "INV-P2,Acme,200.00,USD,done\n"
+        "INV-P3,Acme,300.00,USD,paid\n"
+        "INV-P4,Acme,400.00,USD,rejected\n"
     )
     result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
     assert result.imported == 4, result.to_dict()
@@ -1108,7 +1132,7 @@ async def test_import_provenance_does_not_displace_other_meta_keys():
     takes one reserved top-level key and nothing else, so those writers keep
     working on an imported row."""
     db = _StubSession()
-    csv_text = "invoice_number,vendor_name,amount\nINV-META,Acme,100.00\n"
+    csv_text = "invoice_number,vendor_name,amount,currency\nINV-META,Acme,100.00,USD\n"
     await import_invoices_csv(db, uuid.uuid4(), csv_text)
     inv = next(o for o in db.added if isinstance(o, Invoice))
     assert set(inv.meta) == {IMPORT_PROVENANCE_KEY}
@@ -1141,3 +1165,385 @@ def test_native_and_imported_clauses_are_exact_complements():
     # evaluates FALSE AND NULL = FALSE inside, and TRUE outside.
     assert native.startswith("NOT (")
     assert imported in native
+
+
+# ---------------------------------------------------------------------------
+# Currency is never defaulted, every row error is coded, and vendor resolution
+# stays inside the import's entity (decisions §372)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_import_invoices_refuses_a_blank_or_malformed_currency_per_row(
+    stub_refresh_warnings,
+):
+    """A blank currency cell is a coded row error, never `USD` (a missing
+    currency stays missing, decisions §160/§196/§200). A malformed code is
+    refused rather than truncated (`EURO` used to land as `EUR`). Neither
+    refused row leaves a vendor stub behind; the good rows import."""
+    from app.models.vendor import Vendor
+
+    db = _StubSession()
+    csv_text = (
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "INV-C1,Blank Co,10.00,,new\n"
+        "INV-C2,Euro Co,10.00,EURO,new\n"
+        "INV-C3,Dollar Co,10.00,US$,new\n"
+        "INV-C4,Good Co,10.00, eur ,new\n"
+        "INV-C5,Yen Co,10.00,JPY,paid\n"
+    )
+    result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
+
+    assert (result.imported, result.skipped) == (2, 3), result.to_dict()
+    assert [e.to_dict() for e in result.errors] == [
+        {
+            "code": "csv_currency_required",
+            "params": {},
+            "row": 2,
+            "message": "currency is required (a three-letter ISO 4217 code such as USD or EUR)",
+        },
+        {
+            "code": "csv_currency_invalid",
+            "params": {"value": "EURO"},
+            "row": 3,
+            "message": (
+                "currency invalid: 'EURO' (use a three-letter ISO 4217 code such as USD or EUR)"
+            ),
+        },
+        {
+            "code": "csv_currency_invalid",
+            "params": {"value": "US$"},
+            "row": 4,
+            "message": (
+                "currency invalid: 'US$' (use a three-letter ISO 4217 code such as USD or EUR)"
+            ),
+        },
+    ]
+    invoices = [o for o in db.added if isinstance(o, Invoice)]
+    assert [(i.invoice_number, i.currency) for i in invoices] == [
+        ("INV-C4", "EUR"),
+        ("INV-C5", "JPY"),
+    ]
+    assert sorted(o.name for o in db.added if isinstance(o, Vendor)) == ["Good Co", "Yen Co"]
+
+
+@pytest.mark.asyncio
+async def test_import_invoices_without_a_currency_column_refuses_every_row():
+    """No `currency` column at all is the same as a blank cell on every row —
+    the old default made a whole file of EUR invoices land as USD."""
+    db = _StubSession()
+    csv_text = (
+        "invoice_number,vendor_name,amount,status\nINV-N1,Acme,1.00,done\nINV-N2,Acme,2.00,paid\n"
+    )
+    result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
+
+    assert (result.imported, result.skipped) == (0, 2)
+    assert [(e.row, e.structured["code"]) for e in result.errors] == [
+        (2, "csv_currency_required"),
+        (3, "csv_currency_required"),
+    ]
+    assert not [o for o in db.added if isinstance(o, Invoice)]
+
+
+@pytest.mark.asyncio
+async def test_a_mixed_invoice_file_reports_every_row_with_a_code(stub_refresh_warnings):
+    """One file, one row per refusal the invoice importer can make before it
+    resolves a vendor, plus two good rows. Each refused row is reported by its
+    own line number with a stable `code` and the `params` its sentence needs, so
+    the import modal states it in the reader's language
+    (`codedRefusals.ts`); the good rows still import."""
+    db = _StubSession()
+    csv_text = (
+        "invoice_number,vendor_name,amount,currency,status\n"
+        "INV-M1,Acme,10.00,USD,new\n"  # 2: ok
+        ",Acme,10.00,USD,new\n"  # 3: no number
+        "INV-M3,,10.00,USD,new\n"  # 4: no vendor
+        "INV-M4,Acme,ten,USD,new\n"  # 5: bad amount
+        "INV-M5,Acme,10.00,,new\n"  # 6: no currency
+        "INV-M6,Acme,10.00,USD,lost\n"  # 7: no such status
+        "INV-M7,Acme,10.00,USD,approved\n"  # 8: live stage
+        "INV-M8,Acme,10.00,USD,paid\n"  # 9: history, refused for this caller
+        "INV-M9,Acme,10.00,GBP,rejected\n"  # 10: ok
+    )
+    result = await import_invoices_csv(db, uuid.uuid4(), csv_text, allow_historical=False)
+
+    assert (result.imported, result.skipped) == (2, 7), result.to_dict()
+    assert [(e.row, e.structured) for e in result.errors] == [
+        (3, {"code": "csv_invoice_number_required", "params": {}}),
+        (4, {"code": "csv_vendor_required", "params": {}}),
+        (5, {"code": "csv_amount_invalid", "params": {"value": "ten"}}),
+        (6, {"code": "csv_currency_required", "params": {}}),
+        (7, {"code": "csv_status_invalid", "params": {"value": "lost"}}),
+        (8, {"code": "csv_status_not_importable", "params": {"status": "approved"}}),
+        (9, {"code": "csv_status_records_history", "params": {"status": "paid"}}),
+    ]
+    # The serialized shape is the coded-refusal body beside the row, with the
+    # English kept as the fallback.
+    history = result.to_dict()["errors"][-1]
+    assert set(history) == {"code", "params", "row", "message"}
+    assert "records history" in history["message"]
+    invoices = [o for o in db.added if isinstance(o, Invoice)]
+    assert [i.invoice_number for i in invoices] == ["INV-M1", "INV-M9"]
+
+
+@pytest.mark.asyncio
+async def test_vendor_and_malformed_file_errors_are_coded(monkeypatch):
+    db = _StubSession()
+    result = await import_vendors_csv(db, uuid.uuid4(), "name,code\n,NONAME\n")
+    assert result.to_dict()["errors"] == [
+        {"code": "csv_vendor_name_required", "params": {}, "row": 2, "message": "name is required"}
+    ]
+
+    def _unreadable(_text):
+        raise csv_import_module.csv.Error("field larger than field limit")
+
+    monkeypatch.setattr(csv_import_module, "_read_rows", _unreadable)
+    for importer in (import_vendors_csv, import_invoices_csv):
+        (err,) = (await importer(_StubSession(), uuid.uuid4(), "x")).errors
+        assert (err.row, err.structured) == (0, {"code": "csv_malformed", "params": {}})
+        assert err.message == "Malformed CSV: field larger than field limit"
+
+
+async def _two_entities(realdb):
+    """The tenant's default entity (A) and a sibling (B)."""
+    from sqlalchemy import select
+
+    from app.models.entity import Entity
+
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        entity_a = (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
+        sibling = Entity(
+            organization_id=org_id, name="Sibling Sub", slug="csv-scope-b", is_default=False
+        )
+        s.add(sibling)
+        await s.commit()
+        return org_id, entity_a, sibling.id
+
+
+async def test_import_resolves_vendors_within_the_import_entity(realdb):
+    """Entity B holds `Twin Co` (code `TWIN`). A file imported into entity A
+    that names `Twin Co` — by name on one row, by code on another — must NOT
+    link B's vendor: `Invoice.vendor_id` is what the credit-memo guard and the
+    vendor's spend rollup key on. A gets its own unverified stub, and both rows
+    land on it. An unstamped (NULL-entity) vendor is still matched from A, as
+    the invoice matcher does (`vendor_matching.scope_vendor_candidates`), and an
+    entity's own row beats an unstamped one of the same name. Every imported
+    row carries the importer as uploader."""
+    from sqlalchemy import select
+
+    from app.models.vendor import Vendor
+
+    org_id, entity_a, entity_b = await _two_entities(realdb)
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        twin_b = Vendor(
+            organization_id=org_id, entity_id=entity_b, name="Twin Co", code="TWIN", status="active"
+        )
+        legacy = Vendor(organization_id=org_id, entity_id=None, name="Legacy Co", status="active")
+        both_null = Vendor(organization_id=org_id, entity_id=None, name="Both Co", status="active")
+        both_a = Vendor(organization_id=org_id, entity_id=entity_a, name="Both Co", status="active")
+        s.add_all([twin_b, legacy, both_null, both_a])
+        await s.commit()
+        ids = {"twin_b": twin_b.id, "legacy": legacy.id, "both_a": both_a.id}
+
+    actor_id = realdb.info("a").users["ap_manager"]
+    async with mk() as s:
+        res = await import_invoices_csv(
+            s,
+            org_id,
+            "invoice_number,vendor_name,vendor_code,amount,currency,status\n"
+            "SCOPE-1,Twin Co,,10.00,USD,new\n"
+            "SCOPE-2,Twin Co,TWIN,20.00,USD,new\n"
+            "SCOPE-3,Legacy Co,,30.00,USD,new\n"
+            "SCOPE-4,Both Co,,40.00,USD,new\n",
+            entity_id=entity_a,
+            actor_id=actor_id,
+        )
+        await s.commit()
+    assert (res.imported, res.errors) == (4, []), res.to_dict()
+
+    async with mk() as s:
+        rows = {
+            inv.invoice_number: inv
+            for inv in (
+                await s.execute(select(Invoice).where(Invoice.invoice_number.like("SCOPE-%")))
+            ).scalars()
+        }
+        stubs = (
+            (
+                await s.execute(
+                    select(Vendor).where(Vendor.entity_id == entity_a, Vendor.name == "Twin Co")
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(stubs) == 1, "row 2 (by code) must reuse the stub row 1 minted in A, not B's"
+    stub = stubs[0]
+    assert stub.status == "unverified"
+    assert stub.id != ids["twin_b"]
+    assert rows["SCOPE-1"].vendor_id == stub.id
+    # Resolving by code fell back to the name, which found A's stub — B's `TWIN`
+    # was never in scope.
+    assert rows["SCOPE-2"].vendor_id == stub.id
+    assert rows["SCOPE-3"].vendor_id == ids["legacy"]
+    assert rows["SCOPE-4"].vendor_id == ids["both_a"]
+    assert all(inv.entity_id == entity_a for inv in rows.values())
+    assert {inv.uploaded_by_id for inv in rows.values()} == {actor_id}
+
+
+async def test_vendor_import_dedups_within_the_import_entity(realdb):
+    """The vendor importer used to skip a row because ANOTHER subsidiary held
+    the code or name — leaving the importing entity with no vendor at all — and
+    raised `MultipleResultsFound` once two entities each held one. It now
+    dedups against the import's entity ∪ unstamped vendors only."""
+    from sqlalchemy import func, select
+
+    from app.models.vendor import Vendor
+
+    org_id, entity_a, entity_b = await _two_entities(realdb)
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        s.add(
+            Vendor(
+                organization_id=org_id,
+                entity_id=entity_b,
+                name="Twin Co",
+                code="TWIN",
+                status="active",
+            )
+        )
+        await s.commit()
+
+    for _ in range(2):  # the second run is a re-import into A: deduped
+        async with mk() as s:
+            res = await import_vendors_csv(
+                s, org_id, "name,code\nTwin Co,TWIN\n", entity_id=entity_a
+            )
+            await s.commit()
+    assert (res.imported, res.skipped) == (0, 1)
+
+    async with mk() as s:
+        per_entity = dict(
+            (
+                await s.execute(
+                    select(Vendor.entity_id, func.count())
+                    .where(Vendor.code == "TWIN")
+                    .group_by(Vendor.entity_id)
+                )
+            ).all()
+        )
+    assert per_entity == {entity_a: 1, entity_b: 1}
+
+    # Entity B importing the same file still finds its own row.
+    async with mk() as s:
+        res_b = await import_vendors_csv(s, org_id, "name,code\nTwin Co,TWIN\n", entity_id=entity_b)
+    assert (res_b.imported, res_b.skipped) == (0, 1)
+
+
+async def test_invoice_import_endpoint_scopes_vendors_to_the_selected_entity(realdb):
+    """The same rule through `POST /api/invoices/import-csv`, which resolves
+    the entity from `X-Entity-ID` (`get_write_entity_id`)."""
+    from sqlalchemy import select
+
+    from app.models.vendor import Vendor
+
+    org_id, entity_a, entity_b = await _two_entities(realdb)
+    async with realdb.sessionmaker("a")() as s:
+        twin_a = Vendor(
+            organization_id=org_id, entity_id=entity_a, name="Api Twin", status="active"
+        )
+        s.add(twin_a)
+        await s.commit()
+        twin_a_id = twin_a.id
+
+    csv_bytes = (
+        b"invoice_number,vendor_name,amount,currency,status\nAPI-SCOPE-1,Api Twin,5.00,CAD,new\n"
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+            headers={"X-Entity-ID": str(entity_b)},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"imported": 1, "skipped": 0, "errors": []}
+
+    async with realdb.sessionmaker("a")() as s:
+        inv = (
+            await s.execute(select(Invoice).where(Invoice.invoice_number == "API-SCOPE-1"))
+        ).scalar_one()
+        vendor = await s.get(Vendor, inv.vendor_id)
+    assert inv.entity_id == entity_b
+    assert inv.currency == "CAD"
+    assert vendor.id != twin_a_id
+    assert vendor.entity_id == entity_b
+    assert inv.uploaded_by_id == realdb.info("a").users["ap_manager"]
+
+
+async def test_an_exact_repeat_only_another_entity_holds_is_refused_not_dropped(realdb):
+    """An unstamped vendor is shared by every entity. When entity B (and a
+    third entity) already hold `INV-1` for it, an import into A neither 500s
+    (it used to be `scalar_one_or_none()` over two rows) nor drops the row
+    silently: it is the coded other-entity refusal, existence only (§40), as
+    the near match is. A re-import into B itself stays the silent skip."""
+    from sqlalchemy import func, select
+
+    from app.models.entity import Entity
+    from app.models.vendor import Vendor
+    from app.services.csv_import import CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY
+
+    org_id, entity_a, entity_b = await _two_entities(realdb)
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        entity_c = Entity(
+            organization_id=org_id, name="Third Sub", slug="csv-scope-c", is_default=False
+        )
+        shared = Vendor(organization_id=org_id, entity_id=None, name="Shared Ltd", status="active")
+        s.add_all([entity_c, shared])
+        await s.flush()
+        for ent in (entity_b, entity_c.id):
+            s.add(
+                Invoice(
+                    organization_id=org_id,
+                    entity_id=ent,
+                    invoice_number="INV-1",
+                    vendor_name="Shared Ltd",
+                    vendor_id=shared.id,
+                    amount=Decimal("10.00"),
+                    currency="USD",
+                    status="new",
+                )
+            )
+        await s.commit()
+
+    row = "invoice_number,vendor_name,amount,currency,status\nINV-1,Shared Ltd,10.00,USD,new\n"
+    async with mk() as s:
+        into_a = await import_invoices_csv(s, org_id, row, entity_id=entity_a)
+        await s.commit()
+    assert (into_a.imported, into_a.skipped) == (0, 1)
+    assert [e.to_dict() for e in into_a.errors] == [
+        {
+            "code": CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY,
+            "params": {"invoice_number": "INV-1"},
+            "row": 2,
+            "message": (
+                "invoice_number 'INV-1' is the same invoice number as an invoice for this "
+                "vendor in another entity once formatting is ignored; not imported"
+            ),
+        }
+    ]
+
+    async with mk() as s:
+        into_b = await import_invoices_csv(s, org_id, row, entity_id=entity_b)
+        await s.commit()
+    assert (into_b.imported, into_b.skipped, into_b.errors) == (0, 1, [])
+
+    async with mk() as s:
+        count = (
+            await s.execute(
+                select(func.count()).select_from(Invoice).where(Invoice.invoice_number == "INV-1")
+            )
+        ).scalar_one()
+    assert count == 2

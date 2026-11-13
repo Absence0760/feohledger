@@ -161,6 +161,14 @@ inter-company mirror — which sits under the *counterparty* entity — matches
 against the counterparty's vendors with no call-site change. Details:
 `backend/docs/vendor-management.md` § Matching is scoped to the invoice's entity.
 
+The CSV importers (`services/csv_import`) resolve a row's vendor by code or
+name, and the vendor importer dedups, through the same scope
+(`vendor_matching.scope_vendor_candidates`, the one statement of `entity ∪
+NULL`, entity's own first) under the import's entity. Before that they searched
+the whole tenant, so a row imported into one subsidiary could link another's
+supplier record (`backend/docs/csv-import.md` § Vendors resolve within the
+import's entity; decisions §372).
+
 ## How every tenant gets a Default entity
 
 - **Existing tenants** — migration `0029_entities` (tenant-only, gated on the

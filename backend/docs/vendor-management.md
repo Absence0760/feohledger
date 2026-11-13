@@ -171,6 +171,13 @@ bank-detail record. When the same supplier exists both unstamped and under the
 invoice's own entity, the entity's own row wins (the candidate query orders it
 first).
 
+The CSV importers share the scope rather than restating it:
+`vendor_matching.scope_vendor_candidates` is the helper `_candidate_query`
+builds on, and `services/csv_import` applies it to its by-code and by-name
+lookups (no status filter there — an import has always resolved to an existing
+`inactive` / `rejected` record rather than minting a fresh stub beside it).
+See `csv-import.md` § Vendors resolve within the import's entity.
+
 `match_and_link_vendor` derives the entity from `invoice.entity_id`, so no
 caller passes it explicitly — including an inter-company **mirror** payable,
 which sits under the counterparty entity and therefore matches against the

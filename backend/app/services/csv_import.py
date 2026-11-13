@@ -39,11 +39,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import and_, func, not_, select
+from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
+from app.schemas.expense import normalize_iso_currency
 from app.services.audit_dispatch import dispatch_audit
 from app.services.gl_chart import load_invoice_chart
 from app.services.invoice_warnings import (
@@ -52,6 +53,7 @@ from app.services.invoice_warnings import (
     refresh_warnings,
 )
 from app.services.numeric_bounds import MONEY_NUMERIC, fits_numeric
+from app.services.vendor_matching import scope_vendor_candidates
 from app.utils.dates import parse_ambiguous_date
 
 # CSV imports are always small structured text (vendor lists, invoice batches,
@@ -211,6 +213,36 @@ CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY = "csv_invoice_number_matches_other_enti
 #: Params: `invoice_number`, `other_row`, `other_invoice_number`.
 CSV_INVOICE_NUMBER_MATCHES_ROW = "csv_invoice_number_matches_row"
 
+# Every other row error the vendor and invoice importers report carries a code
+# too, so the import modal states it in the reader's language
+# (`frontend/src/lib/api/codedRefusals.ts`) and falls back to `message`
+# (decisions §372). Params are the cell as written, where the sentence names it.
+#: The file is not parseable CSV (reported as row 0). No params.
+CSV_MALFORMED = "csv_malformed"
+#: A vendor row with a blank `name`. No params.
+CSV_VENDOR_NAME_REQUIRED = "csv_vendor_name_required"
+#: An invoice row with a blank `invoice_number`. No params.
+CSV_INVOICE_NUMBER_REQUIRED = "csv_invoice_number_required"
+#: An invoice row naming neither `vendor_name` nor `vendor_code`. No params.
+CSV_VENDOR_REQUIRED = "csv_vendor_required"
+#: An `amount` that is blank, unparseable, negative or wider than
+#: `Numeric(15, 2)`. Params: `value`.
+CSV_AMOUNT_INVALID = "csv_amount_invalid"
+#: A blank `currency` cell (or no `currency` column). A missing currency stays
+#: missing (decisions §160/§196/§200), so the row is refused, never read as USD.
+#: No params.
+CSV_CURRENCY_REQUIRED = "csv_currency_required"
+#: A `currency` cell that is not a three-letter ISO 4217 code. Params: `value`.
+CSV_CURRENCY_INVALID = "csv_currency_invalid"
+#: A `status` cell that is no invoice status at all. Params: `value`.
+CSV_STATUS_INVALID = "csv_status_invalid"
+#: A real status an import may not land at (a live pipeline stage, issue
+#: #174). Params: `status`.
+CSV_STATUS_NOT_IMPORTABLE = "csv_status_not_importable"
+#: A `done` / `paid` row (a blank status means `done`) from a caller without a
+#: `HISTORICAL_IMPORT_ROLES` role. Params: `status`.
+CSV_STATUS_RECORDS_HISTORY = "csv_status_records_history"
+
 
 @dataclass
 class ImportRowError:
@@ -219,8 +251,8 @@ class ImportRowError:
     #: A row refused for a reason the client localizes carries that refusal's
     #: structured body, merged into the serialized error beside ``row``:
     #: ``gl_chart.ChartRefusal.body`` (its own shape), or ``{code, params}`` in
-    #: the coded-refusal shape for the near-duplicate number refusals above.
-    #: ``message`` stays the English fallback either way.
+    #: the coded-refusal shape for every other refusal (the ``CSV_*`` codes
+    #: above; see :func:`_coded`). ``message`` stays the English fallback.
     structured: dict | None = None
 
     def to_dict(self) -> dict:
@@ -244,6 +276,85 @@ class ImportResult:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _coded(row: int, code: str, message: str, **params) -> ImportRowError:
+    """A row error in the coded-refusal shape: ``{code, params}`` + the English."""
+    return ImportRowError(row=row, message=message, structured={"code": code, "params": params})
+
+
+def _parse_currency(raw: str | None) -> tuple[str | None, ImportRowError | None]:
+    """Normalize a row's ``currency`` cell, or say why the row is refused.
+
+    Returns ``(code, None)`` or ``(None, error)``; the error's ``row`` is 0 and
+    the caller sets it. A blank cell is REFUSED, not defaulted: the importer
+    cannot know a missing currency, and stamping ``USD`` labels a EUR payable in
+    dollars all the way to the approval gates (decisions §160/§196/§200, §372).
+    Neither the vendor nor the entity is evidence — a vendor record has no
+    billing currency, and ``Entity.currency`` is what the entity *reports* in,
+    not what a supplier bills it in. A malformed code is refused rather than
+    truncated (``"EURO"`` used to become ``EUR`` and ``"US$"`` ``US$``), with the
+    same shape check every other boundary uses (``normalize_iso_currency``).
+    """
+    value = (raw or "").strip()
+    if not value:
+        return None, _coded(
+            0,
+            CSV_CURRENCY_REQUIRED,
+            "currency is required (a three-letter ISO 4217 code such as USD or EUR)",
+        )
+    try:
+        return normalize_iso_currency(value), None
+    except ValueError:
+        return None, _coded(
+            0,
+            CSV_CURRENCY_INVALID,
+            f"currency invalid: {value!r} (use a three-letter ISO 4217 code such as USD or EUR)",
+            value=value,
+        )
+
+
+def _in_another_entity(found: uuid.UUID | None, importing: uuid.UUID | None) -> bool:
+    """True when an existing invoice provably belongs to a different entity
+    than the import. A NULL on either side is unstamped, not "another"."""
+    return importing is not None and found is not None and found != importing
+
+
+def _other_entity_match(row: int, invoice_number: str) -> ImportRowError:
+    """The refusal for a number another entity already holds for this vendor
+    (exactly or once formatting is ignored): existence only, never that
+    entity's invoice id or number (decisions §40)."""
+    return _coded(
+        row,
+        CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY,
+        (
+            f"invoice_number {invoice_number!r} is the same invoice number as an "
+            "invoice for this vendor in another entity once formatting is "
+            "ignored; not imported"
+        ),
+        invoice_number=invoice_number,
+    )
+
+
+async def _find_vendor(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+    *criteria,
+) -> Vendor | None:
+    """The vendor a row of ``entity_id`` resolves to, by ``criteria``, or None.
+
+    Scoped to that entity ∪ unstamped vendors by
+    ``vendor_matching.scope_vendor_candidates`` — the rule the invoice matcher
+    applies — so a row can never link (or dedup against) another subsidiary's
+    supplier record (decisions §372). The entity's own row wins over an
+    unstamped one, and ``first()`` over the ordered query means the same
+    supplier present once per subsidiary is not a ``MultipleResultsFound``.
+    """
+    query = scope_vendor_candidates(
+        select(Vendor).where(Vendor.organization_id == organization_id, *criteria), entity_id
+    )
+    return (await db.execute(query.limit(1))).scalars().first()
 
 
 def _read_rows(csv_text: str) -> list[dict]:
@@ -317,7 +428,9 @@ async def import_vendors_csv(
     """Upsert vendors from CSV. Dedup priority: code > case-insensitive name.
 
     ``entity_id`` (multi-entity Phase 2) is the entity new vendors land under —
-    the selected entity or the tenant default, resolved at the endpoint.
+    the selected entity or the tenant default, resolved at the endpoint. Dedup
+    is scoped the same way (that entity ∪ unstamped vendors, :func:`_find_vendor`),
+    so a supplier another subsidiary already holds is created here, not skipped.
 
     ``actor_id`` is the AP user who ran the import; it lands on the
     ``vendor.imported_csv`` audit row written for each vendor created."""
@@ -326,34 +439,26 @@ async def import_vendors_csv(
     try:
         rows = _read_rows(csv_text)
     except csv.Error as exc:
-        result.errors.append(ImportRowError(row=0, message=f"Malformed CSV: {exc}"))
+        result.errors.append(_coded(0, CSV_MALFORMED, f"Malformed CSV: {exc}"))
         return result
 
     for i, row in enumerate(rows, start=2):  # +1 for header, +1 for 1-indexing
         name = (row.get("name") or "").strip()
         if not name:
-            result.errors.append(ImportRowError(row=i, message="name is required"))
+            result.errors.append(_coded(i, CSV_VENDOR_NAME_REQUIRED, "name is required"))
             result.skipped += 1
             continue
 
         code = (row.get("code") or "").strip() or None
+        # Dedup within the entity the vendors land under (∪ unstamped rows) —
+        # another subsidiary's record of the same supplier is not this one's.
         existing: Vendor | None = None
         if code:
-            q = await db.execute(
-                select(Vendor).where(
-                    Vendor.organization_id == organization_id,
-                    Vendor.code == code,
-                )
-            )
-            existing = q.scalar_one_or_none()
+            existing = await _find_vendor(db, organization_id, entity_id, Vendor.code == code)
         if existing is None:
-            q = await db.execute(
-                select(Vendor).where(
-                    Vendor.organization_id == organization_id,
-                    func.lower(Vendor.name) == name.lower(),
-                )
+            existing = await _find_vendor(
+                db, organization_id, entity_id, func.lower(Vendor.name) == name.lower()
             )
-            existing = q.scalar_one_or_none()
 
         if existing is not None:
             result.skipped += 1
@@ -440,7 +545,13 @@ async def import_invoices_csv(
 
     ``entity_id`` (multi-entity Phase 2) is the entity imported invoices and any
     auto-created vendor stubs land under — the selected entity or the tenant
-    default, resolved at the endpoint.
+    default, resolved at the endpoint. Vendor resolution is scoped to it too
+    (that entity ∪ unstamped vendors, :func:`_find_vendor`): a row never links
+    another subsidiary's supplier record, because ``Invoice.vendor_id`` is what
+    the credit-memo guard and the vendor's spend rollup key on.
+
+    Every row must carry a ``currency``: a blank cell is a per-row
+    ``csv_currency_required`` error, never ``USD`` (:func:`_parse_currency`).
 
     ``day_first`` resolves ambiguous ``invoice_date`` / ``due_date`` cells
     (see ``app.utils.dates.resolve_day_first_preference``).
@@ -473,7 +584,7 @@ async def import_invoices_csv(
     try:
         rows = _read_rows(csv_text)
     except csv.Error as exc:
-        result.errors.append(ImportRowError(row=0, message=f"Malformed CSV: {exc}"))
+        result.errors.append(_coded(0, CSV_MALFORMED, f"Malformed CSV: {exc}"))
         return result
 
     # One stamp for the whole batch — every row in a single import shares the
@@ -503,19 +614,28 @@ async def import_invoices_csv(
         amount = _parse_decimal(row.get("amount"))
 
         if not invoice_number:
-            result.errors.append(ImportRowError(row=i, message="invoice_number is required"))
+            result.errors.append(
+                _coded(i, CSV_INVOICE_NUMBER_REQUIRED, "invoice_number is required")
+            )
             result.skipped += 1
             continue
         if not vendor_name and not vendor_code:
             result.errors.append(
-                ImportRowError(row=i, message="vendor_name or vendor_code is required")
+                _coded(i, CSV_VENDOR_REQUIRED, "vendor_name or vendor_code is required")
             )
             result.skipped += 1
             continue
         if amount is None or amount < 0:
+            raw_amount = row.get("amount") or ""
             result.errors.append(
-                ImportRowError(row=i, message=f"amount invalid: {row.get('amount')!r}")
+                _coded(i, CSV_AMOUNT_INVALID, f"amount invalid: {raw_amount!r}", value=raw_amount)
             )
+            result.skipped += 1
+            continue
+        currency, currency_error = _parse_currency(row.get("currency"))
+        if currency_error is not None:
+            currency_error.row = i
+            result.errors.append(currency_error)
             result.skipped += 1
             continue
 
@@ -526,7 +646,9 @@ async def import_invoices_csv(
         try:
             status_val = InvoiceStatus(status_raw)
         except ValueError:
-            result.errors.append(ImportRowError(row=i, message=f"status invalid: {status_raw!r}"))
+            result.errors.append(
+                _coded(i, CSV_STATUS_INVALID, f"status invalid: {status_raw!r}", value=status_raw)
+            )
             result.skipped += 1
             continue
         # A CSV import bypasses the workflow engine (no audit / segregation /
@@ -534,26 +656,30 @@ async def import_invoices_csv(
         # status — never a live pipeline stage like `approved` (issue #174).
         if status_raw not in _IMPORTABLE_INVOICE_STATUSES:
             result.errors.append(
-                ImportRowError(
-                    row=i,
-                    message=(
+                _coded(
+                    i,
+                    CSV_STATUS_NOT_IMPORTABLE,
+                    (
                         f"status not importable: {status_raw!r}; "
                         f"allowed: {', '.join(sorted(_IMPORTABLE_INVOICE_STATUSES))} "
                         "(import open AP as 'new' so it goes through approval)"
                     ),
+                    status=status_raw,
                 )
             )
             result.skipped += 1
             continue
         if not allow_historical and status_raw in _HISTORICAL_INVOICE_STATUSES:
             result.errors.append(
-                ImportRowError(
-                    row=i,
-                    message=(
+                _coded(
+                    i,
+                    CSV_STATUS_RECORDS_HISTORY,
+                    (
                         f"status {status_raw!r} records history and needs an AP manager "
                         "or admin to import; import open AP as 'new' (a blank status "
                         "means 'done')"
                     ),
+                    status=status_raw,
                 )
             )
             result.skipped += 1
@@ -578,15 +704,29 @@ async def import_invoices_csv(
             actor_id=actor_id,
         )
 
-        # Dedup on (vendor_id, invoice_number) — the natural AP uniqueness key
-        q = await db.execute(
-            select(Invoice).where(
-                Invoice.organization_id == organization_id,
-                Invoice.vendor_id == vendor.id,
-                Invoice.invoice_number == invoice_number,
-            )
+        # Dedup on (vendor_id, invoice_number) — the natural AP uniqueness key.
+        # An unstamped vendor is shared by every entity, so several entities
+        # may already hold this number for it: `limit(1)` over an order that
+        # puts this entity's own (or an unstamped) invoice first, never
+        # `scalar_one_or_none()`, which 500'd the whole file. A repeat in this
+        # entity is the silent skip it always was. A repeat that exists ONLY
+        # in another entity is refused like the near match below — existence
+        # only (decisions §40) — rather than dropped with no reason (§372).
+        exact_query = select(Invoice).where(
+            Invoice.organization_id == organization_id,
+            Invoice.vendor_id == vendor.id,
+            Invoice.invoice_number == invoice_number,
         )
-        if q.scalar_one_or_none() is not None:
+        if entity_id is not None:
+            exact_query = exact_query.order_by(
+                or_(Invoice.entity_id.is_(None), Invoice.entity_id == entity_id).desc()
+            )
+        exact = (await db.execute(exact_query.limit(1))).scalars().first()
+        if exact is not None and _in_another_entity(exact.entity_id, entity_id):
+            result.errors.append(_other_entity_match(i, invoice_number))
+            result.skipped += 1
+            continue
+        if exact is not None:
             result.skipped += 1
             continue
 
@@ -626,28 +766,13 @@ async def import_invoices_csv(
             invoice_number,
             and_(Invoice.organization_id == organization_id, Invoice.vendor_id == vendor.id),
         )
-        if match is not None and (
-            entity_id is not None and match.entity_id is not None and match.entity_id != entity_id
-        ):
+        if match is not None and _in_another_entity(match.entity_id, entity_id):
             # The vendor is shared with another entity, which already holds
             # this payable. Refused all the same, but stated as existence only:
             # the importer works in its own entity and is not shown another
             # entity's invoice id or number (decisions §40). A NULL entity on
             # either side is unstamped, not "another entity".
-            result.errors.append(
-                ImportRowError(
-                    row=i,
-                    message=(
-                        f"invoice_number {invoice_number!r} is the same invoice number as an "
-                        "invoice for this vendor in another entity once formatting is "
-                        "ignored; not imported"
-                    ),
-                    structured={
-                        "code": CSV_INVOICE_NUMBER_MATCHES_OTHER_ENTITY,
-                        "params": {"invoice_number": invoice_number},
-                    },
-                )
-            )
+            result.errors.append(_other_entity_match(i, invoice_number))
             result.skipped += 1
             continue
         if match is not None:
@@ -687,7 +812,7 @@ async def import_invoices_csv(
             vendor_name=vendor.name,
             vendor_id=vendor.id,
             amount=amount,
-            currency=(row.get("currency") or "USD").upper()[:3],
+            currency=currency,
             invoice_date=_parse_date(row.get("invoice_date"), day_first=day_first),
             due_date=_parse_date(row.get("due_date"), day_first=day_first),
             po_number=(row.get("po_number") or None) or None,
@@ -756,24 +881,14 @@ async def _resolve_or_create_vendor(
     actor_id: uuid.UUID | None = None,
 ) -> Vendor:
     if vendor_code:
-        q = await db.execute(
-            select(Vendor).where(
-                Vendor.organization_id == organization_id,
-                Vendor.code == vendor_code,
-            )
-        )
-        vendor = q.scalar_one_or_none()
+        vendor = await _find_vendor(db, organization_id, entity_id, Vendor.code == vendor_code)
         if vendor is not None:
             return vendor
 
     if vendor_name:
-        q = await db.execute(
-            select(Vendor).where(
-                Vendor.organization_id == organization_id,
-                func.lower(Vendor.name) == vendor_name.lower(),
-            )
+        vendor = await _find_vendor(
+            db, organization_id, entity_id, func.lower(Vendor.name) == vendor_name.lower()
         )
-        vendor = q.scalar_one_or_none()
         if vendor is not None:
             return vendor
 

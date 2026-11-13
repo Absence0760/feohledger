@@ -989,6 +989,63 @@ describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', 
 			)
 		).toBeNull();
 	});
+
+	// Every other CSV-import row error is coded too (decisions §372), so the
+	// import modal never shows the server's English in another locale.
+	const CSV_ROW_ERRORS = [
+		['csv_malformed', {}, 'refusal.csvMalformed', {}],
+		['csv_vendor_name_required', {}, 'refusal.csvVendorNameRequired', {}],
+		['csv_invoice_number_required', {}, 'refusal.csvInvoiceNumberRequired', {}],
+		['csv_vendor_required', {}, 'refusal.csvVendorRequired', {}],
+		['csv_amount_invalid', { value: 'ten' }, 'refusal.csvAmountInvalid', { value: 'ten' }],
+		['csv_amount_invalid', { value: '' }, 'refusal.csvAmountMissing', {}],
+		['csv_currency_required', {}, 'refusal.csvCurrencyRequired', {}],
+		['csv_currency_invalid', { value: 'EURO' }, 'refusal.csvCurrencyInvalid', { value: 'EURO' }],
+		['csv_status_invalid', { value: 'lost' }, 'refusal.csvStatusInvalid', { value: 'lost' }],
+		[
+			'csv_status_not_importable',
+			{ status: 'approved' },
+			'refusal.csvStatusNotImportable',
+			{ status: 'approved' }
+		],
+		[
+			'csv_status_records_history',
+			{ status: 'paid' },
+			'refusal.csvStatusRecordsHistory',
+			{ status: 'paid' }
+		]
+	] as const;
+
+	it.each(CSV_ROW_ERRORS)(
+		'states CSV row error %s from its params in every shipped locale',
+		(code, params, key, vars) => {
+			expect(CODED_REFUSAL_CODES).toContain(code);
+			for (const [locale, messages] of [
+				['en', en],
+				['de', de],
+				['fr', fr],
+				['es', es],
+				['pt-BR', ptBR],
+				['ja', ja]
+			] as const) {
+				const table = messages as Record<string, string>;
+				const out = localizeApiDetail(
+					{ row: 4, message: 'server English', code, params },
+					translator(table, locale)
+				);
+				expect(out, `${locale} ${code}`).toBe(interpolate(table[key], vars, locale));
+				expect(out, `${locale} ${code}`).not.toContain('{');
+			}
+		}
+	);
+
+	it('falls back to the server English when a CSV row error lacks the cell it names', () => {
+		expect(codedRefusalText('csv_amount_invalid', {}, enT)).toBeNull();
+		expect(codedRefusalText('csv_currency_invalid', { value: ' ' }, enT)).toBeNull();
+		expect(codedRefusalText('csv_status_invalid', {}, enT)).toBeNull();
+		expect(codedRefusalText('csv_status_not_importable', { status: 3 }, enT)).toBeNull();
+		expect(codedRefusalText('csv_status_records_history', {}, enT)).toBeNull();
+	});
 });
 
 describe('the expense report and card reconciliation refusals (decisions §348, §361)', () => {
