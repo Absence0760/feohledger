@@ -156,15 +156,27 @@ class _FakeNetSuite:
             return httpx.Response(401, json={"title": "Unauthorized"})
         if request.method == "GET" and path == "/vendor":
             return httpx.Response(200, json={"items": [], "hasMore": False})
-        if request.method == "GET" and path == "/vendorBill":
-            return httpx.Response(200, json={"items": []})
+        if request.method == "GET" and path.startswith("/vendorBill/eid:"):
+            # The pre-create lookup's miss: NetSuite's 404 NONEXISTENT_ID.
+            return httpx.Response(404, json={"o:errorDetails": [{"o:errorCode": "NONEXISTENT_ID"}]})
+        if request.method == "POST" and request.url.path.endswith("/query/v1/suiteql"):
+            # The currency read: USD is internal id 1.
+            return httpx.Response(
+                200, json={"items": [{"id": "1", "symbol": "USD"}], "hasMore": False}
+            )
         if request.method == "POST" and path == "/vendorBill":
             self.creates += 1
             return httpx.Response(
                 self.create_status, headers={"Location": f"{API_BASE}/vendorBill/1001"}
             )
         if request.method == "GET" and path == "/vendorBill/1001":
-            return httpx.Response(200, content=f'{{"total": {self.bill_total}}}'.encode())
+            return httpx.Response(
+                200,
+                content=(
+                    f'{{"total": {self.bill_total}, "currency": {{"id": "1"}}, '
+                    '"status": {"id": "open"}}'
+                ).encode(),
+            )
         raise AssertionError(f"unexpected {request.method} {request.url}")
 
 

@@ -172,13 +172,25 @@ def test_netsuite_failure_message_is_pii_free():
     )
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        # The pre-create externalId lookup must miss so we reach the create POST.
-        client.get = AsyncMock(return_value=_ok_response({"count": 0, "items": []}))
-        client.post = AsyncMock(return_value=_error_response(422))
+        # The pre-create `eid:` lookup must miss so we reach the create POST.
+        miss = _error_response(404)
+        miss.json = MagicMock(return_value={"o:errorDetails": [{"o:errorCode": "NONEXISTENT_ID"}]})
+        client.get = AsyncMock(return_value=miss)
+        # The currency read, then the refused create; every read made to
+        # explain the refusal answers the same PII-echoing body.
+        client.post = AsyncMock(
+            side_effect=[
+                _ok_response({"items": [{"id": "1", "symbol": "USD"}], "hasMore": False}),
+                _error_response(422),
+                _error_response(422),
+                _error_response(422),
+            ]
+        )
         result = _run(adapter.post_invoice(_payload()))
 
     assert result.success is False
     _assert_pii_free(result.message, status=422, provider_hint="NetSuite")
+    assert result.refusal_code == "bill_refused"
 
 
 def test_merge_dev_failure_message_is_pii_free():
