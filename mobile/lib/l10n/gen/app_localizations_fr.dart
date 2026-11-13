@@ -1106,6 +1106,12 @@ class AppLocalizationsFr extends AppLocalizations {
   String get erpStatusStatus => 'Statut';
 
   @override
+  String get erpStatusOpensInErp => 'ouvre la facture dans l\'ERP';
+
+  @override
+  String get externalLinkOpenFailed => 'Impossible d\'ouvrir le lien';
+
+  @override
   String get fileViewerPdfTitle => 'PDF de la facture';
 
   @override

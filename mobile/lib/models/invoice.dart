@@ -330,6 +330,12 @@ class Invoice {
   /// `InvoiceResponse.erp_document_id` (backend decisions §302).
   final String? erpDocumentId;
 
+  /// The ERP's own link to that bill (`InvoiceResponse.erp_document_url`),
+  /// built by the backend at push time and scoped to the bill's organisation
+  /// where the ERP allows it (decisions §302, §354); null when the provider
+  /// has no stable link. Rendered through [ExternalLink], https only.
+  final String? erpDocumentUrl;
+
   Invoice({
     required this.id,
     this.invoiceNumber,
@@ -350,6 +356,7 @@ class Invoice {
     this.warnings = const [],
     this.poMatch,
     this.erpDocumentId,
+    this.erpDocumentUrl,
   });
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
@@ -386,6 +393,7 @@ class Invoice {
           ? PoMatch.fromJson(rawPoMatch)
           : null,
       erpDocumentId: json['erp_document_id'] as String?,
+      erpDocumentUrl: json['erp_document_url'] as String?,
     );
   }
 

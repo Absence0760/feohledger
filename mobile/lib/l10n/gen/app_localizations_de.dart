@@ -1098,6 +1098,12 @@ class AppLocalizationsDe extends AppLocalizations {
   String get erpStatusStatus => 'Status';
 
   @override
+  String get erpStatusOpensInErp => 'öffnet die Rechnung im ERP';
+
+  @override
+  String get externalLinkOpenFailed => 'Der Link konnte nicht geöffnet werden';
+
+  @override
   String get fileViewerPdfTitle => 'Rechnungs-PDF';
 
   @override

@@ -669,6 +669,8 @@
   "erpStatusError": "Error",
   "erpStatusLastUpdate": "Last update",
   "erpStatusStatus": "Status",
+  "erpStatusOpensInErp": "opens the bill in the ERP",
+  "externalLinkOpenFailed": "Couldn't open the link",
 
   "fileViewerPdfTitle": "Invoice PDF",
   "fileViewerImageTitle": "Invoice Image",

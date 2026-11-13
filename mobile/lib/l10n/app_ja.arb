@@ -276,6 +276,8 @@
   "erpStatusError": "エラー",
   "erpStatusLastUpdate": "最終更新",
   "erpStatusStatus": "ステータス",
+  "erpStatusOpensInErp": "ERP で請求書を開きます",
+  "externalLinkOpenFailed": "リンクを開けませんでした",
   "fileViewerPdfTitle": "請求書PDF",
   "fileViewerImageTitle": "請求書画像",
   "fileViewerPdfError": "PDFを読み込めませんでした",

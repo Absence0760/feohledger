@@ -1763,6 +1763,18 @@ abstract class AppLocalizations {
   /// **'Status'**
   String get erpStatusStatus;
 
+  /// No description provided for @erpStatusOpensInErp.
+  ///
+  /// In en, this message translates to:
+  /// **'opens the bill in the ERP'**
+  String get erpStatusOpensInErp;
+
+  /// No description provided for @externalLinkOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open the link'**
+  String get externalLinkOpenFailed;
+
   /// No description provided for @fileViewerPdfTitle.
   ///
   /// In en, this message translates to:

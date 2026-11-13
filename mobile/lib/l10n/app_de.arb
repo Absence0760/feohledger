@@ -292,6 +292,8 @@
   "erpStatusError": "Fehler",
   "erpStatusLastUpdate": "Letzte Aktualisierung",
   "erpStatusStatus": "Status",
+  "erpStatusOpensInErp": "öffnet die Rechnung im ERP",
+  "externalLinkOpenFailed": "Der Link konnte nicht geöffnet werden",
 
   "fileViewerPdfTitle": "Rechnungs-PDF",
   "fileViewerImageTitle": "Rechnungsbild",

@@ -999,6 +999,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get erpStatusStatus => 'ステータス';
 
   @override
+  String get erpStatusOpensInErp => 'ERP で請求書を開きます';
+
+  @override
+  String get externalLinkOpenFailed => 'リンクを開けませんでした';
+
+  @override
   String get fileViewerPdfTitle => '請求書PDF';
 
   @override

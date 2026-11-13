@@ -292,6 +292,8 @@
   "erpStatusError": "Erreur",
   "erpStatusLastUpdate": "Dernière mise à jour",
   "erpStatusStatus": "Statut",
+  "erpStatusOpensInErp": "ouvre la facture dans l'ERP",
+  "externalLinkOpenFailed": "Impossible d'ouvrir le lien",
 
   "fileViewerPdfTitle": "PDF de la facture",
   "fileViewerImageTitle": "Image de la facture",

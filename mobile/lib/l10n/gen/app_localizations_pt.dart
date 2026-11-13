@@ -1104,6 +1104,12 @@ class AppLocalizationsPt extends AppLocalizations {
   String get erpStatusStatus => 'Status';
 
   @override
+  String get erpStatusOpensInErp => 'abre a fatura no ERP';
+
+  @override
+  String get externalLinkOpenFailed => 'Não foi possível abrir o link';
+
+  @override
   String get fileViewerPdfTitle => 'PDF da fatura';
 
   @override
@@ -4469,6 +4475,12 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get erpStatusStatus => 'Status';
+
+  @override
+  String get erpStatusOpensInErp => 'abre a fatura no ERP';
+
+  @override
+  String get externalLinkOpenFailed => 'Não foi possível abrir o link';
 
   @override
   String get fileViewerPdfTitle => 'PDF da fatura';
