@@ -419,6 +419,7 @@ void main() {
           currency: 'USD',
           status: InvoiceStatus.readyForReview,
           createdAt: DateTime(2026, 1, 1),
+          financiallyLocked: false,
         );
 
     testWidgets('meets tap-target, label and contrast guidelines',
@@ -448,6 +449,7 @@ void main() {
           currency: 'USD',
           status: InvoiceStatus.approved,
           createdAt: DateTime(2026, 1, 1),
+          financiallyLocked: true,
         ),
       )));
       await tester.pump();

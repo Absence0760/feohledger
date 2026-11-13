@@ -4000,6 +4000,7 @@ export const messages = {
 	'refusal.invoiceNotCompletable': "Seule une facture nouvelle ou approuvée peut être soumise ou finalisée.",
 	'refusal.invoiceNotResubmittable': "Seule une facture rejetée peut être resoumise pour examen.",
 	'refusal.invoiceDocumentLocked': "Le document source ne peut plus être modifié une fois la facture approuvée.",
+	'refusal.invoiceFinanciallyLocked': "Le montant, le bénéficiaire et les lignes ne peuvent plus être modifiés une fois la facture approuvée : c’est ce qui a été approuvé et ce qui sera payé.",
 	'refusal.invoiceEntryWindowClosed': "Cette étape dépasse la saisie de la facture ; elle nécessite donc un responsable comptabilité fournisseurs.",
 	'refusal.invoiceNotErpSendable': "Seule une facture approuvée peut être envoyée vers l’ERP.",
 	'refusal.invoiceNotErpRetryable': "Seule une facture approuvée dont l’envoi vers l’ERP a échoué peut être relancée.",

@@ -9,13 +9,14 @@ import 'package:feohledger_mobile/widgets/invoice_edit_sheet.dart';
 // Regression guard for the financial freeze on the invoice edit sheet.
 //
 // The backend refuses a PATCH that carries ANY of `_FINANCIAL_FIELDS` once the
-// invoice is `approved` or later (`_FINANCIALLY_LOCKED_STATUSES` in
-// `backend/app/api/invoices.py`) — and it refuses the WHOLE request, so a
-// combined description + amount edit used to 409 and silently lose the
-// description as well. The sheet now renders the frozen fields read-only and
-// omits them from the diff, mirroring the web client's `invoiceFieldPayload()`.
+// invoice is financially locked (`models/invoice_status.financially_locked`:
+// `approved` or later, or a failed ERP push after approval — decisions §370) —
+// and it refuses the WHOLE request, so a combined description + amount edit
+// used to 409 and silently lose the description as well. The sheet renders the
+// frozen fields read-only and omits them from the diff, from the server's own
+// `financially_locked` verdict rather than a status list.
 
-Invoice _invoice(InvoiceStatus status) => Invoice(
+Invoice _invoice(InvoiceStatus status, {required bool locked}) => Invoice(
       id: 'inv-1',
       invoiceNumber: 'INV-001',
       vendorName: 'Acme Supplies',
@@ -26,6 +27,7 @@ Invoice _invoice(InvoiceStatus status) => Invoice(
       poNumber: 'PO-1',
       glAccount: '6000',
       createdAt: DateTime(2026, 1, 1),
+      financiallyLocked: locked,
     );
 
 /// Opens the sheet the way the detail screen does. Returns a reader for
@@ -88,8 +90,10 @@ void main() {
   group('unlocked invoice', () {
     testWidgets('amount and vendor stay editable and ride the diff',
         (tester) async {
-      final result =
-          await _openSheet(tester, _invoice(InvoiceStatus.readyForReview));
+      final result = await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.readyForReview, locked: false),
+      );
 
       expect(_fieldFor(tester, 'Amount').readOnly, isFalse);
       expect(_fieldFor(tester, 'Vendor').readOnly, isFalse);
@@ -110,7 +114,7 @@ void main() {
   group('financially locked invoice', () {
     testWidgets('renders the money + payee fields read-only with a reason',
         (tester) async {
-      await _openSheet(tester, _invoice(InvoiceStatus.approved));
+      await _openSheet(tester, _invoice(InvoiceStatus.approved, locked: true));
 
       expect(_fieldFor(tester, 'Amount').readOnly, isTrue);
       expect(_fieldFor(tester, 'Vendor').readOnly, isTrue);
@@ -132,7 +136,7 @@ void main() {
     });
 
     testWidgets('a non-financial edit still goes through', (tester) async {
-      final result = await _openSheet(tester, _invoice(InvoiceStatus.approved));
+      final result = await _openSheet(tester, _invoice(InvoiceStatus.approved, locked: true));
 
       await _enterInto(tester, 'Description', 'Corrected coding note');
       await _enterInto(tester, 'GL Account', '6100');
@@ -155,8 +159,10 @@ void main() {
         InvoiceStatus.sendingToErp,
         InvoiceStatus.paid,
         InvoiceStatus.done,
+        // An approved invoice whose ERP push failed (decisions §370).
+        InvoiceStatus.failed,
       ]) {
-        await _openSheet(tester, _invoice(status));
+        await _openSheet(tester, _invoice(status, locked: true));
         expect(
           _fieldFor(tester, 'Amount').readOnly,
           isTrue,
@@ -170,6 +176,35 @@ void main() {
         // Close it before the next iteration re-opens over the same navigator.
         await _tapButton(tester, 'Cancel');
       }
+    });
+  });
+
+  group('the verdict, not the status, decides', () {
+    testWidgets('a failed extraction (never approved) stays editable',
+        (tester) async {
+      final result = await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.failed, locked: false),
+      );
+
+      expect(_fieldFor(tester, 'Amount').readOnly, isFalse);
+      expect(find.text('Frozen after approval'), findsNothing);
+      await _enterInto(tester, 'Amount', '1499.99');
+      await _tapButton(tester, 'Save');
+      expect(result(), {'amount': '1499.99'});
+    });
+
+    testWidgets('a failed ERP push after approval strips the money fields',
+        (tester) async {
+      final result = await _openSheet(
+        tester,
+        _invoice(InvoiceStatus.failed, locked: true),
+      );
+
+      expect(_fieldFor(tester, 'Amount').readOnly, isTrue);
+      await _enterInto(tester, 'Description', 'Retry note');
+      await _tapButton(tester, 'Save');
+      expect(result(), {'description': 'Retry note'});
     });
   });
 }

@@ -332,6 +332,10 @@ const BUILDERS: Record<string, Builder> = {
 	// `api/invoice_entry.document_lock_refusal` (the `/file` routes from
 	// `approved` on) and `api/workflow.resubmit_refusal` (decisions §363).
 	invoice_document_locked: fixed('refusal.invoiceDocumentLocked'),
+	// `api/invoice_entry.financial_lock_refusal` — `PATCH` on a financial field
+	// and `PUT /line-items` once the invoice is financially locked, and the
+	// modal's `edit_financials` verdict (decisions §370).
+	invoice_financially_locked: fixed('refusal.invoiceFinanciallyLocked'),
 	invoice_not_resubmittable: fixed('refusal.invoiceNotResubmittable'),
 	// `api/workflow.close_refusals` — `/complete` closing to `done`, and a
 	// `POST /bulk/status → done` row's skip, refused while a live payment or

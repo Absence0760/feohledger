@@ -43,6 +43,7 @@
 		getReviewActions,
 		INVOICE_NOT_COMPLETABLE,
 		INVOICE_DOCUMENT_LOCKED,
+		INVOICE_FINANCIALLY_LOCKED,
 		INVOICE_NOT_ERP_RETRYABLE,
 		INVOICE_NOT_RESUBMITTABLE,
 		routeIntercompany,
@@ -761,28 +762,32 @@
 
 	let canSubmit = $derived(submitOffered && missingFields.length === 0);
 
-	// Financial fields are frozen once an invoice is approved: the backend 409s
-	// a PATCH that includes any of them (the signed-off amount is what the
-	// payment run pays — services/api/invoices.py `_FINANCIALLY_LOCKED_STATUSES`).
-	// `vendor` is in that frozen set too — re-saving it re-runs the vendor
-	// matcher and re-points `Invoice.vendor_id`, which is where the payment run
-	// reads the payee's bank details from, so WHO gets paid is frozen alongside
-	// HOW MUCH.
+	// The amount, payee and line items freeze once the invoice is approved —
+	// and stay frozen at a failed ERP push after approval, which `/retry-erp`
+	// re-pushes with no new approval (decisions §370). Whether they are frozen
+	// for this reader right now is the SERVER's `edit_financials` verdict
+	// (`api/invoice_entry.edit_financials_refusal`, the very check `PATCH` and
+	// `PUT /line-items` refuse with), never a status list restated here: the
+	// copy this replaced missed the failed push, so the modal would have sent
+	// the frozen fields and 409'd every save. `vendor` is frozen too: re-saving
+	// it re-runs the vendor matcher and re-points `Invoice.vendor_id`, where the
+	// payment run reads the payee's bank details.
 	// Both Save and the workflow-submit button ("Send to ERP" / Mark Complete)
-	// reuse this field write, so once locked we must send only the non-financial
+	// reuse this field write, so once locked we send only the non-financial
 	// metadata (GL coding, addresses, notes) — otherwise every write to an
 	// approved invoice fails and, in particular, "Send to ERP" never fires.
-	const FINANCIALLY_LOCKED_STATUSES = [
-		'approved',
-		'sending_to_erp',
-		'sent_to_erp',
-		'posted_in_erp',
-		'payment_scheduled',
-		'paid',
-		'done',
-	];
-	let financiallyLocked = $derived(FINANCIALLY_LOCKED_STATUSES.includes(status));
-	// `PUT /{id}/line-items`: an entry role, refused once financially locked.
+	// Fail closed: until the verdict arrives the fields are locked — rendered
+	// disabled, so nothing typed is silently dropped from a save.
+	let financialsVerdict = $derived(verdicts?.edit_financials);
+	let financiallyLocked = $derived(!isAllowed(financialsVerdict));
+	// The one refusal worth stating beside the fields: the lock itself. A role
+	// or a clerk's closed window is already why nothing here can be saved.
+	let financialsLockedNote = $derived(
+		financialsVerdict?.code === INVOICE_FINANCIALLY_LOCKED
+			? refusalText(financialsVerdict, m)
+			: ''
+	);
+	// `PUT /{id}/line-items`: the same verdict — its door is the same check.
 	let canEditLines = $derived(canWrite && !financiallyLocked);
 
 	function invoiceFieldPayload(): Record<string, unknown> {
@@ -1961,10 +1966,13 @@
 						</section>
 					{/if}
 
+					{#if financialsLockedNote}
+						<p class="financials-locked" data-testid="financials-locked">{financialsLockedNote}</p>
+					{/if}
 					<div class="form-grid">
 						<label class:field-error={submitOffered && !vendor.trim()}>
 							<span>{m('invoices.modal.field.vendor')} <em class="required">*</em> {#if dot('vendor_name', vendor)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_name)}" data-tip="{Math.round(fieldConfidence.vendor_name * 100)}% — {confidenceLabel(fieldConfidence.vendor_name)}"></span>{/if}</span>
-							<input type="text" bind:value={vendor} required />
+							<input type="text" bind:value={vendor} required disabled={financiallyLocked} />
 						</label>
 						<label class:field-error={submitOffered && !invoice_number.trim()}>
 							<span>{m('invoices.modal.field.invoiceNumber')} <em class="required">*</em> {#if dot('invoice_number', invoice_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.invoice_number)}" data-tip="{Math.round(fieldConfidence.invoice_number * 100)}% — {confidenceLabel(fieldConfidence.invoice_number)}"></span>{/if}</span>
@@ -1972,7 +1980,7 @@
 						</label>
 						<label class:field-error={submitOffered && !isPositiveAmount(amount)}>
 							<span>{m('invoices.modal.field.amount')} <em class="required">*</em> {#if dot('amount', amount)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.amount)}" data-tip="{Math.round(fieldConfidence.amount * 100)}% — {confidenceLabel(fieldConfidence.amount)}"></span>{/if}</span>
-							<input type="number" step="0.01" bind:value={amount} required />
+							<input type="number" step="0.01" bind:value={amount} required disabled={financiallyLocked} />
 						</label>
 						<label>
 							<span>{m('invoices.modal.field.dueDate')} {#if dot('due_date', due_date)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.due_date)}" data-tip="{Math.round(fieldConfidence.due_date * 100)}% — {confidenceLabel(fieldConfidence.due_date)}"></span>{/if}</span>
@@ -2019,7 +2027,7 @@
 						</label>
 						<label>
 							<span>{m('invoices.modal.field.taxRate')} {#if dot('tax_rate', tax_rate)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.tax_rate)}" data-tip="{Math.round(fieldConfidence.tax_rate * 100)}% — {confidenceLabel(fieldConfidence.tax_rate)}"></span>{/if}</span>
-							<input type="number" step="0.01" min="0" max="100" bind:value={tax_rate} />
+							<input type="number" step="0.01" min="0" max="100" bind:value={tax_rate} disabled={financiallyLocked} />
 						</label>
 						<label>
 							<span>{m('invoices.modal.field.vendorTaxId')} {#if dot('vendor_tax_id', vendor_tax_id)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_tax_id)}" data-tip="{Math.round(fieldConfidence.vendor_tax_id * 100)}% — {confidenceLabel(fieldConfidence.vendor_tax_id)}"></span>{/if}</span>
@@ -3252,6 +3260,16 @@
 		display: flex;
 		flex-direction: column;
 		gap: 14px;
+	}
+
+	.financials-locked {
+		margin: 0 0 14px;
+		padding: 10px 14px;
+		font-size: 0.8125rem;
+		color: var(--text-muted);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--surface);
 	}
 
 	.form-grid {

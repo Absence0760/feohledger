@@ -4175,6 +4175,7 @@ export const en = {
 	'refusal.invoiceNotCompletable': "Only a new or approved invoice can be submitted or completed.",
 	'refusal.invoiceNotResubmittable': "Only a rejected invoice can be resubmitted for review.",
 	'refusal.invoiceDocumentLocked': "The source document cannot be changed once the invoice is approved.",
+	'refusal.invoiceFinanciallyLocked': "The amount, payee and line items cannot be changed once the invoice is approved: they are what the approver signed off and what will be paid.",
 	'refusal.invoiceEntryWindowClosed': "This step is past invoice entry, so it needs an AP manager.",
 	'refusal.invoiceNotErpSendable': "Only an approved invoice can be sent to the ERP.",
 	'refusal.invoiceNotErpRetryable': "Only an approved invoice whose ERP push failed can be retried.",

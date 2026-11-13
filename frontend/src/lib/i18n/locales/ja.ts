@@ -3931,6 +3931,7 @@ export const messages = {
 	'refusal.invoiceNotCompletable': "提出または完了できるのは、新規または承認済みの請求書のみです。",
 	'refusal.invoiceNotResubmittable': "レビューに再提出できるのは、却下された請求書のみです。",
 	'refusal.invoiceDocumentLocked': "請求書の承認後は、元の書類を変更できません。",
+	'refusal.invoiceFinanciallyLocked': "請求書の承認後は、金額・支払先・明細を変更できません。承認された内容がそのまま支払われます。",
 	'refusal.invoiceEntryWindowClosed': "この操作は請求書の入力範囲を超えるため、買掛金マネージャーが行う必要があります。",
 	'refusal.invoiceNotErpSendable': "ERP に送信できるのは承認済みの請求書のみです。",
 	'refusal.invoiceNotErpRetryable': "再試行できるのは、ERP への送信に失敗した承認済みの請求書のみです。",

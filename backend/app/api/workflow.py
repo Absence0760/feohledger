@@ -21,6 +21,7 @@ from app.api.invoice_entry import (
     INVOICE_ENTRY_ROLES,
     INVOICE_ENTRY_WINDOW_CLOSED,
     INVOICE_MANAGE_ROLES,
+    edit_financials_refusal,
     entry_window_refusal,
     in_entry_window,
     is_entry_only,
@@ -574,12 +575,14 @@ async def review_actions(
 ):
     """Would each of the invoice modal's workflow actions accept the CALLER
     on this invoice right now? ``{"approve", "reject", "complete",
-    "send_to_erp", "retry_erp", "resubmit", "manage_file"}`` — each ``null``
-    or the coded ``{code, message, params}`` refusal its endpoint would answer
-    with: ``review.review_refusals`` runs `/approve` and `/reject`'s gates,
-    :func:`workflow_action_refusals` runs `/complete`, `/send-to-erp` and
-    `/retry-erp`'s, :func:`resubmit_refusal` `/resubmit`'s, and
-    ``invoice_entry.manage_file_refusal`` the `/file` routes'. The modal offers
+    "send_to_erp", "retry_erp", "resubmit", "manage_file", "edit_financials"}``
+    — each ``null`` or the coded ``{code, message, params}`` refusal its
+    endpoint would answer with: ``review.review_refusals`` runs `/approve` and
+    `/reject`'s gates, :func:`workflow_action_refusals` runs `/complete`,
+    `/send-to-erp` and `/retry-erp`'s, :func:`resubmit_refusal` `/resubmit`'s,
+    ``invoice_entry.manage_file_refusal`` the `/file` routes', and
+    ``invoice_entry.edit_financials_refusal`` what `PATCH` (on a financial
+    field) and `PUT /line-items` would answer (decisions §370). The modal offers
     an action exactly when its verdict is ``null`` and states the refusal
     otherwise, so it never restates a rule.
 
@@ -600,6 +603,7 @@ async def review_actions(
         **workflow,
         "resubmit": resubmit_refusal(user, invoice),
         "manage_file": manage_file_refusal(user, invoice),
+        "edit_financials": edit_financials_refusal(user, invoice),
     }
 
 

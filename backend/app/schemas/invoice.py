@@ -3,7 +3,10 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.models.invoice_status import InvoiceStatus  # the one enum; see that module
+from app.models.invoice_status import (
+    InvoiceStatus,  # the one enum; see that module
+    financially_locked,
+)
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
@@ -243,6 +246,13 @@ class InvoiceResponse(BaseModel):
     # this on load and echoes it back as `expected_updated_at` on the next
     # `PATCH` — the client-side half of the optimistic-concurrency guard.
     updated_at: str
+    # Whether the amount, payee, line items and document are frozen
+    # (`models/invoice_status.financially_locked`: from `approved` on, and at
+    # a failed ERP push after approval — decisions §370). The server's answer,
+    # so a client strips the frozen fields from a save without restating the
+    # status list; the mobile edit sheet reads it. No default: every response
+    # states it, and a client treats its absence as locked.
+    financially_locked: bool
 
     model_config = {"from_attributes": True}
 
@@ -305,6 +315,7 @@ class InvoiceResponse(BaseModel):
             erp_document_id=inv.erp_document_id,
             erp_document_url=inv.erp_document_url,
             priors_summary=_priors_summary(inv),
+            financially_locked=financially_locked(inv),
         )
 
 

@@ -31,7 +31,7 @@ from fastapi import HTTPException, status
 from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK, ROLE_AP_MANAGER, ROLE_CFO, holds_any_role
 from app.api.refusals import coded_refusal, role_not_permitted
 from app.models.invoice import Invoice, InvoiceStatus
-from app.models.invoice_status import FINANCIALLY_LOCKED_STATUSES
+from app.models.invoice_status import financially_locked, was_ever_approved
 from app.models.user import User
 
 #: The roles whose invoice reach goes past entry (delete, ERP, the `approved`
@@ -53,6 +53,11 @@ INVOICE_ENTRY_WINDOW_CLOSED = "invoice_entry_window_closed"
 #: The source-document routes (`POST` / `PUT` / `DELETE /invoices/{id}/file`)
 #: on an approved invoice. ``params.status``. See :func:`document_locked`.
 INVOICE_DOCUMENT_LOCKED = "invoice_document_locked"
+
+#: `PATCH /invoices/{id}` carrying a financial field, or
+#: `PUT /invoices/{id}/line-items`, on a financially locked invoice
+#: (`models/invoice_status.financially_locked`). ``params.status``.
+INVOICE_FINANCIALLY_LOCKED = "invoice_financially_locked"
 
 # An explicit allowlist, so a status added later is outside the window until
 # someone decides otherwise. `ready_for_review` is NOT in it: once submitted,
@@ -88,13 +93,6 @@ def is_entry_only(user: User) -> bool:
 def may_import_history(user: User) -> bool:
     held = {r.name for r in user.roles}
     return bool(held & set(HISTORICAL_IMPORT_ROLES))
-
-
-def was_ever_approved(invoice: Invoice) -> bool:
-    """Every approval site sets both `approval_date` and `approved_by`, and
-    nothing clears either. Both are read: `approved_by` is a display name and
-    can be empty for a user with a blank `full_name`."""
-    return invoice.approval_date is not None or bool(invoice.approved_by)
 
 
 def in_entry_window(invoice: Invoice) -> bool:
@@ -151,16 +149,13 @@ def refuse_entry_only_outside_window(user: User, invoice: Invoice) -> None:
 def document_locked(invoice: Invoice) -> bool:
     """Whether the invoice's source document is frozen (decisions §363).
 
-    From `approved` on (`FINANCIALLY_LOCKED_STATUSES`), the document is what
-    the approver signed off and what the payment is made against, so it is
-    neither replaced, removed nor added to. An approved invoice whose ERP push
-    failed sits at `failed`, and `/retry-erp` pushes it again with no new
-    approval, so it is frozen too; a `failed` extraction (never approved) is
-    not.
+    The document is what the approver signed off and what the payment is made
+    against, so it freezes exactly when the amount and payee do: the shared
+    `models/invoice_status.financially_locked` (from `approved` on, and at
+    `failed` after an approval, which `/retry-erp` pushes again with no new
+    approval). It is neither replaced, removed nor added to then.
     """
-    if invoice.status in FINANCIALLY_LOCKED_STATUSES:
-        return True
-    return invoice.status is InvoiceStatus.failed and was_ever_approved(invoice)
+    return financially_locked(invoice)
 
 
 def document_lock_refusal(invoice: Invoice) -> dict | None:
@@ -172,6 +167,32 @@ def document_lock_refusal(invoice: Invoice) -> dict | None:
         "The source document cannot be changed once the invoice is approved.",
         status=invoice.status.value,
     )
+
+
+def financial_lock_refusal(invoice: Invoice) -> dict | None:
+    """The coded 409 `PATCH` (on a financial field) and `PUT /line-items`
+    answer on a financially locked invoice, or None (decisions §370)."""
+    if not financially_locked(invoice):
+        return None
+    return coded_refusal(
+        INVOICE_FINANCIALLY_LOCKED,
+        "The amount, payee and line items cannot be changed once the invoice is "
+        "approved: they are what the approver signed off and what will be paid.",
+        status=invoice.status.value,
+    )
+
+
+def edit_financials_refusal(user: User, invoice: Invoice) -> dict | None:
+    """What `PATCH` with a financial field, and `PUT /line-items`, would answer
+    ``user`` for ``invoice`` right now: the entry roles, the entry window, then
+    the financial lock — the doors' own order. ``GET /review-actions`` serves
+    it as ``edit_financials``, so the modal decides which fields it may edit
+    and send from the server's answer, not a status list of its own. (`PATCH`
+    refuses an immutable status before the lock; every immutable status is
+    financially locked, so the verdict refuses there too.)"""
+    if not holds_any_role(user, INVOICE_ENTRY_ROLES):
+        return role_not_permitted()
+    return entry_window_refusal(user, invoice) or financial_lock_refusal(invoice)
 
 
 def manage_file_refusal(user: User, invoice: Invoice) -> dict | None:

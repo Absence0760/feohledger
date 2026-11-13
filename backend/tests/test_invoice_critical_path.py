@@ -50,6 +50,7 @@ async def _seed_invoice(
     status: InvoiceStatus,
     amount: str = "500.00",
     number: str = "CP-001",
+    approved_by: str | None = None,
 ) -> uuid.UUID:
     """Insert one invoice directly (no workflow instance) and return its id.
 
@@ -68,6 +69,7 @@ async def _seed_invoice(
                 amount=Decimal(amount),
                 currency="USD",
                 status=status,
+                approved_by=approved_by,
             )
         )
         await s.commit()
@@ -592,6 +594,7 @@ async def test_patch_cannot_mutate_amount_after_approved(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.patch(f"/api/invoices/{inv_id}", json={"amount": "9999.00"})
     assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "invoice_financially_locked"
 
     mk = realdb.sessionmaker("a")
     async with mk() as s:
@@ -836,6 +839,110 @@ async def test_line_items_frozen_after_approved(realdb):
             ],
         )
     assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "invoice_financially_locked"
+
+
+# ---------------------------------------------------------------------------
+# An approved invoice whose ERP push failed sits at `failed`, and `/retry-erp`
+# pushes it again — and a payment run then pays it — with no new approval. Its
+# financial fields stay frozen there too (`models/invoice_status.
+# financially_locked`, decisions §370); a `failed` EXTRACTION (never approved)
+# stays open, since its corrected figures still meet approval.
+# ---------------------------------------------------------------------------
+
+_ONE_LINE = [
+    {"description": "padded line", "quantity": "1", "unit_price": "9999.00", "total": "9999.00"}
+]
+
+
+@pytest.mark.asyncio
+async def test_patch_refuses_financial_fields_on_a_failed_push_after_approval(realdb):
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_invoice(
+        mk,
+        realdb.info("a").org_id,
+        status=InvoiceStatus.failed,
+        amount="100.00",
+        number="CP-FROZEN-FAILED-1",
+        approved_by="Approver",
+    )
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        for body in ({"amount": "9999.00"}, {"vendor": "Someone Else Ltd"}, {"tax_rate": 20}):
+            resp = await c.patch(f"/api/invoices/{inv_id}", json=body)
+            assert resp.status_code == 409, (body, resp.text)
+            detail = resp.json()["detail"]
+            assert detail["code"] == "invoice_financially_locked"
+            assert detail["params"] == {"status": "failed"}
+        # Metadata clean-up stays open, as at `approved`.
+        notes = await c.patch(f"/api/invoices/{inv_id}", json={"notes": "retry pending"})
+    assert notes.status_code == 200, notes.text
+    assert notes.json()["financially_locked"] is True
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert inv.amount == Decimal("100.00")
+        assert inv.vendor_name == "Critical Path Vendor"
+        assert inv.notes == "retry pending"
+
+
+@pytest.mark.asyncio
+async def test_line_items_refused_on_a_failed_push_after_approval(realdb):
+    inv_id = await _seed_invoice(
+        realdb.sessionmaker("a"),
+        realdb.info("a").org_id,
+        status=InvoiceStatus.failed,
+        number="CP-FROZEN-FAILED-2",
+        approved_by="Approver",
+    )
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.put(f"/api/invoices/{inv_id}/line-items", json=_ONE_LINE)
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "invoice_financially_locked"
+
+    from app.models.invoice import InvoiceLineItem
+
+    async with realdb.sessionmaker("a")() as s:
+        count = (
+            await s.execute(
+                select(func.count())
+                .select_from(InvoiceLineItem)
+                .where(InvoiceLineItem.invoice_id == inv_id)
+            )
+        ).scalar_one()
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_failed_extraction_stays_financially_editable(realdb):
+    """`failed` from `pending` was never approved: keying the figures the read
+    missed is the fix, and they still meet approval afterwards."""
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_invoice(
+        mk,
+        realdb.info("a").org_id,
+        status=InvoiceStatus.failed,
+        amount="100.00",
+        number="CP-FAILED-EXTRACTION",
+    )
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        verdict = (await c.get(f"/api/invoices/{inv_id}/review-actions")).json()
+        assert verdict["edit_financials"] is None
+        patch = await c.patch(f"/api/invoices/{inv_id}", json={"amount": "123.45"})
+        assert patch.status_code == 200, patch.text
+        assert patch.json()["financially_locked"] is False
+        lines = await c.put(f"/api/invoices/{inv_id}/line-items", json=_ONE_LINE)
+        assert lines.status_code == 200, lines.text
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert inv.amount == Decimal("123.45")
+
+
+# The verdict-vs-door parity for every role and status is
+# `test_review_actions_parity.test_the_edit_financials_verdict_matches_both_doors`.
 
 
 # ---------------------------------------------------------------------------

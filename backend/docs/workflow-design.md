@@ -64,6 +64,8 @@ failed ───────────> pending                  (retry extrac
 failed ───────────> sending_to_erp           (retry ERP push, if previously approved)
 ```
 
+A `failed` invoice that was approved before its push failed is still **financially locked** (`models/invoice_status.financially_locked`, decisions §370): `failed → sending_to_erp` re-pushes the figures that were approved, with no new approval, so `PATCH` refuses its amount, payee and tax fields and `PUT /line-items` refuses outright (409 `invoice_financially_locked`), as from `approved` on. Its metadata stays editable. A `failed` extraction, never approved, is not locked.
+
 `done` is terminal. The `payment_scheduled → approved` and `paid → approved` back-edges are the **void-payment** path (`POST /api/payments/{id}/void`): the invoice returns to the queue so it can be re-scheduled. Every transition above writes an audit-log row through `transition_invoice()`; nothing in the payment path mutates `invoice.status` directly.
 
 All transitions are enforced by a state machine in `services/workflow_engine.py`. Invalid transitions return `409 Conflict`. Authoritative graph: `VALID_TRANSITIONS` in that file.
