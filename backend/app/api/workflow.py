@@ -423,7 +423,7 @@ async def trigger_extraction(
             status_code=409,
             detail=(
                 "This invoice has already been approved, so its document can't be read "
-                "again. Retry the ERP push, or reject it for rework."
+                "again. Retry the ERP push, or recall its approval to correct it."
             ),
         )
 

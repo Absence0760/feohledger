@@ -242,8 +242,8 @@ class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
   }
 
   /// Why the money + payee fields below can't be edited. Rendered only on a
-  /// financially locked invoice, and worded as the way *out* (reject → correct
-  /// → re-approve) rather than a bare refusal.
+  /// financially locked invoice, and worded as the way *out* (recall the approval
+  /// → correct → re-approve, backend decisions §374) rather than a bare refusal.
   Widget _lockedNotice() {
     final l = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
