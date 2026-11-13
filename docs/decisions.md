@@ -17644,6 +17644,19 @@ and CFO gates again.
   The audit trail names who approved, and the next approval replaces the
   display fields.
 
+**The vendor-setting exception agents stay safe on a recalled invoice**
+(money-path review, §379). §370 cleared `missing_po` and `multi_po_split`
+because they act only at `ready_for_review`, "before approval"; since the
+recall, that status no longer means before approval. Neither re-points a payee
+that is set: each only fills an empty `vendor_id` from the purchase order it
+links, and approves as the triggering human, whose segregation the coordinator
+checks first, so a run the recaller triggers escalates. The one case left, a
+recalled invoice whose vendor was cleared and which the agent would then fill
+and approve, escalates since §379: both resolvers ask
+`refuse_payee_change_after_approval` before any mutation. Recall also starts a
+new review round, so approval links sent before it stop working, and the
+engine keeps a recalled invoice out of draft (both §379).
+
 **Left open** (`docs/followups.md`): no outbound webhook says an approval was
 withdrawn; a PEPPOL transmission sent while the invoice was approved, and an
 inter-company mirror, keep the recalled figures; and the ERP dispatchers do not
@@ -17918,3 +17931,124 @@ toast and the violation panel were English in every locale.
 **Also fixed.** The submit panel's `{#each}` key was `code + policy_id`, which
 collides when one policy blocks two lines (Svelte throws on a duplicate key);
 it now includes `expense_id`.
+
+## 379. A once-approved invoice reaches approval again only through a person, and nothing changes its payee unseen (§374 follow-up, money-path review, 2026-11-13)
+
+**Found** (the round's money-path review of §374):
+
+1. **Recall → reject → `POST /bulk/status → new`** put a once-approved invoice
+   in draft. The financial lock is off there, so anyone outside the
+   segregation set could re-point the vendor and amount, and `/complete`'s
+   amount floor then approved it (`invoice.auto_approved`, approved_by
+   "system (below threshold)"). Nobody independent signed the corrected payee.
+   With no approval step, `/complete` closed it `new → done` unapproved. §374
+   named this risk for `rejected → new` and did not close it.
+2. **Email, Slack and Teams Approve links outlived their round.** The digest
+   they bind holds eight displayed and payment facts, not line items, tax or
+   the review round, so a first-round link still approved after a recall with
+   those facts unchanged. The pair consume (`ActionToken.consume_key`) only retires a
+   message whose own link was clicked, so an in-app reject and resubmit left
+   the old link working too.
+3. **§370 called the vendor-repointing agents safe because they act "before
+   approval"**, at `ready_for_review`. Since §374 that status can hold a
+   recalled invoice.
+4. **A vendor merge re-pointed `Invoice.vendor_id` on approved, financially
+   locked invoices** without asking `financially_locked`. The payment run and
+   the ERP push read the bank details of whichever vendor the invoice names,
+   so an approved invoice signed for the duplicate's payee would be paid to the
+   canonical's account, outside the bank-change dual control.
+
+**The rule.** A once-approved invoice gets back to an approval only through a
+human approval at `ready_for_review` (resubmit from `rejected`, or the recall),
+and nothing unattended changes its payee.
+
+- **The engine keeps it out of draft** (`workflow_engine.
+  _refuse_outside_the_recall`, beside §374's "never re-enters `pending`"): an
+  invoice that was ever approved never enters `new`, and never leaves `new` for
+  `done`. Draft is where every unattended exit starts (`/complete`'s floor
+  `new → approved`, its `new → done`, and extraction's auto-approve after
+  `→ pending`), so holding the edge in covers every door that reaches it:
+  bulk status today, any future one. The portal resubmit already went straight
+  to review for such an invoice. From `rejected` the way back is resubmit.
+- **`new → approved` cannot be held at the engine**: every approval site sets
+  `approved_by` / `approval_date` before its transition, so the engine cannot
+  tell this approval's stamp from an earlier one. `/complete` therefore reads
+  `was_ever_approved` before anything stamps the row, never fires the floor for
+  it, and treats it as needing approval whatever the workflow says
+  (`api/workflow.approval_applies`, which `GET /review-actions` reads too, so
+  the verdict and the door agree). After the engine rule only a row written
+  with a stamp at `new` before it can reach this; it lands in review.
+- **A token belongs to its review round.** The digest appends the round
+  (`email_action_token.round_from_state_data`: `rejection_count` +
+  `recall_count` from the invoice's workflow instance, both only growing) when
+  it is above 0. Both sides read it one way: `services/review.
+  approval_message_facts` when a message is minted (the guard test now
+  requires it at every `invoice_assigned` sender), and `review_round_of` at
+  the three doors, against the locked row. A stale round reads as "This
+  invoice changed after this message was sent", which is the reviewer's
+  remedy either way. **Chosen over spending a round's outstanding pairs** when
+  it ends: that needs a registry of every pair minted per invoice in Redis,
+  and a Redis outage at the recall would leave the old links live; the round
+  needs no state that can be lost. **Round 0 is the old digest byte for byte**,
+  so links already in inboxes for an invoice never rejected or recalled kept
+  working across the deploy; a link for an invoice already in a later round
+  stopped then, which costs one sign-in. Reject stays unbound, as before. An
+  invoice with no workflow instance reads round 0, and a recall or rejection
+  of one bumps nothing (both bump only an existing instance), so its links are
+  retired only by the eight facts, as before.
+- **Agents never set the payee of a once-approved invoice.**
+  `exception_agents/resolvers/amount_mismatch.refuse_payee_change_after_approval`
+  raises `PayeeFixedByApproval` (a `NotApprovable`) when a resolver would write
+  a different `vendor_id` onto an invoice ever approved; `missing_po` and
+  `multi_po_split` ask it before any mutation, and the coordinator escalates
+  with its own rationale. Agents may still approve a recalled invoice as the
+  triggering human when the payee is untouched: the coordinator's segregation
+  check already refuses the recaller, and the corrected figures meet the chain
+  and money gates again. Refusing agent approval outright was weighed and not
+  needed for the payee risk this closes.
+- **A vendor merge refuses while a duplicate holds an approved invoice still to
+  be paid**, 409 `vendor_merge_approved_unpaid`, `params.count` across every
+  duplicate, with nothing written. "Approved and unpaid" is
+  `vendor_merge.approved_unpaid_clause`: `financially_locked` minus `paid` /
+  `done`, in SQL, naming the open side so a new status is held (the
+  population the bank-change flag covers, §286). The Invoice reassignment also
+  excludes such rows and recounts, so an approval that lands while the merge
+  runs refuses it rather than moving. The way through is to let them be paid,
+  or to recall their approvals, after which they move and their next approval
+  signs the canonical payee. A live virtual card on an approved invoice
+  therefore refuses the merge too (`tests/test_vendor_card_revocation.py`).
+
+**Rejected for the merge:**
+- *Refusing on any financially locked invoice*, as the review first put it.
+  That includes `paid` and `done`, so no vendor with a payment history could
+  ever be merged. Their payee is history, and folding history is the point of
+  a merge.
+- *Leaving locked invoices on the retired duplicate.* The duplicate's ERP links
+  move to the canonical (§373), so those invoices would stop posting, and a
+  retired vendor fails the payment path's `vendor_not_active` check. They
+  would be stuck rather than safe.
+- *Moving them and raising the bank-change `fraud_flag` on each.* It keeps
+  merges unblocked, but it re-points a signed payee and leans on a second look
+  to undo it. A refusal changes nothing that was approved. It also leaves the
+  ERP side clean: a bill already posted names the duplicate's ERP supplier.
+
+**Left open** (`docs/followups.md`): a `paid` invoice moved by a merge and
+then voided is re-paid to the canonical's bank details with no flag, because
+`Payment` records no payee to compare against (needs a migration); and the new
+merge code and the engine's two once-approved sentences read in English only.
+
+Tests: `tests/test_workflow_state_machine.py` (the two engine edges refused
+with a stamp and open without, resubmit still allowed);
+`tests/test_invoice_recall_approval.py` (recall → reject → bulk `new` skipped
+then resubmit; the floor fires for a never-approved draft and never for a
+once-approved one; no approval step: review, not `done`, verdict and bulk
+alike; the `pending` rule on a stamped draft);
+`tests/test_email_action_token.py` (round 0 is the old digest, each round its
+own, a first-round link refused later, the counters, every sender binding
+`approval_message_facts`); `tests/test_email_actions.py` (a recall, and an
+in-app reject and resubmit, retire the first round's link; a new-round link
+approves); `tests/test_exception_agents_missing_po.py` and
+`tests/test_exception_agents_multi_po_split.py` (the agent fills an empty payee
+only before any approval); `tests/test_vendor_merge.py` (each approved-unpaid
+status refuses, nothing moves; paid, done, failed extraction, recalled and
+rejected move; the count across duplicates; recall clears the way).
