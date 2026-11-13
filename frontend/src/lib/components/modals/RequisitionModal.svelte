@@ -1,4 +1,5 @@
 <script lang="ts">
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type {
 		Requisition,
@@ -86,6 +87,12 @@
 	let needed_by = $state(requisition?.needed_by ?? '');
 	let justification = $state(requisition?.justification ?? '');
 	let currency = $state(requisition?.currency ?? orgCurrency.currency ?? DEFAULT_CURRENCY);
+	// An existing record opens on its own code; only a new one follows the
+	// org currency (`CurrencyInput` re-seeds an untouched field).
+	let currencyTouched = $state(Boolean(requisition?.currency));
+	$effect(() => {
+		void orgCurrency.ensureLoaded();
+	});
 	let notes = $state(requisition?.notes ?? '');
 	let lines = $state<LineRow[]>(
 		(requisition?.line_items ?? []).map(toRow)
@@ -249,7 +256,7 @@
 			</label>
 			<label>
 				<span>{m('requisitions.modal.field.currency')}</span>
-				<input type="text" bind:value={currency} maxlength="3" disabled={!editable} />
+				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} disabled={!editable} testid="requisition-currency" />
 			</label>
 			<label class="full-width">
 				<span>{m('requisitions.modal.field.justification')}</span>

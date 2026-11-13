@@ -1,4 +1,5 @@
 <script lang="ts">
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
 	import type { IntakeRequest, IntakeType } from '#lib/types/intake.ts';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
@@ -59,6 +60,12 @@
 	// platform default — named explicitly, since the store answers `null` for
 	// an org it could not resolve (decisions §200).
 	let currency = $state(intake?.currency ?? orgCurrency.currency ?? DEFAULT_CURRENCY);
+	// An existing record opens on its own code; only a new one follows the
+	// org currency (`CurrencyInput` re-seeds an untouched field).
+	let currencyTouched = $state(Boolean(intake?.currency));
+	$effect(() => {
+		void orgCurrency.ensureLoaded();
+	});
 	let vendor_name = $state(intake?.vendor_name ?? '');
 	let needed_by = $state(intake?.needed_by ?? '');
 	let description = $state(intake?.description ?? '');
@@ -189,7 +196,7 @@
 			</label>
 			<label>
 				<span>{m('intake.modal.field.currency')}</span>
-				<input type="text" bind:value={currency} maxlength="3" disabled={!canEdit} />
+				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} disabled={!canEdit} testid="intake-currency" />
 			</label>
 			<label>
 				<span>{m('intake.modal.field.vendor')}</span>

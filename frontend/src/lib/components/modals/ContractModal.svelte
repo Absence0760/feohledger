@@ -1,4 +1,6 @@
 <script lang="ts">
+	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type {
 		Contract,
@@ -55,6 +57,12 @@
 	let description = $state(contract?.description ?? '');
 	let contract_type = $state<ContractType>(contract?.contract_type ?? 'service');
 	let currency = $state(contract?.currency ?? 'USD');
+	// An existing record opens on its own code; only a new one follows the
+	// org currency (`CurrencyInput` re-seeds an untouched field).
+	let currencyTouched = $state(Boolean(contract?.currency));
+	$effect(() => {
+		void orgCurrency.ensureLoaded();
+	});
 	let total_value = $state<string | null>(moneyText(contract?.total_value));
 	let spend_limit = $state<string | null>(moneyText(contract?.spend_limit));
 	let not_to_exceed = $state(contract?.not_to_exceed ?? false);
@@ -367,7 +375,7 @@
 			</label>
 			<label>
 				<span>{m('contracts.modal.field.currency')}</span>
-				<input type="text" bind:value={currency} maxlength="3" disabled={!canEdit} />
+				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} disabled={!canEdit} testid="contract-currency" />
 			</label>
 			<label>
 				<span>{m('contracts.modal.field.totalValue')}</span>
