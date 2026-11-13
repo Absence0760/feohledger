@@ -562,6 +562,10 @@ jobs:
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          # The exact SDK comes from `environment: flutter:` in the pubspec, the
+          # one place it is pinned, so a new stable release never changes CI
+          # unannounced (mobile/CLAUDE.md § Stack).
+          flutter-version-file: mobile/pubspec.yaml
           cache: true
 
       - name: Install dependencies
@@ -624,6 +628,10 @@ jobs:
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
+          # The exact SDK comes from `environment: flutter:` in the pubspec, the
+          # one place it is pinned, so a new stable release never changes CI
+          # unannounced (mobile/CLAUDE.md § Stack).
+          flutter-version-file: mobile/pubspec.yaml
           cache: true
 
       - name: Install dependencies

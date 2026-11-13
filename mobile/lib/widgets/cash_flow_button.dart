@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'package:feohledger_mobile/screens/cash_flow_screen.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';

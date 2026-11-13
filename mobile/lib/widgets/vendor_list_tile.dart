@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'package:feohledger_mobile/models/vendor.dart';
 import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';

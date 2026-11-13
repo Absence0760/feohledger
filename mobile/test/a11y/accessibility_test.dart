@@ -1,12 +1,13 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/exception.dart';
@@ -65,7 +66,7 @@ import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';
 // (WCAG 1.4.3). Run with `flutter test test/a11y/`.
 
 Widget _host(Widget child) => MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: child),
     );
@@ -74,7 +75,7 @@ Widget _host(Widget child) => MaterialApp(
 /// Scaffold), for full screens that bring their own. Carries the localization
 /// delegates so a localized screen's `AppLocalizations.of(context)` resolves.
 Widget _screenHost(Widget screen) => MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: screen,
     );
@@ -624,7 +625,7 @@ void main() {
       await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
       await tester.pumpWidget(MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: appLocalizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: const InvoicesScreen(),
       ));
