@@ -2898,6 +2898,11 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoNotIssued(String poNumber) {
+    return 'Bestellung $poNumber ist im ERP noch nicht freigegeben — die Rechnung wurde nicht mit ihr abgeglichen';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return 'Die Summe der Bestellung $poNumber konnte bei der letzten Synchronisierung nicht vom ERP bestätigt werden — die Beträge wurden nicht verglichen';
   }
@@ -3110,6 +3115,10 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get invoicePoMatchIssuePoCancelled =>
       'Bestellung storniert — Beträge nicht verglichen';
+
+  @override
+  String get invoicePoMatchIssuePoNotIssued =>
+      'Bestellung im ERP noch nicht freigegeben — Beträge nicht verglichen';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>

@@ -185,6 +185,27 @@ itself be the bill that closed it, so refusing `closed` would hold the ordinary
 last invoice on every PO. Accruals and budgets still treat `closed` as dead
 (`DEAD_PO_STATUSES`), since they count what is still open (decisions §326).
 
+### An unissued PO authorizes nothing
+
+A PO the ERP has not approved or issued yet (status `unissued`,
+`procurement.UNISSUED_PO_STATUS`: a draft, or one awaiting approval; the
+per-adapter mapping is in `erp-integration.md`) is treated as a cancelled one
+is. The matcher compares nothing (`status = "mismatch"`, `within_tolerance =
+false`, no variance, `MatchResult.po_not_issued = true`, one issue
+`po_match.issue.po_not_issued`), whatever its amount or receipts say, and
+`refresh_warnings` raises the `po_not_issued` warning with a payment-blocking
+`po_mismatch` at `warning`. It is not `po_not_found`: the order exists, and
+reading it as missing would send the missing-PO agent looking for another PO.
+
+The ERP PO sync re-matches the invoices citing a PO whose status moves into or
+out of `procurement.UNMATCHABLE_PO_STATUSES` (cancelled, voided, unissued), so
+an order taken back to draft holds its invoices at sync time. Like every
+sync-triggered re-match the hold is raise-only (decisions §323, amended): the
+ERP approving the order clears the finding on the next refresh but leaves the
+`po_mismatch` row open for a person. Budgets and the open-PO accruals leave an
+unissued PO out (`DEAD_PO_STATUSES`), and the supplier portal does not list,
+show or flip one (decisions §394).
+
 ### A PO total the ERP no longer vouches for
 
 An ERP adapter leaves out a PO whose total it cannot state exactly (SYSPRO: a

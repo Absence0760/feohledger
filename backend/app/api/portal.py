@@ -36,7 +36,12 @@ from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.invoice_status import was_ever_approved
 from app.models.organization import Organization
 from app.models.payment import Payment
-from app.models.procurement import POLineItem, PurchaseOrder, po_vouched_money
+from app.models.procurement import (
+    UNISSUED_PO_STATUS,
+    POLineItem,
+    PurchaseOrder,
+    po_vouched_money,
+)
 from app.models.supplier_chat import ChatAuthorRole, ChatThreadStatus, SupplierChatMessage
 from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
@@ -911,6 +916,11 @@ async def list_my_payments(
 
 # ---------- Purchase orders + PO flip ----------
 
+#: A PO the ERP has not approved or issued yet (decisions §394) has not been
+#: sent to the supplier, so the portal neither lists, shows nor flips it: to
+#: the supplier it does not exist until the ERP issues it.
+_SUPPLIER_VISIBLE_PO = PurchaseOrder.status != UNISSUED_PO_STATUS
+
 
 @router.get("/purchase-orders", response_model=PortalPOListResponse)
 async def list_my_purchase_orders(
@@ -918,22 +928,22 @@ async def list_my_purchase_orders(
     db: AsyncSession = Depends(get_tenant_db),
     vu: VendorUser = Depends(get_current_vendor_user),
 ):
-    """POs owned by the caller's vendor. The only filter is
-    `PurchaseOrder.vendor_id == vu.vendor_id` — same vendor-scoping
-    discipline as the invoice list."""
+    """POs owned by the caller's vendor: `PurchaseOrder.vendor_id ==
+    vu.vendor_id` — same vendor-scoping discipline as the invoice list — less
+    any the ERP has not issued yet (`_SUPPLIER_VISIBLE_PO`)."""
     line_count = (
         select(POLineItem.po_id, func.count().label("n")).group_by(POLineItem.po_id).subquery()
     )
     query = (
         select(PurchaseOrder, func.coalesce(line_count.c.n, 0))
         .outerjoin(line_count, line_count.c.po_id == PurchaseOrder.id)
-        .where(PurchaseOrder.vendor_id == vu.vendor_id)
+        .where(PurchaseOrder.vendor_id == vu.vendor_id, _SUPPLIER_VISIBLE_PO)
     )
     total = (
         await db.execute(
             select(func.count())
             .select_from(PurchaseOrder)
-            .where(PurchaseOrder.vendor_id == vu.vendor_id)
+            .where(PurchaseOrder.vendor_id == vu.vendor_id, _SUPPLIER_VISIBLE_PO)
         )
     ).scalar() or 0
 
@@ -973,7 +983,9 @@ async def get_my_purchase_order(
     po = (
         await db.execute(
             select(PurchaseOrder).where(
-                PurchaseOrder.id == po_id, PurchaseOrder.vendor_id == vu.vendor_id
+                PurchaseOrder.id == po_id,
+                PurchaseOrder.vendor_id == vu.vendor_id,
+                _SUPPLIER_VISIBLE_PO,
             )
         )
     ).scalar_one_or_none()
@@ -1024,7 +1036,9 @@ async def flip_purchase_order(
     po = (
         await db.execute(
             select(PurchaseOrder).where(
-                PurchaseOrder.id == po_id, PurchaseOrder.vendor_id == vu.vendor_id
+                PurchaseOrder.id == po_id,
+                PurchaseOrder.vendor_id == vu.vendor_id,
+                _SUPPLIER_VISIBLE_PO,
             )
         )
     ).scalar_one_or_none()

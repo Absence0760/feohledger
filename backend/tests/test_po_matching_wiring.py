@@ -158,6 +158,43 @@ async def test_refresh_po_match_creates_exception_on_amount_mismatch():
 
 
 @pytest.mark.asyncio
+async def test_refresh_po_match_unissued_po_warns_and_blocks():
+    """A PO the ERP has not approved or issued yet (decisions §394): the finding
+    is `po_not_issued` and a payment-blocking `po_mismatch`, at the cancelled
+    PO's severity, with no variance stated."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice(amount=Decimal("100.00"))
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="2-way",
+        status="mismatch",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        currency_check="same",
+        po_not_issued=True,
+        amount_variance=None,
+        amount_variance_pct=None,
+        within_tolerance=False,
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["po_not_issued"]
+    assert warnings[0]["params"] == {"poNumber": "PO-001"}
+    assert warnings[0]["severity"] == "warning"
+    ensure.assert_awaited_once()
+    assert ensure.await_args.args[2:4] == ("po_mismatch", "warning")
+    assert inv.po_match["po_not_issued"] is True
+    assert inv.po_match["amount_variance"] is None
+
+
+@pytest.mark.asyncio
 async def test_refresh_po_match_currency_mismatch_names_both_codes_and_no_variance():
     """Invoice and PO in different currencies: the finding is the codes, not a
     variance — `po_amount_variance` would print a percentage between EUR and USD
@@ -706,6 +743,13 @@ def test_status_str_handles_simplenamespace_mock():
         {
             "status": "mismatch",
             "currency_check": "different",
+            "amount_variance": None,
+            "amount_variance_pct": None,
+        },
+        {
+            "status": "mismatch",
+            "currency_check": "same",
+            "po_not_issued": True,
             "amount_variance": None,
             "amount_variance_pct": None,
         },

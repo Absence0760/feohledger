@@ -24,7 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import create_vendor_access_token
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.payment import Payment, PaymentRun
-from app.models.procurement import POLineItem, PurchaseOrder
+from app.models.procurement import UNISSUED_PO_STATUS, POLineItem, PurchaseOrder
 from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
 from app.models.vendor_user import VendorUser
@@ -817,6 +817,57 @@ async def test_po_flip_refuses_a_po_whose_total_the_erp_no_longer_vouches_for(re
         count = (
             await s.execute(
                 select(func.count()).select_from(Invoice).where(Invoice.po_number == "PO-FLIP-UNV")
+            )
+        ).scalar_one()
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_portal_hides_a_po_the_erp_has_not_issued(realdb):
+    """A draft or unapproved ERP order (decisions §394) has not been sent to
+    the supplier: the portal does not list, show or flip it, and the issued
+    PO beside it is unaffected."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+
+    draft_id, issued_id = uuid.uuid4(), uuid.uuid4()
+    async with mk() as s:
+        for po_id, number, status in (
+            (draft_id, "PO-PORTAL-DRAFT", UNISSUED_PO_STATUS),
+            (issued_id, "PO-PORTAL-ISSUED", "open"),
+        ):
+            s.add(
+                PurchaseOrder(
+                    id=po_id,
+                    po_number=number,
+                    vendor_id=vendor_id,
+                    total=Decimal("100.00"),
+                    currency="USD",
+                    status=status,
+                    organization_id=org_id,
+                )
+            )
+        await s.commit()
+
+    async with _portal_client(realdb, vu_id, vendor_id) as client:
+        listing = (await client.get("/api/portal/purchase-orders")).json()
+        detail = await client.get(f"/api/portal/purchase-orders/{draft_id}")
+        flip = await client.post(f"/api/portal/purchase-orders/{draft_id}/flip")
+        issued = await client.get(f"/api/portal/purchase-orders/{issued_id}")
+
+    ids = {p["id"] for p in listing["items"]}
+    assert str(draft_id) not in ids and str(issued_id) in ids
+    assert listing["total"] == len(listing["items"])
+    assert detail.status_code == 404
+    assert flip.status_code == 404
+    assert issued.status_code == 200, issued.text
+    async with mk() as s:
+        count = (
+            await s.execute(
+                select(func.count())
+                .select_from(Invoice)
+                .where(Invoice.po_number == "PO-PORTAL-DRAFT")
             )
         ).scalar_one()
     assert count == 0

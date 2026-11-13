@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.models.invoice import Invoice
 from app.models.procurement import (
     CANCELLED_PO_STATUSES,
+    UNISSUED_PO_STATUS,
     GoodsReceipt,
     PurchaseOrder,
     po_currency_code,
@@ -181,6 +182,10 @@ class MatchResult:
     #: The PO is cancelled or voided (`CANCELLED_PO_STATUSES`): nothing was
     #: compared and the invoice is held.
     po_cancelled: bool = False
+    #: The PO is one the ERP has not approved or issued yet
+    #: (`UNISSUED_PO_STATUS`, decisions §394): nothing was compared and the
+    #: invoice is held, as for a cancelled one.
+    po_not_issued: bool = False
     gr_id: str | None = None
 
     #: invoice - PO, in the invoice's currency. `None` when the two are in
@@ -345,6 +350,18 @@ async def match_invoice_to_po(
         result.status = "mismatch"
         result.po_cancelled = True
         result.issues.append(po_match_issue("po_cancelled"))
+    elif po.status == UNISSUED_PO_STATUS:
+        # Nobody in the ERP has approved or issued the order yet (a draft, or
+        # one awaiting approval): it authorizes nothing, so matching against it
+        # would pass the amount control on a draft (decisions §394). Held for
+        # a person like a cancelled PO, with no variance — a 0 would read as a
+        # perfect match — until the ERP issues it.
+        result.amount_variance = None
+        result.amount_variance_pct = None
+        result.within_tolerance = False
+        result.status = "mismatch"
+        result.po_not_issued = True
+        result.issues.append(po_match_issue("po_not_issued"))
     elif result.po_total_unverifiable_reason:
         # The ERP still has this PO, but its last sync could not state the
         # total exactly (decisions §323), so `po.total` is a figure from an
@@ -585,6 +602,7 @@ async def match_invoice_to_po(
         "currency_check": result.currency_check,
         "po_total_unverifiable_reason": result.po_total_unverifiable_reason,
         "po_cancelled": result.po_cancelled,
+        "po_not_issued": result.po_not_issued,
         "tolerance_pct": tolerance,
         "within_tolerance": result.within_tolerance,
         "has_gr": gr is not None,

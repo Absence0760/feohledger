@@ -2897,6 +2897,11 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoNotIssued(String poNumber) {
+    return 'El pedido $poNumber aún no está aprobado en el ERP — la factura no se cotejó con él';
+  }
+
+  @override
   String invoiceWarningPoTotalUnverifiable(String poNumber) {
     return 'El total del pedido $poNumber no se pudo confirmar en el ERP en la última sincronización; los importes no se compararon';
   }
@@ -3109,6 +3114,10 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get invoicePoMatchIssuePoCancelled =>
       'Pedido cancelado — importes no comparados';
+
+  @override
+  String get invoicePoMatchIssuePoNotIssued =>
+      'Pedido aún no aprobado en el ERP — importes no comparados';
 
   @override
   String get invoicePoMatchIssuePoTotalUnverifiable =>
