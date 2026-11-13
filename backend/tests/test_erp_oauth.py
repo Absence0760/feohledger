@@ -2270,31 +2270,95 @@ async def test_picking_a_company_links_it_audited_and_spends_the_pending_connect
 
 
 @pytest.mark.plan("scale")
-async def test_a_company_the_consent_did_not_offer_links_nothing_and_spends_it(
+async def test_a_company_the_consent_did_not_offer_links_nothing_and_keeps_waiting(
     realdb, platform_app, provider, several_companies
 ):
+    """Checked on a peek, before the pending connect is spent: the refusal is
+    audited, nothing links, and the admin can still pick from the list
+    (decisions §355) rather than give a second consent while the first grant
+    stays live at the provider."""
     cookie = await _park(realdb, provider)
+    calls = len(provider.calls)
     resp = await _pick(realdb, cookie, "someone-elses-company")
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "erp_pick_unknown_company"
     assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
     refused = [r for r in await _audit_actions(realdb) if r.action.endswith("connect_refused")]
     assert refused and refused[0].details["reason"] == "erp_pick_unknown_company"
-    # Spent: the offered company cannot be picked on a second try.
-    assert (await _pick(realdb, cookie, _PICK_A)).json()["detail"]["code"] == "erp_pick_expired"
+    assert len(provider.calls) == calls, "a refused pick must not call the provider (no revoke)"
+    # Still waiting: an offered company links on the next try.
+    assert (await _pending(realdb, cookie)).status_code == 200
+    assert (await _pick(realdb, cookie, _PICK_A)).status_code == 200
+    assert (await _org_settings(realdb))["erp"]["oauth"]["external_tenant_id"] == _PICK_A
 
 
 @pytest.mark.plan("scale")
-async def test_a_picked_company_linked_to_another_tenant_is_refused(
+async def test_a_pick_after_the_plan_lost_the_erp_keeps_the_pending_connect(
     realdb, platform_app, provider, several_companies
 ):
+    """The plan is re-checked before the pending connect is spent: a 402
+    links nothing, revokes nothing, and the same consent can be picked from
+    once the plan covers the ERP again, within its window (§355)."""
+    cookie = await _park(realdb, provider)
+    calls = len(provider.calls)
+    await _negotiated_empty_plan(realdb)
+    try:
+        resp = await _pick(realdb, cookie, _PICK_A)
+        assert resp.status_code == 402
+        assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+        assert await _sealed(realdb) == {}
+        assert len(provider.calls) == calls, "no revoke for §337's reason"
+        assert (await _pending(realdb, cookie)).status_code == 200
+    finally:
+        await realdb.purge_plans(NEGOTIATED_PREFIX, org_ids=[realdb.info("a").org_id])
+    await realdb.subscribe("a", "scale")
+    assert (await _pick(realdb, cookie, _PICK_A)).status_code == 200
+    assert (await _org_settings(realdb))["erp"]["oauth"]["external_tenant_id"] == _PICK_A
+
+
+@pytest.mark.plan("scale")
+async def test_a_pick_for_a_provider_no_longer_configured_drops_the_pending_connect(
+    realdb, platform_app, provider, several_companies, monkeypatch
+):
+    """No pick could ever succeed, so the record goes (``erp_pick_expired``).
+    With no spec there is no revoke endpoint to call either: the grant lapses
+    at the provider, as any consent the admin abandons does."""
+    cookie = await _park(realdb, provider)
+    calls = len(provider.calls)
+    with monkeypatch.context() as m:
+        m.setattr(erp_oauth, "load_providers", lambda: {})
+        resp = await _pick(realdb, cookie, _PICK_A)
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "erp_pick_expired"
+    assert len(provider.calls) == calls
+    assert (await _pending(realdb, cookie)).status_code == 409
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+
+
+@pytest.mark.plan("scale")
+async def test_a_picked_company_linked_to_another_tenant_is_refused_and_another_can_be_picked(
+    realdb, platform_app, provider, several_companies
+):
+    """``already_linked`` needs the opened token, so it is refused after the
+    spend; the pending connect is put back, and the consent's other company
+    links without a second consent (§355)."""
     block = {**_connected_block(realdb.info("b").org_id), "external_tenant_id": _PICK_A}
     await _set_settings(realdb, {"erp": {"type": PROVIDER, "oauth": block}}, key="b")
     cookie = await _park(realdb, provider)
+    calls = len(provider.calls)
     resp = await _pick(realdb, cookie, _PICK_A)
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "already_linked"
     assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    assert len(provider.calls) == calls, "revoking could cut tenant b's live connection (§337)"
+    # Tenant b's connection is untouched.
+    assert (await _org_settings(realdb, key="b"))["erp"]["oauth"]["external_tenant_id"] == _PICK_A
+
+    resp = await _pick(realdb, cookie, _PICK_B)
+    assert resp.status_code == 200, resp.text
+    oauth = (await _org_settings(realdb))["erp"]["oauth"]
+    assert oauth["external_tenant_id"] == _PICK_B
+    assert oauth["access_token"] == "ACCESS-SECRET-1"
 
 
 @pytest.mark.plan("scale")
@@ -2308,18 +2372,25 @@ async def test_a_pick_whose_audit_row_cannot_be_written_links_nothing(
     async def _no_audit(**_kw):
         raise RuntimeError("audit sink down")
 
-    monkeypatch.setattr(erp_oauth_api, "record_auth_audit_or_raise", _no_audit)
-    resp = await _pick(realdb, cookie, _PICK_A)
+    with monkeypatch.context() as m:
+        m.setattr(erp_oauth_api, "record_auth_audit_or_raise", _no_audit)
+        resp = await _pick(realdb, cookie, _PICK_A)
     assert resp.status_code == 503
     assert resp.json()["detail"]["code"] == "audit_unavailable"
     assert await _sealed(realdb) == {}
+    # Transient: the pending connect was put back, and a retry links.
+    assert (await _pick(realdb, cookie, _PICK_A)).status_code == 200
 
 
 @pytest.mark.plan("scale")
 async def test_discarding_the_pending_connect_links_nothing(
     realdb, platform_app, provider, several_companies
 ):
+    """Cancel drops the record and revokes nothing at the provider, for §337's
+    reason (§355): the consent can reach a company this or another workspace
+    is connected to, and a revoke can end that grant too."""
     cookie = await _park(realdb, provider)
+    calls = len(provider.calls)
     async with realdb.client(key="a", role="admin") as c:
         first = await c.delete("/api/organization/erp/oauth/pending", headers=_cookie(cookie))
         second = await c.delete("/api/organization/erp/oauth/pending", headers=_cookie(cookie))
@@ -2328,6 +2399,7 @@ async def test_discarding_the_pending_connect_links_nothing(
     cancelled = [r for r in await _audit_actions(realdb) if r.action.endswith("connect_cancelled")]
     assert len(cancelled) == 1 and cancelled[0].details == {"provider": PROVIDER}
     assert second.json() == {"discarded": False}
+    assert len(provider.calls) == calls
     assert (await _pick(realdb, cookie, _PICK_A)).json()["detail"]["code"] == "erp_pick_expired"
     assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
 
@@ -2434,6 +2506,71 @@ async def test_a_taken_pending_connect_ages_its_token_lifetimes(monkeypatch):
     assert taken.token_response["access_token"] == "ACCESS-SECRET-1"
     assert 3299 <= taken.token_response["expires_in"] <= 3300
     assert taken.token_response["x_refresh_token_expires_in"] <= 8726400 - 299
+
+
+async def test_a_restored_pending_connect_keeps_its_window_and_ages_from_now(monkeypatch):
+    """``restore_pending_connect`` puts a spent record back for the same
+    browser and admin, with the window it had (never a fresh one) and the
+    already-aged token, so a later take does not count the wait twice."""
+    from app.services.erp_adapters.oauth_base import ExternalCompany
+
+    org, admin, cookie = uuid.uuid4(), uuid.uuid4(), "browser-nonce"
+    start = time.time()
+    expires = await erp_oauth.park_pending_connect(
+        org_id=org,
+        user_id=admin,
+        provider=PROVIDER,
+        client_source="platform",
+        browser_binding=erp_oauth.browser_binding(cookie),
+        token_response=_token_body(),
+        companies=[ExternalCompany("x", "X"), ExternalCompany("y", "Y")],
+    )
+    monkeypatch.setattr(erp_oauth.time, "time", lambda: start + 100)
+    taken = await erp_oauth.take_pending_connect(org, admin, cookie)
+    assert taken is not None
+    assert await erp_oauth.restore_pending_connect(taken, cookie) is True
+
+    peeked = await erp_oauth.peek_pending_connect(org, admin, cookie)
+    assert peeked is not None and peeked.expires_at == expires
+    assert [c.id for c in peeked.companies] == ["x", "y"]
+    assert await erp_oauth.peek_pending_connect(org, uuid.uuid4(), cookie) is None
+
+    monkeypatch.setattr(erp_oauth.time, "time", lambda: start + 150)
+    again = await erp_oauth.take_pending_connect(org, admin, cookie)
+    assert again is not None and again.token_response is not None
+    # 3600 less 100 s before the restore and 50 s after it.
+    assert 3449 <= again.token_response["expires_in"] <= 3450
+
+
+async def test_a_restore_never_replaces_a_newer_connect_or_outlives_its_window(monkeypatch):
+    from app.services.erp_adapters.oauth_base import ExternalCompany
+
+    org, admin, cookie = uuid.uuid4(), uuid.uuid4(), "browser-nonce"
+
+    async def park(companies):
+        await erp_oauth.park_pending_connect(
+            org_id=org,
+            user_id=admin,
+            provider=PROVIDER,
+            client_source="platform",
+            browser_binding=erp_oauth.browser_binding(cookie),
+            token_response=_token_body(),
+            companies=[ExternalCompany(c, c.upper()) for c in companies],
+        )
+
+    await park(["x", "y"])
+    taken = await erp_oauth.take_pending_connect(org, admin, cookie)
+    assert taken is not None
+    await park(["p", "q"])  # the admin started another connect meanwhile
+    assert await erp_oauth.restore_pending_connect(taken, cookie) is False
+    newer = await erp_oauth.peek_pending_connect(org, admin, cookie)
+    assert newer is not None and [c.id for c in newer.companies] == ["p", "q"]
+
+    await erp_oauth.discard_pending_connect(org, cookie)
+    later = time.time() + erp_oauth.pending_ttl() + 1
+    monkeypatch.setattr(erp_oauth.time, "time", lambda: later)
+    assert await erp_oauth.restore_pending_connect(taken, cookie) is False
+    assert await erp_oauth.restore_pending_connect(taken, None) is False
 
 
 def test_clean_companies_drops_repeats_and_normalises_names():

@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Literal
+from typing import Literal, NoReturn
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -519,8 +519,8 @@ async def oauth_disconnect(
 #: No pending connect for this browser and admin: none was parked, it lapsed,
 #: it was already used, or this is not the browser or admin that started it.
 PICK_EXPIRED = "erp_pick_expired"
-#: The pick names a company the consent did not offer. The pending connect is
-#: spent all the same: a pick is single-use whatever it names.
+#: The pick names a company the consent did not offer. The pending connect
+#: keeps waiting for a pick from its list (decisions §355).
 PICK_UNKNOWN_COMPANY = "erp_pick_unknown_company"
 
 _PICK_EXPIRED_MESSAGE = (
@@ -581,19 +581,44 @@ async def oauth_pending_select(
 ):
     """Link the company the admin picked, from the consent parked for them.
 
-    Spends the pending connect FIRST (GETDEL), so a pick is single-use
-    whatever follows (a plan lost since the consent spends it too, and the admin
-    starts again); then the checks the callback itself makes before a link
-    — the plan, the provider still known — and the same claim-and-link
-    (``_claim_and_link``: realm lock, linked-elsewhere check, audit-first
-    write). The company must be one the consent offered: the list was read
-    from the provider under the new token, which is what confirms the company
-    (§337's rule), and a client-supplied id outside it links nothing.
+    **A refusal the admin can act on leaves the pending connect waiting**
+    (decisions §355). The exchanged grant stays live at the provider whatever
+    the pick ends in, because revoking it is ruled out for §337's reason (a
+    revoke can reach the app's whole grant, a live connection included). So a
+    refusal that spent the record would leave that grant with nothing left to
+    use it, and the admin a new consent to give. Hence the order:
+
+    1. **Checks that need no token run on a peek**, before anything is spent:
+       the company must be one the consent offered (the list was read from the
+       provider under the new token, which is what confirms the company —
+       §337's rule; a client-supplied id outside it links nothing, audited),
+       and the plan must still cover the connect (the callback's own check).
+       Either refusal keeps the pending connect for another pick. A provider
+       no longer configured is the exception: no pick can succeed, so the
+       record is dropped and the answer is ``erp_pick_expired``.
+    2. **Then it is spent (GETDEL)**, so two picks cannot both link, and
+       linked through the callback's own ``_claim_and_link`` (realm lock,
+       linked-elsewhere check, audit-first write).
+    3. **A claim refusal puts it back** (``restore_pending_connect``, same
+       window, never over a newer connect): the company may be linked to
+       another workspace while another one in the list is not, and the two
+       503s are transient. Best-effort; if it cannot be put back the pick is
+       spent, as before.
     """
+    cookie = request.cookies.get(erp_oauth.BROWSER_COOKIE)
+    offered = await erp_oauth.peek_pending_connect(org.id, user.id, cookie)
+    if offered is None:
+        raise _pick_expired()
+    spec = erp_oauth.load_providers().get(offered.provider)
+    if spec is None:
+        await erp_oauth.discard_pending_connect(org.id, cookie)
+        raise _pick_expired()
+    if not any(c.id == body.company_id for c in offered.companies):
+        await _refuse_unknown_company(org, user, spec.key)
+    await ensure_live_erp_entitled(db, org.id, _direct(spec.key))
+
     try:
-        pending = await erp_oauth.take_pending_connect(
-            org.id, user.id, request.cookies.get(erp_oauth.BROWSER_COOKIE)
-        )
+        pending = await erp_oauth.take_pending_connect(org.id, user.id, cookie)
     except CredentialCryptoError:
         raise HTTPException(
             status_code=503,
@@ -603,27 +628,12 @@ async def oauth_pending_select(
         ) from None
     if pending is None or pending.token_response is None:
         raise _pick_expired()
-    spec = erp_oauth.load_providers().get(pending.provider)
-    if spec is None:
-        raise _pick_expired()
     chosen = next((c for c in pending.companies if c.id == body.company_id), None)
-    if chosen is None:
-        await dispatch_auth_audit(
-            organization_id=org.id,
-            actor_id=user.id,
-            action="organization.erp_connect_refused",
-            entity_id=org.id,
-            entity_type="organization",
-            details={"provider": spec.key, "reason": PICK_UNKNOWN_COMPANY},
-        )
-        raise HTTPException(
-            status_code=409,
-            detail=coded_refusal(
-                PICK_UNKNOWN_COMPANY,
-                "That company was not offered by this connection. Connect again to choose one.",
-            ),
-        )
-    await ensure_live_erp_entitled(db, org.id, _direct(spec.key))
+    if pending.provider != spec.key or chosen is None:
+        # A newer connect from this browser replaced the one peeked above: it
+        # is not this pick's to spend.
+        await erp_oauth.restore_pending_connect(pending, cookie)
+        await _refuse_unknown_company(org, user, spec.key)
 
     refused = await _claim_and_link(
         db,
@@ -636,10 +646,30 @@ async def oauth_pending_select(
         picked_from=len(pending.companies),
     )
     if refused:
+        await erp_oauth.restore_pending_connect(pending, cookie)
         status, message = _PICK_REFUSALS[refused]
         raise HTTPException(status_code=status, detail=coded_refusal(refused, message))
     _clear_browser_cookie(response)
     return SelectCompanyResponse(connected=True, provider=spec.key, external_tenant_id=chosen.id)
+
+
+async def _refuse_unknown_company(org: Organization, user: User, provider: str) -> NoReturn:
+    """Audit and refuse a pick of a company the consent did not offer."""
+    await dispatch_auth_audit(
+        organization_id=org.id,
+        actor_id=user.id,
+        action="organization.erp_connect_refused",
+        entity_id=org.id,
+        entity_type="organization",
+        details={"provider": provider, "reason": PICK_UNKNOWN_COMPANY},
+    )
+    raise HTTPException(
+        status_code=409,
+        detail=coded_refusal(
+            PICK_UNKNOWN_COMPANY,
+            "That company was not offered by this connection. Choose one from the list.",
+        ),
+    )
 
 
 @router.delete("/pending", response_model=DiscardPendingResponse)
@@ -651,9 +681,11 @@ async def oauth_pending_discard(
 ):
     """Drop the parked consent without linking anything. Idempotent.
 
-    The token is not revoked at the provider, for §337's reason: a provider's
-    revoke can reach the app's whole grant, including a connection this
-    tenant already relies on. Unused, it lapses with the provider's own expiry.
+    The token is not revoked at the provider, for §337's reason (decisions
+    §355 records it per path): a provider's revoke can reach the app's whole
+    grant, and this consent can reach a company this tenant, or another
+    workspace, is already connected to. Unused, it lapses with the provider's
+    own refresh-token lifetime.
     """
     cookie = request.cookies.get(erp_oauth.BROWSER_COOKIE)
     pending = await erp_oauth.peek_pending_connect(org.id, user.id, cookie)

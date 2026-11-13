@@ -3067,7 +3067,7 @@ and calls `await self.access_token()`.
 | `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan; called **credentialed** (`credentials: 'include'`) | `200 {"authorize_url"}` plus the HttpOnly nonce cookie `__Host-feoh_erp_oauth_nonce` on the API host (§ Bound to the browser that started it); the page navigates the browser to the URL. `404` unknown provider, `409` no app configured, `409` coded `erp_connect_platform_host` (`params.url` when there is a platform address to offer) when this host cannot carry the cookie — a custom domain, or an `Origin` not same-site with the API; `402` plan, `503` when the tenant saved its own app and the credential store cannot be opened (never a silent switch to the platform app). |
 | `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}` (metadata) and seals the tokens in `provider_credentials`, audit row first, and 302s to `<tenant platform origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>` — or, when the consent reached several companies, links nothing and 302s with `&erp_choose_company=<provider>` (§ A consent that reaches several companies) (the `FEOH_TENANT_URL_TEMPLATE` address, not a vanity one — that is where a connect starts; the vanity URL only when no template is set). Every answer given after the nonce cookie matched clears it; a forged, expired or mismatched state leaves it alone, so a junk-state link cannot break a connect in flight. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `browser_mismatch` (the browser lacks the nonce cookie the state's hash names — checked right after the state is burned, before the provider's answer or the code is looked at), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant` (no company id, more than `oauth_base.COMPANY_LIST_MAX` (100) companies, or — QuickBooks — a `realmId` the new token cannot reach), `already_linked` (the company is connected to another tenant, or another connect for it is in flight: the uniqueness check and the write run under a Redis lock on `(provider, company id)`, `erp_oauth.realm_claim`, because the org row lock serialises one tenant only), `unknown_provider`, `credentials_unavailable` (the credential store could not be opened or written), `audit_unavailable` (the `organization.erp_connected` row could not be written, so nothing was linked). |
 | `GET /api/organization/erp/oauth/pending` | admin; **credentialed** | The consent parked for this browser and admin: `{provider, display_name, companies: [{id, name}], expires_at}`. Does not spend it. `409` coded `erp_pick_expired` for anything else (none parked, lapsed, used, another browser or another admin). Never a token. |
-| `POST /api/organization/erp/oauth/pending/select` | admin + `erp_integrations` plan; **credentialed** | `{company_id}` → `200 {connected, provider, external_tenant_id}`, the nonce cookie cleared. Spends the pending connect first (GETDEL), then links through the callback's own claim-and-link (`_claim_and_link`: realm lock, linked-elsewhere check, `organization.erp_connected` audit-first with `picked_from`). Coded refusals: `409 erp_pick_expired`, `409 erp_pick_unknown_company` (an id the consent did not offer; audited `organization.erp_connect_refused`), `409 already_linked`, `503 credentials_unavailable`, `503 audit_unavailable`; the plan gate's own `402`. |
+| `POST /api/organization/erp/oauth/pending/select` | admin + `erp_integrations` plan; **credentialed** | `{company_id}` → `200 {connected, provider, external_tenant_id}`, the nonce cookie cleared. Checks the offered id and the plan on a peek, then spends the pending connect (GETDEL) and links through the callback's own claim-and-link (`_claim_and_link`: realm lock, linked-elsewhere check, `organization.erp_connected` audit-first with `picked_from`). Coded refusals: `409 erp_pick_expired`, `409 erp_pick_unknown_company` (an id the consent did not offer; audited `organization.erp_connect_refused`), `409 already_linked`, `503 credentials_unavailable`, `503 audit_unavailable`; the plan gate's own `402`. Every refusal but `erp_pick_expired` and a token that cannot be opened leaves the pending connect to pick from again (§355). |
 | `DELETE /api/organization/erp/oauth/pending` | admin; **credentialed** | Drops the parked consent, links nothing: `{discarded}` (idempotent), the cookie cleared and `organization.erp_connect_cancelled` written best-effort when one was dropped. The token is not revoked (§337's reason). |
 | `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked", "revocation"}`, `revocation` being `revoked`, `failed` (the provider did not confirm, or could not be reached) or `unsupported` (it has no revocation endpoint: Blackbaud), and null when nothing was connected. The settings page says "Disconnected" only on `revoked`; otherwise it tells the admin to remove FeohLedger on the provider's side (`types/erpConnection.disconnectMessage`). `503` when the credential store cannot be opened, with nothing changed. |
 | `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
@@ -3198,9 +3198,15 @@ the picker from weakening §336 / §337:
   without that cookie, or as another user, there is nothing to find. A pick is
   a bearer request, so a cross-site page cannot forge one, and nothing about
   the pending connect is in a URL.
-- **Single-use and short-lived.** `select` GETDELs the record before any check,
-  so any refusal (an unknown id, the plan, `already_linked`) spends it, and a
-  replay finds nothing. A lapsed record (`e` past) reads as none.
+- **Single-use and short-lived, but a refusal the admin can act on keeps it.**
+  The checks that need no token (an id the consent offered, the plan) run on a
+  peek and refuse without spending, so the admin picks again from the same
+  list. Then `select` GETDELs the record, so two picks cannot both link and a
+  replay of a successful one finds nothing. A claim refusal (`already_linked`,
+  or the two 503s) puts it back with `restore_pending_connect`: same window,
+  the token as aged so far, never over a newer connect from that browser
+  (SET NX). A provider no longer configured drops it (`erp_pick_expired`),
+  since no pick could succeed. A lapsed record (`e` past) reads as none.
 - **Confirmed companies only.** The list was read from the provider under the
   new token; a `company_id` outside it links nothing
   (`erp_pick_unknown_company`, audited). The link runs through the callback's
@@ -3210,8 +3216,11 @@ the picker from weakening §336 / §337:
   consent waited from `expires_in` and the refresh lifetime, so the stored
   expiry never runs later than the provider's.
 
-A cancelled or lapsed pick revokes nothing at the provider: as with a refused
-QuickBooks realm (§337), a revoke can reach the app's whole grant. Xero keeps
+A cancelled, lapsed or refused pick revokes nothing at the provider: as with a
+refused QuickBooks realm (§337), a revoke can reach the app's whole grant, and
+the consent can reach a company this workspace or another one is connected to
+(decisions §355 records the reasoning per path). That is why the refusals the
+admin can retry keep the pending connect rather than strand the grant. Xero keeps
 every organisation the user authorised listed under the app's connections
 until the user removes them in Xero; only the picked one is used.
 
