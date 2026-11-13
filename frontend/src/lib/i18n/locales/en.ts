@@ -5447,6 +5447,7 @@ export const en = {
 	'erpRefusal.currencyUnknown': "{provider} reports no home currency, so the bill's currency can't be checked. Set the home currency in {provider}, then retry.",
 	'erpRefusal.currencyNotEnabled': "This invoice isn't in {provider}'s home currency, and multicurrency is off there. Turn multicurrency on in {provider}, or correct the currency, then retry.",
 	'erpRefusal.idempotencyLookupIncomplete': "{provider} couldn't confirm whether this invoice was already sent, so it wasn't sent again. Retry in a few minutes.",
+	'erpRefusal.purchasesNotPermitted': "{provider} did not allow this bill to be created. Either the business is on Accounting Start, which cannot create purchase invoices, or the connected Sage user lacks Purchases access. Upgrade the plan or give that user Purchases access in {provider}, then retry.",
 	'erpRefusal.existingInvoiceNotOpen': "{provider} already holds this invoice and it's no longer a draft, so it can't be changed from here. Review it in {provider}.",
 	'erpRefusal.lineAmountPrecision': "A line amount has more decimal places than this currency allows in {provider}. Round it, then retry.",
 	'erpRefusal.currencyNotSupported': "{provider} takes bills only in the company's own currency. Correct the currency, or enter the bill in {provider} directly.",

@@ -366,26 +366,144 @@ def test_rate_limited_lookup_fails_closed_without_posting(token):
     assert result.raw_response == {"retry_after": "60"}
 
 
-def test_validation_failure_message_carries_no_response_body(token):
-    echo = [
+#: Sage's 422 error array, its $message echoing what we sent.
+_ECHO_422 = [
+    {
+        "$severity": "error",
+        "$dataCode": "RecordInvalid",
+        "$message": "Tax number GB123456789 at 1 High Street, London is invalid",
+        "$source": "contact",
+    }
+]
+
+
+def _refusal_router(
+    *,
+    financial: httpx.Response | None = None,
+    contact: httpx.Response | None = None,
+    ledger_chart: httpx.Response | None = None,
+):
+    """GETs for a post whose create Sage refuses: the empty idempotency lookup,
+    the ledger's tax rate, and the read-backs that explain the refusal (each
+    defaulting to "nothing wrong here")."""
+    financial = financial or _resp(
+        200,
         {
-            "$severity": "error",
-            "$dataCode": "RecordInvalid",
-            "$message": "Tax number GB123456789 at 1 High Street, London is invalid",
-            "$source": "contact",
-        }
-    ]
+            "year_end_lockdown_date": "2025-12-31",
+            "base_currency": {"id": "GBP"},
+            "multi_currency_enabled": False,
+        },
+    )
+    contact = contact or _resp(200, {"id": VENDOR, "deleted_at": None})
+    ledger_chart = ledger_chart or _resp(200, {"id": LEDGER, "included_in_chart": True})
+
+    async def get(url, params=None, headers=None):
+        if url.endswith("/purchase_invoices"):
+            return _resp(200, _page([]))
+        if url.endswith("/financial_settings"):
+            return financial
+        if url.endswith(f"/contacts/{VENDOR}"):
+            return contact
+        if url.endswith(f"/ledger_accounts/{LEDGER}"):
+            if (params or {}).get("attributes") == "tax_rate":
+                return _resp(200, _ledger())
+            return ledger_chart
+        raise AssertionError(f"unexpected GET {url}")
+
+    return AsyncMock(side_effect=get)
+
+
+def _post_refused(status: int, router=None, **payload_overrides):
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = router or _refusal_router()
+        client.post = AsyncMock(return_value=httpx.Response(status, json=_ECHO_422))
+        return _run(_adapter().post_invoice(_payload(**payload_overrides)))
+
+
+def test_a_refused_create_is_coded_and_carries_no_response_body(token):
+    """A 422 Sage cannot be read further is ``bill_refused``: non-retryable,
+    recorded as having created nothing (QuickBooks lesson 3, decisions §285),
+    and the message names nothing Sage echoed back."""
+    result = _post_refused(422, vendor_tax_id="GB123456789", vendor_address="1 High Street, London")
+    assert result.message == "Sage Accounting post refused: bill_refused (HTTP 422)"
+    assert result.refusal_code == "bill_refused"
+    assert result.retryable is False
+    assert result.not_posted is True
+    assert "GB123456789" not in result.message and "High Street" not in result.message
+
+
+def test_a_create_inside_the_year_end_lockdown_is_period_closed(token):
+    router = _refusal_router(
+        financial=_resp(200, {"year_end_lockdown_date": "2026-09-01"})  # == invoice date
+    )
+    result = _post_refused(422, router)
+    assert (result.refusal_code, result.not_posted, result.retryable) == (
+        "period_closed",
+        True,
+        False,
+    )
+
+
+def test_a_foreign_currency_without_multi_currency_is_currency_not_enabled(token):
+    result = _post_refused(422, currency="EUR")
+    assert result.refusal_code == "currency_not_enabled"
+    assert result.not_posted is True
+
+
+@pytest.mark.parametrize(
+    "contact",
+    [
+        _resp(404, {}),
+        _resp(200, {"id": VENDOR, "deleted_at": "2026-09-02T00:00:00Z"}),
+        _resp(200, {"id": VENDOR, "gdpr_obfuscated": True}),
+    ],
+)
+def test_a_create_naming_a_gone_contact_is_vendor_inactive(token, contact):
+    result = _post_refused(422, _refusal_router(contact=contact))
+    assert result.refusal_code == "vendor_inactive"
+    assert result.not_posted is True
+
+
+def test_a_create_on_an_out_of_chart_ledger_names_our_account_code(token):
+    router = _refusal_router(ledger_chart=_resp(200, {"id": LEDGER, "included_in_chart": False}))
+    result = _post_refused(422, router, gl_account="5000")
+    assert result.refusal_code == "account_inactive"
+    assert result.refusal_params == {"accounts": ["5000"]}
+
+
+def test_an_unreadable_explanation_is_never_read_as_inactive(token):
+    router = _refusal_router(
+        financial=_resp(500, {}), contact=_resp(503, {}), ledger_chart=_resp(500, {})
+    )
+    result = _post_refused(422, router)
+    assert result.refusal_code == "bill_refused"
+
+
+def test_a_403_create_is_purchases_not_permitted_without_further_reads(token):
+    """Accounting Start has no purchase-invoice write (the Swagger's Endpoint
+    Availability lists Plus and Standard only), and nothing in the v3.1 API
+    reports the plan; neither does a missing Purchases role. Sage answers 403."""
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _router(lookup=_resp(200, _page([])), ledger=_resp(200, _ledger()))
-        client.post = AsyncMock(return_value=httpx.Response(422, json=echo))
-        result = _run(
-            _adapter().post_invoice(
-                _payload(vendor_tax_id="GB123456789", vendor_address="1 High Street, London")
-            )
-        )
-    assert result.message == "Sage Accounting post failed: HTTP 422 (validation_failed)"
-    assert "GB123456789" not in result.message and "High Street" not in result.message
+        client.post = AsyncMock(return_value=httpx.Response(403, json={}))
+        result = _run(_adapter().post_invoice(_payload()))
+    assert result.message == "Sage Accounting post refused: purchases_not_permitted (HTTP 403)"
+    assert (result.not_posted, result.retryable) == (True, False)
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_a_create_failure_a_retry_could_change_stays_retryable_and_unknown(token, status):
+    """A 5xx or 429 may have created the invoice: never coded, never not_posted."""
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = _router(lookup=_resp(200, _page([])), ledger=_resp(200, _ledger()))
+        client.post = AsyncMock(return_value=httpx.Response(status, json={}))
+        result = _run(_adapter().post_invoice(_payload()))
+    assert result.refusal_code is None
+    assert result.retryable is True
+    assert result.not_posted is False
 
 
 def test_not_connected_propagates_the_fixed_message(token):
@@ -407,8 +525,6 @@ def test_not_connected_propagates_the_fixed_message(token):
         ("DRAFT", ErpInvoiceStatus.draft),
         ("UNPAID", ErpInvoiceStatus.open),
         ("DISPUTED", ErpInvoiceStatus.open),
-        ("PART_PAID", ErpInvoiceStatus.partially_paid),
-        ("PAID", ErpInvoiceStatus.paid),
         ("VOID", ErpInvoiceStatus.cancelled),
         ("SOMETHING_NEW", ErpInvoiceStatus.unknown),
     ],
@@ -419,6 +535,43 @@ def test_status_mapping(token, status_id, expected):
             return_value=_resp(200, {"id": "pi-1", "status": {"id": status_id}})
         )
         assert _run(_adapter().get_invoice_status("pi-1")) is expected
+
+
+_PAYMENT = {"type": "PURCHASE_PAYMENT", "amount": 1150, "contact_payment": {"id": "cp-1"}}
+_CREDIT = {"type": "PURCHASE_ALLOCATION", "amount": 1150, "contact_allocation": {"id": "ca-1"}}
+_REFUND = {**_PAYMENT, "negative_payment": True}
+
+
+@pytest.mark.parametrize(
+    "status_id, allocations, expected",
+    [
+        ("PAID", [_PAYMENT], ErpInvoiceStatus.paid),
+        ("PAID", [_CREDIT, _PAYMENT], ErpInvoiceStatus.paid),
+        # A credit note allocated to the bill also sets PAID: no money moved.
+        ("PAID", [_CREDIT], ErpInvoiceStatus.settled_no_payment),
+        ("PAID", [], ErpInvoiceStatus.settled_no_payment),
+        ("PAID", [_REFUND], ErpInvoiceStatus.settled_no_payment),
+        ("PART_PAID", [_PAYMENT], ErpInvoiceStatus.partially_paid),
+        ("PART_PAID", [_CREDIT], ErpInvoiceStatus.open),
+    ],
+)
+def test_paid_needs_a_payment_sage_records(token, status_id, allocations, expected):
+    """decisions §303: ``paid`` is a claim that money left. Sage's ``total_paid``
+    counts allocations and discounts too, so only a ``contact_payment`` among
+    ``payments_allocations`` says so."""
+    invoice = {
+        "id": "pi-1",
+        "status": {"id": status_id},
+        "total_paid": 1150,
+        "payments_allocations": allocations,
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(return_value=_resp(200, invoice))
+        assert _run(_adapter().get_invoice_status("pi-1")) is expected
+    params = client.get.await_args.kwargs["params"]
+    assert params["show_payments_allocations"] == "true"
+    assert "payments_allocations" in params["attributes"]
 
 
 def test_status_unknown_on_error(token):
@@ -539,7 +692,44 @@ def test_list_gl_accounts_past_the_sync_bound_raises(token):
     assert client.get.await_count == -(-SYNC_LISTING_MAX_ROWS // 200)
 
 
-def test_list_gl_accounts_maps_type_and_skips_out_of_chart(token):
+def test_list_vendors_reads_a_gdpr_obfuscated_contact_as_inactive(token):
+    rows = [
+        {"id": "c1", "name": "Live Ltd"},
+        {"id": "c2", "name": "Obfuscated", "gdpr_obfuscated": True},
+    ]
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(return_value=_resp(200, _page(rows)))
+        vendors = _run(_adapter().list_vendors())
+    assert [(v.erp_vendor_id, v.active) for v in vendors] == [("c1", True), ("c2", False)]
+    assert "gdpr_obfuscated" in client.get.await_args.kwargs["params"]["attributes"]
+
+
+def test_list_gl_accounts_emits_out_of_chart_and_control_ledgers_inactive(token):
+    """Dropping an out-of-chart ledger read as a dead link and unlinked a row
+    whose ledger still exists (§284). Both chart values are asked for, since
+    Sage leaves ``show_included_in_chart``'s default undocumented."""
+    in_chart = [
+        {"id": "l1", "nominal_code": 5000, "included_in_chart": True},
+        {"id": "l2", "nominal_code": 2100, "included_in_chart": True, "is_control_account": True},
+    ]
+    out_of_chart = [{"id": "l3", "nominal_code": 9999, "included_in_chart": False}]
+
+    async def get(url, params=None, headers=None):
+        rows = in_chart if params["show_included_in_chart"] == "true" else out_of_chart
+        return _resp(200, _page(rows))
+
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(side_effect=get)
+        accounts = _run(_adapter().list_gl_accounts())
+    assert [(a.code, a.active) for a in accounts] == [
+        ("5000", True),
+        ("2100", False),
+        ("9999", False),
+    ]
+
+
+def test_list_gl_accounts_maps_type_and_keeps_out_of_chart_inactive(token):
     rows = [
         {
             "id": "l1",
@@ -565,9 +755,10 @@ def test_list_gl_accounts_maps_type_and_skips_out_of_chart(token):
     with patch("httpx.AsyncClient") as cm:
         _client(cm).get = AsyncMock(return_value=_resp(200, _page(rows)))
         accounts = _run(_adapter().list_gl_accounts())
-    assert [(a.code, a.account_type, a.erp_account_id) for a in accounts] == [
-        ("5000", "expense", "l1"),
-        ("2100", "liability", "l2"),
+    assert [(a.code, a.account_type, a.erp_account_id, a.active) for a in accounts] == [
+        ("5000", "expense", "l1", True),
+        ("2100", "liability", "l2", True),
+        ("9999", "expense", "l3", False),
     ]
 
 

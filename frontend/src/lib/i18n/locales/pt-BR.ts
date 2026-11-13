@@ -5258,6 +5258,7 @@ export const messages = {
 	'erpRefusal.currencyUnknown': "O {provider} não informa moeda principal, então a moeda da conta não pode ser verificada. Defina a moeda principal no {provider} e tente novamente.",
 	'erpRefusal.currencyNotEnabled': "Esta fatura não está na moeda principal do {provider}, e a multimoeda está desativada lá. Ative a multimoeda no {provider} ou corrija a moeda e tente novamente.",
 	'erpRefusal.idempotencyLookupIncomplete': "O {provider} não conseguiu confirmar se esta fatura já tinha sido enviada, então ela não foi reenviada. Tente novamente em alguns minutos.",
+	'erpRefusal.purchasesNotPermitted': "O {provider} não permitiu criar esta fatura. O plano Accounting Start não cria faturas de compra, ou o usuário do Sage conectado não tem acesso a Compras. Mude o plano ou dê a esse usuário acesso a Compras no {provider} e tente novamente.",
 	'erpRefusal.existingInvoiceNotOpen': "O {provider} já tem esta fatura e ela não é mais um rascunho, então não pode ser alterada daqui. Revise-a no {provider}.",
 	'erpRefusal.lineAmountPrecision': "O valor de uma linha tem mais casas decimais do que esta moeda permite no {provider}. Arredonde-o e tente novamente.",
 	'erpRefusal.currencyNotSupported': "O {provider} aceita contas apenas na moeda da própria empresa. Corrija a moeda ou lance a conta diretamente no {provider}.",

@@ -5264,6 +5264,7 @@ export const messages = {
 	'erpRefusal.currencyUnknown': "{provider} n'indique aucune devise principale : la devise de la facture ne peut pas être vérifiée. Définissez la devise principale dans {provider}, puis réessayez.",
 	'erpRefusal.currencyNotEnabled': "Cette facture n'est pas dans la devise principale de {provider}, et le multidevise y est désactivé. Activez le multidevise dans {provider} ou corrigez la devise, puis réessayez.",
 	'erpRefusal.idempotencyLookupIncomplete': "{provider} n'a pas pu confirmer si cette facture avait déjà été envoyée : elle n'a pas été renvoyée. Réessayez dans quelques minutes.",
+	'erpRefusal.purchasesNotPermitted': "{provider} n'a pas autorisé la création de cette facture. L'offre Accounting Start ne permet pas de créer des factures d'achat, ou l'utilisateur Sage connecté n'a pas accès aux Achats. Changez d'offre ou donnez à cet utilisateur l'accès aux Achats dans {provider}, puis réessayez.",
 	'erpRefusal.existingInvoiceNotOpen': "{provider} contient déjà cette facture et ce n'est plus un brouillon : elle ne peut pas être modifiée d'ici. Vérifiez-la dans {provider}.",
 	'erpRefusal.lineAmountPrecision': "Le montant d'une ligne a plus de décimales que cette devise n'en autorise dans {provider}. Arrondissez-le, puis réessayez.",
 	'erpRefusal.currencyNotSupported': "{provider} n'accepte les factures que dans la devise de l'entreprise. Corrigez la devise ou saisissez la facture directement dans {provider}.",

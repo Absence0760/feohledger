@@ -1714,15 +1714,13 @@ scope (§260) — do not fold them into any of these.
       than trusting it silently. **Trigger:** the next change to rule 4 in
       `services/gl_account_sync`, or a report of a bill posted to a parent
       account that meant a sub-account.
-- [ ] **(c) Two adapters still drop or mislabel records the syncs read as
-      evidence.** (1) Sage Accounting (UK) skips ledgers with
-      `included_in_chart: false`, so a row linked to one reads as a dead link.
-      (2) Business Central's vendor `blocked` is not mapped to `active=False`,
-      so a blocked vendor can be linked or created as a payee. **Durable
-      fix:** emit the out-of-chart ledger with `active=False` and map
-      `blocked`. **Trigger:** the next change to either adapter's listings.
+- [ ] **(c) Business Central still mislabels a record the syncs read as
+      evidence.** Its vendor `blocked` is not mapped to `active=False`, so a
+      blocked vendor can be linked or created as a payee. **Durable fix:** map
+      `blocked`. **Trigger:** the next change to the adapter's listings.
       (Merge.dev's half — account `status` and the GL parent id — landed
-      2026-10-26 with the Contacts vendor fix.)
+      2026-10-26 with the Contacts vendor fix; Sage Accounting UK's
+      out-of-chart ledgers are emitted inactive since decisions §390.)
 - [ ] **(c) Vendor linking has three gaps of its own.** (1)
       `vendors.erp_vendor_id` has no unique index, so two rows sharing an id
       make `scalar_one_or_none` in `services/vendor_sync` raise and abort the
