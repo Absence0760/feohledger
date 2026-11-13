@@ -541,6 +541,12 @@ _GL_TYPES = {"A": "asset", "L": "liability", "C": "equity", "R": "revenue", "E":
 
 
 def _po_status(row: dict[str, str]) -> str:
+    """``PorMasterHdr.OrderStatus`` → ours. ``0`` is an order still in
+    process (being entered or maintained), not yet a finished order, so
+    nothing matches against it (decisions §394). ``1`` (entered, ready to
+    print) and ``4`` (printed) are live orders: SYSPRO approves at the
+    requisition, before a PO exists, so an unprinted order is not an
+    unapproved one."""
     if row.get("CancelledFlag", "").strip().upper() == "Y":
         return "cancelled"
     code = row.get("OrderStatus", "").strip()
@@ -548,6 +554,8 @@ def _po_status(row: dict[str, str]) -> str:
         return "closed"
     if code == "*":
         return "cancelled"
+    if code == "0":
+        return "unissued"
     return "open"
 
 

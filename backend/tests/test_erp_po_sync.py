@@ -30,6 +30,7 @@ import app.services.erp_adapters.dynamics_365_bc  # noqa: F401, E402
 import app.services.erp_adapters.merge_dev  # noqa: F401, E402
 import app.services.erp_adapters.mock_adapter  # noqa: F401, E402
 import app.services.erp_adapters.netsuite  # noqa: F401, E402
+from app.models.procurement import UNISSUED_PO_STATUS  # noqa: E402
 from app.services.erp_adapters.base import PoSkipReason, SkippedPo  # noqa: E402
 
 
@@ -176,6 +177,8 @@ def test_bc_list_pos_maps_orders_and_lines(monkeypatch):
       {"number": "PO-2", "vendorName": "", "currencyCode": "eur",
        "requestedReceiptDate": "2026-05-20", "status": "Draft",
        "totalAmountIncludingTax": 820.00},
+      {"number": "PO-3", "status": "In Review", "totalAmountIncludingTax": 5},
+      {"number": "PO-4", "status": "SomethingNew", "totalAmountIncludingTax": 5},
       {"number": "PO-NO-TOTAL", "status": "Open"},
       {"number": null, "totalAmountIncludingTax": 5}
     ]}"""
@@ -186,10 +189,10 @@ def test_bc_list_pos_maps_orders_and_lines(monkeypatch):
         listing = _run(_bc_adapter(monkeypatch).list_pos_report())
     pos = listing.pos
 
-    assert [p.po_number for p in pos] == ["PO-1", "PO-2"]
+    assert [p.po_number for p in pos] == ["PO-1", "PO-2", "PO-3", "PO-4"]
     # Named, so a total synced for it earlier is no longer trusted (§323).
     assert listing.skipped == [SkippedPo("PO-NO-TOTAL", PoSkipReason.unpriceable)]
-    first, second = pos
+    first, second, in_review, unknown = pos
     assert first.total == Decimal("99999999999999.99")
     assert first.vendor_name == "Acme"
     assert first.currency is None
@@ -206,7 +209,12 @@ def test_bc_list_pos_maps_orders_and_lines(monkeypatch):
     assert second.currency == "EUR"
     assert second.vendor_name is None
     assert second.expected_delivery_date == date(2026, 5, 20)
-    assert second.status == "open"  # Draft / In Review / Open are all live orders
+    # Draft (unreleased) and In Review (pending approval) are not orders BC has
+    # released, so nothing matches against them (decisions §394); a status
+    # this build does not know stays open.
+    assert second.status == UNISSUED_PO_STATUS
+    assert in_review.status == UNISSUED_PO_STATUS
+    assert unknown.status == "open"
     assert second.line_items == []
 
     url = client.get.await_args.args[0]
@@ -349,6 +357,7 @@ def test_netsuite_list_pos_maps_suiteql_rows():
       {"id": "503", "tranid": "PO-503", "status": "C", "foreigntotal": 10},
       {"id": "504", "tranid": "PO-504", "status": "G", "foreigntotal": 10},
       {"id": "505", "tranid": "PO-505", "status": "F", "foreigntotal": 10},
+      {"id": "508", "tranid": "PO-508", "status": "A", "foreigntotal": 10},
       {"id": "506", "tranid": "PO-NO-TOTAL", "status": "B", "foreigntotal": null},
       {"id": "507", "tranid": null, "foreigntotal": 1}
     ], "hasMore": false}"""
@@ -367,6 +376,8 @@ def test_netsuite_list_pos_maps_suiteql_rows():
         ("PO-503", "cancelled"),
         ("PO-504", "closed"),
         ("PO-505", "open"),
+        # Pending Supervisor Approval: synced, never matched (decisions §394).
+        ("PO-508", UNISSUED_PO_STATUS),
     ]
     assert pos[0].total == Decimal("99999999999999.99")
     assert pos[0].currency == "USD"
@@ -652,7 +663,7 @@ def test_po_payload_expected_delivery_date_default_is_none():
 
 def test_merge_dev_list_pos_status_mapping_uses_internal_vocab():
     """Whatever Merge calls a status, we normalize into open/closed/
-    cancelled — `PurchaseOrder.status` only accepts those values, and
+    cancelled/unissued — `PurchaseOrder.status` only accepts those values, and
     a stray "FULFILLED" reaching the DB would either error or display
     as junk in the UI."""
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
@@ -665,8 +676,10 @@ def test_merge_dev_list_pos_status_mapping_uses_internal_vocab():
         "CANCELLED": "cancelled",
         "CANCELED": "cancelled",
         "VOIDED": "cancelled",
-        # Merge's published PurchaseOrderStatusEnum.
-        "SUBMITTED": "open",
+        # Merge's published PurchaseOrderStatusEnum. DRAFT and SUBMITTED are
+        # orders nobody has approved (decisions §394).
+        "DRAFT": UNISSUED_PO_STATUS,
+        "SUBMITTED": UNISSUED_PO_STATUS,
         "AUTHORIZED": "open",
         "BILLED": "closed",
         "DELETED": "cancelled",

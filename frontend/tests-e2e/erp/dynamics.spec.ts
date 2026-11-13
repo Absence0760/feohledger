@@ -137,7 +137,10 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 		expect(local!.currency).toBeNull();
 		expect(Number(euro!.total)).toBeCloseTo(820, 2);
 		expect(euro!.currency).toBe('EUR');
-		expect(euro!.status).toBe('open');
+		// fake-erp serves PO-FAKE-BC-402 as a BC `Draft`, an order BC has not
+		// released: it syncs, as `unissued`, and nothing matches against it
+		// (decisions §394).
+		expect(euro!.status).toBe('unissued');
 	});
 
 	test('full send: approved invoice posts as a purchaseInvoice and completes', async ({

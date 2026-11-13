@@ -19,6 +19,7 @@ import httpx
 import pytest
 
 from app.config import settings
+from app.models.procurement import UNISSUED_PO_STATUS
 from app.services.erp_adapters.base import (
     SYNC_LISTING_MAX_ROWS,
     ErpInvoiceStatus,
@@ -750,3 +751,23 @@ def test_a_transport_error_on_any_sync_listing_is_an_incomplete_listing():
         with pytest.raises(ErpListingIncomplete) as exc:
             _run(fake, listing)
         assert exc.value.gap is ListingGap.fetch_failed
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        # Not approved yet: synced, never matched against (decisions §394).
+        ("draft", UNISSUED_PO_STATUS),
+        ("Submitted", UNISSUED_PO_STATUS),
+        ("partiallyApproved", UNISSUED_PO_STATUS),
+        ("analyzing", UNISSUED_PO_STATUS),
+        ("declined", "cancelled"),
+        ("pending", "open"),
+        ("closed", "closed"),
+        ("somethingNew", "open"),
+    ],
+)
+def test_po_state_maps_an_unapproved_po_to_unissued(state, expected):
+    from app.services.erp_adapters.sage_intacct import _po_status
+
+    assert _po_status(state) == expected
