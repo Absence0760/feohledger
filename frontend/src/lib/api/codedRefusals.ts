@@ -678,6 +678,9 @@ const BUILDERS: Record<string, Builder> = {
 			: t('refusal.externalPaymentAmountChanged', { staged, amount });
 	}),
 	external_payment_paid_on_future: fixed('refusal.externalPaymentPaidOnFuture'),
+	// `api/exceptions.py::record_erp_payment` — a kept ERP payment stating no
+	// cash figure whose bill could not be read back to confirm one (§393)
+	erp_paid_amount_unconfirmed: fixed('refusal.erpPaidAmountUnconfirmed'),
 	// `api/payments.py` — `GET /runs/{id}/nacha` (`services/nacha.py`)
 	nacha_requires_record_only: fixed('refusal.nachaRequiresRecordOnly'),
 	nacha_not_configured: nachaNotConfigured,
@@ -904,7 +907,12 @@ const BUILDERS: Record<string, Builder> = {
 	card_skip_erp_bill: fixed('refusal.cardSkipErpBill'),
 	card_skip_issue_failed: fixed('refusal.cardSkipIssueFailed'),
 	// The whole `/cards/generate` call, on a tenant whose programme is off.
-	cards_not_enabled: fixed('refusal.cardsNotEnabled')
+	cards_not_enabled: fixed('refusal.cardsNotEnabled'),
+	// `POST /organization/erp/oauth/status-sync` (`api/erp_oauth.py`, §386):
+	// why an on-request payment check cannot run.
+	status_sync_off: fixed('refusal.statusSyncOff'),
+	status_sync_unsupported: fixed('refusal.statusSyncUnsupported'),
+	status_sync_needs_reconnect: fixed('refusal.statusSyncNeedsReconnect')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

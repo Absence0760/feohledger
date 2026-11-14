@@ -54,3 +54,43 @@ describe('ICU plural messages resolve in every locale', () => {
 		});
 	}
 });
+
+// The bulk toasts that used to splice a "skipped" clause onto a translated
+// sentence (in English on /expenses, as catalogue fragments elsewhere). Each is
+// now one message; it must carry both counts in every locale, and the
+// optional clauses must vanish at zero.
+describe('bulk "N done, M skipped" toasts are one message per locale', () => {
+	const SKIPPED_KEYS = [
+		'expenses.toast.glCodedSkipped',
+		'expenses.cards.toast.syncedSkipped',
+		'vendors.bulk.verifiedSkipped',
+		'vendors.bulk.rejectedSkipped',
+		'vendors.bulk.screenedSkipped',
+		'contracts.bulk.updatedSkipped'
+	];
+	for (const loc of SUPPORTED_LOCALES) {
+		test(`${loc}: renders the done count and the skipped count`, async () => {
+			const dict = (await loadAllMessages(loc)) as Record<string, string>;
+			for (const key of SKIPPED_KEYS) {
+				const out = interpolate(dict[key], { n: 3, skipped: 7 }, loc);
+				expect(out, `${loc}.${key}`).toContain('3');
+				expect(out, `${loc}.${key}`).toContain('7');
+				expect(out, `${loc}.${key}`).not.toMatch(/[{}]/);
+				if (loc !== 'en') expect(out, `${loc}.${key} is English`).not.toMatch(/skipped/i);
+			}
+		});
+
+		test(`${loc}: optional clauses drop out at zero`, async () => {
+			const dict = (await loadAllMessages(loc)) as Record<string, string>;
+			const bare = interpolate(dict['expenses.cards.toast.imported'], { n: 4, duplicates: 0, refused: 0 }, loc);
+			const full = interpolate(dict['expenses.cards.toast.imported'], { n: 4, duplicates: 2, refused: 5 }, loc);
+			expect(bare).not.toMatch(/[25]/);
+			expect(full).toContain('2');
+			expect(full).toContain('5');
+			const clean = interpolate(dict['positivePay.modal.toast.returnFlagged'], { flagged: 4, exceptions: 0 }, loc);
+			const raised = interpolate(dict['positivePay.modal.toast.returnFlagged'], { flagged: 4, exceptions: 6 }, loc);
+			expect(clean).not.toContain('0');
+			expect(raised).toContain('6');
+		});
+	}
+});

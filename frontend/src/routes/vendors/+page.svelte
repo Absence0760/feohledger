@@ -463,7 +463,7 @@
 			await fetchVendors();
 			clearSelection();
 			const msg = res.skipped.length
-				? m('vendors.bulk.verified', { n: res.updated }) + m('vendors.bulk.skipped', { n: res.skipped.length })
+				? m('vendors.bulk.verifiedSkipped', { n: res.updated, skipped: res.skipped.length })
 				: m('vendors.bulk.verified', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 		} catch (err) {
@@ -480,7 +480,7 @@
 			await fetchVendors();
 			clearSelection();
 			const msg = res.skipped.length
-				? m('vendors.bulk.rejected', { n: res.updated }) + m('vendors.bulk.skipped', { n: res.skipped.length })
+				? m('vendors.bulk.rejectedSkipped', { n: res.updated, skipped: res.skipped.length })
 				: m('vendors.bulk.rejected', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
@@ -498,7 +498,7 @@
 			await fetchVendors();
 			clearSelection();
 			const msg = res.skipped.length
-				? m('vendors.bulk.screened', { n: res.screened }) + m('vendors.bulk.skipped', { n: res.skipped.length })
+				? m('vendors.bulk.screenedSkipped', { n: res.screened, skipped: res.skipped.length })
 				: m('vendors.bulk.screened', { n: res.screened });
 			toast(msg, res.screened > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);

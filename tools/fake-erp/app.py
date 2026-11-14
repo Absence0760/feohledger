@@ -1102,38 +1102,64 @@ D365_VENDOR_FIXTURES: list[dict] = [
         "id": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
         "number": "V0001",
         "displayName": "Fake BC Vendor A",
+        "paymentTermsId": "6a4f1d2e-0000-0000-0000-000000000030",
     },
 ]
+
+# BC `paymentTerms`. A vendor names its term by `paymentTermsId` (a GUID); the
+# code is only on the term, reached through the vendor's `paymentTerm`
+# navigation (`$expand=paymentTerm`).
+D365_PAYMENT_TERMS: dict[str, dict] = {
+    "6a4f1d2e-0000-0000-0000-000000000030": {
+        "id": "6a4f1d2e-0000-0000-0000-000000000030",
+        "code": "30 DAYS",
+        "displayName": "Net 30 days",
+        "dueDateCalculation": "30D",
+    },
+}
 
 
 @d365.get("/{environment}/api/v2.0/companies({company_id})/vendors")
 async def d365_list_vendors(request: Request, environment: str, company_id: str) -> dict:
     _require_d365_auth(request)
-    return {"value": copy.deepcopy(D365_VENDOR_FIXTURES)}
+    rows = copy.deepcopy(D365_VENDOR_FIXTURES)
+    if "paymentTerm" in request.query_params.get("$expand", ""):
+        for row in rows:
+            row["paymentTerm"] = copy.deepcopy(D365_PAYMENT_TERMS.get(row.get("paymentTermsId")))
+    return {"value": rows}
 
 
-_D365_EXTERNAL_DOC_FILTER = re.compile(r"externalDocumentNumber\s+eq\s+'([^']*)'", re.IGNORECASE)
+# The pre-create lookup's `$filter`: `vendorId eq <guid> and vendorInvoiceNumber
+# eq '<number>'` (a quote in the number doubled, OData's escape). API v2.0's
+# purchaseInvoice has no `externalDocumentNumber` — that is a salesInvoice
+# field — so, like BC, a filter on it is not supported here.
+_D365_VENDOR_INVOICE_FILTER = re.compile(
+    r"vendorId\s+eq\s+([0-9a-fA-F-]{36})\s+and\s+vendorInvoiceNumber\s+eq\s+'((?:[^']|'')*)'",
+    re.IGNORECASE,
+)
 
 
 @d365.get("/{environment}/api/v2.0/companies({company_id})/purchaseInvoices")
 async def d365_list_purchase_invoices(
     request: Request, environment: str, company_id: str
 ) -> dict:
-    """Collection query — only supports the ``externalDocumentNumber eq '...'``
-    ``$filter`` shape our own adapter sends. Backs the pre-create idempotency
-    lookup (issue #143): a retried push after a lost response finds the
-    already-created invoice here instead of creating a second one via POST."""
+    """Collection query — only supports the ``vendorId eq <id> and
+    vendorInvoiceNumber eq '...'`` ``$filter`` shape our own adapter sends.
+    Backs the pre-create idempotency lookup (issue #143): a retried push after
+    a lost response finds the already-created invoice here instead of creating
+    a second one via POST. Any other filter is a 400, as BC answers a filter
+    on a field the entity does not have."""
     _require_d365_auth(request)
     filter_expr = request.query_params.get("$filter", "")
-    values: list[dict] = []
-    match = _D365_EXTERNAL_DOC_FILTER.match(filter_expr.strip())
-    if match:
-        external_doc_number = match.group(1)
-        values = [
-            rec
-            for rec in STATE["d365_invoices"].values()
-            if rec.get("externalDocumentNumber") == external_doc_number
-        ]
+    match = _D365_VENDOR_INVOICE_FILTER.fullmatch(filter_expr.strip())
+    if not match:
+        raise _d365_error(400, "BadRequest", "Could not find a property named in the filter.")
+    vendor_id, number = match.group(1), match.group(2).replace("''", "'")
+    values = [
+        rec
+        for rec in STATE["d365_invoices"].values()
+        if rec.get("vendorId") == vendor_id and rec.get("vendorInvoiceNumber") == number
+    ]
     return {"value": [copy.deepcopy(v) for v in values]}
 
 
@@ -1165,8 +1191,8 @@ async def d365_create_purchase_invoice(
         **totals,
         "vendorId": vendor["id"],
         "vendorNumber": vendor["number"],
-        "vendorInvoiceNumber": body.get("vendorInvoiceNumber"),
-        "externalDocumentNumber": body.get("externalDocumentNumber"),
+        # `Vendor Invoice No.` is a Code[35] field: BC stores it upper-cased.
+        "vendorInvoiceNumber": str(body.get("vendorInvoiceNumber") or "").upper(),
         "invoiceDate": body.get("invoiceDate"),
         "dueDate": body.get("dueDate"),
         "currencyCode": body.get("currencyCode"),
@@ -1187,6 +1213,12 @@ async def d365_post_purchase_invoice(
     if record.get("status") != "Draft":
         # Like BC: only an unposted invoice can be posted.
         raise _d365_error(400, "Application_DialogException", "The invoice is already posted.")
+    extra = D365_EDITED_BEFORE_POST_COMPANIES.get(company_id)
+    if extra is not None:
+        # A BC user added a line to the draft after the adapter checked its
+        # total and before the post ran (the BC block at the end).
+        for key in ("totalAmountExcludingTax", "totalAmountIncludingTax"):
+            record[key] = float(Decimal(str(record[key])) + extra)
     record["status"] = "Open"  # posted/finalized → Open (unpaid)
     # Like BC: any change to the record moves its etag, so a DELETE carrying
     # the draft's etag is refused once the invoice has been posted.
@@ -2323,6 +2355,31 @@ async def xero_credit(body: dict) -> dict:
     return {"status": "ok"}
 
 
+import xero_webhooks  # noqa: E402 — kept beside the hook that uses it
+
+
+@xero.post("/__webhook")
+async def xero_webhook_delivery(body: dict) -> dict:
+    """A webhook delivery as Xero would send it, for the caller to POST to
+    the backend's `/api/erp/webhook/xero` (decisions §392): `{"body",
+    "signature"}`, the body sent verbatim with the signature in
+    `x-xero-signature`. `{"id"}` names the bill (one INVOICE UPDATE event in
+    `tenant_id`, default the organisation this fake connects); `{"intent_to_receive":
+    true}` is Xero's handshake (no events). `key` signs with another key than
+    the committed dev one (a forged delivery)."""
+    key = str(body.get("key") or xero_webhooks.DEV_WEBHOOK_KEY)
+    if body.get("intent_to_receive"):
+        return xero_webhooks.signed_delivery([], key=key)
+    invoice_id = str(body.get("id") or "")
+    if invoice_id not in _xero_state()["invoices"]:
+        raise ProviderError(404, {"detail": "unknown id"})
+    event = xero_webhooks.invoice_event(
+        str(body.get("tenant_id") or XERO_TENANT_ID),
+        invoice_id,
+        event_type=str(body.get("event_type") or "UPDATE"),
+    )
+    return xero_webhooks.signed_delivery([event], key=key)
+
 
 # Xero identity (FakeOAuthApp, client by HTTP Basic) + GET /connections, which
 # lists the one organisation this consent connected (the backend reads
@@ -2419,8 +2476,21 @@ app.include_router(xero)
 # Backs backend/app/services/erp_adapters/sage_accounting.py. Auth is
 # shape-only: any non-empty bearer plus a non-empty X-Business. Collections use
 # Sage's {"$items", "$next", ...} envelope. State lives under STATE["sage"],
-# created lazily so the shared POST /__reset clears it too. Test hook:
-# POST /sage/v3.1/__set-status {"id", "status", "outstanding_amount"?}.
+# created lazily so the shared POST /__reset clears it too. Test hooks:
+# POST /sage/v3.1/__set-status {"id", "status", "outstanding_amount"?,
+#   "payments_allocations"?} — a PAID set by a credit note carries an
+#   allocation with `contact_allocation` and no `contact_payment`, as Sage's;
+# POST /sage/v3.1/__set-business {"plan"?, "year_end_lockdown_date"?,
+#   "multi_currency_enabled"?} — "start" refuses every purchase-invoice write
+#   with 403 (the v3.1 Swagger's Endpoint Availability: Plus / Standard only).
+#
+# What the real API does and the fake does too (the v3.1 Swagger,
+# github.com/nook-io/python-sage openapi.json): a create dated on or before
+# `financial_settings.year_end_lockdown_date`, or naming a deleted contact or an
+# out-of-chart ledger, is a 422 error array; `payments_allocations` comes back
+# only with `show_payments_allocations=true`; `ledger_accounts` honours
+# `show_included_in_chart` (its default is undocumented — the fake leaves
+# out-of-chart ledgers out unless asked, the conservative reading).
 
 sage = APIRouter(prefix="/sage/v3.1")
 
@@ -2442,6 +2512,24 @@ SAGE_CONTACTS = [
         "name": "Fake Sage Customer Ltd",
         "contact_types": [{"id": "CUSTOMER"}],
         "system": False,
+    },
+    # A supplier whose personal data was erased under GDPR: still listed, no
+    # longer a payee (synced inactive).
+    {
+        "id": "sage-contact-3",
+        "name": "Obfuscated",
+        "contact_types": [{"id": "VENDOR"}],
+        "system": False,
+        "gdpr_obfuscated": True,
+    },
+    # A supplier deleted in Sage after it was synced: a create naming it is
+    # refused, and it reads back with `deleted_at`.
+    {
+        "id": "sage-contact-4",
+        "name": "Fake Sage Deleted Supplier Ltd",
+        "contact_types": [{"id": "VENDOR"}],
+        "system": False,
+        "deleted_at": "2026-09-01T00:00:00Z",
     },
 ]
 SAGE_LEDGERS = [
@@ -2470,11 +2558,42 @@ SAGE_LEDGERS = [
         "ledger_account_type": {"id": "OVERHEADS"},
         "included_in_chart": True,
     },
+    # Taken out of the chart: listed only with show_included_in_chart=false,
+    # and refused on a create.
+    {
+        "id": "sage-ledger-7700",
+        "name": "Fake Retired Costs",
+        "nominal_code": 7700,
+        "ledger_account_type": {"id": "OVERHEADS"},
+        "included_in_chart": False,
+        "tax_rate": {"id": "GB_STANDARD", "displayed_as": "Standard 20.00%"},
+    },
+    # A control account Sage reserves for its own postings.
+    {
+        "id": "sage-ledger-2100",
+        "name": "Fake Purchase Ledger Control",
+        "nominal_code": 2100,
+        "ledger_account_type": {"id": "CURRENT_LIABILITY"},
+        "included_in_chart": True,
+        "is_control_account": True,
+    },
 ]
 
 
 def _sage_state() -> dict[str, Any]:
-    return STATE.setdefault("sage", {"invoices": {}, "counter": 0})
+    return STATE.setdefault(
+        "sage",
+        {
+            "invoices": {},
+            "counter": 0,
+            "business": {
+                "plan": "plus",
+                "year_end_lockdown_date": None,
+                "base_currency": {"id": "GBP"},
+                "multi_currency_enabled": True,
+            },
+        },
+    )
 
 
 def _sage_error(status: int, code: str, message: str) -> ProviderError:
@@ -2506,18 +2625,43 @@ async def sage_business_settings(request: Request) -> dict:
 async def sage_contacts(request: Request, page: int = 1) -> JSONResponse:
     _require_sage_auth(request)
     type_id = request.query_params.get("contact_type_id")
+    # A deleted contact leaves the listing (Sage lists it only under
+    # `deleted_since`); GET /contacts/{key} still answers for it.
     rows = [
         c
         for c in SAGE_CONTACTS
-        if not type_id or any(t["id"] == type_id for t in c.get("contact_types", []))
+        if (not type_id or any(t["id"] == type_id for t in c.get("contact_types", [])))
+        and not c.get("deleted_at")
     ]
     return _sage_page(rows if page == 1 else [])
+
+
+@sage.get("/contacts/{key}")
+async def sage_contact(request: Request, key: str) -> JSONResponse:
+    _require_sage_auth(request)
+    for contact in SAGE_CONTACTS:
+        if contact["id"] == key:
+            return JSONResponse(copy.deepcopy(contact))
+    raise _sage_error(404, "RecordNotFound", "Contact not found")
+
+
+@sage.get("/financial_settings")
+async def sage_financial_settings(request: Request) -> dict:
+    _require_sage_auth(request)
+    business = _sage_state()["business"]
+    return {
+        "year_end_lockdown_date": business["year_end_lockdown_date"],
+        "base_currency": business["base_currency"],
+        "multi_currency_enabled": business["multi_currency_enabled"],
+    }
 
 
 @sage.get("/ledger_accounts")
 async def sage_ledger_accounts(request: Request, page: int = 1) -> JSONResponse:
     _require_sage_auth(request)
-    return _sage_page(SAGE_LEDGERS if page == 1 else [])
+    in_chart = request.query_params.get("show_included_in_chart", "true").lower() != "false"
+    rows = [ledger for ledger in SAGE_LEDGERS if ledger["included_in_chart"] is in_chart]
+    return _sage_page(rows if page == 1 else [])
 
 
 @sage.get("/ledger_accounts/{key}")
@@ -2551,17 +2695,33 @@ async def sage_create_purchase_invoice(request: Request) -> JSONResponse:
     """Validates what v3.1 validates for us: known contact and ledgers, a tax
     rate on any taxed line, and net + tax == total per line and overall."""
     _require_sage_auth(request)
+    business = _sage_state()["business"]
+    if business["plan"] == "start":
+        raise _sage_error(403, "Forbidden", "Not available on this subscription")
     body = _xero_json.loads(await request.body(), parse_float=_XeroDecimal)
     inv = body.get("purchase_invoice") or {}
     for field in ("contact_id", "date", "due_date", "invoice_lines"):
         if not inv.get(field):
             raise _sage_error(422, "RecordInvalid", f"{field} is required")
-    if inv["contact_id"] not in {c["id"] for c in SAGE_CONTACTS}:
+    lockdown = business["year_end_lockdown_date"]
+    if lockdown and inv["date"] <= lockdown:
+        raise _sage_error(422, "RecordInvalid", "date is on or before the lockdown date")
+    currency = inv.get("currency_id")
+    if (
+        currency
+        and currency != business["base_currency"]["id"]
+        and not business["multi_currency_enabled"]
+    ):
+        raise _sage_error(422, "RecordInvalid", "currency is not enabled")
+    contacts = {c["id"]: c for c in SAGE_CONTACTS}
+    contact = contacts.get(inv["contact_id"])
+    if contact is None or contact.get("deleted_at"):
         raise _sage_error(422, "RecordInvalid", "contact not found")
-    ledgers = {ledger["id"] for ledger in SAGE_LEDGERS}
+    ledgers = {ledger["id"]: ledger for ledger in SAGE_LEDGERS}
     total = _XeroDecimal(0)
     for line in inv["invoice_lines"]:
-        if line.get("ledger_account_id") not in ledgers:
+        ledger = ledgers.get(line.get("ledger_account_id"))
+        if ledger is None or not ledger["included_in_chart"]:
             raise _sage_error(422, "RecordInvalid", "ledger account not found")
         tax = _XeroDecimal(str(line.get("tax_amount", 0)))
         if tax and not line.get("tax_rate_id"):
@@ -2589,6 +2749,7 @@ async def sage_create_purchase_invoice(request: Request) -> JSONResponse:
         "status": {"id": "UNPAID"},
         "void_reason": None,
         "deleted_at": None,
+        "payments_allocations": [],
     }
     state["invoices"][record["id"]] = record
     return JSONResponse(_xero_encode(copy.deepcopy(record)), status_code=201)
@@ -2600,13 +2761,18 @@ async def sage_get_purchase_invoice(request: Request, key: str) -> JSONResponse:
     record = _sage_state()["invoices"].get(key)
     if record is None or record.get("deleted_at"):
         raise _sage_error(404, "RecordNotFound", "Purchase invoice not found")
-    return JSONResponse(_xero_encode(copy.deepcopy(record)))
+    out = copy.deepcopy(record)
+    if request.query_params.get("show_payments_allocations", "").lower() != "true":
+        out.pop("payments_allocations", None)
+    return JSONResponse(_xero_encode(out))
 
 
 @sage.delete("/purchase_invoices/{key}")
 async def sage_delete_purchase_invoice(request: Request, key: str) -> Response:
     """Deletes a draft; voids an unpaid posted invoice (void_reason required)."""
     _require_sage_auth(request)
+    if _sage_state()["business"]["plan"] == "start":
+        raise _sage_error(403, "Forbidden", "Not available on this subscription")
     record = _sage_state()["invoices"].get(key)
     if record is None or record.get("deleted_at"):
         raise _sage_error(404, "RecordNotFound", "Purchase invoice not found")
@@ -2632,6 +2798,17 @@ async def sage_set_status(body: dict) -> dict:
     record["status"] = {"id": body["status"]}
     if body.get("outstanding_amount") is not None:
         record["outstanding_amount"] = _XeroDecimal(str(body["outstanding_amount"]))
+    if isinstance(body.get("payments_allocations"), list):
+        record["payments_allocations"] = body["payments_allocations"]
+    return {"status": "ok"}
+
+
+@sage.post("/__set-business")
+async def sage_set_business(body: dict) -> dict:
+    business = _sage_state()["business"]
+    for key in ("plan", "year_end_lockdown_date", "multi_currency_enabled"):
+        if key in body:
+            business[key] = body[key]
     return {"status": "ok"}
 
 
@@ -3442,6 +3619,12 @@ def _d365_check_invoice_lines(lines: list[dict]) -> None:
 # untaxed (total = the lines).
 D365_VAT_COMPANIES: dict[str, Decimal] = {"fake-vat-co": Decimal("20")}
 
+# A BC company whose staff edit purchase drafts: posting a draft here first
+# adds this much to it, as a line a BC user added between the adapter's total
+# check and its `Microsoft.NAV.post`. Keyed by company like the VAT one, so a
+# spec opts in by `company_id` without touching shared state.
+D365_EDITED_BEFORE_POST_COMPANIES: dict[str, Decimal] = {"fake-edit-co": Decimal("10.00")}
+
 
 def _d365_invoice_totals(raw_body: bytes, company_id: str) -> dict:
     """`totalAmountExcludingTax` / `totalTaxAmount` / `totalAmountIncludingTax`
@@ -3489,6 +3672,46 @@ d365_sync = APIRouter(prefix="/d365")
 async def d365_list_accounts(request: Request, environment: str, company_id: str) -> dict:
     _require_d365_auth(request)
     return _d365_page(request, D365_ACCOUNT_FIXTURES)
+
+
+@d365_sync.get("/{environment}/api/v2.0/companies({company_id})/accounts({account_id})")
+async def d365_get_account(
+    request: Request, environment: str, company_id: str, account_id: str
+) -> dict:
+    """One account by id, as the adapter reads it back to code a refused post
+    (`blocked`, `directPosting`). Unknown → 404, like BC."""
+    _require_d365_auth(request)
+    account = next((a for a in D365_ACCOUNT_FIXTURES if a["id"] == account_id), None)
+    if account is None:
+        raise _d365_error(404, "BadRequest_NotFound", f"No account with id {account_id}.")
+    return copy.deepcopy(account)
+
+
+@d365_sync.get("/{environment}/api/v2.0/companies({company_id})/vendors({vendor_id})")
+async def d365_get_vendor(
+    request: Request, environment: str, company_id: str, vendor_id: str
+) -> dict:
+    """One vendor by id, as the adapter reads it back to code a refused post
+    (`blocked`). Unknown → 404, like BC."""
+    _require_d365_auth(request)
+    vendor = next((v for v in D365_VENDOR_FIXTURES if v["id"] == vendor_id), None)
+    if vendor is None:
+        raise _d365_error(404, "BadRequest_NotFound", f"No vendor with id {vendor_id}.")
+    return copy.deepcopy(vendor)
+
+
+# Every fake BC company keeps its books in US dollars: BC leaves a purchase
+# invoice's `currencyCode` blank for this local currency (LCY), and the adapter
+# reads it from here to judge a found invoice with a blank code.
+D365_LOCAL_CURRENCY = "USD"
+
+
+@d365_sync.get("/{environment}/api/v2.0/companies({company_id})/companyInformation")
+async def d365_company_information(request: Request, environment: str, company_id: str) -> dict:
+    """The company's information, as API v2.0 documents it (one object);
+    `currencyCode` is the company's LCY."""
+    _require_d365_auth(request)
+    return {"id": f"ci-{company_id}", "displayName": "Fake BC Company", "currencyCode": D365_LOCAL_CURRENCY}
 
 
 @d365_sync.get("/{environment}/api/v2.0/companies({company_id})/purchaseOrders")

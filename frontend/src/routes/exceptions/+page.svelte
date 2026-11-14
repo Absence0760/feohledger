@@ -669,7 +669,8 @@
 		recordingErp = true;
 		erpError = '';
 		try {
-			// No `amount`: the server records what the invoice owes on that date.
+			// No `amount`: the server records the figure the ERP states (reading
+			// the bill again when the row kept none), never one typed here.
 			await api.post(`/api/exceptions/${target.id}/record-erp-payment`, {
 				method,
 				reference,

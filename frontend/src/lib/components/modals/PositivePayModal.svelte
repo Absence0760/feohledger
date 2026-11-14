@@ -166,10 +166,10 @@
 			const flagged = result.amount_mismatches + result.not_on_file;
 			toast(
 				flagged > 0
-					? m('positivePay.modal.toast.returnFlagged', { flagged }) +
-							m('positivePay.modal.toast.returnExceptions', {
-								exceptions: result.exceptions_created
-							})
+					? m('positivePay.modal.toast.returnFlagged', {
+							flagged,
+							exceptions: result.exceptions_created
+						})
 					: m('positivePay.modal.toast.returnClean'),
 				flagged > 0 ? 'error' : 'success'
 			);

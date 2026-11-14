@@ -224,6 +224,146 @@ def test_a_cash_payment_made_in_quickbooks_is_cash_not_a_vendor_credit(pay_type,
     assert report.paid_only_by_us is False
 
 
+# -- the cash QuickBooks shows (decisions §393) ------------------------------
+
+
+def test_a_bill_paid_in_full_in_cash_states_the_cash_and_its_currency():
+    """The status sync records QuickBooks' own figure, never FeohLedger's."""
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "150.00", pay_type="Check", txn_date="2026-10-21")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.paid_amount == Decimal("150.00")
+    assert report.paid_currency == "USD"
+    assert report.payment_method == "check"
+
+
+def test_cash_is_what_the_lines_applied_to_this_bill_not_the_payments_total():
+    """One BillPayment can pay several bills; only its lines on THIS bill are
+    this bill's cash."""
+    qbo = _Qbo()
+    qbo.bill("501", total="150.00")
+    qbo.bill("502", total="70.00")
+    _payment_record(
+        qbo, "501", "220.00", [_line("Bill", "501", "150.00"), _line("Bill", "502", "70.00")]
+    )
+    # The helper takes every Bill line off the bill it names; QuickBooks takes
+    # each line off its own bill.
+    qbo.bills["501"]["Balance"] = Decimal("0")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.paid and not report.settled_by_credit
+    assert report.paid_amount == Decimal("150.00")
+
+
+def test_a_bill_paid_part_by_cheque_part_by_card_states_the_sum_and_no_one_rail():
+    """Both are cash, so the bill is paid in cash (§303) at their sum. Neither
+    rail is the whole payment's, so none is stated (1099-reportable), rather
+    than the later payment's standing for both."""
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "100.00", pay_type="Check", txn_date="2026-10-20")
+    qbo.pay("501", "50.00", pay_type="CreditCard", txn_date="2026-10-21")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.paid and not report.settled_by_credit
+    assert report.paid_amount == Decimal("150.00")
+    assert report.payment_method is None
+    assert report.paid_on == date(2026, 10, 21)
+
+
+def test_two_cheques_keep_their_rail():
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "100.00", pay_type="Check", txn_date="2026-10-20")
+    qbo.pay("501", "50.00", pay_type="Check", txn_date="2026-10-21")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.paid_amount == Decimal("150.00") and report.payment_method == "check"
+
+
+def test_a_part_paid_bill_states_no_cash_amount():
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "50.00")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.partially_paid
+    assert report.paid_amount is None
+
+
+@pytest.mark.parametrize("pay_type", ["Check", "CreditCard"])
+def test_a_bill_paid_part_by_a_vendor_credit_states_no_cash_amount(pay_type):
+    """§303: a vendor credit is not money leaving. Settled by credit, so the
+    cash beside it is never booked as the payment of the whole bill."""
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "100.00", pay_type=pay_type)
+    _apply_credit(qbo, "501", "50.00")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.paid
+    assert report.settled_by_credit is True
+    assert report.paid_amount is None
+
+
+def test_a_bill_we_part_paid_ourselves_states_no_cash_amount():
+    """Our write-back and a person's cheque together: no one payment a record
+    could state, as Xero answers (§386)."""
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "100.00", note=f"FeohLedger payment {PAYMENT_ID}")
+    qbo.pay("501", "50.00")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.state is ErpBillState.paid and report.reduced_outside
+    assert report.paid_amount is None
+    # Stated, so the sync blocks such a bill rather than book the owed figure.
+    assert report.our_payment_applied is True
+
+
+def test_a_voided_write_back_of_ours_is_not_applied():
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    pid = qbo.pay("501", "150.00", note=f"FeohLedger payment {PAYMENT_ID}")
+    qbo.payments[pid]["TotalAmt"] = Decimal("0")
+    qbo.bills["501"]["Balance"] = Decimal("150.00")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.our_payment_applied is False
+
+
+def test_a_bill_paid_only_by_our_write_back_states_no_cash_amount():
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "150.00", note=f"FeohLedger payment {PAYMENT_ID}")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.paid_only_by_us and report.paid_amount is None
+
+
+def test_the_cash_is_in_the_bills_currency():
+    qbo = _Qbo()
+    qbo.bill(total="150.00", CurrencyRef={"value": "cad", "name": "Canadian Dollar"})
+    qbo.pay("501", "150.00")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.paid_amount == Decimal("150.00") and report.paid_currency == "CAD"
+
+
+def test_a_bill_stating_no_currency_states_none_for_its_cash():
+    """The sync refuses an amount in no currency (§386): never a bare number."""
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    del qbo.bills["501"]["CurrencyRef"]
+    qbo.pay("501", "150.00")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.paid_amount == Decimal("150.00") and report.paid_currency is None
+
+
+def test_a_payment_stating_another_currency_than_its_bill_states_none():
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    pid = qbo.pay("501", "150.00")
+    qbo.payments[pid]["CurrencyRef"] = {"value": "EUR", "name": "Euro"}
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    # The amount stays stated: the sync judges a currency only beside one, so
+    # dropping it here would book the owed figure instead of refusing.
+    assert report.paid_amount == Decimal("150.00")
+    assert report.paid_currency is None
+
+
 def _payment_record(qbo: _Qbo, bill_id: str, total: str, lines: list[dict], note="") -> str:
     """A BillPayment a person made in QuickBooks, with the given lines, linked
     from the bill as real QuickBooks does; the bill comes down by what the

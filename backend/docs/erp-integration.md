@@ -330,8 +330,8 @@ alone, and a bill with nothing owing but no visible payment reads
 `docs/followups.md` ("A bill paid in an ERP other than QuickBooks or Xero
 never reaches FeohLedger"). QuickBooks Online and Xero are the exceptions:
 QuickBooks' status comes back through its own webhook and a change-data-capture
-sweep, Xero's through the same sweep reading its `If-Modified-Since` listings
-(next two sections).
+sweep, Xero's through its invoice webhook and the same sweep reading its
+`If-Modified-Since` listings (next two sections).
 
 **A paid report may carry the ERP's own payment date and rail.** The generic
 body accepts optional `paid_on` (`YYYY-MM-DD`) and `payment_method` (a
@@ -360,6 +360,13 @@ Decisions §295; the phase-by-phase account is
   a bill QuickBooks paid, part-paid or deleted. The tenant is found through the
   control-plane realm index (`uq_organizations_erp_oauth_company`, migration
   0117), which also makes "one tenant per QuickBooks company" a database rule.
+  A tenant the sweep would skip (`status_sync_now_refusal`: status sync off,
+  a connection that needs reconnecting) is skipped by the webhook too, before
+  any QuickBooks read, so with status sync off a delivery never acts on an
+  invoice the push closed at `done` (decisions §392, the rule Xero's webhook
+  keeps). The dedup store unreachable is our failure, a bodyless 503; any
+  event claim the delivery took before the failure is released first, so
+  Intuit's redelivery is not deduped away.
 - **How a bill's payments are found.** A Bill names each BillPayment applied
   to it in its `LinkedTxn`, typed by how it was paid: `BillPaymentCheck` (a
   bank/cheque payment, which is what Pay Bills from a bank account records) or
@@ -397,9 +404,25 @@ with `FEOH_ERP_STATUS_SYNC_ENABLED` on a confirmed Xero push lands payable at
 read, `apply_bill_report`'s table, the write-back, the void) applies. What
 differs:
 
-- **No webhook; the sweep and an admin's "check now".** No Xero webhook is
-  wired here (`docs/followups.md`), so the `erp-status-sync` sweep is the
-  channel:
+- **The webhook, the sweep, and an admin's "check now" (decisions §392).**
+  `POST /api/erp/webhook/xero` takes Xero's invoice webhook for every connected
+  organisation: `x-xero-signature` (base64 HMAC-SHA256 of the raw body under the
+  platform app's ONE webhook key, `FEOH_ERP_XERO_WEBHOOK_KEY`; empty = off) is
+  checked before anything is parsed. The answers are Xero's protocol, not the
+  generic route's 204: **401** for anything unverifiable (no key, an oversized
+  body, a bad or missing signature) and a bodyless **200** for every verified
+  delivery whatever it decided, which is what the intent-to-receive check
+  requires before Xero enables the webhook (a correctly signed, empty delivery
+  must answer 200 and an incorrectly signed one 401). Each `INVOICE` event is
+  deduped before the answer by its own identity (organisation, category, type,
+  resource, time — Xero sends no event id), its `tenantId` picks the one tenant
+  connected to that organisation (`org_for_company`, the realm index), a tenant
+  the sweep would skip (`status_sync_now_refusal`) is skipped, and its
+  `resourceId` is read back and applied by `sync_bills`, the sweep's per-bill
+  path, after the response (`services/erp_xero_webhook`). A sales invoice or a
+  hand-keyed bill costs no Xero call: only a bill an invoice was pushed as is
+  read. The dedup store unreachable is our failure, a bodyless 503. The sweep
+  stays the backstop for a lost or failed event:
   `changed_bills` reads `GET Invoices?where=Type=="ACCPAY"` and `GET
   Payments?where=PaymentType=="ACCPAYPAYMENT"`, both with `If-Modified-Since`
   set to the connection's high-water mark (`yyyy-mm-ddThh:mm:ss`, UTC), 1,000
@@ -413,6 +436,9 @@ differs:
   /api/organization/erp/oauth/status-sync` (admin, audited first, four an hour
   per tenant, one at a time, 202 and the pass runs after the response; 409
   `status_sync_off` / `status_sync_unsupported` / `status_sync_needs_reconnect`).
+  The ERP settings panel's "Check payments now" button calls it, shown only
+  while `GET …/oauth/status` says `status_sync_available` (the same rule, its
+  `status_sync_refusal` naming the 409 code otherwise).
 - **Matched by the bill id, in every state.** `Reference` is ACCREC-only in
   Xero, so a bill carries no marker of ours. Its `InvoiceID` is a GUID Xero
   never reuses, so the report sets `match_by_reference` and the sync matches it
@@ -440,7 +466,8 @@ differs:
   same way (after the live-claim refusals, so a FeohLedger payment, run or card
   on the invoice is named first, §309), and the exception's one-click record
   books the stated figure or nothing, refusing one stated with no currency.
-  QuickBooks states no amount yet and records what is owed, as before.
+  QuickBooks states its cash the same way, through the same path (§393;
+  `quickbooks-online-adapter.md` § Phases 3–5 as built).
 - **The rail.** A Xero payment names the account it came from, not a rail: a
   `CREDITCARD` account reads as `card` (off the 1099), anything else as not
   stated. A rail that cannot be read for any reason (no payments scope, a 429,
@@ -718,7 +745,6 @@ POST /purchaseInvoices
   "invoiceDate": "2026-04-01",
   "dueDate": "2026-05-01",
   "vendorInvoiceNumber": "INV-2024-001",
-  "externalDocumentNumber": "<correlation_id>",
   "purchaseInvoiceLines": [
     {
       "lineType": "Account",
@@ -748,7 +774,10 @@ POST /subscriptions
 - Must create vendor in BC first or map to existing vendor number
 - `purchaseInvoiceLines` require item numbers or GL accounts
 - Posting the invoice is a separate step from creating it
-- The `correlation_id` should be stored in `externalDocumentNumber`
+- API v2.0's purchaseInvoice has **no `externalDocumentNumber`** (that is a
+  salesInvoice field), so the idempotency key is BC's own duplicate key: the
+  vendor (`vendorId`) and the Vendor Invoice No. (`vendorInvoiceNumber`) — see
+  [Business Central: chart, POs and void](#business-central-chart-pos-and-void)
 
 ---
 
@@ -1107,7 +1136,7 @@ Each ERP has different field names for the same concepts. The adapter handles ma
 | po_number | purchaseOrderNumber | PurchaseOrder | purchaseOrderNumber | PONum | PONumber.value |
 | gl_account | accountId | GLAccount | account.id | GLAccount | Account.value |
 | currency | currencyCode | DocumentCurrency | currency.refName | CurrencyCode | CurrencyID.value |
-| correlation_id | externalDocumentNumber | ReferenceDocument | externalId | UserDefinedField | Note |
+| correlation_id | — (lookup by `vendorId` + `vendorInvoiceNumber`) | ReferenceDocument | externalId | UserDefinedField | Note |
 
 ## Error Handling
 
@@ -1869,17 +1898,17 @@ target ERP actually supports:
 |---|---|
 | `merge_dev` | `X-Idempotency-Key: <correlation_id>` header on `POST /invoices` — Merge's unified API returns the ORIGINAL response for a repeated key instead of creating a second invoice. |
 | `netsuite` | Pre-create lookup: `GET /vendorBill?q=externalId IS "<correlation_id>"` (NetSuite enforces `externalId` uniqueness per record type). A match short-circuits `post_invoice` to a success referencing the existing bill — once its `total` reads back as the approved amount (the same check as a fresh create); only a miss proceeds to `POST /vendorBill`. |
-| `dynamics_365_bc` | Pre-create lookup: `GET purchaseInvoices?$filter=externalDocumentNumber eq '<correlation_id>'`. A hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount; a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` (an earlier attempt whose post step failed or whose response was lost) is finished: its total re-checked, then `Microsoft.NAV.post` re-run — never a second create. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
+| `dynamics_365_bc` | Pre-create lookup on BC's own duplicate key: `GET purchaseInvoices?$filter=vendorId eq <vendor guid> and vendorInvoiceNumber eq '<NUMBER>'` (upper-cased, since `Vendor Invoice No.` is a `Code[35]` field; a quote doubled). API v2.0's purchaseInvoice has no `externalDocumentNumber`, so the old filter on it failed every push. More than one hit refuses `duplicate_document_number`; a 200 whose body is not a collection is a retryable failure, never a miss. A hit found `Paid` refuses `existing_invoice_not_open` whatever its total — BC has paid a bill we cannot prove we sent, and since BC has no status sync, success would close the invoice at `done` as our own push, with that payment recorded nowhere here. Any other hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount **and** its `currencyCode` is the invoice's (a blank code is BC's local currency, read from `GET companyInformation`; any difference, or an LCY BC does not state, refuses `posted_total_mismatch`; a failed LCY read is retryable); a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` at the approved total and in the invoice's currency (an earlier attempt whose post step failed or whose response was lost) is finished: `Microsoft.NAV.post` re-run and the posted total read back — never a second create. A `Draft` at any other total may be a BC user's own draft of this bill, so it is refused `posted_total_mismatch` and **left in BC, never deleted or repriced** (decisions §391); a coded post refusal of a found draft leaves it in BC too. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
 
 The local `fake-erp` mock implements the matching server-side behavior (a
 merge-idempotency-key cache; `q=`/`$filter=` collection queries filtered by
-`externalId`/`externalDocumentNumber`) so this is exercised end-to-end by
+`externalId` / `vendorId` + `vendorInvoiceNumber`) so this is exercised end-to-end by
 `pnpm test:erp` without a live ERP account. Unit-level coverage (mocked HTTP,
 no fake-erp container needed) lives in
 `backend/tests/test_erp_adapter_idempotency.py`.
 
 **A failed lookup is a failure, not a miss** — on every direct adapter. A
-non-200 from the NetSuite `externalId` or the BC `externalDocumentNumber`
+non-200 from the NetSuite `externalId` or the BC vendor-and-invoice-number
 lookup returns a retryable `erp_failure_message(...)` result and creates
 nothing; the retry looks again. Reading it as "not posted yet" re-created the
 duplicate the lookup exists to prevent, at exactly the moment the ERP was
@@ -2597,13 +2626,29 @@ complete its consent flow. A ZA Sage adapter is separate work.
 
 | Method | Sage call | Notes |
 |---|---|---|
-| `test_connection` | `GET business_settings` | |
-| `list_vendors` | `GET contacts?contact_type_id=VENDOR` | 200/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); system contacts skipped |
-| `list_gl_accounts` | `GET ledger_accounts` | `nominal_code` → code; `ledger_account_type` → account_type; out-of-chart skipped |
-| `list_pos` | — | base default `[]` (no v3.1 PO collection on every plan) |
+| `test_connection` | `GET business_settings` | passes on every plan, Accounting Start included (see below) |
+| `list_vendors` | `GET contacts?contact_type_id=VENDOR` | 200/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); system contacts skipped; a `gdpr_obfuscated` (or `deleted_at`) contact → `active=False` |
+| `list_gl_accounts` | `GET ledger_accounts`, once with `show_included_in_chart=true` and once `=false`, joined by id | `nominal_code` → code; `ledger_account_type` → account_type; out-of-chart and control (`is_control_account`) ledgers emitted `active=False`, never dropped (§284; the filter's default is undocumented) |
+| `list_pos` | — | base default `[]`: the v3.1 Accounting API has no purchase-order resource at all, on any plan |
 | `post_invoice` | `POST purchase_invoices` | below |
-| `get_invoice_status` | `GET purchase_invoices/{id}` | DRAFT → draft; UNPAID/DISPUTED → open; PART_PAID → partially_paid; PAID → paid; VOID → cancelled |
-| `void_invoice` | `DELETE purchase_invoices/{id}` | DRAFT deleted; unpaid UNPAID/DISPUTED voided with `void_reason`; anything with a payment allocated → `False` |
+| `get_invoice_status` | `GET purchase_invoices/{id}?show_payments_allocations=true` | DRAFT → draft; UNPAID/DISPUTED → open; PAID → paid only with a `contact_payment` allocation, else `settled_no_payment` (a credit note sets PAID too); PART_PAID → partially_paid on the same test, else open; VOID → cancelled (decisions §303, §390) |
+| `void_invoice` | `DELETE purchase_invoices/{id}` | DRAFT deleted; unpaid UNPAID/DISPUTED voided with `void_reason`; anything with a payment allocated → `False`. The Swagger documents no parameter on the purchase DELETE, so whether Sage honours `void_reason` there is unverified (#654) |
+
+**Plan: Accounting Start cannot post.** The Swagger's Endpoint Availability
+lists `POST` / `DELETE purchase_invoices` for Accounting Plus (CA, DE, ES, FR,
+GB, IE) and Accounting Standard (GB, IE) only; `GET` also works on Start. The
+v3.1 Accounting API reports no plan, so a Start business connects, syncs and
+passes the connection test, and its first push is refused
+`purchases_not_permitted` when Sage answers the create 403. A connected user
+without `Purchases: Full Access` or `Restricted Access` gets the same answer.
+Voiding needs `Purchases: Full Access`. Which status Sage gives Start is to be
+confirmed in a sandbox (#654).
+
+**No status sync.** `supports_status_sync` stays `False`: a push closes at
+`done`, and `get_invoice_status`'s paid-versus-credited answer records no
+payment anywhere. Turning it on means a `bill_report` carrying
+`paid_amount` (the `contact_payment` allocations' sum, only when payments
+alone settled the bill) under §386's amount and currency rule (decisions §390).
 
 **`post_invoice`:**
 
@@ -2631,7 +2676,19 @@ complete its consent flow. A ZA Sage adapter is separate work.
   than `amount` voids/deletes the invoice just created and fails non-retryable
   `posted_total_mismatch`, and a create that reports none fails non-retryable
   `posted_total_unconfirmed` (`erp_adapters/posted_total.py`).
-- 429 → `rate_limited` (no sleep loop); failures through
+- **A refused create is coded, non-retryable and `not_posted`** (decisions
+  §285, §390). Any 4xx a re-send cannot change created nothing. A 403 is
+  `purchases_not_permitted`; any other is explained by reading back what the
+  Swagger documents: an invoice date on or before
+  `financial_settings.year_end_lockdown_date` → `period_closed`; a foreign
+  currency with `multi_currency_enabled: false` → `currency_not_enabled`; the
+  contact gone, `deleted_at` or `gdpr_obfuscated` → `vendor_inactive`; a
+  ledger gone or `included_in_chart: false` → `account_inactive` (naming our
+  codes); otherwise `bill_refused`. Sage's `$dataCode` / `$message` are never
+  read (undocumented; the message echoes the payload). The message ends
+  `(HTTP <status>)`.
+- 5xx, 401 and 429 stay plain, retryable failures that may have posted
+  (`rate_limited` for a 429, no sleep loop); failures through
   `erp_failure_message`.
 
 Tests: `backend/tests/test_erp_sage_accounting_adapter.py`. Fake surface:
@@ -2955,10 +3012,11 @@ period or an inactive vendor on the create or in the job, and whether
 
 | Operation | Call |
 |---|---|
-| `post_invoice` | refuse without `vendor_erp_id` / a line account id / a valid `base_url` → `GET purchaseInvoices?$filter=externalDocumentNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` (a draft) → `GET purchaseInvoices({id})` → total check → `POST purchaseInvoices({id})/Microsoft.NAV.post` |
-| `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts are skipped (BC refuses a line on one); blocked accounts are emitted `active=False`. |
+| `post_invoice` | refuse without a GUID `vendor_erp_id` / a line account id / a valid `base_url` / a GUID `company_id`, or with an invoice number over 35 characters (`doc_number_too_long`) → `GET purchaseInvoices?$filter=vendorId eq … and vendorInvoiceNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` (a draft, at the gross) → `GET purchaseInvoices({id})` → total check (a VAT company: delete, re-create at the net, check again) → `POST purchaseInvoices({id})/Microsoft.NAV.post` → `GET purchaseInvoices({id})` → posted-total check |
+| `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts are skipped (BC refuses a line on one); blocked accounts, and Posting accounts with `directPosting: false` (control accounts — payables, bank, inventory — which refuse a purchase line), are emitted `active=False`. |
 | `list_pos` | `GET purchaseOrders?$expand=purchaseOrderLines` — total `totalAmountIncludingTax`; status always `open`; vendor linked by `vendorId` (the vendor GUID `list_vendors` stamps; BC's empty GUID is no vendor) before `vendorName`; `currencyCode` only when non-blank; `requestedReceiptDate` unless BC's blank `0001-01-01`; comment lines dropped |
-| `list_vendors` | `GET vendors` |
+| `list_vendors` | `GET vendors?$expand=paymentTerm` — `payment_terms` is the term's `code` (`30 DAYS`), never the vendor's `paymentTermsId` GUID (no term, or no expansion, → None); `blocked` `Payment` or `All` → `active=False`, so the sync never makes a blocked vendor a payee and marks a linked one `inactive` |
+| `get_invoice_status` | `GET purchaseInvoices({id})` — `Draft` / `Open` / `Paid` / `Canceled`; `Corrective` (an invoice BC made by cancelling a posted credit memo — a live document, never one we pushed) and blank are `unknown` |
 | `void_invoice` | `GET purchaseInvoices({id})`; a `Draft` is deleted (`DELETE` with `If-Match` = the etag just read — never `*`; a read with no etag returns `False` unsent); anything else returns `False` |
 
 **Lines post on `accountId`, not the No.** The chart sync is now the writer of
@@ -2983,7 +3041,24 @@ goes as quantity 1 at its gross, an exact `Decimal` at the invoice currency's
 scale (`payment_adapters.base.exponent_for`: `100.000000` → `100.00`, JPY →
 whole units); a gross finer than the currency refuses `line_amount_precision`
 rather than being rounded. A line's description is its own, else the invoice's,
-else its number.
+else its number, cut to BC's `Text[100]` (a description is not money).
+
+**A VAT company gets a second draft at the net.** BC prices a purchase line
+exclusive of tax and computes each line's tax itself from the G/L account's tax
+group, so a draft at the approved gross comes back taxed on top (1,200 →
+1,440). When the draft's `totalAmountExcludingTax` is exactly the approved
+amount and `totalTaxAmount` is non-zero (`pricesIncludeTax` false), the adapter
+deletes that draft and creates one at each line's net — its gross less its own
+tax, from `bill_allocation.allocate_bill_lines` — so BC's own tax brings it back
+to the approved gross. That second draft goes through the same total check and
+is **never repriced again**: BC's rate not being the supplier's, a rounding
+difference or an account with no tax group is `posted_total_mismatch`, the draft
+deleted. An invoice that gives no exact per-line net is refused instead of
+pro-rated: several tax-inclusive lines with only a header tax →
+`tax_not_itemised` (the shared code #670 introduced for the same condition on
+the other adapters), a net finer than the currency → `line_amount_precision`.
+An invoice that states no tax but that BC taxes is `posted_total_mismatch`, as
+before. Only a draft this push created is repriced (decisions §391).
 
 **The draft's total is checked before it is posted.** BC computes a
 purchaseInvoice's total itself, and a VAT / sales-tax company adds tax on top
@@ -2999,9 +3074,31 @@ BC user had posted it in between. Its status is checked: when the draft could
 not be deleted (BC refused, or no etag was known) the message says so —
 `… posted_total_mismatch (the draft was not deleted in Business Central)` — so
 the accountant knows a draft above the approved amount is still sitting in BC.
-A failed draft read or post step is a **retryable** `erp_failure_message`
-failure. The post step used to be `except Exception: pass`, reporting success —
-and moving the invoice to `sent_to_erp` — while BC held only a draft.
+A failed draft read, or a post step BC answered with a retryable status, is a
+**retryable** `erp_failure_message` failure with the draft kept for the
+retry's lookup. The post step used to be `except Exception: pass`, reporting
+success — and moving the invoice to `sent_to_erp` — while BC held only a draft.
+
+**The posted invoice is read back.** A BC user can edit the draft between our
+total check and `Microsoft.NAV.post`. BC carries a draft's id to the posted
+invoice in the API, so after the post the same `purchaseInvoices({id})` is read
+again and checked once more: a different total is `posted_total_mismatch`, the
+posted invoice left for the accountant (`… (the invoice is posted in Business
+Central and was not deleted)`). A failed read after a successful post is
+retryable — the retry's lookup finds the posted invoice and checks it, so a
+re-send cannot post twice; a draft still unposted is retryable; any other
+status refuses `existing_invoice_not_open`.
+
+**Refusals are coded from facts** (decisions §285's rule). A create or post BC
+refuses with a non-retryable status is explained by reading the bill's own
+records back: the vendor blocked `All` (or gone) → `vendor_inactive`; an
+account it posts on blocked, not open to direct posting, or gone →
+`account_inactive` with our GL codes in `params.accounts`; BC's
+allowed-posting-dates dialog (matched, never stored) → `period_closed`. A
+refused create is marked `not_posted`; a coded post refusal deletes the draft
+first, since re-posting it cannot succeed. Anything unexplained stays the
+plain HTTP failure. BC's own message never reaches the result — it can echo a
+vendor's name.
 
 **Every success is total-checked, including an invoice already posted.** Success
 is reported only for an invoice BC holds as `Open` or `Paid` whose

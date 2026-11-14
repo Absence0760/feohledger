@@ -320,6 +320,13 @@ class Settings(BaseSettings):
     erp_xero_authorize_url: str = ""
     erp_xero_token_url: str = ""
     erp_xero_revoke_url: str = ""
+    # Xero webhooks (`POST /api/erp/webhook/xero`, decisions §392). The
+    # platform app's ONE webhook key, which signs every delivery
+    # (`x-xero-signature`, base64 HMAC-SHA256 over the raw body). A secret:
+    # sops in infra-secrets. Empty (the default) = webhooks are off and every
+    # delivery is refused, never verified against a fallback.
+    # backend/.env.development sets a dev value for fake-erp's deliveries.
+    erp_xero_webhook_key: str = ""
     erp_sage_accounting_api_base: str = ""
     erp_sage_accounting_client_id: str = ""
     erp_sage_accounting_client_secret: str = ""

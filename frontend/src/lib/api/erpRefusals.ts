@@ -119,6 +119,7 @@ const KEYS: Record<string, MessageKey> = {
 	company_subscription_inactive: 'erpRefusal.companySubscriptionInactive',
 	intuit_fault: 'erpRefusal.intuitFault',
 	idempotency_lookup_incomplete: 'erpRefusal.idempotencyLookupIncomplete',
+	purchases_not_permitted: 'erpRefusal.purchasesNotPermitted',
 	existing_invoice_not_open: 'erpRefusal.existingInvoiceNotOpen',
 	line_amount_precision: 'erpRefusal.lineAmountPrecision',
 	currency_not_supported: 'erpRefusal.currencyNotSupported',

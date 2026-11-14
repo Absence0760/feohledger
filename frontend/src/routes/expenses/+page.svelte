@@ -484,7 +484,7 @@
 		try {
 			const res = await bulkGlCode([...selected], bulkGl || null);
 			const msg = res.skipped?.length
-				? `${m('expenses.toast.glCoded', { n: res.updated })} (skipped ${res.skipped.length})`
+				? m('expenses.toast.glCodedSkipped', { n: res.updated, skipped: res.skipped.length })
 				: m('expenses.toast.glCoded', { n: res.updated });
 			toast(msg, 'success');
 			selected = new Set();
@@ -1084,9 +1084,7 @@
 			const duplicates = Math.max(result.skipped - refused, 0);
 			cardImportResult = refused > 0 ? result : null;
 			toast(
-				m('expenses.cards.toast.imported', { n: result.imported }) +
-					(duplicates ? m('expenses.cards.toast.importedSkipped', { n: duplicates }) : '') +
-					(refused ? m('expenses.cards.toast.importedRefused', { n: refused }) : ''),
+				m('expenses.cards.toast.imported', { n: result.imported, duplicates, refused }),
 				refused > 0 ? 'info' : result.imported > 0 ? 'success' : 'info'
 			);
 			await loadCardTxns();
@@ -1103,8 +1101,9 @@
 		try {
 			const res = await syncVirtualCards();
 			toast(
-				m('expenses.cards.toast.synced', { n: res.created }) +
-					(res.skipped ? m('expenses.cards.toast.syncedSkipped', { n: res.skipped }) : ''),
+				res.skipped
+					? m('expenses.cards.toast.syncedSkipped', { n: res.created, skipped: res.skipped })
+					: m('expenses.cards.toast.synced', { n: res.created }),
 				'success'
 			);
 			await loadCardTxns();

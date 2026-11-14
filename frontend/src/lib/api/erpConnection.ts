@@ -62,5 +62,12 @@ export const discardErpPendingConnect = () =>
 export const disconnectErpOAuth = () =>
 	api.post<ErpDisconnectResult>(`${BASE}/oauth/disconnect`, {});
 
+/** The status-sync sweep's pass for this tenant, now (decisions §386, §392):
+ *  202 `{started}`, the pass running after the response. Refused 409 with a
+ *  coded `status_sync_*` reason, or 429 `rate_limited` (four an hour), both
+ *  stated by `api/codedRefusals.ts`. */
+export const startErpStatusSync = () =>
+	api.post<{ started: boolean }>(`${BASE}/oauth/status-sync`, {});
+
 export const testErpConnection = (erp: Record<string, unknown>) =>
 	api.post<ErpTestResult>('/api/organization/test-erp', erp);

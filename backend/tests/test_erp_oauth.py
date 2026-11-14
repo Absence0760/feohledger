@@ -2664,3 +2664,42 @@ async def test_status_sync_now_refuses_a_connection_that_needs_reconnecting(real
         resp = await c.post("/api/organization/erp/oauth/status-sync")
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "status_sync_needs_reconnect"
+
+
+@pytest.mark.plan("scale")
+async def test_status_states_whether_a_payment_check_would_run_now(realdb, monkeypatch):
+    """The settings page offers "check payments now" from this verdict, which is
+    the POST's own rule (decisions §392): offered while a pass would run, and
+    otherwise the very code the POST would refuse with."""
+    await _set_settings(realdb, {"erp": _config(_connected_block(realdb.info("a").org_id))})
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    body = await _status_body(realdb)
+    assert body["status_sync_available"] is True and body["status_sync_refusal"] is None
+
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", False)
+    body = await _status_body(realdb)
+    assert body["status_sync_available"] is False
+    assert body["status_sync_refusal"] == "status_sync_off"
+
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    block = {**_connected_block(realdb.info("a").org_id), "needs_reconnect": True}
+    await _set_settings(realdb, {"erp": _config(block)})
+    body = await _status_body(realdb)
+    assert body["status_sync_available"] is False
+    assert body["status_sync_refusal"] == "status_sync_needs_reconnect"
+
+
+@pytest.mark.plan("scale")
+async def test_status_offers_no_payment_check_when_the_verdict_cannot_be_read(realdb, monkeypatch):
+    from app.services import erp_status_sync
+    from app.services.credential_crypto import CredentialCryptoError
+
+    await _set_settings(realdb, {"erp": _config(_connected_block(realdb.info("a").org_id))})
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    monkeypatch.setattr(
+        erp_status_sync,
+        "status_sync_now_refusal",
+        AsyncMock(side_effect=CredentialCryptoError("sealed")),
+    )
+    body = await _status_body(realdb)
+    assert body["status_sync_available"] is False and body["status_sync_refusal"] is None

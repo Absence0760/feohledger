@@ -125,7 +125,10 @@ describe('codedRefusalText', () => {
 		['card_txn_already_matched', 'refusal.cardTxnAlreadyMatched'],
 		['card_txn_not_matched', 'refusal.cardTxnNotMatched'],
 		['card_txn_matched_not_ignorable', 'refusal.cardTxnMatchedNotIgnorable'],
-		['card_txn_already_ignored', 'refusal.cardTxnAlreadyIgnored']
+		['card_txn_already_ignored', 'refusal.cardTxnAlreadyIgnored'],
+		['status_sync_off', 'refusal.statusSyncOff'],
+		['status_sync_unsupported', 'refusal.statusSyncUnsupported'],
+		['status_sync_needs_reconnect', 'refusal.statusSyncNeedsReconnect']
 	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
@@ -362,6 +365,7 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 		['external_payment_credit_conflict', 'refusal.externalPaymentCreditConflict'],
 		['external_payment_nothing_to_pay', 'refusal.externalPaymentNothingToPay'],
 		['external_payment_paid_on_future', 'refusal.externalPaymentPaidOnFuture'],
+		['erp_paid_amount_unconfirmed', 'refusal.erpPaidAmountUnconfirmed'],
 		['nacha_requires_record_only', 'refusal.nachaRequiresRecordOnly'],
 		['nacha_already_exported', 'refusal.nachaAlreadyExported'],
 		['nacha_run_not_exportable', 'refusal.nachaRunNotExportable'],

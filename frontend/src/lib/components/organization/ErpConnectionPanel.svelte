@@ -45,6 +45,7 @@
 		getErpPendingConnect,
 		selectErpCompany,
 		startErpOAuth,
+		startErpStatusSync,
 		testErpConnection
 	} from '#lib/api/erpConnection.ts';
 	import ErpCompanyPicker from '#lib/components/organization/ErpCompanyPicker.svelte';
@@ -79,6 +80,8 @@
 		readOAuthReturn,
 		secretIsSaved,
 		selectedProviderKey,
+		statusSyncNowOffered,
+		statusSyncStartedKey,
 		withoutOAuthReturn,
 		type ErpCatalog,
 		type ErpOAuthStatus,
@@ -134,6 +137,7 @@
 	let testing = $state(false);
 	let connecting = $state(false);
 	let disconnecting = $state(false);
+	let checkingPayments = $state(false);
 	let confirmDisconnect = $state(false);
 	let oauthStatus = $state<ErpOAuthStatus | null>(null);
 	let oauthStatusFailed = $state(false);
@@ -190,6 +194,11 @@
 	// Why it must be reconnected, or that it expires soon (decisions §295).
 	const attentionKey = $derived(provider ? oauthAttentionKey(provider.key, oauthStatus) : null);
 	const expiresSoon = $derived(attentionKey === 'org.erp.oauth.expiresSoon');
+	// "Check payments now" (decisions §392): offered only while the server says
+	// an on-request status-sync pass would run (`status_sync_available`).
+	const paymentCheckOffered = $derived(
+		provider ? statusSyncNowOffered(provider.key, oauthStatus) : false
+	);
 	// Today's API calls on a shared-quota ERP (Blackbaud SKY, decisions §324):
 	// the count, its limit, and while calls are refused, until when. Nothing
 	// when the status carries none (another ERP, or the counts were unreadable).
@@ -591,6 +600,28 @@
 		}
 	}
 
+	/** Run the status-sync pass for this tenant now (`POST …/status-sync`):
+	 *  202 says it started (or one already runs) and the invoices it moves
+	 *  update as it reads them. A refusal is stated in the reader's language by
+	 *  its code: the 429 with how long to wait, a 409 with why no pass can run,
+	 *  after which the status is read again so the button follows the server's
+	 *  new verdict. */
+	async function checkPayments() {
+		if (!provider) return;
+		const p = provider;
+		checkingPayments = true;
+		setStatus('', null);
+		try {
+			const { started } = await startErpStatusSync();
+			setStatus(m(statusSyncStartedKey(started), { erp: providerLabel(p) }), 'success');
+		} catch (err) {
+			setStatus(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'failure');
+			if (err instanceof ApiError && err.status === 409) await loadOAuthStatus();
+		} finally {
+			checkingPayments = false;
+		}
+	}
+
 	/** Two clicks: the first arms, the second disconnects. */
 	async function onDisconnectClick(e: MouseEvent) {
 		e.stopPropagation();
@@ -860,6 +891,11 @@
 						{#if oauthStatusFailed}
 							<p class="oauth-state failure-text">{m('org.erp.oauth.statusFailed')}</p>
 						{/if}
+						{#if paymentCheckOffered}
+							<p class="oauth-state" id="{uid}-check-payments-hint">
+								{m('org.erp.oauth.checkPaymentsHint', { erp: providerLabel(provider) })}
+							</p>
+						{/if}
 						<div class="action-buttons">
 							{#if connection === 'connected'}
 								<button
@@ -880,6 +916,20 @@
 								>
 									{testing ? m('org.common.testing') : m('org.common.testConnection')}
 								</button>
+								{#if paymentCheckOffered}
+									<!-- Its result lands in the shared live region below. -->
+									<button
+										class="btn-test"
+										data-testid="erp-check-payments"
+										disabled={checkingPayments || !provider.available}
+										aria-describedby="{uid}-check-payments-hint"
+										onclick={checkPayments}
+									>
+										{checkingPayments
+											? m('org.erp.oauth.checkingPayments')
+											: m('org.erp.oauth.checkPayments')}
+									</button>
+								{/if}
 								{#if expiresSoon}
 									<!-- A fresh consent replaces the expiring one in place
 									     (the callback writes a new connection). -->

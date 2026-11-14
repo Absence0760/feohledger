@@ -383,9 +383,15 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   shared and budgeted (Blackbaud SKY) it shows the status's `call_usage` under the connection line
   (`erp-call-usage`): today's calls against the org's share or its own key's quota, when the count
   resets, and while calls are refused, why and until when (`erp-call-usage-paused`). No usage in
-  the status (another ERP, or the counts unreadable) renders nothing (decisions §324). Pure helpers
+  the status (another ERP, or the counts unreadable) renders nothing (decisions §324). A connected
+  ERP the server says can run an on-request status-sync pass (`status_sync_available` on
+  `GET …/oauth/status`, the POST's own rule) gets **Check payments now** (`erp-check-payments`,
+  `POST …/oauth/status-sync`): the 202 says the check started or one was already running, and a
+  refusal is the coded sentence in the reader's language (the 429 with how long to wait, a 409's
+  `status_sync_*` reason, after which the status is read again so the button follows the new
+  verdict) — all in `erp-status` (decisions §392). Pure helpers
   (grouping, the configuration and secret payloads, destination changes, OAuth return params,
-  `fieldApplies`, `callUsageLines`) live in
+  `fieldApplies`, `callUsageLines`, `statusSyncNowOffered`, `statusSyncStartedKey`) live in
   `#lib/types/erpConnection.ts` with a vitest.
 - `ErpCompanyPicker.svelte` — choose which company an OAuth consent connects, shown by
   `ErpConnectionPanel` when the callback returns with `?erp_choose_company=` (a Xero login with

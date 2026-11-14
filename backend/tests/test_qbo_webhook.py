@@ -13,12 +13,20 @@ import base64
 import hashlib
 import hmac
 import json
+import uuid
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from app.config import settings
+from app.models.exception import Exception as APException
+from app.models.invoice import Invoice, InvoiceStatus
+from app.models.organization import Organization
+from app.models.workflow import WorkflowDefinition, WorkflowInstance
 from app.services import erp_status_sync
+from app.services.erp_adapters.base import ErpBillReport, ErpBillState
 from app.services.erp_status_sync import QboEvent
 
 TOKEN = "dev-qbo-verifier"
@@ -158,6 +166,54 @@ async def test_claiming_dedupes_by_event_id(monkeypatch):
     assert await erp_status_sync.claim_qbo_events([one]) == []  # a replay
 
 
+async def test_a_dedup_store_failing_mid_delivery_releases_the_claims_it_made(monkeypatch):
+    """The route answers 503 and dispatches nothing, so a claim taken before
+    the failure guards no work: kept, it would dedupe Intuit's redelivery of
+    that event away and the change would wait for the CDC sweep (§392)."""
+    claimed: list[str] = []
+    released: list[str] = []
+
+    async def claim(provider, event_id, **kw):
+        if event_id == "evt-2":
+            raise ConnectionError("redis")
+        claimed.append(event_id)
+        return False
+
+    async def release(provider, event_id):
+        assert provider == "erp:quickbooks_online"
+        released.append(event_id)
+
+    monkeypatch.setattr("app.services.webhook_security.is_event_already_processed", claim)
+    monkeypatch.setattr("app.services.webhook_security.release_event_claim", release)
+    events = [QboEvent(f"evt-{n}", "9130", "bill", str(n)) for n in (1, 2, 3)]
+    with pytest.raises(ConnectionError):
+        await erp_status_sync.claim_qbo_events(events)
+    assert claimed == ["evt-1"]
+    assert released == ["evt-1"]  # the one claim made, and only it
+
+
+async def test_a_replay_in_a_failed_delivery_is_not_released(monkeypatch):
+    """Only claims THIS delivery made are released: an event another delivery
+    already claimed (a replay) keeps its claim, whoever owns its work."""
+    released: list[str] = []
+
+    async def claim(provider, event_id, **kw):
+        if event_id == "evt-2":
+            raise ConnectionError("redis")
+        return True  # evt-1 was already claimed by an earlier delivery
+
+    async def release(provider, event_id):
+        released.append(event_id)
+
+    monkeypatch.setattr("app.services.webhook_security.is_event_already_processed", claim)
+    monkeypatch.setattr("app.services.webhook_security.release_event_claim", release)
+    with pytest.raises(ConnectionError):
+        await erp_status_sync.claim_qbo_events(
+            [QboEvent("evt-1", "9130", "bill", "1"), QboEvent("evt-2", "9130", "bill", "2")]
+        )
+    assert released == []
+
+
 async def test_a_failed_event_releases_its_claim_and_the_rest_still_run(monkeypatch):
     released: list[str] = []
 
@@ -196,6 +252,7 @@ async def test_a_bill_payment_event_syncs_the_bills_it_pays():
     adapter.bills_for_payment = AsyncMock(return_value=["501", "502"])
     with (
         patch.object(erp_status_sync, "org_for_company", AsyncMock(return_value=org)),
+        patch.object(erp_status_sync, "status_sync_now_refusal", AsyncMock(return_value=None)),
         patch.object(erp_status_sync, "_resolved_erp", AsyncMock(return_value={"x": 1})),
         patch.object(erp_status_sync, "_adapter_or_none", return_value=adapter),
         patch.object(erp_status_sync, "sync_bills", AsyncMock()) as sync,
@@ -203,3 +260,133 @@ async def test_a_bill_payment_event_syncs_the_bills_it_pays():
         await erp_status_sync.process_qbo_event(QboEvent("e", "9130", "billpayment", "900"))
     adapter.bills_for_payment.assert_awaited_once_with("900")
     sync.assert_awaited_once_with(org, ["501", "502"], event_id="e")
+
+
+@pytest.mark.parametrize(
+    "refusal", ["status_sync_off", "status_sync_unsupported", "status_sync_needs_reconnect"]
+)
+@pytest.mark.parametrize("entity", ["bill", "billpayment"])
+async def test_a_tenant_the_sweep_would_skip_is_skipped(refusal, entity):
+    """`status_sync_now_refusal` is the one rule: the webhook reads nothing
+    from QuickBooks for a tenant the sweep would not sync (§392)."""
+    org = MagicMock()
+    with (
+        patch.object(erp_status_sync, "org_for_company", AsyncMock(return_value=org)),
+        patch.object(
+            erp_status_sync, "status_sync_now_refusal", AsyncMock(return_value=refusal)
+        ) as rule,
+        patch.object(erp_status_sync, "_adapter_or_none") as adapter,
+        patch.object(erp_status_sync, "sync_bills", AsyncMock()) as sync,
+    ):
+        await erp_status_sync.process_qbo_event(QboEvent("e", "9130", entity, "501"))
+    rule.assert_awaited_once_with(org)
+    adapter.assert_not_called()
+    sync.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# real rows: the skip rule protects a closed invoice
+# ---------------------------------------------------------------------------
+
+BILL = "501"
+
+
+async def _connected_with_a_closed_invoice(realdb, *, company: str) -> uuid.UUID:
+    """Tenant ``a`` connected to QuickBooks company ``company``, with an
+    invoice pushed there as ``BILL`` and closed at ``done`` (what a confirmed
+    push does while status sync is off)."""
+    info = realdb.info("a")
+    async with realdb.control_sessionmaker()() as s:
+        org = await s.get(Organization, info.org_id)
+        org.settings = {
+            **(org.settings or {}),
+            "erp": {
+                "type": "quickbooks_online",
+                "integration_method": "direct",
+                "oauth": {
+                    "provider": "quickbooks_online",
+                    "external_tenant_id": company,
+                    "org_id": str(org.id),
+                    "connection_id": "c-q",
+                },
+            },
+        }
+        await s.commit()
+    inv_id, corr = uuid.uuid4(), uuid.uuid4()
+    async with realdb.sessionmaker("a")() as s:
+        defn = WorkflowDefinition(organization_id=info.org_id, name="d", steps_config={"steps": []})
+        s.add(defn)
+        s.add(
+            Invoice(
+                id=inv_id,
+                correlation_id=corr,
+                organization_id=info.org_id,
+                invoice_number=f"QWH-{uuid.uuid4().hex[:8]}",
+                vendor_name="Synced Vendor",
+                amount=Decimal("250.00"),
+                currency="USD",
+                status=InvoiceStatus.done,
+            )
+        )
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                correlation_id=corr,
+                definition_id=defn.id,
+                invoice_id=inv_id,
+                state="completed",
+                state_data={"erp_reference": BILL, "erp_realm": f"quickbooks_online:{company}"},
+            )
+        )
+        await s.commit()
+    return inv_id
+
+
+class _FakeQbo:
+    """QuickBooks reporting the bill deleted: on a `done` invoice the sweep's
+    rule opens an `erp_reconciliation` exception."""
+
+    erp_type = "quickbooks_online"
+    supports_status_sync = True
+    bills_match_by_reference = False
+
+    def __init__(self):
+        self.bill_report = AsyncMock(
+            return_value=ErpBillReport(bill_id=BILL, state=ErpBillState.deleted)
+        )
+
+
+async def _deliver_and_read(realdb, monkeypatch, *, enabled: bool):
+    company = f"qc-{uuid.uuid4().hex[:8]}"
+    inv_id = await _connected_with_a_closed_invoice(realdb, company=company)
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", enabled)
+    fake = _FakeQbo()
+    events = erp_status_sync.parse_qbo_events(
+        [_event(id=f"evt-{uuid.uuid4().hex[:8]}", intuitaccountid=company, intuitentityid=BILL)]
+    )
+    with patch.object(erp_status_sync, "_adapter_or_none", return_value=fake):
+        assert await erp_status_sync.process_qbo_events(events) == 0
+    async with realdb.sessionmaker("a")() as s:
+        invoice = await s.get(Invoice, inv_id)
+        flags = (
+            (await s.execute(select(APException).where(APException.invoice_id == inv_id)))
+            .scalars()
+            .all()
+        )
+    return fake, invoice, flags
+
+
+async def test_with_status_sync_off_a_delivery_leaves_a_done_invoice_untouched(realdb, monkeypatch):
+    fake, invoice, flags = await _deliver_and_read(realdb, monkeypatch, enabled=False)
+    fake.bill_report.assert_not_awaited()  # not even a QuickBooks read
+    assert invoice.status == InvoiceStatus.done
+    assert flags == []
+
+
+async def test_with_status_sync_on_the_same_delivery_reaches_the_invoice(realdb, monkeypatch):
+    """The control: the off case above is the rule, not a delivery that could
+    never have matched."""
+    fake, invoice, flags = await _deliver_and_read(realdb, monkeypatch, enabled=True)
+    fake.bill_report.assert_awaited_once_with(BILL)
+    assert invoice.status == InvoiceStatus.done
+    assert [f.exception_type for f in flags] == ["erp_reconciliation"]

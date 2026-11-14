@@ -218,7 +218,7 @@
 			await contractStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
 			clearSelection();
 			const msg = res.skipped.length
-				? m('contracts.bulk.updated', { n: res.updated }) + m('contracts.bulk.skipped', { n: res.skipped.length })
+				? m('contracts.bulk.updatedSkipped', { n: res.updated, skipped: res.skipped.length })
 				: m('contracts.bulk.updated', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 		} catch (err) {

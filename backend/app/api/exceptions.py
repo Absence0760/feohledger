@@ -724,7 +724,10 @@ async def record_erp_payment(
     decides) needs a caller who may clear it under the queue's own rules, which
     :func:`record_erp_payment_refusal` checks first, under lock. Every refusal
     comes before anything is written, so the row stays open and nothing is
-    audited. A replay of a record already booked answers 200, not 201.
+    audited, with one exception: a NON-blocking row that states no cash figure,
+    whose bill cannot be read back to confirm one (§393), is re-raised as the
+    blocking row it should be, committed, and then refused. A replay of a
+    record already booked answers 200, not 201.
 
     Not ``POST /api/payments/record-outside``: a blocking row would refuse that
     record on itself, and clearing it first in a separate request would leave a
@@ -738,6 +741,12 @@ async def record_erp_payment(
     )
     from app.api.refusals import coded_refusal
     from app.schemas.payment import PaymentResponse
+    from app.services.erp_status_sync import (
+        ERP_PAID_AMOUNT_UNCONFIRMED,
+        hold_unconfirmed_erp_payment,
+        read_back_unstated_figure,
+    )
+    from app.services.exception_lifecycle import is_payment_blocking
     from app.services.external_payment import (
         REFUSAL_AMOUNT_MISMATCH,
         ExternalPaymentRefused,
@@ -782,18 +791,41 @@ async def record_erp_payment(
         }.get(verdict.get("code"), http_status.HTTP_403_FORBIDDEN)
         raise HTTPException(status_code=status_code, detail=verdict)
 
-    # The ERP stated the cash it paid (Xero, decisions §386): that figure is the
+    # The ERP stated the cash it paid (decisions §386, §393): that figure is the
     # one recorded, never FeohLedger's own, so a row kept for
     # `amount_mismatch` stays refused until the invoice or the bill is
     # corrected. A body figure that disagrees with it is refused here.
     amount = body.amount
-    stated = (row.erp_report or {}).get("amount")
+    facts = row.erp_report or {}
+    stated = facts.get("amount")
+    stated_currency_raw = facts.get("amount_currency")
+    if not stated and invoice is not None:
+        # No figure stated (a QuickBooks row kept before §393): the bill is
+        # read again under the invoice lock held above, and only the figure it
+        # states now is recorded, the re-attempt's rule. A read that confirms
+        # none is refused, and a non-blocking row is re-raised as blocking:
+        # the bill is paid in the ERP, so no run may pay it meanwhile.
+        figure = await read_back_unstated_figure(db, invoice=invoice, org=org, facts=facts)
+        if figure.needed:
+            if figure.amount is None:
+                if not is_payment_blocking(row.exception_type):
+                    await hold_unconfirmed_erp_payment(db, invoice, org=org, facts=facts)
+                    await db.commit()
+                raise HTTPException(
+                    status_code=http_status.HTTP_409_CONFLICT,
+                    detail=coded_refusal(
+                        ERP_PAID_AMOUNT_UNCONFIRMED,
+                        "The ERP's bill could not be read to confirm what was paid. "
+                        "Check the bill in the ERP, then try again.",
+                    ),
+                )
+            stated, stated_currency_raw = figure.amount, figure.currency
     if stated:
         try:
             stated_amount = Decimal(str(stated))
         except ArithmeticError:
             stated_amount = None
-        stated_currency = str((row.erp_report or {}).get("amount_currency") or "").strip().upper()
+        stated_currency = str(stated_currency_raw or "").strip().upper()
         if (
             stated_amount is None
             or (amount is not None and amount != stated_amount)

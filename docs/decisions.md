@@ -19019,3 +19019,458 @@ the door and the floor stamp the approver; `receiving_conflicts`,
 reader); `tests/test_migration_0129_invoice_approver_id.py` (literals pinned to
 the app, chain, parity, each backfill case including the two recall cases,
 idempotence, Alembic on a tenant and on the control plane).
+
+## 390. Sage Business Cloud Accounting (UK) reads paid from its allocations and codes a refused create (#655, drafted 2026-10-23, landed 2026-11-13)
+
+**Found by a docs-versus-code audit, before any live test** (the v3.1 Swagger
+Sage publishes, vendored at `github.com/nook-io/python-sage/openapi.json`, since
+developer.sage.com refuses automated reads). The v3.1 adapter
+(`erp_adapters/sage_accounting.py`) had been left out of §303 and §285.
+
+**Paid (§303's table gains a row).** Sage sets a purchase invoice `PAID` when a
+credit note is allocated to it as well as when it is paid, and `total_paid`
+"includes any payments, allocations and discounts", so neither says money left.
+Each `payments_allocations` entry names what it is: a payment carries
+`contact_payment`, a credit note or other contact allocation carries
+`contact_allocation`. So:
+
+| Adapter | `paid` when | Nothing owing otherwise |
+|---|---|---|
+| Sage Business Cloud Accounting (v3.1) | `status == PAID` and an allocation with a `contact_payment` (not a `negative_payment`), read with `show_payments_allocations=true` | `settled_no_payment` |
+
+`PART_PAID` is `partially_paid` on the same test and `open` when only credit has
+reduced it: nothing has been paid and money is still owed.
+
+**This is a read, not status sync, and it records no money.** Sage UK keeps
+`supports_status_sync = False`: the port adds no `bill_report`, no
+`changed_bills` and no write-back, a push still closes at `done`, and nothing
+under `app/` calls `get_invoice_status` to record a payment. So §386's rule
+(record only the ERP's stated cash figure, refuse an amount or currency that
+disagrees with what is owed here) has nothing to apply to yet, and nothing here
+contradicts it. When Sage UK gets status sync (the open `docs/followups.md`
+entry "A bill paid in an ERP other than QuickBooks or Xero"), the report must
+follow Xero's shape: `paid_amount` is the sum of the `contact_payment`
+allocations, in the invoice's `currency`, set only when payments alone settled
+it; a bill settled partly by credit reads `paid` here but states no cash
+figure, so `record_invoice_paid_outside` refuses it rather than book what is
+owed.
+
+**A refused create is coded and marked as having created nothing (§285).** Any
+4xx a re-send cannot change (`base.erp_status_retryable` is False) means Sage
+saved nothing, so the result is non-retryable with `not_posted=True`, and
+`services/erp` no longer flags the attempt possibly posted. Sage's own
+`$dataCode` values are undocumented and its `$message` echoes the submitted
+fields, so neither is read. The adapter instead reads back what the Swagger
+documents, in this order: `financial_settings.year_end_lockdown_date` on or
+after the invoice date → `period_closed`; a foreign currency with
+`multi_currency_enabled: false` → `currency_not_enabled`; the contact 404, or
+carrying `deleted_at` / `gdpr_obfuscated` → `vendor_inactive`; a line's ledger
+404 or `included_in_chart: false` → `account_inactive`, naming our codes;
+anything else → the shared `bill_refused` §385 added. A read that fails is "don't
+know", never "inactive". 5xx, 401, 429 and timeouts stay retryable and unknown.
+The lockdown check runs only after a refusal rather than before every push: it
+would spend one of Sage's per-minute calls on every push to save a create Sage
+refuses anyway.
+
+**Accounting Start cannot create purchase invoices.** The Swagger's Endpoint
+Availability lists `POST` / `DELETE purchase_invoices` for Accounting Plus and
+Standard only (GET works on Start). Nothing in the v3.1 Accounting API reports
+the plan, so it cannot be refused before a push or at test-connection time: a
+Start business connects, syncs and tests green. A 403 from the create is coded
+`purchases_not_permitted`, whose sentence names both causes (the plan, or a
+user without Purchases access), since both answer 403. Which status Sage really
+returns for Start is a sandbox question (#654).
+
+**The chart keeps what it used to drop (§284).** Ledgers out of the chart were
+skipped, so a row linked to one read as a dead link and was unlinked while the
+ledger still existed. They are now emitted `active=False`, as are control
+accounts (`is_control_account`), which Sage reserves for its own postings.
+`show_included_in_chart`'s default is undocumented, so the chart is read once
+with each value and joined by id. A GDPR-obfuscated contact is emitted inactive.
+
+**Also corrected.** v3.1 has no purchase-order resource at all, on any plan (the
+old comment said "not on every plan"), and the purchase `DELETE` takes no
+parameters, so whether `void_reason` is honoured there is a sandbox question too.
+
+Fake-erp now behaves the same way (lockdown, deleted contact, out-of-chart
+ledger and multi-currency refusals as Sage's 422 error array; a Start plan's
+403; allocations returned only on request; out-of-chart and control ledgers; an
+obfuscated contact), and the code before this change fails against it.
+
+**Porting note.** Drafted as §320 on `fix/erp-sage-accounting` (`f4698c72`)
+and renumbered on landing (§320 was taken). Its own `bill_refused`
+registration was dropped: §385 had already added the code to
+`base.ERP_REFUSAL_CODES`, `erpRefusals.ts` and the six locales.
+
+Tests: `backend/tests/test_erp_sage_accounting_adapter.py`,
+`frontend/tests-e2e/erp/sage-accounting.spec.ts` (lockdown → `period_closed`,
+Start → `purchases_not_permitted`), `frontend/src/lib/api/erpRefusals.test.ts`.
+
+## 391. Business Central posts on its own duplicate key, reprices only its own VAT draft, and reads the posted total back (issue #655 BC, drafted 2026-10-23, landed 2026-11-14)
+
+**Context.** The 2026-10-23 docs-versus-code audit of
+`erp_adapters/dynamics_365_bc.py` found the adapter would fail its first live
+push: the pre-create idempotency lookup filtered `purchaseInvoices` on
+`externalDocumentNumber`, which API v2.0's purchaseInvoice does not have (it
+is a salesInvoice field;
+https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/api-reference/v2.0/resources/dynamics_purchaseinvoice).
+Three `docs/followups.md` entries were open against the same adapter: a
+VAT-registered company could not post at all, a draft edited in BC between our
+total check and our post was booked unchecked, and the vendor sync stored the
+`paymentTermsId` GUID as the terms text. BC's `blocked` / `directPosting` were
+not read as inactive. The fix was drafted on `fix/erp-bc-netsuite` and ported
+onto main after #670, which had since introduced `tax_not_itemised` and
+`posted_total_mismatch` as shared codes.
+
+**Decision.**
+- **The lookup key is BC's own duplicate key**: `vendorId` and
+  `vendorInvoiceNumber`, upper-cased (it is a `Code[35]` field) with a quote
+  doubled. More than one hit refuses `duplicate_document_number`; an invoice
+  number over 35 characters refuses `doc_number_too_long` before any call.
+  `company_id` and `vendor_erp_id` must be GUIDs, since both are spliced into a
+  URL or a `$filter`.
+- **What the lookup finds is never deleted, so never repriced.** The new key
+  also catches the same bill keyed by hand in BC. A found draft at the
+  approved total is posted; at any other total it is refused
+  `posted_total_mismatch` and left in BC with the message saying so. The
+  drafted branch repriced a found gross draft taxed on top (a DELETE first);
+  the port does not, because it cannot tell our lost-response draft from a BC
+  user's; for the same reason a coded post refusal (`period_closed`, say) of
+  a found draft leaves it in BC. The cost: a VAT-company push whose create
+  response, or the read after it, was lost needs its draft removed in BC
+  before the retry. Accepted, because the alternative deletes a person's work
+  silently; the failed read names the draft so the push records it as an
+  orphan, and recognising that recorded id as ours is a follow-up.
+- **A found `Paid` invoice is refused, not reported posted**
+  (`existing_invoice_not_open`). With the new key it may be the same bill
+  keyed and paid by hand in BC, perhaps before or without our approval. BC
+  has no status sync, so success would close the invoice at `done` as though
+  our push had created the bill: linked to a document FeohLedger never sent,
+  with a payment made in BC recorded nowhere here (no payment row, no 1099
+  line) and nobody asked to reconcile it. (A first draft of this entry said
+  success would send it to our payment run; that holds only for an ERP whose
+  bills sync back, which BC's do not.) A found `Open` one at the approved
+  total is the idempotent success it always was. A lookup BC answers 200
+  with no readable collection is a retryable failure, never a miss.
+- **A found invoice must also be in the invoice's currency** (money-path
+  review). Matching the figure says nothing across currencies: a hand-keyed
+  1,000.00 EUR bill is not the approved 1,000.00 USD one. A draft we create
+  carries the invoice's `currencyCode`; one the lookup finds may be a BC
+  user's in any. So before a found `Open` / `Paid` invoice is reported posted,
+  and before a found draft is posted, its `currencyCode` must equal the
+  invoice's. BC leaves the code blank for the company's local currency
+  (LCY), and that blank is read as the company's LCY
+  (`GET companies({id})/companyInformation`, whose `currencyCode` API v2.0
+  documents; read as one object or a one-row collection), never assumed.
+  A difference, or an LCY BC does not state, is `posted_total_mismatch` with
+  the record left in BC (a currency-specific code exists only as Blackbaud's
+  `currency_mismatch`, whose sentence names the ledger currency, which is not
+  the fault here); a failed LCY read is retryable. Only found records are
+  checked: the read costs one call, and only where the currency is not ours.
+- **A VAT company gets one net reprice of a draft we created.** When the gross
+  draft's `totalAmountExcludingTax` is the approved amount and BC added
+  non-zero tax (`pricesIncludeTax` false), that draft is deleted (real etag,
+  never `*`) and one is created at each line's net from
+  `bill_allocation.allocate_bill_lines`. It goes through the same total check
+  and is never repriced again. **Reconciling with #670:** `tax_not_itemised`
+  keeps #670's meaning — the invoice gives no exact per-line tax, so a split
+  would be invented — and BC raises it only in the one case that matters for
+  BC: a taxed company and several tax-inclusive lines with header-only tax. An
+  untaxed BC company still posts those lines at their gross, which is exact.
+  `posted_total_mismatch` keeps its base meaning (the ERP's own total differs
+  from the approved one) for every BC outcome: a rate other than the
+  supplier's, a draft edited in BC, an untaxed invoice that BC taxes. No new
+  code was minted for either.
+- **The posted invoice is read back** at the same id (BC carries a draft's id
+  to the posted invoice in the API). A different total is
+  `posted_total_mismatch` with the posted invoice left for an accountant's
+  corrective credit memo; a failed read is retryable, since the retry's
+  lookup finds the posted invoice and checks it.
+- **Refusals are coded from facts** (§285's rule): vendor blocked `All` or
+  gone → `vendor_inactive`; an account blocked, not direct-posting or gone →
+  `account_inactive` with our codes; BC's allowed-posting-dates dialog →
+  `period_closed`. A refused create is `not_posted`; a coded post refusal
+  deletes the draft first.
+- **Listings read inactive as inactive.** A vendor `blocked` `Payment` or
+  `All` is `active=False` (a vendor BC will not pay is not one our runs pay);
+  a Posting account with `directPosting: false` is `active=False`. Payment
+  terms are the expanded `paymentTerm.code`, never the GUID. `Corrective`
+  status maps to `unknown`, not `cancelled`: it is a live document BC made by
+  cancelling a credit memo, never one we pushed.
+
+**Left open.** BC purchase-approval workflows (an invoice left `In Review`,
+refused `existing_invoice_not_open`) need a product decision — submit for
+approval and poll, or support only companies without workflows — and stay in
+`docs/followups.md`. NetSuite's N1–N5 from the same branch are a separate,
+unstarted lane. Nothing here has run against a live BC tenant (#654).
+
+**Rejected:**
+- *Keeping `externalDocumentNumber`.* The filter is refused by BC on every
+  push.
+- *Pro-rating a header-only tax across tax-inclusive lines* to get a net per
+  line. It invents a split the supplier never stated (`erp_adapters/bill_allocation.py`).
+- *Repricing again after a second mismatch.* There is no rate to converge to;
+  it loops.
+- *Deleting a posted invoice whose total moved.* Reversing a posted document
+  is an accountant's corrective credit memo in BC.
+
+Tests: `tests/test_erp_adapter_idempotency.py` (the lookup filter, several
+hits, an unreadable lookup, the GUID and length preflights, the VAT reprice
+and its refusals, a found taxed draft left not repriced, a found Paid invoice
+refused, a found draft's coded post refusal left in BC, the post read-back, coded create and post
+refusals, `Corrective` → unknown; a found Open or draft invoice in EUR refused,
+a found blank-code one accepted in the company's LCY and refused against
+another or an unstated LCY, a failed LCY read retryable); `tests/test_erp_adapter_money_exact.py`;
+`tests/test_erp_vendor_sync_adapter.py` (terms code, blocked vendor);
+`tests/test_erp_gl_sync.py` (`directPosting`);
+`tests/test_erp_base_url_overrides.py`; `tests/test_erp_adapter_error_pii.py`;
+`frontend/tests-e2e/erp/dynamics.spec.ts` (VAT net post, edited-draft
+refusal, terms code, against fake-erp; the VAT net post's invoice number is
+kept inside BC's `Code[35]`, since a longer one was correctly refused
+`doc_number_too_long` before any call). fake-erp answers `companyInformation`
+with a USD LCY.
+
+## 392. Xero's invoice webhook answers in Xero's own codes, and the ERP panel can check payments now (§386 follow-ups, 2026-11-14)
+
+**Context.** §386 made Xero's bills sync back, through the sweep and an admin's
+`POST /api/organization/erp/oauth/status-sync`, and left two follow-ups: no
+Xero webhook, so a bill paid in Xero waited for the next tick; and no button
+for the on-request pass, which was API-only.
+
+**Decision — the webhook.** `POST /api/erp/webhook/xero`
+(`api/erp_webhook.xero_webhook`, the work in `services/erp_xero_webhook`).
+Xero's webhook documentation could not be fetched (the developer site refused
+automated reads); the protocol below is from Xero's published AsyncAPI
+description and integrators' guides, and the live check is the operator step
+in `docs/followups.md`.
+
+- **Verified first, with one platform key.** `x-xero-signature` is the base64
+  HMAC-SHA256 of the raw body under the app's webhook key
+  (`FEOH_ERP_XERO_WEBHOOK_KEY`, sops; `.env.development` carries
+  `dev-xero-webhook-key`, as it does QuickBooks' verifier token). Checked with
+  `webhook_security.verify_hmac_sha256_base64`, the QuickBooks route's helper,
+  before the body is parsed. An empty key refuses every delivery: no fallback.
+- **The answers are Xero's, not the generic route's silent 204.** Xero enables
+  a webhook only after its intent-to-receive check: a correctly signed
+  delivery with no events must answer 200 and an incorrectly signed one 401,
+  both with no body, and anything else (a 204 included) fails it. It keeps
+  sending such checks, so a route that answered 204 to a bad signature would
+  be switched off. So: **401** for every unverifiable delivery (no key, a body
+  past `FEOH_ERP_WEBHOOK_MAX_BYTES`, a bad or missing signature) and a
+  bodyless **200** for every verified one, whatever it then decided (not
+  JSON, an unknown organisation, a duplicate, an applied event). The
+  invariant's purpose holds: the 401 says only "not signed with the one
+  platform key", which names no tenant and no invoice, and every
+  post-verification decision answers identically. Our own failure (the dedup
+  store down) is the bodyless 503 the other webhooks use, so Xero redelivers.
+- **Deduped by the event's own identity.** Xero sends no event id. An event is
+  keyed by the SHA-256 of what it states about itself (`tenantId`,
+  `eventCategory`, `eventType`, `resourceId`, `eventDateUtc`), which a
+  redelivery repeats; two changes to one bill differ in time. It is claimed
+  (`is_event_already_processed`, namespace `erp:xero`) before the answer, and
+  a failed event's claim is released after it, as QuickBooks' are. Rejected:
+  `firstEventSequence` (it numbers a delivery, not an event, and its
+  uniqueness is not published) and `resourceId` alone (it would swallow every
+  later change to the bill for the dedup TTL).
+- **The tenant is the one connected to the event's organisation, fail
+  closed.** `tenantId` goes through `erp_status_sync.org_for_company("xero",
+  …)`, the control-plane index on the stored connection (migration 0117),
+  which also requires the tenant still be on Xero. No connection, or another
+  ERP, is a silent no-op; the bill id alone never picks a tenant.
+- **One rule decides.** A tenant the sweep or the on-request pass would skip
+  (`status_sync_now_refusal`: status sync off, an unsupported ERP, a
+  connection that needs reconnecting) is skipped. Otherwise the event's
+  `resourceId` goes to `erp_status_sync.sync_bills`, the sweep's per-bill
+  path, unchanged: it reads only a bill an invoice here was pushed as in that
+  organisation (`_bills_we_posted`), so a sales invoice or a hand-keyed bill
+  costs no Xero call, and `apply_bill_report` decides exactly as it does for
+  a sweep tick. Only `INVOICE` events are read; `CONTACT`, `CREDITNOTE` and
+  application events are dropped, as is an event whose `tenantType` is not
+  `ORGANISATION`.
+- **After the response.** Xero wants its answer within five seconds, and an
+  event costs one to three reads (§386's minute-limit wait included), so the
+  claimed events run as a task on the request's loop
+  (`dispatch_xero_events`, the `dispatch_qbo_events` shape). The sweep stays
+  the backstop for anything a failed or lost event misses.
+- **fake-erp signs what Xero would send.** `tools/fake-erp/xero_webhooks.py`
+  (stdlib only) builds Xero's envelope and signs it with the dev key; `POST
+  /xero/api.xro/2.0/__webhook` returns `{body, signature}` for a spec to POST
+  (the fake never calls the backend), and the backend's tests load the module
+  in-process to prove the route accepts what it signs.
+
+**Decision — "Check payments now".** `GET /api/organization/erp/oauth/status`
+now states the on-request pass's verdict, `status_sync_available` and
+`status_sync_refusal` (the POST's 409 code), computed by
+`status_sync_now_refusal`, the rule the POST applies; a credential store that
+cannot be opened reads as unavailable with no code. `ErpConnectionPanel`
+offers the button only on a connected ERP while that verdict says a pass would
+run, so it never shows on a server with status sync off or an ERP that does
+not report back. The click's answer lands in the panel's live region: 202
+`started` or "already running", or the coded refusal in the reader's language
+(the limiter's `rate_limited` with how long to wait; the three
+`status_sync_*` codes, now in `api/codedRefusals.ts` and every locale), after
+which a 409 re-reads the status so the button follows the new verdict. A
+server verdict was chosen over showing the button everywhere and letting the
+409 explain: the three refusals are facts the admin cannot act on from this
+panel (the operator's flag, the ERP's capability) or already sees there (the
+reconnect state), §382's reasoning for the bank-file panel.
+
+**The QuickBooks webhook keeps both rules too (amended, round 8).** Two of
+the Xero rules above were new, and `POST /api/erp/webhook/quickbooks` lagged
+them. Now `erp_status_sync.claim_qbo_events` releases the claims it already
+made and re-raises when the dedup store fails partway through a delivery
+(the route's 503 dispatches nothing, so a kept claim would dedupe Intuit's
+redelivery away), and `process_qbo_event` skips a tenant
+`status_sync_now_refusal` refuses before any QuickBooks read (with status
+sync off a push closes the invoice at `done`, and `apply_bill_report` would
+otherwise open an `erp_reconciliation` on it for a bill deleted there). The
+rule is called, not restated: the adapter's own `supports_status_sync` check
+in the handler went with it. QuickBooks' answers are unchanged: a silent 204
+for every rejection, since Intuit runs no handshake. Tests:
+`tests/test_qbo_webhook.py` (a mid-delivery failure releasing only its own
+claims, every refusal skipped for bill and bill-payment events, and on real
+rows a `done` invoice left untouched with status sync off beside the same
+delivery reaching it with sync on).
+
+**Not verified live.** That paying a bill in Xero raises an `INVOICE` UPDATE
+for it (a payment has no category of its own), that `eventDateUtc` repeats
+exactly on a retry, that every delivery carries `tenantType`, and the exact
+intent-to-receive rules, are from the published description, not a Demo
+Company pass (`docs/followups.md` (b)).
+
+Tests: `tests/test_xero_webhook.py` (the signature, raw-byte coverage, no key,
+an oversized body, the handshake's 200 and 401 with no body, the dedup store
+down, parsing, the event key, dedupe, a failed event's release, an unknown
+organisation, every skip refusal, real rows: a bill paid in Xero reaching
+`paid` at Xero's amount through the webhook, a hand-keyed bill and another
+organisation's event reading nothing, status sync off, and fake-erp's signed
+delivery verifying); `tests/test_rbac.py` (the route's alternate gate);
+`tests/test_erp_oauth.py` (the status verdict, and an unreadable one);
+`src/lib/types/erpConnection.test.ts` (`statusSyncNowOffered`,
+`statusSyncStartedKey`, the strings in every locale);
+`src/lib/api/codedRefusals.test.ts` (the three codes);
+`tests-e2e/erp/xero-status-sync.spec.ts` (the webhook against fake-erp, a
+forged delivery, the handshake, the panel's button).
+
+## 393. QuickBooks' bills are recorded at the cash QuickBooks shows, as Xero's are (follow-up of §386, 2026-11-14)
+
+**The gap.** §386 made Xero's report state the cash a person paid outside us
+(`ErpBillReport.paid_amount`), so a payment that is not what the invoice owes
+here is refused `amount_mismatch` and kept, blocking, for a person. QuickBooks'
+`bill_report` stated no amount, so the ERP-paid path booked FeohLedger's own
+figure. A bill paid in full in QuickBooks while a credit memo or an
+early-payment discount applied only here was recorded at the smaller figure, as
+money that left, and the difference vanished from the ledger.
+
+**The rule.** `QuickBooksOnlineAdapter.bill_report` states `paid_amount` and
+`paid_currency` on exactly Xero's condition: a bill `paid`, reduced outside us,
+not `settled_by_credit`, and no write-back of ours on it.
+
+- **The figure is what the lines applied to this bill.** It is the sum of
+  `_applied_to(payment, bill)` over the person's cash BillPayments
+  (`_is_cash_payment`, §317), never a payment's `TotalAmt`, because one
+  BillPayment can pay several bills.
+- **The currency is the bill's `CurrencyRef`.** QuickBooks states it on every
+  bill, the home currency included, which `post_payment` already relies on. It
+  is None when the bill states none, or when a cash payment states another
+  currency. The sync refuses None as a mismatch and never compares a bare
+  number (§386).
+- **§303's paid-versus-credited rule is unchanged.** Any vendor credit, journal
+  entry or unreadable reduction beside the cash makes the bill
+  `settled_by_credit`, so no amount is stated and the bill blocks as a credit
+  settlement. A cheque and a card together are both cash, so the figure is
+  their sum.
+- **No one rail, no rail.** A bill paid part by cheque and part by card had
+  the later payment's rail stand for the whole figure. It is now not stated,
+  which counts as 1099-reportable. One `Payment` row cannot hold two rails, and
+  the conservative reading is the one §303 already takes for an unstated rail.
+  The cost is an over-report: the card part lands on the payer's 1099-NEC
+  although the card settlement entity reports it on a 1099-K, and nothing
+  records the split yet. Before, the later payment's rail stood for the whole
+  figure and could leave a cheque off the 1099. Keeping the split, and Xero's
+  same latest-rail shape, are tracked in `docs/followups.md`.
+- **Our own live write-back beside outside cash blocks.** QuickBooks now states
+  `our_payment_applied`, as Xero does. When it is set, the outside reduction is
+  real, no amount is stated, and the invoice is payable here, the sync opens a
+  blocking `payment_reconciliation` (`erp_partly_paid_outside`) and books
+  nothing. That only happens after a void here whose ERP void did not land.
+  Before, such a bill was recorded at the whole owed figure although only the
+  outside part left (the money-path review's example: our 245.00 still standing,
+  a 5.00 cheque, 250.00 booked as cash). The branch is in the shared path, so
+  Xero gets it too.
+
+**One path.** Nothing in `erp_status_sync` or `external_payment` names
+QuickBooks. `apply_bill_report` already passed `report.paid_amount` /
+`paid_currency` to `record_erp_reported_payment`, and the amount and currency
+checks in `record_invoice_paid_outside` run after §309's live-claim
+refusals, so the webhook, the sweep, the re-attempt (§319) and the one-click
+record all apply the QuickBooks figure the way they apply Xero's.
+`amount_mismatch` is in `DOUBLE_PAY_REFUSALS`, so the row blocks.
+
+**Rows kept before this change are read again (money-path review).** Every
+QuickBooks `paid_not_recorded` row written before §393 carries `amount: None`,
+and prod has QuickBooks status sync on, so such rows exist. The re-attempt and
+the one-click passed that None on, and `record_invoice_paid_outside` booked
+what is owed here: a 10.00 credit memo applied only here, a bill QuickBooks
+shows paid 250.00 by cheque, and 240.00 booked as cash. Now a row that states no
+figure, from an ERP whose bills read back (`status_sync_adapter_keys`), is never
+booked as it stands. Under the invoice lock the caller already holds, the bill
+is read again through the dispatch check's own connection rules and bound
+(`read_back_unstated_figure`: the row's ERP is the one connected, the invoice
+names its bill and company, that company is the connected one), and only a
+`paid_amount` the bill states now goes to the record, whose amount and currency
+checks then refuse a mismatch as they would a fresh report (blocking). A read
+that fails, or that states no figure (part-paid since, credit-settled, another
+company), re-raises the row as a blocking `payment_reconciliation`
+(`hold_unconfirmed_erp_payment`, `refusal_code: erp_paid_amount_unconfirmed`)
+with the existing `erp_paid_retry_failed` sentence, which says the record did
+not happen automatically and points at the one-click. The one-click reads
+again too: a body figure the bill does not state is a 422, a read that confirms
+none is a 409 with that code, and a non-blocking row is first re-raised as
+blocking and committed (the one write a one-click refusal makes, since the bill
+is paid there and no run may pay it meanwhile).
+- *Rows from the generic ERP webhook* (NetSuite and the rest, which never read
+  a bill back) are unchanged: their first report records what is owed here, so
+  a re-attempt doing the same is no new risk.
+- *A sentence of its own* for the held row was weighed against a new catalogue
+  entry in six web locales, seven ARB files and their generated code; the
+  retry-failed sentence is accurate for both causes, and `refusal_code` carries
+  the machine detail. The one-click's 409 is localized
+  (`refusal.erpPaidAmountUnconfirmed`).
+- *The read happens inside a person's dismissal* (the re-attempt runs in that
+  transaction) and holds the invoice lock for at most
+  `FEOH_ERP_DISPATCH_CHECK_TIMEOUT_SECONDS`, as the dispatch check already does.
+  A connection-level failure trips the same one-minute org-wide hold, so a
+  QuickBooks outage re-raises legacy rows as blocking rather than waiting.
+
+**Rejected.**
+- *Stating `TotalAmt − Balance`.* That is what left the bill, not what the cash
+  says. It would agree with the balance by construction and hide a cash read
+  that does not cover it, which §317 already turns into `settled_by_credit`.
+- *Stating an amount on a bill we part-paid.* Xero refuses the same: no single
+  payment a record could state.
+
+**Not verified live.** No recording exists yet under
+`tools/fake-erp/fixtures/qbo_recorded/` (the replay names its skips), so the
+replay now also asserts the meaning: a bill paid wholly by cheque or card
+states its whole total in its own currency, and every other scenario states
+none. That runs when the operator records. The fake's BillPayment now carries
+its bill's `CurrencyRef`, as real BillPayments do, and `PAYMENT_READS` names
+it.
+
+Tests: `tests/test_qbo_status_sync_adapter.py` (cash in full; lines on this
+bill only; cheque plus card summed with no rail; partial; a vendor credit
+beside a cheque or a card; our own part-payment or full write-back, and a voided
+one not applied; the bill's currency, none, or a payment in another, with the
+amount still stated); `tests/test_erp_status_sync.py` (real rows: recorded at
+QuickBooks' figure, cheque plus card at their sum, partial and credit-settled
+blocking with nothing booked, a credit memo here refused `amount_mismatch` with
+QuickBooks' figure kept, blocking and refused by the one-click, the bill in
+another currency or none and a payment in another refused, outside cash beside
+our live write-back blocking, and through Xero's own `report_from_bill`; a row
+kept with no figure booked only at the bill's re-read figure, refused at another,
+held blocking when the read fails or states none, and the one-click's same three
+outcomes); `tests/test_erp_reported_payment_recovery.py` (rows now carry the
+stated figure); `tests/test_qbo_recorded_replay.py` (the paid amount per
+recorded scenario); `frontend/src/lib/api/codedRefusals.test.ts` (the 409's
+sentence).

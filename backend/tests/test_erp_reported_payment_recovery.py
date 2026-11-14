@@ -84,7 +84,9 @@ async def _blocker(mk, org_id, inv_id, *, exception_type="payment_reconciliation
 
 
 async def _report_paid(realdb, inv_id, *, method="check", paid_on=REPORTED_ON):
-    """The ERP reports the bill paid, by cheque, on a stated date."""
+    """The ERP reports the bill paid, by cheque, on a stated date, at the
+    figure QuickBooks states since §393: what the invoice owes here. (A row
+    stating none is re-read from the bill first: `test_erp_status_sync.py`.)"""
     from app.services.erp_status_sync import record_erp_reported_payment
 
     async with realdb.control_sessionmaker()() as c:
@@ -100,6 +102,8 @@ async def _report_paid(realdb, inv_id, *, method="check", paid_on=REPORTED_ON):
             event_id="evt-145",
             paid_on=paid_on,
             method=method,
+            amount=Decimal("410.00"),
+            amount_currency="USD",
         )
         await s.commit()
     return recorded
@@ -169,10 +173,10 @@ async def test_a_refused_report_keeps_the_erp_payment_as_data(realdb):
         "reference": "BILL-145",
         "paid_on": "2026-10-20",
         "paid_on_reported": True,
-        # QuickBooks states no cash figure: the row keeps the same shape as a
-        # Xero report, with the amount and its currency not stated (§386).
-        "amount": None,
-        "amount_currency": None,
+        # The cash QuickBooks states, and its currency (§386, §393): the
+        # figure a re-attempt and the one-click record book, or refuse.
+        "amount": "410.00",
+        "amount_currency": "USD",
         "refusal_code": "external_payment_blocking_exception",
         "reported_at": row.erp_report["reported_at"],
     }
