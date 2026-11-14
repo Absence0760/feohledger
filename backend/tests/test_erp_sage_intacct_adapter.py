@@ -74,6 +74,8 @@ class FakeIntacct:
         self.delete_status = 204
         self.reverse_status = 200
         self.tokens_minted = 0
+        self.revoke_status = 200
+        self.revoke_body: object = {"revoked": True}
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -83,6 +85,8 @@ class FakeIntacct:
                 return httpx.Response(self.token_status, json={"error": "invalid_client"})
             self.tokens_minted += 1
             return httpx.Response(200, json={"access_token": "tok-abc", "expires_in": 43200})
+        if path.endswith("/oauth2/revoke"):
+            return httpx.Response(self.revoke_status, json=self.revoke_body)
         if path.endswith("/services/core/query"):
             if self.query_status != 200:
                 return httpx.Response(self.query_status, json={})
@@ -1236,3 +1240,91 @@ def test_po_state_maps_an_unapproved_po_to_unissued(state, expected):
     from app.services.erp_adapters.sage_intacct import _po_status
 
     assert _po_status(state) == expected
+
+
+# ---------------------------------------------------------------------------
+# Revocation at tenant deletion (decisions §400)
+# ---------------------------------------------------------------------------
+
+
+def test_revoke_mints_a_fresh_token_and_revokes_it_as_intacct_documents():
+    """``POST /oauth2/revoke``, form ``token`` + the client as form fields;
+    a fresh token, because revoking one ends every token Intacct issued for the
+    user and company, including those other workers cached."""
+    from app.services.erp_oauth import REVOKED
+
+    fake = FakeIntacct()
+    adapter = SageIntacctAdapter(CONFIG)
+    _run(fake, lambda: adapter.get_invoice_status("777"))  # caches a token
+    outcome = _run(fake, adapter.revoke_stored_access)
+
+    assert outcome == REVOKED
+    assert fake.tokens_minted == 2, "the cached token is not reused: a fresh one is minted"
+    [req] = fake.of("POST", "/oauth2/revoke")
+    assert req.headers["content-type"] == "application/x-www-form-urlencoded"
+    assert "authorization" not in req.headers
+    form = {k: v[0] for k, v in parse_qs(req.content.decode()).items()}
+    assert form == {
+        "token": "tok-abc",
+        "client_id": "cid-123",
+        "client_secret": "s3cr3t-client-value",
+    }
+    from app.services.erp_adapters import sage_intacct
+
+    assert sage_intacct._TOKEN_CACHE == {}, "a revoked token must not stay cached"
+
+
+@pytest.mark.parametrize(
+    ("token_status", "revoke_status", "revoke_body"),
+    [
+        (401, 200, {"revoked": True}),
+        (503, 200, {"revoked": True}),
+        (200, 400, {"error": "invalid_request"}),
+        (200, 503, {}),
+        (200, 200, {"revoked": False}),
+        (200, 200, ["not", "an", "object"]),
+    ],
+    ids=["app-deauthorized", "token-outage", "refused", "outage", "not-confirmed", "garbled"],
+)
+def test_revoke_is_revoked_only_on_intacct_s_confirmation(
+    token_status, revoke_status, revoke_body, caplog
+):
+    from app.services.erp_oauth import REVOKE_FAILED
+
+    caplog.set_level("DEBUG")
+    fake = FakeIntacct()
+    fake.token_status = token_status
+    fake.revoke_status, fake.revoke_body = revoke_status, revoke_body
+    outcome = _run(fake, SageIntacctAdapter(CONFIG).revoke_stored_access)
+    assert outcome == REVOKE_FAILED
+    assert "s3cr3t" not in caplog.text and "tok-abc" not in caplog.text
+
+
+def test_revoke_with_an_unreachable_intacct_is_failed_never_raised():
+    from app.services.erp_oauth import REVOKE_FAILED
+
+    def handler(_request):
+        raise httpx.ConnectError("down")
+
+    def factory(*args, **kwargs):
+        return _RealAsyncClient(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    with patch("httpx.AsyncClient", side_effect=factory):
+        outcome = asyncio.run(SageIntacctAdapter(CONFIG).revoke_stored_access())
+    assert outcome == REVOKE_FAILED
+
+
+def test_revoke_with_incomplete_config_is_failed_never_raised():
+    from app.services.erp_oauth import REVOKE_FAILED
+
+    config = {k: v for k, v in CONFIG.items() if k != "client_secret"}
+    fake = FakeIntacct()
+    assert _run(fake, SageIntacctAdapter(config).revoke_stored_access) == REVOKE_FAILED
+    assert fake.requests == []
+
+
+def test_intacct_names_the_step_the_customer_takes():
+    """Revoking the tokens leaves the company's authorization of our client ID:
+    tenant deletion tells the customer to remove it."""
+    assert "Authorized Client Applications" in SageIntacctAdapter.provider_side_disconnect
+    assert SageIntacctAdapter.revokes_stored_access is True

@@ -20023,6 +20023,92 @@ answers `eid:`, SuiteQL `currency`, `accountingperiod` and `transactionline`,
 refuses a currency given by `refName`, refuses a bill dated in its closed
 January 2020, states PO headers negative and gives bills an `approvalStatus`.
 
+## 400. Sage's revoke is checked against Sage's own guide, and stored-credential ERPs are ended or named at tenant deletion (issue #655 OAuth row, 2026-11-13)
+
+**Context.** Issue #655's OAuth row listed five items. Three had landed: the
+login-CSRF binding (§336), the QuickBooks realm check (§337), and revocation on
+Disconnect and tenant deletion, with Blackbaud's missing endpoint stated (§371).
+Two were open. **Sage UK S3**, the revoke request's shape, rested on Apideck and
+a client library because Sage's guide pages are rendered in the browser and
+refused our fetches. **The Intacct and Sage SA notes** said there was nothing to
+revoke, and deletion said nothing about either: the Intacct adapter's docstring
+read "no long-lived token here to revoke", and a deleted Intacct or Sage SA
+tenant's confirmation had no ERP line at all, though in both cases the access
+outlives our sealed copy.
+
+**Decision.**
+
+- **Sage Accounting's revoke is unchanged and now cited to Sage.** Sage's
+  developer portal answers its search API (`/api/search?term=…`) and serves each
+  guide's text in the page payload at its real path, so the guide was readable
+  after all. "Revoke a Refresh Token"
+  (<https://developer.sage.com/accounting/docs/v1.0.0/guides/learning/authenticating/authentication>,
+  checked 2026-11-13): `POST https://oauth.accounting.sage.com/revoke`,
+  `application/x-www-form-urlencoded`, `client_id`, `client_secret`, `token`
+  (the refresh token), `200 {"success": "ok"}`. Access tokens cannot be
+  revoked; they live out their five minutes. That is exactly what §371 sends,
+  so no code changed. A live sandbox Disconnect stays on the platform-app
+  follow-up.
+- **Sage Intacct's tokens are revoked at tenant deletion.** Intacct's OAuth page
+  (<https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/authorization-and-security/oauth2>,
+  "Revoke a token", checked 2026-11-13) documents
+  `POST /ia/api/v1/oauth2/revoke` with form `token` (access or refresh) and the
+  client as form fields or HTTP Basic, answering `{"revoked": true}`, and says
+  that revoking one token revokes every other token for the same Web Services
+  user and company. Our client-credentials tokens live 12 hours in a
+  per-worker cache that the deleting process cannot see, so
+  `SageIntacctAdapter.revoke_stored_access` mints one fresh token and revokes
+  it. Intacct's rule then ends the tokens the other workers hold. The client
+  goes as form fields, like the token exchange. The outcome is `revoked` only
+  on `200` with `revoked: true`; a refused mint, a refusal, an outage or a
+  garbled body is `failed`.
+- **Sage Accounting (ZA) has nothing to revoke, and says so.** Every call sends
+  the Sage user's own login in HTTP Basic, and no token is issued. The API's
+  Help index (<https://accounting.sageone.co.za/api/2.0.0/Help>, checked
+  2026-11-13) lists only `POST Login/Validate` and an undocumented
+  `DELETE CoreTokens/Delete`, for a token we never hold. Deletion reports
+  `unsupported` without a call.
+- **The adapter states the provider-side step.**
+  `ErpAdapter.provider_side_disconnect` is the step the customer takes at the
+  provider. For Intacct it is removing our client ID under Authorized Client
+  Applications, which revoking tokens does not undo. For Sage SA it is changing
+  that user's password or removing the user.
+  `revoke_stored_access` defaults to `unsupported` when a step is stated and to
+  None otherwise. `revokes_stored_access` marks an override that calls out.
+  `tenant_deletion._read_erp_grant` falls through to it when no OAuth tokens
+  are sealed. The call follows §371's rules: the operator path calls in place,
+  a closure queues it with `post_commit`, and an outcome needing no call is
+  decided at the read. The confirmation's line reads `ERP credentials:` and
+  names the provider's step on every outcome, `revoked` included. The log names
+  only the provider and the outcome.
+
+**Rejected.**
+
+- *Revoking only the token this process has cached.* The deleting process
+  (the operator script, or whichever worker runs the closure) usually holds
+  none, and the other workers' tokens would live out their 12 hours.
+- *Calling `CoreTokens/Delete` for Sage SA.* It is undocumented, and we hold no
+  token for it to delete.
+- *A generic "remove the app from connected apps" line for every
+  stored-credential ERP.* Intacct has no connected-apps list, and the Sage SA
+  customer gave us a password, not an app grant. A wrong instruction is worse
+  than none.
+- *Setting a step for Merge.dev, Business Central, NetSuite and SYSPRO in this
+  change.* Each needs its own reading of the provider's documentation, and two
+  of those adapters were owned by parallel lanes. They are a `docs/followups.md`
+  (c) entry.
+
+**Side effect, accepted.** Intacct's revoke reaches every token for the Web
+Services user and company, not only ours. Another FeohLedger tenant sharing that
+company and user (a partner's child tenant, say) loses its cached token and
+re-mints on its next call: `_send` retries once after a 401. A customer
+integration sharing the Web Services user is affected the same way. The runbook
+says so.
+
+**Not changed.** In-app Disconnect stays OAuth-only (`/organization/erp/oauth/disconnect`).
+Replacing or clearing an Intacct configuration does not revoke: the old tokens
+are reachable only from our own workers' memory and lapse within 12 hours.
+
 ## 401. A hand-entered inspection re-matches its PO's invoices in the same request, and an approver's later pass does not release their own invoice (§366 follow-up, 2026-11-15)
 
 **The gap.** `POST /api/inspections` flushed and audited the row and re-matched

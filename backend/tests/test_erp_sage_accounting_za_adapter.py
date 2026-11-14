@@ -1133,3 +1133,21 @@ def test_po_status_maps_an_unapproved_po_to_unissued(status, expected):
     from app.services.erp_adapters.sage_accounting_za import _po_status
 
     assert _po_status(status) == expected
+
+
+# ---------------------------------------------------------------------------
+# Revocation at tenant deletion (decisions §400)
+# ---------------------------------------------------------------------------
+
+
+def test_revoke_is_unsupported_and_calls_no_one():
+    """Every call carries the Sage user's own login; no token is ever issued,
+    so there is nothing to revoke and the customer changes that password."""
+    from app.services.erp_oauth import REVOKE_UNSUPPORTED
+
+    fake = FakeSage()
+    outcome = _run(fake, SageAccountingZaAdapter(CONFIG).revoke_stored_access)
+    assert outcome == REVOKE_UNSUPPORTED
+    assert fake.requests == []
+    assert SageAccountingZaAdapter.revokes_stored_access is False
+    assert "password" in SageAccountingZaAdapter.provider_side_disconnect

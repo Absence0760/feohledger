@@ -132,9 +132,13 @@ SAGE_ACCOUNTING_OAUTH = register_oauth_provider(
         # Revoking the refresh token ends the grant (an access token lives out
         # its few minutes). Form body `token`, with the client as form fields
         # like the token endpoint, never HTTP Basic (decisions §371). Sage's
-        # own guide refuses automated fetches; the URL and shape are the ones
-        # Apideck's Sage configuration page and the sage-business-cloud-
-        # accounting-api-ts client document. The v3.0 guide's regional hosts
+        # own guide, "Revoke a Refresh Token" (checked 2026-11-13, §400, from
+        # the text the portal ships in the page at this path):
+        # https://developer.sage.com/accounting/docs/v1.0.0/guides/learning/authenticating/authentication
+        # — `POST https://oauth.accounting.sage.com/revoke`, form
+        # `client_id` / `client_secret` / `token` (the refresh token), 200
+        # `{"success": "ok"}`. Access tokens cannot be revoked; they live out
+        # their five minutes. The v3.0 guide's regional hosts
         # (oauth.{na,eu}.sageone.com) belong to the retired v3.0 API.
         revoke_url="https://oauth.accounting.sage.com/revoke",
         authorize_url_setting="erp_sage_accounting_authorize_url",
