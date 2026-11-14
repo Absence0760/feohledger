@@ -5,7 +5,9 @@ the ERP already accepted a create can otherwise retry into a SECOND vendor
 bill for the same invoice. Each real adapter's `post_invoice` must be
 retry-safe via whichever mechanism its target ERP actually supports:
 
-  - `merge_dev`  — an `X-Idempotency-Key` header on the create POST.
+  - `merge_dev`  — a pre-create lookup by vendor + number, then Merge's
+    `Idempotency-Key` header on the create POST (a beta Merge enables per
+    customer, so the lookup is what is relied on; decisions §399).
   - `netsuite`   — a pre-create lookup by `externalId` (NetSuite enforces
     uniqueness on it); a match short-circuits to success WITHOUT posting.
   - `dynamics_365_bc` — a pre-create lookup by vendor + `vendorInvoiceNumber`; same
@@ -106,16 +108,110 @@ def _ns_found(total: str | None, status: str = "open") -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
+_MERGE_EMPTY = {"next": None, "results": []}
+
+
 def test_merge_dev_sends_idempotency_key_header_on_create():
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.post = AsyncMock(return_value=_mock_response(201, {"model": {"id": "m1"}}))
+        client.get = AsyncMock(return_value=_mock_response(200, _MERGE_EMPTY))
+        client.post = AsyncMock(
+            return_value=_mock_response(201, {"model": {"id": "m1", "total_amount": 100.00}})
+        )
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-abc")))
 
     assert result.success
     headers = client.post.await_args.kwargs["headers"]
-    assert headers["X-Idempotency-Key"] == "corr-abc"
+    # Merge's documented header; the `X-` spelling this once sent is not one
+    # Merge reads, so a retry after a lost response created a second bill.
+    assert headers["Idempotency-Key"] == "corr-abc"
+    assert "X-Idempotency-Key" not in headers
+
+
+def test_merge_dev_retry_finds_its_bill_by_vendor_and_number_and_posts_nothing():
+    """The pre-create lookup is what makes a retry safe: Merge's key is a
+    beta it enables per customer, kept 24 h. One live bill under this vendor
+    and number at our total is our earlier attempt."""
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    found = {
+        "id": "merge-inv-9",
+        "number": "INV-1",
+        "total_amount": 100.00,
+        "currency": "USD",
+        "status": "OPEN",
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"next": None, "results": [found]}))
+        client.post = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success and result.erp_document_id == "merge-inv-9"
+    client.post.assert_not_awaited()
+    params = client.get.await_args.kwargs["params"]
+    assert params["number"] == "INV-1"
+    assert params["contact_id"] == "00000000-0000-0000-0000-0000000000a1"
+    assert params["type"] == "ACCOUNTS_PAYABLE"
+
+
+def test_merge_dev_bill_under_the_number_at_another_total_is_a_duplicate():
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    other = {"id": "merge-inv-3", "number": "INV-1", "total_amount": 75.00, "status": "OPEN"}
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"next": None, "results": [other]}))
+        client.post = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert not result.success and not result.retryable
+    assert result.refusal_code == "duplicate_document_number"
+    client.post.assert_not_awaited()
+
+
+def test_merge_dev_bill_under_the_number_in_another_currency_is_a_duplicate():
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    other = {"id": "m4", "number": "INV-1", "total_amount": 100.00, "currency": "EUR"}
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"next": None, "results": [other]}))
+        client.post = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.refusal_code == "duplicate_document_number"
+    client.post.assert_not_awaited()
+
+
+def test_merge_dev_a_void_or_deleted_bill_under_the_number_does_not_block():
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    gone = [
+        {"id": "v", "number": "INV-1", "total_amount": 100.00, "status": "VOID"},
+        {"id": "d", "number": "INV-1", "total_amount": 100.00, "remote_was_deleted": True},
+    ]
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"next": None, "results": gone}))
+        client.post = AsyncMock(
+            return_value=_mock_response(201, {"model": {"id": "m2", "total_amount": 100.00}})
+        )
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success and result.erp_document_id == "m2"
+
+
+def test_merge_dev_unreadable_lookup_never_reads_as_not_there():
+    """A lookup that cannot finish fails the attempt (retryable) without the
+    create: "couldn't ask" must never be read as "no bill yet"."""
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(503, {}))
+        client.post = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert not result.success and result.retryable and result.not_posted
+    assert "idempotency_lookup_unavailable" in result.message
+    client.post.assert_not_awaited()
 
 
 def test_merge_dev_get_invoice_status_does_not_send_idempotency_key():
@@ -128,7 +224,7 @@ def test_merge_dev_get_invoice_status_does_not_send_idempotency_key():
         _run(adapter.get_invoice_status("doc-1"))
 
     headers = client.get.await_args.kwargs["headers"]
-    assert "X-Idempotency-Key" not in headers
+    assert "Idempotency-Key" not in headers and "X-Idempotency-Key" not in headers
 
 
 # ---------------------------------------------------------------------------
@@ -440,11 +536,13 @@ def _bc_record(
     excluding: Decimal | None = None,
     tax: Decimal | None = None,
     currency: str = "USD",
+    pay_to: str | None = None,
 ):
     """A purchaseInvoice read, with its body on the wire exactly as BC sends it.
     ``excluding`` / ``tax`` are its ``totalAmountExcludingTax`` /
     ``totalTaxAmount``, stated only when given; ``currency`` its
-    ``currencyCode`` ("" = BC's blank, the company's local currency)."""
+    ``currencyCode`` ("" = BC's blank, the company's local currency);
+    ``pay_to`` its ``payToVendorId``, stated only when given (decisions §403)."""
     from app.utils.json_money import dumps_exact_json
 
     record = {
@@ -454,6 +552,9 @@ def _bc_record(
         "@odata.etag": etag,
         "currencyCode": currency,
     }
+    if pay_to is not None:
+        record["vendorId"] = _BC_VENDOR
+        record["payToVendorId"] = pay_to
     if total is not None:
         record["totalAmountIncludingTax"] = total
     if excluding is not None:
@@ -1460,7 +1561,10 @@ def test_d365_our_draft_edited_in_bc_is_refused_and_left(monkeypatch, edit):
     assert result.success is False
     assert result.retryable is False
     assert result.erp_document_id == "bc-g"
-    assert result.refusal_code == "posted_total_mismatch"
+    # A redirected payee is refused for that, before the total (§403); every
+    # other edit leaves the draft at a total the found treatment refuses.
+    expected = "pay_to_vendor_differs" if edit == "pay_to_changed" else "posted_total_mismatch"
+    assert result.refusal_code == expected
     assert result.message.endswith("(the draft was not deleted in Business Central)")
     assert result.erp_document_is_own is False
 
@@ -1932,6 +2036,177 @@ def test_d365_a_failed_lcy_read_is_retryable_not_success(monkeypatch):
     result, _ = _found_at_the_approved_total(monkeypatch, "Open", currency="", lcy=lcy)
     assert result.success is False and result.retryable is True
     assert result.erp_document_id == "bc-f"
+
+
+# ---------------------------------------------------------------------------
+# dynamics_365_bc — a bill BC has paying another vendor (decisions §403)
+# ---------------------------------------------------------------------------
+
+#: `_payload()`'s linked vendor, and another vendor in the same company.
+_BC_VENDOR = "00000000-0000-0000-0000-0000000000a1"
+_BC_OTHER_VENDOR = "00000000-0000-0000-0000-0000000000b2"
+
+
+@pytest.mark.parametrize("status", ["Open", "Draft"])
+def test_d365_a_found_invoice_paying_another_vendor_is_refused_and_left(monkeypatch, status):
+    """A BC user keyed (or redirected) the bill to pay another vendor: the
+    approved total and currency match, but booking it as ours would owe the
+    money to a vendor nobody here approved. Refused with its own code, never
+    posted, never deleted."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                AssertionError("neither a create nor a post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-f", "status": status}]}),
+                _bc_record("bc-f", status, Decimal("100.00"), pay_to=_BC_OTHER_VENDOR),
+                AssertionError("refused before any LCY or lines read"),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("a found record is never deleted"))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-f"
+    assert result.refusal_code == "pay_to_vendor_differs"
+    assert result.refusal_provider == "Business Central"
+    where = "the draft was not deleted" if status == "Draft" else "the invoice is posted"
+    assert where in result.message
+    assert result.erp_document_is_own is False
+    client.delete.assert_not_awaited()
+
+
+def test_d365_a_found_draft_paying_another_vendor_is_refused_whatever_its_total(monkeypatch):
+    """The pay-to is checked before the total, so the refusal names the fault
+    a person can fix rather than `posted_total_mismatch`."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[_mock_response(200, {"access_token": "tok"}), AssertionError("no post")]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-f", "status": "Draft"}]}),
+                _bc_record("bc-f", "Draft", Decimal("130.00"), pay_to=_BC_OTHER_VENDOR),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("never delete a found draft"))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.refusal_code == "pay_to_vendor_differs"
+    client.delete.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "pay_to",
+    [
+        _BC_VENDOR,
+        _BC_VENDOR.upper(),  # a GUID's case is not a different vendor
+        "00000000-0000-0000-0000-000000000000",  # BC's empty GUID: not set
+        "",
+    ],
+)
+def test_d365_a_found_draft_paying_its_own_vendor_is_posted(monkeypatch, pay_to):
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(204, None),  # Microsoft.NAV.post
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-f", "status": "Draft"}]}),
+                _bc_record("bc-f", "Draft", Decimal("100.00"), pay_to=pay_to),
+                _bc_record("bc-f", "Open", Decimal("100.00"), pay_to=pay_to),
+            ]
+        )
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success, result.message
+    assert result.erp_document_id == "bc-f"
+
+
+def test_d365_a_draft_we_created_paying_another_vendor_is_deleted_and_refused(monkeypatch):
+    """We never send a pay-to vendor, so BC filled it from the vendor card's
+    `Pay-to Vendor No.`. The draft is ours, so it is deleted (its real etag)
+    and the push refused; nothing is posted."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-c", "number": "PI-3"}),
+                AssertionError("a redirected draft is never posted"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_record("bc-c", "Draft", Decimal("100.00"), 'W/"c1"', pay_to=_BC_OTHER_VENDOR),
+            ]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.refusal_code == "pay_to_vendor_differs"
+    assert result.message == "Business Central post refused: pay_to_vendor_differs"
+    client.delete.assert_awaited_once()
+    assert client.delete.await_args.args[0].endswith("purchaseInvoices(bc-c)")
+    assert client.delete.await_args.kwargs["headers"]["If-Match"] == 'W/"c1"'
+
+
+def test_d365_a_draft_redirected_between_the_check_and_the_post_is_refused(monkeypatch):
+    """The draft paid our vendor when checked; a BC user changed its pay-to
+    before our post ran. The read-back catches it: refused, the posted
+    invoice left for an accountant."""
+    result, client = _bc_post_then_read(
+        _offline_bc(monkeypatch),
+        _bc_record("bc-pr", "Open", Decimal("100.00"), pay_to=_BC_OTHER_VENDOR),
+    )
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-pr"
+    assert result.refusal_code == "pay_to_vendor_differs"
+    assert result.message == (
+        "Business Central post refused: pay_to_vendor_differs "
+        "(the invoice is posted in Business Central and was not deleted)"
+    )
+    client.delete.assert_not_awaited()
+
+
+def test_bc_pay_to_is_compared_with_the_records_own_vendor_too():
+    """A record whose own vendor is another pays someone other than the
+    bill's vendor, whatever its pay-to says."""
+    from app.services.erp_adapters.dynamics_365_bc import _bc_pay_to_redirected
+
+    def redirected(buy_from: str, pay_to: str | None) -> bool:
+        record = {"vendorId": buy_from}
+        if pay_to is not None:
+            record["payToVendorId"] = pay_to
+        return _bc_pay_to_redirected(record, _payload())
+
+    assert not redirected(_BC_VENDOR, _BC_VENDOR)
+    assert not redirected(_BC_VENDOR, None)
+    assert redirected(_BC_OTHER_VENDOR, _BC_VENDOR)
+    assert redirected(_BC_VENDOR, _BC_OTHER_VENDOR)
+    # A buy-from vendor changed in BC (our draft, or the post's read-back,
+    # which the lookup's key does not pin) with a blank or empty pay-to.
+    assert redirected(_BC_OTHER_VENDOR, None)
+    assert redirected(_BC_OTHER_VENDOR, "00000000-0000-0000-0000-000000000000")
 
 
 def test_d365_a_failed_read_of_a_created_draft_names_it_as_a_possible_orphan(monkeypatch):

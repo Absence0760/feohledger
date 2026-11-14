@@ -48,7 +48,7 @@ One reconciliation run for one vendor, as of one `statement_date`.
 | `vendor_name` | varchar(255) | Denormalised for display (mirrors `Invoice`). |
 | `statement_date` | date | "As of" date the statement covers. Required. |
 | `statement_reference` | varchar(120) | The supplier's own statement number / reference, when present. |
-| `currency` | varchar(3) | Default `USD`. |
+| `currency` | varchar(3) | ISO 4217 code of the statement; the run's candidate ledger is filtered to it. No default: both intake doors require it (decisions §377, §402). |
 | `source_format` | varchar(20) | `manual` (pasted lines, default) \| `csv` (uploaded file) \| `pdf` (read through the extraction pipeline — see PDF intake). |
 | `file_key` | varchar(512) | S3 key of the uploaded statement, kept for audit replay. Stamped on both upload paths (NULL for the pasted-lines path, which has no document). |
 | `status` | varchar(20) | Run review status — `open` until every actionable line is cleared, then `resolved`. Indexed. |
@@ -313,7 +313,7 @@ is entity-scoped.
 
 | Method + path | Purpose |
 |---|---|
-| `POST /vendor-statements` | Create a run from a pasted/normalised list of lines (`source_format = manual`) |
+| `POST /vendor-statements` | Create a run from a pasted/normalised list of lines (`source_format = manual`). JSON body: `vendor_id`, `statement_date`, **`currency` (required)**, `lines`, optional `statement_reference` / `notes`. `currency` has no default (decisions §402; it used to default to `USD`, so an API client that left it out was matched against the USD ledger): omitted, blank or malformed is FastAPI's 422 on `["body", "currency"]`, a lowercase code is stored uppercased. The upload below refuses the same omission with a coded `statement_currency_required`, because its multipart field is checked in the handler |
 | `POST /vendor-statements/upload` | Create a run from an uploaded statement **CSV or PDF** (`multipart/form-data`: `file` + `vendor_id` + `statement_date` + `currency` + optional `statement_reference`). **`currency` is required on the upload**: absent or blank is 422 `statement_currency_required`, malformed is 422 `statement_currency_invalid`, before the file is read (decisions §377; it used to default to `USD`, and the run then matched only the USD ledger). The web form takes any three-letter ISO 4217 code (`ui/CurrencyInput.svelte`: free entry, the common codes as suggestions, never blank), seeded from the organization's currency once it loads; the backend checks the shape only, so any well-formed code is accepted. A PDF routes through the extraction pipeline (`source_format = pdf`), anything else through the CSV parser (`source_format = csv`); 422 on a structurally-bad CSV or an unreadable statement, 413 over the size cap |
 | `GET /vendor-statements` | List runs (filters: `vendor_id`, `status`, `search`; paginated `page` / `page_size`). Omits lines. `search` ILIKEs the supplier name + statement reference — the two free-text columns the row renders. The page used to filter the LOADED rows in the browser, so a run matching on page 2 read as "nothing matched" while the footer's "Showing all N" (the server's whole-set total) sat above a client-narrowed table |
 | `GET /vendor-statements/summary` | Whole-set KPI rollup — `by_status` counts + `open_discrepancies` (a COUNT of the **live** lines across the filtered set that are still actionable *and* still unresolved: `classification IN _ACTIONABLE_CLASSES AND resolution_status = 'unresolved'`). Shares `_recon_list_filters` (`vendor_id` / `status` / `search`) with the list so the page's `openCount` / `totalDiscrepancies` KPIs can't describe only the loaded page. Declared **before** `/{recon_id}` so the literal path wins |
@@ -328,7 +328,10 @@ whose status is `NOT IN (paid, done)` — a settled invoice can't be on a
 supplier's open-items statement — and that are **denominated in the run's own
 currency**. Both intake paths share `_create_run`, which resolves the vendor
 (404 if out of entity scope), builds the candidate ledger, runs `reconcile`, and
-persists the run + lines (mirrored by the seed helper).
+persists the run + lines (mirrored by the seed helper). `_create_run` checks the
+currency itself through `refusals.statement_currency` and never defaults it: a
+caller that reaches it with none gets the coded 422
+`statement_currency_required` before anything is read (decisions §402).
 
 #### Why the ledger is single-currency
 

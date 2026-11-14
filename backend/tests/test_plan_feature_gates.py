@@ -1216,10 +1216,12 @@ class _DedupRedis:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("plan", ["free", "canceled_scale"])
-async def test_the_erp_webhook_is_accepted_for_a_stored_merge_config(realdb, monkeypatch, plan):
+async def test_the_erp_webhook_is_accepted_for_a_stored_live_config(realdb, monkeypatch, plan):
     """The in-flight exemption (§258, §281): a push already sent before the
-    plan stopped covering Merge still has its status reported back. The
-    webhook is not plan-gated, so `sent_to_erp → posted_in_erp` applies."""
+    plan stopped covering the ERP still has its status reported back. The
+    webhook is not plan-gated, so `sent_to_erp → posted_in_erp` applies. A
+    direct ERP: the generic route answers only for the tenant's own adapter,
+    never Merge (§399), whose per-tenant route is not plan-gated either."""
     import hashlib
     import hmac
     import json
@@ -1237,7 +1239,7 @@ async def test_the_erp_webhook_is_accepted_for_a_stored_merge_config(realdb, mon
     monkeypatch.setattr(erp_webhook, "control_session_factory", realdb.control_sessionmaker())
 
     await _arrange(realdb, plan)
-    await _write_settings(realdb, erp=dict(MERGE_ERP))
+    await _write_settings(realdb, erp=dict(LIVE_ERP))
     await realdb.store_provider_secrets("a", "erp", {"webhook_signing_secret": secret})
 
     invoice_id = await _approved_invoice(realdb, "WH")
@@ -1258,7 +1260,7 @@ async def test_the_erp_webhook_is_accepted_for_a_stored_merge_config(realdb, mon
     signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(
-            "/api/erp/webhook/merge_dev",
+            "/api/erp/webhook/netsuite",
             content=body,
             headers={"Content-Type": "application/json", "X-Webhook-Signature": signature},
         )

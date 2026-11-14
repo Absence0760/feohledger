@@ -15,6 +15,7 @@ import {
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
 	setErpSettings,
+	syncErpGlAccounts,
 	syncErpVendors,
 	testErpConnection
 } from './helpers';
@@ -36,16 +37,20 @@ import {
  *   3. GL-account sync — imports the fake chart (6100/6200/6300), also
  *      cursor-paginated.
  *   4. Vendor sync — the real `list_vendors()` (issue #256) against the
- *      fake's three supplier Contacts at `/contacts?is_supplier=true` (Merge
- *      has no `/vendors` path — the fake 404s it, as Merge does), also
- *      cursor-paginated 2 + 1; asserts the full `_merge_contact_to_payload`
+ *      fake's Contacts at `/contacts` (Merge has no `/vendors` path — the fake
+ *      404s it, as Merge does), cursor-paginated 2 + 2. One supplier reads
+ *      `is_supplier: false` the way Xero behind Merge reports a supplier with
+ *      no bill yet, and is still imported (decisions §399); asserts the full
+ *      `_merge_contact_to_payload`
  *      field mapping (name, email, phone, address, tax id) and that payment
  *      terms are ABSENT — a Merge Contact carries none — and that the fake's
  *      customer contact is not imported as a vendor.
- *   5. Full send — after the vendor sync stores the vendor's Merge id, an
- *      approved invoice posts through the async ERP dispatch with that id as
- *      its `contact` (the fake 400s an unknown one) and lands `done` with a
- *      Merge-shaped erp_document_id (merge-inv-N).
+ *   5. Full send — after the vendor and chart syncs store the Merge ids, an
+ *      approved, GL-coded invoice posts through the async ERP dispatch with
+ *      the vendor's id as its `contact` and each line's amount as
+ *      `total_amount` (the fake 400s an unknown contact, and a line with no
+ *      `total_amount` as Merge's MISSING_REQUIRED_FIELD), and lands `done`
+ *      with a Merge-shaped erp_document_id (merge-inv-N).
  */
 
 // FIXED fixtures served by tools/fake-erp/app.py — the fake's README marks
@@ -98,8 +103,8 @@ const FAKE_VENDORS = [
 	}
 ];
 
-// A customer contact the fake serves only to a request that does not filter on
-// `is_supplier=true`. It must never become a vendor.
+// A customer-only contact (`is_customer` true, `is_supplier` false). It must
+// never become a vendor.
 const FAKE_CUSTOMER_NAME = 'Fake Merge Customer Co';
 
 // The exact settings.erp shape the adapter reads: get_erp_adapter passes the
@@ -310,13 +315,16 @@ test.describe('/erp merge_dev adapter against fake-erp', () => {
 	test('full send: approved invoice posts to the fake Merge.dev and completes', async ({
 		page
 	}) => {
-		// Merge references the vendor (`contact`) by its Merge id, which only
-		// the vendor sync stores; the fake 400s an unknown contact.
+		// Merge references the vendor (`contact`) and each line's account by
+		// Merge id, which only the vendor and chart syncs store; the fake 400s
+		// an unknown contact, and every bill line needs an account.
 		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
 		const inv = await createApprovedInvoice(page, {
 			prefix: 'E2E-MERGE',
 			amount: '1985.25',
-			vendor: 'Fake Merge Vendor Co'
+			vendor: 'Fake Merge Vendor Co',
+			glAccount: '6100'
 		});
 		try {
 			const terminal = await sendToErpAndAwaitTerminal(page, inv.id);

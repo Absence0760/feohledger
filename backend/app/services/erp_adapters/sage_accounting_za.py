@@ -29,6 +29,10 @@ References (checked 2026-10):
   https://accounting.sageone.co.za/api/2.0.0/Help/Api/GET-TaxType-Get
 * Developer programme (API-key request) —
   https://accounting.sageone.co.za/Marketing/DeveloperProgram.aspx
+* Authentication and tokens: the Help index lists no login session or
+  revocation resource beyond ``POST Login/Validate`` and an undocumented
+  ``DELETE CoreTokens/Delete`` (checked 2026-11-13) —
+  https://accounting.sageone.co.za/api/2.0.0/Help
 * Auth shape (``apikey`` + ``companyid`` query parameters, HTTP basic auth with
   the Sage username/password) and ``LineType`` 0 = item / 1 = account, as used by
   the open-source clients https://github.com/Pietervdw/sageone-api-wrapper
@@ -336,6 +340,16 @@ class SageAccountingZaAdapter(ErpAdapter):
     """Direct integration with Sage Business Cloud Accounting (South Africa)."""
 
     erp_type = "sage_accounting_za"
+    # Nothing to revoke (decisions §400): every call sends the Sage user's own
+    # login in HTTP Basic plus the integrator API key, and no token is ever
+    # issued. The API's only token resource, `DELETE CoreTokens/Delete`, is
+    # undocumented ("No documentation available") and is not one we hold.
+    # Deleting our sealed copy ends nothing at Sage, so the customer changes
+    # that user's password.
+    provider_side_disconnect = (
+        "change the password of the Sage user whose login FeohLedger held, or "
+        "remove that user from the company in Sage Accounting"
+    )
 
     # -- config / transport ---------------------------------------------------
 

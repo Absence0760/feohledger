@@ -112,12 +112,17 @@ def _fake_tenant_session_factory(invoice, *, existing_recon_count: int = 0, sett
     return factory, db
 
 
+# The generic route answers only for the tenant's own, directly connected ERP
+# (decisions §399): `erp_type` must be what this block resolves to.
+GENERIC_DIRECT_ERP = {"type": "generic", "integration_method": "direct"}
+
+
 def _org_with_erp_secret(secret: str):
     return SimpleNamespace(
         id=uuid.uuid4(),
         slug="acme",
         db_name="feoh_acme",
-        settings={"erp": {"webhook_signing_secret": secret}},
+        settings={"erp": {**GENERIC_DIRECT_ERP, "webhook_signing_secret": secret}},
     )
 
 
@@ -160,6 +165,7 @@ async def _post(
     secret="erp-secret",
     existing_recon_count=0,
     settling_payment=None,
+    erp_type="generic",
 ):
     """Drive `erp_webhook` with a correctly-signed body for `status_value`.
 
@@ -205,7 +211,7 @@ async def _post(
         patch("app.api.erp_webhook.transition_invoice", _capture),
     ):
         result = await erp_webhook(
-            erp_type="generic",
+            erp_type=erp_type,
             request=_fake_request(body_bytes, {"X-Webhook-Signature": sig}),
         )
     return result, db, transition_calls
@@ -412,6 +418,91 @@ async def test_erp_paid_for_an_invoice_feohledger_never_paid_is_recorded(fake_re
     assert kwargs["erp_document_id"] == "doc_1"
     assert transition_calls == []  # the record path owns the transitions
     db.commit.assert_awaited()
+
+
+def _merge_org(secret: str):
+    """A tenant connected through Merge.dev, its Merge signature key stored as
+    `webhook_signing_secret` (decisions §399). Merge holds that key."""
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        slug="acme",
+        db_name="feoh_acme",
+        settings={"erp": {"integration_method": "merge_dev", "webhook_signing_secret": secret}},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("erp_type", ["merge_dev", "generic", "netsuite"])
+async def test_a_merge_held_key_never_unlocks_the_generic_route(fake_redis, erp_type):
+    """The generic route takes the tenant from the body and records a `Paid`
+    report as a payment without reading the bill back. A Merge tenant's key is
+    Merge's, a third party's, so a body signed with it must reach nothing here
+    under any `erp_type`: Merge's deliveries go to the per-tenant route, which
+    reads the bill back first. Silent 204, no tenant query, nothing recorded."""
+    org = _merge_org("merge-held-key")
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.posted_in_erp
+    )
+    recorded = AsyncMock()
+    with patch("app.api.erp_webhook._record_erp_reported_payment", recorded):
+        result, db, transition_calls = await _post(
+            org=org,
+            invoice=invoice,
+            status_value="Paid",
+            event_id=f"ev_merge_{erp_type}",
+            secret="merge-held-key",
+            erp_type=erp_type,
+        )
+
+    assert result is None
+    recorded.assert_not_awaited()
+    assert transition_calls == []
+    db.execute.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_erp_type_that_is_not_the_tenants_own_adapter_is_a_silent_204(fake_redis):
+    """A tenant connected directly to one ERP is reported on only by that ERP:
+    a correctly signed body posted under another `erp_type` reaches nothing."""
+    org = SimpleNamespace(
+        id=uuid.uuid4(),
+        slug="acme",
+        db_name="feoh_acme",
+        settings={
+            "erp": {
+                "type": "netsuite",
+                "integration_method": "direct",
+                "webhook_signing_secret": "erp-secret",
+            }
+        },
+    )
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.posted_in_erp
+    )
+    recorded = AsyncMock()
+    with patch("app.api.erp_webhook._record_erp_reported_payment", recorded):
+        result, db, transition_calls = await _post(
+            org=org,
+            invoice=invoice,
+            status_value="Paid",
+            event_id="ev_mismatch",
+            erp_type="sage_intacct",
+        )
+        assert result is None
+        recorded.assert_not_awaited()
+        assert transition_calls == []
+        db.execute.assert_not_awaited()
+
+        # The same body under the tenant's own adapter is heard.
+        result, db, _ = await _post(
+            org=org,
+            invoice=invoice,
+            status_value="Paid",
+            event_id="ev_match",
+            erp_type="netsuite",
+        )
+    recorded.assert_awaited_once()
 
 
 @pytest.mark.asyncio

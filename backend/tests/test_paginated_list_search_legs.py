@@ -77,6 +77,7 @@ async def test_statement_search_matches_supplier_and_reference(realdb):
                 json={
                     "vendor_id": northwind,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "statement_reference": "STMT-Q2-2026",
                     "lines": [_line("NW-1", "10.00")],
                 },
@@ -88,6 +89,7 @@ async def test_statement_search_matches_supplier_and_reference(realdb):
                 json={
                     "vendor_id": contoso,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "statement_reference": "REF-99",
                     "lines": [_line("CS-1", "20.00")],
                 },
@@ -130,6 +132,7 @@ async def test_statement_search_finds_a_run_past_the_first_page(realdb):
                 json={
                     "vendor_id": needle_vendor,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("Z-1", "10.00")],
                 },
             )
@@ -141,6 +144,7 @@ async def test_statement_search_finds_a_run_past_the_first_page(realdb):
                 json={
                     "vendor_id": vendor,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line(f"F-{n}", "10.00")],
                 },
             )
@@ -171,6 +175,7 @@ async def test_statement_summary_describes_the_searched_set(realdb):
                 json={
                     "vendor_id": vendor,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "statement_reference": ref,
                     "lines": [_line(ref, "10.00")],
                 },
@@ -194,6 +199,7 @@ async def test_statement_search_is_tenant_scoped(realdb):
             json={
                 "vendor_id": vendor,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 "lines": [_line("TA-1", "10.00")],
             },
         )

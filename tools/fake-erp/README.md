@@ -42,11 +42,22 @@ surfaces:
 
 ## Surfaces
 
-- **Merge**: `POST /invoices` (creates `merge-inv-<n>`, status `OPEN`; response
-  nests the record under `model`), `GET /invoices/{id}` (top-level `status`),
-  `GET /purchase-orders` + `GET /accounts` + `GET /vendors` (all
-  cursor-paginated 2 + 1 via `next` / `?cursor=`), `GET /account-details`
-  (test_connection).
+- **Merge** (shapes from Merge's Accounting OpenAPI spec, decisions §399):
+  `POST /invoices` (creates `merge-inv-<n>`, status `OPEN`; answers `{model,
+  warnings, errors}`). Each line's amount is `total_amount` — a line without one
+  is a 400 `MISSING_REQUIRED_FIELD` — and lines that do not add up to the header
+  `total_amount` are a 400 `PROVIDER_ERROR`, as are an archived contact and an
+  inactive account. Failed writes answer `{"errors": [{source, title, detail,
+  problem_type}]}`. Only the `Idempotency-Key` header is honoured (same key +
+  same body → the original 201; same key + another body → 400);
+  `X-Idempotency-Key` is ignored, as Merge ignores it. `GET
+  /invoices?number=&contact_id=&type=` (exact filters, the adapter's pre-create
+  lookup), `GET /invoices/{id}` (top-level `status`, `payments`,
+  `applied_payments`, `applied_credit_notes`, `applied_vendor_credits`,
+  `remote_was_deleted`, `modified_at`), `GET /purchase-orders` + `GET /accounts`
+  + `GET /contacts` (all cursor-paginated 2 + rest via `next` / `?cursor=`),
+  `GET /accounts/{id}`, `GET /contacts/{id}`, `GET /account-details`
+  (test_connection, `status: COMPLETE`). There is no `/vendors`: Merge has none.
 - **NetSuite**: `POST /vendorBill` → **204** with the new numeric id (`1001`,
   `1002`, …) in the `Location` header, status `Open` (`Pending Approval` for
   vendor `28`, which is under approval routing);
@@ -85,10 +96,12 @@ GL accounts (`GET /merge/api/accounting/v1/accounts`):
 1. `6100` "Fake Office Supplies" (expense)
 2. `6200` "Fake Software" (expense)
 3. `6300` "Fake Consulting" (expense)
+4. `6900` "Fake Retired Expenses" — `status: INACTIVE`; a bill line on it is a
+   400 `PROVIDER_ERROR`, which the adapter codes `account_inactive`
 
-Suppliers (`GET /merge/api/accounting/v1/contacts?is_supplier=true`). Merge has
-no `/vendors` path and no Vendor model — a supplier is a `Contact` with
-`is_supplier` true, and a Contact has **no payment term** — so the fake serves
+Suppliers (`GET /merge/api/accounting/v1/contacts`). Merge has
+no `/vendors` path and no Vendor model — a supplier is a `Contact`, and a
+Contact has **no payment term** — so the fake serves
 none either and `/vendors` is a 404, as on Merge
 ([OpenAPI](https://docs.merge.dev/openapi/accounting.json),
 [Contacts](https://docs.merge.dev/accounting/contacts/)). `addresses` and
@@ -97,11 +110,14 @@ ids:
 
 1. `merge-vendor-701` "Fake Merge Vendor Co" — tax id `71-1234567`
 2. `merge-vendor-702` "Fake Merge Supply Co" — tax id `72-2345678`
-3. `merge-vendor-703` "Fake Merge Services Co" — tax id `73-3456789`
+3. `merge-vendor-703` "Fake Merge Services Co" — tax id `73-3456789`;
+   `is_supplier: false` and not a customer, as Xero behind Merge reports a
+   supplier with no bill yet, so an adapter filtering on `is_supplier=true`
+   misses it and fails the e2e count
 
-plus `merge-customer-801` "Fake Merge Customer Co", a customer
-(`is_supplier: false`) served only to a request that does not filter on
-`is_supplier=true`, so an adapter that drops the filter fails the e2e count.
+plus `merge-customer-801` "Fake Merge Customer Co", a customer only
+(`is_customer: true`, `is_supplier: false`), which the adapter must leave out.
+`?is_supplier=` still filters, as Merge's does.
 
 ### References are enforced by id, as the real ERPs do
 
@@ -111,7 +127,7 @@ the e2e suite proves the adapters post the ids the syncs stored
 
 - **Merge** `POST /invoices`: `contact` must be a fixture contact id
   (`merge-vendor-701` …); a non-null line `account` must be a fixture account id
-  (`merge-acct-6100` …).
+  (`merge-acct-6100` …). Otherwise 400 `MODEL_NOT_FOUND`.
 - **NetSuite** `POST /vendorBill`: `entity.id` must be a vendor id (`25`, `26`,
   `28`);
   the `expense` sublist must be non-empty with each `account.id` an account id;
@@ -135,7 +151,11 @@ never links one provider's vendor id onto another's vendor row.
 - `POST /__set-status` `{"provider": "merge"|"netsuite"|"d365", "id": "…",
   "status": "…"}` → force a stored invoice into a provider-native status
   (e.g. merge `PAID`, netsuite `paidInFull`, d365 `Paid`) to drive
-  `get_invoice_status()` transitions.
+  `get_invoice_status()` transitions. For merge the body may also set
+  `payments` / `applied_payments` / `applied_credit_notes` /
+  `applied_vendor_credits` (lists of ids), `remote_was_deleted` and
+  `paid_on_date`, so a bill can read paid by a payment or settled by a credit;
+  each call moves `modified_at`.
 - OAuth token lifecycle, for any `FakeOAuthApp` (`xero`, `sage`, `blackbaud`):
   `POST /__oauth/{key}/lifetime {"seconds"}` sets the `expires_in` of every token
   issued from then on (under the backend's 120 s refresh margin, each use must
@@ -196,6 +216,10 @@ Backs `erp_adapters/sage_intacct.py` (`FEOH_ERP_INTACCT_API_BASE`).
 - `POST /oauth2/token` — `client_credentials` form with non-empty
   `client_id` / `client_secret` and a `username` containing `@` → bearer
   `fake-intacct-token` (`expires_in` 43200), required on every other call.
+- `POST /oauth2/revoke` — form `token`, the client as form fields or HTTP
+  Basic → `{"revoked": true}`; a JSON body or no client is refused. Tenant
+  deletion calls it (decisions §400). The fake token is fixed, so it stays
+  usable afterwards.
 - `POST /services/core/query` — `accounts-payable/vendor` (`V-ACME`,
   `V-BETA`, and `V-GONE` with `status: inactive`), `general-ledger/account`
   (`6100`, `6200`, `2000`, and `6900` inactive),
@@ -438,6 +462,11 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   A purchaseInvoice `Account` line must carry a posting account's `accountId`.
   `GET …/companyInformation` answers one object whose `currencyCode` (`USD` for
   every fake company) is the LCY a blank purchaseInvoice `currencyCode` means.
+  `POST …/purchaseInvoices` fills `payToVendorId` as BC does: the vendor card's
+  `Pay-to Vendor No.` (`payToVendorId` on the fixture) when it has one, else the
+  buy-from vendor's own id. No seeded vendor has a card pay-to, so every bill
+  the fake creates pays its own vendor and the adapter's other-vendor refusal
+  (decisions §403) is covered by `backend/tests/test_erp_adapter_idempotency.py`, not here.
 - **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, `28`,
   and inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
   (`PO-FAKE-NS-501` 2100.50 USD open, vendor `25`; `PO-FAKE-NS-502` 640.00 GBP

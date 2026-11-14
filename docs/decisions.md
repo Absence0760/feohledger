@@ -19144,6 +19144,8 @@ onto main after #670, which had since introduced `tax_not_itemised` and
   *Amended by §397:* a found draft with the id our own create recorded, still
   exactly what we sent, is ours and is repriced or deleted as a fresh one;
   every other found draft is still never touched.
+  *Amended by §403:* any record, found or created, whose `payToVendorId` is
+  another vendor's is refused `pay_to_vendor_differs` whatever its total.
 - **A found `Paid` invoice is refused, not reported posted**
   (`existing_invoice_not_open`). With the new key it may be the same bill
   keyed and paid by hand in BC, perhaps before or without our approval. BC
@@ -19825,6 +19827,8 @@ retry found it, could not tell it from a person's, and refused it
   total and currency. Its refusal does not claim it as ours, so the next retry
   will not either. No new refusal code: the found treatment's codes already say
   what happened, and a person who edited the draft now owns it.
+  *Amended by §403:* a pay-to edit is now refused `pay_to_vendor_differs`
+  rather than by the found treatment's total check.
 - A failed read before the draft is judged (its record, its lines, the
   company's LCY) is a retryable failure naming the draft, and it KEEPS the
   claim: nothing was deleted or posted, and the next attempt judges the same
@@ -20018,3 +20022,474 @@ completed after approval, a closed period). fake-erp's NetSuite section now
 answers `eid:`, SuiteQL `currency`, `accountingperiod` and `transactionline`,
 refuses a currency given by `refName`, refuses a bill dated in its closed
 January 2020, states PO headers negative and gives bills an `approvalStatus`.
+
+## 399. Merge.dev posts each line's amount, finds its own bill before a retry, codes Merge's refusals, and takes Merge's webhook per tenant (issue #655 M1–M14, drafted 2026-10-23, landed 2026-11-15)
+
+**Context.** The 2026-10-23 docs-versus-code audit listed Merge.dev findings
+M1–M14; the report is not in the repo, so each was re-derived from the WIP
+branch `fix/erp-merge-intacct-sage` (7ac03f49, written against an older main and
+used as a specification, not merged) and re-checked against Merge's Accounting
+OpenAPI spec (<https://docs.merge.dev/openapi/accounting.json>), its idempotency
+guide (<https://docs.merge.dev/merge-unified/writing-data/idempotency>), its
+webhook guide (<https://docs.merge.dev/merge-unified/reading-data/webhooks/merge-webhooks>)
+and its write-error reference, all read 2026-11-13. Some had landed already:
+suppliers read from `/contacts` with Merge's Contact keys (2026-10-26,
+`docs/known-issues.md`), an `INACTIVE` / deleted account emitted inactive and
+`parent_account` carried as a Merge id (2026-10-26, with the Contacts fix), the PO number read from
+`purchase_order_number` (§328), PO status (M6, §394) and a PO's vendor linked by
+Merge id (M7, #652). Nothing here has run against a Merge linked account (#654).
+
+**Decision.**
+- **A line's amount is `total_amount`.** Merge's invoice line has no
+  `total_line_amount` — that is a purchase-order line field — so every bill went
+  out with lines and no amounts, and the integration either refused it or
+  booked what it computed. The lines are now the shared `bill_lines` grosses,
+  which sum to the approved amount or refuse (`amount_mismatch`,
+  `line_amount_missing`, `account_not_linked`), sent with `inclusive_of_tax:
+  true`. An uncoded line takes the header account as on every other adapter;
+  it used to go out with no account at all. `sub_total` and `total_discount`
+  are not sent (against gross lines they state a second total), nor
+  `purchase_order_number` and `integration_params.correlation_id`, which are not
+  fields of Merge's Invoice and were never echoed back.
+- **Idempotency is a lookup first, then Merge's header.** The adapter sent
+  `X-Idempotency-Key`, which Merge does not read; Merge's header is
+  `Idempotency-Key`, and it is a beta Merge enables per customer and keeps 24
+  hours. So before creating, `GET /invoices?number=&contact_id=&type=
+  ACCOUNTS_PAYABLE` (exact filters) looks for a live bill: one at exactly the
+  approved total is our earlier attempt and the push succeeds without a second
+  create; anything else under the number refuses `duplicate_document_number`;
+  a lookup that cannot finish fails retryably and creates nothing (a 401 is
+  `not_connected`). A found bill in another currency is a duplicate too. The
+  header is still sent, as a second line. Because Merge's listing may not show
+  a bill written through it for a while, a create whose outcome is unknown (a
+  5xx, 408 or 409, a read timeout or dropped connection after it was sent) is
+  **not retried automatically**: `services/erp`'s retry comes 2 and 4 seconds
+  later, inside that window. Only 429 and a connection never made are retried.
+  *Residual:* a person's retry inside the window can still re-create the bill
+  where the beta is off; `docs/followups.md` has the durable fix (wait on
+  `GET /sync-status`). Found in money-path review: the first draft retried a
+  timed-out create automatically.
+- **A 2xx is a bill only when Merge says so.** A model with no `id`, or one
+  carrying `errors`, is `bill_refused`, possibly posted, never success. The
+  total Merge reports goes through `posted_total.check_posted_total`
+  (mismatch / unconfirmed); Merge cannot void, so the bill stays for a person.
+  Responses are parsed with `parse_float=Decimal`: a total read through a
+  float failed the comparison against an exact amount.
+- **Refusals are coded from `problem_type` alone.** 401 and `RELINK_NEEDED` /
+  `CREDENTIAL_REFRESH_FAILED` → `not_connected`; the two duplicate problems →
+  `duplicate_document_number`, kept possibly posted (it may be our own
+  attempt); `PROVIDER_ERROR` → the contact and accounts read back, naming an
+  `ARCHIVED` contact (`vendor_inactive`) or `INACTIVE` accounts by our codes
+  (`account_inactive`), else the shared `bill_refused` (§385) kept possibly
+  posted, since `PROVIDER_ERROR` is the integration's catch-all and nothing
+  says a multi-step write left nothing; any other documented "not created"
+  problem → `bill_refused`, not posted. `detail`,
+  `title` and `raw_error` are never read (they echo what was sent), and a
+  `problem_type` that is not enum-shaped is not echoed either. 5xx and 429 stay
+  retryable; `ERROR`, an undocumented code or no `errors` stays the plain
+  non-retryable failure, possibly posted.
+- **Status reads Merge's enum and §303.** The old map read `VOIDED`, which
+  Merge never sends (`VOID`), and called every `PAID` a payment. `PAID` is
+  `paid` only with a payment listed and no credit applied; a credit note or
+  vendor credit, in whole or part, or nothing behind it, is
+  `settled_no_payment`. `remote_was_deleted` is `cancelled`.
+- **Region.** A linked account lives on one Merge stack (`api`, `api-eu`,
+  `api-ap`) and its token is refused by the others, so EU and APAC customers
+  could not connect at all. `settings.erp.region` (`US` default, `EU`, `APAC`)
+  picks the host; an unknown value refuses the push, never guesses. It is not
+  a destination key: every value is Merge's own host. The operator's
+  `FEOH_ERP_MERGE_API_BASE` (fake-erp) still wins.
+- **The connection test reads the link's status.** Merge answers
+  `/account-details` 200 for a link that needs relinking; `INCOMPLETE` /
+  `RELINK_NEEDED` now fail the test. An unknown region fails a listing as
+  incomplete and reads a status `unknown`, never a 500.
+- **Suppliers are not filtered on `is_supplier`.** Xero behind Merge sets it
+  only once a contact has a bill, so a new supplier was never synced and so
+  could never be billed through us. The whole contact list is read and a
+  customer-only contact (`is_customer` true, `is_supplier` false) dropped.
+- **The webhook is per tenant, verified under that tenant's key, and applied
+  by the status sync's reconciler.** The generic route read Merge's
+  `linked_account_id` from the body as our tenant slug and compared Merge's
+  signature as hex; Merge sends neither (its payload names only its own
+  `linked_account`, and signs base64url), so every delivery was dropped, and
+  had one matched, the body would have chosen whose books it touched. Each
+  tenant connects its own Merge organisation, so the route is
+  `POST /api/erp/webhook/merge_dev/{tenant_slug}`, the URL the tenant
+  registers, and the raw body must verify under that tenant's signature key
+  (`webhook_signing_secret`, now an optional sealed field on the Merge form;
+  `webhook_security.verify_hmac_sha256_base64url`, strict alphabet, raw
+  digests compared) before it is parsed. Merge's `hook.id` names the
+  subscription, so a delivery is deduped by the tenant, linked account,
+  event, bill and `modified_at` (the tenant, so no tenant's deliveries can
+  claim another's keys). Only the bill's id is taken from the body: a bill no
+  invoice was pushed as is not read; otherwise it is read back from Merge with
+  the tenant's credentials, as the QuickBooks and Xero webhooks read theirs
+  (§392) — a late redelivery of an older change, or a body forged with a
+  leaked key, states nothing — mapped to an `ErpBillReport` and applied by
+  `erp_status_sync.apply_bill_report`, matched by `erp_reference` within the
+  push's realm (Merge ids are UUIDs, never reused), so it means what the
+  QuickBooks and Xero sweeps mean. A 404 is gone only for `Invoice.removed`.
+  Every decision is a silent 204; our own failure (a failed read included)
+  is a bodyless 503 with the claim released (the generic route's invariant).
+  The generic route no longer reads Merge's shape. Unlike §392's webhooks it
+  is not gated on `FEOH_ERP_STATUS_SYNC_ENABLED` (`status_sync_now_refusal`
+  would refuse every Merge tenant): that switch decides whether a push stays
+  payable, which never applies to Merge, whose pushes close at `done`; the
+  tenant opts in by storing its key.
+  *Rejected:* the specification's own path, a second copy of the generic
+  route's transition logic keyed by `erp_document_id`. Merge has no status
+  sync, so its pushes close at `done`, where that logic can only flag a void;
+  `apply_bill_report` already flags a void or deletion, a credit settlement
+  and a part payment on any invoice it matches, and one reconciler cannot
+  disagree with itself. *Rejected:* trusting `linked_account.id` to pick the
+  tenant: we store no linked-account id, and a URL plus a per-tenant key needs
+  none.
+
+- **The reconciler's credit branch covers `sent_to_erp` (shared, §303).**
+  `apply_bill_report` flagged a credit-settled bill only for an invoice in
+  `PAYABLE_HERE`; one at `sent_to_erp` (recordable but not payable) fell
+  through to the cash branch and was booked as a payment. It now takes the
+  credit branch for any recordable or payable status. `sent_to_erp` is
+  transient on every adapter today, so this closes a path rather than a
+  reported case. Found in money-path review.
+
+**What it does at runtime.** A push is now one more call (the lookup) and may
+read the contact and accounts after a `PROVIDER_ERROR`; a timed-out or 5xx
+create fails at once instead of after two more attempts, and waits for a
+person's retry. A Merge tenant that
+registers the webhook gets an `erp_reconciliation` exception when a bill it
+pushed is voided or deleted behind Merge; a bill Merge shows paid changes
+nothing on a `done` invoice. A tenant with no key stored gets nothing, as
+before.
+
+**Sandbox-only (#654).** That the idempotency beta is honoured where enabled;
+whether `GET /invoices` lists a bill written through Merge before its next
+sync; the `PROVIDER_ERROR` / `MODEL_NOT_FOUND` answers each integration gives
+an archived contact or inactive account; whether integrations honour
+`inclusive_of_tax`; that `payments` lists cash and the two `applied_*credit*`
+lists credits as documented; and an `Invoice.removed` delivery's body.
+
+Tests: `tests/test_merge_dev_adapter.py` (lines and amounts, the 2xx checks,
+every refusal class, the connection test), `tests/test_merge_webhook.py` (the
+signature, tenant resolution, every silent path, dedupe, the 503s, the report
+mapping and status map; end to end against real rows: a void flagged, a paid
+bill on a `done` invoice unchanged, a credit settlement blocking a payable one,
+an unknown bill and another tenant's key touching nothing, the bill Merge has
+deciding over the delivery, a removed bill, an unreadable read, a credit
+settlement at `sent_to_erp`),
+`test_erp_adapter_idempotency.py` (the lookup and header),
+`test_erp_adapter_money_exact.py`, `test_erp_adapter_error_pii.py`,
+`test_erp_base_url_overrides.py` (region), `test_erp_vendor_sync_adapter.py`,
+`test_erp_push_flow.py`, `test_erp_catalog.py`, `test_rbac.py`;
+`frontend/tests-e2e/erp/merge-dev.spec.ts` (the full send now syncs the chart
+and codes the invoice). fake-erp's Merge section now honours only
+`Idempotency-Key`, answers the exact `GET /invoices` filters, refuses a line
+without `total_amount`, lines that do not sum, an archived contact or inactive
+account with Merge's error shape, serves `GET /contacts/{id}` /
+`/accounts/{id}`, an inactive account, a supplier Xero has not flagged, and
+lets `__set-status` set payments and credits.
+
+**Amendment (round-10 review gate): the generic route refuses a Merge tenant.**
+Storing Merge's signature key as `webhook_signing_secret` put a key a third
+party holds into the field the generic `/webhook/{erp_type}` route verifies its
+hex HMAC against, and that route takes the tenant from the body, finds the
+invoice by `correlation_id`, never reads the bill back, and records a signed
+`{"status": "Paid"}` as a payment (`_record_erp_reported_payment`). So Merge's
+key unlocked a body-trusting write to the money path. The generic route now
+refuses, with the same silent 204, any `erp_type` that is not the tenant's own
+adapter (`resolve_adapter_key(erp_config) != erp_type`) and `merge_dev`
+outright, before the signature is checked. A Merge tenant's key is therefore
+checked only by the per-tenant Merge route, which reads the bill back. Nothing
+else stores a third-party-held key there: only the Merge form renders the
+field, a direct ERP's key is shared between the tenant and its own integration,
+and a switch to another ERP drops every sealed secret, the webhook key included
+(`catalog.secrets_to_drop`), so a key never outlives the ERP it was stored for.
+Tests: `test_erp_webhook_transitions.py` (a Merge-signed body under
+`merge_dev`, `generic` and `netsuite`; an `erp_type` that is not the tenant's
+adapter), `test_plan_feature_gates.py` (the in-flight exemption, now on a
+direct ERP).
+
+**Not gated, deliberately: an invoice back in approval.** The Merge webhook can
+reach `record_erp_reported_payment` for an invoice that re-entered approval
+after an earlier push attempt recorded its `erp_reference`, since the match is
+by that reference. That is correct, because the bill is read back from Merge
+before anything is applied: a payment Merge shows on it is real. Do not gate it.
+
+## 400. Sage's revoke is checked against Sage's own guide, and stored-credential ERPs are ended or named at tenant deletion (issue #655 OAuth row, 2026-11-13)
+
+**Context.** Issue #655's OAuth row listed five items. Three had landed: the
+login-CSRF binding (§336), the QuickBooks realm check (§337), and revocation on
+Disconnect and tenant deletion, with Blackbaud's missing endpoint stated (§371).
+Two were open. **Sage UK S3**, the revoke request's shape, rested on Apideck and
+a client library because Sage's guide pages are rendered in the browser and
+refused our fetches. **The Intacct and Sage SA notes** said there was nothing to
+revoke, and deletion said nothing about either: the Intacct adapter's docstring
+read "no long-lived token here to revoke", and a deleted Intacct or Sage SA
+tenant's confirmation had no ERP line at all, though in both cases the access
+outlives our sealed copy.
+
+**Decision.**
+
+- **Sage Accounting's revoke is unchanged and now cited to Sage.** Sage's
+  developer portal answers its search API (`/api/search?term=…`) and serves each
+  guide's text in the page payload at its real path, so the guide was readable
+  after all. "Revoke a Refresh Token"
+  (<https://developer.sage.com/accounting/docs/v1.0.0/guides/learning/authenticating/authentication>,
+  checked 2026-11-13): `POST https://oauth.accounting.sage.com/revoke`,
+  `application/x-www-form-urlencoded`, `client_id`, `client_secret`, `token`
+  (the refresh token), `200 {"success": "ok"}`. Access tokens cannot be
+  revoked; they live out their five minutes. That is exactly what §371 sends,
+  so no code changed. A live sandbox Disconnect stays on the platform-app
+  follow-up.
+- **Sage Intacct's tokens are revoked at tenant deletion.** Intacct's OAuth page
+  (<https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/authorization-and-security/oauth2>,
+  "Revoke a token", checked 2026-11-13) documents
+  `POST /ia/api/v1/oauth2/revoke` with form `token` (access or refresh) and the
+  client as form fields or HTTP Basic, answering `{"revoked": true}`, and says
+  that revoking one token revokes every other token for the same Web Services
+  user and company. Our client-credentials tokens live 12 hours in a
+  per-worker cache that the deleting process cannot see, so
+  `SageIntacctAdapter.revoke_stored_access` mints one fresh token and revokes
+  it. Intacct's rule then ends the tokens the other workers hold. The client
+  goes as form fields, like the token exchange. The outcome is `revoked` only
+  on `200` with `revoked: true`; a refused mint, a refusal, an outage or a
+  garbled body is `failed`.
+- **Sage Accounting (ZA) has nothing to revoke, and says so.** Every call sends
+  the Sage user's own login in HTTP Basic, and no token is issued. The API's
+  Help index (<https://accounting.sageone.co.za/api/2.0.0/Help>, checked
+  2026-11-13) lists only `POST Login/Validate` and an undocumented
+  `DELETE CoreTokens/Delete`, for a token we never hold. Deletion reports
+  `unsupported` without a call.
+- **The adapter states the provider-side step.**
+  `ErpAdapter.provider_side_disconnect` is the step the customer takes at the
+  provider. For Intacct it is removing our client ID under Authorized Client
+  Applications, which revoking tokens does not undo. For Sage SA it is changing
+  that user's password or removing the user.
+  `revoke_stored_access` defaults to `unsupported` when a step is stated and to
+  None otherwise. `revokes_stored_access` marks an override that calls out.
+  `tenant_deletion._read_erp_grant` falls through to it when no OAuth tokens
+  are sealed. The call follows §371's rules: the operator path calls in place,
+  a closure queues it with `post_commit`, and an outcome needing no call is
+  decided at the read. The confirmation's line reads `ERP credentials:` and
+  names the provider's step on every outcome, `revoked` included. The log names
+  only the provider and the outcome.
+
+**Rejected.**
+
+- *Revoking only the token this process has cached.* The deleting process
+  (the operator script, or whichever worker runs the closure) usually holds
+  none, and the other workers' tokens would live out their 12 hours.
+- *Calling `CoreTokens/Delete` for Sage SA.* It is undocumented, and we hold no
+  token for it to delete.
+- *A generic "remove the app from connected apps" line for every
+  stored-credential ERP.* Intacct has no connected-apps list, and the Sage SA
+  customer gave us a password, not an app grant. A wrong instruction is worse
+  than none.
+- *Setting a step for Merge.dev, Business Central, NetSuite and SYSPRO in this
+  change.* Each needs its own reading of the provider's documentation, and two
+  of those adapters were owned by parallel lanes. They are a `docs/followups.md`
+  (c) entry.
+
+**Side effect, accepted.** Intacct's revoke reaches every token for the Web
+Services user and company, not only ours. Another FeohLedger tenant sharing that
+company and user (a partner's child tenant, say) loses its cached token and
+re-mints on its next call: `_send` retries once after a 401. A customer
+integration sharing the Web Services user is affected the same way. The runbook
+says so.
+
+**Not changed.** In-app Disconnect stays OAuth-only (`/organization/erp/oauth/disconnect`).
+Replacing or clearing an Intacct configuration does not revoke: the old tokens
+are reachable only from our own workers' memory and lapse within 12 hours.
+
+## 401. A hand-entered inspection re-matches its PO's invoices in the same request, and an approver's later pass does not release their own invoice (§366 follow-up, 2026-11-15)
+
+**The gap.** `POST /api/inspections` flushed and audited the row and re-matched
+nothing. The goods-receipt doors and the QMS sync both call
+`invoice_warnings.refresh_invoices_citing_pos`; this door did not, so a typed-in
+`fail` raised no `quality_hold` until something else refreshed the invoice, a
+typed-in `pass` lifted none, and `invoice.po_match` (which §366's clearance
+fingerprint reads) kept describing the old verdict.
+
+**Decision.**
+
+- **Re-match in the request, as receipt entry does.** After the flush,
+  `api/inspections._rematch` resolves the PO the inspection reaches (its own
+  `po_id`, or its `gr_id`'s receipt's PO; the matcher reads a receipt's own
+  inspection first) and calls
+  `refresh_invoices_citing_pos(..., org_settings=<the org's own>,
+  caller="inspections", lock_invoices=True)`. Not best-effort: a failed
+  re-match rolls the inspection back, because a verdict on file whose hold was
+  never raised is worse than no verdict, and the audit row is written after the
+  re-match so `FEOH_AUDIT_MODE=lambda` never ships one for a rolled-back row.
+  The org's own settings, because a refresh without them may raise a hold but
+  never close one.
+- **The cited documents are checked first.** The matcher reads inspections by
+  `po_id` / `gr_id` with no entity filter, and the door now releases holds on
+  the spot, so a `po_id` / `gr_id` outside the caller's `X-Entity-ID` is the
+  same opaque 404 as a missing one (it was an FK 500), a receipt on a
+  different PO than the body's `po_id` is a 422 (the matcher would never read
+  that link), and the row is booked to the cited document's entity, as a
+  goods receipt is booked to its PO's.
+- **Locked, for §389's reason.** The refresh takes the invoices `FOR UPDATE`, as
+  receipt entry does, so an inspection and an approval of one of those
+  invoices serialise on the invoice row: whichever commits second sees the
+  other. If the approval commits second, the inspection came first — the
+  forward order, still open (below). No lock cycle: the insert holds a `KEY
+  SHARE` on the PO / receipt it cites (its foreign keys) and then takes the
+  invoices, the PO-then-invoices order receipt entry takes; an approval holds
+  the invoice and takes no PO or receipt lock.
+- **The approver's own later pass does not release their invoice.**
+  `_inspection_clears_hold` already refused a manual verdict whose recorder is
+  unknown or implicated in the invoice (§262's rule). Now reachable from the
+  door, it also refuses one whose recorder approved the invoice — the
+  approval of record or any level of its chain — which is §389 applied to the
+  fourth leg: passing the goods after signing the invoice off is still one
+  person doing both. The approver set is the one §389 reads
+  (`approval_chain.approvers_in_force`, factored out of
+  `receiving_conflict_on` so both rules read one set), and the approval step's
+  `require_segregation: false` lifts it as it lifts §267 and §389; the queue's
+  `settings.exceptions.require_segregation: false` lifts it with every other
+  auto-close limit. The verdict itself lands and is what the matcher reads;
+  raising a hold is never refused.
+- **The way through is an independent person's verdict on the same leg.** The
+  matcher reads the newest inspection on the invoice's newest live receipt and
+  falls back to a PO-level one (`gr_id` NULL) only when that receipt has none.
+  So someone else's pass lifts the hold in that request when it is recorded
+  where the matcher looks: against the receipt when the hold came from a
+  receipt's inspection, against the PO when it came from a PO-level one. A
+  PO-level pass beside a receipt's `fail` is never read. Or someone else
+  resolves the held row in the queue — which does not yet refuse the approver
+  doing it themselves (`exception_lifecycle.segregation_refusal` refuses the
+  implicated set and the raiser, not approvers; the `docs/followups.md` entry
+  §389 opened now names `quality_hold` too). Like §389, this binds an
+  approver who does not use the queue.
+
+**Rejected.** *Refusing an approver at the inspection door*: an inspection
+serves every invoice on its PO, so refusing it would stop a true fact from
+being recorded for the invoices its recorder never approved (§389's argument
+for the hold over the door). *Best-effort, like the QMS sync*: that sync is a
+batch whose rows are the contract; this is one interactive write.
+
+**Still open (`docs/followups.md`).** The forward order: a manager records the
+pass (not yet an approver, so it lifts the hold) and then approves. For
+receipts §267 refuses that at the approval door; no door refuses an inspector
+yet. It needs its own refusal code catalogued on web and mobile and the bulk /
+escalation / `/complete` wiring §267 has, so it is tracked rather than folded
+in here. This closes §366's "Not done" item.
+
+## 402. The pasted vendor statement's currency is required, refused by the body schema (§377 follow-up, 2026-11-15)
+
+**Context.** §377 stopped `POST /api/vendor-statements/upload` defaulting the
+statement currency to `USD`, and §381 put `ReconciliationCreate.currency` on the
+shared `CurrencyCode` rule, but the pasted-lines door still declared it
+`= "USD"`. A run is matched only against the ledger in its own currency, so an
+API client that left the field out had a GBP statement reconciled against the
+vendor's dollar invoices: every GBP line `missing_on_our_side`, every dollar
+invoice `missing_on_their_side`. The web modal always sent a currency, so only
+API callers (and the backend tests) reached the default.
+
+**Decision.** `ReconciliationCreate.currency` is a required `CurrencyCode` with
+no default, so OpenAPI shows it required. Omitted, blank or malformed is
+FastAPI's 422 on `["body", "currency"]` (`type` `missing` or `value_error`),
+before any run is built; a lowercase code is stored uppercased. The ORM column
+lost its Python-side `default="USD"` as well (the server default went in 0113),
+so a future construction site that forgets the currency fails on insert rather
+than writing dollars. (Amended in the round-10 review gate: `_create_run`, the
+persist path both doors share, still read `(currency or "USD")`, so a caller
+reaching it with none was filtered to the dollar ledger before the insert could
+fail. It now runs `refusals.statement_currency` on its argument, so an empty
+currency is the coded 422 before anything is read.) The frontend `ReconciliationCreate` type makes `currency`
+required too.
+
+**Rejected: the upload's coded refusal on this door.** The upload refuses with
+`statement_currency_required` / `_invalid` because a multipart `Form` field
+cannot carry the shared annotation, so `api/refusals.statement_currency` checks
+it in the handler. Doing the same here means typing the field
+`str | None = None` and checking it in the handler: OpenAPI would advertise an
+optional field, and a malformed code would refuse in a different shape from
+every other JSON currency field, which all refuse through `CurrencyCode` since
+§381. A JSON body's missing required field refuses in FastAPI's shape across
+the whole API (`vendor_id` and `statement_date` on this same body already do),
+and the web client sends the field, so no translated sentence is lost.
+
+Tests: `backend/tests/test_vendor_statement_recon_api.py` (omitted, blank and
+malformed currency refused with no run created; a lowercase `eur` statement
+stored `EUR` and matched only against the EUR ledger); the existing callers in
+that file, `test_paginated_list_search_legs.py` and `test_privacy_documents.py`
+now name their currency.
+
+## 403. Business Central refuses a bill that pays another vendor, with its own code (§391 / §397 follow-up, 2026-11-15)
+
+**Context.** A purchaseInvoice in BC has two vendors: the buy-from vendor
+(`vendorId`, which we send and the duplicate lookup keys on) and the pay-to
+vendor (`payToVendorId`, which we never send). §391 posts a draft the lookup
+finds at the approved total and currency, and accepts a found `Open` one, but
+never read the pay-to. A BC user who redirected who a bill pays had it booked
+as our approved bill: the liability sat on a vendor nobody here approved,
+while our payment run paid the approved one. §397 checked the pay-to only on
+our own recognised draft, and only to decide it was no longer ours; it then
+fell to the found treatment, which posted it if the total matched.
+
+**Decision.**
+- **The bill must pay its own vendor.** A record whose `payToVendorId` is set
+  (not blank, not BC's empty GUID) and is not our linked vendor, or whose own
+  `vendorId` is not ours, is refused `pay_to_vendor_differs`, non-retryably
+  (`_bc_pay_to_redirected`; GUIDs compared case-insensitively). The lookup's
+  key pins `vendorId` only for found records; a draft we created and our
+  post's read-back have no such pin, so a buy-from vendor changed in BC
+  between our check and our post is caught too (money-path review).
+- **Every record, not only found ones.** BC fills the pay-to of a draft we
+  create from the vendor card's `Pay-to Vendor No.` (else the buy-from
+  vendor), so a standing redirect on the card reaches our own drafts too.
+  Checking only found records would refuse a lost-read retry and post the
+  same bill on a clean first attempt. So a draft is checked before its total
+  (and before any reprice): one we created is deleted (real etag), one the
+  lookup found is left in BC. An `Open` / `Paid` record is checked inside
+  `_bc_posted`, the one success builder, so a found invoice, one posted
+  between our create and read, and our post's read-back all are; a posted
+  one is never deleted.
+- **A new code**, because none of the existing ones says it.
+  `posted_total_mismatch` tells the reader to check tax settings, and the
+  totals may well agree; `existing_invoice_not_open` is about status. The
+  sentence (six locales, `erpRefusals.ts`) sends the reader to the bill's
+  pay-to vendor and the vendor card in BC.
+- **Pay-to checked before total.** A redirected draft at another total is
+  refused for the redirect, the fault a person must fix first. A draft we
+  created with a redirect is not repriced: repricing creates another draft
+  that BC would fill with the same pay-to.
+- **§397's own-draft path compared the pay-to against our vendor only**, as
+  raw strings. It now uses the same helper (empty GUID read as unset, and the
+  record's own `vendorId` compared too). An own draft with another pay-to is
+  still "no longer ours" and gets the found treatment, which is now this
+  refusal, left in BC: we cannot tell a BC user's edit from the vendor card's
+  default, and §397 deletes only what is still exactly what we sent.
+
+**Left open, accepted.** A vendor whose BC card names another pay-to vendor
+cannot be pushed until that is cleared in BC or our vendor is linked to the
+pay-to vendor instead. That is deliberate: the alternative books liabilities
+to a vendor FeohLedger did not approve. Nothing here has run against a live
+BC tenant (#654); that BC fills `payToVendorId` on the API's purchaseInvoice
+from the vendor card is BC's documented Purchase Header behaviour, not yet
+observed through API v2.0; that check, and how BC writes an unset or braced
+GUID, are on the #654 sandbox entry in `docs/followups.md`. An earlier
+attempt's own draft that BC gave the card's pay-to reads as no longer ours, so
+it is refused and left in BC, not deleted: the safe direction, since §397
+deletes only what is still exactly what we sent. fake-erp seeds no vendor with
+a card pay-to, so the refusal is covered by unit tests, not e2e.
+
+**Rejected:**
+- *Sending `payToVendorId` = `vendorId` on create.* It would override a
+  vendor card's pay-to silently, which is the accountant's setting, and does
+  nothing for a found record.
+- *Reusing `posted_total_mismatch`.* Its sentence names the wrong fix.
+
+Tests: `backend/tests/test_erp_adapter_idempotency.py` (a found draft or
+`Open` invoice paying another vendor refused and left, whatever its total;
+a pay-to equal to the vendor in another case, the empty GUID and blank all
+posted; a created draft with a redirect deleted and refused; a redirect made
+between our check and our post refused on the read-back; the helper against
+the record's own `vendorId`, which is refused even with a blank pay-to;
+§397's pay-to edit now refused with this code);
+`tests/test_erp_refusal_codes.py` and `frontend/src/lib/api/erpRefusals.test.ts`
+(the code catalogued and stated). fake-erp's BC create now states
+`payToVendorId` (the vendor card's, else the vendor's own).

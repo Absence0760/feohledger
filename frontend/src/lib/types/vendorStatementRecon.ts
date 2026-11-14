@@ -206,7 +206,8 @@ export interface ReconciliationCreate {
 	vendor_id: string;
 	statement_date: string;
 	statement_reference?: string | null;
-	currency?: string;
+	/** Required: never defaulted to USD (decisions §402). */
+	currency: string;
 	notes?: string | null;
 	lines: StatementLineInput[];
 }

@@ -1100,8 +1100,8 @@ async def apply_bill_report(
     =================== ============================ ================================
     Bill in the ERP     Invoice here                 What happens
     =================== ============================ ================================
-    paid outside us     payable here, partly or      blocking payment_reconciliation:
-    (vendor credit)     wholly by a credit           settled without money leaving
+    paid outside us     payable here, or sent;       blocking payment_reconciliation:
+    (vendor credit)     partly or wholly by a credit settled without money leaving
     paid outside us     approved / sent / posted     recorded as paid outside, with
     (cash)                                           the ERP's date, rail and cash
                                                      figure; a figure that is not
@@ -1147,10 +1147,12 @@ async def apply_bill_report(
             action = "erp_payment_withdrawn"
 
     if report.state is ErpBillState.paid and report.reduced_outside:
-        if report.settled_by_credit and status in PAYABLE_HERE:
+        if report.settled_by_credit and status in PAYABLE_HERE | ERP_PAID_RECORDABLE:
             # Settled in the ERP by a vendor credit (in whole or part), not by
             # money leaving: never booked as a cash payment, but never payable
-            # here either until a person says what is owed.
+            # here either until a person says what is owed. `sent_to_erp` is
+            # recordable but not payable, and must not fall through to the
+            # cash branch below (decisions §303, §399).
             opened = await open_erp_reconciliation_exception(
                 db,
                 invoice,

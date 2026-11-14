@@ -207,6 +207,7 @@ async def test_create_amount_mismatch_line(realdb):
             json={
                 "vendor_id": vendor_id,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 # Supplier claims 1100 vs our 1000 → mismatch of 100.
                 "lines": [_line("INV-300", "1100.00")],
             },
@@ -237,6 +238,7 @@ async def test_create_fully_matched_run_is_resolved_immediately(realdb):
             json={
                 "vendor_id": vendor_id,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 "lines": [_line("CLEAN-1", "100.00"), _line("CLEAN-2", "200.00")],
             },
         )
@@ -274,6 +276,7 @@ async def test_create_run_with_actionable_line_stays_open_until_resolved(realdb)
             json={
                 "vendor_id": vendor_id,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 # MIX-1 matches; MIX-2 has no corresponding invoice → actionable.
                 "lines": [_line("MIX-1", "100.00"), _line("MIX-2", "50.00")],
             },
@@ -301,6 +304,7 @@ async def test_create_404_unknown_vendor(realdb):
             json={
                 "vendor_id": str(uuid.uuid4()),
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 "lines": [_line("INV-1", "10.00")],
             },
         )
@@ -402,6 +406,106 @@ async def test_upload_refuses_a_blank_or_malformed_statement_currency(
         assert runs.scalars().all() == []
 
 
+@pytest.mark.parametrize(
+    ("currency", "error_type"),
+    [(None, "missing"), ("EURO", "value_error"), ("", "value_error")],
+    ids=["omitted", "malformed", "blank"],
+)
+async def test_create_refuses_an_omitted_or_malformed_statement_currency(
+    realdb, currency, error_type
+):
+    """The pasted-lines door never defaults the currency to USD either
+    (decisions §402): the run matches only the ledger in its own currency, so an
+    API client that leaves it out would have been reconciled against dollars.
+    It is a required field of the body schema, so the refusal is FastAPI's 422
+    on ``["body", "currency"]`` and no run is created."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    body = {
+        "vendor_id": vendor_id,
+        "statement_date": _TODAY.isoformat(),
+        "lines": [_line("INV-1", "10.00")],
+    }
+    if currency is not None:
+        body["currency"] = currency
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post("/api/vendor-statements", json=body)
+    assert resp.status_code == 422, resp.text
+    errors = resp.json()["detail"]
+    assert [(e["loc"], e["type"]) for e in errors] == [(["body", "currency"], error_type)]
+    async with mk() as s:
+        runs = await s.execute(
+            select(VendorStatementReconciliation).where(
+                VendorStatementReconciliation.vendor_id == uuid.UUID(vendor_id)
+            )
+        )
+        assert runs.scalars().all() == []
+
+
+@pytest.mark.parametrize("currency", [None, "", "  "])
+async def test_create_run_refuses_an_empty_currency_before_reading_anything(currency):
+    """The shared persist path never defaults a missing currency to USD
+    (decisions §402): it is the ledger filter, so an empty one is the coded
+    422, and no vendor, ledger or run is read or written."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from fastapi import HTTPException
+
+    from app.api.vendor_statement_recon import _create_run
+
+    db = MagicMock()
+    db.execute = AsyncMock()
+    with pytest.raises(HTTPException) as exc:
+        await _create_run(
+            db,
+            org_id=uuid.uuid4(),
+            entity_id=uuid.uuid4(),
+            actor_id=uuid.uuid4(),
+            vendor_id=uuid.uuid4(),
+            statement_date=_TODAY,
+            statement_reference=None,
+            currency=currency,
+            notes=None,
+            source_format="manual",
+            statement_lines=[],
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "statement_currency_required"
+    db.execute.assert_not_awaited()
+    db.add.assert_not_called()
+
+
+async def test_create_takes_the_statement_currency_it_is_given(realdb):
+    """A non-USD statement is stored in its own (uppercased) currency and
+    matched against that ledger, not the USD one."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    await _add_invoice(
+        mk, org_id, vendor_id=vendor_id, invoice_number="INV-EUR", amount="750.00", currency="EUR"
+    )
+    await _add_invoice(
+        mk, org_id, vendor_id=vendor_id, invoice_number="INV-USD", amount="750.00", currency="USD"
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/vendor-statements",
+            json={
+                "vendor_id": vendor_id,
+                "statement_date": _TODAY.isoformat(),
+                "currency": "eur",
+                "lines": [_line("INV-EUR", "750.00")],
+            },
+        )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["currency"] == "EUR"
+    assert body["summary"]["matched_count"] == 1
+    assert body["summary"]["missing_their_side_count"] == 0
+    assert body["lines"][0]["matched_invoice_number"] == "INV-EUR"
+
+
 # ---------------------------------------------------------------------------
 # list + filter
 # ---------------------------------------------------------------------------
@@ -420,6 +524,7 @@ async def test_list_filters_by_vendor_and_status(realdb):
                 json={
                     "vendor_id": v1,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("A-1", "10.00")],
                 },
             )
@@ -429,6 +534,7 @@ async def test_list_filters_by_vendor_and_status(realdb):
             json={
                 "vendor_id": v2,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 "lines": [_line("B-1", "20.00")],
             },
         )
@@ -464,6 +570,7 @@ async def test_summary_is_whole_set_status_counts_and_open_discrepancies(realdb)
             json={
                 "vendor_id": v1,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 "lines": [_line("RK-1", "1100.00")],
             },
         )
@@ -473,6 +580,7 @@ async def test_summary_is_whole_set_status_counts_and_open_discrepancies(realdb)
             json={
                 "vendor_id": v2,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 "lines": [_line("RK-2", "500.00")],
             },
         )
@@ -519,6 +627,7 @@ async def test_summary_open_discrepancies_falls_when_a_line_is_resolved(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     # RKF-1 at the wrong amount -> amount_mismatch (actionable);
                     # RKF-9 has no invoice at all -> missing_on_our_side (actionable).
                     "lines": [_line("RKF-1", "1100.00"), _line("RKF-9", "50.00")],
@@ -583,6 +692,7 @@ async def test_summary_open_discrepancies_excludes_missing_their_side(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("RKT-1", "100.00")],
                 },
             )
@@ -614,6 +724,7 @@ async def test_get_detail_includes_lines(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("D-1", "100.00")],
                 },
             )
@@ -638,6 +749,7 @@ async def test_get_detail_404_cross_tenant(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("X-1", "10.00")],
                 },
             )
@@ -666,6 +778,7 @@ async def test_resolve_only_actionable_line_resolves_run(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("R-1", "100.00"), _line("R-2", "50.00")],
                 },
             )
@@ -712,6 +825,7 @@ async def test_resolve_back_to_unresolved_clears_and_reopens(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("U-1", "75.00")],  # missing_on_our_side, actionable
                 },
             )
@@ -754,6 +868,7 @@ async def test_close_readiness_flags_over_threshold_clears_under(realdb):
             json={
                 "vendor_id": vendor_id,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 "lines": [_line("BIG-1", "5000.00")],
             },
         )
@@ -784,6 +899,7 @@ async def test_close_readiness_ignores_resolved_lines(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("CL-1", "5000.00")],
                 },
             )
@@ -816,6 +932,7 @@ async def test_delete_cascades_lines(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("DEL-1", "10.00"), _line("DEL-2", "20.00")],
                 },
             )
@@ -861,6 +978,7 @@ async def test_clerk_cannot_create(realdb):
             json={
                 "vendor_id": vendor_id,
                 "statement_date": _TODAY.isoformat(),
+                "currency": "USD",
                 "lines": [_line("RB-1", "10.00")],
             },
         )
@@ -1044,6 +1162,7 @@ async def test_source_download_404s_when_nothing_was_archived(realdb):
                 json={
                     "vendor_id": vendor_id,
                     "statement_date": _TODAY.isoformat(),
+                    "currency": "USD",
                     "lines": [_line("NOFILE-1", "10.00")],
                 },
             )
