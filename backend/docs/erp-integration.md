@@ -128,8 +128,8 @@ class ErpAdapter:
 
         Same default-empty pattern as `list_pos` / `list_gl_accounts`.
         Implemented by all three real adapters — `merge_dev` (supplier
-        Contacts at `GET /contacts?is_supplier=true`, cursor-paginated;
-        Merge has no `/vendors`), `netsuite` (`GET /vendor`), and
+        Contacts at `GET /contacts`, a customer-only contact dropped,
+        cursor-paginated; Merge has no `/vendors`), `netsuite` (`GET /vendor`), and
         `dynamics_365_bc` (`GET .../vendors`) — plus `mock`.
         Covered by the local fake-erp e2e suite (`pnpm test:erp`); see
         "Local e2e testing" below.
@@ -262,7 +262,11 @@ After sending an invoice to the ERP, the system needs to know when the ERP has p
 | **Webhook** | ERP calls our endpoint when status changes | Preferred — real-time, no polling cost |
 | **Polling** | Background job checks ERP for status every N minutes | Fallback for ERPs without webhook support — **designed, not built** for the generic case (below); QuickBooks Online has its change-data-capture sweep (§295), and Xero its `If-Modified-Since` sweep (§386) |
 
-**Webhook endpoint:** `POST /api/erp/webhook/{erp_type}`
+**Webhook endpoint:** `POST /api/erp/webhook/{erp_type}` (the generic shape
+below). QuickBooks, Xero and Merge.dev have their own routes, since none of them
+sends this shape: `/webhook/quickbooks`, `/webhook/xero` (next sections) and
+`/webhook/merge_dev/{tenant_slug}` (§ Merge.dev: idempotency, refusals, region
+and webhook).
 
 The webhook handler:
 1. Validates the request (signature, API key, or IP whitelist)
@@ -1239,7 +1243,7 @@ vendor whose number happened to equal it.
 |---|---|---|
 | `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount`, `memo`), since the `item` sublist needs an item record we never send. The lines are the shared `bill_lines.bill_lines` projection — NetSuite keeps no line rules of its own: `amount` is the line's tax-inclusive gross (its total, else quantity × unit price; a unit price with no quantity refuses `line_amount_missing` rather than being priced as quantity 1), exact Decimal; an uncoded line takes the header account; a coded line with no id, or a bill with no account at all, refuses `account_not_linked`, never moved onto the header account; lines that do not sum to the approved amount refuse `amount_mismatch`, and several tax-exclusive lines with header-only tax refuse `tax_not_itemised`. `memo` is the line's description, else the invoice's, else its number. NetSuite then totals the bill itself, so the booked `total` is read back after the create (§ NetSuite: SuiteQL syncs and void → Posted total). A create NetSuite refuses with a final 4xx is coded from facts read back (`period_closed` / `vendor_inactive` / `account_inactive` / `bill_refused`, § Coded refusals there). |
 | `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Every line is an `Account` line on **`accountId`** = the account GUID the BC chart sync stored, never `lineObjectNumber` (the No.). The lines are the shared `bill_lines.bill_lines` rule: an uncoded line takes the header account, a coded line with no id or a bill with no account at all refuses `account_not_linked`. See § Business Central: chart, POs and void. |
-| `merge_dev` | `contact` (Merge object id); refuses `vendor_not_linked` | A line's `account` is the Merge account id. A coded line with no id refuses `account_not_linked`; an uncoded line sends none (Merge allows it). |
+| `merge_dev` | `contact` (Merge object id); refuses `vendor_not_linked` | A line's `account` is the Merge account id, and its amount is Merge's invoice-line **`total_amount`** — never `total_line_amount`, a purchase-order line field Merge does not read on an invoice line, which this sent until decisions §399, so every bill went out with lines and no amounts. The lines are the shared `bill_lines.bill_lines` projection (tax-inclusive grosses that sum to the approved amount, sent with `inclusive_of_tax: true`): an uncoded line takes the header account, and a coded line with no id or a bill with no account at all refuses `account_not_linked` (an uncoded line used to go out with no account). § Merge.dev: idempotency, refusals, region and webhook. |
 
 **NetSuite chart sync.** `NetSuiteAdapter.list_gl_accounts` pulls the chart
 with one SuiteQL query (`POST …/services/rest/query/v1/suiteql`,
@@ -1720,15 +1724,19 @@ still linked in that company. Detail: [vendor-management.md](vendor-management.m
 § Unlinking a vendor from one ERP company.
 
 **Merge.dev suppliers are Contacts.** Merge's Accounting API has no `/vendors`
-path and no Vendor model; the adapter lists `GET /contacts?is_supplier=true`
+path and no Vendor model; the adapter lists `GET /contacts`
 with `expand=addresses,phone_numbers`, following `next` cursors, and any failed
 page raises `ErpListingIncomplete` (the sync answers 502 and changes nothing).
 It maps `name`, `email_address`, `tax_number`, the first `phone_numbers[].number`
 and the first address's `street_1` / `street_2` / `city` / `state` / `zip_code` /
 `country`. A Contact carries **no payment term**, so `payment_terms` is always
 absent and the sync keeps whatever terms the vendor already has. An `ARCHIVED`
-contact, or one with `remote_was_deleted`, is emitted inactive; one that says
-`is_supplier: false` is never listed. The Contact `id` is the `erp_vendor_id`:
+contact, or one with `remote_was_deleted`, is emitted inactive; one that is
+only a customer (`is_customer: true`, `is_supplier: false`) is never listed.
+The listing is not filtered on `is_supplier=true`: some integrations derive it
+from history (Xero behind Merge sets it only once a contact has a bill), so a
+supplier nobody had billed yet was never synced and so could never be billed
+through us (decisions §399). The Contact `id` is the `erp_vendor_id`:
 it is what a Merge PurchaseOrder's `vendor` and an Invoice's `contact` hold, so
 the PO sync links by it and the push posts it. Before 2026-10-26 the adapter
 read a `/vendors` path Merge never published, so a live Merge vendor sync
@@ -1922,12 +1930,13 @@ target ERP actually supports:
 
 | Adapter | Mechanism |
 |---|---|
-| `merge_dev` | `X-Idempotency-Key: <correlation_id>` header on `POST /invoices` — Merge's unified API returns the ORIGINAL response for a repeated key instead of creating a second invoice. |
+| `merge_dev` | Pre-create lookup: `GET /invoices?number=<invoice number>&contact_id=<vendor's Merge id>&type=ACCOUNTS_PAYABLE` (exact filters, the number compared again; a `VOID` or deleted bill ignored). One live bill at exactly the approved total, in the invoice's currency, is our earlier attempt and short-circuits to success; anything else under the number refuses `duplicate_document_number`; a lookup that cannot finish is a retryable failure that creates nothing (a 401 is `not_connected`). Then `Idempotency-Key: <correlation_id>` on `POST /invoices`. That header is a **beta Merge enables per customer and keeps 24 hours**, so the lookup is what is relied on; the `X-Idempotency-Key` this sent until decisions §399 is not one Merge reads at all. The residual: Merge's listing may not show a bill written through it until its next sync, so a create whose outcome is unknown is not retried automatically (§ Merge.dev: idempotency, refusals, region and webhook), and only the header (where enabled) covers a person's retry inside that window. |
 | `netsuite` | Pre-create lookup: `GET /vendorBill/eid:<correlation_id>`, Oracle's form for addressing a record by external id (NetSuite enforces `externalId` uniqueness per record type). The collection query `?q=externalId IS "…"` it replaced is documented only as a pipe workaround and reported refused on transactions (decisions §398, N2). A miss is a 404 whose `o:errorCode` is `NONEXISTENT_ID`; any other 404 or an unreadable 200 fails the push. A hit is the bill itself and short-circuits `post_invoice` to success only when its `total` is the approved amount, its `currency` the invoice's and NetSuite shows it approved (the same checks as a fresh create); only a miss proceeds to `POST /vendorBill`. |
 | `dynamics_365_bc` | Pre-create lookup on BC's own duplicate key: `GET purchaseInvoices?$filter=vendorId eq <vendor guid> and vendorInvoiceNumber eq '<NUMBER>'` (upper-cased, since `Vendor Invoice No.` is a `Code[35]` field; a quote doubled). API v2.0's purchaseInvoice has no `externalDocumentNumber`, so the old filter on it failed every push. More than one hit refuses `duplicate_document_number`; a 200 whose body is not a collection is a retryable failure, never a miss. A hit found `Paid` refuses `existing_invoice_not_open` whatever its total — BC has paid a bill we cannot prove we sent, and since BC has no status sync, success would close the invoice at `done` as our own push, with that payment recorded nowhere here. Any other hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount **and** its `currencyCode` is the invoice's (a blank code is BC's local currency, read from `GET companyInformation`; any difference, or an LCY BC does not state, refuses `posted_total_mismatch`; a failed LCY read is retryable); a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` at the approved total and in the invoice's currency (an earlier attempt whose post step failed or whose response was lost) is finished: `Microsoft.NAV.post` re-run and the posted total read back — never a second create. A `Draft` at any other total may be a BC user's own draft of this bill, so it is refused `posted_total_mismatch` and **left in BC, never deleted or repriced** (decisions §391); a coded post refusal of a found draft leaves it in BC too. **The one exception is our own draft** (decisions §397): a `Draft` whose id is the one an earlier attempt recorded from its own create (`own_orphan_document_id`), and which is still exactly what we sent — its three totals equal to the ones BC answered our create with (which catches a line's tax group changed, a field we never send), its lines (`GET purchaseInvoices({id})/purchaseInvoiceLines`: type, account, description, quantity, unit cost, as a multiset), `totalAmountExcludingTax` equal to those lines' sum, the dates we sent, and the invoice's currency — is handled as a draft just created: a gross one BC taxed on top is repriced to the net, a net one is not repriced again, and a mismatch is deleted. Any other id, an edited draft, or one no longer a draft gets the found treatment above. A failed read before the draft is judged is retryable, touches nothing and keeps the claim for the next attempt. A create whose response was lost outright reports no id, so its draft is never recognised and still needs deleting in BC before the retry. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
 
-The local `fake-erp` mock implements the matching server-side behavior (a
-merge-idempotency-key cache; `q=`/`$filter=` collection queries filtered by
+The local `fake-erp` mock implements the matching server-side behavior (Merge's
+`Idempotency-Key` cache — same key and body replay the original, another body is
+a 400 — and its exact `GET /invoices` filters; `q=`/`$filter=` collection queries filtered by
 `externalId` / `vendorId` + `vendorInvoiceNumber`) so this is exercised end-to-end by
 `pnpm test:erp` without a live ERP account. Unit-level coverage (mocked HTTP,
 no fake-erp container needed) lives in
@@ -2082,12 +2091,13 @@ One server fakes three provider surfaces by path prefix:
 `GET /health` reports liveness; `POST /__reset` restores the fixture state.
 Fixture data: purchase orders `PO-FAKE-301` (1250.00), `PO-FAKE-302` (980.50),
 `PO-FAKE-303` (4400.00) — cursor-paginated — GL accounts `6100 Fake Office
-Supplies`, `6200 Fake Software`, `6300 Fake Consulting`, and (Merge.dev only,
-issue #256) three cursor-paginated supplier Contacts at `/contacts` —
-`Fake Merge Vendor Co`, `Fake Merge Supply Co`, `Fake Merge Services Co`, with
-no payment terms, as on Merge — plus a customer contact served only to a request
-that does not filter `is_supplier=true`. Like Merge, the fake has no `/vendors`
-(404). Full list in `tools/fake-erp/README.md`.
+Supplies`, `6200 Fake Software`, `6300 Fake Consulting` (Merge.dev also an
+inactive `6900`), and (Merge.dev only, issue #256) three cursor-paginated
+supplier Contacts at `/contacts` — `Fake Merge Vendor Co`, `Fake Merge Supply
+Co`, `Fake Merge Services Co` (the last flagged `is_supplier: false`, as Xero
+behind Merge reports a supplier with no bill yet), with no payment terms, as on
+Merge — plus a customer-only contact the adapter must leave out (decisions
+§399). Like Merge, the fake has no `/vendors` (404). Full list in `tools/fake-erp/README.md`.
 
 ### Env-overridable base URLs
 
@@ -2212,7 +2222,14 @@ gated as one.
    account token
 3. In **Organization > ERP Integration**, choose **Other ERP via Merge.dev**,
    pick the ERP from the second dropdown, enter the API key and account token,
-   then save and test
+   pick the Merge region the linked account is on (US unless your Merge
+   dashboard is on EU or APAC), then save and test
+4. Optional, for bills voided or deleted in the ERP to reach FeohLedger: in
+   Merge's dashboard add a webhook for the `Invoice` changed / removed events
+   pointing at `https://<api host>/api/erp/webhook/merge_dev/<workspace slug>`,
+   and paste Merge's webhook signature key (Configuration → Webhooks →
+   Security) into the form's "Merge webhook signature key" field
+   (§ Merge.dev: idempotency, refusals, region and webhook)
 
 ### Merge.dev Pricing
 
@@ -2276,6 +2293,101 @@ when" note:
 The shared reason codes (`account_not_linked`, `amount_mismatch`,
 `line_amount_missing`, `not_connected`, `posted_total_mismatch`,
 `posted_total_unconfirmed`) are constants in `erp_adapters/base.py`.
+
+## Merge.dev: idempotency, refusals, region and webhook
+
+`erp_adapters/merge_dev.py`, checked against Merge's Accounting OpenAPI spec
+(<https://docs.merge.dev/openapi/accounting.json>), its idempotency, webhook and
+write-error guides (read 2026-11-13). Reasoning: `docs/decisions.md` §399.
+
+- **What a bill sends.** `POST /invoices` with `type: ACCOUNTS_PAYABLE`, the
+  vendor's Merge id as `contact`, the approved `total_amount`, `inclusive_of_tax:
+  true`, `total_tax_amount`, and one line per `bill_lines` gross as
+  `{description, total_amount, account}`. Not sent: `sub_total` and
+  `total_discount` (against gross lines either states a second, contradicting
+  total), and `purchase_order_number` / `integration_params.correlation_id`,
+  which are not fields Merge's Invoice has (a PO is `purchase_orders`, a list of
+  Merge ids) and were never echoed back. Money is exact both ways: the body is
+  encoded by `dumps_exact_json`, and responses are parsed with
+  `parse_float=Decimal`.
+- **Idempotency.** The vendor + number lookup, then the `Idempotency-Key`
+  header (table in § Idempotency).
+- **A 2xx is a bill only when Merge says so.** The create answers `{model,
+  warnings, errors}`; a model with no `id`, or any `errors`, is `bill_refused`
+  and stays possibly posted (the model id, if any, is kept on the failure). The
+  total Merge reports must be exactly the approved amount
+  (`posted_total.check_posted_total`): a different one is
+  `posted_total_mismatch`, none is `posted_total_unconfirmed`. Merge has no void
+  or delete for an invoice, so the bill is left for a person either way.
+- **Coded refusals.** Only `errors[].problem_type` is read — never `detail`,
+  `title` or `raw_error`, which echo the integration's own text and the fields
+  we sent — and only a value shaped like an enum code. A 401 is `not_connected`
+  (Merge has no token for us to refresh); `RELINK_NEEDED` /
+  `CREDENTIAL_REFRESH_FAILED` are `not_connected` too; `DUPLICATE_MODEL_EXISTS` /
+  `MODEL_WITH_DUPLICATE_UNIQUE_FIELD_EXISTS` are `duplicate_document_number` and
+  stay possibly posted (the record may be our own earlier attempt);
+  `PROVIDER_ERROR` reads the contact and each account back and names an
+  `ARCHIVED` contact (`vendor_inactive`) or `INACTIVE` accounts by our codes
+  (`account_inactive`, `params.accounts`), both not posted; with neither it is
+  `bill_refused` kept **possibly posted**, since it is the integration's
+  catch-all; every other documented "not created" problem is `bill_refused`,
+  not posted. Each carries `params.merge_problem`. Only 429 (Merge's rate
+  limit) and a connection that was never made are retried automatically. A 5xx,
+  408, 409 or a lost response (read timeout, dropped connection) after the
+  create was sent is non-retryable and possibly posted ("outcome unknown"): the
+  automatic retry would come within seconds, before Merge's listing may show a
+  bill written through it, and the `Idempotency-Key` that would catch it may be
+  off. A person's retry runs the lookup again. `ERROR`, an undocumented code or
+  no `errors` at all is the plain non-retryable HTTP failure, possibly posted.
+- **Status read.** `get_invoice_status` reads Merge's enum (`PAID, DRAFT,
+  SUBMITTED, PARTIALLY_PAID, OPEN, VOID`; the old map read `VOIDED`, which Merge
+  never sends). `PAID` is `paid` only with a payment listed and no credit;
+  settled wholly or partly by a credit note or vendor credit, or with nothing
+  behind it, is `settled_no_payment` (decisions §303). `remote_was_deleted` is
+  `cancelled`.
+- **Connection test.** `GET /account-details` must answer 200 **and** a linked
+  account `status` other than `INCOMPLETE` / `RELINK_NEEDED`: Merge answers 200
+  for a link that can no longer write.
+- **Region.** A linked account lives on one Merge stack and its token is
+  refused by the others. `settings.erp.region` (`US`, the default and what a
+  block without it means, `EU` or `APAC`) picks `api.merge.dev`,
+  `api-eu.merge.dev` or `api-ap.merge.dev`; an unknown value refuses the push
+  (`config_invalid`), fails a vendor / chart / PO sync as an incomplete listing
+  (the coded 502) and reads a bill's status `unknown`; it never guesses. It is not a destination key: every value is
+  Merge's own host. `FEOH_ERP_MERGE_API_BASE`, when set to anything but the US
+  default (fake-erp), wins over it.
+- **Webhook.** `POST /api/erp/webhook/merge_dev/{tenant_slug}` takes Merge's
+  `Invoice.added` / `.changed` / `.removed` webhooks. Each tenant connects its
+  own Merge organisation, so the tenant registers this URL (its own slug) in its
+  Merge dashboard and stores Merge's webhook signature key (Configuration →
+  Webhooks → Security) as the ERP block's `webhook_signing_secret` — the Merge
+  form's optional "Merge webhook signature key" field, sealed like every ERP
+  secret. The raw body must verify under **that tenant's** key
+  (`X-Merge-Webhook-Signature`, base64url HMAC-SHA256,
+  `webhook_security.verify_hmac_sha256_base64url`) before it is parsed, so a
+  delivery signed for one tenant does nothing at another's URL. It is deduped by
+  the tenant, the bill and its `modified_at` (Merge's `hook.id` names the
+  subscription, not the delivery). Only the bill's id is taken from the body: a
+  bill no invoice was pushed as (within the realm the push recorded,
+  `merge_dev:`) is not read at all; otherwise it is read back from Merge with the
+  tenant's credentials (`MergeDevAdapter.bill_report`), so a late redelivery or
+  a body forged with a leaked key states nothing, mapped by
+  `merge_dev.merge_bill_report` and applied by `erp_status_sync.apply_bill_report`
+  — the same reconciler QuickBooks' and Xero's status sync use. A 404 is gone
+  only for an `Invoice.removed` delivery. Merge has no status sync, so a pushed
+  invoice is already `done`: a bill voided or deleted behind Merge opens an
+  `erp_reconciliation` exception, and a payment there changes nothing. Every
+  decision (unknown tenant, a tenant not on Merge or with no key, a bad
+  signature, another event, a duplicate, a bill nobody pushed) is a silent 204;
+  our own failure (dedup store, the bill read, tenant DB) is a bodyless 503 with
+  the claim released. Credentials that cannot be opened are a 503 too, before
+  the signature can be checked (the key is what failed), as on the generic
+  route. Unlike the QuickBooks and Xero webhooks it is not gated on
+  `FEOH_ERP_STATUS_SYNC_ENABLED`: that switch decides whether a push stays
+  payable, which never applies to Merge; storing the key is the tenant's
+  opt-in. The generic `/webhook/{erp_type}` route no longer reads
+  Merge's shape: it used to take `linked_account_id` from the body as the
+  tenant slug.
 
 ## Sage Intacct direct adapter (`sage_intacct`)
 

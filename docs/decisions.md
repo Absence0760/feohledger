@@ -20018,3 +20018,169 @@ completed after approval, a closed period). fake-erp's NetSuite section now
 answers `eid:`, SuiteQL `currency`, `accountingperiod` and `transactionline`,
 refuses a currency given by `refName`, refuses a bill dated in its closed
 January 2020, states PO headers negative and gives bills an `approvalStatus`.
+
+## 399. Merge.dev posts each line's amount, finds its own bill before a retry, codes Merge's refusals, and takes Merge's webhook per tenant (issue #655 M1–M14, drafted 2026-10-23, landed 2026-11-15)
+
+**Context.** The 2026-10-23 docs-versus-code audit listed Merge.dev findings
+M1–M14; the report is not in the repo, so each was re-derived from the WIP
+branch `fix/erp-merge-intacct-sage` (7ac03f49, written against an older main and
+used as a specification, not merged) and re-checked against Merge's Accounting
+OpenAPI spec (<https://docs.merge.dev/openapi/accounting.json>), its idempotency
+guide (<https://docs.merge.dev/merge-unified/writing-data/idempotency>), its
+webhook guide (<https://docs.merge.dev/merge-unified/reading-data/webhooks/merge-webhooks>)
+and its write-error reference, all read 2026-11-13. Some had landed already:
+suppliers read from `/contacts` with Merge's Contact keys (2026-10-26,
+`docs/known-issues.md`), an `INACTIVE` / deleted account emitted inactive and
+`parent_account` carried as a Merge id (2026-10-26, with the Contacts fix), the PO number read from
+`purchase_order_number` (§328), PO status (M6, §394) and a PO's vendor linked by
+Merge id (M7, #652). Nothing here has run against a Merge linked account (#654).
+
+**Decision.**
+- **A line's amount is `total_amount`.** Merge's invoice line has no
+  `total_line_amount` — that is a purchase-order line field — so every bill went
+  out with lines and no amounts, and the integration either refused it or
+  booked what it computed. The lines are now the shared `bill_lines` grosses,
+  which sum to the approved amount or refuse (`amount_mismatch`,
+  `line_amount_missing`, `account_not_linked`), sent with `inclusive_of_tax:
+  true`. An uncoded line takes the header account as on every other adapter;
+  it used to go out with no account at all. `sub_total` and `total_discount`
+  are not sent (against gross lines they state a second total), nor
+  `purchase_order_number` and `integration_params.correlation_id`, which are not
+  fields of Merge's Invoice and were never echoed back.
+- **Idempotency is a lookup first, then Merge's header.** The adapter sent
+  `X-Idempotency-Key`, which Merge does not read; Merge's header is
+  `Idempotency-Key`, and it is a beta Merge enables per customer and keeps 24
+  hours. So before creating, `GET /invoices?number=&contact_id=&type=
+  ACCOUNTS_PAYABLE` (exact filters) looks for a live bill: one at exactly the
+  approved total is our earlier attempt and the push succeeds without a second
+  create; anything else under the number refuses `duplicate_document_number`;
+  a lookup that cannot finish fails retryably and creates nothing (a 401 is
+  `not_connected`). A found bill in another currency is a duplicate too. The
+  header is still sent, as a second line. Because Merge's listing may not show
+  a bill written through it for a while, a create whose outcome is unknown (a
+  5xx, 408 or 409, a read timeout or dropped connection after it was sent) is
+  **not retried automatically**: `services/erp`'s retry comes 2 and 4 seconds
+  later, inside that window. Only 429 and a connection never made are retried.
+  *Residual:* a person's retry inside the window can still re-create the bill
+  where the beta is off; `docs/followups.md` has the durable fix (wait on
+  `GET /sync-status`). Found in money-path review: the first draft retried a
+  timed-out create automatically.
+- **A 2xx is a bill only when Merge says so.** A model with no `id`, or one
+  carrying `errors`, is `bill_refused`, possibly posted, never success. The
+  total Merge reports goes through `posted_total.check_posted_total`
+  (mismatch / unconfirmed); Merge cannot void, so the bill stays for a person.
+  Responses are parsed with `parse_float=Decimal`: a total read through a
+  float failed the comparison against an exact amount.
+- **Refusals are coded from `problem_type` alone.** 401 and `RELINK_NEEDED` /
+  `CREDENTIAL_REFRESH_FAILED` → `not_connected`; the two duplicate problems →
+  `duplicate_document_number`, kept possibly posted (it may be our own
+  attempt); `PROVIDER_ERROR` → the contact and accounts read back, naming an
+  `ARCHIVED` contact (`vendor_inactive`) or `INACTIVE` accounts by our codes
+  (`account_inactive`), else the shared `bill_refused` (§385) kept possibly
+  posted, since `PROVIDER_ERROR` is the integration's catch-all and nothing
+  says a multi-step write left nothing; any other documented "not created"
+  problem → `bill_refused`, not posted. `detail`,
+  `title` and `raw_error` are never read (they echo what was sent), and a
+  `problem_type` that is not enum-shaped is not echoed either. 5xx and 429 stay
+  retryable; `ERROR`, an undocumented code or no `errors` stays the plain
+  non-retryable failure, possibly posted.
+- **Status reads Merge's enum and §303.** The old map read `VOIDED`, which
+  Merge never sends (`VOID`), and called every `PAID` a payment. `PAID` is
+  `paid` only with a payment listed and no credit applied; a credit note or
+  vendor credit, in whole or part, or nothing behind it, is
+  `settled_no_payment`. `remote_was_deleted` is `cancelled`.
+- **Region.** A linked account lives on one Merge stack (`api`, `api-eu`,
+  `api-ap`) and its token is refused by the others, so EU and APAC customers
+  could not connect at all. `settings.erp.region` (`US` default, `EU`, `APAC`)
+  picks the host; an unknown value refuses the push, never guesses. It is not
+  a destination key: every value is Merge's own host. The operator's
+  `FEOH_ERP_MERGE_API_BASE` (fake-erp) still wins.
+- **The connection test reads the link's status.** Merge answers
+  `/account-details` 200 for a link that needs relinking; `INCOMPLETE` /
+  `RELINK_NEEDED` now fail the test. An unknown region fails a listing as
+  incomplete and reads a status `unknown`, never a 500.
+- **Suppliers are not filtered on `is_supplier`.** Xero behind Merge sets it
+  only once a contact has a bill, so a new supplier was never synced and so
+  could never be billed through us. The whole contact list is read and a
+  customer-only contact (`is_customer` true, `is_supplier` false) dropped.
+- **The webhook is per tenant, verified under that tenant's key, and applied
+  by the status sync's reconciler.** The generic route read Merge's
+  `linked_account_id` from the body as our tenant slug and compared Merge's
+  signature as hex; Merge sends neither (its payload names only its own
+  `linked_account`, and signs base64url), so every delivery was dropped, and
+  had one matched, the body would have chosen whose books it touched. Each
+  tenant connects its own Merge organisation, so the route is
+  `POST /api/erp/webhook/merge_dev/{tenant_slug}`, the URL the tenant
+  registers, and the raw body must verify under that tenant's signature key
+  (`webhook_signing_secret`, now an optional sealed field on the Merge form;
+  `webhook_security.verify_hmac_sha256_base64url`, strict alphabet, raw
+  digests compared) before it is parsed. Merge's `hook.id` names the
+  subscription, so a delivery is deduped by the tenant, linked account,
+  event, bill and `modified_at` (the tenant, so no tenant's deliveries can
+  claim another's keys). Only the bill's id is taken from the body: a bill no
+  invoice was pushed as is not read; otherwise it is read back from Merge with
+  the tenant's credentials, as the QuickBooks and Xero webhooks read theirs
+  (§392) — a late redelivery of an older change, or a body forged with a
+  leaked key, states nothing — mapped to an `ErpBillReport` and applied by
+  `erp_status_sync.apply_bill_report`, matched by `erp_reference` within the
+  push's realm (Merge ids are UUIDs, never reused), so it means what the
+  QuickBooks and Xero sweeps mean. A 404 is gone only for `Invoice.removed`.
+  Every decision is a silent 204; our own failure (a failed read included)
+  is a bodyless 503 with the claim released (the generic route's invariant).
+  The generic route no longer reads Merge's shape. Unlike §392's webhooks it
+  is not gated on `FEOH_ERP_STATUS_SYNC_ENABLED` (`status_sync_now_refusal`
+  would refuse every Merge tenant): that switch decides whether a push stays
+  payable, which never applies to Merge, whose pushes close at `done`; the
+  tenant opts in by storing its key.
+  *Rejected:* the specification's own path, a second copy of the generic
+  route's transition logic keyed by `erp_document_id`. Merge has no status
+  sync, so its pushes close at `done`, where that logic can only flag a void;
+  `apply_bill_report` already flags a void or deletion, a credit settlement
+  and a part payment on any invoice it matches, and one reconciler cannot
+  disagree with itself. *Rejected:* trusting `linked_account.id` to pick the
+  tenant: we store no linked-account id, and a URL plus a per-tenant key needs
+  none.
+
+- **The reconciler's credit branch covers `sent_to_erp` (shared, §303).**
+  `apply_bill_report` flagged a credit-settled bill only for an invoice in
+  `PAYABLE_HERE`; one at `sent_to_erp` (recordable but not payable) fell
+  through to the cash branch and was booked as a payment. It now takes the
+  credit branch for any recordable or payable status. `sent_to_erp` is
+  transient on every adapter today, so this closes a path rather than a
+  reported case. Found in money-path review.
+
+**What it does at runtime.** A push is now one more call (the lookup) and may
+read the contact and accounts after a `PROVIDER_ERROR`; a timed-out or 5xx
+create fails at once instead of after two more attempts, and waits for a
+person's retry. A Merge tenant that
+registers the webhook gets an `erp_reconciliation` exception when a bill it
+pushed is voided or deleted behind Merge; a bill Merge shows paid changes
+nothing on a `done` invoice. A tenant with no key stored gets nothing, as
+before.
+
+**Sandbox-only (#654).** That the idempotency beta is honoured where enabled;
+whether `GET /invoices` lists a bill written through Merge before its next
+sync; the `PROVIDER_ERROR` / `MODEL_NOT_FOUND` answers each integration gives
+an archived contact or inactive account; whether integrations honour
+`inclusive_of_tax`; that `payments` lists cash and the two `applied_*credit*`
+lists credits as documented; and an `Invoice.removed` delivery's body.
+
+Tests: `tests/test_merge_dev_adapter.py` (lines and amounts, the 2xx checks,
+every refusal class, the connection test), `tests/test_merge_webhook.py` (the
+signature, tenant resolution, every silent path, dedupe, the 503s, the report
+mapping and status map; end to end against real rows: a void flagged, a paid
+bill on a `done` invoice unchanged, a credit settlement blocking a payable one,
+an unknown bill and another tenant's key touching nothing, the bill Merge has
+deciding over the delivery, a removed bill, an unreadable read, a credit
+settlement at `sent_to_erp`),
+`test_erp_adapter_idempotency.py` (the lookup and header),
+`test_erp_adapter_money_exact.py`, `test_erp_adapter_error_pii.py`,
+`test_erp_base_url_overrides.py` (region), `test_erp_vendor_sync_adapter.py`,
+`test_erp_push_flow.py`, `test_erp_catalog.py`, `test_rbac.py`;
+`frontend/tests-e2e/erp/merge-dev.spec.ts` (the full send now syncs the chart
+and codes the invoice). fake-erp's Merge section now honours only
+`Idempotency-Key`, answers the exact `GET /invoices` filters, refuses a line
+without `total_amount`, lines that do not sum, an archived contact or inactive
+account with Merge's error shape, serves `GET /contacts/{id}` /
+`/accounts/{id}`, an inactive account, a supplier Xero has not flagged, and
+lets `__set-status` set payments and credits.
