@@ -440,11 +440,13 @@ def _bc_record(
     excluding: Decimal | None = None,
     tax: Decimal | None = None,
     currency: str = "USD",
+    pay_to: str | None = None,
 ):
     """A purchaseInvoice read, with its body on the wire exactly as BC sends it.
     ``excluding`` / ``tax`` are its ``totalAmountExcludingTax`` /
     ``totalTaxAmount``, stated only when given; ``currency`` its
-    ``currencyCode`` ("" = BC's blank, the company's local currency)."""
+    ``currencyCode`` ("" = BC's blank, the company's local currency);
+    ``pay_to`` its ``payToVendorId``, stated only when given (decisions §403)."""
     from app.utils.json_money import dumps_exact_json
 
     record = {
@@ -454,6 +456,9 @@ def _bc_record(
         "@odata.etag": etag,
         "currencyCode": currency,
     }
+    if pay_to is not None:
+        record["vendorId"] = _BC_VENDOR
+        record["payToVendorId"] = pay_to
     if total is not None:
         record["totalAmountIncludingTax"] = total
     if excluding is not None:
@@ -1460,7 +1465,10 @@ def test_d365_our_draft_edited_in_bc_is_refused_and_left(monkeypatch, edit):
     assert result.success is False
     assert result.retryable is False
     assert result.erp_document_id == "bc-g"
-    assert result.refusal_code == "posted_total_mismatch"
+    # A redirected payee is refused for that, before the total (§403); every
+    # other edit leaves the draft at a total the found treatment refuses.
+    expected = "pay_to_vendor_differs" if edit == "pay_to_changed" else "posted_total_mismatch"
+    assert result.refusal_code == expected
     assert result.message.endswith("(the draft was not deleted in Business Central)")
     assert result.erp_document_is_own is False
 
@@ -1932,6 +1940,177 @@ def test_d365_a_failed_lcy_read_is_retryable_not_success(monkeypatch):
     result, _ = _found_at_the_approved_total(monkeypatch, "Open", currency="", lcy=lcy)
     assert result.success is False and result.retryable is True
     assert result.erp_document_id == "bc-f"
+
+
+# ---------------------------------------------------------------------------
+# dynamics_365_bc — a bill BC has paying another vendor (decisions §403)
+# ---------------------------------------------------------------------------
+
+#: `_payload()`'s linked vendor, and another vendor in the same company.
+_BC_VENDOR = "00000000-0000-0000-0000-0000000000a1"
+_BC_OTHER_VENDOR = "00000000-0000-0000-0000-0000000000b2"
+
+
+@pytest.mark.parametrize("status", ["Open", "Draft"])
+def test_d365_a_found_invoice_paying_another_vendor_is_refused_and_left(monkeypatch, status):
+    """A BC user keyed (or redirected) the bill to pay another vendor: the
+    approved total and currency match, but booking it as ours would owe the
+    money to a vendor nobody here approved. Refused with its own code, never
+    posted, never deleted."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                AssertionError("neither a create nor a post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-f", "status": status}]}),
+                _bc_record("bc-f", status, Decimal("100.00"), pay_to=_BC_OTHER_VENDOR),
+                AssertionError("refused before any LCY or lines read"),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("a found record is never deleted"))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-f"
+    assert result.refusal_code == "pay_to_vendor_differs"
+    assert result.refusal_provider == "Business Central"
+    where = "the draft was not deleted" if status == "Draft" else "the invoice is posted"
+    assert where in result.message
+    assert result.erp_document_is_own is False
+    client.delete.assert_not_awaited()
+
+
+def test_d365_a_found_draft_paying_another_vendor_is_refused_whatever_its_total(monkeypatch):
+    """The pay-to is checked before the total, so the refusal names the fault
+    a person can fix rather than `posted_total_mismatch`."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[_mock_response(200, {"access_token": "tok"}), AssertionError("no post")]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-f", "status": "Draft"}]}),
+                _bc_record("bc-f", "Draft", Decimal("130.00"), pay_to=_BC_OTHER_VENDOR),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("never delete a found draft"))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.refusal_code == "pay_to_vendor_differs"
+    client.delete.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "pay_to",
+    [
+        _BC_VENDOR,
+        _BC_VENDOR.upper(),  # a GUID's case is not a different vendor
+        "00000000-0000-0000-0000-000000000000",  # BC's empty GUID: not set
+        "",
+    ],
+)
+def test_d365_a_found_draft_paying_its_own_vendor_is_posted(monkeypatch, pay_to):
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(204, None),  # Microsoft.NAV.post
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-f", "status": "Draft"}]}),
+                _bc_record("bc-f", "Draft", Decimal("100.00"), pay_to=pay_to),
+                _bc_record("bc-f", "Open", Decimal("100.00"), pay_to=pay_to),
+            ]
+        )
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success, result.message
+    assert result.erp_document_id == "bc-f"
+
+
+def test_d365_a_draft_we_created_paying_another_vendor_is_deleted_and_refused(monkeypatch):
+    """We never send a pay-to vendor, so BC filled it from the vendor card's
+    `Pay-to Vendor No.`. The draft is ours, so it is deleted (its real etag)
+    and the push refused; nothing is posted."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-c", "number": "PI-3"}),
+                AssertionError("a redirected draft is never posted"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_record("bc-c", "Draft", Decimal("100.00"), 'W/"c1"', pay_to=_BC_OTHER_VENDOR),
+            ]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.refusal_code == "pay_to_vendor_differs"
+    assert result.message == "Business Central post refused: pay_to_vendor_differs"
+    client.delete.assert_awaited_once()
+    assert client.delete.await_args.args[0].endswith("purchaseInvoices(bc-c)")
+    assert client.delete.await_args.kwargs["headers"]["If-Match"] == 'W/"c1"'
+
+
+def test_d365_a_draft_redirected_between_the_check_and_the_post_is_refused(monkeypatch):
+    """The draft paid our vendor when checked; a BC user changed its pay-to
+    before our post ran. The read-back catches it: refused, the posted
+    invoice left for an accountant."""
+    result, client = _bc_post_then_read(
+        _offline_bc(monkeypatch),
+        _bc_record("bc-pr", "Open", Decimal("100.00"), pay_to=_BC_OTHER_VENDOR),
+    )
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-pr"
+    assert result.refusal_code == "pay_to_vendor_differs"
+    assert result.message == (
+        "Business Central post refused: pay_to_vendor_differs "
+        "(the invoice is posted in Business Central and was not deleted)"
+    )
+    client.delete.assert_not_awaited()
+
+
+def test_bc_pay_to_is_compared_with_the_records_own_vendor_too():
+    """A record whose own vendor is another pays someone other than the
+    bill's vendor, whatever its pay-to says."""
+    from app.services.erp_adapters.dynamics_365_bc import _bc_pay_to_redirected
+
+    def redirected(buy_from: str, pay_to: str | None) -> bool:
+        record = {"vendorId": buy_from}
+        if pay_to is not None:
+            record["payToVendorId"] = pay_to
+        return _bc_pay_to_redirected(record, _payload())
+
+    assert not redirected(_BC_VENDOR, _BC_VENDOR)
+    assert not redirected(_BC_VENDOR, None)
+    assert redirected(_BC_OTHER_VENDOR, _BC_VENDOR)
+    assert redirected(_BC_VENDOR, _BC_OTHER_VENDOR)
+    # A buy-from vendor changed in BC (our draft, or the post's read-back,
+    # which the lookup's key does not pin) with a blank or empty pay-to.
+    assert redirected(_BC_OTHER_VENDOR, None)
+    assert redirected(_BC_OTHER_VENDOR, "00000000-0000-0000-0000-000000000000")
 
 
 def test_d365_a_failed_read_of_a_created_draft_names_it_as_a_possible_orphan(monkeypatch):

@@ -1195,6 +1195,9 @@ async def d365_create_purchase_invoice(
         **totals,
         "vendorId": vendor["id"],
         "vendorNumber": vendor["number"],
+        # Like BC: the pay-to vendor is filled from the vendor card's
+        # `Pay-to Vendor No.`, else the buy-from vendor itself (decisions §403).
+        "payToVendorId": vendor.get("payToVendorId") or vendor["id"],
         # `Vendor Invoice No.` is a Code[35] field: BC stores it upper-cased.
         "vendorInvoiceNumber": str(body.get("vendorInvoiceNumber") or "").upper(),
         "invoiceDate": body.get("invoiceDate"),
