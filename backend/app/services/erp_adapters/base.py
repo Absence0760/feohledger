@@ -307,6 +307,7 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         # Business Central
         "existing_invoice_not_open",
         "line_amount_precision",
+        "pay_to_vendor_differs",  # decisions §403
         # NetSuite (decisions §398)
         "bill_not_posted",
         "bill_rejected",
