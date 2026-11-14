@@ -1822,7 +1822,13 @@ scope (§260) — do not fold them into any of these.
       documented (`revokes_stored_access = True`), with a test in
       `test_tenant_deletion.py` and the adapter's own suite. **Trigger:** each
       adapter's next change; Merge.dev and Business Central were left out of
-      round 10 only because parallel lanes owned those files.
+      round 10 only because parallel lanes owned those files. **Merge.dev
+      also has a second credential since §399:** the Merge webhook signature
+      key the tenant stored as `webhook_signing_secret` is Merge's, so the
+      customer must end it (and the webhook) at Merge too. Until they do, the
+      webhook registered against the deleted slug keeps calling it; that is
+      safe, since a later tenant on that slug has its own key and those
+      deliveries fail its signature check, but the confirmation should say so.
 
 ### Surfaced by porting the Sage Intacct audit fixes (#655, decisions §395)
 

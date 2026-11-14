@@ -462,6 +462,11 @@ non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   A purchaseInvoice `Account` line must carry a posting account's `accountId`.
   `GET …/companyInformation` answers one object whose `currencyCode` (`USD` for
   every fake company) is the LCY a blank purchaseInvoice `currencyCode` means.
+  `POST …/purchaseInvoices` fills `payToVendorId` as BC does: the vendor card's
+  `Pay-to Vendor No.` (`payToVendorId` on the fixture) when it has one, else the
+  buy-from vendor's own id. No seeded vendor has a card pay-to, so every bill
+  the fake creates pays its own vendor and the adapter's other-vendor refusal
+  (decisions §403) is covered by `backend/tests/test_erp_adapter_idempotency.py`, not here.
 - **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, `28`,
   and inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
   (`PO-FAKE-NS-501` 2100.50 USD open, vendor `25`; `PO-FAKE-NS-502` 640.00 GBP

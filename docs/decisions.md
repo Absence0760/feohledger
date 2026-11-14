@@ -20209,6 +20209,12 @@ Tests: `test_erp_webhook_transitions.py` (a Merge-signed body under
 adapter), `test_plan_feature_gates.py` (the in-flight exemption, now on a
 direct ERP).
 
+**Not gated, deliberately: an invoice back in approval.** The Merge webhook can
+reach `record_erp_reported_payment` for an invoice that re-entered approval
+after an earlier push attempt recorded its `erp_reference`, since the match is
+by that reference. That is correct, because the bill is read back from Merge
+before anything is applied: a payment Merge shows on it is real. Do not gate it.
+
 ## 400. Sage's revoke is checked against Sage's own guide, and stored-credential ERPs are ended or named at tenant deletion (issue #655 OAuth row, 2026-11-13)
 
 **Context.** Issue #655's OAuth row listed five items. Three had landed: the
@@ -20412,7 +20418,7 @@ stored `EUR` and matched only against the EUR ledger); the existing callers in
 that file, `test_paginated_list_search_legs.py` and `test_privacy_documents.py`
 now name their currency.
 
-## 403. Business Central refuses a bill that pays another vendor, with its own code (§391 / §397 follow-up)
+## 403. Business Central refuses a bill that pays another vendor, with its own code (§391 / §397 follow-up, 2026-11-15)
 
 **Context.** A purchaseInvoice in BC has two vendors: the buy-from vendor
 (`vendorId`, which we send and the duplicate lookup keys on) and the pay-to
