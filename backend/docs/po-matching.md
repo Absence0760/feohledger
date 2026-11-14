@@ -613,9 +613,20 @@ where somebody could:
   inspection by hand.
   `QualityInspection.source` / `recorded_by_user_id` (migration 0105) say where
   a verdict came from: a `qms` one lifts the hold; a `manual` one only when its
-  recorder is known and not implicated in the invoice
-  (`approval_chain.violates_segregation`); one of unknown provenance (a manual
-  row with no recorder, or a row predating the columns) never — fail closed.
+  recorder is known, not implicated in the invoice
+  (`approval_chain.violates_segregation`) and did not approve it (decisions
+  §401: the approval of record or any chain level, `approval_chain.
+  approvers_in_force` — the same approver set §389's receipt rule reads, lifted
+  by the approval step's `require_segregation: false`); one of unknown
+  provenance (a manual row with no recorder, or a row predating the columns)
+  never — fail closed. The way through is an independent person's own verdict
+  recorded where the matcher looks: the matcher reads the newest inspection on
+  the invoice's newest live receipt and falls back to a PO-level one only when
+  that receipt has none, so a hold raised by a receipt's `fail` lifts only on a
+  pass recorded against that receipt — a PO-level pass beside it is never
+  read. Raising a hold is never refused — a `fail` from anyone lands. (The
+  queue does not yet refuse an approver resolving the row by hand —
+  `docs/followups.md`, as for §389.)
   Not the audit log: in `FEOH_AUDIT_MODE=lambda` no local row exists, so an
   audit-based check would fail open. When the QMS sync takes over a row that
   was not its own (same inspection number), it also replaces the typed PO / GR
@@ -684,11 +695,16 @@ The org's `settings.exceptions.require_segregation: false` opt-out lifts the two
 segregation limits, as it does on the queue.
 
 Refreshes run on every invoice save, approval-with-corrections, QMS sync,
-**recording or cancelling a goods receipt** and the other `refresh_warnings`
-callers. A receipt re-matches every invoice that cites its PO in the same
-transaction (`invoice_warnings.refresh_invoices_citing_pos`), so the hold lifts
-— or is raised — the moment the receipt lands. Nothing re-evaluates an
-untouched invoice on a schedule.
+**recording or cancelling a goods receipt**, **recording an inspection by hand**
+and the other `refresh_warnings` callers. A receipt or a hand-entered
+inspection re-matches every invoice that cites its PO in the same transaction
+(`invoice_warnings.refresh_invoices_citing_pos`, `caller="goods-receipts"` /
+`"inspections"`), so the hold lifts — or is raised — the moment the row lands,
+and a re-match that fails rolls the row back with it. An inspection reaches
+its own `po_id`, or its goods receipt's PO. Both lock the invoices they
+re-match (`lock_invoices=True`), so each serialises with an approval of one of
+them (decisions §389, §401). Nothing re-evaluates an untouched invoice on a
+schedule.
 
 **The ERP PO sync is the one refresh that never closes a row** — it may only
 raise. A row it no longer finds stays open, annotated
@@ -1016,6 +1032,26 @@ a `fail` or `partial` here is what flips an invoice's `po_match` to a quality
 hold, and a `pass` is what clears one — so this is the only inspection a human
 can author, and it was the only one with no record of who authored it while its
 QMS-synced sibling had audited since the integration shipped.
+
+### Manual inspections re-match in the same request
+
+`POST /api/inspections` re-runs the match on every invoice citing the PO the
+inspection reaches — its own `po_id`, or the PO of its `gr_id`'s receipt —
+in the same transaction, with the org's own settings and the invoices locked
+(`api/inspections._rematch` → `refresh_invoices_citing_pos(caller="inspections",
+lock_invoices=True)`), as receipt entry does (decisions §401). A `fail` or
+`partial` therefore raises the `quality_hold` before the response returns; a
+`pass` closes one only when `_inspection_clears_hold` allows it (above: not the
+invoice's implicated actors, not anyone who approved it). Before this, the row
+landed and the invoice kept describing the old verdict until something else
+refreshed it. A rematch failure rolls the inspection back (not best-effort; the
+QMS sync's batch rematch stays best-effort), and the audit row is written after
+the rematch. The cited `po_id` / `gr_id` must be inside the caller's
+`X-Entity-ID` (else the same 404 as a missing one), a receipt on another PO
+than the body's `po_id` is a 422, and the row is booked to the cited
+document's entity — the matcher reads inspections with no entity filter, so a
+verdict filed from one subsidiary must not release another's hold. Pinned in
+`tests/test_inspections_api.py`.
 
 ## Data Models
 

@@ -20023,6 +20023,82 @@ answers `eid:`, SuiteQL `currency`, `accountingperiod` and `transactionline`,
 refuses a currency given by `refName`, refuses a bill dated in its closed
 January 2020, states PO headers negative and gives bills an `approvalStatus`.
 
+## 401. A hand-entered inspection re-matches its PO's invoices in the same request, and an approver's later pass does not release their own invoice (§366 follow-up, 2026-11-15)
+
+**The gap.** `POST /api/inspections` flushed and audited the row and re-matched
+nothing. The goods-receipt doors and the QMS sync both call
+`invoice_warnings.refresh_invoices_citing_pos`; this door did not, so a typed-in
+`fail` raised no `quality_hold` until something else refreshed the invoice, a
+typed-in `pass` lifted none, and `invoice.po_match` (which §366's clearance
+fingerprint reads) kept describing the old verdict.
+
+**Decision.**
+
+- **Re-match in the request, as receipt entry does.** After the flush,
+  `api/inspections._rematch` resolves the PO the inspection reaches (its own
+  `po_id`, or its `gr_id`'s receipt's PO; the matcher reads a receipt's own
+  inspection first) and calls
+  `refresh_invoices_citing_pos(..., org_settings=<the org's own>,
+  caller="inspections", lock_invoices=True)`. Not best-effort: a failed
+  re-match rolls the inspection back, because a verdict on file whose hold was
+  never raised is worse than no verdict, and the audit row is written after the
+  re-match so `FEOH_AUDIT_MODE=lambda` never ships one for a rolled-back row.
+  The org's own settings, because a refresh without them may raise a hold but
+  never close one.
+- **The cited documents are checked first.** The matcher reads inspections by
+  `po_id` / `gr_id` with no entity filter, and the door now releases holds on
+  the spot, so a `po_id` / `gr_id` outside the caller's `X-Entity-ID` is the
+  same opaque 404 as a missing one (it was an FK 500), a receipt on a
+  different PO than the body's `po_id` is a 422 (the matcher would never read
+  that link), and the row is booked to the cited document's entity, as a
+  goods receipt is booked to its PO's.
+- **Locked, for §389's reason.** The refresh takes the invoices `FOR UPDATE`, as
+  receipt entry does, so an inspection and an approval of one of those
+  invoices serialise on the invoice row: whichever commits second sees the
+  other. If the approval commits second, the inspection came first — the
+  forward order, still open (below). No lock cycle: the insert holds a `KEY
+  SHARE` on the PO / receipt it cites (its foreign keys) and then takes the
+  invoices, the PO-then-invoices order receipt entry takes; an approval holds
+  the invoice and takes no PO or receipt lock.
+- **The approver's own later pass does not release their invoice.**
+  `_inspection_clears_hold` already refused a manual verdict whose recorder is
+  unknown or implicated in the invoice (§262's rule). Now reachable from the
+  door, it also refuses one whose recorder approved the invoice — the
+  approval of record or any level of its chain — which is §389 applied to the
+  fourth leg: passing the goods after signing the invoice off is still one
+  person doing both. The approver set is the one §389 reads
+  (`approval_chain.approvers_in_force`, factored out of
+  `receiving_conflict_on` so both rules read one set), and the approval step's
+  `require_segregation: false` lifts it as it lifts §267 and §389; the queue's
+  `settings.exceptions.require_segregation: false` lifts it with every other
+  auto-close limit. The verdict itself lands and is what the matcher reads;
+  raising a hold is never refused.
+- **The way through is an independent person's verdict on the same leg.** The
+  matcher reads the newest inspection on the invoice's newest live receipt and
+  falls back to a PO-level one (`gr_id` NULL) only when that receipt has none.
+  So someone else's pass lifts the hold in that request when it is recorded
+  where the matcher looks: against the receipt when the hold came from a
+  receipt's inspection, against the PO when it came from a PO-level one. A
+  PO-level pass beside a receipt's `fail` is never read. Or someone else
+  resolves the held row in the queue — which does not yet refuse the approver
+  doing it themselves (`exception_lifecycle.segregation_refusal` refuses the
+  implicated set and the raiser, not approvers; the `docs/followups.md` entry
+  §389 opened now names `quality_hold` too). Like §389, this binds an
+  approver who does not use the queue.
+
+**Rejected.** *Refusing an approver at the inspection door*: an inspection
+serves every invoice on its PO, so refusing it would stop a true fact from
+being recorded for the invoices its recorder never approved (§389's argument
+for the hold over the door). *Best-effort, like the QMS sync*: that sync is a
+batch whose rows are the contract; this is one interactive write.
+
+**Still open (`docs/followups.md`).** The forward order: a manager records the
+pass (not yet an approver, so it lifts the hold) and then approves. For
+receipts §267 refuses that at the approval door; no door refuses an inspector
+yet. It needs its own refusal code catalogued on web and mobile and the bulk /
+escalation / `/complete` wiring §267 has, so it is tracked rather than folded
+in here. This closes §366's "Not done" item.
+
 ## 402. The pasted vendor statement's currency is required, refused by the body schema (§377 follow-up, 2026-11-15)
 
 **Context.** §377 stopped `POST /api/vendor-statements/upload` defaulting the
