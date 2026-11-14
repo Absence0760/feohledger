@@ -422,6 +422,33 @@ async def test_a_bill_settled_by_a_vendor_credit_blocks_and_books_no_cash(realdb
     assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.posted_in_erp
 
 
+async def test_a_credit_settled_bill_at_sent_to_erp_books_no_cash_and_blocks(realdb):
+    """`sent_to_erp` is recordable but not payable here, so it must take the
+    credit branch, not fall through to the cash one (decisions §303, §399):
+    a QuickBooks bill settled by a vendor credit books no `Payment` and opens
+    the payment-blocking `payment_reconciliation` row, invoice unmoved."""
+    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+
+    inv_id, corr = await _seed(realdb, status=InvoiceStatus.sent_to_erp)
+    report = _report(corr, ErpBillState.paid, reduced_outside=True, settled_by_credit=True)
+    async with realdb.sessionmaker("a")() as s:
+        outcome = await erp_status_sync.apply_bill_report(
+            s,
+            org=await _org(realdb),
+            report=report,
+            realm=REALM,
+            erp_type=erp_status_sync.QBO_PROVIDER,
+            event_id="ev-credit-sent",
+        )
+    assert outcome.action == "credit_settlement_flagged"
+    [flag] = await _exceptions(realdb, inv_id)
+    assert flag.exception_type == "payment_reconciliation"
+    assert flag.exception_type in PAYMENT_BLOCKING_EXCEPTION_TYPES
+    assert flag.status == "open"
+    assert await _payments(realdb, inv_id) == []
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.sent_to_erp
+
+
 @pytest.mark.parametrize(
     ("pay_type", "link_type", "method"),
     [("Check", "BillPaymentCheck", "check"), ("CreditCard", "BillPaymentCreditCard", "card")],
