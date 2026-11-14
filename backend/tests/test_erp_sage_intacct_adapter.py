@@ -776,9 +776,11 @@ def test_void_reverses_today_when_the_bill_was_posted_earlier():
     fake = FakeIntacct()
     fake.bill = {"key": "777", "state": "posted", "postingDate": "2000-01-01"}
     fake.delete_status = 400
-    assert _run(fake, lambda: SageIntacctAdapter(CONFIG).void_invoice("777")) is True
+    # "Today" is the UTC day (app.utils.dates), never the server's local one.
+    with patch("app.services.erp_adapters.sage_intacct.utc_today", return_value=date(2026, 3, 4)):
+        assert _run(fake, lambda: SageIntacctAdapter(CONFIG).void_invoice("777")) is True
     [reverse] = fake.of("POST", "/workflows/accounts-payable/bill/reverse")
-    assert json.loads(reverse.content)["reverseDate"] == date.today().isoformat()
+    assert json.loads(reverse.content)["reverseDate"] == "2026-03-04"
 
 
 def test_void_fails_when_neither_delete_nor_reverse_is_allowed():
