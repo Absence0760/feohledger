@@ -20018,3 +20018,40 @@ completed after approval, a closed period). fake-erp's NetSuite section now
 answers `eid:`, SuiteQL `currency`, `accountingperiod` and `transactionline`,
 refuses a currency given by `refName`, refuses a bill dated in its closed
 January 2020, states PO headers negative and gives bills an `approvalStatus`.
+
+## 402. The pasted vendor statement's currency is required, refused by the body schema (§377 follow-up, 2026-11-15)
+
+**Context.** §377 stopped `POST /api/vendor-statements/upload` defaulting the
+statement currency to `USD`, and §381 put `ReconciliationCreate.currency` on the
+shared `CurrencyCode` rule, but the pasted-lines door still declared it
+`= "USD"`. A run is matched only against the ledger in its own currency, so an
+API client that left the field out had a GBP statement reconciled against the
+vendor's dollar invoices: every GBP line `missing_on_our_side`, every dollar
+invoice `missing_on_their_side`. The web modal always sent a currency, so only
+API callers (and the backend tests) reached the default.
+
+**Decision.** `ReconciliationCreate.currency` is a required `CurrencyCode` with
+no default, so OpenAPI shows it required. Omitted, blank or malformed is
+FastAPI's 422 on `["body", "currency"]` (`type` `missing` or `value_error`),
+before any run is built; a lowercase code is stored uppercased. The ORM column
+lost its Python-side `default="USD"` as well (the server default went in 0113),
+so a future construction site that forgets the currency fails on insert rather
+than writing dollars. The frontend `ReconciliationCreate` type makes `currency`
+required too.
+
+**Rejected: the upload's coded refusal on this door.** The upload refuses with
+`statement_currency_required` / `_invalid` because a multipart `Form` field
+cannot carry the shared annotation, so `api/refusals.statement_currency` checks
+it in the handler. Doing the same here means typing the field
+`str | None = None` and checking it in the handler: OpenAPI would advertise an
+optional field, and a malformed code would refuse in a different shape from
+every other JSON currency field, which all refuse through `CurrencyCode` since
+§381. A JSON body's missing required field refuses in FastAPI's shape across
+the whole API (`vendor_id` and `statement_date` on this same body already do),
+and the web client sends the field, so no translated sentence is lost.
+
+Tests: `backend/tests/test_vendor_statement_recon_api.py` (omitted, blank and
+malformed currency refused with no run created; a lowercase `eur` statement
+stored `EUR` and matched only against the EUR ledger); the existing callers in
+that file, `test_paginated_list_search_legs.py` and `test_privacy_documents.py`
+now name their currency.
