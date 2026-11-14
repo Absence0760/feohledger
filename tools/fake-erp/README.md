@@ -196,6 +196,10 @@ Backs `erp_adapters/sage_intacct.py` (`FEOH_ERP_INTACCT_API_BASE`).
 - `POST /oauth2/token` — `client_credentials` form with non-empty
   `client_id` / `client_secret` and a `username` containing `@` → bearer
   `fake-intacct-token` (`expires_in` 43200), required on every other call.
+- `POST /oauth2/revoke` — form `token`, the client as form fields or HTTP
+  Basic → `{"revoked": true}`; a JSON body or no client is refused. Tenant
+  deletion calls it (decisions §400). The fake token is fixed, so it stays
+  usable afterwards.
 - `POST /services/core/query` — `accounts-payable/vendor` (`V-ACME`,
   `V-BETA`, and `V-GONE` with `status: inactive`), `general-ledger/account`
   (`6100`, `6200`, `2000`, and `6900` inactive),

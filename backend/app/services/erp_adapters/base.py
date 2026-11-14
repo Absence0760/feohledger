@@ -863,9 +863,35 @@ class ErpAdapter:
     #: its bills match an invoice only within the realm the push recorded, so
     #: the sweep never reads a bill only a realm-less push names (§386).
     bills_match_by_reference: bool = False
+    #: For an ERP reached with stored credentials rather than an OAuth consent:
+    #: the step the customer takes at the provider to end the access those
+    #: credentials gave FeohLedger, which deleting our copy does not end
+    #: (decisions §400). Tenant deletion states it in the confirmation. None:
+    #: nothing to say (an OAuth adapter, whose grant ``erp_oauth`` revokes, or
+    #: one not yet assessed).
+    provider_side_disconnect: str | None = None
+    #: True when :meth:`revoke_stored_access` calls the provider, so tenant
+    #: deletion defers it past a closure's commit like an OAuth revoke.
+    revokes_stored_access: bool = False
 
     def __init__(self, config: dict):
         self.config = config
+
+    async def revoke_stored_access(self) -> str | None:
+        """End, at the provider, the access this adapter's stored credentials
+        hold, once a tenant is being deleted (decisions §400).
+
+        Returns ``erp_oauth.REVOKED`` / ``REVOKE_FAILED`` /
+        ``REVOKE_UNSUPPORTED``, or None when the adapter states no
+        :attr:`provider_side_disconnect` (nothing to report). The default calls
+        no one: an adapter whose provider documents a revocation endpoint
+        overrides this. Never raises, never logs a credential.
+        """
+        if self.provider_side_disconnect is None:
+            return None
+        from app.services.erp_oauth import REVOKE_UNSUPPORTED
+
+        return REVOKE_UNSUPPORTED
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         """Send an invoice to the ERP. Returns the ERP document ID."""

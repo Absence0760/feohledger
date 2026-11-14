@@ -17,14 +17,27 @@ programme against that sender ID; and each customer company must authorize the
 sender ID, subscribe to Web Services, and list our client id together with its
 Web Services user under Company > Setup > Company > Security > Authorized
 Client Applications. Only then does the client-credentials grant below answer.
-Disconnecting on the customer's side means removing that Authorized Client
-Application entry: there is no long-lived token here to revoke.
+
+**Revocation (decisions §400).** The grant itself is that Authorized Client
+Applications entry, and only the customer can remove it. What FeohLedger can end
+is the tokens: the client-credentials grant issues no refresh token, only
+access tokens that live 12 h, cached per worker below. Intacct documents
+``POST /oauth2/revoke`` (form ``token``, the client as form fields or HTTP
+Basic, answering ``{"revoked": true}``), and revoking one token revokes every
+token issued for that Web Services user and company. So
+:meth:`SageIntacctAdapter.revoke_stored_access` mints one fresh token and
+revokes it, which ends any token another worker still holds; tenant deletion
+calls it, and its confirmation still tells the customer to remove the entry.
 
 References (checked 2026-10-23; Sage's guide pages refuse automated fetches,
 the OpenAPI ``.md`` variants do not):
 
 * REST docs root (quick start, OAuth 2.0, query service, error handling) —
   https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/
+* OAuth 2.0 (client credentials, "Revoke a token"; checked 2026-11-13 by
+  reading the text the portal ships in the page at this path, and its
+  ``/api/search?term=revoke`` answer, which automated fetches do reach) —
+  https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/authorization-and-security/oauth2
 * Bill create / get / delete / reverse —
   https://developer.sage.com/intacct/apis/intacct/1/intacct-openapi/groups/accounts-payable/groups/bills/tags/accounts_payable_bills/paths/create-accounts-payable-bill.md
   (and ``get-accounts-payable-bill-key``, ``delete-accounts-payable-bill-key``,
@@ -73,6 +86,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -107,6 +121,8 @@ from app.services.erp_adapters.bill_allocation import MISSING_DATES
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.posted_total import VoidOutcome, check_posted_total
+
+logger = logging.getLogger(__name__)
 
 PROVIDER = "Sage Intacct"
 DEFAULT_API_BASE = "https://api.intacct.com/ia/api/v1"
@@ -278,6 +294,11 @@ class SageIntacctAdapter(ErpAdapter):
     """Direct integration with the Sage Intacct REST API."""
 
     erp_type = "sage_intacct"
+    provider_side_disconnect = (
+        "remove FeohLedger's client ID under Company > Setup > Company > Security > "
+        "Authorized Client Applications in Sage Intacct"
+    )
+    revokes_stored_access = True
 
     # -- config / transport ---------------------------------------------------
 
@@ -854,6 +875,50 @@ class SageIntacctAdapter(ErpAdapter):
             return rows is not None
         except Exception:
             return False
+
+    async def revoke_stored_access(self) -> str | None:
+        """Revoke every token Intacct holds for this Web Services user and
+        company (decisions §400).
+
+        Intacct's ``POST /oauth2/revoke`` ends the token it is given and every
+        other token for the same user and company, so one freshly minted token
+        reaches the ones other workers have cached, which this process cannot
+        see. The client goes as form fields, as the token exchange sends it.
+        ``revoked`` only on Intacct's documented ``200 {"revoked": true}``;
+        a refused mint (the app already de-authorized), a refusal or an outage
+        is ``failed``, and the confirmation then says what the customer removes.
+        Never raises; names the status only, never a token or the secret.
+        """
+        from app.services.erp_oauth import REVOKE_FAILED, REVOKED
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                token = await self._token(client, fresh=True)
+                resp = await client.post(
+                    f"{self._base()}/oauth2/revoke",
+                    data={
+                        "token": token,
+                        "client_id": self._require("client_id"),
+                        "client_secret": self._require("client_secret"),
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001 — best-effort by contract
+            logger.warning("%s token revocation failed: %s", PROVIDER, type(exc).__name__)
+            return REVOKE_FAILED
+        finally:
+            try:
+                _TOKEN_CACHE.pop(self._token_key(), None)
+            except IntacctConfigError:
+                pass
+        if resp.status_code != 200:
+            logger.warning("%s token revocation refused: HTTP %s", PROVIDER, resp.status_code)
+            return REVOKE_FAILED
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+        confirmed = isinstance(body, dict) and body.get("revoked") is True
+        return REVOKED if confirmed else REVOKE_FAILED
 
 
 def _field(raw: dict, parent: str, child: str) -> object:

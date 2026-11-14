@@ -1403,6 +1403,28 @@ async def intacct_token(request: Request) -> dict:
     return {"access_token": INTACCT_TOKEN, "token_type": "Bearer", "expires_in": 43200}
 
 
+@intacct.post("/oauth2/revoke")
+async def intacct_revoke(request: Request) -> dict:
+    """Intacct's ``POST /oauth2/revoke`` (decisions §400): form ``token``, the
+    client as form fields or HTTP Basic, answering ``{"revoked": true}``. A
+    JSON body or a missing client is refused, so a wrong shape fails here as it
+    would at Intacct. The fake token is fixed, so revoking ends nothing."""
+    if not request.headers.get("content-type", "").startswith(
+        "application/x-www-form-urlencoded"
+    ):
+        raise ProviderError(400, {"error": "invalid_request"})
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    form = {k: v[0] for k, v in parse_qs(raw).items()}
+    has_client = request.headers.get("authorization", "").startswith("Basic ") or (
+        form.get("client_id", "").strip() and form.get("client_secret", "").strip()
+    )
+    if not has_client:
+        raise ProviderError(401, {"error": "invalid_client"})
+    if not form.get("token"):
+        raise ProviderError(400, {"error": "invalid_request"})
+    return {"revoked": True}
+
+
 def _intacct_rows(obj: str) -> list[dict]:
     if obj == "accounts-payable/vendor":
         return INTACCT_VENDOR_FIXTURES
