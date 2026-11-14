@@ -630,3 +630,49 @@ async def test_a_delivery_signed_with_another_key_touches_nothing(realdb, monkey
     )
     delivered.read.assert_not_awaited()
     assert await _exceptions(realdb, inv_id) == []
+
+
+@pytest.mark.parametrize("signed_with", ["someone-elses-merge-key", KEY])
+async def test_the_route_is_mounted_public_and_verifies_before_it_applies(
+    realdb, monkeypatch, signed_with
+):
+    """Through the ASGI app, not the handler: the router mount, the URL's
+    tenant slug and the public-by-design path (no JWT, no tenant header). A
+    bad signature is the silent 204 with nothing read or applied; the tenant's
+    own key, on the same request, is heard (the control that makes the 204
+    mean the signature, not a missing route)."""
+    from app.api import erp_webhook
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    inv_id = await _merge_tenant_with_a_pushed_bill(realdb)
+    body = _delivery(status="VOID")
+    read = AsyncMock(return_value=merge_bill_report(json.loads(body)["data"]))
+    monkeypatch.setattr(MergeDevAdapter, "bill_report", read)
+    fake = _DedupRedis()
+
+    async def _get_redis():
+        return fake
+
+    monkeypatch.setattr("app.services.webhook_security.get_redis", _get_redis)
+    monkeypatch.setattr(erp_webhook, "control_session_factory", realdb.control_sessionmaker())
+
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(
+            f"/api/erp/webhook/merge_dev/{realdb.info('a').slug}",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Merge-Webhook-Signature": _sign(body, signed_with),
+            },
+        )
+    assert resp.status_code == 204, resp.text
+    assert resp.content == b""
+    if signed_with == KEY:
+        read.assert_awaited_once()
+        [row] = await _exceptions(realdb, inv_id)
+        assert row.exception_type == "erp_reconciliation"
+    else:
+        read.assert_not_awaited()
+        assert fake._store == {}  # no dedup claim either
+        assert await _exceptions(realdb, inv_id) == []
+    assert await _status(realdb, inv_id) == InvoiceStatus.done
