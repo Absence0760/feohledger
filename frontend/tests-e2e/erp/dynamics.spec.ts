@@ -7,10 +7,12 @@ import {
 	tenantBase,
 	test
 } from '../fixtures/helpers';
+import type { Page } from '@playwright/test';
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
 	createApprovedInvoice,
 	deleteInvoice,
+	FAKE_ERP_BASE,
 	erpFailureFromAudit,
 	erpReferenceFromAudit,
 	resetFakeErp,
@@ -60,6 +62,12 @@ import {
  *      and refused, the posted invoice left for the accountant.
  *   7. Vendor sync stores the payment term's code (`30 DAYS`), not the
  *      vendor's `paymentTermsId` GUID.
+ *   8. A VAT company whose first draft read is lost (`fake-vat-lostread-co`):
+ *      the push records that draft as its own orphan, and the automatic retry
+ *      recognises it by that id, reprices it to the net and posts (§397).
+ *      When a BC user edits it before the retry (`fake-vat-lostedit-co`) it
+ *      is no longer ours: refused and left in BC. A draft keyed by hand under
+ *      the same vendor and number is never touched.
  */
 
 // The exact settings.erp shape the adapter reads: get_erp_adapter passes the
@@ -75,6 +83,31 @@ const D365_ERP_CONFIG = {
 	environment: 'sandbox',
 	company_id: 'fake-co'
 };
+
+// fake-erp's BC token and vendor fixture, for reading and keying drafts the way
+// a BC user would (tools/fake-erp/app.py, the /d365 block).
+const FAKE_BC_AUTH = { Authorization: 'Bearer fake-d365-token' };
+const FAKE_BC_VENDOR_A = '5d115c9c-44e3-ea11-bb43-000d3a2feca1';
+const FAKE_BC_ACCOUNT_6100 = 'a6100000-0000-0000-0000-000000006100';
+
+function fakeBcCompany(company: string): string {
+	return `${FAKE_ERP_BASE}/d365/sandbox/api/v2.0/companies(${company})`;
+}
+
+/** The `erp_document_id` the failed push named on its `invoice.erp_failed` row. */
+async function failedDocumentId(page: Page, invoiceId: string): Promise<string> {
+	const resp = await page.request.get(`${API_BASE}/api/invoices/${invoiceId}/audit-log`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status()).toBe(200);
+	const rows = (await resp.json()) as Array<{
+		action: string;
+		details: { erp_document_id?: string } | null;
+	}>;
+	const id = rows.find((r) => r.action === 'invoice.erp_failed')?.details?.erp_document_id;
+	expect(id, 'the failure names the draft left in BC').toBeTruthy();
+	return id!;
+}
 
 test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 	test.beforeAll(async () => {
@@ -137,7 +170,10 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 		expect(local!.currency).toBeNull();
 		expect(Number(euro!.total)).toBeCloseTo(820, 2);
 		expect(euro!.currency).toBe('EUR');
-		expect(euro!.status).toBe('open');
+		// fake-erp serves PO-FAKE-BC-402 as a BC `Draft`, an order BC has not
+		// released: it syncs, as `unissued`, and nothing matches against it
+		// (decisions §394).
+		expect(euro!.status).toBe('unissued');
 	});
 
 	test('full send: approved invoice posts as a purchaseInvoice and completes', async ({
@@ -258,6 +294,126 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 			expect(await erpFailureFromAudit(page, inv.id)).toBe(
 				'Business Central post refused: posted_total_mismatch'
 			);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a VAT draft whose read was lost is repriced by the retry and posted', async ({ page }) => {
+		// The first read of the gross draft answers 503: the push records that
+		// draft as the orphan it created. The automatic retry's lookup finds a
+		// draft with exactly that id, still what was sent, so it is ours: the
+		// adapter deletes it, sends the net 2,057.30, and BC's 20% makes the
+		// approved 2,468.76 (decisions §397). Each test here takes its own
+		// figure, so none reads as another's duplicate.
+		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-vat-lostread-co' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365-LOST',
+			amount: '2468.76',
+			taxAmount: '411.46',
+			vendor: 'Fake BC Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+			const ref = await erpReferenceFromAudit(page, inv.id);
+			const posted = await page.request.get(
+				`${fakeBcCompany('fake-vat-lostread-co')}/purchaseInvoices(${ref})`,
+				{ headers: FAKE_BC_AUTH }
+			);
+			expect(posted.status()).toBe(200);
+			const record = (await posted.json()) as { status: string; totalAmountIncludingTax: number };
+			expect(record.status).toBe('Open');
+			expect(record.totalAmountIncludingTax).toBe(2468.76);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('our lost-read draft edited in BC before the retry is refused and left', async ({
+		page
+	}) => {
+		// As above, but a BC user adds a 10.00 line to the draft before the
+		// retry reads it. The recorded id no longer makes it ours: it is judged
+		// as any found draft, refused at its new total, and never deleted.
+		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-vat-lostedit-co' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365-LEDT',
+			amount: '1851.78',
+			taxAmount: '308.63',
+			vendor: 'Fake BC Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'Business Central post refused: posted_total_mismatch ' +
+					'(the draft was not deleted in Business Central)'
+			);
+			const left = await page.request.get(
+				`${fakeBcCompany('fake-vat-lostedit-co')}/purchaseInvoices(${await failedDocumentId(page, inv.id)})`,
+				{ headers: FAKE_BC_AUTH }
+			);
+			expect(left.status()).toBe(200);
+			expect(((await left.json()) as { status: string }).status).toBe('Draft');
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a draft keyed by hand under the same vendor and number is never touched', async ({
+		page
+	}) => {
+		// A BC user keys the bill first, at the gross, exactly as our own first
+		// draft would be. It was not made by this push, so it is refused and
+		// left in BC — not repriced, not deleted.
+		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-vat-co' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const invoiceNumber = `E2E-D365-HAND-${Date.now()}`;
+		const keyed = await page.request.post(`${fakeBcCompany('fake-vat-co')}/purchaseInvoices`, {
+			headers: FAKE_BC_AUTH,
+			data: {
+				vendorId: FAKE_BC_VENDOR_A,
+				vendorInvoiceNumber: invoiceNumber,
+				currencyCode: 'USD',
+				purchaseInvoiceLines: [
+					{
+						lineType: 'Account',
+						accountId: FAKE_BC_ACCOUNT_6100,
+						description: '',
+						quantity: 1,
+						unitCost: 1371.24
+					}
+				]
+			}
+		});
+		expect(keyed.status()).toBe(201);
+		const handId = ((await keyed.json()) as { id: string }).id;
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365-HAND',
+			invoiceNumber,
+			amount: '1371.24',
+			taxAmount: '228.54',
+			vendor: 'Fake BC Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'Business Central post refused: posted_total_mismatch ' +
+					'(the draft was not deleted in Business Central)'
+			);
+			const left = await page.request.get(
+				`${fakeBcCompany('fake-vat-co')}/purchaseInvoices(${handId})`,
+				{ headers: FAKE_BC_AUTH }
+			);
+			expect(left.status()).toBe(200);
+			expect(((await left.json()) as { status: string }).status).toBe('Draft');
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}

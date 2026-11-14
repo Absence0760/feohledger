@@ -493,13 +493,26 @@ async def _vendor(mk, org_id, name, *, eligible=True):
         return v.id
 
 
-async def _paid(mk, org_id, vendor_id, amount, *, gl=None, method=None):
+async def _paid(
+    mk,
+    org_id,
+    vendor_id,
+    amount,
+    *,
+    gl=None,
+    method=None,
+    rail_breakdown=None,
+    currency="USD",
+    source_amount=None,
+    source_currency=None,
+):
     async with mk() as s:
         inv = Invoice(
             organization_id=org_id,
             invoice_number=f"INV-{uuid.uuid4().hex[:10]}",
             vendor_name="x",
             amount=Decimal(amount),
+            currency=currency,
             status=InvoiceStatus.paid,
             vendor_id=vendor_id,
             gl_account=gl,
@@ -513,10 +526,163 @@ async def _paid(mk, org_id, vendor_id, amount, *, gl=None, method=None):
                 amount=Decimal(amount),
                 status="completed",
                 method=method,
+                rail_breakdown=rail_breakdown,
+                source_amount=Decimal(source_amount) if source_amount else None,
+                source_currency=source_currency,
                 completed_at=datetime(YEAR, 6, 1, tzinfo=UTC),
             )
         )
         await s.commit()
+
+
+def _parts(*pairs) -> list[dict]:
+    return [{"method": m, "amount": a} for m, a in pairs]
+
+
+async def test_a_payment_made_on_two_rails_is_split_by_its_breakdown(realdb):
+    """Decisions §396: one payment, a cheque part and a card part. The cheque
+    part is the payer's 1099, the card part the processor's 1099-K, so the
+    report splits it exactly, in its box, and counts it on both sides."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _set_boxes(realdb, "a", _MAPPING["tax"]["boxes"])
+
+    vid = await _vendor(mk, org_id, "Two Rails Co")
+    await _paid(
+        mk,
+        org_id,
+        vid,
+        "2500.00",
+        gl="6010",
+        rail_breakdown=_parts(("check", "2100.01"), ("card", "399.99")),
+    )
+    # Xero's bank part states no rail: reportable, like a NULL method.
+    await _paid(
+        mk,
+        org_id,
+        vid,
+        "100.00",
+        gl="6000",
+        rail_breakdown=_parts((None, "60.00"), ("card", "40.00")),
+    )
+    # All on card: entirely the processor's, whatever `method` says.
+    await _paid(
+        mk,
+        org_id,
+        vid,
+        "300.00",
+        gl="6000",
+        method="card",
+        rail_breakdown=_parts(("card", "100.00"), ("card", "200.00")),
+    )
+    await _paid(mk, org_id, vid, "50.00", gl="6000", method="ach")
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(f"/api/tax/1099-report?year={YEAR}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    row = next(r for r in body["rows"] if r["vendor_id"] == str(vid))
+    assert row["ytd_paid"] == "2210.01"  # 2100.01 + 60.00 + 50.00
+    assert row["card_paid"] == "739.99"  # 399.99 + 40.00 + 300.00
+    assert row["payment_count"] == 3  # both split payments, and the ACH one
+    assert row["card_payment_count"] == 3
+    boxes = {b["box"]: b for b in row["box_allocations"]}
+    assert boxes["MISC-1"]["amount"] == "2100.01"
+    assert boxes["NEC-1"]["amount"] == "110.00"
+    assert sum(Decimal(b["amount"]) for b in boxes.values()) == Decimal(row["ytd_paid"])
+    assert body["box_allocation_reconciled"] is True
+
+
+async def test_a_breakdown_that_does_not_sum_to_the_payment_counts_it_whole(realdb):
+    """The writer refuses such a breakdown; the aggregate re-checks it on every
+    read and fails closed: no split, the payment counts as its `method` says
+    (NULL here, so reportable in full)."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _set_boxes(realdb, "a", None)
+    vid = await _vendor(mk, org_id, "Short Split Co")
+    await _paid(
+        mk, org_id, vid, "250.00", rail_breakdown=_parts(("check", "150.00"), ("card", "99.99"))
+    )
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(f"/api/tax/1099-report?year={YEAR}")
+    row = next(r for r in resp.json()["rows"] if r["vendor_id"] == str(vid))
+    assert row["ytd_paid"] == "250.00" and Decimal(row["card_paid"]) == 0
+    assert row["payment_count"] == 1 and row["card_payment_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "breakdown",
+    [
+        # Sums to the payment, but a negative part would move 150.00 to card.
+        [{"method": "card", "amount": "150.00"}, {"method": "check", "amount": "-50.00"}],
+        # A part with no amount: SUM would skip it, leaving all of it card.
+        [{"method": "card", "amount": "100.00"}, {"method": "check"}],
+        # Not a number: must not fail the tenant's whole report.
+        [{"method": "card", "amount": "abc"}],
+        # Finer than a cent.
+        [{"method": "card", "amount": "33.335"}, {"method": "check", "amount": "66.665"}],
+    ],
+)
+async def test_a_breakdown_the_writer_would_refuse_never_splits_a_payment(realdb, breakdown):
+    """The read-side check is the writer's rule again (§396): only positive
+    whole-cent parts summing exactly to the payment split it."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _set_boxes(realdb, "a", None)
+    vid = await _vendor(mk, org_id, f"Bent Split {uuid.uuid4().hex[:6]}")
+    await _paid(mk, org_id, vid, "100.00", rail_breakdown=breakdown)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(f"/api/tax/1099-report?year={YEAR}")
+    assert resp.status_code == 200, resp.text
+    row = next(r for r in resp.json()["rows"] if r["vendor_id"] == str(vid))
+    assert row["ytd_paid"] == "100.00" and Decimal(row["card_paid"]) == 0
+
+
+async def test_a_breakdown_is_not_applied_to_a_home_leg_that_differs_from_the_amount(realdb):
+    """Same currency throughout, but the 1099 figure is the rate-locked
+    `source_amount`, not `amount` the parts sum to: no split."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _set_boxes(realdb, "a", None)
+    vid = await _vendor(mk, org_id, "Home Leg Co")
+    await _paid(
+        mk,
+        org_id,
+        vid,
+        "200.00",
+        source_amount="201.50",
+        source_currency="USD",
+        rail_breakdown=_parts(("check", "120.00"), ("card", "80.00")),
+    )
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(f"/api/tax/1099-report?year={YEAR}")
+    row = next(r for r in resp.json()["rows"] if r["vendor_id"] == str(vid))
+    assert row["ytd_paid"] == "201.50" and Decimal(row["card_paid"]) == 0
+
+
+async def test_a_breakdown_in_another_currency_than_the_reported_figure_is_not_applied(realdb):
+    """The parts are in the payment's own (invoice) currency. When the 1099
+    figure is the rate-locked home leg instead, splitting it would need a rate,
+    and none is fetched on a read: the payment counts whole, reportable."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _set_boxes(realdb, "a", None)
+    vid = await _vendor(mk, org_id, "Euro Split Co")
+    await _paid(
+        mk,
+        org_id,
+        vid,
+        "200.00",
+        currency="EUR",
+        source_amount="216.40",
+        source_currency="USD",
+        rail_breakdown=_parts(("check", "120.00"), ("card", "80.00")),
+    )
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get(f"/api/tax/1099-report?year={YEAR}")
+    row = next(r for r in resp.json()["rows"] if r["vendor_id"] == str(vid))
+    assert row["ytd_paid"] == "216.40" and Decimal(row["card_paid"]) == 0
 
 
 async def test_report_allocates_by_gl_account_and_reconciles(realdb):

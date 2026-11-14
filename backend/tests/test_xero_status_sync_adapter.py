@@ -298,6 +298,85 @@ def test_a_bill_paid_from_a_company_card_reads_as_card(xero):
     assert report.payment_method == "card"
 
 
+def test_a_bank_payment_then_a_card_payment_is_not_all_card(xero):
+    """The follow-up's case (decisions §396): the rail was read from the LATEST
+    cash payment alone, so a bank payment followed by a card one was booked as
+    all card and left off the 1099. Every payment's account is read now, and
+    each part carries its own rail and amount."""
+    from app.services.payment_methods import RailPart
+
+    xero.bill()
+    xero.pay(BILL, "150.00", account=BANK, day=date(2026, 9, 20))
+    xero.pay(BILL, "100.00", account=CARD, day=date(2026, 9, 28))
+    report = _report(xero)
+    assert report.state is ErpBillState.paid and report.paid_amount == Decimal("250.00")
+    assert report.payment_method is None
+    assert report.payment_parts == (
+        RailPart(None, Decimal("150.00")),
+        RailPart("card", Decimal("100.00")),
+    )
+    assert sum(p.amount for p in report.payment_parts) == report.paid_amount
+
+
+def test_every_payment_on_a_card_account_states_card_reading_the_account_once(xero):
+    from app.services.payment_methods import RailPart
+
+    xero.bill()
+    xero.pay(BILL, "200.00", account=CARD)
+    xero.pay(BILL, "50.00", account=CARD)
+    report = _report(xero)
+    assert report.payment_method == "card"
+    assert report.payment_parts == (
+        RailPart("card", Decimal("200.00")),
+        RailPart("card", Decimal("50.00")),
+    )
+    assert len(xero.sent("GET", f"/Accounts/{CARD}")) == 1
+
+
+def test_one_payment_whose_account_cannot_be_read_is_that_part_not_stated(xero):
+    """Best effort per payment: the unreadable one is reportable, the card one
+    still a card part, and the parts still sum to the cash figure."""
+    from app.services.payment_methods import RailPart
+
+    xero.bill()
+    xero.pay(BILL, "150.00", account=CARD)
+    unreadable = xero.pay(BILL, "100.00", account=CARD)
+    xero.payments[unreadable]["Account"] = {}
+    report = _report(xero)
+    assert report.payment_method is None
+    assert report.payment_parts == (
+        RailPart("card", Decimal("150.00")),
+        RailPart(None, Decimal("100.00")),
+    )
+
+
+def test_a_part_paid_bill_reads_no_rails(xero):
+    """Only a bill paid in full outside us is recorded, so only its rails are
+    worth Xero's per-minute allowance."""
+    xero.bill()
+    xero.pay(BILL, "100.00", account=CARD)
+    report = _report(xero)
+    assert report.state is ErpBillState.partially_paid
+    assert xero.sent("GET", "/Accounts/" + CARD) == []
+    assert [r for r in xero.requests if "/Payments/" in r.url.path] == []
+
+
+def test_a_rate_limited_rail_read_is_not_waited_out(xero, monkeypatch):
+    """A rail read never sleeps (it may run under the invoice lock and inside
+    the dispatch check's bound): a 429 leaves that payment not stated."""
+    slept = AsyncMock()
+    monkeypatch.setattr("app.services.erp_adapters.xero.asyncio.sleep", slept)
+    xero.bill()
+    xero.pay(BILL, "250.00", account=CARD)
+    xero.answers[("GET", "Payments")] = httpx.Response(
+        429, headers={"Retry-After": "5", "X-Rate-Limit-Problem": "minute"}
+    )
+    report = _report(xero)
+    assert report.state is ErpBillState.paid and report.payment_method is None
+    assert [p.method for p in report.payment_parts] == [None]
+    slept.assert_not_awaited()
+
+
 def test_a_connection_without_the_payments_scope_reads_the_rail_as_not_stated(xero):
     xero.bill()
     xero.pay(BILL, "250.00", account=CARD)

@@ -23,7 +23,7 @@ from app.database import get_control_db
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.procurement import (
-    CANCELLED_PO_STATUSES,
+    UNMATCHABLE_PO_STATUSES,
     GRLineItem,
     POLineItem,
     PurchaseOrder,
@@ -655,10 +655,11 @@ async def sync_pos_from_erp(
                 rematch.add(existing_po.po_number)
                 changed = True
             if existing_po.status != erp_po.status:
-                # Into or out of cancelled changes whether the matcher accepts
-                # the PO at all, so the invoices citing it are re-matched.
-                if (existing_po.status in CANCELLED_PO_STATUSES) != (
-                    erp_po.status in CANCELLED_PO_STATUSES
+                # Into or out of cancelled or unissued changes whether the
+                # matcher accepts the PO at all, so the invoices citing it are
+                # re-matched (decisions §326, §394).
+                if (existing_po.status in UNMATCHABLE_PO_STATUSES) != (
+                    erp_po.status in UNMATCHABLE_PO_STATUSES
                 ):
                     rematch.add(existing_po.po_number)
                 existing_po.status = erp_po.status
@@ -692,8 +693,8 @@ async def sync_pos_from_erp(
                     existing_po.vendor_id = vendor_id
                     changed = True
             # The lines are the ERP's too (decisions §327). A payload with none
-            # (a headers-only adapter, NetSuite) leaves the stored lines alone:
-            # silence is not a correction.
+            # (a headers-only adapter, or a closed NetSuite PO, §398) leaves the
+            # stored lines alone: silence is not a correction.
             mark: str | None = None
             if erp_po.line_items:
                 outcome = await _refresh_po_lines(db, existing_po, erp_po.line_items)

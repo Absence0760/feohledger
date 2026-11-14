@@ -64,7 +64,7 @@ def _payload(**overrides) -> InvoicePayload:
 def _ns_bill(total: str | None, status: str = "open") -> MagicMock:
     """A NetSuite ``GET /vendorBill/{id}`` response carrying ``total`` as a
     JSON number literal (the adapter parses the raw bytes, never a float)."""
-    fields = [f'"id": "42", "status": {{"id": "{status}"}}']
+    fields = [f'"id": "42", "status": {{"id": "{status}"}}', '"currency": {"id": "1"}']
     if total is not None:
         fields.append(f'"total": {total}')
     resp = _mock_response(200, {})
@@ -84,8 +84,21 @@ def _ns_adapter() -> NetSuiteAdapter:
     )
 
 
-_NS_MISS = _mock_response(200, {"items": [], "count": 0})
+#: The `GET /vendorBill/eid:<id>` lookup's miss: NetSuite's 404 NONEXISTENT_ID.
+_NS_MISS = _mock_response(404, {"o:errorDetails": [{"o:errorCode": "NONEXISTENT_ID"}]})
 _NS_CREATED = _mock_response(204, None, headers={"Location": "https://x/vendorBill/42"})
+#: The SuiteQL currency read: USD is internal id 1.
+_NS_USD = _mock_response(200, {})
+# SuiteQL bodies are parsed from the raw bytes (`loads_exact_json`).
+_NS_USD.content = b'{"items": [{"id": "1", "symbol": "USD"}], "hasMore": false}'
+
+
+def _ns_found(total: str | None, status: str = "open") -> MagicMock:
+    """The lookup's hit: the bill itself, as `GET /vendorBill/eid:<id>`
+    answers, id 9001."""
+    resp = _ns_bill(total, status)
+    resp.content = resp.content.replace(b'"id": "42"', b'"id": "9001"')
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -131,28 +144,21 @@ def test_netsuite_post_invoice_short_circuits_when_external_id_already_exists():
     adapter = _ns_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(
-            side_effect=[
-                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
-                _ns_bill("100.00"),
-            ]
-        )
-        client.post = AsyncMock(
-            side_effect=AssertionError("must not POST when externalId already exists")
-        )
+        client.get = AsyncMock(return_value=_ns_found("100.00"))
+        # The one POST is the SuiteQL currency read — never a vendorBill create.
+        client.post = AsyncMock(return_value=_NS_USD)
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
 
     assert result.success, result.message
     assert result.erp_document_id == "9001"
     assert "idempotent" in result.message.lower()
-    client.post.assert_not_awaited()
+    client.post.assert_awaited_once()
+    assert client.post.await_args.args[0].endswith("/query/v1/suiteql?limit=100&offset=0")
 
-    # The lookup query carries the correlation_id as the externalId filter.
-    lookup_url = client.get.await_args_list[0].args[0]
-    assert "externalId" in lookup_url
-    assert "corr-existing" in lookup_url
-    # Then the found bill itself is read back.
-    assert client.get.await_args_list[1].args[0].endswith("/vendorBill/9001")
+    # The lookup addresses the bill by its external id (Oracle's `eid:` form),
+    # and its answer is the bill itself: no second read.
+    client.get.assert_awaited_once()
+    assert client.get.await_args.args[0].endswith("/vendorBill/eid:corr-existing")
 
 
 def test_netsuite_idempotent_hit_with_a_different_total_is_not_success():
@@ -163,13 +169,12 @@ def test_netsuite_idempotent_hit_with_a_different_total_is_not_success():
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(
             side_effect=[
-                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
-                _ns_bill("110.00"),
+                _ns_found("110.00"),
                 # void_invoice's own status read: approved, so left alone.
                 _mock_response(200, {"status": {"id": "open"}}),
             ]
         )
-        client.post = AsyncMock()
+        client.post = AsyncMock(return_value=_NS_USD)
         client.delete = AsyncMock()
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
 
@@ -177,7 +182,7 @@ def test_netsuite_idempotent_hit_with_a_different_total_is_not_success():
     assert result.retryable is False
     assert result.message.startswith("NetSuite post failed: posted_total_mismatch")
     assert "could not be deleted" in result.message
-    client.post.assert_not_awaited()
+    client.post.assert_awaited_once()  # the currency read, never a create
     client.delete.assert_not_awaited()
 
 
@@ -185,12 +190,8 @@ def test_netsuite_idempotent_hit_with_no_total_is_unconfirmed():
     adapter = _ns_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(
-            side_effect=[
-                _mock_response(200, {"items": [{"id": "9001"}], "count": 1}),
-                _ns_bill(None),
-            ]
-        )
+        client.get = AsyncMock(return_value=_ns_found(None))
+        client.post = AsyncMock(return_value=_NS_USD)
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-existing")))
 
     assert result.success is False
@@ -213,7 +214,7 @@ def test_netsuite_created_bill_whose_total_differs_is_deleted_while_pending():
                 _mock_response(200, {"status": {"id": "pendingApproval"}}),
             ]
         )
-        client.post = AsyncMock(return_value=_NS_CREATED)
+        client.post = AsyncMock(side_effect=[_NS_USD, _NS_CREATED])
         client.delete = AsyncMock(return_value=_mock_response(204, None))
         result = _run(adapter.post_invoice(_payload()))
 
@@ -237,7 +238,7 @@ def test_netsuite_created_bill_whose_total_differs_is_left_when_approved():
                 _mock_response(200, {"status": {"id": "open"}}),
             ]
         )
-        client.post = AsyncMock(return_value=_NS_CREATED)
+        client.post = AsyncMock(side_effect=[_NS_USD, _NS_CREATED])
         client.delete = AsyncMock()
         result = _run(adapter.post_invoice(_payload()))
 
@@ -261,7 +262,7 @@ def test_netsuite_created_bill_compares_its_total_exactly():
                     _mock_response(200, {"status": {"id": "open"}}),
                 ]
             )
-            client.post = AsyncMock(return_value=_NS_CREATED)
+            client.post = AsyncMock(side_effect=[_NS_USD, _NS_CREATED])
             client.delete = AsyncMock()
             result = _run(_ns_adapter().post_invoice(_payload()))
         assert result.success is ok, (total, result.message)
@@ -281,7 +282,7 @@ def test_netsuite_created_bill_that_cannot_be_read_back_is_unconfirmed():
         with patch("httpx.AsyncClient") as cm:
             client = cm.return_value.__aenter__.return_value
             client.get = AsyncMock(side_effect=gets)
-            client.post = AsyncMock(return_value=created)
+            client.post = AsyncMock(side_effect=[_NS_USD, created])
             client.delete = AsyncMock()
             result = _run(_ns_adapter().post_invoice(_payload()))
         assert result.success is False
@@ -300,13 +301,13 @@ def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(side_effect=[_NS_MISS, _ns_bill("100.00")])
-        client.post = AsyncMock(return_value=_NS_CREATED)
+        client.post = AsyncMock(side_effect=[_NS_USD, _NS_CREATED])
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-new")))
 
     assert result.success, result.message
     assert result.erp_document_id == "42"
     assert client.get.await_count == 2  # the lookup, then the read-back
-    client.post.assert_awaited_once()
+    assert client.post.await_count == 2  # the currency read, then the create
     # Synchronous create: `respond-async` would answer with a job, not the bill.
     assert "Prefer" not in client.post.await_args.kwargs["headers"]
     # The bill names its vendor (`entity`) and the expense line's account by
@@ -315,6 +316,9 @@ def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
 
     body = json.loads(client.post.await_args.kwargs["content"])
     assert body["entity"] == {"id": "00000000-0000-0000-0000-0000000000a1"}
+    # The currency by its internal id too: a reference's `refName` is display
+    # text (the currency record's name), not its ISO code.
+    assert body["currency"] == {"id": "1"}
     assert body["expense"]["items"] == [
         {"account": {"id": "ERP-6000"}, "amount": 100.00, "memo": "INV-1"}
     ]
@@ -1232,6 +1236,302 @@ def test_d365_a_net_draft_found_by_the_lookup_is_not_repriced_again(monkeypatch)
 
     assert result.refusal_code == "posted_total_mismatch"
     assert result.message.endswith("(the draft was not deleted in Business Central)")
+
+
+# ---------------------------------------------------------------------------
+# dynamics_365_bc — the draft an earlier attempt created is ours (§397)
+# ---------------------------------------------------------------------------
+
+
+def _own_gross_draft(doc_id="bc-g", etag='W/"gross"'):
+    """`_gross_draft_taxed_on_top`, carrying the invoice date we sent."""
+    resp = _gross_draft_taxed_on_top(doc_id, etag)
+    from app.utils.json_money import dumps_exact_json, loads_exact_json
+
+    record = loads_exact_json(resp.content)
+    record["invoiceDate"] = "2026-01-01"
+    resp.content = dumps_exact_json(record).encode()
+    resp.json = MagicMock(return_value=record)
+    return resp
+
+
+#: `_gross_draft_taxed_on_top`'s totals as our create recorded them.
+_GROSS_FINGERPRINT = "120|24|144"
+
+
+def _ours(doc_id="bc-g", fingerprint=_GROSS_FINGERPRINT):
+    """A payload carrying the draft an earlier attempt recorded as its own."""
+    return _vat_payload(own_orphan_document_id=doc_id, own_orphan_document_fingerprint=fingerprint)
+
+
+def _lines_response(lines: list[dict]):
+    """A `purchaseInvoiceLines` read, as BC sends it: each line with its own
+    id and the fields we sent, plus ones we never send."""
+    from app.utils.json_money import dumps_exact_json
+
+    body = {
+        "value": [
+            {"id": f"line-{i}", "sequence": 10000 * (i + 1), "taxCode": "VAT20", **line}
+            for i, line in enumerate(lines)
+        ]
+    }
+    resp = _mock_response(200, body)
+    resp.content = dumps_exact_json(body).encode()
+    return resp
+
+
+def _sent_gross_lines(payload):
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    return _bc_invoice_lines(payload).gross
+
+
+def test_d365_a_vat_draft_whose_read_was_lost_is_repriced_by_the_retry(monkeypatch):
+    """The first attempt created the gross draft and lost the read after it;
+    `services/erp` recorded its id as our own orphan. The retry's lookup finds
+    a draft with exactly that id, its lines still exactly what we sent and BC's
+    VAT on top: it is ours, so it is deleted (its real etag) and created again
+    at the net, which BC's 20% brings to the approved 120.00 — posted."""
+    adapter = _offline_bc(monkeypatch)
+    payload = _ours()
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-n", "number": "PI-2"}),  # net draft
+                _mock_response(204, None),  # Microsoft.NAV.post (the net draft)
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-g", "status": "Draft"}]}),
+                _own_gross_draft(),
+                _lines_response(_sent_gross_lines(payload)),
+                _bc_record(
+                    "bc-n",
+                    "Draft",
+                    Decimal("120.00"),
+                    excluding=Decimal("100.00"),
+                    tax=Decimal("20.00"),
+                ),
+                _bc_record("bc-n", "Open", Decimal("120.00")),
+            ]
+        )
+        client.delete = AsyncMock(return_value=_mock_response(204, None))
+        result = _run(adapter.post_invoice(payload))
+
+    assert result.success, result.message
+    assert result.erp_document_id == "bc-n"
+    client.delete.assert_awaited_once()
+    assert client.delete.await_args.args[0].endswith("purchaseInvoices(bc-g)")
+    assert client.delete.await_args.kwargs["headers"]["If-Match"] == 'W/"gross"'
+    assert (
+        client.get.await_args_list[2]
+        .args[0]
+        .endswith("purchaseInvoices(bc-g)/purchaseInvoiceLines")
+    )
+
+
+def test_d365_a_draft_created_then_lost_says_it_is_ours(monkeypatch):
+    """The read after our create failed: the result names the draft AND says
+    this push made it, which is what lets the retry recognise it."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _gross_draft_taxed_on_top(),  # the create's answer: BC's totals
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, {"value": []}), _mock_response(503, None)]
+        )
+        result = _run(adapter.post_invoice(_vat_payload()))
+
+    assert result.retryable is True
+    assert result.erp_document_id == "bc-g"
+    assert result.erp_document_is_own is True
+    # What BC said the draft held, so the retry can tell it is unchanged.
+    assert result.erp_document_fingerprint == _GROSS_FINGERPRINT
+
+
+def test_d365_a_hand_keyed_draft_under_the_key_is_never_touched_even_with_our_orphan(
+    monkeypatch,
+):
+    """Our recorded draft is gone, and a BC user has keyed the same bill by hand
+    — identical lines, the same vendor and number. Its id is not the one we
+    recorded, so it is not ours: refused and left in BC, nothing deleted,
+    repriced or posted, and the refusal does not claim it as ours."""
+    adapter = _offline_bc(monkeypatch)
+    payload = _ours("bc-ours")
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                AssertionError("no create and no post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-hand", "status": "Draft"}]}),
+                _own_gross_draft("bc-hand"),
+                AssertionError("a draft that is not ours has no lines read"),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("never delete a BC user's draft"))
+        result = _run(adapter.post_invoice(payload))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-hand"
+    assert result.refusal_code == "posted_total_mismatch"
+    assert result.message == (
+        "Business Central post refused: posted_total_mismatch "
+        "(the draft was not deleted in Business Central)"
+    )
+    assert result.erp_document_is_own is False
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        "line_added",
+        "amount_changed",
+        "account_changed",
+        "discount_given",
+        "date_changed",
+        "tax_code_changed",
+        "pay_to_changed",
+    ],
+)
+def test_d365_our_draft_edited_in_bc_is_refused_and_left(monkeypatch, edit):
+    """The recorded id is ours, but a BC user has changed the draft since we
+    sent it. It is no longer ours to delete or reprice: refused as any found
+    draft at another total is, left in BC, and no longer claimed as ours."""
+    adapter = _offline_bc(monkeypatch)
+    payload = _ours()
+    lines = [dict(line) for line in _sent_gross_lines(payload)]
+    draft = _own_gross_draft()
+    if edit == "line_added":
+        lines.append({**lines[0], "description": "Freight", "unitCost": Decimal("10.00")})
+    elif edit == "amount_changed":
+        lines[0]["unitCost"] = Decimal("119.00")
+    elif edit == "account_changed":
+        lines[0]["accountId"] = "ERP-6100"
+    else:
+        from app.utils.json_money import dumps_exact_json, loads_exact_json
+
+        record = loads_exact_json(draft.content)
+        if edit == "discount_given":
+            # A field we never send: BC's own excluding total shows it.
+            record["totalAmountExcludingTax"] = Decimal("110.00")
+        elif edit == "pay_to_changed":
+            # Who the bill pays, redirected: totals and lines untouched.
+            record["payToVendorId"] = "00000000-0000-0000-0000-0000000000b2"
+        elif edit == "tax_code_changed":
+            # The line moved to a 5% tax group (`taxCode`, never sent): only
+            # the tax and the total move, which the creation totals catch.
+            record["totalTaxAmount"] = Decimal("6.00")
+            record["totalAmountIncludingTax"] = Decimal("126.00")
+        else:
+            record["invoiceDate"] = "2026-01-15"
+        draft.content = dumps_exact_json(record).encode()
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                AssertionError("no create and no post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-g", "status": "Draft"}]}),
+                draft,
+                _lines_response(lines),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("an edited draft is not ours"))
+        result = _run(adapter.post_invoice(payload))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-g"
+    assert result.refusal_code == "posted_total_mismatch"
+    assert result.message.endswith("(the draft was not deleted in Business Central)")
+    assert result.erp_document_is_own is False
+
+
+def test_d365_our_draft_posted_meanwhile_is_judged_as_any_found_invoice(monkeypatch):
+    """No longer a draft: the recorded id buys nothing. A Paid one is refused
+    `existing_invoice_not_open` exactly as a found Paid invoice is, and no
+    lines are read."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-g", "status": "Paid"}]}),
+                _bc_record("bc-g", "Paid", Decimal("120.00")),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("never delete a posted invoice"))
+        result = _run(adapter.post_invoice(_ours()))
+
+    assert result.success is False
+    assert result.refusal_code == "existing_invoice_not_open"
+    assert client.get.await_count == 2
+
+
+def test_d365_a_failed_read_of_our_drafts_lines_is_retryable_and_deletes_nothing(monkeypatch):
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-g", "status": "Draft"}]}),
+                _own_gross_draft(),
+                _mock_response(503, None),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("nothing deleted unread"))
+        result = _run(adapter.post_invoice(_ours()))
+
+    assert result.success is False
+    assert result.retryable is True
+    assert result.erp_document_id == "bc-g"
+    # Nothing was judged, deleted or posted: the claim carries to the next
+    # attempt, which judges the same id again.
+    assert result.erp_document_is_own is True
+    assert result.erp_document_fingerprint == _GROSS_FINGERPRINT
+
+
+def test_d365_a_recorded_draft_with_no_creation_totals_is_not_ours(monkeypatch):
+    """An id recorded with no fingerprint (BC's create answered no totals, or a
+    row from before it was kept) proves nothing: the draft is judged as any
+    found one, its lines never read, nothing deleted."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-g", "status": "Draft"}]}),
+                _own_gross_draft(),
+                AssertionError("no lines read without proof"),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("not ours to delete"))
+        result = _run(adapter.post_invoice(_ours(fingerprint=None)))
+
+    assert result.refusal_code == "posted_total_mismatch"
+    assert result.message.endswith("(the draft was not deleted in Business Central)")
+    assert result.erp_document_is_own is False
 
 
 def test_bc_net_lines_are_each_lines_gross_less_its_own_tax():

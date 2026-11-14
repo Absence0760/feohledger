@@ -67,15 +67,16 @@ def _to_date(v) -> date | None:
 
 # Merge.dev's PO status enum → our internal vocabulary. Merge publishes
 # DRAFT / SUBMITTED / AUTHORIZED / BILLED / DELETED (an open enum: an
-# integration may pass another value through); BILLED and DELETED map as
-# Xero's same statuses do. Anything not listed maps to "open" (the safest
-# default — it shows up in the matching pool but doesn't mark an unfamiliar
-# PO as closed/cancelled and exclude it).
+# integration may pass another value through); every one maps as Xero's same
+# status does, so DRAFT and SUBMITTED, orders nobody has approved, sync as
+# "unissued" and nothing matches against them (decisions §394). Anything not
+# listed maps to "open" (the safest default — it shows up in the matching pool
+# but doesn't mark an unfamiliar PO as closed/cancelled and exclude it).
 _MERGE_PO_STATUS_MAP = {
     "OPEN": "open",
     "PENDING": "open",
-    "DRAFT": "open",
-    "SUBMITTED": "open",
+    "DRAFT": "unissued",
+    "SUBMITTED": "unissued",
     "AUTHORIZED": "open",
     "BILLED": "closed",
     "DELETED": "cancelled",

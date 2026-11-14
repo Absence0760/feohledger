@@ -4496,6 +4496,12 @@ abstract class AppLocalizations {
   /// **'PO {poNumber} is cancelled — the invoice was not matched against it'**
   String invoiceWarningPoCancelled(String poNumber);
 
+  /// No description provided for @invoiceWarningPoNotIssued.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {poNumber} is not approved in the ERP yet — the invoice was not matched against it'**
+  String invoiceWarningPoNotIssued(String poNumber);
+
   /// No description provided for @invoiceWarningPoTotalUnverifiable.
   ///
   /// In en, this message translates to:
@@ -4740,6 +4746,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'PO is cancelled — amounts not compared'**
   String get invoicePoMatchIssuePoCancelled;
+
+  /// No description provided for @invoicePoMatchIssuePoNotIssued.
+  ///
+  /// In en, this message translates to:
+  /// **'PO not approved in the ERP yet — amounts not compared'**
+  String get invoicePoMatchIssuePoNotIssued;
 
   /// No description provided for @invoicePoMatchIssuePoTotalUnverifiable.
   ///

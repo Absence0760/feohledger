@@ -270,6 +270,46 @@ def test_a_bill_paid_part_by_cheque_part_by_card_states_the_sum_and_no_one_rail(
     assert report.paid_on == date(2026, 10, 21)
 
 
+def test_a_cheque_and_card_bill_states_each_payments_rail_and_amount():
+    """The split the 1099 needs (decisions §396): each cash payment's rail and
+    what it applied to THIS bill, summing exactly to the cash figure. No
+    account, no payee: a rail and an amount per payment."""
+    from app.services.payment_methods import RailPart
+
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "100.00", pay_type="Check", txn_date="2026-10-20")
+    qbo.pay("501", "50.00", pay_type="CreditCard", txn_date="2026-10-21")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.payment_parts == (
+        RailPart("check", Decimal("100.00")),
+        RailPart("card", Decimal("50.00")),
+    )
+    assert sum(p.amount for p in report.payment_parts) == report.paid_amount
+
+
+def test_the_breakdown_counts_only_the_lines_on_this_bill():
+    from app.services.payment_methods import RailPart
+
+    qbo = _Qbo()
+    qbo.bill("501", total="150.00")
+    qbo.bill("502", total="70.00")
+    _payment_record(
+        qbo, "501", "220.00", [_line("Bill", "501", "150.00"), _line("Bill", "502", "70.00")]
+    )
+    qbo.bills["501"]["Balance"] = Decimal("0")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.payment_parts == (RailPart("check", Decimal("150.00")),)
+
+
+def test_no_breakdown_is_stated_without_a_cash_figure():
+    qbo = _Qbo()
+    qbo.bill(total="150.00")
+    qbo.pay("501", "50.00", pay_type="CreditCard")
+    report = _run(qbo, lambda: _adapter().bill_report("501"))
+    assert report.paid_amount is None and report.payment_parts == ()
+
+
 def test_two_cheques_keep_their_rail():
     qbo = _Qbo()
     qbo.bill(total="150.00")

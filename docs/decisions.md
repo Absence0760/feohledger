@@ -19141,6 +19141,9 @@ onto main after #670, which had since introduced `tax_not_itemised` and
   before the retry. Accepted, because the alternative deletes a person's work
   silently; the failed read names the draft so the push records it as an
   orphan, and recognising that recorded id as ours is a follow-up.
+  *Amended by §397:* a found draft with the id our own create recorded, still
+  exactly what we sent, is ours and is repriced or deleted as a fresh one;
+  every other found draft is still never touched.
 - **A found `Paid` invoice is refused, not reported posted**
   (`existing_invoice_not_open`). With the new key it may be the same bill
   keyed and paid by hand in BC, perhaps before or without our approval. BC
@@ -19474,3 +19477,544 @@ outcomes); `tests/test_erp_reported_payment_recovery.py` (rows now carry the
 stated figure); `tests/test_qbo_recorded_replay.py` (the paid amount per
 recorded scenario); `frontend/src/lib/api/codedRefusals.test.ts` (the 409's
 sentence).
+
+## 394. An ERP purchase order nobody has approved syncs as `unissued`, and the matcher refuses it (issue #655 PO status, drafted 2026-10-23, landed 2026-11-14)
+
+**Context.** `PurchaseOrder.status` had three values (open / closed /
+cancelled), so every adapter mapped a draft or awaiting-approval order to
+`open`: Xero and Merge.dev `DRAFT` / `SUBMITTED`, NetSuite Pending Supervisor
+Approval (`A`), Business Central `Draft` / `In Review` (the adapter wrote
+`open` for every BC order), Intacct drafts and in-approval states, SYSPRO's
+in-process `OrderStatus 0`. In the Xero Demo Company a Draft PO showed as OPEN,
+and an invoice could pass 2- or 3-way match against an order nobody in the ERP
+had approved (issue #655: Xero X7, Merge.dev M6, Intacct #12, the Sage SA
+strings; the `docs/followups.md` entry from the live Xero test).
+
+**Decision.** A fourth status, `unissued` (`models/procurement.UNISSUED_PO_STATUS`),
+treated the way §326 treats a cancelled PO:
+
+- **Adapters map, they do not skip.** Skipping a not-yet-issued PO in each
+  `list_pos` was the other option the follow-up named. It was rejected: the
+  sync never deletes, so a PO an earlier build stored as `open` would keep
+  matching for good, and an invoice citing a skipped draft would read
+  `po_not_found` and send the missing-PO agent looking for some other PO. The
+  mapping lines are per adapter (listed in `erp-integration.md`); an unknown
+  value still maps to `open`, the existing default. Adapters write the literal
+  `"unissued"` as they write `"open"`, without importing the model, and the
+  adapter tests pin each one to the constant. Sage SA's real PO strings are
+  unconfirmed (#654), so it reads words (draft, approval) as `_po_status`
+  already read "cancel". QuickBooks Online has only Open / Closed; Blackbaud
+  FE NXT maps nothing yet, pending its live-system check
+  (`docs/followups.md`).
+- **The matcher refuses it.** `po_matching` sets `po_not_issued`, `mismatch`,
+  no variance (a 0 would read as a perfect match), issue
+  `po_match.issue.po_not_issued`, whatever the amount or receipts say.
+  `refresh_warnings` raises the `po_not_issued` warning and a payment-blocking
+  `po_mismatch` at `warning`, the cancelled PO's severity (the 2026-10-23 draft
+  used `error`, as for a missing PO; the cancelled precedent landed since and
+  is the closer case: the order exists and a person decides).
+- **The sync holds at sync time.** The re-match trigger moves from
+  `CANCELLED_PO_STATUSES` to `UNMATCHABLE_PO_STATUSES` (cancelled, voided,
+  unissued), so a PO taken back to draft holds its invoices when the sync
+  runs. The ERP approving it re-matches too, but under §323 (amended) the
+  sync never clears a hold: the finding goes and the `po_mismatch` row stays
+  open for a person.
+- **Elsewhere.** `DEAD_PO_STATUSES` gains `unissued`, so budgets and the CFO
+  open-PO accrual stop counting an order that is not a commitment yet;
+  workspace closure treats it as untouched, like `draft`. The supplier portal
+  no longer lists, shows or flips an unissued PO: a draft has not been sent to
+  the supplier, and before this it showed there as `open`. The
+  purchase-orders page gets a "Not issued" chip and a warning-toned badge.
+- **The fingerprint does not name the new flag.** `_PO_MATCH_FACT_FIELDS`
+  leaves `po_not_issued` out: a match stored before this lacks the key, so
+  naming it would move every cleared finding's fingerprint (§366) on the first
+  refresh after the deploy. The issue code it raises carries the same fact.
+
+**Not ported.** The branch's two vendor-gate commits (`35739b4d`,
+`74ff4dfb`): §333 decided the push vendor gate differently in #679.
+
+Tests: `test_po_matching_algorithm.py` (an unissued PO refused at an exact
+amount and with full receipts; the same PO `open` matches),
+`test_po_matching_wiring.py` (the warning and blocking `po_mismatch`; the
+pure `blocking_finding_types` agrees), `test_purchase_orders.py` (a sync taking
+an approved invoice's PO back to unissued holds it and the run refuses it; the
+ERP issuing it re-matches without clearing), `test_portal_self_service.py`
+(hidden from list, detail and flip), and the adapter mappings in
+`test_erp_po_sync.py` (BC, NetSuite, Merge.dev), `test_erp_xero_adapter.py`,
+`test_erp_sage_intacct_adapter.py`, `test_erp_syspro_adapter.py` and
+`test_erp_sage_accounting_za_adapter.py`.
+
+## 395. Sage Intacct: a bill counts as posted only when Intacct shows it posted, and the REST API still needs a sender ID (#655, drafted 2026-10-23, landed 2026-11-15)
+
+**What happened.** A docs-against-code audit of the Intacct adapter (part of
+#655), checked against Sage's published OpenAPI rather than our memory of it,
+found the adapter could not have worked against a real company, and that
+fake-erp hid it:
+
+- The bill create sent no `state`. The spec's default is `draft`, which books
+  nothing to AP or the GL and cannot be paid; the state moves afterwards only
+  through a workflow, never a PATCH. We recorded "Posted to Sage Intacct", and
+  the fake hard-coded `posted`.
+- The PO query selected `txnTotal` and `currency.txnCurrency`. The purchasing
+  document has `totalInTxnCurrency` and a top-level `txnCurrency`; an unknown
+  field 400s the query, and `list_pos` swallowed it, so PO sync silently synced
+  nothing. Had Intacct tolerated the field, every PO would have synced at 0.
+- A create Intacct refused (400 schema, 422 business validation: a closed
+  period, an inactive vendor or account) was the generic `erp_http_failure`,
+  recorded as possibly posted (QuickBooks lesson 3, §285).
+- §269 said REST avoids the XML gateway's paid Web Services sender ID. It does
+  not: Sage's REST quick start requires a Web Services licence, the developer
+  app is enrolled against that sender ID, and each customer company authorizes
+  it and lists our client id with its Web Services user under Authorized Client
+  Applications. (Sage's guide pages refuse automated fetches, so this rests on
+  the quick start's wording as quoted by third-party integration guides
+  (Merge's help centre, Celigo, Agave), which agree; a sandbox confirms it, #654.)
+  §269 stands for the API choice; its licensing reason is withdrawn.
+
+**Decision.**
+
+- **The create sends `state: "posted"`, and nothing counts as posted until it
+  is read back.** After a 201, and on a retry that finds our earlier bill by
+  `referenceNumber`, the adapter `GET`s the bill. A draft / submitted /
+  analyzing / unknown state is the non-retryable `bill_left_unposted` (the bill
+  exists, so not `not_posted`; a retry once someone posts it in Intacct finds
+  it and succeeds). A reversed or declined one is the shared
+  `existing_invoice_not_open` (Business Central's code for a found document
+  that is no longer ours to change, §391), left in Intacct: reporting it posted
+  would close the invoice against a bill nothing will pay. A posted bill must
+  show `totalTxnAmount` equal to the approved amount (`posted_total`), because
+  a tax-enabled company's tax solution computes it. An unreadable read-back is
+  a retryable failure, never success. A mismatch voids a bill this attempt
+  created; a *found* one is refused `posted_total_mismatch` and left in
+  Intacct, since it may be a draft we refused that a person since edited and
+  posted. Making the state configurable
+  (`submitted` for companies with bill approvals) is deferred until a sandbox
+  shows how such a company answers a `posted` create (#654).
+- **A deterministic 4xx from the create is coded and created nothing.** The
+  adapter reads the bill's vendor and accounts back by id: one Intacct reports
+  inactive, `activeNonPosting`, awaiting or declined approval (vendor `state`
+  `s` / `r`), or absent is `vendor_inactive` / `account_inactive` (named by our
+  code); anything else is the shared `bill_refused` §385 added. All set
+  `not_posted`, including when the reads that would name the cause fail.
+  Intacct's `errorId`s for a closed period or a duplicate bill number are not
+  published, so they are not mapped yet; a sandbox capture can add
+  `period_closed` (#654). Intacct's error text is never read. 5xx / 429 stay
+  retryable and possibly posted.
+- **The token is cached and a refusal of it is coded.** A client-credentials
+  token lives 12 h, so it is cached per process under a digest of the
+  credentials until 5 minutes before `expires_in`; a 401 from any call mints a
+  fresh one once. A 400 / 401 / 403 from the token exchange is
+  `not_connected` (non-retryable, nothing posted); a 5xx or network failure is
+  a retryable failure naming the status only. On a sync listing either is a
+  failed page, so `ErpListingIncomplete`, never an uncoded error. On a push,
+  `not_connected` carries `not_posted` only while no bill exists: a token
+  refused after the create returned a key, or after the lookup found our bill,
+  is a plain refusal naming that bill (money-path review).
+- **Smaller corrections, all from the spec:** both dates are required
+  (`missing_dates` before any call); `analyzing` reads draft and `noValue`
+  ("posted but has not affected the GL") reads `settled_no_payment` (§303);
+  every query sends `orderBy: [{"key": "asc"}]` because Intacct evaluates each
+  page independently; vendors and accounts sync their `status` (and vendor
+  approval `state`) as `active=False` instead of linking a dead record (§284);
+  a PO's total is `totalInTxnCurrency` and its currency the top-level
+  `txnCurrency`, and one with no total is skipped `unpriceable` (§323); and
+  `void_invoice` falls back to the `bill/reverse` workflow, dated after the
+  posting date, when a reversal-enabled company refuses the delete of a posted
+  bill. A paid bill is still never reversed automatically: Intacct requires its
+  payment voided first, which is an accountant's call.
+- **fake-erp behaves like the spec, so it fails the old code**: a create
+  without `state` is a draft, dates are required, a query naming a field the
+  object lacks is a 400, inactive vendor / account and a pre-2020 date are 422s,
+  `expires_in` is 43200, and a reversal-enabled switch refuses every DELETE. The
+  audit's claim that Intacct's error body is a top-level `ia::error` is
+  **refuted** by the published OpenAPI (`error-response`: `ia::error` nested in
+  `ia::result`), so the fake keeps that shape and the adapter reads neither.
+
+**Rejected.** Mapping 422 → `period_closed` by status alone (a 422 is any
+business rule, so it would mislabel an inactive vendor as a closed period);
+keeping the read-back optional for a 201 that carries a key (the 201 says
+nothing about state, which is the bug); adding `location_id` to the link realm
+in this change (it is a realm migration with its own rollout, tracked in
+`docs/followups.md`, "Intacct's link realm ignores `location_id`").
+
+**Porting note.** Drafted as §320 on `fix/erp-sage-intacct` (`9ac3a997`, WIP)
+and renumbered on landing (§320 was taken). Since the draft, #670 and #679 made
+every Intacct sync listing, the PO listing included, read whole or raise and
+link a PO's vendor by `vendor.id`; the port keeps both and moves the PO fields
+onto `totalInTxnCurrency` / `txnCurrency` inside that shape. Its own
+`bill_refused` registration was dropped: §385 had already added it to
+`base.ERP_REFUSAL_CODES`, `erpRefusals.ts` and the six locales. Only
+`bill_left_unposted` is new, with its sentence in the six locales.
+
+**PO status (#655 Intacct #12) is not mapped yet.** A draft, submitted,
+partially approved or declined purchasing document authorizes nothing, but it
+still syncs `open`, as every adapter's unissued PO does. The states are named
+in `sage_intacct._UNISSUED_PO_STATES` with a TODO to return
+`models.procurement.UNISSUED_PO_STATUS` once the PO-status lane defines it;
+this change deliberately defines no status of its own, so the vocabulary is
+decided once (`docs/followups.md`, "An unapproved ERP purchase order syncs as
+`open`").
+
+Tests: `backend/tests/test_erp_sage_intacct_adapter.py` (create posted, a
+draft or submitted read-back refused, a found reversed / declined bill refused,
+a different total voided but a found one left in place, an unreadable
+read-back or create answer never success, a token refused after the bill
+exists never `not_posted`, coded
+refusals by vendor / account read-back and `bill_refused` when those reads
+fail, the token cache and its coded refusals, a sync listing whose token fails
+incomplete, ordered queries, the reverse fallback, inactive vendors and
+accounts, the PO fields); `frontend/tests-e2e/erp/sage-intacct.spec.ts` (the
+bill read from fake-erp is `posted`; a closed period is `bill_refused`; PO sync
+against the spec's field names).
+
+## 396. A payment the ERP shows made on two rails keeps the split, and the 1099 reports it part by part (follow-up of §393, migration 0130, 2026-11-15)
+
+**The gap.** A bill an ERP shows paid by a cheque AND a card is recorded here as
+one `Payment`, and `Payment.method` holds one rail. QuickBooks' report stated no
+rail for such a bill (§393), so the card part was reported on the payer's
+1099-NEC although the card settlement entity reports it on a 1099-K: an
+over-report. Xero's report read the rail of the latest cash payment alone, so a
+bank payment followed by a card one was booked as all card and the bank part
+left off the 1099: an under-report. Nothing on the payment or its audit row
+said which rails paid how much.
+
+**The rule.**
+
+- **The report states the split.** `ErpBillReport.payment_parts`: one
+  `payment_methods.RailPart` (a rail, or None = not stated, and an exact
+  `Decimal`) per cash payment a person made, no account data. Stated only with
+  `paid_amount`, which it breaks down. QuickBooks: each cash BillPayment's
+  `PayType` and what its lines applied to this bill (`_cash_parts`, the same
+  `_applied_to` figures `paid_amount` sums). Xero: every cash payment's account
+  is read, each account once per bill (`_payment_rails`); `CREDITCARD` is
+  `card`, anything else, or a read that fails for that payment, not stated.
+  Xero's `payment_method` is `card` only when every part is card. Rails are
+  read only for a bill `paid` (the only one ever recorded), and these reads
+  never wait out a 429 (`_status_get`'s once-a-minute wait would otherwise
+  repeat per payment, under the invoice lock the read-back holds and past the
+  dispatch check's bound): a rate-limited read leaves that payment not stated,
+  an over-report, never an under-report.
+- **The record keeps it, or drops it whole.** `payment_methods.split_by_rail`
+  is the one judgement. A breakdown stands only when every part is a positive
+  whole-cent amount (33.335 + 66.665 sums to 100.00, but neither prints
+  unrounded on a form) and the parts sum EXACTLY to the amount booked. Then `method` is
+  the parts' one rail, or NULL over several, and `payments.rail_breakdown`
+  holds the parts. Anything else is `unreconciled`: no breakdown, no rail, so
+  the whole payment is reportable, logged by id only. Nothing is prorated or
+  rounded. The `payment.recorded_outside` audit row carries the stated parts,
+  `rail_breakdown_status` (`applied` / `unreconciled` / `superseded`) and
+  `method_stated`, so the trail says what the ERP claimed whether or not it
+  stood.
+- **The 1099 splits by it.** `build_1099_report` joins a `LATERAL` sum over the
+  array (`payment_methods.rail_breakdown_sums_sql`, card parts classified by
+  the same `CARD_PAYMENT_METHODS`), and applies the split only when the row
+  passes the writer's rule again (`RailBreakdownSumsSql.applies_to`: every part
+  a positive whole-cent amount, cast only from an exact decimal string, summing
+  to `Payment.amount`), so a row written by any other path cannot bend a filed
+  figure (a negative part, a missing amount SUM would skip) or fail the report
+  (an amount that is not a number); and the 1099 figure is the
+  payment's own amount in the invoice's currency
+  (`PaymentReportingAmountSql.is_payment_amount`). Otherwise the payment counts
+  as its `method` says, which for a split one is NULL: reportable, whole. A
+  split payment is counted on `payment_count` and `card_payment_count` both,
+  and its reportable part takes its invoice's box, so the per-box
+  reconciliation stays exact.
+- **The kept facts carry it.** A refused record keeps `payment_parts` beside
+  `amount` on the `paid_not_recorded` row, a later amount-less report never
+  erases either (`_merged_report`), and the re-attempt, the read-back of a row
+  that stated no figure (`ReadBackFigure.parts`) and the one-click all book
+  the same split.
+- **A person's one rail.** The one-click form asks for one rail. Over a
+  breakdown of several rails the breakdown stands, as the ERP's cash figure
+  stands against a typed one (§386): one rail cannot describe a payment made on
+  two. Against a breakdown of one rail, a person naming another has corrected
+  it and their rail is the record (`superseded`). Against an unreconciled one,
+  their rail stands. The dialog does not yet show the split or say it will
+  stand over the rail picked; that is tracked in `docs/followups.md`.
+
+**Where it persists: a JSONB column on `payments`, not a child table.** The
+aggregate needs it queryable, so it must be stored, not only audited (under
+`FEOH_AUDIT_MODE=lambda` the audit row is not even local). The breakdown is
+written once, in the record's own transaction, never changed alone, and read
+only summed per payment inside the one query that already reads the row. A
+`payment_rail_parts` table would put a record with no lifecycle of its own into
+the per-table registries (workspace closure's `CLOSURE_ALLOWED`, for one) and
+need a grouped join to answer what a lateral over the row answers. What a table would
+have given, typed amounts and a shape the database enforces, is covered by
+exact decimal strings cast to `numeric` in SQL, the writer's exact-sum rule,
+the read-side re-check, and `ck_payments_rail_breakdown_array` (an array or
+NULL, so `jsonb_array_elements` can never meet an object and fail the report).
+Rejected too: a single `card_amount` column. It answers the 1099 but not the
+follow-up's other question, which rails paid how much, and a Xero bank part
+(not stated) would be indistinguishable from a cheque.
+
+**No backfill (§141).** A payment recorded before 0130 states one rail or none,
+and nothing stored says how it split: its audit row names the rail booked, not
+the ERP's payments, and re-reading today's bill would date a split from a read
+nobody made then. Those payments keep counting by `method` (QuickBooks' two-rail
+ones as reportable, Xero's latest-card ones as card); a preparer who needs a
+past year exact reads the bill in the ERP.
+
+**Not verified live.** Both adapters' readings are against their doubles and the
+published shapes (§386, §393); no recorded QuickBooks or Xero bill paid on two
+rails exists yet.
+
+Tests: `tests/test_payment_methods.py` (the split judgement: two rails, all
+card, a cent short or over, a zero, a negative or a NaN part fail closed, an
+unknown rail, the JSON round trip and a malformed breakdown);
+`tests/test_qbo_status_sync_adapter.py` (cheque plus card parts summing to the
+cash, only this bill's lines, none without a cash figure);
+`tests/test_xero_status_sync_adapter.py` (bank then card is not all card, two
+card payments read their account once, one unreadable payment not stated);
+`tests/test_erp_status_sync.py` (real rows: cheque plus card kept and audited,
+two cards recorded as card, parts not summing recorded reportable and audited
+`unreconciled`, a kept two-rail row booked with its split when its blocker
+clears, the one-click booking the split over a person's one rail, the merge
+keeping the parts, Xero bank plus card); `tests/test_tax_1099_boxes.py` (the
+aggregate's split per box and count, parts not summing counted whole, a split
+on a home-currency figure not applied);
+`tests/test_migration_0130_payment_rail_breakdown.py` (parity with
+`create_all`, idempotent, no backfill, the CHECK, a control-plane no-op).
+
+## 397. Business Central recognises its own lost-read draft by the id its create recorded, and only while it is unedited (§391 follow-up, 2026-11-15)
+
+**Context.** §391 made every draft the duplicate lookup finds untouchable,
+because the lookup's key (vendor + Vendor Invoice No.) also matches a bill a
+BC user keyed by hand. The cost it accepted: a VAT company's push whose read
+after the create was lost could not be finished by the retry. The read failure
+names the gross draft, so `services/erp` records it as the orphan, but the
+retry found it, could not tell it from a person's, and refused it
+`posted_total_mismatch`, left in BC. Someone had to delete it before retrying.
+
+**Decision.**
+- **Ownership is recorded, never inferred.** `ErpPostResult` gains
+  `erp_document_is_own`: true only when the document it names is one this push
+  created (in this attempt, or an earlier one's it recognised). `_call_erp`
+  keeps `state_data["erp_orphan_document_own"] = true` beside the orphan id,
+  only when the result says so, and drops it whenever a failure names a
+  document the adapter merely found. Beside it goes
+  `erp_orphan_document_fingerprint`: the three totals BC answered our create
+  with. The next attempt gets both (`InvoicePayload.own_orphan_document_id` /
+  `_fingerprint`); a row from before the flag existed, or one with no
+  fingerprint, is read as not ours. So a BC user's draft, once named by a
+  refusal, can never come back as "ours" on a later retry.
+- **Only that exact id counts.** A lookup hit is ours only when its id equals
+  the recorded one (a GUID compared case-insensitively). Any other hit, even
+  one identical to what we would send, keeps §391's rule: never deleted, never
+  repriced.
+- **And only while it is still what we sent.** Before acting on it, the
+  adapter requires the draft's `totalAmountExcludingTax` / `totalTaxAmount` /
+  `totalAmountIncludingTax` to equal the recorded fingerprint. This is what
+  catches a line moved to another tax group: `taxCode` is a field we never
+  send, so the lines look unchanged and only the tax moves (money-path
+  review), and any `payToVendorId` to be the bill's own vendor (we never send
+  one, so another means a BC user redirected the payee). It then reads the
+  draft's lines (`GET purchaseInvoices({id})/purchaseInvoiceLines`)
+  and requires them to equal, as a multiset, our gross or our net lines in
+  every field we send (type, account, description, quantity, unit cost);
+  `totalAmountExcludingTax` to equal those lines' sum, which catches a field we
+  never send (a line discount, prices made tax-inclusive); the invoice and due
+  dates we sent; and the invoice's currency (blank read as the company's LCY,
+  as §391). A gross match is handled as a draft just created, so BC's VAT on
+  top gets the one net reprice; a net match is not repriced again (a mismatch
+  is deleted and refused, as for a net draft we just made).
+- **Edited, or no longer a draft: it is no longer ours.** It gets exactly the
+  found treatment §391 gives anyone's record: a draft at another total refused
+  `posted_total_mismatch` and left in BC, a `Paid` one refused
+  `existing_invoice_not_open`, an `Open` one accepted only at the approved
+  total and currency. Its refusal does not claim it as ours, so the next retry
+  will not either. No new refusal code: the found treatment's codes already say
+  what happened, and a person who edited the draft now owns it.
+- A failed read before the draft is judged (its record, its lines, the
+  company's LCY) is a retryable failure naming the draft, and it KEEPS the
+  claim: nothing was deleted or posted, and the next attempt judges the same
+  id afresh. Dropping it there would strand our draft after one 503 (money-path
+  review). A failure that names no document leaves the recorded id and claim
+  as they were, even when the draft has since been deleted (by our refusal's
+  own DELETE, say): the id then matches nothing, because BC does not reuse
+  ids, so the stale entry is harmless.
+
+**Left open, accepted.** A create whose response was lost outright (a timeout
+or 5xx after BC made the draft) reports no id, so nothing is recorded and the
+retry cannot recognise the draft: it still needs deleting in BC, as §391
+describes. Recognising it would need us to choose the id before the create;
+whether API v2.0 honours a client-supplied `id` on a purchaseInvoice POST is
+undocumented, and nothing here has run against a live BC tenant (#654). The
+lines comparison assumes BC returns a line's `unitCost`, `description` and
+`accountId` as we sent them, and the fingerprint assumes BC's create response
+states the draft's three totals. If a live tenant does otherwise, our own
+drafts read as edited or unproven and fall back to §391's behaviour, which is
+safe. The DELETE before a reprice carries the etag from the header read,
+which comes before the lines read. A line edited between the two is stopped
+only if BC moves the header's etag when a line changes, which is undocumented
+(as it was already for a draft just created).
+
+**Rejected:**
+- *Recognising our draft by its shape alone* (gross lines, approved
+  excluding-tax total). A BC user keying the same bill makes the same shape;
+  that is what §391 refuses to delete.
+- *Recognising it by an etag recorded at create.* Whether BC moves the
+  header's etag for a line edit, or for its own post-insert recalculation, is
+  undocumented. The header's totals are computed from the lines, so they
+  answer the question that matters (is the money still what we sent?), and
+  the lines comparison covers the rest.
+- *Refusing an edited own draft outright, even at the approved total.* That
+  makes a draft we once made stricter than one a person keyed from scratch,
+  for the same facts; handing it to the found treatment keeps one rule for
+  every draft a person has shaped.
+
+Tests: `backend/tests/test_erp_adapter_idempotency.py` (a lost-read VAT draft
+repriced by the retry and posted; a created-then-lost draft marked ours; a
+hand-keyed identical draft untouched even with an orphan recorded; our draft
+edited seven ways, tax group and pay-to vendor included, refused and left; our draft found `Paid`
+refused as any; a failed lines read retryable and keeping the claim; a
+recorded id with no fingerprint not ours); `backend/tests/test_erp_push_flow.py` (only a
+created orphan is handed back, a found one drops the claim, a legacy row is
+not ours; success clears the flag); `frontend/tests-e2e/erp/dynamics.spec.ts`
+against fake-erp's `fake-vat-lostread-co` / `fake-vat-lostedit-co` (first
+draft read per invoice number answers 503, the second company also adding a
+10.00 line first) and a draft keyed by hand in `fake-vat-co`.
+
+## 398. NetSuite posts by ids, reads its own PO sign, and counts a bill posted only when NetSuite shows it approved (issue #655 N1–N5, 2026-11-15)
+
+**Context.** The 2026-10-23 docs-versus-code audit listed NetSuite findings
+N1–N5; the report itself is not in the repo, so each was re-derived from the
+issue's text, its cross-cutting classes and Oracle's SuiteTalk REST docs. N1
+(the TBA signer put the query inside the signed URI) landed with §320 and N5
+(a synced PO linked to its vendor by name) with #652; both were re-checked
+against the code and stand. N6 (OAuth 2.0) is §320. This entry is N2–N4, the
+PO lines `docs/followups.md` kept open, and the classes #655 asks of every
+adapter. Nothing here has run against a NetSuite account (#654).
+
+**Decision.**
+- **N2 — the idempotency lookup is `GET /vendorBill/eid:<correlation id>`.**
+  Oracle documents `eid:` for addressing any record by external id, and shows
+  the collection query `?q=externalId IS "…"` only as a workaround for an id
+  holding a pipe; integrators report NetSuite refusing that query on
+  transaction records, which would fail every push at its lookup. A miss is a
+  404 whose `o:errorCode` is `NONEXISTENT_ID`; any other 404, or a 200 we
+  cannot parse, fails the push as before (a lookup that could not be made is
+  not a miss). The hit is the bill itself, so it is not read twice.
+- **N3 — the currency is posted by internal id, and the PO total by its
+  magnitude.** A reference's `refName` is its display text (`getFieldText`:
+  the currency record's name, which an administrator can rename), so
+  `{"refName": "USD"}` named no currency reliably, and a bill NetSuite
+  defaulted to the vendor's currency would have passed a total check that
+  compares figures only. The adapter reads the active currency whose
+  `symbol` (ISO code, the column the PO sync already trusts) is the
+  invoice's, posts `{"id": …}`, and confirms the read-back bill's
+  `currency.id`. None active, or not an ISO code: `currency_not_set_up`
+  (new), `not_posted` when the lookup has just shown no bill of ours exists.
+  A failed read is retryable. A found bill in another currency is
+  `posted_total_mismatch`, as BC's is (§391). Separately, SuiteQL states a
+  transaction header in posting sign and a purchase order's is the
+  vendor-side credit, so `foreigntotal` reads -2,100.50 for an order the UI
+  shows at 2,100.50; stored as read, no invoice could match a NetSuite PO and
+  every open-PO rollup subtracted it. The total is now `abs(foreigntotal)`.
+  Sources are integrators' (an ODBC report, a published SuiteQL query that
+  negates it), not Oracle's, so this is a sandbox item.
+- **N4 — a bill counts as posted only when NetSuite shows it approved.** Under
+  approval routing a bill is created Pending Approval and posts nothing to
+  the GL. It used to be reported posted, which closes the invoice at `done`
+  (NetSuite has no status sync), so a bill NetSuite's approver then rejected
+  would be paid by nobody. After the total and currency checks, the bill's
+  `approvalStatus` (1 pending, 3 rejected) and `status` (a word, a refName or
+  a `VendBill:` letter, all read alike) decide: Open or Paid In Full, not
+  pending or rejected → success; Pending Approval or anything unreadable →
+  `bill_not_posted` (new); rejected or cancelled → `bill_rejected` (new).
+  Both leave the bill: the approval is NetSuite's to give, and `retry-erp`
+  after it finds the bill by `eid:` and reports it posted, so it is never
+  created twice. BC's `existing_invoice_not_open` was the first choice for a
+  rejected bill and was dropped in money-path review: its sentence ("no
+  longer a draft, so it can't be changed from here") reads as a live bill,
+  which invites closing an invoice that nothing will pay. The total check still
+  runs first, so a mismatched pending bill is deleted as before.
+  *Rejected:* setting `approvalStatus` to Approved on the create. It would
+  overrule the customer's own NetSuite control with FeohLedger's approval,
+  and only a role holding the approve permission can do it anyway.
+- **Coded create refusals (§285's class).** A create NetSuite answers with a
+  4xx a re-send cannot change is coded from facts read back, and is
+  `not_posted` only once the `eid:` lookup, made again, misses: the 4xx may be
+  NetSuite's duplicate-externalId answer to a second create racing the first
+  (an SQS redelivery after a lost response), so a hit goes through the posted
+  checks as our bill, and a lookup that cannot be made leaves the refusal
+  fail-closed. The facts, in order: the base accounting period holding the
+  bill's date closed, A/P-locked or all-locked → `period_closed`; the vendor
+  gone or `isinactive` → `vendor_inactive`; an account gone or inactive →
+  `account_inactive` naming our codes; otherwise the shared `bill_refused`
+  (§385). NetSuite's body is never read for the cause: its `o:errorCode` is a
+  generic `USER_ERROR` / `INVALID_CONTENT` and its `detail` echoes the
+  submitted fields. A read that fails is "don't know", never "inactive". Only
+  integer internal ids are spliced into SuiteQL. 401, 408, 409, 423, 425, 429
+  and 5xx stay uncoded and retryable.
+- **Paid versus credited (§303's table gains a row).** NetSuite sets Paid In
+  Full when a vendor credit is applied as well as a vendor payment, so
+  `get_invoice_status` reads what was applied to the bill
+  (`NextTransactionLineLink` where `previousdoc` is the bill): `paid` only
+  when every link is a `VendPymt` and together they are exactly the bill's
+  total; a credit, any other link, a shortfall, or rows of mixed sign (a
+  payment and its reversal) is `settled_no_payment`; a failed read is
+  `unknown`. No caller reads it today (§303), so nothing
+  changes at runtime.
+
+  | Adapter | `paid` when | Nothing owing otherwise |
+  |---|---|---|
+  | NetSuite | Paid In Full and the applied links are all `VendPymt`, summing to the bill's `total` | `settled_no_payment` |
+
+- **PO lines (the `docs/followups.md` entry).** After the headers, the lines
+  of every PO not closed or cancelled are read from `transactionline`
+  (`mainline = 'F' AND taxline = 'F'`), 100 PO ids a query, each chunk read
+  whole or the listing raises `ErpListingIncomplete`. The sync then refreshes
+  stored lines by §327's rule; a closed or cancelled PO is sent without lines,
+  which leaves the stored ones alone. Reading only the live POs keeps each
+  read inside `SYNC_LISTING_MAX_ROWS` for an account with years of orders,
+  and a chunk that still runs past it is read again in halves, down to one PO
+  (only a single PO past the bound raises). Lines are debits and read
+  positive; a PO whose line amounts sum negative (credit sign, as the header
+  is stated) has its line totals and quantities negated, so the 3-way receipt
+  value never mixes signs. A line NetSuite closed is kept: the header total
+  still counts it, and dropping it would unlink a receipt recorded against
+  it. An expense line's `gl_account` is the chart sync's code for its account
+  (`acctnumber`, else its name); an item line's account is the item's own,
+  so it carries none. *Rejected:* one query over every PO's lines (it hits
+  the listing bound long before the headers do).
+- **Payment terms were already stored by code.** BC's half of the old
+  follow-up stored a GUID (§391). NetSuite's vendor sync reads
+  `BUILTIN.DF(terms)`, the term record's name ("Net 30"), which is the only
+  identifier a NetSuite term has besides its internal id; nothing changed,
+  and `test_erp_vendor_sync_adapter.py` pins it.
+
+**Draft and pending-approval POs.** A PO in Pending Supervisor Approval (`A`)
+is the PO-status lane's (§394, `models/procurement.UNISSUED_PO_STATUS`), whose
+change maps it in the same file; this entry does not touch that mapping. Its
+lines are read like any other live PO's.
+
+**Sandbox-only (#654).** That NetSuite answers the `eid:` miss with 404
+`NONEXISTENT_ID`; that `refName` on a reference is display-only on input; the
+sign of `foreigntotal` and of PO line `quantity` / `foreignamount` (taken as
+stated, lines being debits); the `accountingperiod`, `currency`,
+`transactionline` and `NextTransactionLineLink` columns used; the status and
+`approvalStatus` shapes a vendorBill GET returns; the duplicate-externalId
+answer to a racing create; whether closed PO lines (`isclosed`) should count;
+and that Paid In Full is set by an applied vendor credit.
+
+Tests: `tests/test_erp_netsuite_adapter.py` (the adapter against fake-erp's
+NetSuite routes in process: a clean push by currency id, the `eid:` retry, a
+pending bill refused and left then posted once approved, a rejected one, the
+currency, period, vendor and account refusals, PO totals and lines; mocked:
+line chunks, a failed line read, a lookup 404 that is not a miss, an
+unreadable currency, `bill_refused`, retryable create answers, a found bill
+in another currency, every status shape, paid versus credited; the
+money-path review's follow-ups: a refused create whose bill exists after all,
+a second lookup that fails, a hit that is not plainly ours, a truncated line
+chunk split in halves, credit-sign lines, a payment and its reversal);
+`tests/test_erp_adapter_idempotency.py`, `test_erp_adapter_money_exact.py`,
+`test_erp_adapter_error_pii.py`, `test_erp_push_flow.py`,
+`test_erp_netsuite_auth.py`, `test_erp_void_invoice.py`,
+`test_erp_po_sync.py` (the new request sequence);
+`frontend/src/lib/api/erpRefusals.test.ts` (the two codes);
+`frontend/tests-e2e/erp/netsuite.spec.ts` (PO lines and sign, a pending bill
+completed after approval, a closed period). fake-erp's NetSuite section now
+answers `eid:`, SuiteQL `currency`, `accountingperiod` and `transactionline`,
+refuses a currency given by `refName`, refuses a bill dated in its closed
+January 2020, states PO headers negative and gives bills an `approvalStatus`.

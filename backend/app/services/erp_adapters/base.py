@@ -8,6 +8,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from app.services.payment_methods import RailPart
+
 if TYPE_CHECKING:
     from app.services.erp_call_budget import CallBudget
 
@@ -96,6 +98,18 @@ class InvoicePayload:
     #: adapter whose duplicate lookup narrows by date searches these too, so
     #: a bill an earlier attempt created is found after the date was edited.
     prior_invoice_dates: list[date] = field(default_factory=list)
+    #: The ERP id of a document an earlier attempt of this push CREATED and
+    #: left behind (:attr:`ErpPostResult.erp_document_is_own`, persisted by
+    #: ``services/erp``) — never one an attempt merely found. An adapter whose
+    #: duplicate lookup cannot otherwise tell its own lost-response draft from
+    #: one keyed by hand may treat a found document with exactly this id as its
+    #: own, and only while it is still what was sent (Business Central,
+    #: decisions §397).
+    own_orphan_document_id: str | None = None
+    #: What the ERP said that document held when it was created
+    #: (:attr:`ErpPostResult.erp_document_fingerprint`), so the adapter can
+    #: tell it is unchanged. None means no proof, and the document is not ours.
+    own_orphan_document_fingerprint: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +307,10 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         # Business Central
         "existing_invoice_not_open",
         "line_amount_precision",
+        # NetSuite (decisions §398)
+        "bill_not_posted",
+        "bill_rejected",
+        "currency_not_set_up",
         # SYSPRO / Sage Accounting ZA / Blackbaud FE NXT
         "duplicate_invoice_number",
         # Sage Accounting ZA
@@ -314,6 +332,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "job_failed",
         # `services/erp_call_budget`: the shared SKY call quota (decisions §322)
         "erp_call_budget_exhausted",
+        # Sage Intacct
+        "bill_left_unposted",
         # `services/erp` itself: the sealed ERP credentials could not be opened
         "erp_credentials_unavailable",
         # `services/erp_export_gate`: an open duplicate / fraud exception (§286)
@@ -417,6 +437,18 @@ class ErpPostResult:
     #: organisation ``ShortCode``). Read by ``deep_links.erp_document_url``
     #: only; None leaves the link to the user's currently selected company.
     erp_company_code: str | None = None
+    #: True only when ``erp_document_id`` names a document THIS push created
+    #: (in this attempt, or an earlier one whose own id it recognised as still
+    #: unedited). ``services/erp`` persists it beside the orphan id and hands
+    #: the id back as :attr:`InvoicePayload.own_orphan_document_id`; a document
+    #: the adapter found and cannot prove it made leaves it False, so it is
+    #: never handed back as ours. Default False is the fail-closed answer.
+    erp_document_is_own: bool = False
+    #: With ``erp_document_is_own``: the adapter's opaque digest of the
+    #: document as the ERP reported it at creation (Business Central: its
+    #: three totals), persisted and handed back as
+    #: :attr:`InvoicePayload.own_orphan_document_fingerprint`.
+    erp_document_fingerprint: str | None = None
 
 
 #: Stable reason code: a payment written back to the ERP (``post_payment``)
@@ -518,6 +550,13 @@ class ErpBillReport:
     #: compares it with the invoice's before comparing figures; a missing or
     #: different one is refused like a different amount.
     paid_currency: str | None = None
+    #: How ``paid_amount`` was paid: one ``RailPart`` per cash payment a person
+    #: made, its rail (a ``Payment.method`` value, None = not stated) and the
+    #: exact amount it applied to THIS bill. No account data. Stated only with
+    #: ``paid_amount``, and its parts sum to it; a bill paid on two rails is
+    #: then recorded with this breakdown and split by it on the 1099, which one
+    #: ``payment_method`` cannot do (decisions §396). Empty = not stated.
+    payment_parts: tuple[RailPart, ...] = ()
 
 
 @dataclass
@@ -564,10 +603,13 @@ class PoLinePayload:
 class PoPayload:
     """Normalized purchase order returned by `ErpAdapter.list_pos`.
 
-    `status` is one of {"open", "closed", "cancelled"} — the same set
-    `PurchaseOrder.status` accepts. Adapters that get something exotic
-    from their ERP should normalize to one of these or default to
-    "open" rather than passing the raw vendor string through.
+    `status` is one of {"open", "closed", "cancelled", "unissued"} — the same
+    set `PurchaseOrder.status` accepts. `unissued` is an order the ERP has not
+    approved or issued yet (a draft, or one awaiting approval): it is synced,
+    and the matcher refuses it (`models/procurement.UNISSUED_PO_STATUS`,
+    decisions §394). Adapters that get something exotic from their ERP should
+    normalize to one of these or default to "open" rather than passing the raw
+    vendor string through.
     """
 
     po_number: str

@@ -328,6 +328,9 @@ async def set_status(body: dict) -> dict:
         raise ProviderError(404, {"detail": "unknown provider or id"})
     if provider == "netsuite":
         store[doc_id]["status"] = {"id": status.lower(), "refName": status}
+        # An approver acting in NetSuite moves the approval status with it.
+        approval = {"pendingapproval": "1", "rejected": "3"}.get(status.lower(), "2")
+        store[doc_id]["approvalStatus"] = {"id": approval}
     else:
         store[doc_id]["status"] = status
     return {"status": "ok"}
@@ -893,37 +896,6 @@ async def netsuite_list_vendors(request: Request, limit: int = 1000) -> dict:
     }
 
 
-_NETSUITE_EXTERNAL_ID_Q = re.compile(r'externalId\s+IS\s+"([^"]*)"', re.IGNORECASE)
-
-
-@netsuite.get("/vendorBill")
-async def netsuite_list_vendor_bills(request: Request, q: str | None = None) -> dict:
-    """Collection query — only supports the ``externalId IS "..."`` shape our
-    own adapter sends. Backs the pre-create idempotency lookup (issue #143):
-    NetSuite enforces externalId uniqueness per record type, so a retried push
-    after a lost response finds the already-created bill here instead of
-    creating a second one via POST."""
-    _require_netsuite_auth(request)
-    items: list[dict] = []
-    if q:
-        match = _NETSUITE_EXTERNAL_ID_Q.match(q.strip())
-        if match:
-            external_id = match.group(1)
-            items = [
-                {"links": [], "id": doc_id}
-                for doc_id, rec in STATE["netsuite_bills"].items()
-                if rec.get("externalId") == external_id
-            ]
-    return {
-        "links": [],
-        "count": len(items),
-        "hasMore": False,
-        "items": items,
-        "offset": 0,
-        "totalResults": len(items),
-    }
-
-
 def _netsuite_invalid_ref(field: str) -> ProviderError:
     return _netsuite_error(400, "INVALID_KEY_OR_REF", f"Invalid {field} reference key.")
 
@@ -944,6 +916,15 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
     lines = (body.get("expense") or {}).get("items") or []
     if not lines:
         raise _netsuite_error(400, "USER_ERROR", "You must enter at least one line item.")
+    # The currency is a record reference by internal id; a `refName` alone
+    # (display text) names no record here.
+    currency = _netsuite_active_currency((body.get("currency") or {}).get("id"))
+    if currency is None:
+        raise _netsuite_invalid_ref("currency")
+    if _netsuite_period_closed(body.get("tranDate")):
+        raise _netsuite_error(
+            400, "USER_ERROR", "The accounting period for this transaction date is closed."
+        )
     account_ids = {a["id"] for a in NETSUITE_ACCOUNT_FIXTURES}
     total = Decimal(0)
     for line in lines:
@@ -964,7 +945,7 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
         "dueDate": body.get("dueDate"),
         "memo": body.get("memo"),
         "externalId": body.get("externalId"),
-        "currency": body.get("currency"),
+        "currency": {"id": currency["id"], "refName": currency["symbol"]},
         "entity": body.get("entity"),
         "expense": body.get("expense"),
         "total": total,
@@ -972,6 +953,13 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
             {"id": "pendingApproval", "refName": "Pending Approval"}
             if pending
             else {"id": "open", "refName": "Open"}
+        ),
+        # Under approval routing a bill carries its approval status; a
+        # routed vendor's starts Pending Approval (1), the rest Approved (2).
+        "approvalStatus": (
+            {"id": "1", "refName": "Pending Approval"}
+            if pending
+            else {"id": "2", "refName": "Approved"}
         ),
     }
     # Real NetSuite responds 204 No Content with the new record URL in Location.
@@ -984,8 +972,24 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
 @netsuite.get("/vendorBill/{doc_id}")
 async def netsuite_get_vendor_bill(request: Request, doc_id: str) -> Response:
     """The record, ``total`` included. Money goes out as JSON number literals
-    with every digit (``_netsuite_json``), never through a float."""
+    with every digit (``_netsuite_json``), never through a float.
+
+    ``eid:<external id>`` addresses the bill by its ``externalId``, as NetSuite
+    lets any record URL do — the adapter's pre-create idempotency lookup
+    (issue #143): NetSuite enforces externalId uniqueness per record type, so
+    a retried push after a lost response finds the bill it already created.
+    No such bill is NetSuite's 404 ``NONEXISTENT_ID``."""
     _require_netsuite_auth(request)
+    if doc_id.startswith("eid:"):
+        external_id = doc_id.removeprefix("eid:")
+        doc_id = next(
+            (
+                bill_id
+                for bill_id, rec in STATE["netsuite_bills"].items()
+                if str(rec.get("externalId") or "").lower() == external_id.lower()
+            ),
+            doc_id,
+        )
     record = STATE["netsuite_bills"].get(doc_id)
     if record is None:
         raise _netsuite_error(404, "NONEXISTENT_ID", f"That record does not exist. id: {doc_id}")
@@ -1234,6 +1238,7 @@ async def d365_get_purchase_invoice(
     record = STATE["d365_invoices"].get(doc_id)
     if record is None:
         raise _d365_error(404, "BadRequest_NotFound", f"No purchaseInvoice with id {doc_id}.")
+    _d365_maybe_lose_read(company_id, record)
     return copy.deepcopy(record)
 
 
@@ -1246,16 +1251,33 @@ app.include_router(d365)
 # ---------------------------------------------------------------------------
 #
 # OAuth 2.0 client-credentials token, services/core/query, and the
-# accounts-payable/bill object. State lives under STATE["intacct"], created on
-# first use so POST /__reset clears it without touching _fresh_state.
+# accounts-payable/bill object (create / get / delete) plus the bill reverse
+# workflow. State lives under STATE["intacct"], created on first use so
+# POST /__reset clears it without touching _fresh_state.
+#
+# Shaped on Sage's published OpenAPI (decisions §269 and §395):
+#   * a bill created without `state` is a `draft` (the spec's default) — a
+#     client that forgets `state: "posted"` gets a bill that books nothing;
+#   * `createdDate` and `dueDate` are required;
+#   * a query naming a field the object does not have is a 400 (the PO object
+#     has `totalInTxnCurrency` / `txnCurrency`, never `txnTotal`);
+#   * an inactive vendor or GL account, or a date in a closed period, is a 422
+#     business-validation refusal;
+#   * a "reversal-enabled" company refuses every DELETE; a posted bill is
+#     reversed through `workflows/accounts-payable/bill/reverse` instead.
+# Errors keep the spec's shape: `ia::error` nested under `ia::result`.
 
 intacct = APIRouter(prefix="/intacct/ia/api/v1")
 
 INTACCT_TOKEN = "fake-intacct-token"
 
+#: Any bill dated before this is in a closed period (422).
+INTACCT_CLOSED_BEFORE = "2020-01-01"
+
 INTACCT_VENDOR_FIXTURES: list[dict] = [
-    {"key": "11", "id": "V-ACME", "name": "Fake Intacct Vendor A"},
-    {"key": "12", "id": "V-BETA", "name": "Fake Intacct Vendor B"},
+    {"key": "11", "id": "V-ACME", "name": "Fake Intacct Vendor A", "status": "active"},
+    {"key": "12", "id": "V-BETA", "name": "Fake Intacct Vendor B", "status": "active"},
+    {"key": "13", "id": "V-GONE", "name": "Fake Intacct Inactive Vendor", "status": "inactive"},
 ]
 INTACCT_GL_FIXTURES: list[dict] = [
     {
@@ -1264,6 +1286,7 @@ INTACCT_GL_FIXTURES: list[dict] = [
         "name": "Fake Office Supplies",
         "accountType": "incomeStatement",
         "normalBalance": "debit",
+        "status": "active",
     },
     {
         "key": "62",
@@ -1271,6 +1294,15 @@ INTACCT_GL_FIXTURES: list[dict] = [
         "name": "Fake Software",
         "accountType": "incomeStatement",
         "normalBalance": "debit",
+        "status": "active",
+    },
+    {
+        "key": "69",
+        "id": "6900",
+        "name": "Fake Retired Expenses",
+        "accountType": "incomeStatement",
+        "normalBalance": "debit",
+        "status": "inactive",
     },
     {
         "key": "20",
@@ -1278,6 +1310,7 @@ INTACCT_GL_FIXTURES: list[dict] = [
         "name": "Fake Accounts Payable",
         "accountType": "balanceSheet",
         "normalBalance": "credit",
+        "status": "active",
     },
 ]
 INTACCT_PO_FIXTURES: list[dict] = [
@@ -1286,28 +1319,69 @@ INTACCT_PO_FIXTURES: list[dict] = [
         "documentNumber": "PO-INTACCT-401",
         # The vendor fixture's `id`: what the vendor sync stamps, and what the
         # PO sync links by before the name.
-        "vendor": {"id": "V-ACME", "name": "Fake Intacct Vendor A"},
+        "vendor": {"key": "11", "id": "V-ACME", "name": "Fake Intacct Vendor A"},
         "state": "pending",
-        "txnTotal": "1250.00",
-        "currency": {"txnCurrency": "USD"},
+        "totalInTxnCurrency": "1250.00",
+        "txnCurrency": "USD",
     },
     {
         "key": "402",
         "documentNumber": "PO-INTACCT-402",
-        "vendor": {"id": "V-BETA", "name": "Fake Intacct Vendor B"},
+        "vendor": {"key": "12", "id": "V-BETA", "name": "Fake Intacct Vendor B"},
         "state": "closed",
-        "txnTotal": "980.50",
-        "currency": {"txnCurrency": "USD"},
+        "totalInTxnCurrency": "980.50",
+        "txnCurrency": "USD",
     },
 ]
 
+#: The fields each object's query may select (a dotted field names a child of
+#: a reference object). Anything else is a 400, as Intacct answers.
+_INTACCT_FIELDS: dict[str, set[str]] = {
+    "accounts-payable/vendor": {"key", "id", "name", "status", "state"},
+    "general-ledger/account": {"key", "id", "name", "accountType", "normalBalance", "status"},
+    "purchasing/document::Purchase Order": {
+        "key",
+        "documentNumber",
+        "vendor.key",
+        "vendor.id",
+        "vendor.name",
+        "state",
+        "total",
+        "totalInTxnCurrency",
+        "txnCurrency",
+        "baseCurrency",
+    },
+    "accounts-payable/bill": {
+        "key",
+        "id",
+        "billNumber",
+        "referenceNumber",
+        "state",
+        "totalTxnAmount",
+        "totalTxnAmountDue",
+    },
+}
+
+_INTACCT_CREATE_STATES = {"draft", "posted", "submitted"}
+
 
 def _intacct_state() -> dict[str, Any]:
-    return STATE.setdefault("intacct", {"bills": {}, "next_key": 5000})
+    return STATE.setdefault(
+        "intacct", {"bills": {}, "next_key": 5000, "reversals_enabled": False}
+    )
 
 
-def _intacct_error(status: int, code: str, message: str) -> ProviderError:
-    return ProviderError(status, {"ia::result": {"ia::error": {"code": code, "message": message}}})
+def _intacct_error(status: int, code: str, message: str, error_id: str = "") -> ProviderError:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if error_id:
+        error["errorId"] = error_id
+    return ProviderError(
+        status,
+        {
+            "ia::result": {"ia::error": error},
+            "ia::meta": {"totalCount": 1, "totalSuccess": 0, "totalError": 1},
+        },
+    )
 
 
 def _require_intacct_auth(request: Request) -> None:
@@ -1326,7 +1400,7 @@ async def intacct_token(request: Request) -> dict:
         or "@" not in form.get("username", "")
     ):
         raise ProviderError(400, {"error": "invalid_client"})
-    return {"access_token": INTACCT_TOKEN, "token_type": "Bearer", "expires_in": 21600}
+    return {"access_token": INTACCT_TOKEN, "token_type": "Bearer", "expires_in": 43200}
 
 
 def _intacct_rows(obj: str) -> list[dict]:
@@ -1349,15 +1423,39 @@ def _intacct_matches(row: dict, filters: list[dict]) -> bool:
     return True
 
 
+def _intacct_select(row: dict, fields: list[str]) -> dict:
+    out: dict[str, Any] = {}
+    for field in fields:
+        if "." in field:
+            parent, child = field.split(".", 1)
+            value = (row.get(parent) or {}).get(child)
+            out.setdefault(parent, {})[child] = value
+        else:
+            out[field] = row.get(field)
+    return out
+
+
 @intacct.post("/services/core/query")
 async def intacct_query(request: Request) -> dict:
     _require_intacct_auth(request)
     body = await request.json()
+    obj = body.get("object", "")
+    rows = _intacct_rows(obj)
+    fields = body.get("fields") or ["key"]
+    known = _INTACCT_FIELDS.get(obj)
+    unknown = [f for f in fields if known is not None and f not in known]
+    if unknown:
+        raise _intacct_error(
+            400, "invalidRequest", f"{unknown[0]} is not a valid field", "REST-1043"
+        )
     filters = body.get("filters") or []
-    rows = [r for r in _intacct_rows(body.get("object", "")) if _intacct_matches(r, filters)]
+    rows = [r for r in rows if _intacct_matches(r, filters)]
+    for order in reversed(body.get("orderBy") or []):
+        for field, direction in order.items():
+            rows = sorted(rows, key=lambda r: str(r.get(field)), reverse=direction == "desc")
     start = int(body.get("start") or 1)
     size = int(body.get("size") or 100)
-    page = rows[start - 1 : start - 1 + size]
+    page = [_intacct_select(r, fields) for r in rows[start - 1 : start - 1 + size]]
     nxt = start + size if start - 1 + size < len(rows) else None
     return {
         "ia::result": copy.deepcopy(page),
@@ -1369,17 +1467,30 @@ async def intacct_query(request: Request) -> dict:
 async def intacct_create_bill(request: Request) -> dict:
     _require_intacct_auth(request)
     body = await request.json()
+    if not body.get("createdDate") or not body.get("dueDate"):
+        raise _intacct_error(400, "invalidRequest", "createdDate and dueDate are required.")
+    bill_state = body.get("state") or "draft"
+    if bill_state not in _INTACCT_CREATE_STATES:
+        raise _intacct_error(400, "invalidRequest", "Invalid state.")
     vendor_id = (body.get("vendor") or {}).get("id")
-    if vendor_id not in {v["id"] for v in INTACCT_VENDOR_FIXTURES}:
-        raise _intacct_error(400, "invalidVendor", "Invalid vendor.")
+    vendor = next((v for v in INTACCT_VENDOR_FIXTURES if v["id"] == vendor_id), None)
+    if vendor is None:
+        raise _intacct_error(422, "invalidRequest", "Invalid vendor.", "BL01001973")
+    if vendor.get("status") != "active":
+        raise _intacct_error(422, "invalidRequest", "The vendor is inactive.", "BL01001973")
+    if str(body["createdDate"]) < INTACCT_CLOSED_BEFORE:
+        raise _intacct_error(422, "invalidRequest", "The period is closed.", "BL03000018")
     lines = body.get("lines") or []
     if not lines:
         raise _intacct_error(422, "noLines", "A bill needs at least one line.")
-    known_gl = {a["id"] for a in INTACCT_GL_FIXTURES}
+    accounts = {a["id"]: a for a in INTACCT_GL_FIXTURES}
     total = Decimal(0)
     for line in lines:
-        if (line.get("glAccount") or {}).get("id") not in known_gl:
-            raise _intacct_error(400, "invalidGlAccount", "Invalid GL account.")
+        account = accounts.get((line.get("glAccount") or {}).get("id"))
+        if account is None:
+            raise _intacct_error(422, "invalidRequest", "Invalid GL account.", "BL01001973")
+        if account.get("status") != "active":
+            raise _intacct_error(422, "invalidRequest", "The account is inactive.", "BL01001973")
         amount = line.get("txnAmount")
         if not isinstance(amount, str):
             raise _intacct_error(422, "invalidAmount", "txnAmount must be a decimal string.")
@@ -1393,7 +1504,10 @@ async def intacct_create_bill(request: Request) -> dict:
         "billNumber": body.get("billNumber"),
         "referenceNumber": body.get("referenceNumber"),
         "vendor": {"id": vendor_id},
-        "state": "posted",
+        "state": bill_state,
+        "createdDate": body.get("createdDate"),
+        "postingDate": body.get("createdDate"),
+        "dueDate": body.get("dueDate"),
         "totalTxnAmount": str(total),
         "totalTxnAmountDue": str(total),
     }
@@ -1412,18 +1526,42 @@ async def intacct_get_bill(request: Request, key: str) -> dict:
 @intacct.delete("/objects/accounts-payable/bill/{key}")
 async def intacct_delete_bill(request: Request, key: str) -> Response:
     _require_intacct_auth(request)
-    bills = _intacct_state()["bills"]
+    state = _intacct_state()
+    bills = state["bills"]
     if key not in bills:
         raise _intacct_error(404, "notFound", "Bill not found.")
-    if bills[key]["state"] in {"paid", "partiallyPaid"}:
-        raise _intacct_error(400, "paidBill", "A paid bill cannot be deleted.")
+    if state["reversals_enabled"]:
+        raise _intacct_error(400, "operationNotAllowed", "Bills must be reversed in this company.")
+    if bills[key]["state"] not in {"posted", "draft", "declined"}:
+        raise _intacct_error(400, "operationNotAllowed", "This bill cannot be deleted.")
     del bills[key]
     return Response(status_code=204)
 
 
+@intacct.post("/workflows/accounts-payable/bill/reverse")
+async def intacct_reverse_bill(request: Request) -> dict:
+    _require_intacct_auth(request)
+    body = await request.json()
+    bill = _intacct_state()["bills"].get(str(body.get("key", "")))
+    if bill is None:
+        raise _intacct_error(404, "notFound", "Bill not found.")
+    if bill["state"] != "posted":
+        raise _intacct_error(400, "operationNotAllowed", "Only a posted bill can be reversed.")
+    if not body.get("reverseDate") or str(body["reverseDate"]) <= str(bill.get("postingDate")):
+        raise _intacct_error(
+            400, "invalidRequest", "The reversal date must be after the posting date."
+        )
+    bill["state"] = "reversed"
+    return {"ia::result": {"key": bill["key"], "id": bill["id"], "state": "reversed"}}
+
+
 @intacct.post("/__set-state")
 async def intacct_set_state(body: dict) -> dict:
-    """Test hook: {"key": "...", "state": "paid", "totalTxnAmountDue": "0"}."""
+    """Test hook: {"key": "...", "state": "paid", "totalTxnAmountDue": "0"}, or
+    {"reversals_enabled": true} for the company (DELETE then always refuses)."""
+    if "reversals_enabled" in body:
+        _intacct_state()["reversals_enabled"] = bool(body["reversals_enabled"])
+        return {"status": "ok"}
     bill = _intacct_state()["bills"].get(str(body.get("key", "")))
     if bill is None:
         raise ProviderError(404, {"detail": "unknown bill"})
@@ -3625,6 +3763,40 @@ D365_VAT_COMPANIES: dict[str, Decimal] = {"fake-vat-co": Decimal("20")}
 # spec opts in by `company_id` without touching shared state.
 D365_EDITED_BEFORE_POST_COMPANIES: dict[str, Decimal] = {"fake-edit-co": Decimal("10.00")}
 
+# VAT companies (20%, as `fake-vat-co`) where the read of the FIRST draft made
+# for each vendor invoice number answers 503: the create went through and its
+# read-back was lost, so the push records the draft as its own orphan and the
+# retry finds it (decisions §397). The value is what a BC user adds to that
+# draft, as a line, before the retry reads it — None for no edit. Keyed by
+# company and invoice number, so a spec opts in by `company_id` and no other
+# worker's draft is affected.
+D365_LOST_READ_COMPANIES: dict[str, Decimal | None] = {
+    "fake-vat-lostread-co": None,
+    "fake-vat-lostedit-co": Decimal("10.00"),
+}
+D365_VAT_COMPANIES.update({company: Decimal("20") for company in D365_LOST_READ_COMPANIES})
+
+
+def _d365_maybe_lose_read(company_id: str, record: dict) -> None:
+    """Raise the 503 a `D365_LOST_READ_COMPANIES` company answers to the first
+    read of its first draft per invoice number, applying the BC user's edit."""
+    if company_id not in D365_LOST_READ_COMPANIES or record.get("status") != "Draft":
+        return
+    lost = STATE.setdefault("d365_lost_reads", set())
+    key = (company_id, record.get("vendorInvoiceNumber"))
+    if key in lost:
+        return
+    lost.add(key)
+    extra = D365_LOST_READ_COMPANIES[company_id]
+    if extra is not None:
+        lines = record["purchaseInvoiceLines"]
+        lines.append({**lines[0], "description": "Added in BC", "unitCost": float(extra)})
+        record.update(
+            _d365_invoice_totals(json.dumps({"purchaseInvoiceLines": lines}).encode(), company_id)
+        )
+        record["@odata.etag"] = f'{record["@odata.etag"][:-1]}-edited"'
+    raise _d365_error(503, "ServiceUnavailable", "The service is temporarily unavailable.")
+
 
 def _d365_invoice_totals(raw_body: bytes, company_id: str) -> dict:
     """`totalAmountExcludingTax` / `totalTaxAmount` / `totalAmountIncludingTax`
@@ -3714,6 +3886,28 @@ async def d365_company_information(request: Request, environment: str, company_i
     return {"id": f"ci-{company_id}", "displayName": "Fake BC Company", "currencyCode": D365_LOCAL_CURRENCY}
 
 
+@d365_sync.get(
+    "/{environment}/api/v2.0/companies({company_id})/purchaseInvoices({doc_id})/purchaseInvoiceLines"
+)
+async def d365_list_purchase_invoice_lines(
+    request: Request, environment: str, company_id: str, doc_id: str
+) -> dict:
+    """A purchaseInvoice's lines, as the adapter reads them to tell whether a
+    draft it recorded is still exactly what it sent. Each carries an id and a
+    sequence beside the fields it was created with, as BC's do."""
+    _require_d365_auth(request)
+    record = STATE["d365_invoices"].get(doc_id)
+    if record is None:
+        raise _d365_error(404, "BadRequest_NotFound", f"No purchaseInvoice with id {doc_id}.")
+    lines = record.get("purchaseInvoiceLines") or []
+    return {
+        "value": [
+            {"id": f"{doc_id}-line-{i}", "documentId": doc_id, "sequence": 10000 * (i + 1), **line}
+            for i, line in enumerate(copy.deepcopy(lines))
+        ]
+    }
+
+
 @d365_sync.get("/{environment}/api/v2.0/companies({company_id})/purchaseOrders")
 async def d365_list_purchase_orders(request: Request, environment: str, company_id: str) -> dict:
     _require_d365_auth(request)
@@ -3796,6 +3990,8 @@ NETSUITE_SUITEQL_VENDOR_FIXTURES: list[dict] = [
 # (B = Pending Receipt, H = Closed), `currency` the currency's ISO symbol,
 # `vendorid` the `t.entity` internal id — a NETSUITE_SUITEQL_VENDOR_FIXTURES
 # `id` — and `vendorname` its display name (`BUILTIN.DF(t.entity)`).
+# `foreigntotal` is in posting sign, as SuiteQL states a PO's header: the
+# vendor-side credit, so negative for an order the UI shows at 2,100.50.
 NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
     {
         "id": "501",
@@ -3803,7 +3999,7 @@ NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
         "status": "B",
         "vendorid": "25",
         "vendorname": "Fake NetSuite Vendor A",
-        "foreigntotal": 2100.50,
+        "foreigntotal": -2100.50,
         "currency": "USD",
         "duedate": "2026-06-01",
     },
@@ -3813,11 +4009,110 @@ NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
         "status": "H",
         "vendorid": "26",
         "vendorname": "Fake NetSuite Vendor B",
-        "foreigntotal": 640.00,
+        "foreigntotal": -640.00,
         "currency": "GBP",
         "duedate": None,
     },
 ]
+
+# SuiteQL `transactionline` rows of the POs above (mainline and tax lines
+# already left out, as the adapter's query asks). PO-FAKE-NS-501 has an item
+# line (`itemid` set; its account is the item's) and an expense line coded to
+# 6100; together 2,100.50. The closed PO-FAKE-NS-502's lines are never read.
+NETSUITE_SUITEQL_PO_LINE_FIXTURES: list[dict] = [
+    {
+        "poid": "501",
+        "lineid": "1",
+        "itemid": "910",
+        "item": "FAKE-NS-WIDGET",
+        "memo": "Widgets",
+        "quantity": 10,
+        "rate": 150.05,
+        "foreignamount": 1500.50,
+        "acctnumber": "5000",
+        "accountname": "Fake NS Inventory",
+    },
+    {
+        "poid": "501",
+        "lineid": "2",
+        "itemid": None,
+        "item": None,
+        "memo": "Installation",
+        "quantity": None,
+        "rate": None,
+        "foreignamount": 600.00,
+        "acctnumber": "6100",
+        "accountname": "Fake NS Office Supplies",
+    },
+    {
+        "poid": "502",
+        "lineid": "1",
+        "itemid": "911",
+        "item": "FAKE-NS-GADGET",
+        "memo": None,
+        "quantity": 4,
+        "rate": 160.00,
+        "foreignamount": 640.00,
+        "acctnumber": "5000",
+        "accountname": "Fake NS Inventory",
+    },
+]
+
+# SuiteQL `currency` rows: a bill's `currency` must be the id of an active
+# one (`netsuite_create_vendor_bill`); `symbol` is the ISO code.
+NETSUITE_SUITEQL_CURRENCY_FIXTURES: list[dict] = [
+    {"id": "1", "symbol": "USD", "isinactive": "F"},
+    {"id": "2", "symbol": "GBP", "isinactive": "F"},
+    {"id": "4", "symbol": "EUR", "isinactive": "F"},
+    {"id": "6", "symbol": "CAD", "isinactive": "T"},
+]
+
+# SuiteQL `accountingperiod` rows (base periods only). January 2020 is closed,
+# so a bill dated in it is refused and the adapter codes it `period_closed`.
+NETSUITE_SUITEQL_PERIOD_FIXTURES: list[dict] = [
+    {
+        "id": "101",
+        "startdate": "2020-01-01",
+        "enddate": "2020-01-31",
+        "isyear": "F",
+        "isquarter": "F",
+        "isadjust": "F",
+        "closed": "T",
+        "aplocked": "T",
+        "alllocked": "T",
+    },
+    {
+        "id": "182",
+        "startdate": "2026-11-01",
+        "enddate": "2026-11-30",
+        "isyear": "F",
+        "isquarter": "F",
+        "isadjust": "F",
+        "closed": "F",
+        "aplocked": "F",
+        "alllocked": "F",
+    },
+]
+
+
+def _netsuite_active_currency(currency_id: object) -> dict | None:
+    return next(
+        (
+            c
+            for c in NETSUITE_SUITEQL_CURRENCY_FIXTURES
+            if c["id"] == currency_id and c["isinactive"] != "T"
+        ),
+        None,
+    )
+
+
+def _netsuite_period_closed(tran_date: object) -> bool:
+    day = str(tran_date or "")[:10]
+    return bool(day) and any(
+        p["startdate"] <= day <= p["enddate"] and "T" in (p["closed"], p["aplocked"])
+        for p in NETSUITE_SUITEQL_PERIOD_FIXTURES
+    )
+
 
 _SUITEQL_VENDOR_Q = re.compile(r"^\s*SELECT\b.*\bFROM\s+vendor\b", re.IGNORECASE | re.DOTALL)
 _SUITEQL_PO_Q = re.compile(
@@ -3825,15 +4120,34 @@ _SUITEQL_PO_Q = re.compile(
 )
 
 
+_SUITEQL_PO_LINE_Q = re.compile(
+    r"^\s*SELECT\b.*\bFROM\s+transactionline\b", re.IGNORECASE | re.DOTALL
+)
+_SUITEQL_CURRENCY_Q = re.compile(
+    r"^\s*SELECT\b.*\bFROM\s+currency\b", re.IGNORECASE | re.DOTALL
+)
+_SUITEQL_PERIOD_Q = re.compile(
+    r"^\s*SELECT\b.*\bFROM\s+accountingperiod\b", re.IGNORECASE | re.DOTALL
+)
+
+
 def _netsuite_suiteql_table(query: str) -> list[dict] | None:
     """The fixture rows a SuiteQL query reads, or None for one the fake
-    doesn't answer (a 400, as real SuiteQL gives an invalid query)."""
+    doesn't answer (a 400, as real SuiteQL gives an invalid query). The
+    fake ignores a WHERE clause and returns the whole table; the adapter
+    filters the rows by the ids it asked for itself."""
     if _SUITEQL_ACCOUNT_Q.match(query):
         return NETSUITE_ACCOUNT_FIXTURES
     if _SUITEQL_VENDOR_Q.match(query):
         return NETSUITE_SUITEQL_VENDOR_FIXTURES
     if _SUITEQL_PO_Q.match(query):
         return NETSUITE_SUITEQL_PO_FIXTURES
+    if _SUITEQL_PO_LINE_Q.match(query):
+        return NETSUITE_SUITEQL_PO_LINE_FIXTURES
+    if _SUITEQL_CURRENCY_Q.match(query):
+        return NETSUITE_SUITEQL_CURRENCY_FIXTURES
+    if _SUITEQL_PERIOD_Q.match(query):
+        return NETSUITE_SUITEQL_PERIOD_FIXTURES
     return None
 
 

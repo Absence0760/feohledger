@@ -1472,3 +1472,32 @@ def test_a_refusal_is_not_blamed_on_a_contact_or_account_that_states_no_status(t
         )
     assert result.refusal_code is None
     assert result.not_posted and not result.retryable
+
+
+@pytest.mark.parametrize(
+    ("xero_status", "expected"),
+    [
+        # Nobody has approved a DRAFT or SUBMITTED order: synced, never matched
+        # against (decisions §394).
+        ("DRAFT", "unissued"),
+        ("SUBMITTED", "unissued"),
+        ("AUTHORISED", "open"),
+        ("BILLED", "closed"),
+        ("DELETED", "cancelled"),
+    ],
+)
+def test_list_pos_maps_an_unapproved_po_to_unissued(token, xero_status, expected):
+    from app.models.procurement import UNISSUED_PO_STATUS
+
+    assert UNISSUED_PO_STATUS == "unissued"
+    po = {
+        "PurchaseOrderNumber": "PO-0002",
+        "Contact": {"ContactID": "c-1", "Name": "Acme"},
+        "Total": 10,
+        "Status": xero_status,
+        "LineItems": [],
+    }
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(200, {"PurchaseOrders": [po]}))
+        (row,) = _run(_adapter().list_pos())
+    assert row.status == expected

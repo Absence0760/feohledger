@@ -263,3 +263,105 @@ def test_card_is_a_record_only_rail_off_the_1099():
         paid_on="2026-10-01",
     )
     assert recorded.method == "card"
+
+
+# ---------------------------------------------------------------------------
+# One payment on several rails (decisions §396)
+# ---------------------------------------------------------------------------
+
+
+def _parts(*pairs):
+    from decimal import Decimal
+
+    from app.services.payment_methods import RailPart
+
+    return tuple(RailPart(m, Decimal(a)) for m, a in pairs)
+
+
+def test_a_cheque_and_a_card_that_sum_to_the_payment_are_kept_with_no_one_rail():
+    from decimal import Decimal
+
+    from app.services.payment_methods import RAIL_SPLIT_APPLIED, card_share, split_by_rail
+
+    parts = _parts(("check", "150.00"), ("card", "100.00"))
+    split = split_by_rail(parts, Decimal("250.00"), method=None)
+    assert split.status == RAIL_SPLIT_APPLIED
+    assert split.method is None  # no one rail paid it all
+    assert split.breakdown == parts
+    assert card_share(split.breakdown) == Decimal("100.00")
+
+
+def test_parts_all_on_card_state_the_card_rail():
+    from decimal import Decimal
+
+    from app.services.payment_methods import RAIL_SPLIT_APPLIED, split_by_rail
+
+    split = split_by_rail(
+        _parts(("card", "100.00"), ("CARD ", "150.00")), Decimal("250.00"), method="card"
+    )
+    assert split.status == RAIL_SPLIT_APPLIED and split.method == "card"
+    assert {p.method for p in split.breakdown} == {"card"}
+
+
+@pytest.mark.parametrize(
+    "pairs",
+    [
+        (("check", "150.00"), ("card", "99.99")),  # a cent short
+        (("check", "150.00"), ("card", "100.01")),  # a cent over
+        (("check", "250.00"), ("card", "0.00")),  # a zero part
+        (("check", "300.00"), ("card", "-50.00")),  # a negative part
+        (("check", "NaN"),),
+        # Finer than a cent: sums to 250.00, but neither part is printable.
+        (("check", "166.665"), ("card", "83.335")),
+    ],
+)
+def test_parts_that_do_not_reconcile_fail_closed_to_reportable(pairs):
+    """Never prorated, never rounded: a breakdown that is not exactly the
+    payment is dropped, and the whole payment has no rail (reportable)."""
+    from decimal import Decimal
+
+    from app.services.payment_methods import RAIL_SPLIT_UNRECONCILED, split_by_rail
+
+    split = split_by_rail(_parts(*pairs), Decimal("250.00"), method="card")
+    assert split.status == RAIL_SPLIT_UNRECONCILED
+    assert split.method is None and split.breakdown == ()
+    # Kept for the audit row as stated (compared as text: NaN != NaN).
+    assert [str(p.amount) for p in split.stated] == [a for _, a in pairs]
+    assert is_1099_reportable_method(split.method)
+
+
+def test_no_breakdown_leaves_the_stated_rail_alone():
+    from decimal import Decimal
+
+    from app.services.payment_methods import split_by_rail
+
+    split = split_by_rail((), Decimal("250.00"), method="check")
+    assert split.status is None and split.method == "check" and split.breakdown == ()
+
+
+def test_a_part_on_a_rail_we_do_not_know_is_a_part_with_no_rail():
+    from decimal import Decimal
+
+    from app.services.payment_methods import split_by_rail
+
+    split = split_by_rail(
+        _parts(("barter", "50.00"), ("card", "50.00")), Decimal("100.00"), method=None
+    )
+    assert [p.method for p in split.breakdown] == [None, "card"]
+
+
+def test_a_breakdown_round_trips_as_exact_strings_and_a_malformed_one_is_none():
+    from app.services.payment_methods import rail_breakdown_json, rail_parts_from_json
+
+    parts = _parts(("check", "0.10"), (None, "1234567890123.45"))
+    stored = rail_breakdown_json(parts)
+    assert stored == [
+        {"method": "check", "amount": "0.10"},
+        {"method": None, "amount": "1234567890123.45"},
+    ]
+    assert rail_parts_from_json(stored) == parts
+    # One bad part voids the whole breakdown: the rest is not the whole.
+    assert rail_parts_from_json([*stored, {"method": "card", "amount": 5}]) == ()
+    assert rail_parts_from_json([{"method": "card", "amount": "x"}]) == ()
+    assert rail_parts_from_json({"method": "card"}) == ()
+    assert rail_parts_from_json(None) == ()

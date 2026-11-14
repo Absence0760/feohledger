@@ -177,6 +177,8 @@ async def test_a_refused_report_keeps_the_erp_payment_as_data(realdb):
         # figure a re-attempt and the one-click record book, or refuse.
         "amount": "410.00",
         "amount_currency": "USD",
+        # No rail breakdown stated (decisions §396).
+        "payment_parts": None,
         "refusal_code": "external_payment_blocking_exception",
         "reported_at": row.erp_report["reported_at"],
     }

@@ -87,6 +87,8 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'po_currency_mismatch': 'invoices.warning.poCurrencyMismatch',
 	// PO {poNumber} is cancelled — the invoice was not matched against it
 	'po_cancelled': 'invoices.warning.poCancelled',
+	// PO {poNumber} is not approved in the ERP yet — the invoice was not matched against it
+	'po_not_issued': 'invoices.warning.poNotIssued',
 	// The total of PO {poNumber} could not be confirmed from the ERP on its last sync — the amounts were not compared
 	'po_total_unverifiable': 'invoices.warning.poTotalUnverifiable',
 	// Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received
@@ -147,6 +149,8 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'po_match.issue.currency_mismatch': 'invoices.poMatch.issue.currencyMismatch',
 	// PO is cancelled — amounts not compared
 	'po_match.issue.po_cancelled': 'invoices.poMatch.issue.poCancelled',
+	// PO not approved in the ERP yet — amounts not compared
+	'po_match.issue.po_not_issued': 'invoices.poMatch.issue.poNotIssued',
 	// PO total not confirmed by the ERP on its last sync — amounts not compared
 	'po_match.issue.po_total_unverifiable': 'invoices.poMatch.issue.poTotalUnverifiable',
 	// Amount mismatch: invoice {invoiceAmount} {currency} vs PO {poTotal} {currency} ({variancePct}%)
@@ -357,6 +361,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'po_amount_variance_po_currency_unknown': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'number', currency: 'currency' },
 	'po_currency_mismatch': { invoiceCurrency: 'text', poNumber: 'text', poCurrency: 'text' },
 	'po_cancelled': { poNumber: 'text' },
+	'po_not_issued': { poNumber: 'text' },
 	'po_total_unverifiable': { poNumber: 'text' },
 	'po_partial_receipt': { matchType: 'text', poNumber: 'text' },
 	'po_over_receipt': { receivedQuantity: 'number', orderedQuantity: 'number', excessQuantity: 'number', poNumber: 'text' },
@@ -387,6 +392,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'po_match.issue.po_not_found': { poNumber: 'text' },
 	'po_match.issue.currency_mismatch': { invoiceCurrency: 'text', poCurrency: 'text' },
 	'po_match.issue.po_cancelled': {},
+	'po_match.issue.po_not_issued': {},
 	'po_match.issue.po_total_unverifiable': {},
 	'po_match.issue.amount_mismatch': { invoiceAmount: 'money', poTotal: 'money', currency: 'currency', variancePct: 'percent' },
 	'po_match.issue.amount_mismatch_po_currency_unknown': { invoiceAmount: 'money', poTotal: 'number', currency: 'currency', variancePct: 'percent' },

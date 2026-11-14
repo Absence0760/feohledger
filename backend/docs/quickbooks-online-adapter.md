@@ -140,8 +140,10 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
   none is refused the same way. Partly paid, credit-settled (a vendor credit
   beside a cheque or card included, §303) and our own write-backs state no
   amount. A bill paid part by cheque and part by card is cash at their sum, but
-  no one rail paid it, so its rail is not stated (1099-reportable), not the
-  later payment's. A live write-back of ours on the bill is stated
+  no one rail paid it, so its rail is not stated, not the later payment's; the
+  report states the split instead (`payment_parts`: each cash payment's rail and
+  what it applied to this bill, summing to `paid_amount`), the payment keeps
+  it, and the 1099 reports the cheque part only (decisions §396). A live write-back of ours on the bill is stated
   (`our_payment_applied`): beside an outside reduction on an invoice payable
   here (voided here, the QuickBooks void not landed) the sync opens a blocking
   `payment_reconciliation` rather than book the owed figure.

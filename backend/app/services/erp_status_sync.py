@@ -79,6 +79,7 @@ from app.services.invoice_warning_catalog import (
     ERP_UNRECORDED_REASONS,
     exception_finding,
 )
+from app.services.payment_methods import RailPart, rail_breakdown_json, rail_parts_from_json
 from app.services.workflow_engine import get_invoice_for_update, transition_invoice
 from app.utils.dates import utc_today
 
@@ -167,6 +168,15 @@ def reported_payment_method(value: object) -> str | None:
     except ValueError:
         return None
     return None if method == PaymentMethod.virtual_card else method.value
+
+
+def reported_payment_parts(parts: Sequence[RailPart]) -> tuple[RailPart, ...]:
+    """An ERP-stated breakdown (``ErpBillReport.payment_parts``) with each
+    part's rail validated as :func:`reported_payment_method` validates the
+    whole payment's: a rail that cannot be recorded is a part with no rail
+    (reportable). The amounts are left exactly as stated; whether they add up
+    to what is recorded is ``payment_methods.split_by_rail``'s call."""
+    return tuple(RailPart(reported_payment_method(p.method), p.amount) for p in parts)
 
 
 #: ``Exception.erp_report["kind"]`` values — what the ERP reported that a
@@ -319,9 +329,11 @@ def _merged_report(old: dict | None, new: dict, *, keep_refusal: bool) -> dict:
         merged["reference"] = old["reference"]
         merged["erp_document_id"] = old.get("erp_document_id")
     if new.get("amount") is None and old.get("amount") is not None:
-        # A report that states no amount never erases one the ERP stated.
+        # A report that states no amount never erases one the ERP stated, nor
+        # the breakdown of that amount by rail (§396).
         merged["amount"] = old["amount"]
         merged["amount_currency"] = old.get("amount_currency")
+        merged["payment_parts"] = old.get("payment_parts")
     merged["first_reported_at"] = old.get("first_reported_at") or old.get("reported_at")
     if keep_refusal and old.get("refusal_code"):
         merged["refusal_code"] = old["refusal_code"]
@@ -458,6 +470,7 @@ async def record_erp_reported_payment(
     paid_on_reported: bool | None = None,
     amount: Decimal | None = None,
     amount_currency: str | None = None,
+    payment_parts: Sequence[RailPart] = (),
 ) -> bool:
     """Book the ERP's `Paid` as a payment made outside FeohLedger.
 
@@ -485,11 +498,19 @@ async def record_erp_reported_payment(
     ``amount_currency`` is the currency the ERP states it in; with an amount,
     a missing or different one from the invoice's is refused the same way.
     None records what is owed here.
+
+    ``payment_parts`` is how the ERP says ``amount`` was paid, rail by rail
+    (``ErpBillReport.payment_parts``). The record keeps it on the payment, and
+    the 1099 splits by it, only when the parts sum exactly to what is booked
+    (decisions §396). A refused record keeps it beside the amount, so the
+    re-attempt and the one-click book the same split.
     """
     from app.services.external_payment import (
         ExternalPaymentRefused,
         record_invoice_paid_outside,
     )
+
+    payment_parts = reported_payment_parts(payment_parts)
 
     if invoice.status == InvoiceStatus.sent_to_erp:
         # The ERP can only have paid a bill it holds: the `posted_in_erp` report
@@ -530,6 +551,7 @@ async def record_erp_reported_payment(
             source="erp",
             amount=amount,
             amount_currency=amount_currency,
+            rail_parts=payment_parts,
         )
     except ExternalPaymentRefused as exc:
         # When FeohLedger itself still has a claim on paying this invoice — a
@@ -561,6 +583,11 @@ async def record_erp_reported_payment(
                 "paid_on_reported": paid_on_reported,
                 "amount": str(amount) if amount is not None else None,
                 "amount_currency": amount_currency if amount is not None else None,
+                "payment_parts": (
+                    rail_breakdown_json(payment_parts)
+                    if amount is not None and payment_parts
+                    else None
+                ),
                 "refusal_code": exc.refusal.code,
                 "reported_at": datetime.now(UTC).isoformat(),
             },
@@ -765,6 +792,7 @@ async def retry_erp_reported_payments(
             except (ValueError, ArithmeticError):
                 return False
             currency = facts.get("amount_currency")
+            parts = rail_parts_from_json(facts.get("payment_parts")) if amount is not None else ()
             if amount is None:
                 # No figure stated (a QuickBooks row kept before §393): never
                 # booked at FeohLedger's own figure. The bill is read again
@@ -775,7 +803,7 @@ async def retry_erp_reported_payments(
                     if figure.amount is None:
                         await hold_unconfirmed_erp_payment(db, invoice, org=org, facts=facts)
                         return False
-                    amount, currency = figure.amount, figure.currency
+                    amount, currency, parts = figure.amount, figure.currency, figure.parts
             return await record_erp_reported_payment(
                 db,
                 invoice,
@@ -788,6 +816,7 @@ async def retry_erp_reported_payments(
                 paid_on_reported=bool(facts.get("paid_on_reported")),
                 amount=amount,
                 amount_currency=currency,
+                payment_parts=parts,
             )
     except Exception:  # noqa: BLE001 — isolated follow-on; logged with its traceback
         # ids only — no vendor, no amount, no reference.
@@ -840,6 +869,8 @@ class ReadBackFigure:
     #: ``needed``) means the read back could not confirm one.
     amount: Decimal | None = None
     currency: str | None = None
+    #: The bill's breakdown of ``amount`` by rail, as read now (§396).
+    parts: tuple[RailPart, ...] = ()
 
 
 async def read_back_unstated_figure(
@@ -908,7 +939,12 @@ async def read_back_unstated_figure(
     )
     if report is None or report.state is not ErpBillState.paid or report.paid_amount is None:
         return unconfirmed
-    return ReadBackFigure(needed=True, amount=report.paid_amount, currency=report.paid_currency)
+    return ReadBackFigure(
+        needed=True,
+        amount=report.paid_amount,
+        currency=report.paid_currency,
+        parts=tuple(report.payment_parts),
+    )
 
 
 async def hold_unconfirmed_erp_payment(
@@ -1155,6 +1191,7 @@ async def apply_bill_report(
                 method=reported_payment_method(report.payment_method),
                 amount=report.paid_amount,
                 amount_currency=report.paid_currency,
+                payment_parts=report.payment_parts,
             )
             action = "paid_recorded"
         elif status == InvoiceStatus.payment_scheduled:

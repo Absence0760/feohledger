@@ -56,6 +56,17 @@ bank payments, and the safe default for an unclassified rail is to keep it on
 the 1099 rather than silently drop money out of a filed figure. The drift
 guard below is what stops "unknown" from becoming a hiding place.
 
+**One payment, several rails (decisions §396).** A bill an ERP shows paid by a
+cheque AND a card is one ``Payment`` row, and one ``method`` cannot hold two
+rails. The ERP's per-payment breakdown is therefore kept on the row
+(``Payment.rail_breakdown``: each cash payment's rail and exact amount, no
+account data), and the 1099 aggregate splits the payment by it:
+:func:`split_by_rail` decides, at the record, whether a stated breakdown may
+stand (its parts sum EXACTLY to the recorded amount, or it is dropped and the
+whole payment is reportable), and :func:`rail_breakdown_sums_sql` is what the
+aggregate reads. A part's rail is classified by the same frozensets as
+``method``, so an unstated part is reportable, as an unstated ``method`` is.
+
 **Drift guard:** ``tests/test_payment_methods.py`` fails if a rail appears in
 the ``PaymentMethod`` schema enum, in any registered payment adapter's
 ``supported_methods``, or in the corridor selector's method table without
@@ -66,7 +77,12 @@ again; there is no way to add a rail and leave either treatment undecided.
 
 from __future__ import annotations
 
-from sqlalchemy import ColumnElement, func
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+
+from sqlalchemy import ColumnElement, Numeric, and_, case, cast, column, func, select
+from sqlalchemy.dialects.postgresql import JSONB
 
 # Card rails: excluded from 1099-NEC/1099-MISC (the settlement entity files
 # a 1099-K for these).
@@ -191,3 +207,184 @@ def card_payment_method_clause(column: ColumnElement[str | None]) -> ColumnEleme
     re-handling NULLs at every call site.
     """
     return func.lower(func.btrim(func.coalesce(column, ""))).in_(sorted(CARD_PAYMENT_METHODS))
+
+
+# ---------------------------------------------------------------------------
+# One payment paid on several rails (decisions §396)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RailPart:
+    """One cash payment behind a recorded ``Payment``: its rail (a
+    ``Payment.method`` value, or None = not stated, which is reportable) and the
+    exact amount it applied to the bill. No account, no payee, no reference."""
+
+    method: str | None
+    amount: Decimal
+
+
+#: ``RailSplit.status`` values, also written to the record's audit details.
+#: ``applied``: the breakdown is kept on the payment and the 1099 splits by it.
+#: ``unreconciled``: its parts do not sum exactly to the recorded amount (or one
+#: is not a positive exact amount), so it is dropped and the whole payment is
+#: reportable. ``superseded``: a person recording the payment named one rail
+#: other than the one the breakdown states, and their rail is the record.
+RAIL_SPLIT_APPLIED = "applied"
+RAIL_SPLIT_UNRECONCILED = "unreconciled"
+RAIL_SPLIT_SUPERSEDED = "superseded"
+
+
+@dataclass(frozen=True)
+class RailSplit:
+    """What a recorded payment's rails are, once a stated breakdown is judged.
+
+    ``method`` is the one rail the whole payment went by, or None when no one
+    rail did (several, or none stated, or the breakdown did not reconcile).
+    ``breakdown`` is what ``Payment.rail_breakdown`` stores: empty unless the
+    breakdown was ``applied``. ``status`` is None when no breakdown was stated.
+    """
+
+    method: str | None
+    breakdown: tuple[RailPart, ...] = ()
+    status: str | None = None
+    stated: tuple[RailPart, ...] = ()
+
+
+_CENT = Decimal("0.01")
+
+#: What a stored part's ``amount`` must look like before SQL casts it: an
+#: exact decimal string (``rail_breakdown_json`` writes ``str(Decimal)``).
+_AMOUNT_TEXT = r"^-?[0-9]+(\.[0-9]+)?$"
+
+
+def _part_rail(value: str | None) -> str | None:
+    rail = normalize_payment_method(value)
+    return rail if rail in KNOWN_PAYMENT_METHODS else None
+
+
+def split_by_rail(parts: Sequence[RailPart], amount: Decimal, *, method: str | None) -> RailSplit:
+    """Judge an ERP's per-payment breakdown against the amount being recorded.
+
+    No breakdown: ``method`` stands, as before. A breakdown stands only when
+    every part is a positive exact ``Decimal`` and the parts sum EXACTLY to
+    ``amount``; then the payment's ``method`` is the parts' one rail, or None
+    when they used more than one (the split, not ``method``, then decides the
+    1099). Anything else fails closed: the breakdown is dropped and ``method``
+    is None, so the whole payment is reportable, never a card part guessed
+    off it. Never rounds, never prorates.
+    """
+    stated = tuple(parts)
+    if not stated:
+        return RailSplit(method=method)
+    total = Decimal(0)
+    for part in stated:
+        if (
+            not isinstance(part.amount, Decimal)
+            or not part.amount.is_finite()
+            or part.amount <= 0
+            # Whole cents only, as `payments.amount` is: 33.335 + 66.665 sums to
+            # 100.00, but neither part is a figure a form can print unrounded.
+            or part.amount != part.amount.quantize(_CENT)
+        ):
+            return RailSplit(method=None, status=RAIL_SPLIT_UNRECONCILED, stated=stated)
+        total += part.amount
+    if not isinstance(amount, Decimal) or total != amount:
+        return RailSplit(method=None, status=RAIL_SPLIT_UNRECONCILED, stated=stated)
+    normalized = tuple(RailPart(_part_rail(p.method), p.amount) for p in stated)
+    rails = {p.method for p in normalized}
+    one = next(iter(rails)) if len(rails) == 1 else None
+    return RailSplit(method=one, breakdown=normalized, status=RAIL_SPLIT_APPLIED, stated=stated)
+
+
+def card_share(parts: Iterable[RailPart]) -> Decimal:
+    """The exact part of a breakdown paid on a card rail (1099-K, not ours)."""
+    return sum((p.amount for p in parts if is_card_payment_method(p.method)), Decimal(0))
+
+
+def rail_breakdown_json(parts: Iterable[RailPart]) -> list[dict]:
+    """A breakdown as stored and audited: ``[{"method", "amount"}]``, each
+    amount an exact decimal string, never a float."""
+    return [{"method": p.method, "amount": str(p.amount)} for p in parts]
+
+
+def rail_parts_from_json(value: object) -> tuple[RailPart, ...]:
+    """The inverse of :func:`rail_breakdown_json`, for a breakdown kept in an
+    exception's ``erp_report`` or on a payment. Anything malformed reads as no
+    breakdown at all, never a partial one: a part dropped would make the rest
+    look like the whole."""
+    if not isinstance(value, list):
+        return ()
+    out: list[RailPart] = []
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(item.get("amount"), str):
+            return ()
+        try:
+            amount = Decimal(item["amount"])
+        except (InvalidOperation, ValueError):
+            return ()
+        rail = item.get("method")
+        out.append(RailPart(rail if isinstance(rail, str) else None, amount))
+    return tuple(out)
+
+
+@dataclass(frozen=True)
+class RailBreakdownSumsSql:
+    """Per-payment sums over ``Payment.rail_breakdown``, as a LATERAL subquery
+    the 1099 aggregate joins: ``card_amount`` (the card parts), ``total_amount``
+    (all parts), ``part_count`` and ``valid_count`` (parts whose amount is a
+    positive whole-cent decimal). A payment with no breakdown has
+    ``part_count`` 0 and NULL sums. :meth:`applies_to` is the read-side check."""
+
+    lateral: object
+    card_amount: ColumnElement
+    total_amount: ColumnElement
+    part_count: ColumnElement
+    valid_count: ColumnElement
+
+    def applies_to(self, amount: ColumnElement) -> ColumnElement[bool]:
+        """The breakdown may split a payment of ``amount``: it has parts, every
+        part is a positive whole-cent amount, and they sum EXACTLY to it —
+        :func:`split_by_rail`'s rule again, on whatever the row holds."""
+        return and_(
+            self.part_count > 0,
+            self.valid_count == self.part_count,
+            self.total_amount == amount,
+        )
+
+
+def rail_breakdown_sums_sql(breakdown_column: ColumnElement) -> RailBreakdownSumsSql:
+    """SQL over a stored breakdown: one row per payment, classified by the same
+    card set as ``method`` (``card_payment_method_clause`` on each part's rail),
+    amounts cast to ``numeric`` from their exact decimal strings (only when they
+    are one). The migration's CHECK keeps the column an array, so
+    ``jsonb_array_elements`` cannot meet an object."""
+    parts = (
+        # NULL (no breakdown) yields no rows: the sums are NULL, the count 0.
+        func.jsonb_array_elements(breakdown_column)
+        .table_valued(column("value", JSONB))
+        .alias("rail_part")
+    )
+    amount_text = parts.c.value.op("->>")("amount")
+    # Cast only what is an exact decimal string; anything else is NULL, so one
+    # malformed row is a payment that does not split, never a failed report.
+    part_amount = case((amount_text.op("~")(_AMOUNT_TEXT), cast(amount_text, Numeric)))
+    part_is_card = card_payment_method_clause(parts.c.value.op("->>")("method"))
+    part_valid = and_(part_amount > 0, part_amount == func.round(part_amount, 2))
+    sums = (
+        select(
+            func.sum(case((part_is_card, part_amount), else_=Decimal(0))).label("card_amount"),
+            func.sum(part_amount).label("total_amount"),
+            func.count().label("part_count"),
+            func.count(case((part_valid, 1))).label("valid_count"),
+        )
+        .select_from(parts)
+        .lateral("rail_split")
+    )
+    return RailBreakdownSumsSql(
+        lateral=sums,
+        card_amount=sums.c.card_amount,
+        total_amount=sums.c.total_amount,
+        part_count=sums.c.part_count,
+        valid_count=sums.c.valid_count,
+    )

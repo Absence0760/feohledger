@@ -581,3 +581,54 @@ async def test_a_backdated_record_does_not_take_a_discount_accepted_later(realdb
     [payment] = await _payments_for(mk, inv_id)
     assert payment.amount == Decimal("1000.00")
     assert payment.discount_offer_id is None
+
+
+# ---------------------------------------------------------------------------
+# A person's one rail against the ERP's breakdown (decisions §396)
+# ---------------------------------------------------------------------------
+
+
+def _split_parts(*pairs):
+    from app.services.payment_methods import RailPart
+
+    return tuple(RailPart(m, Decimal(a)) for m, a in pairs)
+
+
+async def test_a_person_naming_another_rail_than_the_breakdowns_one_rail_is_the_record():
+    from app.services.external_payment import _rail_split
+
+    split = _rail_split(
+        _split_parts(("card", "100.00"), ("card", "150.00")),
+        Decimal("250.00"),
+        method="check",
+        source="user",
+    )
+    assert split.status == "superseded" and split.method == "check" and split.breakdown == ()
+
+
+async def test_a_persons_rail_fills_a_breakdown_that_states_none():
+    from app.services.external_payment import _rail_split
+
+    split = _rail_split(
+        _split_parts((None, "250.00")), Decimal("250.00"), method="ach", source="user"
+    )
+    assert split.status == "superseded" and split.method == "ach"
+
+
+async def test_a_breakdown_over_two_rails_stands_against_a_persons_one():
+    from app.services.external_payment import _rail_split
+
+    parts = _split_parts(("check", "150.00"), ("card", "100.00"))
+    split = _rail_split(parts, Decimal("250.00"), method="check", source="user")
+    assert split.status == "applied" and split.method is None and split.breakdown == parts
+
+
+async def test_an_unreconciled_breakdown_leaves_a_persons_rail_and_the_erps_none():
+    from app.services.external_payment import _rail_split
+
+    parts = _split_parts(("card", "100.00"), ("card", "149.99"))
+    by_person = _rail_split(parts, Decimal("250.00"), method="card", source="user")
+    by_erp = _rail_split(parts, Decimal("250.00"), method="card", source="erp")
+    assert by_person.status == by_erp.status == "unreconciled"
+    assert by_person.method == "card" and by_erp.method is None
+    assert by_person.breakdown == by_erp.breakdown == ()

@@ -29,8 +29,9 @@ from app.utils.currency_code import iso_currency_or_none
 #: silently counting a cancelled order as committed spend is what makes a
 #: figure wrong. Shared by the budget-commitment leg (`services/budget_service`)
 #: and the open-PO accrual (`api/analytics`), which must not disagree about what
-#: "open" means.
-DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
+#: "open" means. An `unissued` order (`UNISSUED_PO_STATUS`) is not a commitment
+#: YET, so it is left out too until the ERP issues it.
+DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided", "unissued")
 
 #: The dead statuses the PO matcher refuses to match an invoice against
 #: (`services/po_matching`): an order that was called off authorizes nothing.
@@ -38,6 +39,21 @@ DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
 #: (NetSuite's "Fully Billed", for one), which the invoice being matched can
 #: itself have caused, so refusing it would hold the ordinary last invoice.
 CANCELLED_PO_STATUSES: tuple[str, ...] = ("cancelled", "voided")
+
+#: An ERP purchase order nobody in the ERP has approved or issued yet: a Xero
+#: or Merge.dev ``DRAFT`` / ``SUBMITTED``, a NetSuite Pending Supervisor
+#: Approval, a Business Central ``Draft`` / ``In Review``, an Intacct draft or
+#: one still in approval. The PO sync stores it under this status rather than
+#: skipping it, so a re-sync can also take back an order an earlier build
+#: synced as ``open``, and the matcher refuses it with its own finding
+#: (``po_not_issued``) instead of "PO not found". The ERP issuing it moves it
+#: to ``open`` on the next sync. Decisions §394.
+UNISSUED_PO_STATUS = "unissued"
+
+#: Every status the matcher refuses to match an invoice against. The PO sync
+#: re-matches the invoices citing a PO whose status moves into or out of this
+#: set, so the hold appears at sync time (decisions §326, §394).
+UNMATCHABLE_PO_STATUSES: tuple[str, ...] = (*CANCELLED_PO_STATUSES, UNISSUED_PO_STATUS)
 
 
 def po_currency_code(value: object) -> str | None:

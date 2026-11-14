@@ -57,8 +57,9 @@ payable-status gate requires, already applied the CFO approval threshold.)
 
 from __future__ import annotations
 
+import logging
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
@@ -74,6 +75,16 @@ from app.models.payment import Payment, PaymentRun
 from app.services.applied_credit_integrity import applied_credit_conflicts
 from app.services.approval_chain import violates_segregation
 from app.services.payment_controls import run_segregation_enabled
+from app.services.payment_methods import (
+    RAIL_SPLIT_APPLIED,
+    RAIL_SPLIT_SUPERSEDED,
+    RAIL_SPLIT_UNRECONCILED,
+    RailPart,
+    RailSplit,
+    normalize_payment_method,
+    rail_breakdown_json,
+    split_by_rail,
+)
 from app.services.payment_runs import (
     blocking_exception_types,
     card_claimed_invoice_ids,
@@ -82,6 +93,8 @@ from app.services.payment_runs import (
     payable_amounts,
 )
 from app.services.workflow_engine import VALID_TRANSITIONS, transition_invoice
+
+logger = logging.getLogger(__name__)
 
 #: ``Payment.provider`` of every payment recorded through this module. Not a
 #: registered payment adapter, so nothing can ever dispatch, void upstream or
@@ -413,6 +426,7 @@ async def _complete(
     source: Source,
     converted: bool,
     actor_name: str | None = None,
+    rail_parts: Sequence[RailPart] = (),
 ) -> None:
     """Book ``payment`` as completed outside FeohLedger and walk the invoice to ``paid``."""
     from app.api.payments import _capture_discount_offers
@@ -420,9 +434,26 @@ async def _complete(
 
     at = paid_on_timestamp(paid_on)
     previous_status = payment.status if converted else None
+    split = _rail_split(rail_parts, payment.amount, method=method, source=source)
     payment.status = "completed"
     payment.provider = EXTERNAL_PAYMENT_PROVIDER
-    payment.method = method or payment.method
+    if split.status is None:
+        payment.method = method or payment.method
+    else:
+        # The ERP said which rails paid (decisions §396): that, not a rail the
+        # booking was staged with, is the record. Several rails, or parts that
+        # do not reconcile, leave `method` NULL; only an applied breakdown is
+        # kept, and the 1099 aggregate splits the payment by it.
+        payment.method = split.method
+        payment.rail_breakdown = rail_breakdown_json(split.breakdown) if split.breakdown else None
+        if split.status == RAIL_SPLIT_UNRECONCILED:
+            # Ids only: the breakdown is audited below, never logged.
+            logger.warning(
+                "ERP rail breakdown does not sum to the recorded amount; recorded as "
+                "1099-reportable: invoice=%s payment=%s",
+                invoice.id,
+                payment.id,
+            )
     payment.reference = reference
     payment.submitted_at = at
     payment.completed_at = at
@@ -469,6 +500,21 @@ async def _complete(
             "discount_amount": (
                 str(payment.discount_amount) if payment.discount_amount is not None else None
             ),
+            # Which rails the ERP says paid how much (each cash payment's rail
+            # and exact amount, no account data), and whether it stands:
+            # `applied` (kept on the payment, the 1099 splits by it),
+            # `unreconciled` (its parts do not sum to `amount`: dropped, the
+            # whole payment reportable) or `superseded` (a person named another
+            # rail). Absent when no breakdown was stated (decisions §396).
+            **(
+                {
+                    "rail_breakdown": rail_breakdown_json(split.stated),
+                    "rail_breakdown_status": split.status,
+                    "method_stated": method,
+                }
+                if split.status is not None
+                else {}
+            ),
         },
     )
 
@@ -504,6 +550,34 @@ async def _complete(
     )
 
 
+def _rail_split(
+    parts: Sequence[RailPart], amount: Decimal, *, method: str | None, source: Source
+) -> RailSplit:
+    """The ERP's per-payment breakdown judged against the amount booked
+    (``payment_methods.split_by_rail``), with a person's word on top: a person
+    recording it (the exception queue's one-click) who names one rail other
+    than the single rail the breakdown states (or states none for) has
+    corrected it, and their rail is the record (``superseded``). A breakdown
+    over several rails stands against a person's one rail, as the ERP's cash
+    figure stands against theirs: one rail cannot describe a payment made on two, and the record's
+    form asks for one (decisions §396). A breakdown that does not reconcile is
+    dropped whoever records it: the ERP's own record falls back to no rail
+    (reportable), a person's to the rail they named."""
+    split = split_by_rail(parts, amount, method=method)
+    if source == "user" and split.status == RAIL_SPLIT_UNRECONCILED:
+        return RailSplit(method=method, status=RAIL_SPLIT_UNRECONCILED, stated=split.stated)
+    if (
+        source == "user"
+        and split.status == RAIL_SPLIT_APPLIED
+        # One rail across every part, stated or not: a person's rail corrects
+        # it, or fills in a rail the ERP did not state.
+        and len({p.method for p in split.breakdown}) == 1
+        and normalize_payment_method(method) != (split.method or "")
+    ):
+        return RailSplit(method=method, status=RAIL_SPLIT_SUPERSEDED, stated=split.stated)
+    return split
+
+
 async def record_invoice_paid_outside(
     db: AsyncSession,
     *,
@@ -518,6 +592,7 @@ async def record_invoice_paid_outside(
     answering_exception_ids: frozenset[uuid.UUID] = frozenset(),
     actor_name: str | None = None,
     amount_currency: str | None = None,
+    rail_parts: Sequence[RailPart] = (),
 ) -> RecordedPayment:
     """Record one invoice as paid outside FeohLedger. Never commits.
 
@@ -528,6 +603,13 @@ async def record_invoice_paid_outside(
     missing or different currency is refused the same way. Both are judged
     after the live-claim refusals, so a FeohLedger payment, run or card on the
     invoice is named first (§309).
+
+    ``rail_parts`` is the ERP's breakdown of the payment by rail (each cash
+    payment's rail and exact amount; ``ErpBillReport.payment_parts``). It is
+    kept on the payment only when its parts sum exactly to the amount booked,
+    and the 1099 then splits the payment by it; otherwise it is dropped, the
+    payment is recorded with no rail (reportable) and the audit row says so
+    (``_rail_split``, decisions §396).
 
     ``answering_exception_ids`` names exceptions this record ANSWERS, so they do
     not refuse it on the blocking-exception gate. One caller passes any: the
@@ -601,6 +683,7 @@ async def record_invoice_paid_outside(
             source=source,
             converted=True,
             actor_name=actor_name,
+            rail_parts=rail_parts,
         )
         return RecordedPayment(target, created=True)
 
@@ -651,6 +734,7 @@ async def record_invoice_paid_outside(
         source=source,
         converted=False,
         actor_name=actor_name,
+        rail_parts=rail_parts,
     )
     return RecordedPayment(payment, created=True)
 

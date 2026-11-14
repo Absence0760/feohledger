@@ -122,6 +122,10 @@ const KEYS: Record<string, MessageKey> = {
 	purchases_not_permitted: 'erpRefusal.purchasesNotPermitted',
 	existing_invoice_not_open: 'erpRefusal.existingInvoiceNotOpen',
 	line_amount_precision: 'erpRefusal.lineAmountPrecision',
+	// NetSuite (decisions §398)
+	bill_not_posted: 'erpRefusal.billNotPosted',
+	bill_rejected: 'erpRefusal.billRejected',
+	currency_not_set_up: 'erpRefusal.currencyNotSetUp',
 	currency_not_supported: 'erpRefusal.currencyNotSupported',
 	foreign_currency_supplier: 'erpRefusal.foreignCurrencySupplier',
 	correlation_total_mismatch: 'erpRefusal.correlationTotalMismatch',
@@ -138,6 +142,7 @@ const KEYS: Record<string, MessageKey> = {
 	job_unconfirmed: 'erpRefusal.jobUnconfirmed',
 	job_failed: 'erpRefusal.jobFailed',
 	[ERP_CALL_BUDGET_EXHAUSTED]: 'erpRefusal.callBudgetTenant',
+	bill_left_unposted: 'erpRefusal.billLeftUnposted',
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
 	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',

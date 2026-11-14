@@ -19,6 +19,7 @@ import httpx
 import pytest
 
 from app.config import settings
+from app.models.procurement import UNISSUED_PO_STATUS
 from app.services.e_invoice._xml import local_name, parse_secure
 from app.services.erp_adapters.base import (
     SYNC_LISTING_MAX_ROWS,
@@ -1258,3 +1259,21 @@ def test_list_pos_report_names_every_po_it_skips_and_why(monkeypatch):
     assert ("C", PoSkipReason.local_currency_unknown) in [
         (s.po_number, s.reason) for s in report.skipped
     ]
+
+
+@pytest.mark.parametrize(
+    ("order_status", "expected"),
+    [
+        # Still being entered or maintained: not a finished order, so never
+        # matched against (decisions §394).
+        ("0", UNISSUED_PO_STATUS),
+        ("1", "open"),
+        ("4", "open"),
+        ("9", "closed"),
+        ("*", "cancelled"),
+    ],
+)
+def test_po_status_maps_an_order_in_process_to_unissued(order_status, expected):
+    from app.services.erp_adapters.syspro import _po_status
+
+    assert _po_status({"OrderStatus": order_status}) == expected
