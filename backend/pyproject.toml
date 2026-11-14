@@ -26,12 +26,12 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.1.8,<3",
     "asyncpg>=0.32.0,<1",
     "alembic>=1.20.1,<2",
-    "pydantic>=2.14.2,<3",
+    "pydantic>=2.14.3,<3",
     # >=2.14.2 fixes GHSA-4xgf-cpjx-pc3j (NestedSecretsSettingsSource follows
     # symlinks outside secrets_dir).
     "pydantic-settings>=2.16.2,<3",
     "python-multipart>=0.0.33,<1",
-    "boto3>=1.43.123,<2",
+    "boto3>=1.43.125,<2",
     # Password hashing, called directly — there is no passlib here any more.
     # passlib 1.7.4 (its last release, 2020) held this floor at 4.0.1 for two
     # years: it reads `bcrypt.__about__.__version__`, deleted in bcrypt 5.0, and
@@ -113,7 +113,7 @@ dev = [
     # to a single minor keeps CI's `pip install` from quietly picking
     # up stricter rules than the local venv runs. Bump intentionally
     # via dependabot or a manual upgrade pass.
-    "ruff>=0.17.3,<0.18",
+    "ruff>=0.17.4,<0.18",
 ]
 # Optional: auto-rotation of scanned invoice pages via Tesseract OSD.
 # Install with `pip install -e ".[ocr]"` and ensure the `tesseract` binary
