@@ -544,12 +544,17 @@ def _ctrl_session_for_org(org):
     return factory
 
 
+# The generic route answers only for the tenant's own, directly connected ERP
+# (decisions §399): `erp_type` must be what this block resolves to.
+GENERIC_DIRECT_ERP = {"type": "generic", "integration_method": "direct"}
+
+
 def _org_with_erp_secret(secret: str):
     return SimpleNamespace(
         id=uuid.uuid4(),
         slug="acme",
         db_name="feoh_acme",
-        settings={"erp": {"webhook_signing_secret": secret}},
+        settings={"erp": {**GENERIC_DIRECT_ERP, "webhook_signing_secret": secret}},
     )
 
 
@@ -579,7 +584,7 @@ async def test_erp_webhook_rejects_unsigned_request_silently(fake_redis):
         patch("app.api.erp_webhook.async_sessionmaker") as mk_factory,
     ):
         result = await erp_webhook(
-            erp_type="merge_dev",
+            erp_type="generic",
             request=_fake_request(body_bytes),
         )
 
@@ -612,7 +617,7 @@ async def test_erp_webhook_rejects_wrong_signature_silently(fake_redis):
         patch("app.api.erp_webhook.get_tenant_engine") as mk_engine,
     ):
         await erp_webhook(
-            erp_type="merge_dev",
+            erp_type="generic",
             request=_fake_request(body_bytes, {"X-Webhook-Signature": wrong_sig}),
         )
 

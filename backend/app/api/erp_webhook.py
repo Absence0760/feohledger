@@ -14,6 +14,7 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment
 from app.services.credential_crypto import CredentialCryptoError
+from app.services.erp_adapters.dispatcher import MERGE_DEV_ADAPTER_KEY, resolve_adapter_key
 from app.services.erp_status_sync import (
     DOUBLE_PAY_REFUSALS,
     ERP_PAID_RECORDABLE,
@@ -297,7 +298,6 @@ async def merge_webhook(tenant_slug: str, request: Request):
     ``done``); a tenant opts in by storing its key (decisions §399).
     """
     from app.services import erp_merge_webhook as merge_events
-    from app.services.erp_adapters.dispatcher import resolve_adapter_key
     from app.services.webhook_security import verify_hmac_sha256_base64url
 
     max_bytes = settings.erp_webhook_max_bytes
@@ -363,11 +363,13 @@ async def erp_webhook(
     erp_type: str,
     request: Request,
 ):
-    """Receive status updates from ERPs or Merge.dev.
+    """Receive status updates from a tenant's directly connected ERP.
 
     Authenticated by HMAC over the raw body. The signing secret is
     looked up off the tenant named in the body — same pattern as the
-    card webhook. Bad signatures, unknown tenants, missing events all
+    card webhook — and only for the ERP that tenant is connected to:
+    ``erp_type`` must be the adapter its config resolves to, and never
+    ``merge_dev`` (decisions §399). Bad signatures, unknown tenants, missing events all
     return 204 silently. Leaking the distinction would help an
     attacker enumerate tenant slugs or replay events.
 
@@ -420,9 +422,17 @@ async def erp_webhook(
 
     if not isinstance(body, dict):
         return  # not the generic shape → silent 204
-    # Merge.dev's own deliveries are not this shape (they name no tenant and
-    # are signed base64url): they go to `/webhook/merge_dev/{tenant_slug}`
-    # (`merge_webhook`, decisions §399). A body must never choose the tenant.
+    # This route takes the tenant from the BODY, so the only thing standing
+    # between a body and a tenant's books is the HMAC key that tenant's OWN
+    # ERP integration signs with. It therefore answers only for the ERP the
+    # tenant is actually connected to (`erp_type` must be the adapter its
+    # config resolves to, checked below) and never for Merge.dev: a Merge
+    # tenant's `webhook_signing_secret` is Merge's signature key, held by a
+    # third party, and Merge's deliveries go to the per-tenant
+    # `/webhook/merge_dev/{tenant_slug}` (`merge_webhook`, decisions §399),
+    # which reads the bill back before believing it.
+    if erp_type == MERGE_DEV_ADAPTER_KEY:
+        return
 
     tenant_slug = body.get("tenant_slug")
     correlation_id = body.get("correlation_id")
@@ -460,6 +470,14 @@ async def erp_webhook(
         except CredentialCryptoError:
             logger.error("ERP webhook: the tenant's ERP credentials could not be opened")
             return _retry_please()
+
+    # Only the tenant's own adapter may report here (above). An empty block,
+    # or one with no `integration_method`, resolves to Merge.dev and so is
+    # refused too. A switch to another ERP drops every sealed secret, the
+    # webhook key included (`erp_adapters/catalog.secrets_to_drop`), so a key
+    # stored for one ERP never verifies another's route.
+    if resolve_adapter_key(erp_config) != erp_type:
+        return
 
     # Verify HMAC against the tenant's configured signing secret.
     signing_secret = erp_config.get("webhook_signing_secret", "")

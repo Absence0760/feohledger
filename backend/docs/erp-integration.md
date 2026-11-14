@@ -268,6 +268,18 @@ sends this shape: `/webhook/quickbooks`, `/webhook/xero` (next sections) and
 `/webhook/merge_dev/{tenant_slug}` (§ Merge.dev: idempotency, refusals, region
 and webhook).
 
+**The generic route answers only for the tenant's own, directly connected
+ERP.** It takes the tenant from the body and, on a `Paid` report, records a
+payment without reading the bill back, so the HMAC key is the whole defence.
+`erp_type` must be the adapter the tenant's `settings.erp` resolves to
+(`dispatcher.resolve_adapter_key`), and `merge_dev` is refused outright: a
+Merge tenant's `webhook_signing_secret` is Merge's signature key, held by a
+third party, and is only ever checked by the per-tenant Merge route, which reads
+the bill back first. A mismatch is the same silent 204 as a bad signature. A
+switch to another ERP drops every sealed secret, the webhook key included
+(`catalog.secrets_to_drop`), so a key stored for one ERP never verifies another
+(decisions §399, amendment).
+
 The webhook handler:
 1. Validates the request (signature, API key, or IP whitelist)
 2. Dedupes by `event_id` (`services/webhook_security.is_event_already_processed`)
@@ -2387,7 +2399,9 @@ write-error guides (read 2026-11-13). Reasoning: `docs/decisions.md` §399.
   payable, which never applies to Merge; storing the key is the tenant's
   opt-in. The generic `/webhook/{erp_type}` route no longer reads
   Merge's shape: it used to take `linked_account_id` from the body as the
-  tenant slug.
+  tenant slug. Nor does it accept the generic shape for a Merge tenant under
+  any `erp_type`: Merge holds that key, and the generic route trusts the body
+  (§ Webhook endpoint above).
 
 ## Sage Intacct direct adapter (`sage_intacct`)
 

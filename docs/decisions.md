@@ -20189,6 +20189,26 @@ account with Merge's error shape, serves `GET /contacts/{id}` /
 `/accounts/{id}`, an inactive account, a supplier Xero has not flagged, and
 lets `__set-status` set payments and credits.
 
+**Amendment (round-10 review gate): the generic route refuses a Merge tenant.**
+Storing Merge's signature key as `webhook_signing_secret` put a key a third
+party holds into the field the generic `/webhook/{erp_type}` route verifies its
+hex HMAC against, and that route takes the tenant from the body, finds the
+invoice by `correlation_id`, never reads the bill back, and records a signed
+`{"status": "Paid"}` as a payment (`_record_erp_reported_payment`). So Merge's
+key unlocked a body-trusting write to the money path. The generic route now
+refuses, with the same silent 204, any `erp_type` that is not the tenant's own
+adapter (`resolve_adapter_key(erp_config) != erp_type`) and `merge_dev`
+outright, before the signature is checked. A Merge tenant's key is therefore
+checked only by the per-tenant Merge route, which reads the bill back. Nothing
+else stores a third-party-held key there: only the Merge form renders the
+field, a direct ERP's key is shared between the tenant and its own integration,
+and a switch to another ERP drops every sealed secret, the webhook key included
+(`catalog.secrets_to_drop`), so a key never outlives the ERP it was stored for.
+Tests: `test_erp_webhook_transitions.py` (a Merge-signed body under
+`merge_dev`, `generic` and `netsuite`; an `erp_type` that is not the tenant's
+adapter), `test_plan_feature_gates.py` (the in-flight exemption, now on a
+direct ERP).
+
 ## 400. Sage's revoke is checked against Sage's own guide, and stored-credential ERPs are ended or named at tenant deletion (issue #655 OAuth row, 2026-11-13)
 
 **Context.** Issue #655's OAuth row listed five items. Three had landed: the
