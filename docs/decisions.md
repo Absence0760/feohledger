@@ -19144,6 +19144,8 @@ onto main after #670, which had since introduced `tax_not_itemised` and
   *Amended by §397:* a found draft with the id our own create recorded, still
   exactly what we sent, is ours and is repriced or deleted as a fresh one;
   every other found draft is still never touched.
+  *Amended by §403:* any record, found or created, whose `payToVendorId` is
+  another vendor's is refused `pay_to_vendor_differs` whatever its total.
 - **A found `Paid` invoice is refused, not reported posted**
   (`existing_invoice_not_open`). With the new key it may be the same bill
   keyed and paid by hand in BC, perhaps before or without our approval. BC
@@ -19825,6 +19827,8 @@ retry found it, could not tell it from a person's, and refused it
   total and currency. Its refusal does not claim it as ours, so the next retry
   will not either. No new refusal code: the found treatment's codes already say
   what happened, and a person who edited the draft now owns it.
+  *Amended by §403:* a pay-to edit is now refused `pay_to_vendor_differs`
+  rather than by the found treatment's total check.
 - A failed read before the draft is judged (its record, its lines, the
   company's LCY) is a retryable failure naming the draft, and it KEEPS the
   claim: nothing was deleted or posted, and the next attempt judges the same
@@ -20018,3 +20022,79 @@ completed after approval, a closed period). fake-erp's NetSuite section now
 answers `eid:`, SuiteQL `currency`, `accountingperiod` and `transactionline`,
 refuses a currency given by `refName`, refuses a bill dated in its closed
 January 2020, states PO headers negative and gives bills an `approvalStatus`.
+
+## 403. Business Central refuses a bill that pays another vendor, with its own code (§391 / §397 follow-up)
+
+**Context.** A purchaseInvoice in BC has two vendors: the buy-from vendor
+(`vendorId`, which we send and the duplicate lookup keys on) and the pay-to
+vendor (`payToVendorId`, which we never send). §391 posts a draft the lookup
+finds at the approved total and currency, and accepts a found `Open` one, but
+never read the pay-to. A BC user who redirected who a bill pays had it booked
+as our approved bill: the liability sat on a vendor nobody here approved,
+while our payment run paid the approved one. §397 checked the pay-to only on
+our own recognised draft, and only to decide it was no longer ours; it then
+fell to the found treatment, which posted it if the total matched.
+
+**Decision.**
+- **The bill must pay its own vendor.** A record whose `payToVendorId` is set
+  (not blank, not BC's empty GUID) and is not our linked vendor, or whose own
+  `vendorId` is not ours, is refused `pay_to_vendor_differs`, non-retryably
+  (`_bc_pay_to_redirected`; GUIDs compared case-insensitively). The lookup's
+  key pins `vendorId` only for found records; a draft we created and our
+  post's read-back have no such pin, so a buy-from vendor changed in BC
+  between our check and our post is caught too (money-path review).
+- **Every record, not only found ones.** BC fills the pay-to of a draft we
+  create from the vendor card's `Pay-to Vendor No.` (else the buy-from
+  vendor), so a standing redirect on the card reaches our own drafts too.
+  Checking only found records would refuse a lost-read retry and post the
+  same bill on a clean first attempt. So a draft is checked before its total
+  (and before any reprice): one we created is deleted (real etag), one the
+  lookup found is left in BC. An `Open` / `Paid` record is checked inside
+  `_bc_posted`, the one success builder, so a found invoice, one posted
+  between our create and read, and our post's read-back all are; a posted
+  one is never deleted.
+- **A new code**, because none of the existing ones says it.
+  `posted_total_mismatch` tells the reader to check tax settings, and the
+  totals may well agree; `existing_invoice_not_open` is about status. The
+  sentence (six locales, `erpRefusals.ts`) sends the reader to the bill's
+  pay-to vendor and the vendor card in BC.
+- **Pay-to checked before total.** A redirected draft at another total is
+  refused for the redirect, the fault a person must fix first. A draft we
+  created with a redirect is not repriced: repricing creates another draft
+  that BC would fill with the same pay-to.
+- **§397's own-draft path compared the pay-to against our vendor only**, as
+  raw strings. It now uses the same helper (empty GUID read as unset, and the
+  record's own `vendorId` compared too). An own draft with another pay-to is
+  still "no longer ours" and gets the found treatment, which is now this
+  refusal, left in BC: we cannot tell a BC user's edit from the vendor card's
+  default, and §397 deletes only what is still exactly what we sent.
+
+**Left open, accepted.** A vendor whose BC card names another pay-to vendor
+cannot be pushed until that is cleared in BC or our vendor is linked to the
+pay-to vendor instead. That is deliberate: the alternative books liabilities
+to a vendor FeohLedger did not approve. Nothing here has run against a live
+BC tenant (#654); that BC fills `payToVendorId` on the API's purchaseInvoice
+from the vendor card is BC's documented Purchase Header behaviour, not yet
+observed through API v2.0; that check, and how BC writes an unset or braced
+GUID, are on the #654 sandbox entry in `docs/followups.md`. An earlier
+attempt's own draft that BC gave the card's pay-to reads as no longer ours, so
+it is refused and left in BC, not deleted: the safe direction, since §397
+deletes only what is still exactly what we sent. fake-erp seeds no vendor with
+a card pay-to, so the refusal is covered by unit tests, not e2e.
+
+**Rejected:**
+- *Sending `payToVendorId` = `vendorId` on create.* It would override a
+  vendor card's pay-to silently, which is the accountant's setting, and does
+  nothing for a found record.
+- *Reusing `posted_total_mismatch`.* Its sentence names the wrong fix.
+
+Tests: `backend/tests/test_erp_adapter_idempotency.py` (a found draft or
+`Open` invoice paying another vendor refused and left, whatever its total;
+a pay-to equal to the vendor in another case, the empty GUID and blank all
+posted; a created draft with a redirect deleted and refused; a redirect made
+between our check and our post refused on the read-back; the helper against
+the record's own `vendorId`, which is refused even with a blank pay-to;
+§397's pay-to edit now refused with this code);
+`tests/test_erp_refusal_codes.py` and `frontend/src/lib/api/erpRefusals.test.ts`
+(the code catalogued and stated). fake-erp's BC create now states
+`payToVendorId` (the vendor card's, else the vendor's own).
