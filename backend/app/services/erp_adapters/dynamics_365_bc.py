@@ -90,6 +90,14 @@ DOC_NUMBER_TOO_LONG = "doc_number_too_long"
 VENDOR_INACTIVE = "vendor_inactive"
 ACCOUNT_INACTIVE = "account_inactive"
 PERIOD_CLOSED = "period_closed"
+#: The purchaseInvoice pays a vendor other than its own: its ``payToVendorId``
+#: is set and is not the ``vendorId`` we sent (the bill's linked vendor). We
+#: never send a pay-to vendor, so BC filled it from the vendor card's
+#: ``Pay-to Vendor No.``, or a BC user redirected the bill. Booking it as our
+#: approved bill would put the liability on a vendor nobody here approved
+#: (decisions §403). A draft we created is deleted; any record the lookup
+#: found is left in BC, and a posted one is never deleted.
+PAY_TO_VENDOR_DIFFERS = "pay_to_vendor_differs"
 
 _PROVIDER = "Business Central"
 
@@ -530,6 +538,13 @@ class BusinessCentralAdapter(ErpAdapter):
           non-retryably and never deleted (reversing a posted invoice is an
           accountant's corrective credit memo in BC): ``posted_total_mismatch``,
           or ``posted_total_unconfirmed`` when no total is stated.
+        * A draft whose ``payToVendorId`` is another vendor's → refused
+          ``pay_to_vendor_differs`` before its total is looked at: left in BC
+          when the lookup found it (an earlier attempt's own draft included,
+          once it no longer reads as ours), deleted when this attempt made it
+          (or recognised it as ours). An ``Open`` /
+          ``Paid`` one is refused the same way by ``_bc_posted``, never
+          deleted (decisions §403).
         * A draft the lookup found with a total ≠ ``payload.amount`` may be a
           BC user's own draft under this number, so it is refused
           ``posted_total_mismatch`` and left in BC — never deleted, and so
@@ -607,6 +622,22 @@ class BusinessCentralAdapter(ErpAdapter):
                 return result
             if status != "draft":
                 return erp_refusal(_PROVIDER, EXISTING_INVOICE_NOT_OPEN)
+
+            if _bc_pay_to_redirected(record, payload):
+                # Whoever this draft pays is not the bill's vendor (§403).
+                # Checked before the total, so a draft that would also be
+                # repriced is refused for the reason a person can fix. One the
+                # lookup found is left in BC; one we made is ours to delete.
+                if found_by_lookup:
+                    return _draft_not_deleted(doc_id, PAY_TO_VENDOR_DIFFERS)
+                return await _delete_and_refuse(
+                    client,
+                    url,
+                    headers,
+                    record.get("@odata.etag") or known_etag,
+                    doc_id,
+                    PAY_TO_VENDOR_DIFFERS,
+                )
 
             if _bc_decimal(record.get("totalAmountIncludingTax")) != payload.amount:
                 etag = record.get("@odata.etag") or known_etag
@@ -957,10 +988,23 @@ def _bc_posted(
     non-retryable and the invoice is left as BC holds it: a posted document is
     never deleted (reversing it is a corrective credit memo, an accountant's
     call in BC). Messages are PII-free: provider literal and stable reason.
+
+    It must also pay the bill's own vendor (``_bc_pay_to_redirected``): an
+    invoice BC holds as payable to another vendor is refused
+    ``pay_to_vendor_differs`` whatever its total, since the money would be owed
+    to a vendor nobody here approved (decisions §403). This is the one success
+    builder for an ``Open`` / ``Paid`` record, so a found invoice, one posted
+    between our create and our read, and our post's read-back all pass it.
     """
     total = _bc_decimal(record.get("totalAmountIncludingTax"))
-    if total is None or total != payload.amount:
-        reason = POSTED_TOTAL_UNCONFIRMED if total is None else POSTED_TOTAL_MISMATCH
+    redirected = _bc_pay_to_redirected(record, payload)
+    if redirected or total is None or total != payload.amount:
+        if redirected:
+            reason = PAY_TO_VENDOR_DIFFERS
+        elif total is None:
+            reason = POSTED_TOTAL_UNCONFIRMED
+        else:
+            reason = POSTED_TOTAL_MISMATCH
         return ErpPostResult(
             success=False,
             erp_document_id=doc_id,
@@ -1204,9 +1248,9 @@ async def _own_draft_shape(
     if recorded is None or _bc_totals_fingerprint(record) != recorded:
         return None
     # We never send a pay-to vendor, so BC's is the buy-from one; any other
-    # means a BC user redirected who this bill pays.
-    pay_to = str(record.get("payToVendorId") or "").strip().lower()
-    if pay_to and pay_to != str(payload.vendor_erp_id or "").strip().lower():
+    # means a BC user redirected who this bill pays (or the vendor card did).
+    # Not ours, then: the found treatment refuses it, left in BC (§403).
+    if _bc_pay_to_redirected(record, payload):
         return None
     resp = await client.get(f"{url}/purchaseInvoiceLines", headers=headers)
     if resp.status_code != 200:
@@ -1393,6 +1437,25 @@ def _bc_vendor_id(raw: object) -> str | None:
     """A purchaseOrder's ``vendorId``, or None when it names no vendor."""
     text = str(raw or "").strip()
     return text if text and text != _BC_EMPTY_GUID else None
+
+
+def _bc_pay_to_redirected(record: dict, payload: InvoicePayload) -> bool:
+    """Whether purchaseInvoice ``record`` pays a vendor other than its own.
+
+    True when the record states a ``vendorId`` other than our linked vendor
+    (``payload.vendor_erp_id``), or a ``payToVendorId`` (not blank, not BC's
+    empty GUID) that is not both. GUIDs are compared case-insensitively. A
+    blank pay-to is the buy-from vendor, so it is never a redirect on its own.
+    The lookup's key pins ``vendorId`` only for found records; a draft we
+    created and our post's read-back have no such pin, so a buy-from vendor
+    changed in BC is caught here too (decisions §403).
+    """
+    ours = str(payload.vendor_erp_id or "").strip().lower()
+    buy_from = (_bc_vendor_id(record.get("vendorId")) or "").lower()
+    if buy_from and buy_from != ours:
+        return True
+    pay_to = _bc_vendor_id(record.get("payToVendorId"))
+    return pay_to is not None and pay_to.lower() != ours
 
 
 #: API v2.0 ``purchaseOrder.status`` (lower-cased) → ours. ``Open`` is not

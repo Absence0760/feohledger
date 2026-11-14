@@ -220,36 +220,66 @@ def test_loads_exact_json_reads_money_without_a_float_hop():
 # ---------------------------------------------------------------------------
 
 
+_MERGE_EMPTY = {"next": None, "results": []}
+
+
+def _merge_client(cm, posted_total=LOSSY_AMOUNT):
+    client = cm.return_value.__aenter__.return_value
+    client.get = AsyncMock(return_value=_mock_response(200, _MERGE_EMPTY))
+    client.post = AsyncMock(
+        return_value=_mock_response(201, {"model": {"id": "m1", "total_amount": posted_total}})
+    )
+    return client
+
+
 def test_merge_dev_posts_exact_decimal_amounts():
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     with patch("httpx.AsyncClient") as cm:
-        client = cm.return_value.__aenter__.return_value
-        client.post = AsyncMock(return_value=_mock_response(201, {"model": {"id": "m1"}}))
+        client = _merge_client(cm)
         result = _run(adapter.post_invoice(_payload()))
 
     assert result.success
     body = _posted_body_text(client)
-    _assert_exact(body, "total_amount", "sub_total", "total_line_amount", "unit_price")
-    assert '"quantity":3.5000' in body
+    _assert_exact(body, "total_amount")
+    # A line's amount is Merge's `total_amount` (decisions §399), exact; the
+    # PO-line field `total_line_amount` is never sent on an invoice line.
+    line = json.loads(body, parse_float=Decimal)["model"]["line_items"][0]
+    assert line["total_amount"] == LOSSY_AMOUNT
+    assert "total_line_amount" not in body
     assert '"total_tax_amount":0.10' in body
-    assert '"total_discount":5.50' in body
     # Still a JSON object the far end can parse, with the header it advertises.
     assert json.loads(body)["model"]["number"] == "INV-1"
     assert client.post.await_args.kwargs["headers"]["Content-Type"] == "application/json"
 
 
-def test_merge_dev_omits_absent_optional_money_unchanged():
-    """The `if x else None` shape around every optional amount is behaviour the
-    fix had to preserve, not change — a zero subtotal still sends null."""
+def test_merge_dev_reads_the_posted_total_back_exactly():
+    """The total Merge reports is parsed without a float hop: read through a
+    float, an exact 99999999999999.99 came back …98 and failed as a mismatch."""
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     with patch("httpx.AsyncClient") as cm:
-        client = cm.return_value.__aenter__.return_value
-        client.post = AsyncMock(return_value=_mock_response(201, {"model": {"id": "m1"}}))
+        client = _merge_client(cm)
+        resp = client.post.return_value
+        # What httpx does with the body: `json.loads(content, **kwargs)`.
+        wire = f'{{"model": {{"id": "m1", "total_amount": {LOSSY_AMOUNT}}}}}'
+        resp.json = MagicMock(side_effect=lambda **kw: json.loads(wire, **kw))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success, result.message
+
+
+def test_merge_dev_omits_absent_optional_money_unchanged():
+    """A zero tax still sends null, and the totals Merge would read as a
+    second statement of the bill (`sub_total`, `total_discount`) are not sent
+    against gross lines (decisions §399)."""
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    with patch("httpx.AsyncClient") as cm:
+        client = _merge_client(cm)
         _run(adapter.post_invoice(_payload(subtotal=None, tax_amount=Decimal("0.00"))))
 
     parsed = json.loads(_posted_body_text(client))
-    assert parsed["model"]["sub_total"] is None
+    assert "sub_total" not in parsed["model"] and "total_discount" not in parsed["model"]
     assert parsed["model"]["total_tax_amount"] is None
+    assert parsed["model"]["inclusive_of_tax"] is True
 
 
 # ---------------------------------------------------------------------------

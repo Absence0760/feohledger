@@ -19,9 +19,12 @@ past the dedup and replay the one-time effect.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import logging
+import re
 
 from app.redis import get_redis
 
@@ -68,6 +71,33 @@ def verify_hmac_sha256_base64(secret: str, raw_body: bytes, provided_b64: str | 
         expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
     except (binascii.Error, ValueError):
         return False
+    return hmac.compare_digest(expected, provided)
+
+
+_BASE64URL = re.compile(r"[A-Za-z0-9_-]+={0,2}")
+
+
+def verify_hmac_sha256_base64url(secret: str, raw_body: bytes, provided_b64url: str | None) -> bool:
+    """:func:`verify_hmac_sha256` for a provider that sends the digest
+    base64url encoded (Merge.dev's ``X-Merge-Webhook-Signature``).
+
+    Strict: only the URL-safe alphabet is accepted (a standard-base64 ``+`` /
+    ``/`` is not), padding is optional, and the raw digests are compared, so
+    no re-encoding of the signature makes two different digests equal. Same
+    fail-closed rules: an empty secret or signature, or one that does not
+    decode, is False.
+    """
+    if not secret or not provided_b64url:
+        return False
+    text = provided_b64url.strip()
+    if not _BASE64URL.fullmatch(text):
+        return False
+    bare = text.rstrip("=")
+    try:
+        provided = base64.urlsafe_b64decode(bare + "=" * (-len(bare) % 4))
+    except (binascii.Error, ValueError):
+        return False
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
     return hmac.compare_digest(expected, provided)
 
 

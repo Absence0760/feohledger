@@ -99,14 +99,78 @@ def test_merge_dev_override_applies_to_posts_too(monkeypatch):
         invoice_date=date(2026, 1, 1),
         correlation_id="corr-1",
         vendor_erp_id="merge-vendor-1",
+        gl_account="6000",
+        gl_account_erp_id="merge-acct-6000",
     )
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.post = AsyncMock(return_value=_mock_response(201, {"model": {"id": "m1"}}))
+        client.get = AsyncMock(return_value=_mock_response(200, {"results": [], "next": None}))
+        client.post = AsyncMock(
+            return_value=_mock_response(201, {"model": {"id": "m1", "total_amount": 100.00}})
+        )
         result = _run(adapter.post_invoice(payload))
     assert result.success
     url = client.post.await_args.args[0]
     assert url == f"{FAKE_MERGE}/invoices"
+    # The pre-create lookup reads the same host.
+    assert client.get.await_args.args[0] == f"{FAKE_MERGE}/invoices"
+
+
+@pytest.mark.parametrize(
+    ("region", "host"),
+    [
+        (None, "https://api.merge.dev"),
+        ("", "https://api.merge.dev"),
+        ("US", "https://api.merge.dev"),
+        ("eu", "https://api-eu.merge.dev"),
+        ("APAC", "https://api-ap.merge.dev"),
+    ],
+)
+def test_merge_dev_region_picks_merges_own_regional_host(region, host):
+    """A linked account lives on one Merge stack, and its token is refused by
+    the others; a blank region is the US stack every older connection is on
+    (decisions §399)."""
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok", "region": region})
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"status": "OPEN"}))
+        _run(adapter.get_invoice_status("doc-1"))
+    assert client.get.await_args.args[0] == f"{host}/api/accounting/v1/invoices/doc-1"
+
+
+def test_merge_dev_unknown_region_is_refused_not_guessed():
+    from datetime import date
+    from decimal import Decimal
+
+    from app.services.erp_adapters.base import InvoicePayload
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok", "region": "mars"})
+    payload = InvoicePayload(
+        invoice_number="INV-1",
+        vendor_name="Acme",
+        amount=Decimal("100.00"),
+        currency="USD",
+        invoice_date=date(2026, 1, 1),
+        correlation_id="corr-1",
+        vendor_erp_id="merge-vendor-1",
+        gl_account_erp_id="merge-acct-6000",
+    )
+    with patch("httpx.AsyncClient") as cm:
+        result = _run(adapter.post_invoice(payload))
+    assert not result.success and not result.retryable and result.not_posted
+    assert "config_invalid" in result.message
+    cm.assert_not_called()
+
+
+def test_merge_dev_region_does_not_override_an_operator_base(monkeypatch):
+    """The operator's base (fake-erp) wins over a tenant's region."""
+    monkeypatch.setattr(settings, "erp_merge_api_base", FAKE_MERGE)
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok", "region": "EU"})
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"status": "OPEN"}))
+        _run(adapter.get_invoice_status("doc-1"))
+    assert client.get.await_args.args[0] == f"{FAKE_MERGE}/invoices/doc-1"
 
 
 # ---------- NetSuite -------------------------------------------------------

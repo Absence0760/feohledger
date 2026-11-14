@@ -170,3 +170,462 @@ async def test_sync_refuses_when_no_qms_is_configured(realdb):
             for r in listing.json()["items"]
             if str(r["inspection_number"]).startswith("QMS-INSP-")
         ]
+
+
+# --------------------------------------------------------------------------- #
+# The matching consequence (decisions §401)
+#
+# A hand-entered verdict re-matches the invoices citing its PO in the same
+# request, as a goods receipt does: a `fail` raises the payment-blocking
+# `quality_hold`, a later `pass` closes it — unless whoever typed the pass is
+# implicated in the invoice (§262's rule) or approved it (§389's reverse order,
+# applied to the fourth leg).
+# --------------------------------------------------------------------------- #
+
+TENANT = "a"
+
+
+async def _default_entity(s):
+    from sqlalchemy import select
+
+    from app.models.entity import Entity
+
+    return (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
+
+
+async def _po_and_invoice(realdb, *, uploaded_by=None, lines=()):
+    """A PO for 1,037.00 and an invoice billing all of it, refreshed once under
+    the org's own (empty) settings, so it starts with no PO-match exception.
+    Returns (po_id, line ids, invoice id)."""
+    from decimal import Decimal
+
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.models.procurement import POLineItem, PurchaseOrder
+    from app.services.invoice_warnings import refresh_warnings
+
+    number = f"PO-QI-{uuid.uuid4().hex[:6]}"
+    async with realdb.sessionmaker(TENANT)() as s:
+        entity = await _default_entity(s)
+        po = PurchaseOrder(
+            po_number=number,
+            total=Decimal("1037.00"),
+            currency="USD",
+            status="open",
+            organization_id=realdb.info(TENANT).org_id,
+            entity_id=entity,
+        )
+        s.add(po)
+        await s.flush()
+        line_ids = []
+        for desc, qty in lines:
+            li = POLineItem(po_id=po.id, description=desc, quantity=Decimal(qty))
+            s.add(li)
+            await s.flush()
+            line_ids.append(li.id)
+        inv = Invoice(
+            invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
+            vendor_name="Racket Wholesale Co",
+            amount=Decimal("1037.00"),
+            currency="USD",
+            po_number=number,
+            status=InvoiceStatus.ready_for_review,
+            uploaded_by_id=uploaded_by,
+            organization_id=realdb.info(TENANT).org_id,
+            entity_id=entity,
+        )
+        s.add(inv)
+        await s.flush()
+        await refresh_warnings(s, inv, org_settings={})
+        await s.commit()
+        return po.id, line_ids, inv.id
+
+
+async def _quality_holds(realdb, invoice_id):
+    from sqlalchemy import select
+
+    from app.models.exception import Exception as APException
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        return (
+            (
+                await s.execute(
+                    select(APException).where(
+                        APException.invoice_id == invoice_id,
+                        APException.exception_type == "quality_hold",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def _blocked(realdb, invoice_id) -> bool:
+    from app.services.payment_runs import blocked_invoice_ids
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        return invoice_id in await blocked_invoice_ids(s, [invoice_id])
+
+
+async def _inspect(realdb, role, *, result, po_id=None, gr_id=None):
+    body = {"inspection_number": f"QI-{uuid.uuid4().hex[:8]}", "result": result}
+    if po_id is not None:
+        body["po_id"] = str(po_id)
+    if gr_id is not None:
+        body["gr_id"] = str(gr_id)
+    async with realdb.client(key=TENANT, role=role) as c:
+        resp = await c.post("/api/inspections", json=body)
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+async def _held(realdb, *, uploaded_by=None):
+    """An invoice whose PO an admin has just failed at inspection."""
+    po_id, _, inv_id = await _po_and_invoice(realdb, uploaded_by=uploaded_by)
+    assert await _quality_holds(realdb, inv_id) == []
+    await _inspect(realdb, "admin", result="fail", po_id=po_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "open"
+    assert await _blocked(realdb, inv_id)
+    return po_id, inv_id
+
+
+async def _approve(realdb, inv_id, role):
+    """Approval gates on no payment-blocking exception, so the hold rides
+    along; it is the payment run it stops."""
+    from app.models.invoice import Invoice, InvoiceStatus
+
+    async with realdb.client(key=TENANT, role=role) as c:
+        resp = await c.post(f"/api/invoices/{inv_id}/approve", json={})
+    assert resp.status_code == 200, resp.text
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.status == InvoiceStatus.approved
+        assert inv.approved_by_user_id == realdb.info(TENANT).users[role]
+
+
+async def test_a_failed_inspection_holds_the_invoice_in_the_same_request(realdb):
+    """The follow-up's first half: a typed-in `fail` used to raise nothing
+    until something else refreshed the invoice. `_held` asserts the hold."""
+    _, inv_id = await _held(realdb)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.severity == "error"
+
+
+async def test_a_pass_by_someone_uninvolved_lifts_the_hold(realdb):
+    po_id, inv_id = await _held(realdb)
+    await _inspect(realdb, "ap_manager", result="pass", po_id=po_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "resolved"
+    assert row.resolved_by == "PO match"
+    assert not await _blocked(realdb, inv_id)
+
+
+async def test_a_pass_by_the_invoices_uploader_does_not_lift_it(realdb):
+    """§262's rule, now reachable from the inspection door: the verdict lands
+    and is what the matcher reads, but it is not evidence that releases an
+    invoice its recorder created."""
+    manager = realdb.info(TENANT).users["ap_manager"]
+    po_id, inv_id = await _held(realdb, uploaded_by=manager)
+    await _inspect(realdb, "ap_manager", result="pass", po_id=po_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "open"
+    assert await _blocked(realdb, inv_id)
+
+
+async def test_the_approver_cannot_release_their_invoice_with_a_later_pass(realdb):
+    """§401: the manager approves the held invoice, then types in a passing
+    inspection. One person signed the invoice and passed the goods, so the
+    hold stays for someone else — who releases it with their own verdict."""
+    po_id, inv_id = await _held(realdb)
+    await _approve(realdb, inv_id, "ap_manager")
+
+    await _inspect(realdb, "ap_manager", result="pass", po_id=po_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "open"
+    assert await _blocked(realdb, inv_id)
+
+    await _inspect(realdb, "admin", result="pass", po_id=po_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "resolved"
+    assert not await _blocked(realdb, inv_id)
+
+
+async def test_the_approval_steps_opt_out_lets_the_approvers_pass_lift_it(realdb):
+    """`require_segregation: false` on the approval step lifts the approver
+    half, as it lifts §267 and §389: one policy, not three."""
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+    from app.utils.dates import utc_today
+
+    manager = realdb.info(TENANT).users["ap_manager"]
+    po_id, inv_id = await _held(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        snapshot = {
+            "steps": [
+                {"type": "approval", "enabled": True, "config": {"require_segregation": False}}
+            ]
+        }
+        definition = WorkflowDefinition(
+            name=f"qi-optout-{uuid.uuid4().hex[:6]}",
+            steps_config=snapshot,
+            is_active=False,
+            organization_id=realdb.info(TENANT).org_id,
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                definition_id=definition.id, invoice_id=inv_id, steps_config_snapshot=snapshot
+            )
+        )
+        inv = await s.get(Invoice, inv_id)
+        inv.status = InvoiceStatus.approved
+        inv.approved_by = "Manager"
+        inv.approval_date = utc_today()
+        inv.approved_by_user_id = manager
+        await s.commit()
+
+    await _inspect(realdb, "ap_manager", result="pass", po_id=po_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "resolved"
+
+
+async def test_a_receipt_scoped_inspection_rematches_the_receipts_po(realdb):
+    """A body naming only the goods receipt still reaches the invoices on that
+    receipt's PO — the matcher reads a receipt's own inspection first."""
+    from app.utils.dates import utc_today
+
+    po_id, (li,), inv_id = await _po_and_invoice(realdb, lines=(("Racket", "10"),))
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        gr = await c.post(
+            "/api/goods-receipts",
+            json={
+                "po_id": str(po_id),
+                "received_date": utc_today().isoformat(),
+                "lines": [{"po_line_item_id": str(li), "quantity_received": "10"}],
+            },
+        )
+    assert gr.status_code == 201, gr.text
+    assert await _quality_holds(realdb, inv_id) == []
+
+    await _inspect(realdb, "admin", result="fail", gr_id=gr.json()["id"])
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "open"
+
+
+async def test_the_inspection_and_its_rematch_land_together(realdb, monkeypatch):
+    """Not best-effort: a re-match that fails rolls the inspection back rather
+    than leaving a verdict on file whose hold was never raised."""
+    from sqlalchemy import select
+
+    from app.models.quality_inspection import QualityInspection
+
+    po_id, _, _ = await _po_and_invoice(realdb)
+
+    async def boom(*_a, **_k):
+        raise RuntimeError("matcher down")
+
+    monkeypatch.setattr("app.services.invoice_warnings.refresh_warnings", boom)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        with pytest.raises(RuntimeError):
+            await c.post(
+                "/api/inspections",
+                json={"inspection_number": "QI-ROLLBACK", "result": "fail", "po_id": str(po_id)},
+            )
+    async with realdb.sessionmaker(TENANT)() as s:
+        assert (
+            await s.execute(select(QualityInspection).where(QualityInspection.po_id == po_id))
+        ).first() is None
+
+
+async def test_a_chain_level_approver_cannot_release_it_either(realdb):
+    """The approver set is §389's: a level signed by id in the chain state,
+    later levels still open, counts as an approval of the invoice."""
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+    from app.services.approval_chain import CHAIN_STATE_KEY
+
+    manager = realdb.info(TENANT).users["ap_manager"]
+    po_id, inv_id = await _held(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        snapshot = {"steps": [{"type": "approval", "enabled": True, "config": {}}]}
+        definition = WorkflowDefinition(
+            name=f"qi-chain-{uuid.uuid4().hex[:6]}",
+            steps_config=snapshot,
+            is_active=False,
+            organization_id=realdb.info(TENANT).org_id,
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                definition_id=definition.id,
+                invoice_id=inv_id,
+                steps_config_snapshot=snapshot,
+                state_data={
+                    CHAIN_STATE_KEY: {
+                        "current_level": 1,
+                        "levels": [
+                            {"level": 0, "approvals": [{"user_id": str(manager)}]},
+                            {"level": 1, "approvals": []},
+                        ],
+                    }
+                },
+            )
+        )
+        await s.commit()
+
+    await _inspect(realdb, "ap_manager", result="pass", po_id=po_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "open"
+
+
+async def _received(realdb):
+    """A PO with one line, fully received by the admin, and its invoice."""
+    from app.utils.dates import utc_today
+
+    po_id, (li,), inv_id = await _po_and_invoice(realdb, lines=(("Racket", "10"),))
+    async with realdb.client(key=TENANT, role="admin") as c:
+        gr = await c.post(
+            "/api/goods-receipts",
+            json={
+                "po_id": str(po_id),
+                "received_date": utc_today().isoformat(),
+                "lines": [{"po_line_item_id": str(li), "quantity_received": "10"}],
+            },
+        )
+    assert gr.status_code == 201, gr.text
+    return po_id, gr.json()["id"], inv_id
+
+
+async def test_a_receipts_hold_lifts_only_on_a_pass_against_that_receipt(realdb):
+    """The matcher reads the newest receipt's own inspection first, so the
+    way through is a verdict on the same leg: the approver's receipt pass is
+    refused, a PO-level pass beside the receipt's fail is never read, and an
+    independent receipt pass lifts it (decisions §401)."""
+    po_id, gr_id, inv_id = await _received(realdb)
+    await _inspect(realdb, "admin", result="fail", gr_id=gr_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "open"
+    await _approve(realdb, inv_id, "ap_manager")
+
+    await _inspect(realdb, "ap_manager", result="pass", gr_id=gr_id)
+    assert (await _quality_holds(realdb, inv_id))[0].status == "open"
+
+    await _inspect(realdb, "admin", result="pass", po_id=po_id)
+    assert (await _quality_holds(realdb, inv_id))[0].status == "open"
+
+    await _inspect(realdb, "admin", result="pass", gr_id=gr_id)
+    (row,) = await _quality_holds(realdb, inv_id)
+    assert row.status == "resolved"
+    assert not await _blocked(realdb, inv_id)
+
+
+async def test_the_rematch_is_locked_and_judged_under_the_orgs_settings(realdb, monkeypatch):
+    """`lock_invoices=True` is what serialises an inspection with an approval
+    of the same invoice (§389's argument, §401), and the org's own settings are
+    what let the refresh close a hold at all. Both are pinned here, since
+    dropping either would leave every other test green."""
+    import app.services.invoice_warnings as iw
+
+    seen: list[dict] = []
+    real = iw.refresh_invoices_citing_pos
+
+    async def spy(*args, **kwargs):
+        seen.append(kwargs)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(iw, "refresh_invoices_citing_pos", spy)
+    po_id, _, _ = await _po_and_invoice(realdb)
+    await _inspect(realdb, "admin", result="fail", po_id=po_id)
+    (call,) = seen
+    assert call["lock_invoices"] is True
+    assert call["caller"] == "inspections"
+    assert call["org_settings"] is not None
+    assert call.get("best_effort", False) is False
+
+
+async def test_a_po_outside_the_callers_entity_is_a_404(realdb):
+    """The matcher reads inspections with no entity filter and this door
+    releases holds on the spot, so a verdict filed from one subsidiary
+    against another's PO is refused — the same 404 as a PO that does not
+    exist — and nothing is written."""
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from app.models.entity import Entity
+    from app.models.procurement import PurchaseOrder
+    from app.models.quality_inspection import QualityInspection
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        entity = Entity(
+            name=f"UK Ltd {uuid.uuid4().hex[:4]}",
+            slug=f"uk-{uuid.uuid4().hex[:6]}",
+            organization_id=realdb.info(TENANT).org_id,
+        )
+        s.add(entity)
+        await s.flush()
+        sibling = str(entity.id)
+        default = await _default_entity(s)
+        po = PurchaseOrder(
+            po_number=f"PO-QI-{uuid.uuid4().hex[:6]}",
+            total=Decimal("10.00"),
+            currency="USD",
+            status="open",
+            organization_id=realdb.info(TENANT).org_id,
+            entity_id=uuid.UUID(sibling),
+        )
+        s.add(po)
+        await s.commit()
+        po_id = po.id
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        scoped = await c.post(
+            "/api/inspections",
+            json={"inspection_number": "QI-XENT", "result": "pass", "po_id": str(po_id)},
+            headers={"X-Entity-ID": str(default)},
+        )
+        missing = await c.post(
+            "/api/inspections",
+            json={"inspection_number": "QI-NONE", "result": "pass", "po_id": str(uuid.uuid4())},
+            headers={"X-Entity-ID": str(default)},
+        )
+        consolidated = await c.post(
+            "/api/inspections",
+            json={"inspection_number": "QI-CONS", "result": "pass", "po_id": str(po_id)},
+        )
+    assert scoped.status_code == 404, scoped.text
+    assert missing.status_code == 404, missing.text
+    assert scoped.json() == missing.json()
+    async with realdb.sessionmaker(TENANT)() as s:
+        assert (
+            await s.execute(
+                select(QualityInspection).where(QualityInspection.inspection_number == "QI-XENT")
+            )
+        ).first() is None
+    # From the consolidated view the PO is in scope, and the row is booked to
+    # the PO's own entity rather than the default one.
+    assert consolidated.status_code == 201, consolidated.text
+    async with realdb.sessionmaker(TENANT)() as s:
+        row = await s.get(QualityInspection, uuid.UUID(consolidated.json()["id"]))
+    assert str(row.entity_id) == sibling
+
+
+async def test_a_receipt_on_another_po_is_refused(realdb):
+    """The matcher reads a receipt's own inspection through the receipt, never
+    through `po_id`, so a body pairing a receipt with a different PO would
+    record a link nothing honours."""
+    _, gr_id, _ = await _received(realdb)
+    other_po, _, _ = await _po_and_invoice(realdb)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post(
+            "/api/inspections",
+            json={
+                "inspection_number": "QI-PAIR",
+                "result": "pass",
+                "po_id": str(other_po),
+                "gr_id": gr_id,
+            },
+        )
+    assert resp.status_code == 422, resp.text

@@ -197,11 +197,47 @@ def test_merge_dev_failure_message_is_pii_free():
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_ok_response({"next": None, "results": []}))
         client.post = AsyncMock(return_value=_error_response(400))
         result = _run(adapter.post_invoice(_payload()))
 
     assert result.success is False
     _assert_pii_free(result.message, status=400, provider_hint="Merge.dev")
+
+
+def test_merge_dev_coded_refusal_reads_only_the_problem_type():
+    """Merge's `errors[]` carry the integration's own `detail` / `title` /
+    `raw_error`, which echo what was submitted. Only `problem_type` (an enum
+    value) is read; free text in its place is not echoed either."""
+    import json
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    leaky = json.dumps(_PII_BODY)
+    body = {
+        "model": None,
+        "errors": [
+            {
+                "problem_type": "MISSING_REQUIRED_FIELD",
+                "title": leaky,
+                "detail": leaky,
+                "raw_error": leaky,
+                "source": {"pointer": leaky},
+            },
+            {"problem_type": f"Bank Street {leaky}"},
+        ],
+    }
+    refused = _error_response(400)
+    refused.json = MagicMock(return_value=body)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_ok_response({"next": None, "results": []}))
+        client.post = AsyncMock(return_value=refused)
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.refusal_code == "bill_refused" and result.not_posted
+    assert result.refusal_params == {"merge_problem": "MISSING_REQUIRED_FIELD"}
+    for token in _PII_TOKENS:
+        assert token not in result.message
 
 
 def test_business_central_failure_message_is_pii_free():

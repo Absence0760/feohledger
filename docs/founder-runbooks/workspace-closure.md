@@ -80,6 +80,17 @@ disconnecting it from the environment in Blackbaud Marketplace. An operator
 deletion (`scripts/delete_tenant.py`) prints the same outcome in its written
 confirmation.
 
+An ERP connected with stored credentials instead of a consent logs the same two
+lines as `ERP credentials (<provider>)` (§400). For Sage Intacct a `revoked`
+outcome ends every token Intacct issued us, but the company still lists our
+client ID: tell the customer to remove it under Company > Setup > Company >
+Security > Authorized Client Applications. Intacct's revoke ends every token for
+that Web Services user and company, so anything else sharing the user (another
+integration of the customer's) must sign in again. Sage Accounting (ZA) issues no token,
+so it always reads `unsupported`: tell the customer to change the password of
+the Sage user whose login FeohLedger held, or remove that user. The operator's
+written confirmation names the step in both cases.
+
 ## What stays, on purpose
 
 - **The `workspace_closures` row** — organisation id, slug, the requesting

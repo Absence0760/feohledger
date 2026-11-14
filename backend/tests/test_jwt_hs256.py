@@ -356,19 +356,24 @@ def test_token_without_exp_is_accepted_as_python_jose_did():
     assert jwt_hs256.decode(jwt_hs256.encode(claims)) == claims
 
 
+# Each case is built from `now` at RUN time. A literal `int(time.time()) + 300`
+# here would be evaluated at collection, and a CI shard that reaches this test
+# more than five minutes later would mint an already-past "future" claim and
+# watch the decoder correctly accept it.
 @pytest.mark.parametrize(
-    "extra",
+    "make_extra",
     [
-        pytest.param({"nbf": int(time.time()) + 300}, id="nbf-in-future"),
-        pytest.param({"iat": int(time.time()) + 300}, id="iat-in-future"),
-        pytest.param({"exp": "4102444799"}, id="exp-not-a-number"),
-        pytest.param({"sub": 12345}, id="sub-not-a-string"),
-        pytest.param({"jti": 12345}, id="jti-not-a-string"),
-        pytest.param({"aud": "someone-else"}, id="aud-present"),
-        pytest.param({"aud": ["a", "b"]}, id="aud-list"),
+        pytest.param(lambda now: {"nbf": now + 300}, id="nbf-in-future"),
+        pytest.param(lambda now: {"iat": now + 300}, id="iat-in-future"),
+        pytest.param(lambda now: {"exp": "4102444799"}, id="exp-not-a-number"),
+        pytest.param(lambda now: {"sub": 12345}, id="sub-not-a-string"),
+        pytest.param(lambda now: {"jti": 12345}, id="jti-not-a-string"),
+        pytest.param(lambda now: {"aud": "someone-else"}, id="aud-present"),
+        pytest.param(lambda now: {"aud": ["a", "b"]}, id="aud-list"),
     ],
 )
-def test_bad_claims_are_rejected(extra):
+def test_bad_claims_are_rejected(make_extra):
+    extra = make_extra(int(time.time()))
     with pytest.raises(jwt_hs256.InvalidTokenError):
         jwt_hs256.decode(jwt_hs256.encode(_live_claims(**extra)))
 

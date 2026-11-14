@@ -86,7 +86,9 @@ class VendorStatementReconciliation(Base, EntityMixin, TimestampMixin):
     # statement number/reference, when present.
     statement_date: Mapped[date] = mapped_column(Date, nullable=False)
     statement_reference: Mapped[str | None] = mapped_column(String(120))
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    # No default: both intake doors require the statement's currency
+    # (decisions §377, §402), and a run matches only the ledger in it.
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
 
     # 'csv' | 'manual' | 'pdf'. The S3 key of the uploaded statement, kept for
     # audit replay (NULL for the manual / pasted-lines path).

@@ -236,6 +236,7 @@ async def _seed_document_graph(tenant_mk, org_id):
                 vendor_id=vendor_id,
                 vendor_name="Docs Supplier Ltd",
                 statement_date=date(2026, 1, 31),
+                currency="USD",
                 file_key=STATEMENT_KEY,
             )
         )

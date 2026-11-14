@@ -74,7 +74,9 @@ serves Merge-shaped Contacts at `/contacts` (plus a customer only an unfiltered
 request sees) and 404s `/vendors`, so `tests-e2e/erp/merge-dev.spec.ts` fails on
 the old adapter (vendor sync 502) and asserts payment terms absent. Detail:
 `backend/docs/erp-integration.md` § Merge.dev suppliers are Contacts. The
-diagnosis is kept below.
+diagnosis is kept below. *Amended 2026-11-15 (decisions §399):* the listing no
+longer filters on `is_supplier=true`, which Xero behind Merge sets only once a
+contact has a bill; a customer-only contact is dropped instead.
 
 
 **Found 2026-10-26** while fixing issue #652 (POs linked to their vendor by

@@ -5184,6 +5184,7 @@ export const messages = {
 	'erpRefusal.purchasesNotPermitted': "{provider} はこの請求書の作成を許可しませんでした。Accounting Start プランでは仕入請求書を作成できないか、接続している Sage ユーザーに仕入のアクセス権がありません。プランを変更するか、{provider} でそのユーザーに仕入のアクセス権を付与してから、再試行してください。",
 	'erpRefusal.existingInvoiceNotOpen': "{provider} にはこの請求書がすでにあり、下書きではなくなっているため、ここからは変更できません。{provider} で確認してください。",
 	'erpRefusal.lineAmountPrecision': "明細の金額の小数桁数が、{provider} でこの通貨に使える桁数を超えています。丸めてから再試行してください。",
+	'erpRefusal.payToVendorDiffers': "{provider} でこの請求書の支払先仕入先が承認済みの仕入先と異なるため、この請求書として転記しませんでした。{provider} で請求書と仕入先カードの支払先仕入先を確認してから再試行してください。",
 	'erpRefusal.billNotPosted': "{provider} にこの請求書はありますが、まだ転記済みとして表示されていません。通常は承認待ちのためです。{provider} で承認してから再試行してください。二重に作成されることはありません。",
 	'erpRefusal.billRejected': "{provider} にこの請求書はありますが、却下または取り消されているため、転記されることはありません。再試行する前に {provider} で削除するか入力し直してください。この請求書を完了にしないでください。誰も支払わなくなります。",
 	'erpRefusal.currencyNotSetUp': "{provider} には、この請求書の通貨コードに対応する有効な通貨がありません。{provider} でその通貨を追加または再有効化するか（外貨の場合は複数通貨を有効にする必要があります）、請求書の通貨を修正してから再試行してください。",

@@ -450,6 +450,27 @@ async def receiving_conflict_on(
     runs one policy) or when nobody has approved it. ``instance`` is the
     invoice's workflow instance when the caller already holds it; ``None``
     looks it up."""
+    approvers = await approvers_in_force(db, invoice, approval_config, instance=instance)
+    if not approvers:
+        return frozenset()
+    return receiving_conflicts(await receipt_recorders(db, invoice), approvers)
+
+
+async def approvers_in_force(
+    db: AsyncSession,
+    invoice: Invoice,
+    approval_config: dict,
+    *,
+    instance: WorkflowInstance | None = None,
+) -> frozenset[str]:
+    """:func:`approver_ids` as the reverse-order rules read it: empty when the
+    approval step opted out of segregation (``require_segregation: false``,
+    the opt-out §267 honours at approval). Shared by the receipt rule
+    (:func:`receiving_conflict_on`, decisions §389) and the inspection rule
+    (``invoice_warnings._inspection_clears_hold``, decisions §401), so the two
+    kinds of evidence an approver can type in afterwards are measured against
+    one set of approvers. ``instance`` is the invoice's workflow instance when
+    the caller already holds it; ``None`` looks it up."""
     if approval_config.get("require_segregation", True) is False:
         return frozenset()
     if instance is None:
@@ -458,10 +479,7 @@ async def receiving_conflict_on(
                 select(WorkflowInstance).where(WorkflowInstance.invoice_id == invoice.id)
             )
         ).scalar_one_or_none()
-    approvers = approver_ids(invoice, instance)
-    if not approvers:
-        return frozenset()
-    return receiving_conflicts(await receipt_recorders(db, invoice), approvers)
+    return approver_ids(invoice, instance)
 
 
 def check_receiving_segregation(

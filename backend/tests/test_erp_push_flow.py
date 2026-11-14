@@ -489,14 +489,17 @@ async def test_call_erp_dispatches_via_configured_adapter_not_mock():
 
     resp = AsyncMock()
     resp.status_code = 201
-    resp.json = lambda: {"model": {"id": "merge-inv-77", "number": "INV-1"}}
+    resp.json = lambda **_: {
+        "model": {"id": "merge-inv-77", "number": "INV-1", "total_amount": Decimal("100.00")}
+    }
 
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_merge_no_bill())
         client.post = AsyncMock(return_value=resp)
         ref = await _call_erp(
-            _line_items_db([]),
-            _invoice(),
+            _line_items_db([], accounts=[("6000", None, "ERP-6000")]),
+            _invoice(gl_account="6000"),
             {
                 "integration_method": "merge_dev",
                 "api_key": "k",
@@ -768,17 +771,22 @@ async def test_call_erp_includes_line_items_in_payload():
         _line_item(line_number=None, item_code="SKU-2", gl_account="6100", total=Decimal("50.00")),
     ]
     db = _line_items_db(rows)
+    inv = _invoice()
+    inv.amount = Decimal("71.00")  # what the two lines add up to
 
     resp = AsyncMock()
     resp.status_code = 201
-    resp.json = lambda: {"model": {"id": "merge-inv-88", "number": "INV-1"}}
+    resp.json = lambda **_: {
+        "model": {"id": "merge-inv-88", "number": "INV-1", "total_amount": Decimal("71.00")}
+    }
 
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_merge_no_bill())
         client.post = AsyncMock(return_value=resp)
         await _call_erp(
             db,
-            _invoice(),
+            inv,
             {
                 "integration_method": "merge_dev",
                 "api_key": "k",
@@ -794,10 +802,11 @@ async def test_call_erp_includes_line_items_in_payload():
     assert len(posted_lines) == 2
     # Merge references accounts by its own object id — the chart's
     # `erp_account_id`, never the GL code.
+    # A Merge invoice line's amount is `total_amount` (decisions §399).
     assert posted_lines[0]["account"] == "ERP-6000"
-    assert posted_lines[0]["total_line_amount"] == 21.00
+    assert posted_lines[0]["total_amount"] == 21.00
     assert posted_lines[1]["account"] == "ERP-6100"
-    assert posted_lines[1]["total_line_amount"] == 50.00
+    assert posted_lines[1]["total_amount"] == 50.00
     assert posted_body["model"]["contact"] == "ERP-V-1"
 
 
@@ -1607,6 +1616,15 @@ def test_erp_status_retryable(status, retryable):
     assert result.message.startswith(f"Xero post failed: HTTP {status} (")
 
 
+def _merge_no_bill():
+    """Merge's answer to the pre-create lookup: no bill under this vendor and
+    number yet (decisions §399)."""
+    resp = AsyncMock()
+    resp.status_code = 200
+    resp.json = lambda **_: {"next": None, "results": []}
+    return resp
+
+
 def _merge_send(status: int):
     """Run a whole send through the real `_call_erp` and the Merge.dev adapter,
     whose create answers ``status`` every time: the invoice, the audit
@@ -1614,15 +1632,18 @@ def _merge_send(status: int):
     resp = AsyncMock()
     resp.status_code = status
     resp.headers = {"content-type": "application/json"}
-    resp.json = lambda: {"errors": [{"detail": "Vendor Acme 12-3456789"}]}
-    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    resp.json = lambda **_: {"errors": [{"detail": "Vendor Acme 12-3456789"}]}
+    inv = _invoice(status=InvoiceStatus.sending_to_erp, gl_account="6000")
     recorder = _AuditRecorder()
     cfg = {"integration_method": "merge_dev", "api_key": "k", "account_token": "t"}
     return inv, recorder, cfg, resp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("status", "attempts"), [(400, 1), (422, 1), (503, 3), (429, 3)])
+# 503: Merge.dev's create may have landed, and its listing may not show the
+# bill seconds later, so the adapter does not let it be retried automatically
+# (decisions §399); 429 is Merge's rate limit, which processed nothing.
+@pytest.mark.parametrize(("status", "attempts"), [(400, 1), (422, 1), (503, 1), (429, 3)])
 async def test_send_to_erp_retries_only_an_answer_that_can_change(status, attempts):
     from app.services.erp_link_realm import connection_realm
 
@@ -1635,9 +1656,11 @@ async def test_send_to_erp_retries_only_an_answer_that_can_change(status, attemp
         patch("app.services.erp.asyncio.sleep", sleep_mock),
     ):
         client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_merge_no_bill())
         client.post = AsyncMock(return_value=resp)
         # Linked in the Merge.dev realm the config names, so the push posts.
-        db = _line_items_db([], vendor_realm=connection_realm(cfg))
+        realm = connection_realm(cfg)
+        db = _line_items_db([], vendor_realm=realm, accounts=[("6000", None, "ERP-6000", realm)])
         await send_to_erp_internal(db, inv, erp_config=cfg)
 
     assert inv.status == InvoiceStatus.failed

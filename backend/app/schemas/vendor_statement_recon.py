@@ -38,7 +38,10 @@ class ReconciliationCreate(BaseModel):
     vendor_id: str
     statement_date: date
     statement_reference: str | None = Field(default=None, max_length=120)
-    currency: CurrencyCode = "USD"
+    # Required, no default (decisions §402): the run matches only the ledger
+    # in this currency, so an omitted one must not be read as USD. Missing or
+    # malformed is FastAPI's 422 on `["body", "currency"]`.
+    currency: CurrencyCode
     notes: str | None = Field(default=None, max_length=500)
     lines: list[StatementLineInput] = Field(default_factory=list)
 

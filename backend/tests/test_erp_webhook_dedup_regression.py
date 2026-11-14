@@ -73,12 +73,17 @@ def _tenant_session_factory(invoice):
     return factory
 
 
+# The generic route answers only for the tenant's own, directly connected ERP
+# (decisions §399): `erp_type` must be what this block resolves to.
+GENERIC_DIRECT_ERP = {"type": "generic", "integration_method": "direct"}
+
+
 def _org_with_erp_secret(secret: str):
     return SimpleNamespace(
         id=uuid.uuid4(),
         slug="acme",
         db_name="feoh_acme",
-        settings={"erp": {"webhook_signing_secret": secret}},
+        settings={"erp": {**GENERIC_DIRECT_ERP, "webhook_signing_secret": secret}},
     )
 
 

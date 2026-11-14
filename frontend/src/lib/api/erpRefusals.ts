@@ -122,6 +122,8 @@ const KEYS: Record<string, MessageKey> = {
 	purchases_not_permitted: 'erpRefusal.purchasesNotPermitted',
 	existing_invoice_not_open: 'erpRefusal.existingInvoiceNotOpen',
 	line_amount_precision: 'erpRefusal.lineAmountPrecision',
+	// Business Central: the bill pays another vendor (decisions §403)
+	pay_to_vendor_differs: 'erpRefusal.payToVendorDiffers',
 	// NetSuite (decisions §398)
 	bill_not_posted: 'erpRefusal.billNotPosted',
 	bill_rejected: 'erpRefusal.billRejected',

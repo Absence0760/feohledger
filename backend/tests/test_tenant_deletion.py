@@ -537,7 +537,7 @@ async def test_an_unopenable_store_is_reported_and_the_deletion_proceeds(monkeyp
         tenant_deletion.GRANT_UNREADABLE,
     )
     assert session.deletes == len(CONTROL_DELETIONS)
-    assert "sealed tokens could not be opened" in format_confirmation(result)
+    assert "sealed credentials could not be opened" in format_confirmation(result)
 
 
 @pytest.mark.asyncio
@@ -791,6 +791,251 @@ def test_every_grant_outcome_has_its_confirmation_text():
             assert "NOT yet confirmed" in line and "connected apps" in line
         else:
             assert "NOT revoked" in line and "connected apps" in line, outcome
+
+
+# ---------------------------------------------------------------------------
+# Stored-credential ERPs — ended where the provider allows it, named where it
+# does not (§400)
+# ---------------------------------------------------------------------------
+
+_INTACCT_SECRET = "intacct-client-secret-7"
+_SAGE_ZA_PASSWORD = "sage-za-password-7"
+_STORED = {
+    "sage_intacct": {
+        "client_id": "intacct-client",
+        "client_secret": _INTACCT_SECRET,
+        "company_id": "ACMECO",
+        "user_id": "ws_user",
+    },
+    "sage_accounting_za": {
+        "api_key": "za-api-key-7",
+        "username": "ap@example.co.za",
+        "password": _SAGE_ZA_PASSWORD,
+        "company_id": "4711",
+    },
+    "netsuite": {"account_id": "123"},
+}
+
+
+class _ScriptedIntacct:
+    """Intacct's token and revoke endpoints, over ``httpx.MockTransport`` so
+    the request each test reads is what httpx would send."""
+
+    def __init__(self, revoke_status: int = 200):
+        self.revoke_status = revoke_status
+        self.requests: list[httpx.Request] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.url.path.endswith("/oauth2/token"):
+            return httpx.Response(200, json={"access_token": "intacct-tok", "expires_in": 43200})
+        if request.url.path.endswith("/oauth2/revoke"):
+            return httpx.Response(self.revoke_status, json={"revoked": True})
+        return httpx.Response(599)
+
+    def install(self, monkeypatch):
+        real = httpx.AsyncClient
+
+        def factory(*args, **kwargs):
+            return real(*args, transport=httpx.MockTransport(self.handler), **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", factory)
+        monkeypatch.setattr(settings, "erp_intacct_api_base", "https://intacct.test/ia/api/v1")
+        from app.services.erp_adapters.sage_intacct import clear_token_cache
+
+        clear_token_cache()
+        return self
+
+    def revokes(self) -> list[httpx.Request]:
+        return [r for r in self.requests if r.url.path.endswith("/oauth2/revoke")]
+
+
+def _stored_settings(erp_type: str) -> dict:
+    return {"erp": {"type": erp_type, "integration_method": "direct"}}
+
+
+def _stored_resolver(monkeypatch, erp_type: str) -> None:
+    async def _resolved(_org_id, got_settings, _db):
+        erp = dict(got_settings.get("erp") or {})
+        erp.update(_STORED.get(erp_type, {}))
+        return erp, {}  # no OAuth block: the access is the stored credentials
+
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _resolved)
+
+
+async def _delete_stored(monkeypatch, erp_type: str, *, control_session=None):
+    plan = _closing_plan()
+    _stored_resolver(monkeypatch, erp_type)
+    session = _GrantSession(_stored_settings(erp_type))
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=plan)),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: session),
+    ):
+        result = await delete_tenant(plan.slug, control_session=control_session)
+    return result, session
+
+
+@pytest.mark.asyncio
+async def test_intacct_tokens_are_revoked_and_the_customer_told_what_remains(monkeypatch, caplog):
+    """Intacct documents a revoke that ends every token for the user and
+    company; the authorization itself stays until the customer removes it."""
+    intacct = _ScriptedIntacct().install(monkeypatch)
+    caplog.set_level("DEBUG")
+
+    result, session = await _delete_stored(monkeypatch, "sage_intacct")
+
+    (call,) = intacct.revokes()
+    assert str(call.url) == "https://intacct.test/ia/api/v1/oauth2/revoke"
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "sage_intacct",
+        erp_oauth.REVOKED,
+    )
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "revoked at the provider" in line
+    assert "Authorized Client Applications" in line
+    assert "ERP credentials (sage_intacct) revoked" in caplog.text
+    for secret in (_INTACCT_SECRET, "intacct-tok"):
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_intacct_revoke_that_fails_never_stops_the_deletion(monkeypatch):
+    intacct = _ScriptedIntacct(revoke_status=503).install(monkeypatch)
+
+    result, session = await _delete_stored(monkeypatch, "sage_intacct")
+
+    assert len(intacct.revokes()) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_FAILED
+    assert session.deletes == len(CONTROL_DELETIONS)
+    confirmation = format_confirmation(result)
+    assert "NOT revoked" in confirmation and "Authorized Client Applications" in confirmation
+
+
+@pytest.mark.asyncio
+async def test_a_closure_revokes_intacct_only_after_its_commit(monkeypatch):
+    """The same rule as an OAuth revoke: no provider call while the closure
+    holds its row locks."""
+    intacct = _ScriptedIntacct().install(monkeypatch)
+    held = _GrantSession(_stored_settings("sage_intacct"))
+
+    result, _other = await _delete_stored(monkeypatch, "sage_intacct", control_session=held)
+
+    assert held.deletes == len(CONTROL_DELETIONS)
+    assert intacct.requests == [], "Intacct was called while the closure held its locks"
+    assert result.erp_grant_revocation == tenant_deletion.GRANT_REVOKE_AFTER_COMMIT
+    await held.commit()
+    assert len(intacct.revokes()) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKED
+
+
+@pytest.mark.asyncio
+async def test_sage_za_is_unsupported_at_once_and_names_the_password(monkeypatch, caplog):
+    """No token exists to revoke: decided at the read, so a closure defers
+    nothing, and the customer is told to change the Sage user's password."""
+    intacct = _ScriptedIntacct().install(monkeypatch)  # any HTTP call would land here
+    caplog.set_level("DEBUG")
+    held = _GrantSession(_stored_settings("sage_accounting_za"))
+
+    result, _other = await _delete_stored(monkeypatch, "sage_accounting_za", control_session=held)
+    await held.commit()
+
+    assert intacct.requests == []
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "sage_accounting_za",
+        erp_oauth.REVOKE_UNSUPPORTED,
+    )
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "NOT revoked" in line and "password" in line
+    assert _SAGE_ZA_PASSWORD not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("erp_type", ["netsuite", "mock"])
+async def test_an_erp_with_no_stated_step_adds_nothing(monkeypatch, erp_type):
+    """An adapter that states no provider-side step (or the local mock) is
+    not reported: the confirmation never invents a step."""
+    intacct = _ScriptedIntacct().install(monkeypatch)
+
+    result, session = await _delete_stored(monkeypatch, erp_type)
+
+    assert intacct.requests == []
+    assert result.erp_grant_provider is None
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert "ERP credentials" not in format_confirmation(result)
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_store_still_names_intacct_s_step(monkeypatch):
+    """The sealed client secret cannot be opened, so nothing is minted or
+    revoked; the public config still says Intacct, so the customer is told."""
+    intacct = _ScriptedIntacct().install(monkeypatch)
+
+    async def _unreadable(*_a, **_k):
+        raise CredentialCryptoError("open failed (kms)")
+
+    monkeypatch.setattr(erp_oauth, "resolved_erp", _unreadable)
+    session = _GrantSession(_stored_settings("sage_intacct"))
+    with (
+        patch.object(tenant_deletion, "_load_plan", AsyncMock(return_value=_closing_plan())),
+        patch.object(tenant_deletion.storage, "delete_prefix", AsyncMock(return_value=0)),
+        patch.object(tenant_deletion, "control_session_factory", lambda: session),
+    ):
+        result = await delete_tenant("closing")
+
+    assert intacct.requests == []
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "sage_intacct",
+        tenant_deletion.GRANT_UNREADABLE,
+    )
+    assert "Authorized Client Applications" in format_confirmation(result)
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_that_breaks_while_assessed_never_stops_the_deletion(monkeypatch):
+    """The deletion completes, and the confirmation still names the step: a
+    broken assessment reads ``failed``, never silence about live access."""
+    from app.services.erp_adapters.sage_accounting_za import SageAccountingZaAdapter
+
+    async def _boom(self):
+        raise RuntimeError("adapter bug")
+
+    monkeypatch.setattr(SageAccountingZaAdapter, "revoke_stored_access", _boom)
+
+    result, session = await _delete_stored(monkeypatch, "sage_accounting_za")
+
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "sage_accounting_za",
+        erp_oauth.REVOKE_FAILED,
+    )
+    assert "password" in format_confirmation(result)
+
+
+def test_every_stored_credential_outcome_names_the_provider_side_step():
+    step = "remove FeohLedger's client ID under Authorized Client Applications"
+    for outcome in (
+        erp_oauth.REVOKED,
+        erp_oauth.REVOKE_FAILED,
+        erp_oauth.REVOKE_UNSUPPORTED,
+        tenant_deletion.GRANT_UNREADABLE,
+        tenant_deletion.GRANT_REVOKE_AFTER_COMMIT,
+    ):
+        text_out = format_confirmation(
+            tenant_deletion.TenantDeletionResult(
+                plan=_closing_plan(),
+                objects_deleted=0,
+                database_dropped=True,
+                erp_grant_provider="sage_intacct",
+                erp_grant_revocation=outcome,
+                erp_grant_provider_step=step,
+            )
+        )
+        line = next(ln for ln in text_out.splitlines() if "ERP credentials:" in ln)
+        assert step in line, outcome
+        assert "connected apps" not in line, "the generic OAuth step replaced the provider's"
 
 
 # ---------------------------------------------------------------------------

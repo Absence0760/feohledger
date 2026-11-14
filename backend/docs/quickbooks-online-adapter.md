@@ -165,7 +165,7 @@ also records `state_data.erp_realm`, the connection realm the bill lives in.
 
   | Bill in QuickBooks | Invoice here | Result |
   |---|---|---|
-  | settled outside us, by a vendor credit (in part or whole) | payable here | blocking `payment_reconciliation`; no cash payment is booked |
+  | settled outside us, by a vendor credit (in part or whole) | payable here, or sent | blocking `payment_reconciliation`; no cash payment is booked |
   | paid outside us, in cash | approved / sent / posted | recorded as paid outside FeohLedger (the ERP-paid path, `record_erp_reported_payment`), at QuickBooks' cash figure, with its date and rail → `paid`, out of the queue; a figure (or currency) that is not what is owed here is refused `amount_mismatch` and kept on a blocking row (§393) |
   | paid outside us | payment_scheduled | blocking `payment_reconciliation`: FeohLedger is paying it too |
   | paid outside us | paid by a FeohLedger rail | `erp_reconciliation`: paid twice (a payment recorded as made outside is taken to be that same payment) |

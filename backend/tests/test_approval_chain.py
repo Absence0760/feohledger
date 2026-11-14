@@ -836,3 +836,61 @@ def test_advance_records_actor_id_in_approvals():
     assert len(approvals) == 1
     assert approvals[0]["user_id"] == str(actor)
     assert "at" in approvals[0]
+
+
+# ---------------------------------------------------------------------------
+# approvers_in_force — the set the reverse-order receipt and inspection rules
+# measure a later recorder against (decisions §389, §401)
+# ---------------------------------------------------------------------------
+
+
+def _chain_with(*user_ids):
+    return {
+        "approval_levels": {
+            "levels": [{"name": "L1", "approvals": [{"user_id": str(u)} for u in user_ids]}]
+        }
+    }
+
+
+async def test_approvers_in_force_is_empty_when_segregation_is_opted_out():
+    """`require_segregation: false` is the opt-out §267 honours at approval, so
+    nobody is an approver in force — and no instance is even looked up."""
+    from app.services.approval_chain import approvers_in_force
+
+    invoice = SimpleNamespace(id=uuid.uuid4(), approved_by_user_id=uuid.uuid4())
+    db = _db_returning(_make_instance(state_data=_chain_with(uuid.uuid4())))
+
+    assert await approvers_in_force(db, invoice, {"require_segregation": False}) == frozenset()
+    db.execute.assert_not_awaited()
+
+
+async def test_approvers_in_force_includes_a_chain_level_approver():
+    """A level approver (signed while later levels are open) is in force beside
+    the approval of record; the given instance is used without a lookup."""
+    from app.services.approval_chain import approvers_in_force
+
+    stamped, level_approver = uuid.uuid4(), uuid.uuid4()
+    invoice = SimpleNamespace(id=uuid.uuid4(), approved_by_user_id=stamped)
+    db = _db_returning(None)
+
+    got = await approvers_in_force(
+        db, invoice, {}, instance=_make_instance(state_data=_chain_with(level_approver))
+    )
+
+    assert got == frozenset({str(stamped), str(level_approver)})
+    db.execute.assert_not_awaited()
+
+
+async def test_approvers_in_force_looks_up_the_instance_when_none_is_given():
+    """`instance=None` reads the invoice's workflow instance, so a chain-level
+    approver is still found by a caller that does not hold it."""
+    from app.services.approval_chain import approvers_in_force
+
+    level_approver = uuid.uuid4()
+    invoice = SimpleNamespace(id=uuid.uuid4(), approved_by_user_id=None)
+    db = _db_returning(_make_instance(state_data=_chain_with(level_approver)))
+
+    got = await approvers_in_force(db, invoice, {"require_segregation": True})
+
+    assert got == frozenset({str(level_approver)})
+    db.execute.assert_awaited_once()

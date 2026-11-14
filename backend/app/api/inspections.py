@@ -25,7 +25,7 @@ from app.api.deps import (
 from app.api.pagination import PaginationParams, paginated, pagination_params
 from app.database import get_control_db
 from app.models.organization import Organization
-from app.models.procurement import GoodsReceipt
+from app.models.procurement import GoodsReceipt, PurchaseOrder
 from app.models.quality_inspection import INSPECTION_SOURCE_MANUAL, QualityInspection
 from app.models.user import User
 from app.schemas.inspection import VALID_RESULTS, InspectionCreate
@@ -36,6 +36,7 @@ from app.tenant import (
     apply_entity_scope,
     ensure_in_entity_scope,
     get_entity_id,
+    get_tenant,
     get_tenant_db,
     get_write_entity_id,
 )
@@ -168,10 +169,24 @@ async def list_inspections(
 async def create_inspection(
     body: InspectionCreate,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID = Depends(get_write_entity_id),
+    scope_entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    """Record a quality inspection by hand, and re-match the invoices citing
+    its PO in the same transaction.
+
+    The verdict is the 4-way match's input: a ``fail`` / ``partial`` raises a
+    payment-blocking ``quality_hold`` on those invoices, and a ``pass`` lets
+    the refresh close one, so both land with the row or not at all (a failed
+    re-match rolls the inspection back), as a goods receipt's do. Whether the
+    new verdict may *close* a hold is ``invoice_warnings._inspection_clears_hold``'s
+    call: not while its recorder is implicated in the invoice or approved it
+    (decisions §262, §401). The org's own settings are threaded through, since
+    without them a refresh may raise a hold but never close one.
+    """
     if body.result not in VALID_RESULTS:
         raise HTTPException(
             status_code=400,
@@ -191,6 +206,53 @@ async def create_inspection(
             gr_id = uuid.UUID(body.gr_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid gr_id")
+
+    # The documents it cites, inside the caller's entity — before anything is
+    # written. The matcher reads inspections by `po_id` / `gr_id` with no
+    # entity filter of its own, and this request re-matches (and can release)
+    # the invoices on that PO, so a verdict filed from entity A against entity
+    # B's PO would lift B's quality hold (decisions §401). An unknown or
+    # out-of-scope id is the same opaque 404 `GET /api/purchase-orders/{id}` /
+    # `GET /api/goods-receipts/{id}` give, rather than the FK error it was.
+    # The row is booked to the cited document's own entity, where the receipt
+    # it inspects lives, as a goods receipt is booked to its PO's.
+    if gr_id is not None:
+        gr_row = (
+            await db.execute(
+                apply_entity_scope(
+                    select(GoodsReceipt.po_id, GoodsReceipt.entity_id).where(
+                        GoodsReceipt.id == gr_id
+                    ),
+                    GoodsReceipt,
+                    scope_entity_id,
+                )
+            )
+        ).one_or_none()
+        if gr_row is None:
+            raise HTTPException(status_code=404, detail="Goods receipt not found")
+        if po_id is not None and gr_row.po_id != po_id:
+            # The matcher reads a receipt's own inspection through the receipt,
+            # never through `po_id`, so a body naming a receipt of another PO
+            # records a link nothing would honour.
+            raise HTTPException(
+                status_code=422, detail="The goods receipt is not on that purchase order."
+            )
+        entity_id = gr_row.entity_id or entity_id
+    elif po_id is not None:
+        po_entity = (
+            await db.execute(
+                apply_entity_scope(
+                    select(PurchaseOrder.id, PurchaseOrder.entity_id).where(
+                        PurchaseOrder.id == po_id
+                    ),
+                    PurchaseOrder,
+                    scope_entity_id,
+                )
+            )
+        ).one_or_none()
+        if po_entity is None:
+            raise HTTPException(status_code=404, detail="Purchase order not found")
+        entity_id = po_entity.entity_id or entity_id
 
     inspection = QualityInspection(
         inspection_number=body.inspection_number,
@@ -212,6 +274,8 @@ async def create_inspection(
     db.add(inspection)
     await db.flush()
 
+    await _rematch(db, org_id, inspection, org.settings or {})
+
     # The 4-way-match quality gate: a `fail`/`partial` here is what flips an
     # invoice's `po_match` to a quality hold, so a hand-entered inspection can
     # block (or clear) a payable invoice. Its QMS-synced sibling has always
@@ -221,6 +285,9 @@ async def create_inspection(
     # inspection number and outcome only. The inspector's name, the accepted /
     # rejected quantities and the free-text deviation notes are deliberately
     # NOT recorded: the same PII-lean rule the sync path applies.
+    # Written after the re-match: under `FEOH_AUDIT_MODE=lambda` the event
+    # leaves for SQS at once, so writing it first would ship a
+    # `quality_inspection.created` for a row a failed re-match rolled back.
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),
@@ -248,6 +315,50 @@ async def create_inspection(
         else None
     )
     return _serialize(inspection, gr_number)
+
+
+async def _rematch(
+    db: AsyncSession, org_id: uuid.UUID, inspection: QualityInspection, org_settings: dict
+) -> None:
+    """Re-run PO matching on every invoice citing the PO this inspection
+    reaches — its own ``po_id``, or its goods receipt's PO (the create route
+    has already refused a receipt on another PO). Not best-effort: an
+    interactive write and the holds it raises or lifts land together
+    (decisions §401).
+
+    Locked, like receipt entry: the refresh takes the invoices ``FOR UPDATE``
+    in id order, so an inspection and an approval of one of those invoices
+    serialise on the invoice row, which every human approval door locks.
+    Whichever commits second sees the other; if the approval commits second,
+    the inspection came first, which is the forward order §401 leaves open
+    (``docs/followups.md``). Lock order: the inspection's insert holds a
+    ``KEY SHARE`` on the PO / receipt it cites (the foreign keys), then the
+    invoices — the same PO-then-invoices order receipt entry takes, and
+    approval takes no PO or receipt lock — so there is no cycle."""
+    from app.services.invoice_warnings import refresh_invoices_citing_pos
+
+    po_ids = {inspection.po_id} - {None}
+    if inspection.gr_id is not None:
+        gr_po = (
+            await db.execute(select(GoodsReceipt.po_id).where(GoodsReceipt.id == inspection.gr_id))
+        ).scalar_one_or_none()
+        if gr_po is not None:
+            po_ids.add(gr_po)
+    if not po_ids:
+        return
+    numbers = set(
+        (
+            await db.execute(select(PurchaseOrder.po_number).where(PurchaseOrder.id.in_(po_ids)))
+        ).scalars()
+    )
+    await refresh_invoices_citing_pos(
+        db,
+        org_id,
+        numbers,
+        org_settings=org_settings,
+        caller="inspections",
+        lock_invoices=True,
+    )
 
 
 @router.post("/sync")

@@ -59,7 +59,24 @@ def test_merge_dev_is_the_scale_plan_choice():
     assert {f["name"] for f in catalog.MERGE_DEV_PROVIDER["fields"] if f["secret"]} == {
         "api_key",
         "account_token",
+        # Merge's webhook signature key, optional (decisions §399).
+        "webhook_signing_secret",
     }
+    fields = {f["name"]: f for f in catalog.MERGE_DEV_PROVIDER["fields"]}
+    assert not fields["webhook_signing_secret"]["required"]
+    # The region picks one of Merge's own hosts and nothing else, so it is no
+    # destination: changing it keeps the stored Merge credentials. Its options
+    # are exactly the adapter's hosts, and a saved block without it is the US.
+    from app.services.erp_adapters import merge_dev
+
+    region = fields["region"]
+    assert region["destination"] is False and not region["required"]
+    assert set(region["options"]) == set(merge_dev.MERGE_REGION_BASES)
+    assert region["stored_default"] == merge_dev.DEFAULT_REGION
+    assert all(
+        host.startswith("https://api") and ".merge.dev/" in host
+        for host in merge_dev.MERGE_REGION_BASES.values()
+    )
     long_tail = {e["value"] for e in catalog.MERGE_DEV_LONG_TAIL}
     assert {"sap_s4hana", "epicor", "acumatica"} <= long_tail
     # A direct ERP must not also be offered as a Merge.dev long-tail entry.
