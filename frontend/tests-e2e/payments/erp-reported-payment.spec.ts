@@ -94,6 +94,9 @@ function chequeReport(tag: string): Record<string, unknown> {
 		reference: `BILL-${tag}`,
 		paid_on: PAID_ON,
 		paid_on_reported: true,
+		// The cash QuickBooks states for the bill (§393): a row without it is
+		// re-read from the ERP before anything is booked, never booked at our
+		// own figure.
 		amount: '150.00',
 		amount_currency: 'USD',
 		payment_parts: null,
