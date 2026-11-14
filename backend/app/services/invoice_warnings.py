@@ -1426,8 +1426,9 @@ async def _close_cleared_po_exceptions(
       release the payment. A row with no recorded PO counts as a different one.
     * **A hand-recorded pass.** An inspection can be typed in
       (``POST /api/inspections``). A ``quality_hold`` cleared by a manual
-      inspection whose recorder is unknown, or is implicated in the invoice
-      (``approval_chain.violates_segregation``), stays open. A QMS-synced
+      inspection whose recorder is unknown, is implicated in the invoice
+      (``approval_chain.violates_segregation``), or approved it (§401), stays
+      open. A QMS-synced
       inspection carries the QMS's verdict; an inspection predating the source
       column is unknown and stays held.
     * **A hand-recorded receipt.** A receipt can be typed in too
@@ -1532,7 +1533,15 @@ async def _inspection_clears_hold(
     """Whether the inspection the matcher now reads may lift a quality hold —
     see ``_close_cleared_po_exceptions``. No inspection at all (the rule stopped
     requiring one) is an admin's configuration act, not evidence anyone typed
-    in, and does not hold the close back."""
+    in, and does not hold the close back.
+
+    A hand-recorded verdict may not, while its recorder is unknown, is
+    implicated in the invoice (decisions §262's rule, as for receipts), or
+    approved it — the approval of record or any level of its chain
+    (decisions §401, §389's reverse order applied to the fourth leg): one
+    person passing the goods after signing the invoice off is still one person
+    doing both. The approval step's ``require_segregation: false`` lifts the
+    approver half, as it lifts §389."""
     if not inspection_id:
         return True
     import uuid as _uuid
@@ -1558,7 +1567,16 @@ async def _inspection_clears_hold(
         return True
     if recorder is None:
         return False
-    return not violates_segregation(invoice, recorder, {})
+    if violates_segregation(invoice, recorder, {}):
+        return False
+    from app.services.approval_chain import approvers_in_force
+    from app.services.review import resolve_approval_config
+    from app.services.workflow_engine import get_workflow_instance
+
+    instance = await get_workflow_instance(db, invoice.id)
+    approval_config = await resolve_approval_config(db, invoice, instance)
+    approvers = await approvers_in_force(db, invoice, approval_config or {}, instance=instance)
+    return str(recorder) not in approvers
 
 
 async def receipts_clear_hold(db: AsyncSession, invoice: Invoice, po_id: str | None) -> bool:
