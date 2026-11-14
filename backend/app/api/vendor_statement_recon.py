@@ -231,7 +231,7 @@ async def _create_run(
     vendor_id: uuid.UUID,
     statement_date: date,
     statement_reference: str | None,
-    currency: str,
+    currency: str | None,
     notes: str | None,
     source_format: str,
     statement_lines: list[recon.StatementLine],
@@ -244,8 +244,13 @@ async def _create_run(
     currency**, runs the pure reconciliation engine, and persists the run + its
     per-line results. Does NOT commit — the caller owns the transaction
     boundary.
+
+    Both doors already require the currency, but this is where it becomes the
+    ledger filter, so it is checked again here rather than defaulted: a run with
+    no currency is refused (`statement_currency`'s coded 422) before anything
+    is read, never reconciled against dollars (decisions §402).
     """
-    run_currency = (currency or "USD").upper()
+    run_currency = statement_currency(currency)
     vendor = (
         await db.execute(
             apply_entity_scope(select(Vendor).where(Vendor.id == vendor_id), Vendor, entity_id)

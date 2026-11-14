@@ -328,7 +328,10 @@ whose status is `NOT IN (paid, done)` — a settled invoice can't be on a
 supplier's open-items statement — and that are **denominated in the run's own
 currency**. Both intake paths share `_create_run`, which resolves the vendor
 (404 if out of entity scope), builds the candidate ledger, runs `reconcile`, and
-persists the run + lines (mirrored by the seed helper).
+persists the run + lines (mirrored by the seed helper). `_create_run` checks the
+currency itself through `refusals.statement_currency` and never defaults it: a
+caller that reaches it with none gets the coded 422
+`statement_currency_required` before anything is read (decisions §402).
 
 #### Why the ledger is single-currency
 

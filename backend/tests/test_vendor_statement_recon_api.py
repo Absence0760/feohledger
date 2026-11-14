@@ -443,6 +443,39 @@ async def test_create_refuses_an_omitted_or_malformed_statement_currency(
         assert runs.scalars().all() == []
 
 
+@pytest.mark.parametrize("currency", [None, "", "  "])
+async def test_create_run_refuses_an_empty_currency_before_reading_anything(currency):
+    """The shared persist path never defaults a missing currency to USD
+    (decisions §402): it is the ledger filter, so an empty one is the coded
+    422, and no vendor, ledger or run is read or written."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from fastapi import HTTPException
+
+    from app.api.vendor_statement_recon import _create_run
+
+    db = MagicMock()
+    db.execute = AsyncMock()
+    with pytest.raises(HTTPException) as exc:
+        await _create_run(
+            db,
+            org_id=uuid.uuid4(),
+            entity_id=uuid.uuid4(),
+            actor_id=uuid.uuid4(),
+            vendor_id=uuid.uuid4(),
+            statement_date=_TODAY,
+            statement_reference=None,
+            currency=currency,
+            notes=None,
+            source_format="manual",
+            statement_lines=[],
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "statement_currency_required"
+    db.execute.assert_not_awaited()
+    db.add.assert_not_called()
+
+
 async def test_create_takes_the_statement_currency_it_is_given(realdb):
     """A non-USD statement is stored in its own (uppercased) currency and
     matched against that ledger, not the USD one."""

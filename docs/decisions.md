@@ -20388,7 +20388,11 @@ FastAPI's 422 on `["body", "currency"]` (`type` `missing` or `value_error`),
 before any run is built; a lowercase code is stored uppercased. The ORM column
 lost its Python-side `default="USD"` as well (the server default went in 0113),
 so a future construction site that forgets the currency fails on insert rather
-than writing dollars. The frontend `ReconciliationCreate` type makes `currency`
+than writing dollars. (Amended in the round-10 review gate: `_create_run`, the
+persist path both doors share, still read `(currency or "USD")`, so a caller
+reaching it with none was filtered to the dollar ledger before the insert could
+fail. It now runs `refusals.statement_currency` on its argument, so an empty
+currency is the coded 422 before anything is read.) The frontend `ReconciliationCreate` type makes `currency`
 required too.
 
 **Rejected: the upload's coded refusal on this door.** The upload refuses with
