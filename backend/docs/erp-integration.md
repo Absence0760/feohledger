@@ -2296,8 +2296,18 @@ Web Services sender ID, and each customer company must subscribe to Web
 Services, authorize that sender ID, and add our client id together with its
 Web Services user under *Company > Setup > Company > Security > Authorized
 Client Applications*. The `user_id` field's help on the setup page says so.
-Disconnecting on the customer's side means removing that entry: no long-lived
-token is stored here to revoke.
+Disconnecting on the customer's side means removing that entry; only the
+customer can. **Revocation** (decisions §400): the client-credentials grant
+issues no refresh token, only 12-hour access tokens cached per worker. Intacct
+documents `POST /ia/api/v1/oauth2/revoke` (form `token`, the client as form
+fields or HTTP Basic, answering `200 {"revoked": true}`), and revoking one token
+revokes every token for that Web Services user and company
+(<https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/authorization-and-security/oauth2>,
+"Revoke a token", checked 2026-11-13). Tenant deletion therefore mints one fresh
+token and revokes it (`SageIntacctAdapter.revoke_stored_access`), which ends the
+tokens other workers hold too, and its confirmation still tells the customer to
+remove the Authorized Client Applications entry. `revoked` only on that
+documented answer; a refused mint, a refusal or an outage is `failed`.
 
 | `settings.erp` key | Secret | Meaning |
 |---|---|---|
@@ -2760,6 +2770,14 @@ separate product with its own API, `https://accounting.sageone.co.za/api/2.0.0`
 | `company_id` | no | Numeric Sage company id (`Company/Get` lists them) |
 | `base_url` | no (optional) | API base; default `https://accounting.sageone.co.za/api/2.0.0`. Admin-supplied and handed the API key and the Sage password, so https-only, on `accounting.sageone.co.za` only (any other host or port → `SageZaConfigError`), and SSRF-guarded. The operator override `FEOH_ERP_SAGE_ZA_API_BASE` (fake-erp) skips all three |
 | `company_currency` | no (optional) | ISO code of the Sage company's own currency, default `ZAR` — the API reports currencies only as numeric ids and a symbol |
+
+**Nothing to revoke** (decisions §400). No token is ever issued: the stored
+Sage login is the access, and deleting our sealed copy ends nothing at Sage.
+The API's Help index has no revocation resource beyond an undocumented
+`DELETE CoreTokens/Delete` for a token we never hold
+(<https://accounting.sageone.co.za/api/2.0.0/Help>, checked 2026-11-13). Tenant
+deletion reports `unsupported` without calling Sage, and its confirmation tells
+the customer to change that Sage user's password or remove the user.
 
 Every call is `<Resource>/<Method>?apikey=…&companyid=…` with the Sage login in
 HTTP basic auth. List methods page with OData `$top` / `$skip` (100 rows a
@@ -3625,7 +3643,7 @@ endpoint does (`token_auth`). **Which providers revoke** (decisions §371):
 |---|---|---|
 | QuickBooks Online | `developer.api.intuit.com/v2/oauth2/tokens/revoke` | JSON `{"token"}`, Basic |
 | Xero | `identity.xero.com/connect/revocation` | RFC 7009 form, Basic. Revoking the refresh token also removes the org's connection, so the next consent offers the org afresh instead of "Already connected" |
-| Sage Accounting | `oauth.accounting.sage.com/revoke` (`FEOH_ERP_SAGE_ACCOUNTING_REVOKE_URL`) | RFC 7009 form, the client as `client_id` / `client_secret` form fields like its token endpoint, never Basic |
+| Sage Accounting | `oauth.accounting.sage.com/revoke` (`FEOH_ERP_SAGE_ACCOUNTING_REVOKE_URL`) | RFC 7009 form: `token` (the refresh token) with the client as `client_id` / `client_secret` form fields like its token endpoint, never Basic; `200 {"success": "ok"}`. Access tokens cannot be revoked and live out their five minutes. Source: Sage's own guide, "Revoke a Refresh Token" (<https://developer.sage.com/accounting/docs/v1.0.0/guides/learning/authenticating/authentication>, checked 2026-11-13, §400) |
 | Blackbaud FE NXT | none: SKY API's OAuth service has only `/authorization` and `/token` | `revocation: "unsupported"`. The grant ends when the customer disconnects the app from the environment in Blackbaud Marketplace (or the developer does, under My Applications); regenerating the client secret does not end it |
 
 Every `OAuthProviderSpec` sets exactly one of `revoke_url` and
@@ -3634,8 +3652,14 @@ provider cannot quietly forget the grant on Disconnect. **Deleting a tenant
 revokes too**: `services/tenant_deletion` reads the sealed tokens just before
 the control-plane rows (which hold them) are deleted, calls
 `erp_oauth.revoke_grant`, and prints the outcome in the deletion confirmation.
-It never blocks the deletion and never logs a token. An empty `scopes` sends no
-`scope`. Operator URL overrides (`*_url_setting`) are read on every call.
+It never blocks the deletion and never logs a token. An ERP reached with
+**stored credentials** instead of a consent is covered when its adapter states
+`provider_side_disconnect` (§400): Sage Intacct's tokens are revoked at Intacct
+(`revoke_stored_access`, after a closure's commit like an OAuth revoke) and
+Sage Accounting (ZA) reads `unsupported`; the confirmation's `ERP credentials:`
+line names the step the customer takes at the provider. Merge.dev, Business
+Central, NetSuite and SYSPRO state none yet (`docs/followups.md`). An empty
+`scopes` sends no `scope`. Operator URL overrides (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before
 any post, with `QuickBooks Online post refused: <reason>`: `vendor_not_linked`,
