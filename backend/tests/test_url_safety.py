@@ -579,7 +579,7 @@ _PLAIN_CLIENT_ALLOWED: dict[str, tuple[int, str]] = {
     # Listed though it imports nothing from url_safety: its host is BUILT from a
     # per-org value, so its plain clients are pinned here like the others.
     "services/erp_adapters/netsuite.py": (
-        7,
+        6,
         "the host is <account_id>.suitetalk.api.netsuite.com and account_id must "
         "match [A-Za-z0-9_-]+ before it reaches a URL (_ACCOUNT_ID_RE; injection "
         "cases in test_erp_base_url_overrides), so the token only ever goes to "
