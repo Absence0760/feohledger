@@ -1,6 +1,32 @@
-"""Merge.dev unified API adapter — one integration for all ERPs."""
+"""Merge.dev unified API adapter — one integration for all ERPs.
+
+Checked against Merge's published Accounting OpenAPI spec
+(https://docs.merge.dev/openapi/accounting.json) and its idempotency, webhook
+and write-error guides, read 2026-11-13 (decisions §399):
+
+* a bill is ``POST /invoices`` with ``type: ACCOUNTS_PAYABLE``; an invoice
+  line's amount is ``total_amount`` (``total_line_amount`` exists on
+  purchase-order lines only, and Merge ignores it on an invoice line), and the
+  invoice ``status`` enum is ``PAID, DRAFT, SUBMITTED, PARTIALLY_PAID, OPEN,
+  VOID``;
+* the idempotency header is ``Idempotency-Key``
+  (https://docs.merge.dev/merge-unified/writing-data/idempotency) — a beta
+  Merge enables per customer and remembers for 24 hours — so the pre-create
+  lookup by vendor + number is what keeps a retry from posting twice, and the
+  header is the second line of defence;
+* a failed write answers ``errors[]`` of ``{problem_type, title, detail,
+  source}``; only ``problem_type`` is read, since ``detail`` is the
+  integration's own text and can echo the submitted fields;
+* suppliers are ``GET /contacts`` (there is no ``/vendors``);
+* a linked account lives on one regional stack (``api``, ``api-eu``,
+  ``api-ap``), and its token is refused by the others.
+
+A bill the webhook names (``api/erp_webhook.merge_webhook``) is read back by
+:meth:`MergeDevAdapter.bill_report` and mapped by :func:`merge_bill_report`.
+"""
 
 import logging
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -8,9 +34,11 @@ import httpx
 
 from app.config import settings
 from app.services.erp_adapters.base import (
-    ACCOUNT_NOT_LINKED,
+    NOT_CONNECTED,
     VENDOR_NOT_LINKED,
     ErpAdapter,
+    ErpBillReport,
+    ErpBillState,
     ErpInvoiceStatus,
     ErpListingIncomplete,
     ErpPostResult,
@@ -25,16 +53,94 @@ from app.services.erp_adapters.base import (
     VendorPayload,
     erp_http_failure,
     erp_preflight_refusal,
+    erp_refusal,
+    erp_status_retryable,
     sync_listing_pages,
 )
+from app.services.erp_adapters.bill_allocation import DUPLICATE_DOCUMENT_NUMBER
+from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
+from app.services.erp_adapters.posted_total import check_posted_total
 from app.utils.json_money import dumps_exact_json
 
 logger = logging.getLogger(__name__)
 
+PROVIDER = "Merge.dev"
+
+#: Stable reason codes shared with the other adapters (``ERP_REFUSAL_CODES``).
+VENDOR_INACTIVE = "vendor_inactive"
+ACCOUNT_INACTIVE = "account_inactive"
+#: The ERP refused the bill's create with an answer that says nothing was
+#: created, but not why in a way we can code (Sage's and Intacct's code too).
+BILL_REFUSED = "bill_refused"
+
+#: Merge's regional API stacks, by the ``region`` the org chose. A linked
+#: account lives in exactly one region and its token is refused (401) by the
+#: others. Every value is Merge's own host, so the choice never sends the
+#: credentials anywhere but Merge (it is not a ``catalog.DESTINATION_KEYS``).
+MERGE_REGION_BASES: dict[str, str] = {
+    "US": "https://api.merge.dev/api/accounting/v1",
+    "EU": "https://api-eu.merge.dev/api/accounting/v1",
+    "APAC": "https://api-ap.merge.dev/api/accounting/v1",
+}
+DEFAULT_REGION = "US"
+
+#: Merge ``errors[].problem_type`` values that mean the linked account itself
+#: must be fixed in Merge (relinked); sending the bill again cannot help.
+_RECONNECT_PROBLEMS = frozenset({"RELINK_NEEDED", "CREDENTIAL_REFRESH_FAILED"})
+#: ... that another record already holds the bill's unique fields. Kept
+#: fail-closed (``not_posted`` False): the record may be our own earlier
+#: attempt, which Merge's synced copy did not yet show the pre-create lookup.
+_DUPLICATE_PROBLEMS = frozenset(
+    {"DUPLICATE_MODEL_EXISTS", "MODEL_WITH_DUPLICATE_UNIQUE_FIELD_EXISTS"}
+)
+#: ... the integration's own refusal (a closed period, an inactive vendor or
+#: account), which the adapter then classifies by reading the records back.
+_PROVIDER_PROBLEM = "PROVIDER_ERROR"
+#: Every documented problem type that says the write was refused before
+#: anything was created (Merge's warnings-and-errors reference). ``ERROR``,
+#: ``RATE_LIMITED`` and anything undocumented are not here: they say nothing
+#: about whether the bill landed, so they stay fail-closed.
+_NOT_CREATED_PROBLEMS = frozenset(
+    {
+        "DISABLED_MODEL_WRITE",
+        "INCORRECT_FIELD_TYPE",
+        "INVALID_FIELD_CHOICE",
+        "INVALID_REQUEST_CONTENT_TYPE",
+        "INVALID_REQUEST_DATA_SHAPE",
+        "MISSING_PERMISSION",
+        "MISSING_REQUIRED_FIELD",
+        "MODEL_NOT_FOUND",
+        "PROVIDER_ERROR",
+        "UNSUPPORTED_OPERATION",
+        "UNSUPPORTED_TEST_REQUEST",
+        *_RECONNECT_PROBLEMS,
+    }
+)
+
+#: The shape of a Merge ``problem_type``. Only such a value is ever read.
+_PROBLEM_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+
+#: ``AccountDetails.status`` values of a linked account that cannot write.
+_UNUSABLE_LINK_STATUSES = frozenset({"INCOMPLETE", "RELINK_NEEDED"})
+
+#: Pages the pre-create lookup may read. One vendor rarely has more than one
+#: bill under a number; a lookup that does not finish is "couldn't ask".
+_LOOKUP_MAX_PAGES = 10
+
+#: Merge's ``InvoiceStatusEnum`` → ours, for the statuses whose meaning does
+#: not depend on what settled the bill (``PAID`` / ``PARTIALLY_PAID`` are
+#: judged with the payments and credits, :func:`map_invoice_status`).
+_INVOICE_STATUS_MAP = {
+    "DRAFT": ErpInvoiceStatus.draft,
+    "SUBMITTED": ErpInvoiceStatus.open,
+    "OPEN": ErpInvoiceStatus.open,
+    "VOID": ErpInvoiceStatus.cancelled,
+}
+
 
 def _to_decimal(v) -> Decimal | None:
-    if v is None:
+    if v is None or isinstance(v, bool):
         return None
     try:
         return Decimal(str(v))
@@ -103,16 +209,203 @@ _MERGE_ACCOUNT_TYPE_MAP = {
 }
 
 
-def _api_base() -> str:
-    """Merge.dev API base URL.
+class _LookupUnauthorized(Exception):
+    """The pre-create lookup was answered 401: the credentials are refused."""
 
-    Reads ``settings.erp_merge_api_base`` (default: live Merge.dev). The
-    setting is OPERATOR-controlled (env/process level), not tenant-admin
-    config, so it is trusted — it exists to point local dev + e2e at the
-    fake ERP container (backend/docker-compose.yml `fake-erp`, host port
-    12112). Read per-call, not at import, so tests can monkeypatch it.
+
+class MergeBillNotFound(LookupError):
+    """Merge answered 404 for a bill id."""
+
+
+def _outcome_unknown(message: str) -> ErpPostResult:
+    """A create that may have reached Merge, answered by nothing we can read.
+
+    Not retried automatically: the retry would come within seconds, and Merge's
+    listing may not show a bill written through it that soon, so the
+    pre-create lookup could miss it and post a second one (the
+    ``Idempotency-Key`` that would catch it is a beta that may be off). Stays
+    possibly posted; a person's retry runs the lookup again (decisions §399)."""
+    return ErpPostResult(success=False, message=f"{message} (outcome unknown)", retryable=False)
+
+
+class MergeConfigError(ValueError):
+    """``settings.erp`` holds a Merge field no adapter can use. Names the key only."""
+
+
+def _api_base(region: object = None) -> str:
+    """Merge.dev API base URL for the linked account's ``region``.
+
+    ``settings.erp_merge_api_base`` is OPERATOR-controlled (env/process level,
+    not tenant-admin config), so it is trusted: when it names anything other
+    than Merge's default US host it wins outright — that is how local dev and
+    e2e reach the fake ERP container (backend/docker-compose.yml `fake-erp`,
+    host port 12112). Otherwise the region picks one of Merge's fixed hosts;
+    blank is the US stack (every connection made before the field existed),
+    and an unknown value is a config error, never a guess. Read per call, not
+    at import, so tests can monkeypatch it.
     """
-    return settings.erp_merge_api_base.rstrip("/")
+    override = settings.erp_merge_api_base.rstrip("/")
+    if override != MERGE_REGION_BASES[DEFAULT_REGION]:
+        return override
+    key = str(region or "").strip().upper() or DEFAULT_REGION
+    if key not in MERGE_REGION_BASES:
+        raise MergeConfigError("Merge.dev config 'region' must be one of US, EU, APAC")
+    return MERGE_REGION_BASES[key]
+
+
+def _json_body(resp: httpx.Response) -> dict:
+    """The response body as a dict, or ``{}`` — never raises.
+
+    Numbers with a fraction parse straight to ``Decimal``: a total read back
+    through a float (``99999999999999.99`` → ``…98``) would fail the posted-total
+    and lookup comparisons against an amount that is in fact exact."""
+    try:
+        body = resp.json(parse_float=Decimal)
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _problem_types(body: dict) -> list[str]:
+    """``errors[].problem_type`` of a Merge write response, upper-cased.
+
+    Only the code is read — never ``detail`` / ``title`` / ``raw_error``,
+    which echo the integration's own text (and can carry the submitted fields).
+    """
+    errors = body.get("errors")
+    if not isinstance(errors, list):
+        return []
+    codes = (
+        e["problem_type"].strip().upper()
+        for e in errors
+        if isinstance(e, dict) and isinstance(e.get("problem_type"), str)
+    )
+    # A code is an enum value; anything else (free text) is not echoed.
+    return [c for c in codes if _PROBLEM_CODE.fullmatch(c)]
+
+
+def _coded(reason: str, *, not_posted: bool, problem: str | None = None, **params) -> ErpPostResult:
+    """A non-retryable coded refusal; ``merge_problem`` names Merge's code."""
+    result = erp_refusal(PROVIDER, reason)
+    result.not_posted = not_posted
+    extra = dict(params)
+    if problem:
+        extra["merge_problem"] = problem
+        result.message = f"{result.message} (Merge {problem})"
+    result.refusal_params = extra or None
+    return result
+
+
+def _account_codes(payload: InvoicePayload) -> dict[str, str]:
+    """Our GL code for each Merge account id the payload references."""
+    pairs = [(payload.gl_account_erp_id, payload.gl_account)]
+    pairs += [(li.gl_account_erp_id, li.gl_account) for li in payload.line_items]
+    return {str(erp_id): code for erp_id, code in pairs if erp_id and code}
+
+
+def _ids(value: object) -> tuple[str, ...]:
+    """The Merge ids in a list field that holds ids or expanded objects."""
+    if not isinstance(value, list):
+        return ()
+    out: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            item = item.get("id")
+        if isinstance(item, str) and item:
+            out.append(item)
+    return tuple(out)
+
+
+def has_recorded_payment(record: dict) -> bool:
+    """True when Merge lists a Payment applied to the bill (``payments`` /
+    ``applied_payments``). Credits are not payments: no money left."""
+    return bool(_ids(record.get("payments")) or _ids(record.get("applied_payments")))
+
+
+def settled_by_credit(record: dict) -> bool:
+    """True when Merge lists a credit note or vendor credit applied to the bill."""
+    return bool(
+        _ids(record.get("applied_credit_notes")) or _ids(record.get("applied_vendor_credits"))
+    )
+
+
+def _merge_record_inactive(raw: dict, inactive_status: str) -> bool:
+    """True when Merge reports a contact / account unusable in the ERP: its
+    ``status`` is ``inactive_status`` (``ARCHIVED`` for a contact, ``INACTIVE``
+    for an account) or the ERP deleted it (``remote_was_deleted``)."""
+    return (
+        str(raw.get("status") or "").upper() == inactive_status
+        or raw.get("remote_was_deleted") is True
+    )
+
+
+def map_invoice_status(record: dict) -> ErpInvoiceStatus:
+    """A Merge Invoice read → our status, honouring decisions §303.
+
+    ``PAID`` is ``paid`` only when Merge lists a payment against the bill and
+    no credit: a bill settled wholly or partly by a credit note or vendor
+    credit, or one Merge calls paid with nothing behind it, is
+    ``settled_no_payment`` — booking it as cash would record money that never
+    moved. ``PARTIALLY_PAID`` with no payment behind it is ``open``. A bill
+    the ERP deleted (``remote_was_deleted``) is ``cancelled``, like ``VOID``.
+    """
+    if record.get("remote_was_deleted") is True:
+        return ErpInvoiceStatus.cancelled
+    status = str(record.get("status") or "").upper()
+    if status == "PAID":
+        if has_recorded_payment(record) and not settled_by_credit(record):
+            return ErpInvoiceStatus.paid
+        return ErpInvoiceStatus.settled_no_payment
+    if status == "PARTIALLY_PAID":
+        if has_recorded_payment(record):
+            return ErpInvoiceStatus.partially_paid
+        return ErpInvoiceStatus.open
+    return _INVOICE_STATUS_MAP.get(status, ErpInvoiceStatus.unknown)
+
+
+def merge_bill_report(record: dict) -> ErpBillReport | None:
+    """A Merge Invoice, as :meth:`MergeDevAdapter.bill_report` reads it for the
+    webhook, as the status sync's :class:`ErpBillReport`, or None for a record
+    with no id.
+
+    FeohLedger never writes a payment back to Merge, so whatever took a bill
+    down was done outside it (``reduced_outside``). ``PAID`` is cash only when
+    Merge lists a payment and no credit; otherwise ``settled_by_credit``, which
+    the sync flags for a person rather than recording (decisions §303). ``VOID``
+    or deleted in the ERP is ``deleted`` — Merge's positive answer. ``DRAFT``
+    and anything unlisted are ``unknown``, on which the sync changes nothing.
+    Merge writes no marker of ours onto a bill, but its ids are UUIDs never
+    reused across linked accounts, so the bill matches an invoice by its
+    ``erp_reference`` within the realm the push recorded
+    (``match_by_reference``). Ids, a state and a date only: no vendor, memo or
+    amount reaches the report.
+    """
+    bill_id = record.get("id")
+    if not isinstance(bill_id, str) or not bill_id:
+        return None
+    status = str(record.get("status") or "").upper()
+    if record.get("remote_was_deleted") is True or status == "VOID":
+        state = ErpBillState.deleted
+    elif status == "PAID":
+        state = ErpBillState.paid
+    elif status == "PARTIALLY_PAID":
+        state = ErpBillState.partially_paid
+    elif status in ("OPEN", "SUBMITTED"):
+        state = ErpBillState.open
+    else:
+        state = ErpBillState.unknown
+    paid = state in (ErpBillState.paid, ErpBillState.partially_paid)
+    return ErpBillReport(
+        bill_id=bill_id,
+        state=state,
+        match_by_reference=True,
+        paid_on=_to_date(record.get("paid_on_date")) if paid else None,
+        external_payment_ids=(
+            _ids(record.get("payments")) + _ids(record.get("applied_payments")) if paid else ()
+        ),
+        reduced_outside=paid,
+        settled_by_credit=paid and (not has_recorded_payment(record) or settled_by_credit(record)),
+    )
 
 
 @register_adapter("merge_dev")
@@ -123,11 +416,20 @@ class MergeDevAdapter(ErpAdapter):
         api_key: Merge.dev API key (from your Merge dashboard)
         account_token: Per-customer linked account token (created when
                        the customer connects their ERP via Merge Link)
+
+    Optional:
+        region: ``US`` (default), ``EU`` or ``APAC`` — the Merge stack the
+                linked account lives on.
+        webhook_signing_secret: the Merge organisation's webhook signature
+                key, which verifies ``POST /api/erp/webhook/merge_dev/{slug}``.
     """
 
     erp_type = "merge_dev"
     # Every PO with no number used to be filed under this one row (§328).
     retired_po_numbers = ("UNKNOWN",)
+
+    def _base(self) -> str:
+        return _api_base(self.config.get("region"))
 
     def _headers(self, *, idempotency_key: str | None = None) -> dict[str, str]:
         headers = {
@@ -136,22 +438,85 @@ class MergeDevAdapter(ErpAdapter):
             "Content-Type": "application/json",
         }
         if idempotency_key:
-            # Merge's unified API de-dupes a create by this header: a retried
-            # push after a lost response returns the ORIGINAL record instead
-            # of creating a second one (issue #143).
-            headers["X-Idempotency-Key"] = idempotency_key
+            # Merge's documented header (a beta Merge enables per customer,
+            # kept 24 h); Merge reads no other spelling. A second line of
+            # defence only: `_find_existing` is what keeps a retry from
+            # creating a second bill (§399).
+            headers["Idempotency-Key"] = idempotency_key
         return headers
+
+    async def _find_existing(
+        self, client: httpx.AsyncClient, payload: InvoicePayload
+    ) -> list[dict] | None:
+        """Every live AP invoice for this vendor carrying the invoice number.
+
+        ``number``, ``contact_id`` and ``type`` are exact filters on Merge's
+        ``GET /invoices``; the number is compared again here. None when the
+        lookup could not be completed: a retry must never read "couldn't ask"
+        as "not there". Raises :class:`_LookupUnauthorized` on a 401.
+        """
+        params = {
+            "number": payload.invoice_number,
+            "contact_id": str(payload.vendor_erp_id),
+            "type": "ACCOUNTS_PAYABLE",
+            "page_size": "100",
+        }
+        rows: list[dict] = []
+        for _ in range(_LOOKUP_MAX_PAGES):
+            try:
+                resp = await client.get(
+                    f"{self._base()}/invoices", params=params, headers=self._headers()
+                )
+            except httpx.HTTPError:
+                return None
+            if resp.status_code == 401:
+                raise _LookupUnauthorized
+            if resp.status_code != 200:
+                return None
+            body = _json_body(resp)
+            results = body.get("results")
+            if not isinstance(results, list):
+                return None
+            rows.extend(
+                r
+                for r in results
+                if isinstance(r, dict)
+                and r.get("number") == payload.invoice_number
+                and r.get("remote_was_deleted") is not True
+                and str(r.get("status") or "").upper() != "VOID"
+            )
+            cursor = body.get("next")
+            if not cursor:
+                return rows
+            params["cursor"] = cursor
+        return None
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         # Merge's Invoice references its vendor (`contact`) and each line's
         # `account` by MERGE object id — the ids our vendor and chart syncs
-        # store. Without them the underlying ERP gets a bill with no vendor,
-        # or a GL code where an id belongs. Refuse before any HTTP call, as
-        # the direct adapters do; never fall back to the name or the code.
+        # store. Refuse before any HTTP call, as the direct adapters do; never
+        # fall back to the name or the code.
         if not payload.vendor_erp_id:
-            return erp_preflight_refusal("Merge.dev", VENDOR_NOT_LINKED)
-        if any(li.gl_account and not li.gl_account_erp_id for li in payload.line_items):
-            return erp_preflight_refusal("Merge.dev", ACCOUNT_NOT_LINKED)
+            return erp_preflight_refusal(PROVIDER, VENDOR_NOT_LINKED)
+        try:
+            self._base()
+        except MergeConfigError:
+            result = ErpPostResult(
+                success=False,
+                message=f"{PROVIDER} post failed: config_invalid (region)",
+                retryable=False,
+            )
+            result.not_posted = True
+            return result
+        # The lines are the shared allocation's tax-inclusive grosses, which sum
+        # to exactly the approved amount, or the bill is refused
+        # (`line_amount_missing` / `amount_mismatch` / `account_not_linked`).
+        # A line's amount is Merge's invoice-line `total_amount`;
+        # `total_line_amount` is a purchase-order line field Merge does not
+        # read on an invoice line.
+        lines = bill_lines(payload)
+        if isinstance(lines, str):
+            return erp_preflight_refusal(PROVIDER, lines)
         body = {
             "model": {
                 "type": "ACCOUNTS_PAYABLE",
@@ -163,83 +528,227 @@ class MergeDevAdapter(ErpAdapter):
                 # Money stays Decimal all the way to the encoder — `float()`
                 # here would post a rounded amount into the customer's ledger
                 # (see `utils/json_money`). Merge types these as JSON numbers,
-                # and `dumps_exact_json` still emits numbers, so the wire
-                # contract is unchanged.
+                # and `dumps_exact_json` still emits numbers.
                 "total_amount": payload.amount,
-                "sub_total": payload.subtotal if payload.subtotal else None,
+                # The line amounts are gross, so the bill says so: an
+                # integration must not add tax on top of them. `sub_total` and
+                # `total_discount` are not sent: against gross lines either
+                # would state a second, contradicting total.
+                "inclusive_of_tax": True,
                 "total_tax_amount": payload.tax_amount if payload.tax_amount else None,
-                "total_discount": payload.discount_amount if payload.discount_amount else None,
                 "memo": payload.description,
-                "purchase_order_number": payload.po_number,
                 "line_items": [
-                    {
-                        "description": li.description,
-                        "quantity": li.quantity if li.quantity else None,
-                        "unit_price": li.unit_price if li.unit_price else None,
-                        "total_line_amount": li.total if li.total else None,
-                        # An uncoded line posts no account (Merge allows it);
-                        # a coded one was refused above unless it has an id.
-                        "account": li.gl_account_erp_id,
-                    }
-                    for li in payload.line_items
+                    {"description": memo, "total_amount": amount, "account": account}
+                    for account, amount, memo in lines
                 ],
-                "integration_params": {
-                    "correlation_id": payload.correlation_id,
-                },
             }
         }
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{_api_base()}/invoices",
-                content=dumps_exact_json(body),
-                headers=self._headers(idempotency_key=payload.correlation_id),
-            )
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                # Merge hands back no field of ours to find the bill by, so an
+                # earlier attempt is found by vendor + number: one live bill
+                # with our total is it; anything else is a different document
+                # under the same number.
+                try:
+                    existing = await self._find_existing(client, payload)
+                except _LookupUnauthorized:
+                    return _coded(NOT_CONNECTED, not_posted=True)
+                if existing is None:
+                    result = ErpPostResult(
+                        success=False,
+                        message=f"{PROVIDER} post failed: idempotency_lookup_unavailable",
+                    )
+                    # Nothing was sent yet, so this attempt created nothing.
+                    result.not_posted = True
+                    return result
+                if existing:
+                    return self._found(existing, payload)
 
-        if resp.status_code in (200, 201):
-            data = resp.json()
-            model = data.get("model", {})
+                resp = await client.post(
+                    f"{self._base()}/invoices",
+                    content=dumps_exact_json(body),
+                    headers=self._headers(idempotency_key=payload.correlation_id),
+                )
+                if resp.status_code in (200, 201):
+                    return await self._created(resp, payload)
+                return await self._create_refusal(client, resp, payload)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # No connection was made, so nothing was sent: safe to send again.
+            return ErpPostResult(success=False, message=f"{PROVIDER} post failed: network_error")
+        except httpx.HTTPError:
+            return _outcome_unknown(f"{PROVIDER} post failed: network_error")
+
+    def _found(self, existing: list[dict], payload: InvoicePayload) -> ErpPostResult:
+        """The pre-create lookup found live bills under this vendor + number.
+
+        One at exactly the approved total, in the invoice's currency, is our
+        earlier attempt; anything else is a different document under the
+        number. Two invoices here with the same vendor, number and amount would
+        both match one bill, which the duplicate check upstream exists to stop.
+        """
+        found = existing[0]
+        if (
+            len(existing) == 1
+            and found.get("id")
+            and _to_decimal(found.get("total_amount")) == payload.amount
+            and (not payload.currency or found.get("currency") == payload.currency)
+        ):
             return ErpPostResult(
                 success=True,
-                erp_document_id=model.get("id"),
-                erp_document_number=model.get("number"),
-                message="Posted via Merge.dev",
-                raw_response=data,
+                erp_document_id=str(found["id"]),
+                erp_document_number=found.get("number") or payload.invoice_number,
+                message=f"Already posted via {PROVIDER} (idempotent — found by vendor and number)",
             )
-        else:
-            return erp_http_failure(
-                "Merge.dev",
-                resp.status_code,
-                raw_response=resp.json()
-                if resp.headers.get("content-type", "").startswith("application/json")
-                else None,
+        return erp_refusal(PROVIDER, DUPLICATE_DOCUMENT_NUMBER)
+
+    async def _created(self, resp: httpx.Response, payload: InvoicePayload) -> ErpPostResult:
+        """A 2xx create. Merge answers ``{model, warnings, errors}``: a model with
+        no id, or one carrying ``errors``, is not a confirmed bill, so it fails
+        closed (non-retryable, possibly posted). The total Merge reports must be
+        exactly ours (``posted_total``); Merge cannot void, so a mismatched or
+        unreported total leaves the bill for a person."""
+        data = _json_body(resp)
+        model = data.get("model") if isinstance(data.get("model"), dict) else {}
+        problems = _problem_types(data)
+        if not model.get("id") or problems:
+            refused = _coded(
+                BILL_REFUSED, not_posted=False, problem=problems[0] if problems else None
             )
+            # A model id beside errors may name a bill that exists: kept, so
+            # the failure records which one a person has to look at.
+            refused.erp_document_id = str(model["id"]) if model.get("id") else None
+            return refused
+        document_id = str(model["id"])
+        document_number = model.get("number") or payload.invoice_number
+        failure = await check_posted_total(
+            self,
+            PROVIDER,
+            payload,
+            posted_total=_to_decimal(model.get("total_amount")),
+            document_id=document_id,
+            document_number=document_number,
+        )
+        if failure is not None:
+            return failure
+        return ErpPostResult(
+            success=True,
+            erp_document_id=document_id,
+            erp_document_number=document_number,
+            message=f"Posted via {PROVIDER}",
+        )
+
+    async def _create_refusal(
+        self, client: httpx.AsyncClient, resp: httpx.Response, payload: InvoicePayload
+    ) -> ErpPostResult:
+        """Why Merge refused the create, coded where Merge's answer allows.
+
+        * 401 — a bad API key or account token: ``not_connected``, not retried
+          (Merge has no token for us to refresh).
+        * 429 — Merge's rate limit, which processed nothing: retryable.
+        * any other status a re-send could change (5xx, 408, 409, ...) — the
+          create may have landed, and Merge's listing may not show it for
+          seconds: not retried automatically (:func:`_outcome_unknown`).
+        * otherwise Merge's ``errors[].problem_type`` decides: relink →
+          ``not_connected``; a duplicate → ``duplicate_document_number``
+          (fail-closed, :data:`_DUPLICATE_PROBLEMS`); ``PROVIDER_ERROR`` →
+          the vendor / accounts are read back and an inactive one is named
+          (not posted), else ``bill_refused`` kept possibly posted — it is the
+          integration's catch-all, and nothing says a multi-step write left
+          nothing behind; any other documented "not created" problem →
+          ``bill_refused``, not posted. An undocumented or absent problem type
+          is the plain non-retryable HTTP failure, and stays possibly posted.
+        """
+        status = resp.status_code
+        if status == 401:
+            return _coded(NOT_CONNECTED, not_posted=True)
+        if status == 429:
+            return erp_http_failure(PROVIDER, status)
+        if erp_status_retryable(status):
+            result = erp_http_failure(PROVIDER, status)
+            result.retryable = False
+            return result
+        problems = _problem_types(_json_body(resp))
+        reconnect = next((p for p in problems if p in _RECONNECT_PROBLEMS), None)
+        if reconnect:
+            return _coded(NOT_CONNECTED, not_posted=True, problem=reconnect)
+        duplicate = next((p for p in problems if p in _DUPLICATE_PROBLEMS), None)
+        if duplicate:
+            return _coded(DUPLICATE_DOCUMENT_NUMBER, not_posted=False, problem=duplicate)
+        if not problems or not all(p in _NOT_CREATED_PROBLEMS for p in problems):
+            return erp_http_failure(PROVIDER, status)
+        if _PROVIDER_PROBLEM in problems:
+            inactive = await self._inactive_reference(client, payload)
+            if inactive is not None:
+                return inactive
+            return _coded(BILL_REFUSED, not_posted=False, problem=_PROVIDER_PROBLEM)
+        return _coded(BILL_REFUSED, not_posted=True, problem=problems[0])
+
+    async def _inactive_reference(
+        self, client: httpx.AsyncClient, payload: InvoicePayload
+    ) -> ErpPostResult | None:
+        """``vendor_inactive`` / ``account_inactive`` when Merge positively
+        reports the bill's contact ARCHIVED (or deleted in the ERP) or one of
+        its accounts INACTIVE; else None. An unreadable record is "don't know",
+        never "inactive"."""
+        contact = await self._read(client, f"contacts/{payload.vendor_erp_id}")
+        if contact is not None and _merge_record_inactive(contact, "ARCHIVED"):
+            return _coded(VENDOR_INACTIVE, not_posted=True, problem=_PROVIDER_PROBLEM)
+        inactive: list[str] = []
+        for account_id, code in sorted(_account_codes(payload).items()):
+            account = await self._read(client, f"accounts/{account_id}")
+            if account is not None and _merge_record_inactive(account, "INACTIVE"):
+                inactive.append(code)
+        if inactive:
+            return _coded(
+                ACCOUNT_INACTIVE,
+                not_posted=True,
+                problem=_PROVIDER_PROBLEM,
+                accounts=sorted(set(inactive)),
+            )
+        return None
+
+    async def _read(self, client: httpx.AsyncClient, path: str) -> dict | None:
+        try:
+            resp = await client.get(f"{self._base()}/{path}", headers=self._headers())
+        except httpx.HTTPError:
+            return None
+        if resp.status_code != 200:
+            return None
+        return _json_body(resp) or None
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
+        try:
+            base = self._base()
+        except MergeConfigError:
+            return ErpInvoiceStatus.unknown
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                f"{_api_base()}/invoices/{erp_document_id}",
-                headers=self._headers(),
-            )
+            resp = await client.get(f"{base}/invoices/{erp_document_id}", headers=self._headers())
 
         if resp.status_code != 200:
             return ErpInvoiceStatus.unknown
+        return map_invoice_status(_json_body(resp))
 
-        data = resp.json()
-        status = data.get("status", "").upper()
-
-        status_map = {
-            "DRAFT": ErpInvoiceStatus.draft,
-            "SUBMITTED": ErpInvoiceStatus.open,
-            "OPEN": ErpInvoiceStatus.open,
-            "PARTIALLY_PAID": ErpInvoiceStatus.partially_paid,
-            "PAID": ErpInvoiceStatus.paid,
-            "VOIDED": ErpInvoiceStatus.cancelled,
-        }
-        return status_map.get(status, ErpInvoiceStatus.unknown)
+    async def bill_report(self, bill_id: str) -> ErpBillReport:
+        """The bill as Merge has it now, for the webhook
+        (``erp_merge_webhook``). Raises :class:`MergeBillNotFound` on a 404 and
+        another error on anything unreadable — never reads as gone.
+        ``supports_status_sync`` stays False: Merge takes no payment write-back,
+        so a push still closes at ``done``."""
+        base = self._base()
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{base}/invoices/{bill_id}", headers=self._headers())
+        if resp.status_code == 404:
+            raise MergeBillNotFound(bill_id)
+        if resp.status_code != 200:
+            raise RuntimeError(f"{PROVIDER} bill read failed: HTTP {resp.status_code}")
+        report = merge_bill_report(_json_body(resp))
+        if report is None or report.bill_id != str(bill_id):
+            raise RuntimeError(f"{PROVIDER} bill read failed: unreadable body")
+        return report
 
     async def void_invoice(self, erp_document_id: str) -> bool:
-        # Merge.dev doesn't support direct voiding — depends on ERP capability
+        # Merge's unified API has no void or delete for an invoice.
         return False
 
     async def list_pos(self) -> list[PoPayload]:
@@ -304,26 +813,30 @@ class MergeDevAdapter(ErpAdapter):
         """
         records: list[dict] = []
         params = dict(params)
+        try:
+            self._base()
+        except MergeConfigError:
+            raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed) from None
         async with httpx.AsyncClient(timeout=30) as client:
             for _ in range(sync_listing_pages(100)):
                 try:
                     resp = await client.get(
-                        f"{_api_base()}/{path}", params=params, headers=self._headers()
+                        f"{self._base()}/{path}", params=params, headers=self._headers()
                     )
                 except httpx.HTTPError:
-                    raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed) from None
+                    raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed) from None
                 if resp.status_code != 200:
-                    raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed)
+                    raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed)
                 try:
                     body = resp.json() if resp.content else {}
                 except ValueError:
-                    raise ErpListingIncomplete("Merge.dev", path, ListingGap.fetch_failed) from None
+                    raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed) from None
                 records.extend(r for r in body.get("results") or [] if isinstance(r, dict))
                 cursor = body.get("next")
                 if not cursor:
                     return records
                 params["cursor"] = cursor
-        raise ErpListingIncomplete("Merge.dev", path, ListingGap.truncated)
+        raise ErpListingIncomplete(PROVIDER, path, ListingGap.truncated)
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """The whole chart via Merge's unified ``/accounts``, or
@@ -350,36 +863,49 @@ class MergeDevAdapter(ErpAdapter):
         return items
 
     async def list_vendors(self) -> list[VendorPayload]:
-        """Every supplier via Merge's unified ``/contacts?is_supplier=true``, or
+        """Every supplier via Merge's unified ``/contacts``, or
         :class:`ErpListingIncomplete` — never the pages read before a failure.
 
         Merge's Accounting API has no ``/vendors`` path and no Vendor model: a
-        supplier is a ``Contact`` with ``is_supplier`` true (Merge Accounting
-        OpenAPI, https://docs.merge.dev/openapi/accounting.json, ``GET
-        /accounting/v1/contacts``; https://docs.merge.dev/accounting/contacts/).
-        A Contact's ``id`` is what a PurchaseOrder's ``vendor`` and an
-        Invoice's ``contact`` carry, so it is the ``erp_vendor_id`` the PO sync
-        links by and the bill push posts. ``addresses`` and ``phone_numbers``
-        are expanded so they arrive as objects, not bare ids.
+        supplier is a ``Contact`` (Merge Accounting OpenAPI,
+        https://docs.merge.dev/openapi/accounting.json, ``GET
+        /accounting/v1/contacts``). A Contact's ``id`` is what a
+        PurchaseOrder's ``vendor`` and an Invoice's ``contact`` carry, so it is
+        the ``erp_vendor_id`` the PO sync links by and the bill push posts.
+        ``addresses`` and ``phone_numbers`` are expanded so they arrive as
+        objects, not bare ids.
+
+        The whole contact list is read, not ``is_supplier=true``: some
+        integrations derive ``is_supplier`` from history (Xero sets it only once
+        a contact has a bill), so a supplier nobody has billed yet was never
+        synced, and so could never be billed through us either. A contact that
+        is only a customer is left out by :func:`_merge_contact_to_payload`
+        (decisions §399).
         """
         records = await self._list_complete(
             "contacts",
-            {
-                "page_size": "100",
-                "is_supplier": "true",
-                "expand": "addresses,phone_numbers",
-            },
+            {"page_size": "100", "expand": "addresses,phone_numbers"},
         )
         return [v for v in map(_merge_contact_to_payload, records) if v is not None]
 
     async def test_connection(self) -> bool:
+        """``/account-details`` answers 200 and the linked account can write.
+
+        Merge answers 200 for a linked account that needs relinking too, so its
+        ``status`` (``COMPLETE`` / ``INCOMPLETE`` / ``RELINK_NEEDED`` /
+        ``IDLE``) must not be one that cannot write. An absent status is not
+        read as broken.
+        """
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(
-                    f"{_api_base()}/account-details",
+                    f"{self._base()}/account-details",
                     headers=self._headers(),
                 )
-            return resp.status_code == 200
+            if resp.status_code != 200:
+                return False
+            status = str(_json_body(resp).get("status") or "").upper()
+            return status not in _UNUSABLE_LINK_STATUSES
         except Exception:
             return False
 
@@ -533,9 +1059,12 @@ def _merge_account_to_payload(raw: dict) -> GLAccountPayload | None:
 
 
 def _merge_contact_to_payload(raw: dict) -> VendorPayload | None:
-    """Map a Merge.dev supplier ``Contact`` to our normalized VendorPayload,
-    or None for a record with no Merge ``id`` or one Merge says is not a
-    supplier.
+    """Map a Merge.dev ``Contact`` to our normalized VendorPayload, or None for
+    a record with no Merge ``id`` or a contact that is only a customer
+    (``is_customer`` true, ``is_supplier`` false): it is never a payee. A
+    contact flagged as neither is kept — an integration that derives
+    ``is_supplier`` from history (Xero) flags a new supplier only after its
+    first bill.
 
     ``erp_vendor_id`` is the Merge ``id`` and nothing else: it is what
     ``post_invoice`` posts as the bill's ``contact`` and what a PO's ``vendor``
@@ -558,9 +1087,7 @@ def _merge_contact_to_payload(raw: dict) -> VendorPayload | None:
     vendor_id = raw.get("id")
     if not vendor_id:
         return None
-    # The listing asks for suppliers only; a record that says otherwise is a
-    # customer and never a payee.
-    if raw.get("is_supplier") is False:
+    if raw.get("is_customer") is True and raw.get("is_supplier") is False:
         return None
     name = raw.get("name") or str(vendor_id)
 

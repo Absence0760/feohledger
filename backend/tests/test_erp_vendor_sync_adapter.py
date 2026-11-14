@@ -103,11 +103,13 @@ def test_base_adapter_list_vendors_default_is_empty_not_raises():
 
 def test_merge_dev_list_vendors_reads_supplier_contacts_not_a_vendors_path():
     """Merge's Accounting API has no ``/vendors`` path and no Vendor model: a
-    supplier is a ``Contact`` listed at ``GET /contacts?is_supplier=true``
+    supplier is a ``Contact`` listed at ``GET /contacts``
     (https://docs.merge.dev/openapi/accounting.json). The old adapter read
     ``/vendors``, which a live Merge account answers with an error, so every
     vendor sync failed and every bill push was refused ``vendor_not_linked``.
-    ``addresses`` / ``phone_numbers`` are expanded so they arrive as objects."""
+    ``addresses`` / ``phone_numbers`` are expanded so they arrive as objects.
+    No ``is_supplier=true`` filter: Xero behind Merge sets it only once a
+    contact has a bill, so a new supplier was never listed (decisions §399)."""
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
@@ -118,7 +120,7 @@ def test_merge_dev_list_vendors_reads_supplier_contacts_not_a_vendors_path():
 
     call = client.get.await_args_list[0]
     assert call.args[0].endswith("/contacts")
-    assert call.kwargs["params"]["is_supplier"] == "true"
+    assert "is_supplier" not in call.kwargs["params"]
     assert set(call.kwargs["params"]["expand"].split(",")) == {"addresses", "phone_numbers"}
     assert call.kwargs["params"]["page_size"] == "100"
 
@@ -264,8 +266,9 @@ def test_merge_dev_archived_or_deleted_contact_is_emitted_inactive():
 
 
 def test_merge_dev_never_lists_a_customer_contact_as_a_vendor():
-    """The listing filters on ``is_supplier=true``; a record that still says
-    ``is_supplier: false`` is a customer, never a payee."""
+    """A contact that is only a customer (``is_customer`` true, ``is_supplier``
+    false) is never a payee. One flagged as neither is kept: Xero via Merge
+    flags a supplier only after its first bill (decisions §399)."""
     from app.services.erp_adapters.merge_dev import MergeDevAdapter
 
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
@@ -274,6 +277,8 @@ def test_merge_dev_never_lists_a_customer_contact_as_a_vendor():
             {"id": "c-sup", "name": "Supplier", "is_supplier": True},
             {"id": "c-cust", "name": "Customer", "is_supplier": False, "is_customer": True},
             {"id": "c-unknown", "name": "Unflagged", "is_supplier": None},
+            {"id": "c-new", "name": "New", "is_supplier": False, "is_customer": False},
+            {"id": "c-both", "name": "Both", "is_supplier": True, "is_customer": True},
         ],
         "next": None,
     }
@@ -282,7 +287,7 @@ def test_merge_dev_never_lists_a_customer_contact_as_a_vendor():
         client.get = AsyncMock(return_value=_make_mock_response(200, body))
         vendors = _run(adapter.list_vendors())
 
-    assert [v.erp_vendor_id for v in vendors] == ["c-sup", "c-unknown"]
+    assert [v.erp_vendor_id for v in vendors] == ["c-sup", "c-unknown", "c-new", "c-both"]
 
 
 def test_merge_dev_vendor_id_is_the_id_a_po_and_a_bill_reference():
@@ -322,8 +327,11 @@ def test_merge_dev_vendor_id_is_the_id_a_po_and_a_bill_reference():
     # And the bill posts that same id as its `contact`.
     with patch("httpx.AsyncClient") as client_cls:
         client = client_cls.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_make_mock_response(200, {"results": [], "next": None}))
         client.post = AsyncMock(
-            return_value=_make_mock_response(201, {"model": {"id": "inv-1", "number": "INV-1"}})
+            return_value=_make_mock_response(
+                201, {"model": {"id": "inv-1", "number": "INV-1", "total_amount": 10.00}}
+            )
         )
         result = _run(
             adapter.post_invoice(
@@ -333,6 +341,8 @@ def test_merge_dev_vendor_id_is_the_id_a_po_and_a_bill_reference():
                     vendor_name="Acme",
                     amount=Decimal("10.00"),
                     vendor_erp_id=vendor.erp_vendor_id,
+                    gl_account="6000",
+                    gl_account_erp_id="merge-acct-6000",
                 )
             )
         )

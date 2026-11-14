@@ -263,10 +263,10 @@ def _fresh_state() -> dict[str, Any]:
         "netsuite_bills": {},  # id -> record dict ({"status": {"refName": ...}, ...})
         "d365_invoices": {},  # id -> record dict ({"status": "Draft"/"Open", ...})
         "counters": {"merge": 0, "netsuite": 1000, "d365": 0},
-        # Idempotency-Key -> the original create response body, so a retried
-        # POST /invoices with the same key returns the SAME record instead of
-        # creating a second one (mirrors Merge.dev's real documented
-        # idempotency-key mechanism; issue #143).
+        # Idempotency-Key -> {the request body, the original response}, so a
+        # retried POST /invoices with the same key and body returns the SAME
+        # record, and the same key with another body is a 400 — Merge's
+        # documented `Idempotency-Key` (issue #143, decisions §399).
         "merge_idempotency": {},
     }
 
@@ -333,6 +333,24 @@ async def set_status(body: dict) -> dict:
         store[doc_id]["approvalStatus"] = {"id": approval}
     else:
         store[doc_id]["status"] = status
+    if provider == "merge":
+        # Merge settles a bill by payment OR by credit: `payments` /
+        # `applied_payments` are Payment ids, `applied_credit_notes` /
+        # `applied_vendor_credits` are credits that moved no money.
+        record = store[doc_id]
+        for key in (
+            "payments",
+            "applied_payments",
+            "applied_credit_notes",
+            "applied_vendor_credits",
+        ):
+            if key in body:
+                record[key] = list(body.get(key) or [])
+        if "remote_was_deleted" in body:
+            record["remote_was_deleted"] = bool(body["remote_was_deleted"])
+        if "paid_on_date" in body:
+            record["paid_on_date"] = body["paid_on_date"]
+        record["modified_at"] = _merge_now()
     return {"status": "ok"}
 
 
@@ -464,11 +482,23 @@ MERGE_ACCOUNT_FIXTURES: list[dict] = [
         "currency": "USD",
         "parent_account": None,
     },
+    # An account the ERP made inactive: Merge reports it INACTIVE rather than
+    # dropping it, and the integration refuses a bill line posted to it.
+    {
+        "id": "merge-acct-6900",
+        "remote_id": "fake-remote-acct-6900",
+        "account_number": "6900",
+        "name": "Fake Retired Expenses",
+        "classification": "EXPENSE",
+        "type": "Expense",
+        "status": "INACTIVE",
+        "currency": "USD",
+        "parent_account": None,
+    },
 ]
 
-# Merge has no Vendor model and no `/vendors` path: a supplier is a `Contact`
-# with `is_supplier` true, listed at `GET /contacts?is_supplier=true`, and a
-# Contact carries NO payment term (Merge Accounting OpenAPI,
+# Merge has no Vendor model and no `/vendors` path: a supplier is a `Contact`,
+# listed at `GET /contacts`, and a Contact carries NO payment term (Merge Accounting OpenAPI,
 # https://docs.merge.dev/openapi/accounting.json; https://docs.merge.dev/accounting/contacts/).
 # The `merge-vendor-70x` ids are kept because the PO fixtures above name them
 # as `vendor`, exactly as a Merge PurchaseOrder names a Contact id.
@@ -525,7 +555,11 @@ MERGE_CONTACT_FIXTURES: list[dict] = [
         "id": "merge-vendor-703",
         "remote_id": "fake-remote-vendor-703",
         "name": "Fake Merge Services Co",
-        "is_supplier": True,
+        # Xero via Merge flags a supplier only once it has a bill: a new one
+        # reads `is_supplier: false` (and is no customer either), and must
+        # still be synced — an adapter filtering on `is_supplier=true` misses
+        # it and the e2e vendor count fails (decisions §399).
+        "is_supplier": False,
         "is_customer": False,
         "email_address": "invoices@fakemergeservices.example",
         "tax_number": "73-3456789",
@@ -545,9 +579,9 @@ MERGE_CONTACT_FIXTURES: list[dict] = [
         ],
         "remote_was_deleted": False,
     },
-    # A CUSTOMER, not a supplier: served only when the request does not filter
-    # on `is_supplier=true`, so an adapter that forgets the filter imports a
-    # payee that is not one and the e2e spec's vendor count fails.
+    # A CUSTOMER only (`is_customer` true, `is_supplier` false): the adapter
+    # must leave it out, or it imports a payee that is not one and the e2e
+    # spec's vendor count fails.
     {
         "id": "merge-customer-801",
         "remote_id": "fake-remote-customer-801",
@@ -604,33 +638,106 @@ async def merge_account_details(request: Request) -> dict:
     }
 
 
+def _merge_write_error(problem_type: str, title: str, source: str | None = None) -> ProviderError:
+    """A failed Merge write: 400 with `{model, warnings, errors}`, each error
+    `{source, title, detail, problem_type}` (Merge's write-error reference)."""
+    return ProviderError(
+        400,
+        {
+            "model": None,
+            "warnings": [],
+            "errors": [
+                {
+                    "source": {"pointer": source} if source else None,
+                    "title": title,
+                    "detail": f"Fake ERP: {title}",
+                    "problem_type": problem_type,
+                }
+            ],
+        },
+    )
+
+
+def _merge_money(value: Any) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return Decimal(str(value))
+    except (ArithmeticError, ValueError):
+        return None
+
+
+def _merge_jsonable(value: Any) -> Any:
+    """A deep copy with each Decimal as a JSON number (Merge types money as
+    numbers), so the response encoder can write it."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {k: _merge_jsonable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_merge_jsonable(v) for v in value]
+    return value
+
+
+def _merge_now() -> str:
+    """A fresh ISO timestamp for `modified_at`, distinct per change."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{time.time_ns() % 10**9:09d}Z"
+
+
 @merge.post("/invoices")
 async def merge_create_invoice(request: Request) -> JSONResponse:
     _require_merge_auth(request)
-    body = await request.json()
-    model = body.get("model")
+    raw = await request.body()
+    body = json.loads(raw, parse_float=Decimal) if raw else {}
+    model = body.get("model") if isinstance(body, dict) else None
     if not isinstance(model, dict):
-        raise ProviderError(400, {"model": ["This field is required."]})
+        raise _merge_write_error("INVALID_REQUEST_DATA_SHAPE", "model is required")
 
-    # Idempotency-Key: a retried create with the SAME key returns the
-    # original response instead of creating a second invoice (issue #143).
-    idem_key = request.headers.get("x-idempotency-key")
+    # Merge's documented header is `Idempotency-Key` (a beta it enables per
+    # customer). A repeat with the same key and body returns the original
+    # response; the same key with a DIFFERENT body is a 400. Any other header
+    # name (`X-Idempotency-Key`) is ignored, as Merge ignores it.
+    idem_key = request.headers.get("idempotency-key")
     if idem_key:
         cached = STATE["merge_idempotency"].get(idem_key)
         if cached is not None:
-            return JSONResponse(cached, status_code=200)
+            if cached["body"] != raw:
+                raise ProviderError(
+                    400, {"detail": "Idempotency-Key reused with different parameters."}
+                )
+            return JSONResponse(cached["response"], status_code=201)
 
     # Like real Merge, the vendor (`contact`) and each line's `account` are
-    # Merge object ids. A name or a GL code in either is a 400, not a bill
-    # filed against nothing.
-    merge_contact_ids = {c["id"] for c in MERGE_CONTACT_FIXTURES}
-    merge_account_ids = {a["id"] for a in MERGE_ACCOUNT_FIXTURES}
-    if model.get("contact") not in merge_contact_ids:
-        raise ProviderError(400, {"model": {"contact": ["Unknown contact id."]}})
-    for line in model.get("line_items") or []:
+    # Merge object ids. An unknown one is refused, not a bill filed against
+    # nothing; an archived contact or an inactive account is the integration's
+    # own refusal (PROVIDER_ERROR), as the ERP refuses it.
+    contacts = {c["id"]: c for c in MERGE_CONTACT_FIXTURES}
+    accounts = {a["id"]: a for a in MERGE_ACCOUNT_FIXTURES}
+    contact = contacts.get(model.get("contact"))
+    if contact is None:
+        raise _merge_write_error("MODEL_NOT_FOUND", "Unknown contact id", "/model/contact")
+    if contact["status"] == "ARCHIVED":
+        raise _merge_write_error("PROVIDER_ERROR", "The contact is archived in the ERP")
+    lines = model.get("line_items") or []
+    line_total = Decimal(0)
+    for line in lines:
         account = line.get("account")
-        if account is not None and account not in merge_account_ids:
-            raise ProviderError(400, {"model": {"line_items": ["Unknown account id."]}})
+        if account is not None and account not in accounts:
+            raise _merge_write_error("MODEL_NOT_FOUND", "Unknown account id", "/model/line_items")
+        if account is not None and accounts[account]["status"] == "INACTIVE":
+            raise _merge_write_error("PROVIDER_ERROR", "The account is inactive in the ERP")
+        # The invoice line's amount is `total_amount`. `total_line_amount` is a
+        # purchase-order line field Merge does not read on an invoice line, so
+        # a line carrying only that has no amount.
+        amount = _merge_money(line.get("total_amount"))
+        if amount is None:
+            raise _merge_write_error(
+                "MISSING_REQUIRED_FIELD", "Line amount is required", "/model/line_items"
+            )
+        line_total += amount
+    total = _merge_money(model.get("total_amount"))
+    if lines and total is not None and line_total != total:
+        raise _merge_write_error("PROVIDER_ERROR", "Line amounts do not add up to the total")
 
     STATE["counters"]["merge"] += 1
     n = STATE["counters"]["merge"]
@@ -645,18 +752,44 @@ async def merge_create_invoice(request: Request) -> JSONResponse:
         "due_date": model.get("due_date"),
         "currency": model.get("currency"),
         "total_amount": model.get("total_amount"),
-        "sub_total": model.get("sub_total"),
         "total_tax_amount": model.get("total_tax_amount"),
-        "total_discount": model.get("total_discount"),
+        "inclusive_of_tax": model.get("inclusive_of_tax"),
         "memo": model.get("memo"),
-        "purchase_order_number": model.get("purchase_order_number"),
-        "line_items": model.get("line_items", []),
+        "line_items": lines,
+        "balance": model.get("total_amount"),
+        "payments": [],
+        "applied_payments": [],
+        "applied_credit_notes": [],
+        "applied_vendor_credits": [],
+        "paid_on_date": None,
+        "remote_was_deleted": False,
+        "modified_at": _merge_now(),
     }
     STATE["merge_invoices"][record["id"]] = record
-    response_body = {"model": copy.deepcopy(record)}
+    encoded = _merge_jsonable({"model": record, "warnings": [], "errors": []})
     if idem_key:
-        STATE["merge_idempotency"][idem_key] = copy.deepcopy(response_body)
-    return JSONResponse(response_body, status_code=201)
+        STATE["merge_idempotency"][idem_key] = {"body": raw, "response": encoded}
+    return JSONResponse(encoded, status_code=201)
+
+
+@merge.get("/invoices")
+async def merge_list_invoices(
+    request: Request,
+    number: str | None = None,
+    contact_id: str | None = None,
+    type: str | None = None,
+    cursor: str | None = None,
+) -> dict:
+    """`number`, `contact_id` and `type` are exact filters, as in Merge's spec."""
+    _require_merge_auth(request)
+    rows = [
+        r
+        for r in STATE["merge_invoices"].values()
+        if (number is None or r.get("number") == number)
+        and (contact_id is None or r.get("contact") == contact_id)
+        and (type is None or r.get("type") == type)
+    ]
+    return {"next": None, "previous": None, "results": _merge_jsonable(rows)}
 
 
 @merge.get("/invoices/{invoice_id}")
@@ -665,7 +798,25 @@ async def merge_get_invoice(request: Request, invoice_id: str) -> dict:
     record = STATE["merge_invoices"].get(invoice_id)
     if record is None:
         raise ProviderError(404, {"detail": "Not found."})
-    return copy.deepcopy(record)
+    return _merge_jsonable(record)
+
+
+@merge.get("/accounts/{account_id}")
+async def merge_get_account(request: Request, account_id: str) -> dict:
+    _require_merge_auth(request)
+    for account in MERGE_ACCOUNT_FIXTURES:
+        if account["id"] == account_id:
+            return copy.deepcopy(account)
+    raise ProviderError(404, {"detail": "Not found."})
+
+
+@merge.get("/contacts/{contact_id}")
+async def merge_get_contact(request: Request, contact_id: str) -> dict:
+    _require_merge_auth(request)
+    for contact in MERGE_CONTACT_FIXTURES:
+        if contact["id"] == contact_id:
+            return copy.deepcopy(contact)
+    raise ProviderError(404, {"detail": "Not found."})
 
 
 @merge.get("/purchase-orders")

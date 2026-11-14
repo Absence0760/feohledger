@@ -58,6 +58,7 @@ __all__ = [
     "ERP_PAID_RECORDABLE",
     "ERP_RECONCILIATION_EXCEPTION_TYPE",
     "erp_webhook",
+    "merge_webhook",
     "quickbooks_webhook",
     "xero_webhook",
 ]
@@ -254,6 +255,109 @@ async def xero_webhook(request: Request) -> Response:
     return _xero_ack()
 
 
+# ---------------------------------------------------------------------------
+# Merge.dev — per-tenant Invoice webhooks (decisions §399)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/webhook/merge_dev/{tenant_slug}", status_code=status.HTTP_204_NO_CONTENT)
+async def merge_webhook(tenant_slug: str, request: Request):
+    """Merge.dev's ``Invoice`` webhooks for ONE tenant.
+
+    Declared before ``/webhook/{erp_type}``. Merge's delivery differs from the
+    generic shape in each place that decides whose books it may touch:
+
+    * it names no tenant of ours, only Merge's own ``linked_account``, and each
+      tenant connects its OWN Merge organisation (its own API key and webhook
+      signature key). So the tenant is the URL it registered in its Merge
+      dashboard, and the delivery must verify under THAT tenant's key: a
+      delivery signed for one tenant posted to another's URL fails;
+    * ``X-Merge-Webhook-Signature`` is the HMAC-SHA256 of the raw body,
+      **base64url**-encoded, under the tenant's Merge signature key (stored as
+      the ERP block's ``webhook_signing_secret``), checked before the body is
+      parsed;
+    * ``hook.id`` is the subscription, the same on every delivery, so the
+      dedupe key is the tenant, the bill and its ``modified_at``
+      (``erp_merge_webhook.event_key``).
+
+    Only the bill's id is taken from the body: the bill is read back from Merge
+    and applied by the status sync's reconciler
+    (``erp_merge_webhook.apply_merge_event``). Every decision — unknown tenant,
+    a tenant not on Merge, no key, a bad signature, a malformed body, another
+    event, a duplicate, a bill no invoice was pushed as — is a silent 204.
+    Our own failure (the credential store, the dedup store, the bill read or
+    the tenant DB) is a bodyless 503 with the claim released, so Merge's
+    redelivery is applied. The credential-store 503 comes before the
+    signature can be checked (the key is what it could not open), as on the
+    generic route; it says only that a slug's credentials are unreadable.
+
+    Not gated on ``FEOH_ERP_STATUS_SYNC_ENABLED``, unlike the QuickBooks and
+    Xero webhooks (§392): that switch decides whether a push leaves the
+    invoice payable, which never applies to Merge (its pushes close at
+    ``done``); a tenant opts in by storing its key (decisions §399).
+    """
+    from app.services import erp_merge_webhook as merge_events
+    from app.services.erp_adapters.dispatcher import resolve_adapter_key
+    from app.services.webhook_security import verify_hmac_sha256_base64url
+
+    max_bytes = settings.erp_webhook_max_bytes
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_bytes:
+                return
+        except ValueError:
+            return
+    raw_body = await request.body()
+    if len(raw_body) > max_bytes:
+        return
+
+    async with control_session_factory() as ctrl_db:
+        org = (
+            await ctrl_db.execute(select(Organization).where(Organization.slug == tenant_slug))
+        ).scalar_one_or_none()
+        if org is None:
+            return
+        try:
+            erp_config = await provider_config(org, "erp", db=ctrl_db) or {}
+        except CredentialCryptoError:
+            logger.error("Merge webhook: the tenant's ERP credentials could not be opened")
+            return _retry_please()
+
+    if not erp_config or resolve_adapter_key(erp_config) != merge_events.MERGE_PROVIDER:
+        return  # this tenant is not connected through Merge
+    signing_secret = erp_config.get("webhook_signing_secret") or ""
+    if not signing_secret:
+        logger.warning(
+            "Merge webhook dropped: no webhook_signing_secret configured for tenant '%s'",
+            tenant_slug,
+        )
+        return
+    signature = extract_signature_header(dict(request.headers), "X-Merge-Webhook-Signature")
+    if not verify_hmac_sha256_base64url(signing_secret, raw_body, signature):
+        return
+
+    try:
+        body = json.loads(raw_body)
+    except ValueError:
+        return
+    event = merge_events.parse_merge_delivery(body, org.id)
+    if event is None:
+        return
+    try:
+        if await is_event_already_processed(merge_events.DEDUP_PROVIDER, event.event_key):
+            return
+    except Exception as exc:  # noqa: BLE001 — Redis unreachable
+        logger.warning("Merge webhook: dedup unavailable (%s)", exc.__class__.__name__)
+        return _retry_please()
+    try:
+        await merge_events.apply_merge_event(org, erp_config, event)
+    except Exception as exc:  # noqa: BLE001 — our failure, never a decision
+        await release_event_claim(merge_events.DEDUP_PROVIDER, event.event_key)
+        logger.warning("Merge webhook: applying the bill failed (%s)", exc.__class__.__name__)
+        return _retry_please()
+
+
 @router.post("/webhook/{erp_type}", status_code=status.HTTP_204_NO_CONTENT)
 async def erp_webhook(
     erp_type: str,
@@ -285,7 +389,7 @@ async def erp_webhook(
     an invalid or absent value falls back to the arrival date / NULL rather
     than refusing the report.
 
-    For Merge.dev webhooks, the body structure may differ — we normalize it.
+    Merge.dev's own webhooks arrive on :func:`merge_webhook` instead.
     """
     # Bound the body BEFORE buffering it. A POST would otherwise be read fully
     # into memory before the signature check ever runs (memory-exhaustion DoS
@@ -314,17 +418,11 @@ async def erp_webhook(
     except Exception:  # noqa: BLE001
         return  # malformed JSON → silent 204
 
-    # Normalize — Merge.dev sends a different shape
-    if erp_type == "merge_dev" and "data" in body:
-        data = body["data"]
-        body = {
-            "tenant_slug": body.get("linked_account_id"),
-            "correlation_id": data.get("integration_params", {}).get("correlation_id"),
-            "erp_document_id": data.get("id"),
-            "event_id": body.get("hook", {}).get("event") or body.get("event"),
-            "status": data.get("status"),
-            "details": data,
-        }
+    if not isinstance(body, dict):
+        return  # not the generic shape → silent 204
+    # Merge.dev's own deliveries are not this shape (they name no tenant and
+    # are signed base64url): they go to `/webhook/merge_dev/{tenant_slug}`
+    # (`merge_webhook`, decisions §399). A body must never choose the tenant.
 
     tenant_slug = body.get("tenant_slug")
     correlation_id = body.get("correlation_id")
@@ -380,7 +478,6 @@ async def erp_webhook(
         dict(request.headers),
         "X-Webhook-Signature",
         "X-Hub-Signature-256",
-        "X-Merge-Webhook-Signature",
     )
     if not verify_hmac_sha256(signing_secret, raw_body, provided_sig):
         return  # silent 204 on bad / missing signature
