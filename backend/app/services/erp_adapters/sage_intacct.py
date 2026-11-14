@@ -107,6 +107,7 @@ from app.services.erp_adapters.bill_allocation import MISSING_DATES
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.posted_total import VoidOutcome, check_posted_total
+from app.utils.dates import utc_today
 
 PROVIDER = "Sage Intacct"
 DEFAULT_API_BASE = "https://api.intacct.com/ia/api/v1"
@@ -731,7 +732,7 @@ class SageIntacctAdapter(ErpAdapter):
             if state != "posted" or erp_status_retryable(resp.status_code):
                 return False
             posted_on = _date_or_none(record.get("postingDate") or record.get("createdDate"))
-            reverse_on = date.today()
+            reverse_on = utc_today()
             if posted_on is not None and reverse_on <= posted_on:
                 reverse_on = posted_on + timedelta(days=1)
             reverse = await self._send(
