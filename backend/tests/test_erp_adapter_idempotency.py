@@ -5,7 +5,9 @@ the ERP already accepted a create can otherwise retry into a SECOND vendor
 bill for the same invoice. Each real adapter's `post_invoice` must be
 retry-safe via whichever mechanism its target ERP actually supports:
 
-  - `merge_dev`  — an `X-Idempotency-Key` header on the create POST.
+  - `merge_dev`  — a pre-create lookup by vendor + number, then Merge's
+    `Idempotency-Key` header on the create POST (a beta Merge enables per
+    customer, so the lookup is what is relied on; decisions §399).
   - `netsuite`   — a pre-create lookup by `externalId` (NetSuite enforces
     uniqueness on it); a match short-circuits to success WITHOUT posting.
   - `dynamics_365_bc` — a pre-create lookup by vendor + `vendorInvoiceNumber`; same
@@ -106,16 +108,110 @@ def _ns_found(total: str | None, status: str = "open") -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
+_MERGE_EMPTY = {"next": None, "results": []}
+
+
 def test_merge_dev_sends_idempotency_key_header_on_create():
     adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.post = AsyncMock(return_value=_mock_response(201, {"model": {"id": "m1"}}))
+        client.get = AsyncMock(return_value=_mock_response(200, _MERGE_EMPTY))
+        client.post = AsyncMock(
+            return_value=_mock_response(201, {"model": {"id": "m1", "total_amount": 100.00}})
+        )
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-abc")))
 
     assert result.success
     headers = client.post.await_args.kwargs["headers"]
-    assert headers["X-Idempotency-Key"] == "corr-abc"
+    # Merge's documented header; the `X-` spelling this once sent is not one
+    # Merge reads, so a retry after a lost response created a second bill.
+    assert headers["Idempotency-Key"] == "corr-abc"
+    assert "X-Idempotency-Key" not in headers
+
+
+def test_merge_dev_retry_finds_its_bill_by_vendor_and_number_and_posts_nothing():
+    """The pre-create lookup is what makes a retry safe: Merge's key is a
+    beta it enables per customer, kept 24 h. One live bill under this vendor
+    and number at our total is our earlier attempt."""
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    found = {
+        "id": "merge-inv-9",
+        "number": "INV-1",
+        "total_amount": 100.00,
+        "currency": "USD",
+        "status": "OPEN",
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"next": None, "results": [found]}))
+        client.post = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success and result.erp_document_id == "merge-inv-9"
+    client.post.assert_not_awaited()
+    params = client.get.await_args.kwargs["params"]
+    assert params["number"] == "INV-1"
+    assert params["contact_id"] == "00000000-0000-0000-0000-0000000000a1"
+    assert params["type"] == "ACCOUNTS_PAYABLE"
+
+
+def test_merge_dev_bill_under_the_number_at_another_total_is_a_duplicate():
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    other = {"id": "merge-inv-3", "number": "INV-1", "total_amount": 75.00, "status": "OPEN"}
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"next": None, "results": [other]}))
+        client.post = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert not result.success and not result.retryable
+    assert result.refusal_code == "duplicate_document_number"
+    client.post.assert_not_awaited()
+
+
+def test_merge_dev_bill_under_the_number_in_another_currency_is_a_duplicate():
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    other = {"id": "m4", "number": "INV-1", "total_amount": 100.00, "currency": "EUR"}
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"next": None, "results": [other]}))
+        client.post = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.refusal_code == "duplicate_document_number"
+    client.post.assert_not_awaited()
+
+
+def test_merge_dev_a_void_or_deleted_bill_under_the_number_does_not_block():
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    gone = [
+        {"id": "v", "number": "INV-1", "total_amount": 100.00, "status": "VOID"},
+        {"id": "d", "number": "INV-1", "total_amount": 100.00, "remote_was_deleted": True},
+    ]
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"next": None, "results": gone}))
+        client.post = AsyncMock(
+            return_value=_mock_response(201, {"model": {"id": "m2", "total_amount": 100.00}})
+        )
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success and result.erp_document_id == "m2"
+
+
+def test_merge_dev_unreadable_lookup_never_reads_as_not_there():
+    """A lookup that cannot finish fails the attempt (retryable) without the
+    create: "couldn't ask" must never be read as "no bill yet"."""
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(503, {}))
+        client.post = AsyncMock()
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert not result.success and result.retryable and result.not_posted
+    assert "idempotency_lookup_unavailable" in result.message
+    client.post.assert_not_awaited()
 
 
 def test_merge_dev_get_invoice_status_does_not_send_idempotency_key():
@@ -128,7 +224,7 @@ def test_merge_dev_get_invoice_status_does_not_send_idempotency_key():
         _run(adapter.get_invoice_status("doc-1"))
 
     headers = client.get.await_args.kwargs["headers"]
-    assert "X-Idempotency-Key" not in headers
+    assert "Idempotency-Key" not in headers and "X-Idempotency-Key" not in headers
 
 
 # ---------------------------------------------------------------------------

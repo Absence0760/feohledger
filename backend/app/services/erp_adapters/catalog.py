@@ -379,6 +379,26 @@ MERGE_DEV_PROVIDER: dict[str, Any] = {
     "fields": [
         _field("api_key", secret=True, label_key="org.erp.mergeApiKey", placeholder="test_..."),
         _field("account_token", secret=True, label_key="org.erp.accountToken"),
+        # The Merge stack the linked account lives on; its token is refused by
+        # the others. Not a destination: every value is one of Merge's own
+        # hosts (`merge_dev.MERGE_REGION_BASES`), so the secrets never reach
+        # anyone else, and a saved block without it is the US stack.
+        _field(
+            "region",
+            required=False,
+            options=["US", "EU", "APAC"],
+            help_key="org.erp.help.mergeRegion",
+            stored_default="US",
+        ),
+        # The Merge organisation's webhook signature key, which verifies
+        # `POST /api/erp/webhook/merge_dev/{slug}` (decisions §399). Inbound
+        # only, so it is never a destination either.
+        _field(
+            "webhook_signing_secret",
+            secret=True,
+            required=False,
+            help_key="org.erp.help.mergeWebhook",
+        ),
     ],
     "docs_url": "https://docs.merge.dev/accounting/",
 }
@@ -406,8 +426,9 @@ MERGE_DEV_LONG_TAIL: list[dict[str, str]] = [
 #: registry test accepts these as unregistered; empty it as each adapter lands.
 PENDING_ADAPTERS: frozenset[str] = frozenset()
 
-#: ``settings.erp`` keys that are secrets but no form field names: the inbound
-#: webhook's HMAC key (``api/erp_webhook``) and its older spelling.
+#: ``settings.erp`` keys that are secrets whatever provider is chosen: the
+#: inbound webhook's HMAC key (``api/erp_webhook``; only the Merge.dev form
+#: renders it) and its older spelling.
 EXTRA_SECRET_KEYS: frozenset[str] = frozenset({"webhook_signing_secret", "webhook_secret"})
 
 
