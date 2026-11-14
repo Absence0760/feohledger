@@ -80,6 +80,10 @@ function openException(
 		.trim();
 }
 
+/** The row a QuickBooks sync keeps since decisions §393: it states the cash
+ *  QuickBooks shows paid. A row with no `amount` (one kept before §393) is
+ *  not booked as it stands; the bill is read back first, and with no
+ *  QuickBooks connected here that read confirms nothing, so it is refused. */
 function chequeReport(tag: string): Record<string, unknown> {
 	return {
 		kind: 'paid_not_recorded',
@@ -90,6 +94,9 @@ function chequeReport(tag: string): Record<string, unknown> {
 		reference: `BILL-${tag}`,
 		paid_on: PAID_ON,
 		paid_on_reported: true,
+		amount: '150.00',
+		amount_currency: 'USD',
+		payment_parts: null,
 		refusal_code: 'external_payment_blocking_exception'
 	};
 }
