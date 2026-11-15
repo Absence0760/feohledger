@@ -5,14 +5,16 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Nine entries are open**: the `/complete` amount floor approving an invoice whose PO was never matched (found 2026-11-15), the run builder reading
+**Eight entries are open**: the run builder reading
 a missing invoice currency as USD (found 2026-10-21), the app rendering nothing when browser
 storage is blocked (found 2026-10-20), the remove-tenant backup deletion the
 VM's IAM role refuses (found 2026-10-18),
 the expense-report Attach dead end found while
 writing the help centre, the `all`-mode approval-chain segregation deadlock,
 the legal-contents smooth-scroll race and the e2e cleanup race directly below,
-and the `payments/` local-e2e flake near the bottom. Merge.dev's vendor listing
+and the `payments/` local-e2e flake near the bottom. The `/complete` amount
+floor approving an invoice whose PO was never matched, found and struck on
+2026-11-15, sits struck above the run-builder entry. Merge.dev's vendor listing
 calling an endpoint Merge does not publish, found and struck on 2026-10-26, sits
 struck at the top. The payment mock tests that failed locally in one pytest
 process, found and struck on 2026-10-31, sit struck above the run-builder
@@ -31,7 +33,7 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Twenty-one of the twenty-nine `##`
+refuses to start against a stale database. Twenty-two of the thirty `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included,
 and later "seventeen of the twenty-four" while nineteen were struck.)
@@ -177,7 +179,15 @@ red for reasons unrelated to their diff. No production effect.
 add a guard that a mock-DB test touching `provider_credentials` fails loudly
 instead of reaching the real engine.
 
-## The `/complete` amount floor approves an invoice whose PO was never matched
+## ~~The `/complete` amount floor approves an invoice whose PO was never matched~~ — FIXED 2026-11-15
+
+**Fixed** in round 13 (decisions §425): `/complete` runs the PO match on the
+`new` invoice it submits, and both unattended doors (the floor and
+extraction's auto-approve) ask `invoice_warnings.po_match_hold_refusal` before
+stamping an approval, so an open `po_mismatch` / `quality_hold` sends the
+invoice to review. Tests: `backend/tests/test_invoice_complete_auto_approve.py`,
+`backend/tests/test_extraction_reextract_options.py`. The diagnosis is kept
+below.
 
 **Found 2026-11-15**, by round 12's fix lane for decisions §422 (PR #716);
 reproduced with a throwaway test, since deleted. `POST /api/invoices/{id}/complete`
