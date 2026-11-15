@@ -1389,7 +1389,10 @@ reasoning).
   lookup stays unknown: the lookup may have found our own earlier bill. Beside the
   flag, `erp_outcome_unknown_at` keeps when that attempt ended, handed to the
   adapter as `InvoicePayload.outcome_unknown_since` (Merge.dev waits on it, §405,
-  § Merge.dev below). `erp.possibly_posted` reads that flag,
+  § Merge.dev below). Only an attempt's end is final
+  (`erp_outcome_unknown_at_final`): the start committed before the call is
+  provisional, and a provisional stamp read later (the attempt died before its
+  failure was committed) is replaced by the time it is read (§409). `erp.possibly_posted` reads that flag,
   an unconfirmed ERP job, an orphan document or an `erp_reference`. When it is
   true, the refusal's params, the 409 and the `invoice.erp_failed` row carry
   `possibly_posted: true`, and the browser says to check the ERP before anyone
@@ -2396,9 +2399,9 @@ write-error guides (read 2026-11-13). Reasoning: `docs/decisions.md` §399.
   (`account_inactive`, `params.accounts`), both not posted; with neither it is
   `bill_refused` kept **possibly posted**, since it is the integration's
   catch-all; every other documented "not created" problem is `bill_refused`,
-  not posted. Each carries `params.merge_problem`. Only 429 (Merge's rate
-  limit) and a connection that was never made are retried automatically, and
-  both are not posted (nothing reached the ERP). A 5xx,
+  not posted. Each carries `params.merge_problem`. Only a connection that was
+  never made is retried automatically, and it is not posted (nothing reached
+  the ERP). A 429, 5xx,
   408, 409 or a lost response (read timeout, dropped connection) after the
   create was sent is non-retryable and possibly posted ("outcome unknown"): the
   automatic retry would come within seconds, before Merge's listing may show a
@@ -2409,15 +2412,20 @@ write-error guides (read 2026-11-13). Reasoning: `docs/decisions.md` §399.
   Merge's `GET /invoices` is its synced copy of the ERP, so the lookup cannot
   rule out a bill an earlier attempt may have made until Merge has synced
   invoices since. `services/erp` keeps the time that attempt ended
-  (`erp_outcome_unknown_at` beside `erp_outcome_unknown`; a row flagged before
-  the stamp existed is stamped when next read) and hands it over as
+  (`erp_outcome_unknown_at` beside `erp_outcome_unknown`, final only once the
+  attempt came back or raised; a row flagged before the stamp existed, or one
+  left with an attempt's provisional start by a crash or a cancelled task, is
+  stamped when next read, §409) and hands it over as
   `InvoicePayload.outcome_unknown_since`. The adapter then reads
   `GET /sync-status` **before** the lookup
   (<https://docs.merge.dev/merge-unified/accounting/data-management/sync-status/list>,
   read 2026-11-14) and takes the `Invoice` row's `data_fresh_as_of`, the start
-  of the last sync that completed. Only a time strictly after the stamp counts.
-  Without that field, only a link at rest (not `SYNCING`) whose last sync is
-  `DONE` and started after the stamp counts, because Merge says
+  of the last sync that completed. Only a time strictly more than
+  `SYNC_SETTLE_MARGIN` (10 minutes) after the stamp counts (§409): the stamp is
+  when our client gave up, httpx's 30 s timeout is per operation, and Merge
+  may still be writing the bill after that. Without that field, only a link at
+  rest (not `SYNCING`) whose last sync is `DONE` and started past the margin
+  counts, because Merge says
   `last_sync_start` and `last_sync_finished` can belong to different syncs. If
   the lookup finds our bill, the push succeeds whatever the sync says. If it
   finds nothing and the sync is not yet past the stamp (or `Invoice` is not

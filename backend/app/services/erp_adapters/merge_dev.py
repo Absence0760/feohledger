@@ -50,7 +50,7 @@ Checked against the same spec, read 2026-11-14 (decisions §405):
 
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -274,9 +274,19 @@ def _merge_time(value: object) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
+#: How long after ``since`` (when our client gave up on the create) a sync must
+#: have started to vouch for the listing (decisions §409). ``since`` is our
+#: side's end: httpx's ``timeout=30`` is per operation, so the request can run
+#: past a minute, and Merge may still be writing to the ERP after we stop
+#: waiting — whether it finishes a create the client abandoned is unverified
+#: (#654). Too short a margin costs a second bill; too long costs one more
+#: sync's wait, so it is generous.
+SYNC_SETTLE_MARGIN = timedelta(minutes=10)
+
+
 def invoice_sync_covers(row: dict, since: datetime) -> bool:
     """Does Merge's ``SyncStatus`` row say its ``Invoice`` data is complete
-    through a time after ``since``?
+    through a time more than :data:`SYNC_SETTLE_MARGIN` after ``since``?
 
     ``data_fresh_as_of`` is that time when Merge reports it: the start of the
     most recent sync that completed successfully. Without it, only a link at
@@ -286,6 +296,7 @@ def invoice_sync_covers(row: dict, since: datetime) -> bool:
     ``PARTIALLY_SYNCED`` result included, is "not yet". Strictly after: a sync
     that started at the very moment cannot be shown to have seen the bill.
     """
+    since = since + SYNC_SETTLE_MARGIN
     fresh = _merge_time(row.get("data_fresh_as_of"))
     if fresh is not None:
         return fresh > since
@@ -790,11 +801,11 @@ class MergeDevAdapter(ErpAdapter):
 
         * 401 — a bad API key or account token: ``not_connected``, not retried
           (Merge has no token for us to refresh).
-        * 429 — Merge's rate limit, which processed nothing: retryable, and
-          not posted.
-        * any other status a re-send could change (5xx, 408, 409, ...) — the
+        * any status a re-send could change (429, 5xx, 408, 409, ...) — the
           create may have landed, and Merge's listing may not show it for
-          seconds: not retried automatically (:func:`_outcome_unknown`).
+          seconds: not retried automatically (:func:`_outcome_unknown`). A
+          429 is no exception: whether Merge ever answers one after the write
+          reached the integration is unverified (#654, decisions §409).
         * otherwise Merge's ``errors[].problem_type`` decides: relink →
           ``not_connected``; a duplicate → ``duplicate_document_number``
           (fail-closed, :data:`_DUPLICATE_PROBLEMS`); ``PROVIDER_ERROR`` →
@@ -808,13 +819,6 @@ class MergeDevAdapter(ErpAdapter):
         status = resp.status_code
         if status == 401:
             return _coded(NOT_CONNECTED, not_posted=True)
-        if status == 429:
-            # Refused at Merge's door, before anything reached the ERP: not
-            # an attempt whose outcome is unknown, so the retry need not wait
-            # for a sync (§405).
-            result = erp_http_failure(PROVIDER, status)
-            result.not_posted = True
-            return result
         if erp_status_retryable(status):
             result = erp_http_failure(PROVIDER, status)
             result.retryable = False
