@@ -5351,6 +5351,9 @@ async def export_run_nacha(
             "sec_code": sec_code,
             "effective_date": effective_date.isoformat(),
             "file_id_modifier": modifier,
+            # Whether it carries the offsetting debit (decisions §432) — the
+            # fact, never the offset account.
+            "balanced": originator.offset is not None,
             "regenerated": previous_status == "exported",
             "file_sha256": hashlib.sha256(content.encode("ascii")).hexdigest(),
         },

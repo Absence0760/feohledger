@@ -51,6 +51,7 @@ from __future__ import annotations
 
 from app.services.erp_adapters.catalog import public_erp_config
 from app.services.provider_credentials import strip_all_blocks
+from app.utils.bank_masking import mask_secret
 
 # Top-level settings blocks a NON-ADMIN may read.
 #
@@ -124,6 +125,23 @@ def _with_public_erp(settings: dict) -> dict:
     return settings
 
 
+def _with_masked_nacha_offset(settings: dict) -> dict:
+    """``settings`` with ``payments.nacha.offset_account`` reduced to a last-4.
+
+    The NACHA offset account (decisions §432) is the customer's own bank
+    account number — banking data, shown masked on every surface
+    (`utils/bank_masking`). Its writer keeps the stored number when a save
+    sends it blank or sends this mask back (`nacha.carry_offset_account`), so
+    no page needs the full number. Copies only the path it touches.
+    """
+    payments = settings.get("payments")
+    nacha = payments.get("nacha") if isinstance(payments, dict) else None
+    if not isinstance(nacha, dict) or nacha.get("offset_account") in (None, ""):
+        return settings
+    masked = {**nacha, "offset_account": mask_secret(nacha["offset_account"])}
+    return {**settings, "payments": {**payments, "nacha": masked}}
+
+
 def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
     """Return the settings a caller of this role may see.
 
@@ -133,7 +151,9 @@ def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
     """
     raw = settings or {}
     if is_admin:
-        return _without_always_redacted(_with_public_erp(strip_all_blocks(raw)))
+        return _with_masked_nacha_offset(
+            _without_always_redacted(_with_public_erp(strip_all_blocks(raw)))
+        )
 
     projected: dict = {}
     for block, allowed_keys in NON_ADMIN_SETTINGS.items():

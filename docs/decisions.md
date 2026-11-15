@@ -22120,6 +22120,69 @@ Tests: `mobile/test/screens/invoice_detail_screen_test.dart`,
 `mobile/test/stores/invoice_store_test.dart`,
 `mobile/test/l10n/coded_refusal_messages_test.dart`.
 
+## 432. A balanced NACHA file debits an offset account kept in the settings JSONB, masked on read, not sealed (closes a `docs/followups.md` entry, round 13, 2026-11-15)
+
+**Context.** `services/nacha.py` wrote credits only (service class 220), the
+unbalanced file most ODFIs expect from a corporate originator (§251). Some
+banks require a balanced file: an offsetting debit to the originator's own
+account for the batch total. That needs the customer's own account number,
+which is banking data, so where it lives and who sees it is the design call.
+
+**Decision.**
+
+- **Three optional keys on `settings.payments.nacha`**: `offset_routing`
+  (ABA, checksum-validated), `offset_account` (≤ 17 alphanumerics after spaces
+  and dashes go) and `offset_account_type` (`checking` | `savings`). **All or
+  none**: any one holding a value asks for a balanced file, and the save 422s
+  naming the missing ones (`nacha.originator_problems`, field names only).
+  Validated through the existing settings writer, `PATCH /api/organization`,
+  like the rest of the block.
+- **With them** the batch header and batch control say service class **200**,
+  and the batch ends with the offsetting debit: transaction code **27**
+  (checking) or **37** (savings), individual ID `OFFSET`, the company name as
+  receiver, the next trace number. The entry/addenda count, the entry hash
+  (the offset routing's first eight digits) and the total debit in both
+  control records include it. **A batch total above one entry's
+  $99,999,999.99 is offset by several debits** rather than refused: a run that
+  exports unbalanced today must not become unexportable for asking to balance.
+- **Without them the file is byte-identical** to the credits-only one, pinned
+  by a SHA-256 of a fixed build taken before the change.
+- **Plain in the JSONB, not sealed in `provider_credentials`.** The sealed
+  store is for credentials, values that let their holder act as the tenant
+  against a third party (`SECRET_FIELDS`). An account number authenticates
+  nothing, and the payee account numbers in the very same file live in
+  `Vendor.bank_details` as plain JSONB. Sealing this one would make it the
+  only account number in the product behind KMS, and route the NACHA export
+  through a credential read (and its "store unavailable" failure) for no
+  protection the vendor numbers lack.
+- **But masked on every read, admins included.** It follows the
+  `utils/bank_masking` rule: `GET /api/organization` shows `****6789`
+  (`org_settings_view._with_masked_nacha_offset`; non-admins never see the
+  payments block). The writer keeps the stored number when a save sends it
+  blank or sends the mask back (`nacha.carry_offset_account`), so the settings
+  page never needs the full number; clearing the routing and type clears it.
+- **Never a value in a log, an error body or an audit row.** The 422 names
+  fields; `NachaOffset.__repr__` leaves the account out; the settings audit
+  `organization.provider_config_updated` adds `nacha_changed` (the block's
+  changed key names); the export's `payment_run.nacha_exported` adds
+  `balanced: bool`. The file itself carries the number, as it carries the
+  vendors'.
+
+**Rejected.** Sealing it as a payments secret (above). A separate settings
+endpoint for the offset: the block already has one audited, validated writer,
+and a second door for half of it is how the other blocks grew drift. Refusing
+a batch total above one entry's maximum: the split is what NACHA permits and
+costs nothing. A per-entry offset (one debit per credit): banks that want a
+balanced file want one offset per batch, and per-entry debits multiply what
+the customer reconciles on its own statement.
+
+**Enforced by** `backend/tests/test_nacha.py` (the byte-identical digest; the
+balanced file's records, controls and block padding; the savings debit code;
+the split debit; the all-or-none rule; the masked read, the blank re-save that
+keeps the number and the audit row; the 422 that echoes no value; a balanced
+export end to end) and `frontend/src/lib/types/paymentExecution.test.ts` (the
+form's mirror of the rule and the account types).
+
 ## 433. A multi-PO split's POs live in their own column, `invoices.split_po_ids`, which no warning refresh rewrites (closes a §267 / §404 follow-up, round 13, 2026-11-15)
 
 **The gap.** The multi-PO split agent (`multi_po_split_v1`) links one invoice to

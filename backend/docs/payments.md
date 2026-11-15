@@ -2300,8 +2300,11 @@ rails paid it, so NULL there means "not stated" or "several rails", and
 `GET /api/payments/runs/{id}/nacha?effective_date=&sec_code=CCD|PPD[&regenerate=true]`
 writes a NACHA ACH credit file (`services/nacha.py`) for a run, for the customer
 to upload to its own bank — it is the originator under its own bank agreement.
-One batch, credits only (service class 220), CCD by default (PPD for a consumer
-payee), unbalanced (no offsetting debit), padded to whole blocks of ten.
+One batch, CCD by default (PPD for a consumer payee), padded to whole blocks of
+ten. By default the batch is credits only (service class 220) and the file is
+unbalanced (no offsetting debit) — what most ODFIs expect from a corporate
+originator. A bank that requires a **balanced** file gets one when the offset
+account is configured (below): see § Balanced files.
 
 Uploading the file is the money moving, so the export is treated as the
 dispatch step:
@@ -2356,7 +2359,8 @@ dispatch step:
   effective date must be a business day (bank holidays are not checked).
   Anything else refuses the whole file naming the invoice — never the bank data.
 - Each export writes `payment_run.nacha_exported` with counts, total, SEC code,
-  effective date, file-ID modifier and the file's SHA-256 — not the file.
+  effective date, file-ID modifier, whether it is `balanced`, and the file's
+  SHA-256 — not the file.
 - **The run-level refusals are one gate**, `payment_controls.run_nacha_export_refusal`,
   in order: the run's state (`nacha_already_exported`,
   `nacha_nothing_to_regenerate`, `nacha_run_not_exportable`), record-only,
@@ -2367,6 +2371,38 @@ dispatch step:
   `payment_controls.run_nacha_void_refusal` as `actions.nacha_void`), which the
   run dialog's bank-file panel reads. The per-payment checks above stay in the
   endpoint, so a `null` verdict can still meet a refusal that names an invoice.
+
+#### Balanced files — the offset account
+
+Three optional keys on `settings.payments.nacha` ask for a balanced file:
+`offset_routing` (the ABA of the customer's own account, checksum-validated),
+`offset_account` (its account number, ≤ 17 alphanumerics after spaces and
+dashes are dropped) and `offset_account_type` (`checking` | `savings`). All
+three or none: any one present makes the other two required, and the save 422s
+naming the missing fields (`nacha.originator_problems`, field names only).
+
+With them, the batch header and batch control carry **service class 200**
+(mixed), and after the credits the batch ends with an **offsetting debit** to
+that account for the batch total — transaction code **27** (checking) or **37**
+(savings), individual ID `OFFSET`, the company name as the receiver, the next
+trace number. One entry's amount field tops out at $99,999,999.99, so a larger
+batch total is split across as many debits as it needs. The controls count
+them like any entry: entry/addenda count and entry hash (its routing's first
+eight digits) include the offset, and total debits equal total credits in both
+the batch and file control records. Without the keys the output is
+byte-identical to the credits-only file (pinned by
+`tests/test_nacha.py::test_the_unbalanced_file_is_byte_identical`).
+
+The offset account number is the customer's own banking data (decisions
+§432). It is stored in the settings JSONB like a vendor's `bank_details`, not
+sealed with the provider credentials (it authenticates nothing), but it is
+**write-only on the way out**: `GET /api/organization` shows it as a last-4
+mask (`****6789`) to admins (non-admins never see the payments block), and a
+save that sends it blank or sends the mask back keeps the stored number
+(`nacha.carry_offset_account`). A save that clears the routing and type clears
+it too. It never enters a log line, an error body or an audit row: the
+settings audit (`organization.provider_config_updated`) names the changed keys
+under `nacha_changed`, never a value.
 
 **Verify before upload** — `POST /api/payments/runs/{id}/nacha/verify`
 (`payment.execute`, decisions §362). The export reads each bill when it builds

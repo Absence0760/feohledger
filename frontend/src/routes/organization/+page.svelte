@@ -61,6 +61,7 @@
 	} from '#lib/types/planFeatures.ts';
 	import {
 		NACHA_FIELD_LABEL_KEYS,
+		NACHA_OFFSET_ACCOUNT_TYPES,
 		nachaForSave,
 		nachaProblems,
 		type PaymentExecutionMode
@@ -670,6 +671,13 @@
 	let nachaCompanyId = $state('');
 	let nachaOdfiRouting = $state('');
 	let nachaBankName = $state('');
+	// The balanced-file offset account (decisions §432). The account number
+	// reads back masked (`****1234`), so the input starts blank with the mask as
+	// its placeholder; saving it blank keeps the stored number.
+	let nachaOffsetRouting = $state('');
+	let nachaOffsetAccount = $state('');
+	let nachaOffsetAccountMask = $state('');
+	let nachaOffsetAccountType = $state('');
 	// Every OTHER key of the stored `settings.payments` block. The save is a
 	// shallow replace of the whole block, so a key this form does not manage —
 	// `require_run_segregation`, `home_currency`, anything newer than this
@@ -702,6 +710,12 @@
 		nachaCompanyId = typeof nacha.company_id === 'string' ? nacha.company_id : '';
 		nachaOdfiRouting = typeof nacha.odfi_routing === 'string' ? nacha.odfi_routing : '';
 		nachaBankName = typeof nacha.bank_name === 'string' ? nacha.bank_name : '';
+		nachaOffsetRouting = typeof nacha.offset_routing === 'string' ? nacha.offset_routing : '';
+		nachaOffsetAccount = '';
+		nachaOffsetAccountMask =
+			typeof nacha.offset_account === 'string' ? nacha.offset_account : '';
+		nachaOffsetAccountType =
+			typeof nacha.offset_account_type === 'string' ? nacha.offset_account_type : '';
 	}
 	let testingPayments = $state(false);
 	let paymentsTestResult = $state<{ success: boolean; message: string } | null>(null);
@@ -886,12 +900,17 @@
 			company_name: nachaCompanyName,
 			company_id: nachaCompanyId,
 			odfi_routing: nachaOdfiRouting,
-			bank_name: nachaBankName
+			bank_name: nachaBankName,
+			offset_routing: nachaOffsetRouting,
+			offset_account: nachaOffsetAccount,
+			offset_account_type: nachaOffsetAccountType
 		});
 		if (nacha) {
 			// The server 422s the same fields (`services/nacha.originator_problems`);
 			// naming them here keeps the admin on the form with the reason.
-			const problems = nachaProblems(nacha);
+			const problems = nachaProblems(nacha, {
+				offsetAccountOnFile: nachaOffsetAccountMask !== ''
+			});
 			if (problems.length > 0) {
 				toast(
 					m('org.payments.nachaInvalid', {
@@ -920,6 +939,16 @@
 				},
 			});
 			if (sendMode) paymentsModeStored = paymentsMode;
+			// The typed offset account number is now on file: show it as the
+			// server does, masked, and clear the input.
+			const savedNacha = (
+				(org?.settings as unknown as Record<string, unknown> | undefined)?.payments as
+					| Record<string, unknown>
+					| undefined
+			)?.nacha as Record<string, unknown> | null | undefined;
+			nachaOffsetAccountMask =
+				typeof savedNacha?.offset_account === 'string' ? savedNacha.offset_account : '';
+			nachaOffsetAccount = '';
 			await saveSecrets('payments', {
 				api_key: paymentsApiKey,
 				webhook_secret: paymentsWebhookSecret
@@ -2555,6 +2584,49 @@
 											autocomplete="off"
 											aria-describedby="org-payments-nacha-hint"
 										/>
+									</label>
+								</div>
+								<p class="card-hint" id="org-payments-nacha-offset-hint">
+									{m('org.payments.nachaOffsetHint')}
+								</p>
+								<div class="form-grid" data-testid="payments-nacha-offset">
+									<label>
+										<span>{m('org.payments.nachaField.offsetRouting')}</span>
+										<input
+											type="text"
+											inputmode="numeric"
+											bind:value={nachaOffsetRouting}
+											maxlength="9"
+											autocomplete="off"
+											aria-describedby="org-payments-nacha-offset-hint"
+										/>
+									</label>
+									<label>
+										<span>{m('org.payments.nachaField.offsetAccount')}</span>
+										<input
+											type="text"
+											bind:value={nachaOffsetAccount}
+											maxlength="20"
+											autocomplete="off"
+											placeholder={nachaOffsetAccountMask || undefined}
+											aria-describedby="org-payments-nacha-offset-hint"
+										/>
+									</label>
+									<label>
+										<span>{m('org.payments.nachaField.offsetAccountType')}</span>
+										<select
+											bind:value={nachaOffsetAccountType}
+											aria-describedby="org-payments-nacha-offset-hint"
+										>
+											<option value="">{m('org.payments.nachaOffsetTypeNone')}</option>
+											{#each NACHA_OFFSET_ACCOUNT_TYPES as type (type)}
+												<option value={type}>
+													{type === 'savings'
+														? m('org.payments.nachaOffsetType.savings')
+														: m('org.payments.nachaOffsetType.checking')}
+												</option>
+											{/each}
+										</select>
 									</label>
 								</div>
 							{/if}

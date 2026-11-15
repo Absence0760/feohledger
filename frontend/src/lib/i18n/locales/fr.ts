@@ -5172,6 +5172,13 @@ export const messages = {
 	'org.payments.nachaField.companyId': "Identifiant de la société",
 	'org.payments.nachaField.odfiRouting': "Numéro de routage de votre banque",
 	'org.payments.nachaField.bankName': "Nom de la banque",
+	'org.payments.nachaField.offsetRouting': "Numéro de routage du compte de contrepartie",
+	'org.payments.nachaField.offsetAccount': "Numéro du compte de contrepartie",
+	'org.payments.nachaField.offsetAccountType': "Type du compte de contrepartie",
+	'org.payments.nachaOffsetHint': "Uniquement si votre banque exige un fichier équilibré : votre propre compte, que le fichier débite du total du lot. Remplissez les trois champs, ou laissez-les vides pour un fichier de crédits seuls. Le numéro de compte est affiché masqué ; laissez-le vide pour conserver celui enregistré.",
+	'org.payments.nachaOffsetTypeNone': "Non défini",
+	'org.payments.nachaOffsetType.checking': "Compte courant",
+	'org.payments.nachaOffsetType.savings': "Compte d'épargne",
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "Exporté",
 	'refusal.externalPaymentAmountChanged': "Le montant dû sur cette facture a changé depuis la préparation du lot ({staged} dans le lot, {amount} dû maintenant) à cause d'un avoir ou d'un escompte pour paiement anticipé. Réglez l'écart avec le fournisseur, puis enregistrez la facture seule.",

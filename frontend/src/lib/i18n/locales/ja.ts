@@ -5082,6 +5082,13 @@ export const messages = {
 	'org.payments.nachaField.companyId': "会社 ID",
 	'org.payments.nachaField.odfiRouting': "銀行のルーティング番号",
 	'org.payments.nachaField.bankName': "銀行名",
+	'org.payments.nachaField.offsetRouting': "相殺口座のルーティング番号",
+	'org.payments.nachaField.offsetAccount': "相殺口座番号",
+	'org.payments.nachaField.offsetAccountType': "相殺口座の種類",
+	'org.payments.nachaOffsetHint': "銀行がバランス済みファイルを求める場合のみ: ファイルがバッチ合計を引き落とす自社の口座です。3 項目すべてを入力するか、入金のみのファイルにする場合は空欄のままにしてください。口座番号はマスク表示されます。登録済みの番号を維持するには空欄のままにしてください。",
+	'org.payments.nachaOffsetTypeNone': "未設定",
+	'org.payments.nachaOffsetType.checking': "当座預金",
+	'org.payments.nachaOffsetType.savings': "普通預金",
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "エクスポート済み",
 	'refusal.externalPaymentAmountChanged': "クレジットメモまたは早期支払割引により、バッチ作成後にこの請求書の支払額が変わりました（バッチ上 {staged}、現在の支払額 {amount}）。仕入先と差額を解消してから、請求書を個別に記録してください。",
