@@ -12,8 +12,10 @@ against it. Real-Postgres harness (`realdb`). Pinned here:
     mobile, the exception agents) goes through;
   * someone else may approve — the rule names the receiver, not the invoice;
   * what counts — live, hand-entered receipts on the invoice's PO (by
-    `po_number` under the matcher's scope, or by the stored match's `po_ids`)
-    in the invoice's own entity. A cancelled receipt, a receipt with no
+    `po_number` under the matcher's scope, by the stored match's `po_id`, or
+    by the multi-PO split's `split_po_ids`) in the invoice's own entity. The
+    split's set survives a warning refresh that rewrites `po_match`
+    (decisions §433). A cancelled receipt, a receipt with no
     source, and a receipt booked in a sibling entity do not;
   * an approve-with-corrections that re-points `po_number` at a PO the
     approver received is refused, not read against the old PO;
@@ -112,7 +114,7 @@ async def _receive(realdb, role, po_id, line_id, qty="10"):
     return resp.json()["id"]
 
 
-async def _invoice(realdb, po_number, *, po_match=None, approval_config=None):
+async def _invoice(realdb, po_number, *, po_match=None, split_po_ids=None, approval_config=None):
     """A ready-for-review invoice billed against `po_number`, uploaded by
     nobody who approves here. With `approval_config`, it gets its own frozen
     workflow snapshot carrying that approval-step config."""
@@ -124,6 +126,7 @@ async def _invoice(realdb, po_number, *, po_match=None, approval_config=None):
             currency="USD",
             po_number=po_number,
             po_match=po_match,
+            split_po_ids=split_po_ids,
             status=InvoiceStatus.ready_for_review,
             uploaded_by_id=uuid.uuid4(),
             organization_id=realdb.info(TENANT).org_id,
@@ -300,26 +303,105 @@ async def test_receipts_with_no_source_or_in_a_sibling_entity_do_not_count(reald
         assert await receipt_recorders(s, inv) == frozenset()
 
 
-async def test_a_multi_po_match_counts_every_po_it_names(realdb):
-    """The multi-PO split records a combined `po_number` that resolves to
-    nothing; its `po_match.po_ids` is what names the POs."""
-    _, number_a, _ = await _po(realdb)
+async def _split_invoice(realdb, received_by: str | None = "ap_manager"):
+    """An invoice the multi-PO split linked to two POs, as the resolver leaves
+    it: the combined `po_number` (which resolves to no PO), the `po_match`
+    snapshot naming both, and `split_po_ids`. `received_by` (if any)
+    hand-records a receipt on the second leg only. Returns
+    (invoice_id, (po_a, po_b), leg_b_line_id)."""
+    po_a, number_a, _ = await _po(realdb)
     po_b, number_b, li_b = await _po(realdb)
-    await _receive(realdb, "ap_manager", po_b, li_b)
+    if received_by is not None:
+        await _receive(realdb, received_by, po_b, li_b)
+    legs = [str(po_a), str(po_b)]
     inv_id = await _invoice(
-        realdb, f"{number_a},{number_b}", po_match={"status": "matched", "po_ids": [str(po_b)]}
+        realdb,
+        f"{number_a},{number_b}",
+        po_match={"status": "matched", "match_type": "multi-po-split", "po_ids": legs},
+        split_po_ids=legs,
     )
+    return inv_id, (po_a, po_b), li_b
+
+
+async def _refresh(realdb, invoice_id):
+    """Run the warning refresh any later edit runs; it rewrites `po_match`."""
+    from app.services.invoice_warnings import refresh_warnings
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        await refresh_warnings(s, inv, org_settings={})
+        await s.commit()
+
+
+async def test_a_multi_po_split_counts_every_po_it_linked(realdb):
+    """The multi-PO split records a combined `po_number` that resolves to
+    nothing; `split_po_ids` is what names its POs."""
+    inv_id, _, _ = await _split_invoice(realdb)
     resp = await _approve(realdb, "ap_manager", inv_id)
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == APPROVAL_SEGREGATION_RECEIVER
 
 
-async def test_the_approval_steps_segregation_opt_out_lifts_it(realdb):
-    po_id, number, li = await _po(realdb)
-    await _receive(realdb, "ap_manager", po_id, li)
-    inv_id = await _invoice(realdb, number, approval_config={"require_segregation": False})
-    resp = await _approve(realdb, "ap_manager", inv_id)
-    assert resp.status_code == 200, resp.text
+async def test_a_split_legs_receiver_is_refused_after_a_refresh_rewrote_po_match(realdb):
+    """The hole §433 closes: any later edit runs `refresh_warnings`, which
+    rewrites `po_match` (the combined reference matches no PO, so it becomes
+    `no_po` and names no PO ids). The receiver of one leg is still refused,
+    and someone else may still approve."""
+    inv_id, (po_a, po_b), _ = await _split_invoice(realdb)
+    await _refresh(realdb, inv_id)
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        # The premise: the refresh dropped the snapshot's PO set...
+        assert inv.po_match["status"] == "no_po"
+        assert "po_ids" not in inv.po_match
+        # ...and the split's own record of it survived.
+        assert set(inv.split_po_ids) == {str(po_a), str(po_b)}
+        manager = str(realdb.info(TENANT).users["ap_manager"])
+        assert await receipt_recorders(s, inv) == frozenset({manager})
+
+    refused = await _approve(realdb, "ap_manager", inv_id)
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["code"] == APPROVAL_SEGREGATION_RECEIVER
+    approved = await _approve(realdb, "admin", inv_id)
+    assert approved.status_code == 200, approved.text
+
+
+async def test_a_split_legs_receipt_by_its_approver_conflicts_after_a_refresh(realdb):
+    """The reverse order (§389) reads the same set: a receipt the invoice's
+    approver hand-records on one leg afterwards is a receiving conflict, so
+    `receipts_clear_hold` will not let it lift a hold, even after a refresh
+    rewrote `po_match`."""
+    from app.services.approval_chain import receiving_conflict_on
+    from app.services.invoice_warnings import receipts_clear_hold
+
+    inv_id, (_, po_b), li_b = await _split_invoice(realdb, received_by=None)
+    approved = await _approve(realdb, "ap_manager", inv_id)
+    assert approved.status_code == 200, approved.text
+    await _receive(realdb, "ap_manager", po_b, li_b)
+    await _refresh(realdb, inv_id)
+
+    manager = str(realdb.info(TENANT).users["ap_manager"])
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert "po_ids" not in (inv.po_match or {})
+        assert await receiving_conflict_on(s, inv, {}) == frozenset({manager})
+        assert await receipts_clear_hold(s, inv, str(po_b)) is False
+
+
+async def test_a_split_legs_inspector_is_refused_after_a_refresh(realdb):
+    """The inspector set reads the same PO set (§404)."""
+    inv_id, (po_a, _), _ = await _split_invoice(realdb, received_by=None)
+    await _inspect(realdb, "ap_manager", po_id=po_a)
+    await _refresh(realdb, inv_id)
+    manager = str(realdb.info(TENANT).users["ap_manager"])
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert "po_ids" not in (inv.po_match or {})
+        assert await inspection_recorders(s, inv) == frozenset({manager})
+    refused = await _approve(realdb, "ap_manager", inv_id)
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["code"] == APPROVAL_SEGREGATION_INSPECTOR
 
 
 # --------------------------------------------------------------------------- #

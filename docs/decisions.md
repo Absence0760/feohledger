@@ -22021,3 +22021,553 @@ the way back to it.
 / link parity per link state, the refused link reads nothing, unlink reopens it)
 and `frontend/tests-e2e/vendors/erp-unlink.spec.ts` (the panel is gone after a
 link; a refused vendor gets the sentence or nothing).
+
+## 425. An unattended approval asks the PO match first, and a PO-match hold sends the invoice to review (closes a `docs/known-issues.md` entry, round 13, 2026-11-15)
+
+**The gap.** `POST /api/invoices/{id}/complete` auto-approves an invoice under
+the approval step's `auto_approve_below` floor straight from `new`, and
+`refresh_warnings` skips the PO match on `new` as an unentered draft. So an
+invoice citing a PO that did not exist came back `approved` with no match run
+and no `po_mismatch` raised (found by round 12's §422 lane). Extraction's
+auto-approve had the other half of the gap: its refresh runs on the `pending`
+invoice, so the match ran and the hold was raised, but the auto-approve read no
+exception and approved anyway, leaving an `approved` invoice with an open hold
+for the run builder to catch.
+
+**Decision.** The operator's recommended default from PR #716: match first,
+and hold on failure (fail closed).
+
+- `/complete` passes `refresh_warnings(..., match_po_on_new=True)` when it is
+  taking a `new` invoice out through approval, so the match runs whether the
+  floor fires or the invoice goes to review (the reviewer now sees the match
+  too). The `new → done` close of a workflow with no approval step is unchanged.
+- Both unattended doors, the floor and extraction's auto-approve, ask
+  `invoice_warnings.po_match_hold_refusal` **before** `record_final_approval`.
+  It refuses on an open or escalated `po_mismatch` / `quality_hold` (the same
+  `payment_runs.blocking_exception_types` predicate the run builder reads), and
+  on a clearance of one that stamping the would-be approver would undo: the
+  caller cleared the hold while not its approver (§420 allows that), and §422's
+  re-judge right after the stamp would raise it again. That second question is
+  §422's own, asked with the would-be approver added to the approver set
+  (`exception_lifecycle.clearance_stands(..., approvers=...)`), so the
+  unattended doors never leave an `approved` invoice with a hold open.
+- A refusal lands the invoice at `ready_for_review` with
+  `auto_approve_suppressed: "po_match_hold"` or
+  `"po_match_hold_cleared_by_approver"` on the audit row (extraction's
+  `invoice.extraction_completed`, `/complete`'s `invoice.submitted_for_review`).
+  The caller's clearance is left standing for the human reviewer, whose own
+  approval then re-judges it as §422 says.
+- An invoice with no PO reference has no such row; the floor behaves as before.
+
+**Rejected.**
+
+- *Sending every invoice that cites a PO to review.* The other option PR #716
+  named. It is simpler but gives up the floor for every PO-backed invoice,
+  including the clean matches the floor exists for.
+- *Stamping, re-judging, then undoing the stamp if a hold came back.*
+  `record_final_approval` is the one writer of the approval fields (§389), and
+  an undo would be a second writer whose mistakes leave `approved_by` on an
+  invoice nobody approved. Asking first keeps the stamp a one-way act.
+- *Gating the human approval doors on open holds too.* §422 already chose for
+  those: a person approves with the hold visible, and the hold stops the run.
+  This entry is about the doors with no person in them.
+
+**Cost.** A PO-backed invoice under the floor whose match fails now needs a
+person, which is the point. `/complete` runs the matcher on every PO-citing
+invoice it submits for review, one more query set per submit.
+
+**Enforced by** `backend/tests/test_invoice_complete_auto_approve.py` (an
+unknown and an over-billed PO hold the invoice at review with an open
+`po_mismatch` and no stamp; a clean match approves; no PO is unchanged; a
+hold the caller cleared sends the invoice to review with the clearance left
+standing; the predicate on an extracted invoice; an AST pin that both doors ask
+before they stamp) and `backend/tests/test_extraction_reextract_options.py`
+(extraction lands at review on either refusal, with nothing stamped).
+
+## 426. A payment the ERP reported on several rails is booked only by its row's one-click; `record-outside` refuses it, and the queue's dialog records through the row (§396 / §413 follow-up, round 13, 2026-11-15)
+
+**The gap.** A live `paid_not_recorded` row keeps how the ERP says the payment
+was split rail by rail (§396), and its one-click books that split (§413). The
+payment queue's "Record as paid" posted `POST /api/payments/record-outside`
+instead, which books the one rail the person picks and the figure the invoice
+owes, and `_complete` then resolved the row on the way. A cheque-plus-card
+payment was closed as one rail with no `rail_breakdown`, so the card part
+landed on the payer's 1099-NEC, and the queue's dialog never showed the split
+it was dropping.
+
+**The rule.**
+
+- **One door books a kept split: the row's own one-click.** A person's record
+  by any other door (`record-outside`, the run-level record) of an invoice
+  holding a live `paid_not_recorded` row whose kept breakdown stands is refused
+  with 409 `external_payment_erp_split`, `params.exception_id` the row
+  (`external_payment.erp_split_refusal`). It runs after the live-claim
+  refusals (§309) and before anything is written or audited. The one-click
+  passes the row in `answering_exception_ids`, so it is never refused by
+  itself; an ERP-sourced record carries its own parts and is not gated.
+- **"Stands" is the §413 verdict, now in one place.** `erp_status_sync.
+  kept_split_stands` (moved from `api/exceptions._kept_split_stands`) is the
+  exception row's `erp_payment_split_stands`, the queue row's
+  `erp_reported_payment.split_stands`, and the refusal's test. A row whose
+  breakdown does not stand (one rail, parts that do not add up, none) leaves
+  the person's rail as the record, so `record-outside` still books it and
+  closes the row, as §319 has it.
+- **The queue's dialog records through the row.** Its `erp_reported_payment`
+  carries the stated figure, the kept parts and `split_stands`. The dialog
+  shows the ERP's figure beside the amount owed and the split through the
+  shared `ErpPaymentSplit` component (the `/exceptions` markup, extracted, with
+  the three-state note in `erpReport.splitNoteKey`). Where the split stands it
+  shows no picker and posts `record-erp-payment` with no `method`, exactly as
+  `/exceptions` does, so the payment, its audit (`method_stated: null`) and
+  the row's resolve happen in one transaction. A refusal with this code (a
+  queue read before the row kept its split) links to `/exceptions?id=<row>`.
+- **`record_outside_refusal` does not carry the new code.** The queue's action
+  is no longer `record-outside` alone, and folding the code in would disable
+  the very button that books the split.
+
+**Rejected.** Teaching `record-outside` to read the row and book its split:
+it would need the one-click's whole rule set (the ERP's stated figure over the
+invoice's, §386; the read-back of an unstated one, §393; the no-rail rule,
+§413) a second time, and two doors applying one rule drift. Refusing every
+live row at `record-outside`: it would reverse §319's "any door answers the
+row" for the rows a person's rail does describe, with no 1099 consequence to
+justify it.
+
+**Enforced by** `backend/tests/test_erp_status_sync.py` (the refusal names the
+row and writes nothing; a row whose split does not stand still records; the
+queue carries the figure, parts and the same verdict; refused, then booked
+through the row, the 1099 reports the cheque part only; the run-level refusal),
+`frontend/src/lib/types/erpReport.test.ts`, `codedRefusals.test.ts`, and
+`frontend/tests-e2e/payments/erp-reported-payment.spec.ts` (the queue dialog
+shows the split and books it through the row with no rail sent; a refused
+record links to the exception).
+
+**Amendment (round-13 gate).** The two refusals met in a dead end. An invoice
+in a draft run that also holds a `paid_not_recorded` row whose split stands was
+refused by the run-level record (`external_payment_erp_split`, since only the
+row books the split) and by the row's one-click (`external_payment_in_run`,
+since a run holds it), and neither sentence said how out. A draft run gives up
+an invoice only by being cancelled, so both refusals now say to cancel the run
+first, then record the invoice from its exception, in one shared sentence
+(`external_payment.SPLIT_IN_RUN_MESSAGE`, `refusal.externalPaymentErpSplitInRun`
+in every locale), and both carry `params.payment_run_id` and
+`params.exception_id`. The run-level refusal adds the run
+(`run_payment_refusal` passes it to `erp_split_refusal`); the in-run refusal
+adds the row only for a person's record (`source="user"`) over a split that
+stands, so the ERP-sync path and an in-run refusal with no such row are
+unchanged. Neither refusal moves: the run still holds the invoice until a
+person cancels it, which is the decision the sentence hands them. Tests:
+`backend/tests/test_erp_status_sync.py` (both doors refused with the hint,
+nothing written; cancel, then the row books the split; an in-run refusal with no
+standing split keeps its own params; `erp_split_refusal` exempts only the row it
+answers; `source="erp"` is not held by it) and
+`frontend/src/lib/api/codedRefusals.test.ts`.
+
+## 427. An outbound webhook event is sent after the change it announces commits, and the emitter takes the session (closes a `docs/followups.md` entry, §414 / §421 follow-up, round 13, 2026-11-15)
+
+**The gap.** `transition_invoice` called the webhook emitters inline, and
+`emit_event` commits the `WebhookDelivery` row in its own control-plane
+session. The delivery was therefore durable while the tenant transaction that
+changed the status was still open: a rollback (a failed chain step, a refused
+bulk row, a failed commit) left a subscriber told of an `invoice.approved`,
+`invoice.approval_recalled` or `payment.settled` that never happened, and a
+receiver that read the invoice back on receipt could see the old status.
+`exception.raised` from `exception_service.create_exception` had the same shape:
+the event named an exception row the caller could still roll back.
+
+**Decision.** The typed emitters in `services/webhooks/dispatch.py` take the
+caller's session as a required keyword (`db=`), build the payload at once, and
+queue the `emit_event` call on `services/post_commit` — the `Session.info`
+queue and `after_commit` hook the notification email / chat legs (§46) and the
+ERP auto-send already use. A rolled-back transaction drops the event; a
+rolled-back savepoint drops only the events queued inside it (§304), so a bulk
+approve emits one event per invoice it actually approved, after the outer
+commit. The payload is built at queue time, so it is the state the transaction
+committed, not whatever the instance holds when the job runs. Delivery rows,
+the `(subscription_id, event_id)` dedupe and the per-transition occurrence ids
+are unchanged.
+
+**Why at the emitter.** The follow-up proposed queuing in `transition_invoice`.
+Putting it in the emitters covers both sources (the engine and
+`create_exception`) with one mechanism, and the required `db=` keyword makes a
+new event source state its transaction: `db=None` is the explicit "nothing to
+wait for" case and emits immediately, so it cannot be reached by omission.
+
+**Rejected.** A third deferral mechanism (an outbox table, or a webhook-own
+`Session.info` key like `erp_send`'s): `post_commit` already has the right
+savepoint and dispatch-scope semantics, and the durable backstop for a lost
+emit attempt is unchanged. An outbox would make the emit itself durable across
+a crash between commit and emit; that window existed before as the gap between
+the delivery commit and the tenant commit, in the worse direction, and no
+integrator has needed it.
+
+**Trade-off.** An emit now runs after the request's commit, on a task (or
+inline under a dispatcher's scope, where the control pool is free by then);
+a process that dies in that instant loses the event, where before it could
+announce one that never happened. Missing an event is recoverable through the
+`/api/v1` pull surface; a false one is not.
+
+**Enforced by** `backend/tests/test_outbound_webhooks.py`
+(`test_a_committed_approval_emits_once_after_the_commit`,
+`test_a_rolled_back_approval_emits_nothing`,
+`test_a_bulk_approval_emits_one_event_per_committed_invoice`) and
+`backend/tests/test_outbound_webhooks_exception.py::test_a_rolled_back_exception_emits_nothing`.
+
+## 428. A push stranded at `sending_to_erp` is re-driven or failed by the auto-send sweep; a spent push fails coded; a direct ERP's save is its fence (§410, §411 follow-ups, round 13, 2026-11-15)
+
+Three gaps round 12 left open, all around a push that sits at `sending_to_erp`
+with nothing that will ever move it.
+
+**A new push gets a full retry budget.** `send_to_erp_internal` resumes from
+`state_data.erp_retries`, which only `retry_erp` reset. A send from `approved`
+inherited whatever the invoice's last push left, so a push that failed three
+times, then had its approval recalled and re-approved (§374), was sent with no
+attempts left. That was the path the follow-up called unknown. `start_erp_send`
+now resets the counter on every new push, through the one helper `retry_erp`
+uses (`erp.reset_erp_push_budget`). Only the counter: the outcome-unknown flag,
+the pending job and the orphan keys describe what may already be in the ERP,
+and the next attempt must still read them.
+
+**No attempt left is a final failure.** A job that still arrives spent (a
+redelivery after the last attempt, a re-drive of one) used to return without
+an attempt or a transition. After the §410 gate, so a spent redelivery for a
+recalled invoice is still only skipped, it lands at `failed` with
+`invoice.erp_failed` coded `erp_retries_exhausted`. The refusal's params carry
+`possibly_posted: true` when an earlier attempt may have left the bill, as the
+export gate's do (§286), and the row carries the flag and any known orphan as
+a failed attempt's does, so whoever retries looks in the ERP first. An
+unreadable counter is read as spent rather than guessed at.
+
+**A stranded push is the sweep's second pass.** `start_erp_send` commits
+`→ sending_to_erp` and then dispatches; a death in between leaves no job.
+`erp_auto_send_sweep` now also takes invoices at `sending_to_erp` whose latest
+entry into it (by its transition's audit row) is older than the delay with no
+`invoice.erp_*` row since, and decides each under the invoice row lock from the
+instance's attempt stamp (`erp_outcome_unknown_at`, committed before every
+adapter call, §409):
+
+- *No attempt since the transition, inside the window* → re-dispatched through
+  `dispatch_erp(inline=True)`, so it lands in `send_to_erp_internal` with the
+  same §410 gate, the correlation-id idempotency key and the possibly-posted
+  state handed to the adapter. It cannot post twice: in Lambda mode the FIFO
+  queue's per-invoice message group runs it after any original message, which
+  then finds the invoice moved and skips; in local mode the original job is a
+  task started at the commit, and one that has stamped no attempt within the
+  delay died with its process.
+- *No attempt, outside the window* → `failed`, coded `erp_push_interrupted`.
+  The window is the §411 lookback and the ERP's live-from moment (below). A
+  push stranded for a day may have been keyed into the ERP by hand, and the
+  idempotency key cannot see a hand-keyed bill; a push started before the
+  current ERP was saved was meant for another one. Neither is sent on nobody's
+  say-so; at `failed` a person can retry it.
+- *An attempt began and nothing ended it* (a local worker that died mid-call)
+  → left while the attempt is inside the lookback, since it may still be
+  running or be redelivered by SQS; past it, failed the same way, and flagged
+  possibly posted. Rejected: re-driving it after the delay. An adapter call can
+  outlive five minutes (a Lambda runs up to fifteen, Merge.dev waits for a
+  sync), and two live attempts would rest on the idempotency key alone.
+
+The re-drive writes no audit row of its own: no transition happens, and an
+`invoice.erp_*` row would become the "latest ERP entry" the invoice panels
+read (§410's reason). The push's own outcome rows are the record; the sweep
+logs and counts (`pushes_redriven`, `pushes_interrupted`). A row that is left
+stays a candidate, so the cap could hold it; the lookback releases it, as
+§411's argues for its own skipped rows.
+
+**`settings.erp.configured_at`.** §411 fenced an OAuth ERP's recovery on
+`connected_at`; a directly configured ERP had no such moment. `PATCH
+/api/organization` now stamps `configured_at` when a save names a different
+ERP, destination (`catalog.same_connection`, the condition the sealed secrets
+follow, as `catalog.secrets_to_drop` does) or link realm (`connection_realm`, so an
+Intacct entity change counts, §412), keeps the stored stamp otherwise, and
+never takes one from the request. The sweep's floor is the later of the two
+moments, for approvals and for stranded pushes alike. A block saved before
+this change has no stamp and keeps the lookback alone; that window closed at
+its save.
+
+Tests: `tests/test_erp_push_flow.py` (spent push failed coded, with and without
+possibly-posted; a spent push for a moved invoice still skipped; a new send
+from `approved` resets the counter and keeps the ERP state; the interrupted
+exit), `tests/test_erp_auto_send_sweep.py` (re-drive; an earlier push's stamp
+ignored; too fresh and answered left; an in-flight attempt left; the three
+interrupted cases; the end-to-end re-drive through the local dispatcher landing
+once; the `configured_at` fence and the later-of-two rule),
+`tests/test_erp_catalog.py` (stamped on a first save, kept and unforgeable on a
+same-connection save, restamped on a destination, ERP or realm change), and
+`frontend/src/lib/api/erpRefusals.test.ts` (both codes in every locale, with
+the possibly-posted note).
+
+**Amendment (round-13 gate).** Two corrections to the stranded-push pass.
+
+*An attempt is read from a signal a clean failure cannot erase.* The pass took
+`erp.OUTCOME_UNKNOWN_AT_KEY` as proof that an attempt began, but `_call_erp`
+drops that key when an attempt ends `not_posted` and nothing earlier was
+unknown. During the 2 s / 4 s backoff between attempts the push therefore read
+as never attempted, and once its entry was older than the delay the sweep
+re-drove it beside its own sleeping job: two `send_to_erp_internal` loops, both
+able to post. `_call_erp` now commits a dedicated `erp.ATTEMPT_STARTED_AT_KEY`
+with its pre-call write and never clears it, and the sweep also counts
+`erp_retries` other than 0 as an attempt of this push (every new push resets it
+to 0 in the transaction that enters `sending_to_erp`, and only a finished
+attempt raises it). With no stamp to date it (a row from before the key), such
+an attempt is dated at the push's entry, its earliest possible moment, so the
+lookback still releases it. The cost: a local job that dies mid-backoff is no
+longer re-driven; it is left until the lookback and then failed
+`erp_push_interrupted` (possibly-posted when the state says so) for a person,
+which is the fail-closed side. The module docstring's "nothing new can post a
+bill twice" was also too strong for local mode, where the re-drive infers from
+the missing stamp that the original task died; it now says that is an
+inference and names the correlation-id idempotency lookup as what stops a
+second bill if the task was only slow.
+
+*A push with no entry row fails closed.* `_stranded_query` used to drop an
+invoice at `sending_to_erp` with no audit row recording that entry (a
+Lambda-shipped audit row that never landed, a database restored without it), because its start was
+NULL, so the sweep never saw it. There is no timestamp that provably is the
+transition time (`invoices.updated_at` is only an upper bound), so such a push
+is never re-driven: its attempts cannot be told from an earlier push's. It is
+selected once the invoice row has been untouched for the delay (so a push whose
+audit row is merely still in flight is not taken), left while the attempt
+stamp is inside the lookback, and otherwise failed `erp_push_interrupted` for
+a person, through the same `fail_interrupted_erp_send`. Rejected: falling back
+to `updated_at` as the start, which would re-drive pushes whose real start was
+outside the window. Tests: `tests/test_erp_auto_send_sweep.py` (the sweep run
+inside a real backoff after a `not_posted` attempt leaves the push and the job
+lands it once; `erp_retries` alone counts; a push with no entry row fails
+closed, and is left while its row is fresh or its attempt stamp is recent).
+
+## 429. Mobile offers Approve / Reject from the per-invoice verdict, on the detail screen and per row of the approvals queue; the Approvals tab stays on the permission (closes two `docs/followups.md` entries, round 13, 2026-11-15)
+
+**Context.** The mobile detail screen and the approvals swipe offered Approve /
+Reject to anyone holding `invoice.approve` (`AuthStore.canApproveInvoice`), so
+the uploader, a non-named approver and an ap_manager over the CFO limit met a
+control that could only 403 — the restated rule issue #575 removed from the
+web. Separately, the mobile bulk sheet offered Approved for any selection and
+`BulkResult` kept bare ids (in fact it stringified the `{id, reason, code,
+params}` skip objects), so since §418 a bulk approve of drafts said "N
+skipped" with no reason.
+
+**Decision.**
+
+- The detail screen reads `GET /api/invoices/{id}/review-actions` once for an
+  invoice in review or holding an approval and offers Approve, Reject and
+  Recall from its `approve` / `reject` / `recall_approval` verdicts
+  (`ActionVerdict`), the web modal's rules: hidden on `role_not_permitted` and
+  `invoice_not_in_review`, disabled beside the localized reason otherwise,
+  nothing while unanswered.
+- The approvals queue asks the same read **per row**, keyed by id and
+  `updated_at`, and swipes a row to approve only on an allowed verdict, stating
+  a refusal under the row. One GET per queued row is the cost; the queue is one
+  server-filtered page of `ready_for_review` invoices, and the alternative —
+  keep swiping and let the POST refuse — is exactly the offer-then-403 the
+  verdict exists to prevent. A failed read stays unanswered until
+  pull-to-refresh rather than being re-asked on every rebuild.
+- The **Approvals tab** stays gated on `canApproveInvoice`. It is not a
+  per-invoice decision but "does this user review invoices at all", which is
+  the permission the server itself states on `/auth/me`; every row of a user
+  without it would be `role_not_permitted`. So `canApproveInvoice` keeps that
+  one caller, documented as tab-only.
+- Bulk status keeps each skip as `BulkSkip {id, code, params, reason}` and,
+  when a batch skips rows, lists each in a dialog (invoice number + the reason
+  through `coded_refusal_messages.dart`, else the server's English). Approved
+  is offered only when every selected row is loaded and `ready_for_review`, as
+  the web picker's `commonTransitions` does.
+
+**Rejected.** A list-level verdict field on `GET /api/invoices` (one read for
+the whole queue): a backend change outside this lane, and `review_refusals`
+runs per-invoice chain gates that would make every list read pay for them.
+Worth revisiting if the queue's per-row reads show up as a cost.
+
+Tests: `mobile/test/screens/invoice_detail_screen_test.dart`,
+`mobile/test/screens/approvals_screen_test.dart`,
+`mobile/test/screens/invoices_screen_test.dart` (picker + skip dialog),
+`mobile/test/stores/invoice_store_test.dart`,
+`mobile/test/l10n/coded_refusal_messages_test.dart`.
+
+## 432. A balanced NACHA file debits an offset account kept in the settings JSONB, masked on read, not sealed (closes a `docs/followups.md` entry, round 13, 2026-11-15)
+
+**Context.** `services/nacha.py` wrote credits only (service class 220), the
+unbalanced file most ODFIs expect from a corporate originator (§251). Some
+banks require a balanced file: an offsetting debit to the originator's own
+account for the batch total. That needs the customer's own account number,
+which is banking data, so where it lives and who sees it is the design call.
+
+**Decision.**
+
+- **Three optional keys on `settings.payments.nacha`**: `offset_routing`
+  (ABA, checksum-validated), `offset_account` (≤ 17 alphanumerics after spaces
+  and dashes go) and `offset_account_type` (`checking` | `savings`). **All or
+  none**: any one holding a value asks for a balanced file, and the save 422s
+  naming the missing ones (`nacha.originator_problems`, field names only).
+  Validated through the existing settings writer, `PATCH /api/organization`,
+  like the rest of the block.
+- **With them** the batch header and batch control say service class **200**,
+  and the batch ends with the offsetting debit: transaction code **27**
+  (checking) or **37** (savings), individual ID `OFFSET`, the company name as
+  receiver, the next trace number. The entry/addenda count, the entry hash
+  (the offset routing's first eight digits) and the total debit in both
+  control records include it. **A batch total above one entry's
+  $99,999,999.99 is offset by several debits** rather than refused: a run that
+  exports unbalanced today must not become unexportable for asking to balance.
+- **Without them the file is byte-identical** to the credits-only one, pinned
+  by a SHA-256 of a fixed build taken before the change.
+- **Plain in the JSONB, not sealed in `provider_credentials`.** The sealed
+  store is for credentials, values that let their holder act as the tenant
+  against a third party (`SECRET_FIELDS`). An account number authenticates
+  nothing, and the payee account numbers in the very same file live in
+  `Vendor.bank_details` as plain JSONB. Sealing this one would make it the
+  only account number in the product behind KMS, and route the NACHA export
+  through a credential read (and its "store unavailable" failure) for no
+  protection the vendor numbers lack.
+- **But masked on every read, admins included.** It follows the
+  `utils/bank_masking` rule: `GET /api/organization` shows `****6789`
+  (`org_settings_view._with_masked_nacha_offset`; non-admins never see the
+  payments block). The writer keeps the stored number when a save sends it
+  blank or sends the mask back (`nacha.carry_offset_account`), so the settings
+  page never needs the full number; clearing the routing and type clears it.
+- **Never a value in a log, an error body or an audit row.** The 422 names
+  fields; `NachaOffset.__repr__` leaves the account out; the settings audit
+  `organization.provider_config_updated` adds `nacha_changed` (the block's
+  changed key names); the export's `payment_run.nacha_exported` adds
+  `balanced: bool`. The file itself carries the number, as it carries the
+  vendors'.
+
+**Rejected.** Sealing it as a payments secret (above). A separate settings
+endpoint for the offset: the block already has one audited, validated writer,
+and a second door for half of it is how the other blocks grew drift. Refusing
+a batch total above one entry's maximum: the split is what NACHA permits and
+costs nothing. A per-entry offset (one debit per credit): banks that want a
+balanced file want one offset per batch, and per-entry debits multiply what
+the customer reconciles on its own statement.
+
+**Enforced by** `backend/tests/test_nacha.py` (the byte-identical digest; the
+balanced file's records, controls and block padding; the savings debit code;
+the split debit; the all-or-none rule; the masked read, the blank re-save that
+keeps the number and the audit row; the 422 that echoes no value; a balanced
+export end to end) and `frontend/src/lib/types/paymentExecution.test.ts` (the
+form's mirror of the rule and the account types).
+
+**Amendment (round-13 gate).** `carry_offset_account` kept the stored number
+whenever a save sent it blank or masked, even when the same save changed
+`offset_routing` or `offset_account_type`; the next balanced file then debited
+the old number at the new bank. An account number belongs to its bank and
+type, so it is now carried only when the save names the same routing number
+(whitespace aside) and the same type. Otherwise the save is refused 422,
+`payments.nacha.offset_account must be re-entered: offset_routing or
+offset_account_type changed.`, naming the field and never the number, and
+nothing is written (`nacha.OffsetAccountReentryRequired`, raised by the carry
+and answered in `PATCH /api/organization`). Rejected: clearing the number
+and letting the half-filled-offset 422 answer, whose sentence would not say
+why a field the admin never touched is suddenly invalid. Tests:
+`backend/tests/test_nacha.py` (a new routing, a new type or both, with the
+number blank, absent or masked, refused; a re-entered number saved; the same
+routing spaced differently still carried; the PATCH refused, unechoed and
+unwritten).
+
+## 433. A multi-PO split's POs live in their own column, `invoices.split_po_ids`, which no warning refresh rewrites (closes a §267 / §404 follow-up, round 13, 2026-11-15)
+
+**The gap.** The multi-PO split agent (`multi_po_split_v1`) links one invoice to
+several POs by writing a combined `po_number` ("PO-A,PO-B") and a `po_match`
+snapshot naming the set in `po_ids`. The approval door's evidence sets — who
+received the goods (§267), who inspected them (§404), and the reverse order's
+receiving conflict that `receipts_clear_hold` reads (§389) — took the
+invoice's POs from that `po_number` and that snapshot. But `refresh_warnings`
+rewrites `po_match` on every later edit, and the combined reference resolves to
+no PO, so after any refresh the sets named no PO at all: a receiver of one leg
+could approve, after a recall for instance, and a receipt the approver typed
+in on one leg was not a conflict.
+
+**Decision.**
+
+- **The split's links are a column the matcher never writes.**
+  `invoices.split_po_ids` (JSONB, stringified UUIDs like
+  `segregation_actor_ids`, migration 0133) has one writer, the split resolver's
+  `apply`, which unions the set it links into what is there. Nothing clears it:
+  a later `po_number` edit or a recall leaves it, because a PO the invoice was
+  once linked to by the agent is still goods it was approved against, and
+  refusing one more receiver is the safe error the receiver set already takes
+  for same-numbered sibling POs.
+- **`approval_chain._invoice_po_ids` reads it** (through `_linked_po_ids`,
+  with the stored match's single `po_id`), and no longer reads
+  `po_match.po_ids`: one durable source instead of a snapshot that is right
+  until the next edit. Every evidence set reads `_invoice_po_ids`, so the
+  receiver rule, the inspector rule and the reverse order all see the split.
+  `po_match` keeps its `po_ids` for the modal only.
+- **Backfill** from `po_match.po_ids` where it is still present, then — for a
+  split already refreshed — from the split agent's own `auto_resolved`
+  decision, whose `changes.po_number.new` still records the combined reference;
+  each number resolves to every PO of that number in the invoice's entity, with
+  no vendor filter (the vendor may have changed since; over-naming refuses one
+  more receiver, never fewer).
+
+**Rejected.** A link table (`invoice_po_links`): FKs and a row per link buy
+nothing a read needs here — the only reader wants the ids for a batch of
+invoices it already has loaded, and a JSONB list on the row costs no extra
+query (the bulk approve lookups stay at two and three statements). Teaching
+the matcher to preserve `po_ids` on refresh: the matcher would then own a
+field it never computes, and any future rewrite of `po_match` (a re-extract, a
+new match shape) would reopen the hole silently. Teaching the single-PO matcher
+to match a split: a separate, larger change (the split would stop re-raising
+`no_po` on refresh); it does not need the segregation fix to wait for it.
+
+**Enforced by** `backend/tests/test_approval_receiver_segregation.py` (a leg's
+receiver is refused after a refresh rewrote `po_match`; the reverse-order
+conflict and `receipts_clear_hold`; the inspector),
+`backend/tests/test_exception_agents_multi_po_split.py` (the agent writes the
+set and it survives a refresh) and
+`backend/tests/test_migration_0133_invoice_split_po_ids.py` (model parity,
+both backfills, re-runs, control-plane no-op).
+
+## 434. A line on no report is its creator's, and only its creator may put it on a report (§241 follow-up, round 13, 2026-11-15)
+
+§241 made a report's lines its owner's, but a line on no report had no owner:
+`expenses` recorded no creator, any `admin` / `ap_manager` / `ap_clerk` could
+rewrite a colleague's loose line, and attaching adopted it. A manager could edit
+a clerk's line and the clerk would attach and submit it unaware; the approver ≠
+owner check held, but the line's real author was not in the set it read.
+
+Migration 0134 adds `expenses.created_by_user_id` (tenant, nullable, no FK),
+stamped with the authenticated caller on both create paths and pinned at every
+`Expense(...)` site by `tests/test_expense_creator_stamping.py`. Three rules
+read it (`services/expense_controls.py`):
+
+1. **A loose line is its creator's.** Changing a claim field, replacing the
+   receipt or deleting it is refused to anyone else (403
+   `expense_not_creator`). The gate is the line-level twin of §241's owner gate,
+   and it leaves open what §241 left open: GL coding and card reconciliation
+   are not authorship.
+2. **Only a line its creator owns may go onto a report** (403
+   `expense_report_foreign_line`, `params.expense_id`), on the attach endpoint
+   and on a `PATCH` that moves the line. Refusing the attach, rather than
+   letting it through and recording the creator on the report, is what makes
+   §241's choice hold: every line on a report is its owner's, so the owner is
+   the complete author set. The rule compares the creator with the report's
+   owner, not the caller; the owner gate already makes them equal.
+3. **The SoD set reads the line creators anyway.** `report_line_creators`
+   feeds `segregation_actor_ids`, so a line whose recorded creator is not the
+   owner refuses that person as approver or rejecter. Under rule 2 the set is
+   empty for every new report. It is read so the fraud control keys on what
+   the rows record, not on a gate having held, and it costs one pass over lines
+   already loaded.
+
+**A card-minted line belongs to whoever minted it.** `/create-expense` stamps
+the caller. A card transaction names no cardholder user, so any other choice is
+inferred, and §141 says a fraud control's inputs must be observed. The cost is
+that a reconciler cannot mint a line for a colleague to attach. The colleague
+holds the same role (`CARD_CREATE_EXPENSE_ROLES` is the author set), so they can
+mint it themselves.
+
+**NULL means "no recorded creator" and is permissive, as §141 reads a NULL
+invoice uploader.** Existing rows are not backfilled. The `expense.created`
+audit row is not local in lambda audit mode, and before 0134 attaching adopted
+lines, so a report's owner is no better a proxy. A guessed creator would block a
+real owner from their own line or put an unobserved name in the SoD set. A NULL
+loose line keeps the pre-0134 rules: any author role may edit it and any report
+owner may attach it. The attach does not stamp it either, since that would be
+the guess again. Failing closed was rejected. Nobody could edit, attach or
+delete an existing loose line, so every one would be stranded until someone
+changed the database by hand, and that is an outage, not a control. The residue
+is the set of loose lines that existed at deploy, and it only shrinks.
+
+Mobile does not ship expenses, so the two codes are localized in the web app's
+six locales only.

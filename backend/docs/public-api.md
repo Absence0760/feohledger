@@ -536,6 +536,26 @@ recalled (decisions §421); that is in the audit trail.
   that org**, silently and with no delivery row to show for it, on exactly the
   replay the dedupe exists to make safe. An org with a single subscription never
   saw it. Guard: `tests/test_outbound_webhooks.py::test_emit_duplicate_for_one_sub_still_queues_the_others`.
+- **after the commit** (`dispatch._emit_after_commit`) — every event source
+  is a change made inside a tenant transaction the caller has not committed yet,
+  and `emit_event` commits the delivery row in its own control-plane session.
+  So the typed emitters (`emit_invoice_approved`, `emit_invoice_approval_recalled`,
+  `emit_payment_settled`, `emit_exception_raised`) take the caller's session as a
+  required `db=` keyword, build the payload **now** (the state being
+  committed), and queue the `emit_event` call on `services/post_commit` — the
+  same `Session.info` queue and `after_commit` hook the notification email /
+  chat legs and the ERP auto-send ride. A transaction that rolls back queues
+  nothing; a savepoint that rolls back drops only its own events, so a bulk
+  approve emits one event per invoice it actually approved, after the outer
+  commit. Before this the delivery was durable while the change it announced
+  could still roll back, and a receiver reading the invoice back on receipt
+  could see the old status (decisions §427). `db=None` is the explicit
+  "no caller transaction" case and emits immediately. The `(subscription_id,
+  event_id)` dedupe is unchanged. Guards:
+  `tests/test_outbound_webhooks.py::test_a_committed_approval_emits_once_after_the_commit`,
+  `::test_a_rolled_back_approval_emits_nothing`,
+  `::test_a_bulk_approval_emits_one_event_per_committed_invoice`, and
+  `tests/test_outbound_webhooks_exception.py::test_a_rolled_back_exception_emits_nothing`.
 - **deliver** (`delivery.process_delivery`) — signs the byte-identical frozen
   payload, POSTs via `httpx` (10 s timeout), classifies the result. `2xx` →
   `delivered`; otherwise increment `attempt_count` and, if attempts remain
@@ -592,7 +612,8 @@ alongside the existing notification hook, keyed off the resulting status:
 `approved` → `invoice.approved`, `paid` → `payment.settled`. Every path that
 converges on those statuses (the ERP-sync / payment-webhook / direct-schedule
 paths) emits exactly once, here — once per *transition*, each carrying the
-occurrence id that transition minted.
+occurrence id that transition minted, and only once the caller commits
+the transition.
 
 **`invoice.approval_recalled`** comes from the same hook, but keyed off the
 transition's action (`workflow_engine.RECALL_ACTION`, the one action allowed to
@@ -604,7 +625,7 @@ becomes `recalled_from`; the actor is not sent (decisions §421).
 **`exception.raised`** is emitted from the shared exception-create chokepoint
 `services/exception_service.create_exception`. Every `Exception` row in the
 codebase is now constructed through this one helper — it builds the row,
-flushes for the id, then best-effort emits `exception.raised` (the exception id
+flushes for the id, then queues `exception.raised` for the caller's commit (the exception id
 is the `event_key`, so a re-run / double-fire dedupes on
 `(subscription, exception.raised:<exception-id>)`). The five former
 construction sites all route through it, so coverage is complete (no

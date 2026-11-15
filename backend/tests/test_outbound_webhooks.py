@@ -685,7 +685,7 @@ async def test_transition_mints_a_new_occurrence_per_transition(monkeypatch):
 
     captured: list = []
 
-    async def _fake_emit(invoice, *, occurrence_id=None):
+    async def _fake_emit(invoice, *, db, occurrence_id=None):
         captured.append(occurrence_id)
 
     monkeypatch.setattr(webhooks_pkg, "emit_invoice_approved", _fake_emit)
@@ -759,8 +759,8 @@ async def test_re_approval_of_the_same_invoice_queues_a_second_delivery(realdb, 
 
     try:
         first, second = uuid.uuid4(), uuid.uuid4()
-        await dispatch_mod.emit_invoice_approved(invoice, occurrence_id=first)
-        await dispatch_mod.emit_invoice_approved(invoice, occurrence_id=second)
+        await dispatch_mod.emit_invoice_approved(invoice, db=None, occurrence_id=first)
+        await dispatch_mod.emit_invoice_approved(invoice, db=None, occurrence_id=second)
 
         rows = await _rows()
         assert len(rows) == 2, "each genuine approval must queue its own delivery"
@@ -773,7 +773,7 @@ async def test_re_approval_of_the_same_invoice_queues_a_second_delivery(realdb, 
         assert {r.payload["id"] for r in rows} == {r.event_id for r in rows}
 
         # Replaying the FIRST occurrence still dedupes — no third row.
-        await dispatch_mod.emit_invoice_approved(invoice, occurrence_id=first)
+        await dispatch_mod.emit_invoice_approved(invoice, db=None, occurrence_id=first)
         assert len(await _rows()) == 2
     finally:
         await _cleanup(control_mk, sub.id)
@@ -807,8 +807,8 @@ async def test_re_settlement_of_the_same_invoice_queues_a_second_delivery(realdb
     )
 
     try:
-        await dispatch_mod.emit_payment_settled(invoice, occurrence_id=uuid.uuid4())
-        await dispatch_mod.emit_payment_settled(invoice, occurrence_id=uuid.uuid4())
+        await dispatch_mod.emit_payment_settled(invoice, db=None, occurrence_id=uuid.uuid4())
+        await dispatch_mod.emit_payment_settled(invoice, db=None, occurrence_id=uuid.uuid4())
         async with control_mk() as s:
             rows = (
                 (
@@ -824,6 +824,168 @@ async def test_re_settlement_of_the_same_invoice_queues_a_second_delivery(realdb
         assert {r.payload["data"]["amount"] for r in rows} == {"250.00"}
     finally:
         await _cleanup(control_mk, sub.id)
+
+
+# ---------------------------------------------------------------------------
+# An invoice event is sent only once the transition COMMITS (decisions §427).
+#
+# `emit_event` commits the delivery row in its own control-plane session, so an
+# emit fired inline from `transition_invoice` was durable while the tenant
+# transaction that changed the status could still roll back: a subscriber was
+# told of an approval that never happened. The emitters now ride `post_commit`.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def _committed_transition_env(realdb, monkeypatch):
+    """A subscribed sub + a factory for `ready_for_review` invoices in tenant a."""
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy import delete
+
+    from app.config import settings
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.services import workflow_engine as we
+    from app.services.webhooks import dispatch as dispatch_mod
+
+    org_id = realdb.info("a").org_id
+    control_mk = realdb.control_sessionmaker()
+    mk = realdb.sessionmaker("a")
+    sub, _ = _make_sub_and_delivery(org_id)
+    sub.event_types = [EVENT_INVOICE_APPROVED]
+    await _persist(control_mk, sub)
+
+    monkeypatch.setattr(settings, "webhooks_enabled", True)
+    monkeypatch.setattr(dispatch_mod, "_spawn_immediate_attempt", lambda did: None)
+    # Only the webhook leg is under test; the audit / notification legs are
+    # covered by their own modules.
+    monkeypatch.setattr(we, "dispatch_audit", AsyncMock())
+    monkeypatch.setattr(we, "_maybe_notify_transition", AsyncMock())
+
+    created: list[uuid.UUID] = []
+
+    async def make_invoices(n: int) -> list[uuid.UUID]:
+        ids = [uuid.uuid4() for _ in range(n)]
+        async with mk() as s:
+            for i, inv_id in enumerate(ids):
+                s.add(
+                    Invoice(
+                        id=inv_id,
+                        organization_id=org_id,
+                        invoice_number=f"INV-427-{i}-{inv_id.hex[:6]}",
+                        vendor_name="Acme",
+                        amount=Decimal("100.00"),
+                        currency="USD",
+                        status=InvoiceStatus.ready_for_review,
+                    )
+                )
+            await s.commit()
+        created.extend(ids)
+        return ids
+
+    async def rows():
+        from sqlalchemy import select
+
+        async with control_mk() as s:
+            return (
+                (
+                    await s.execute(
+                        select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+    try:
+        yield SimpleNamespace(mk=mk, make_invoices=make_invoices, rows=rows)
+    finally:
+        from app.services.post_commit import drain_post_commit
+
+        await drain_post_commit()
+        await _cleanup(control_mk, sub.id)
+        async with mk() as s:
+            await s.execute(delete(Invoice).where(Invoice.id.in_(created)))
+            await s.commit()
+
+
+async def _approve(s, invoice_id):
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.services.workflow_engine import transition_invoice
+
+    inv = await s.get(Invoice, invoice_id)
+    await transition_invoice(s, inv, InvoiceStatus.approved, action_name="invoice.approved")
+
+
+@pytest.mark.asyncio
+async def test_a_committed_approval_emits_once_after_the_commit(_committed_transition_env):
+    from app.services.post_commit import drain_post_commit
+
+    env = _committed_transition_env
+    (inv_id,) = await env.make_invoices(1)
+
+    async with env.mk() as s:
+        await _approve(s, inv_id)
+        await drain_post_commit()
+        # Nothing is announced while the transaction that made it is open.
+        assert await env.rows() == []
+        await s.commit()
+    await drain_post_commit()
+
+    (row,) = await env.rows()
+    assert row.event_type == EVENT_INVOICE_APPROVED
+    assert row.payload["data"]["invoice_id"] == str(inv_id)
+    # The payload is the state the transaction committed.
+    assert row.payload["data"]["status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_a_rolled_back_approval_emits_nothing(_committed_transition_env):
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.services.post_commit import drain_post_commit
+
+    env = _committed_transition_env
+    (inv_id,) = await env.make_invoices(1)
+
+    async with env.mk() as s:
+        await _approve(s, inv_id)
+        await s.rollback()
+    await drain_post_commit()
+
+    assert await env.rows() == []
+    async with env.mk() as s:
+        assert (await s.get(Invoice, inv_id)).status is InvoiceStatus.ready_for_review
+
+
+@pytest.mark.asyncio
+async def test_a_bulk_approval_emits_one_event_per_committed_invoice(_committed_transition_env):
+    """Bulk approve runs each row in a SAVEPOINT and rolls a refused row's back.
+
+    Each approved invoice gets exactly one event once the outer transaction
+    commits; the row whose savepoint rolled back gets none, and its rollback
+    does not take its siblings' events with it.
+    """
+    from app.services.post_commit import drain_post_commit
+
+    env = _committed_transition_env
+    first, refused, last = await env.make_invoices(3)
+
+    async with env.mk() as s:
+        for inv_id in (first, refused, last):
+            nested = await s.begin_nested()
+            await _approve(s, inv_id)
+            if inv_id == refused:
+                await nested.rollback()
+            else:
+                await nested.commit()
+        await drain_post_commit()
+        assert await env.rows() == [], "a released savepoint is not a commit"
+        await s.commit()
+    await drain_post_commit()
+
+    rows = await env.rows()
+    assert sorted(r.payload["data"]["invoice_id"] for r in rows) == sorted([str(first), str(last)])
+    assert len({r.event_id for r in rows}) == 2
 
 
 # ---------------------------------------------------------------------------

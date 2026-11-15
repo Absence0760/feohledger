@@ -282,6 +282,32 @@ def _changed_key_names(before: object, after: object) -> list[str]:
     return sorted(k for k in set(b) | set(a) if b.get(k) != a.get(k))
 
 
+def _stamp_erp_configured_at(stored: object, merged: dict) -> dict:
+    """``merged`` with ``configured_at`` set by the server, never by the save.
+
+    Stamped now when the save names a different ERP, destination
+    (``catalog.same_connection``, the condition the sealed secrets follow) or
+    link realm (``erp_link_realm.connection_realm``); otherwise the stored
+    stamp is kept. A directly configured ERP (NetSuite, Business Central,
+    Intacct, SYSPRO) has no OAuth ``connected_at``, so this is the moment the
+    auto-send recovery sweep fences on: an approval before it was made against
+    another ERP, or none, and is never pushed as "recovered" (decisions §428).
+    """
+    from datetime import UTC, datetime
+
+    from app.services.erp_link_realm import connection_realm
+
+    key = erp_catalog.CONFIGURED_AT_KEY
+    out = {k: v for k, v in merged.items() if k != key}
+    if not erp_catalog.same_connection(stored, out) or connection_realm(stored) != connection_realm(
+        out
+    ):
+        out[key] = datetime.now(UTC).isoformat()
+    elif isinstance(stored, dict) and isinstance(stored.get(key), str):
+        out[key] = stored[key]
+    return out
+
+
 @router.patch("", response_model=OrganizationResponse)
 async def update_organization(
     body: UpdateOrganizationRequest,
@@ -296,10 +322,36 @@ async def update_organization(
     if body.name is not None:
         org.name = body.name
     credential_changes: dict[str, list[str]] = {}
+    nacha_changes: dict[str, list[str]] = {}
     erp_secrets_to_drop: frozenset[str] = frozenset()
     erp_drop_reason = "erp_destination_changed"
 
     if body.settings is not None:
+        # The NACHA offset account number reads back masked, so a re-save of
+        # the payments block sends it blank (or as the mask): keep the stored
+        # number rather than validate the blank and refuse (decisions §432).
+        incoming_payments = body.settings.get("payments")
+        if isinstance(incoming_payments, dict) and "nacha" in incoming_payments:
+            from app.services.nacha import OffsetAccountReentryRequired, carry_offset_account
+
+            stored_payments = (org.settings or {}).get("payments")
+            try:
+                carried = carry_offset_account(
+                    incoming_payments.get("nacha"),
+                    stored_payments.get("nacha") if isinstance(stored_payments, dict) else None,
+                )
+            except OffsetAccountReentryRequired as exc:
+                # The stored number belongs to the old bank or account type:
+                # never carried onto a new one (§432, round-13 amendment).
+                # Field name only: the number is never echoed.
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"payments.nacha.{exc.field} must be re-entered: "
+                        "offset_routing or offset_account_type changed."
+                    ),
+                ) from None
+            body.settings["payments"] = {**incoming_payments, "nacha": carried}
         _validate_settings_patch(body.settings)
 
         # Saving a LIVE ERP adapter is plan-gated, and one routed through
@@ -324,7 +376,9 @@ async def update_organization(
             # silently and report the save as a success.
             _refuse_credentials_in_patch("erp", incoming_erp)
             if isinstance(incoming_erp, dict):
-                body.settings["erp"] = erp_catalog.merge_erp_update(erp_before, incoming_erp)
+                body.settings["erp"] = _stamp_erp_configured_at(
+                    erp_before, erp_catalog.merge_erp_update(erp_before, incoming_erp)
+                )
             else:
                 # Clearing the ERP still keeps the OAuth block: only the OAuth
                 # disconnect removes it (it revokes at the provider first).
@@ -451,9 +505,19 @@ async def update_organization(
                 continue
             _refuse_credentials_in_patch(block, incoming_settings[block])
             incoming_settings[block] = strip_secrets(block, incoming_settings[block])
-            changed = _changed_key_names((org.settings or {}).get(block), incoming_settings[block])
+            before_block = (org.settings or {}).get(block)
+            changed = _changed_key_names(before_block, incoming_settings[block])
             if changed:
                 credential_changes[block] = changed
+            if block == "payments" and "nacha" in changed:
+                # The NACHA block holds the originator and the offset account
+                # (banking data): name which of its keys moved, never a value.
+                nacha_changes[block] = _changed_key_names(
+                    before_block.get("nacha") if isinstance(before_block, dict) else None,
+                    incoming_settings[block].get("nacha")
+                    if isinstance(incoming_settings[block], dict)
+                    else None,
+                )
 
         # Merge incoming keys into existing settings (don't replace the whole dict)
         existing = dict(org.settings or {})
@@ -493,7 +557,11 @@ async def update_organization(
                 action="organization.provider_config_updated",
                 entity_type="organization",
                 entity_id=org.id,
-                details={"block": block, "changed": changed},
+                details={
+                    "block": block,
+                    "changed": changed,
+                    **({"nacha_changed": nacha_changes[block]} if block in nacha_changes else {}),
+                },
             )
         except Exception:
             await db.rollback()

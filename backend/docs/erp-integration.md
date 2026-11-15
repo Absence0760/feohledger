@@ -1369,8 +1369,12 @@ NetSuite, Business Central and Blackbaud), `params.provider` (the adapter's
 fixed literal) and, for `account_not_linked`, `params.accounts` — the GL codes
 on the invoice that resolved to no ERP id, or `[]` when the bill had a line with
 no account at all. An `ErpNotConnectedError` records `not_connected`, the
-unopenable-credentials path `erp_credentials_unavailable`; an HTTP failure
-(`erp_failure_message`) records none, since its text is already the diagnosis.
+unopenable-credentials path `erp_credentials_unavailable`, a push that arrived
+with no attempt left `erp_retries_exhausted`, and a stranded push the recovery
+sweep will not re-drive `erp_push_interrupted` (both provider-less, with
+`params.possibly_posted: true` when an earlier attempt may have left the bill,
+decisions §428); an HTTP failure (`erp_failure_message`) records none, since
+its text is already the diagnosis.
 
 The invoice modal's ERP panel states the code in the reader's language with the
 fix (`frontend/src/lib/api/erpRefusals.ts`, e.g. *"This vendor isn't in
@@ -1460,7 +1464,42 @@ reasoning).
   the lookback that nothing on the trail answers, and runs it through the
   same `send_after_approval`. Its rows carry `details.recovered: true` and no
   actor. A payment void back to `approved` is not an approval and is never
-  auto-sent.
+  auto-sent. The lookback's second floor is the moment the tenant's current
+  ERP went live: an OAuth connection's `connected_at`, or `settings.erp
+  .configured_at`, which `PATCH /api/organization` stamps whenever a save
+  changes the ERP, its destination (`catalog.same_connection`) or its link
+  realm (`erp_link_realm.connection_realm`), and which a save can never set
+  itself. An approval before the later of the two is never recovered
+  (decisions §428). A block saved before the stamp existed has neither, and
+  only the lookback fences it.
+- **A push stranded at `sending_to_erp` is re-driven or failed** (decisions
+  §428). The same sweep's second pass takes an invoice at `sending_to_erp`
+  whose latest entry into that status is older than the delay, with no
+  `invoice.erp_*` row after it, and decides under its row lock whether an
+  attempt of this push began, from signals a clean failure cannot erase: the
+  never-cleared `erp_attempt_started_at` committed before every adapter call
+  (or the outcome stamp) at or after the transition, or an `erp_retries` other
+  than 0, which every new push resets and only a finished attempt raises
+  (`erp_outcome_unknown_at` alone is not one: an attempt that ends
+  `not_posted` drops it, and a push sleeping in its backoff used to be
+  re-driven beside its own job; round-13 amendment). No attempt since the
+  transition and inside the window (the
+  lookback, and the `configured_at` / `connected_at` floor) → re-dispatched
+  through `dispatch_erp(inline=True)` into `send_to_erp_internal`, with the
+  same status gate, idempotency key and possibly-posted state, actor NULL. No
+  attempt and outside the window → `failed`, coded `erp_push_interrupted`
+  (`erp.fail_interrupted_erp_send`), for a person to retry. An attempt began
+  and nothing ended it → left while it is inside the lookback (it may still be
+  running, sleeping between attempts, or be redelivered by SQS), then failed
+  the same way, possibly posted. No audit row records the entry at all (a
+  Lambda-shipped row that never landed, a restored database) → never re-driven: selected once the invoice row has
+  been untouched for the delay, left while `erp_attempt_started_at` is inside
+  the lookback, otherwise failed the same way. In Lambda mode the FIFO
+  queue's per-invoice group runs a re-drive after any original message, which
+  then finds the invoice moved (§410); in local mode the re-drive infers from
+  the missing attempt that the original task died with its process, and if it
+  was only slow the adapter's correlation-id idempotency lookup is what stops
+  a second bill. Counters `pushes_redriven` / `pushes_interrupted`.
 - **A hand-off that raises lands at `failed`.** When `dispatch_erp` raises after
   the `sending_to_erp` commit (an SQS send), `start_erp_send` moves the invoice
   to `failed` with an `invoice.erp_failed` row (`error: "ERP send could not be
@@ -2058,6 +2097,18 @@ re-entered push resumes rather than restarts. A **non-retryable** result
 `job_unconfirmed`) or an OAuth ERP with no usable connection fails the invoice
 on the first attempt. After the last attempt the invoice goes to `failed`, with
 `last_error` on the instance and an `invoice.erp_failed` audit row.
+
+**Every new push starts with a full budget** (decisions §428). `start_erp_send`
+resets `erp_retries` to 0 on a send from `approved` as `retry_erp` does on a
+retry (`erp.reset_erp_push_budget`, the counter only), so a push that ended
+spent, then a recall and a re-approval, is attempted again rather than
+inheriting the spent counter. **A push that still arrives with no attempt left**
+(a redelivery after the last attempt, or a re-drive of one) is a final failure:
+after the status gate below, `failed` with an `invoice.erp_failed` row coded
+`erp_retries_exhausted`, its refusal params carrying `possibly_posted: true`
+when an earlier attempt may have left the bill, and no adapter call. It used
+to return with nothing written, leaving the invoice at `sending_to_erp` for
+ever.
 
 **Only an invoice still at `sending_to_erp` is pushed** (decisions §410).
 Before every attempt, the first included, `send_to_erp_internal` re-reads the

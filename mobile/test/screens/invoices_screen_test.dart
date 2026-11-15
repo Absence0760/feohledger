@@ -93,10 +93,11 @@ Map<String, dynamic> _invoiceJson(
   String id, {
   String status = 'pending',
   String vendor = 'Acme Corp',
+  String? number,
 }) =>
     {
       'id': id,
-      'invoice_number': 'INV-$id',
+      'invoice_number': number ?? 'INV-$id',
       'vendor_name': vendor,
       'amount': 100,
       'currency': 'USD',
@@ -480,10 +481,22 @@ void main() {
             });
           }
           // One row moved/deleted, one skipped: exercises the plural and the
-          // skipped-count suffix in every result line.
+          // skipped-count suffix in every result line, and (for a status
+          // change) the per-row reason, stated from its code.
           if (req.url.path.endsWith('/bulk/status')) {
             return http.Response(
-                jsonEncode({'updated': 1, 'skipped': ['2']}), 200,
+                jsonEncode({
+                  'updated': 1,
+                  'skipped': [
+                    {
+                      'id': '2',
+                      'reason': 'invoice is in an immutable status (paid)',
+                      'code': 'invoice_status_immutable',
+                      'params': {'status': 'paid'},
+                    },
+                  ],
+                }),
+                200,
                 headers: json);
           }
           if (req.url.path.endsWith('/bulk/delete')) {
@@ -491,7 +504,10 @@ void main() {
                 jsonEncode({'deleted': 1, 'skipped': ['2']}), 200,
                 headers: json);
           }
-          return _list([_invoiceJson('1'), _invoiceJson('2')]);
+          return _list([
+            _invoiceJson('1', status: 'ready_for_review'),
+            _invoiceJson('2', status: 'ready_for_review'),
+          ]);
         }),
       );
       await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
@@ -527,12 +543,16 @@ void main() {
       await _pumpUntilTrue(tester, () => fake.calls >= 1);
       await tester.pumpAndSettle();
 
-      // Status: target sheet, then the result snackbar.
+      // Status: target sheet, then the result dialog naming the skipped row.
       await tester.tap(find.byIcon(Icons.swap_horiz));
       await tester.pumpAndSettle();
       capture();
       await tester.tap(find.widgetWithText(ListTile, l.invoiceStatusApproved));
-      await snack();
+      await _pumpUntil(tester, find.byType(AlertDialog));
+      await tester.pumpAndSettle();
+      capture();
+      await tester.tap(find.widgetWithText(TextButton, l.commonClose));
+      await tester.pumpAndSettle();
 
       // Delete: confirmation dialog, then the result snackbar.
       await selectBoth();
@@ -556,13 +576,15 @@ void main() {
       'Change status to…',
       'Delete invoices?',
       'Moved 1 invoice to Approved (1 skipped)',
+      'This invoice is Paid, so it can no longer be changed.',
       'Deleted 1 invoice (1 skipped)',
     ]));
     expectNoUntranslatedStrings(
       english: english,
       other: await runFlow(const Locale('ja')),
       // File-format names are the same token in every language.
-      allowed: {'CSV', 'XML'},
+      // An invoice number is the same token in every language too.
+      allowed: {'CSV', 'XML', 'INV-2'},
       surface: 'InvoicesScreen bulk flow',
     );
   });
@@ -669,6 +691,151 @@ void main() {
           find.widgetWithText(FilledButton, 'Reject'));
       expect(confirm.onPressed, isNull);
       expect(bodies, isEmpty);
+    });
+  });
+
+  // A bulk approve moves only rows awaiting review (backend decisions §418),
+  // and every row it skips says why.
+  group('bulk status picker and skipped rows', () {
+    MockClient listClient(
+      List<Map<String, dynamic>> rows, {
+      Object skipped = const <Object>[],
+    }) =>
+        MockClient((req) async {
+          final json = {'content-type': 'application/json'};
+          if (req.url.path == '/api/auth/login') {
+            return http.Response(
+                jsonEncode({'access_token': 'tok'}), 200, headers: json);
+          }
+          if (req.url.path == '/api/auth/me') {
+            return http.Response(jsonEncode(_me(['admin'])), 200,
+                headers: json);
+          }
+          if (req.url.path.endsWith('/bulk/status')) {
+            return http.Response(
+                jsonEncode({'updated': 1, 'skipped': skipped}), 200,
+                headers: json);
+          }
+          return _list(rows);
+        });
+
+    Future<void> openPicker(WidgetTester tester, List<String> ids) async {
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+      await tester.pumpWidget(_localized(const InvoicesScreen()));
+      await _pumpUntil(tester, find.byType(InvoiceListTile));
+      store.enterSelectionMode(ids.first);
+      for (final id in ids.skip(1)) {
+        store.toggleSelected(id);
+      }
+      await tester.pump();
+      await tester.tap(find.widgetWithText(TextButton, 'Status'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('offers Approved when every selected row awaits review',
+        (tester) async {
+      ApiClient().debugConfigure(
+        client: listClient([
+          _invoiceJson('1', status: 'ready_for_review'),
+          _invoiceJson('2', status: 'ready_for_review'),
+        ]),
+      );
+      await openPicker(tester, ['1', '2']);
+      expect(find.widgetWithText(ListTile, 'Approved'), findsOneWidget);
+    });
+
+    testWidgets('hides Approved when any selected row is not in review',
+        (tester) async {
+      ApiClient().debugConfigure(
+        client: listClient([
+          _invoiceJson('1', status: 'ready_for_review'),
+          _invoiceJson('2', status: 'new'),
+        ]),
+      );
+      await openPicker(tester, ['1', '2']);
+      expect(find.widgetWithText(ListTile, 'Approved'), findsNothing);
+      // The other targets are still there.
+      expect(find.widgetWithText(ListTile, 'Rejected'), findsOneWidget);
+    });
+
+    testWidgets('each skipped row is listed with its localized reason, else '
+        'the server\'s English', (tester) async {
+      ApiClient().debugConfigure(
+        client: listClient(
+          [
+            _invoiceJson('1', status: 'ready_for_review'),
+            _invoiceJson('2', status: 'ready_for_review'),
+            _invoiceJson('3', status: 'ready_for_review'),
+          ],
+          skipped: [
+            {
+              'id': '2',
+              'reason': 'server english',
+              'code': 'approval_segregation',
+              'params': <String, dynamic>{},
+            },
+            {'id': '3', 'reason': 'something this build cannot state'},
+          ],
+        ),
+      );
+      await openPicker(tester, ['1', '2', '3']);
+      await tester.tap(find.widgetWithText(ListTile, 'Approved'));
+      await _pumpUntil(tester, find.byType(AlertDialog));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Moved 1 invoice to Approved (2 skipped)'),
+          findsOneWidget);
+      final two = find.byKey(const ValueKey('bulk-skip-2'));
+      expect(find.descendant(of: two, matching: find.text('INV-2')),
+          findsOneWidget);
+      expect(
+        find.descendant(
+            of: two, matching: find.textContaining('Segregation of duties')),
+        findsOneWidget,
+      );
+      expect(find.text('server english'), findsNothing);
+      final three = find.byKey(const ValueKey('bulk-skip-3'));
+      expect(
+        find.descendant(
+            of: three,
+            matching: find.text('something this build cannot state')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a skipped row with no invoice number is named, not shown '
+        'by its id', (tester) async {
+      const id = '6f1c2e9a-0b7d-4c55-9a1e-3d2f4b5c6d7e';
+      ApiClient().debugConfigure(
+        client: listClient(
+          [_invoiceJson(id, status: 'ready_for_review', number: '')],
+          skipped: [
+            {'id': id, 'reason': 'skipped'},
+          ],
+        ),
+      );
+      await openPicker(tester, [id]);
+      await tester.tap(find.widgetWithText(ListTile, 'Approved'));
+      await _pumpUntil(tester, find.byType(AlertDialog));
+      await tester.pumpAndSettle();
+
+      final row = find.byKey(const ValueKey('bulk-skip-$id'));
+      expect(
+        find.descendant(of: row, matching: find.text('Invoice (no number)')),
+        findsOneWidget,
+      );
+      expect(find.textContaining(id), findsNothing);
+    });
+
+    testWidgets('a batch with no skips just confirms', (tester) async {
+      ApiClient().debugConfigure(
+        client: listClient([_invoiceJson('1', status: 'ready_for_review')]),
+      );
+      await openPicker(tester, ['1']);
+      await tester.tap(find.widgetWithText(ListTile, 'Approved'));
+      await _pumpUntil(tester, find.byType(SnackBar));
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('Moved 1 invoice to Approved'), findsOneWidget);
     });
   });
 }

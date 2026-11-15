@@ -787,6 +787,9 @@ class Stack:
         _with_stub(root, "sops", "#!/bin/sh\nexit 0\n")
         _with_stub(root, "git", "#!/bin/sh\necho abcdef123456\n")
         _with_stub(root, "curl", DEPLOY_CURL_STUB)
+        # macOS has no flock(1); the real one runs wherever it exists (Linux, CI).
+        if shutil.which("flock") is None:
+            _with_stub(root, "flock", "#!/bin/sh\nexit 0\n")
         self.hosts = self.deploy / "tenants.caddy"
 
     def run(self, *args: str, fail: str = "") -> subprocess.CompletedProcess[str]:

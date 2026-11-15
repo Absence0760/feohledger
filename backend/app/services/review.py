@@ -489,12 +489,20 @@ async def _chain_level_gate(
     return current
 
 
+#: "Not looked up yet" for :func:`review_refusals`' ``instance`` — distinct
+#: from ``None``, which is a looked-up invoice with no workflow instance.
+_UNLOADED = object()
+
+
 async def review_refusals(
     db: AsyncSession,
     invoice: Invoice,
     *,
     actor,
     org_settings: dict | None,
+    instance=_UNLOADED,
+    receipt_recorders: Collection[str] | None = None,
+    inspection_recorders: Collection[str] | None = None,
 ) -> dict[str, dict | None]:
     """What ``POST /approve`` and ``POST /reject`` would answer ``actor`` for
     ``invoice`` right now: ``{"approve": refusal | None, "reject": refusal |
@@ -522,6 +530,11 @@ async def review_refusals(
     Reject has no segregation or threshold gate on the server — a reviewer may
     always send an invoice back — so its verdict is the permission and the
     review stage only.
+
+    ``instance`` / ``receipt_recorders`` / ``inspection_recorders`` let
+    :func:`review_refusals_by_invoice` hand in a page's worth resolved up front
+    (the same seam :func:`approve_invoice` gives bulk approve); left out, each
+    is looked up here.
     """
     import copy
     from types import SimpleNamespace
@@ -541,7 +554,8 @@ async def review_refusals(
         refused = refusal_of(exc, fallback_code=INVOICE_NOT_IN_REVIEW)
         return {"approve": refused, "reject": refused}
 
-    instance = await get_workflow_instance(db, invoice.id)
+    if instance is _UNLOADED:
+        instance = await get_workflow_instance(db, invoice.id)
     approval_config = await resolve_approval_config(db, invoice, instance)
     actor_roles = {r.name for r in actor.roles} if actor.roles else set()
     try:
@@ -553,8 +567,8 @@ async def review_refusals(
             actor_roles=actor_roles,
             approval_config=approval_config,
             org_settings=org_settings,
-            receipt_recorders=None,
-            inspection_recorders=None,
+            receipt_recorders=receipt_recorders,
+            inspection_recorders=inspection_recorders,
         )
         if approval_config.get("approver_strategy") == "chain" and instance:
             scratch = SimpleNamespace(state_data=copy.deepcopy(instance.state_data or {}))
@@ -565,6 +579,66 @@ async def review_refusals(
     except HTTPException as exc:
         return {"approve": refusal_of(exc, fallback_code="approval_refused"), "reject": None}
     return {"approve": None, "reject": None}
+
+
+async def review_refusals_by_invoice(
+    db: AsyncSession,
+    invoices: Collection[Invoice],
+    *,
+    actor,
+    org_settings: dict | None,
+) -> dict[uuid.UUID, dict[str, dict | None]]:
+    """:func:`review_refusals` for a page of invoices — ``{invoice_id:
+    {"approve", "reject"}}`` — with the per-invoice lookups batched.
+
+    The rule is :func:`review_refusals`' own, run once per invoice; only its
+    inputs are resolved up front: the workflow instances in one query, and the
+    receiving and inspecting recorders through
+    ``approval_chain.receipt_recorders_by_invoice`` /
+    ``inspection_recorders_by_invoice`` (bulk approve's batch). Only an invoice
+    that reaches the gates needs them: a caller without ``invoice.approve`` and
+    a row not awaiting review are answered before any lookup, so a page with
+    neither pays nothing. What stays per row is what the gates read only in
+    rarer cases: the org's active definition for an invoice with no snapshot,
+    and the structuring guard's same-vendor spend when that guard is on.
+    """
+    from app.api.deps import holds_any_permission
+    from app.api.permissions import PERM_INVOICE_APPROVE
+    from app.models.workflow import WorkflowInstance
+    from app.services.approval_chain import (
+        inspection_recorders_by_invoice,
+        receipt_recorders_by_invoice,
+    )
+
+    gated = (
+        [inv for inv in invoices if awaiting_review(inv)]
+        if holds_any_permission(actor, {PERM_INVOICE_APPROVE})
+        else []
+    )
+    instances: dict[uuid.UUID, object] = {}
+    receivers: dict[uuid.UUID, frozenset[str]] = {}
+    inspectors: dict[uuid.UUID, frozenset[str]] = {}
+    if gated:
+        rows = await db.execute(
+            select(WorkflowInstance).where(
+                WorkflowInstance.invoice_id.in_([inv.id for inv in gated])
+            )
+        )
+        instances = {row.invoice_id: row for row in rows.scalars().all()}
+        receivers = await receipt_recorders_by_invoice(db, gated)
+        inspectors = await inspection_recorders_by_invoice(db, gated)
+    return {
+        inv.id: await review_refusals(
+            db,
+            inv,
+            actor=actor,
+            org_settings=org_settings,
+            instance=instances.get(inv.id),
+            receipt_recorders=receivers.get(inv.id),
+            inspection_recorders=inspectors.get(inv.id),
+        )
+        for inv in invoices
+    }
 
 
 async def approve_invoice(

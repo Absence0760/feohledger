@@ -2244,9 +2244,20 @@ Controls (all in `services/external_payment.py`):
 - A **live virtual card**, an **applied credit that no longer pairs**, or
   **another live payment** (dispatched, or held in a run) refuses — each is a
   double-pay risk or an amount we can't state. An invoice inside a draft run is
-  refused with `external_payment_in_run` and pointed at the run-level record.
+  refused with `external_payment_in_run` and pointed at the run-level record,
+  or, when a kept ERP split also stands, told to cancel the run first (below).
 - A `pending` standalone payment FeohLedger booked but **never dispatched** is
   completed in place rather than left holding the live-payment slot.
+- A **payment the ERP reported on several rails** refuses (409
+  `external_payment_erp_split`, `params.exception_id` = the row): the invoice
+  holds a live `paid_not_recorded` row whose kept breakdown stands
+  (`erp_status_sync.kept_split_stands`, the row's `erp_payment_split_stands`),
+  and this endpoint books one rail. Only that row's one-click books the split
+  (`external_payment.erp_split_refusal`, after the live-claim refusals and
+  before anything is written; the run-level record is refused the same way).
+  Without it the card part landed on the payer's 1099 (decisions §426). A kept
+  row whose breakdown does not stand (one rail, or parts that do not add up)
+  is still recorded here at the person's rail, and `_complete` closes it.
 - The **amount** is what the invoice owes — net of applied credit memos and any
   accepted early-pay discount at `paid_on`. A stated `amount` must equal it
   (422 `external_payment_amount_mismatch`); partial payments aren't supported.
@@ -2283,6 +2294,33 @@ at all (#566). Two gates are deliberately left out of the field: the
 payable-status and live-payment gates, which the queue's own base filter
 already is, and segregation of duties, which depends on who records — the
 endpoint's coded 403 is what tells the creator a colleague must record it.
+Nor is `external_payment_erp_split`: the queue's "Record as paid" books such a
+row through its one-click instead (below), so the action stays offered.
+
+**Over a kept ERP split the queue's dialog is the `/exceptions` one.** A queue
+row's `erp_reported_payment` carries the row's stated figure
+(`amount` / `amount_currency`), its kept `payment_parts` and `split_stands`
+(the same `kept_split_stands` verdict). The dialog shows the ERP's figure beside
+the amount owed and the split through the shared `ErpPaymentSplit` component.
+Where `split_stands` is true it shows no rail picker and posts
+`POST /api/exceptions/{exception_id}/record-erp-payment` with no `method`, so
+the split is booked and audited exactly as from `/exceptions` (decisions
+§413, §426). Anywhere else it posts this endpoint as before; should that be
+refused with `external_payment_erp_split` (the queue was read before the row
+kept its split), the dialog links to `/exceptions?id=<row>`.
+
+**An invoice held by a draft run AND a standing split must leave the run
+first.** The run-level record refuses it (`external_payment_erp_split`, only the
+row books the split) and the row's one-click refuses it too
+(`external_payment_in_run`, a run holds it). Each refusal therefore says the
+same thing: cancel the run first (a draft run gives up its invoices only by
+being cancelled), then record the invoice from its exception. Both carry
+`params.payment_run_id` and `params.exception_id`, and the browser renders the
+shared `refusal.externalPaymentErpSplitInRun` sentence from either code when
+both are present. The in-run refusal adds `exception_id` only for a person's
+record over a split that stands; with no such row it keeps `payment_run_id`
+alone and its own sentence, since recording the whole run is then a way out
+(decisions §426, round-13 amendment).
 `tests/test_payment_queue_blocked.py` POSTs every kind of row and compares the
 endpoint's answer to the field.
 
@@ -2300,8 +2338,11 @@ rails paid it, so NULL there means "not stated" or "several rails", and
 `GET /api/payments/runs/{id}/nacha?effective_date=&sec_code=CCD|PPD[&regenerate=true]`
 writes a NACHA ACH credit file (`services/nacha.py`) for a run, for the customer
 to upload to its own bank — it is the originator under its own bank agreement.
-One batch, credits only (service class 220), CCD by default (PPD for a consumer
-payee), unbalanced (no offsetting debit), padded to whole blocks of ten.
+One batch, CCD by default (PPD for a consumer payee), padded to whole blocks of
+ten. By default the batch is credits only (service class 220) and the file is
+unbalanced (no offsetting debit) — what most ODFIs expect from a corporate
+originator. A bank that requires a **balanced** file gets one when the offset
+account is configured (below): see § Balanced files.
 
 Uploading the file is the money moving, so the export is treated as the
 dispatch step:
@@ -2356,7 +2397,8 @@ dispatch step:
   effective date must be a business day (bank holidays are not checked).
   Anything else refuses the whole file naming the invoice — never the bank data.
 - Each export writes `payment_run.nacha_exported` with counts, total, SEC code,
-  effective date, file-ID modifier and the file's SHA-256 — not the file.
+  effective date, file-ID modifier, whether it is `balanced`, and the file's
+  SHA-256 — not the file.
 - **The run-level refusals are one gate**, `payment_controls.run_nacha_export_refusal`,
   in order: the run's state (`nacha_already_exported`,
   `nacha_nothing_to_regenerate`, `nacha_run_not_exportable`), record-only,
@@ -2367,6 +2409,43 @@ dispatch step:
   `payment_controls.run_nacha_void_refusal` as `actions.nacha_void`), which the
   run dialog's bank-file panel reads. The per-payment checks above stay in the
   endpoint, so a `null` verdict can still meet a refusal that names an invoice.
+
+#### Balanced files — the offset account
+
+Three optional keys on `settings.payments.nacha` ask for a balanced file:
+`offset_routing` (the ABA of the customer's own account, checksum-validated),
+`offset_account` (its account number, ≤ 17 alphanumerics after spaces and
+dashes are dropped) and `offset_account_type` (`checking` | `savings`). All
+three or none: any one present makes the other two required, and the save 422s
+naming the missing fields (`nacha.originator_problems`, field names only).
+
+With them, the batch header and batch control carry **service class 200**
+(mixed), and after the credits the batch ends with an **offsetting debit** to
+that account for the batch total — transaction code **27** (checking) or **37**
+(savings), individual ID `OFFSET`, the company name as the receiver, the next
+trace number. One entry's amount field tops out at $99,999,999.99, so a larger
+batch total is split across as many debits as it needs. The controls count
+them like any entry: entry/addenda count and entry hash (its routing's first
+eight digits) include the offset, and total debits equal total credits in both
+the batch and file control records. Without the keys the output is
+byte-identical to the credits-only file (pinned by
+`tests/test_nacha.py::test_the_unbalanced_file_is_byte_identical`).
+
+The offset account number is the customer's own banking data (decisions
+§432). It is stored in the settings JSONB like a vendor's `bank_details`, not
+sealed with the provider credentials (it authenticates nothing), but it is
+**write-only on the way out**: `GET /api/organization` shows it as a last-4
+mask (`****6789`) to admins (non-admins never see the payments block), and a
+save that sends it blank or sends the mask back keeps the stored number
+(`nacha.carry_offset_account`), but only while the save names the same
+`offset_routing` (whitespace aside) and `offset_account_type`: a number belongs
+to its bank, so a save that changes either without re-entering the number is
+refused 422 (`payments.nacha.offset_account must be re-entered: offset_routing
+or offset_account_type changed.`, the field named, never the number) and
+nothing is written (round-13 amendment to §432). A save that clears the
+routing and type clears it too. It never enters a log line, an error body or an audit row: the
+settings audit (`organization.provider_config_updated`) names the changed keys
+under `nacha_changed`, never a value.
 
 **Verify before upload** — `POST /api/payments/runs/{id}/nacha/verify`
 (`payment.execute`, decisions §362). The export reads each bill when it builds
@@ -2483,7 +2562,10 @@ stays open for a person but is never recorded.
   body is the `Payment`, whose `rail_breakdown` (each part's rail or null and
   amount) explains a split payment's `method: null`.
 - *Any other record.* Whichever door records the invoice paid, `_complete`
-  resolves its live `paid_not_recorded` rows (`via: payment_recorded`).
+  resolves its live `paid_not_recorded` rows (`via: payment_recorded`). A row
+  whose kept split stands is the exception: a person's record by any other
+  door is refused (`external_payment_erp_split`), so its split is only ever
+  booked by the one-click (decisions §426).
 Segregation of duties doesn't apply — there is no human actor. The payment is
 dated by the ERP's own payment date and classified by its rail when the report
 states them — the generic webhook's optional `paid_on` / `payment_method`, or
@@ -2962,7 +3044,7 @@ and clear.
 | `required_method` | the one rail this invoice is still payable on, or `null` |
 | `record_outside_refusal` | a different question: the code `POST /api/payments/record-outside` would refuse this row with, or `null` — see § Recording a payment made outside FeohLedger |
 | `blocking_exception` | `{id, exception_type, clear_refusal}` of the open payment-blocking exception behind the row (the type `blocked_reason` names), or `null`. `clear_refusal` is `exception_lifecycle.segregation_refusal` for THIS caller resolving it (`segregation_implicated` / `segregation_raiser` / `segregation_approver`, decisions §420), so the page can say someone else must clear it (decisions §319) |
-| `erp_reported_payment` | `{exception_id, erp_name, method, reference, paid_on}` from the newest live `paid_not_recorded` exception on the invoice, or `null` — what "Record as paid" pre-fills |
+| `erp_reported_payment` | `{exception_id, erp_name, method, reference, paid_on, amount, amount_currency, payment_parts, split_stands}` from the newest live `paid_not_recorded` exception on the invoice, or `null` — what "Record as paid" pre-fills and shows; `split_stands` true sends the record through that exception's one-click (decisions §426) |
 | `selectable_total` | rows "select all N matching" resolves (`/queue/ids`) — excludes blocked AND rail-pinned rows |
 | `blocked_total` | rows whose checkbox is disabled, i.e. exactly the `blocked` ones |
 

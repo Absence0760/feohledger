@@ -368,6 +368,7 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 		['external_payment_credit_conflict', 'refusal.externalPaymentCreditConflict'],
 		['external_payment_nothing_to_pay', 'refusal.externalPaymentNothingToPay'],
 		['external_payment_paid_on_future', 'refusal.externalPaymentPaidOnFuture'],
+		['external_payment_erp_split', 'refusal.externalPaymentErpSplit'],
 		['erp_paid_amount_unconfirmed', 'refusal.erpPaidAmountUnconfirmed'],
 		['erp_payment_method_required', 'refusal.erpPaymentMethodRequired'],
 		['nacha_requires_record_only', 'refusal.nachaRequiresRecordOnly'],
@@ -431,6 +432,33 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 				enT
 			)
 		).toContain('payment run 0f9e8d7c.');
+	});
+
+	it('tells an invoice held by a run AND an ERP split to cancel the run first, from either door', () => {
+		const run = '0f9e8d7c-1111-2222-3333-444455556666';
+		const exception = '11111111-2222-3333-4444-555555555555';
+		// The row's one-click, refused because the invoice is in a run.
+		const fromRow = codedRefusalText(
+			'external_payment_in_run',
+			{ payment_run_id: run, exception_id: exception },
+			enT
+		);
+		// The run-level record, refused because only the row books the split.
+		const fromRun = codedRefusalText(
+			'external_payment_erp_split',
+			{ payment_run_id: run, exception_id: exception },
+			enT
+		);
+		expect(fromRow).toBe(fromRun);
+		expect(fromRow).toContain('payment run 0f9e8d7c,');
+		expect(fromRow).toContain('Cancel the run first');
+		// Without the other half, each door keeps its own sentence.
+		expect(codedRefusalText('external_payment_in_run', { payment_run_id: run }, enT)).toBe(
+			enT('refusal.externalPaymentInRun', { run: '0f9e8d7c' })
+		);
+		expect(codedRefusalText('external_payment_erp_split', { exception_id: exception }, enT)).toBe(
+			enT('refusal.externalPaymentErpSplit')
+		);
 	});
 
 	it('states the amount owed with its currency, or bare without one', () => {
@@ -1316,6 +1344,8 @@ describe('the expense report and card reconciliation refusals (decisions §348, 
 	it.each([
 		['expense_fx_source_missing', 'refusal.expenseFxSourceMissing'],
 		['expense_card_reconciled', 'refusal.expenseCardReconciled'],
+		['expense_not_creator', 'refusal.expenseNotCreator'],
+		['expense_report_foreign_line', 'refusal.expenseReportForeignLine'],
 		['card_txn_expense_already_matched', 'refusal.cardTxnExpenseAlreadyMatched']
 	] as [string, MainMessageKey][])('%s is the fixed sentence %s in every locale', (code, key) => {
 		for (const [locale, messages] of LOCALES) {

@@ -235,7 +235,8 @@ async def _pause_ai_reading(
 #: code rides the `invoice.extraction_completed` audit row's details as
 #: ``auto_approve_suppressed``, so a reviewer (and the touchless-rate reader)
 #: can tell "the gates didn't fire" from "the gates fired and a person was
-#: required anyway".
+#: required anyway". `invoice_warnings.UNATTENDED_APPROVAL_PO_HOLD_*` join them
+#: when a PO-match hold stops the approval (decisions §425).
 AUTO_APPROVE_SUPPRESSED_BY_CALLER = "requested_by_caller"
 AUTO_APPROVE_SUPPRESSED_SEGREGATION_ACTORS = "segregation_actors"
 AUTO_APPROVE_SUPPRESSED_UPLOADED_BY_ANOTHER_USER = "uploaded_by_another_user"
@@ -1119,6 +1120,18 @@ async def run_extraction(
             # refused — the entry window closes on an approved invoice).
             suppression_reason = await _locked_auto_approve_suppression(
                 db, invoice_id, actor_id=actor_id, read_file_key=read_file_key
+            )
+        if auto_approved and suppression_reason is None:
+            # The PO match `refresh_warnings` ran above gates the unattended
+            # approval as it gates `/complete`'s floor (decisions §425): an open
+            # `po_mismatch` / `quality_hold`, or a clearance of one that
+            # stamping the reader would undo (§422), lands at review. Asked
+            # before the stamp, so the invoice is never `approved` with a hold
+            # open.
+            from app.services.invoice_warnings import po_match_hold_refusal
+
+            suppression_reason = await po_match_hold_refusal(
+                db, invoice, approver_id=actor_id, org_settings=org_settings
             )
         if suppression_reason is not None and auto_approved:
             # A human already rejected this document, an entry-only caller

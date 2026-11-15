@@ -561,6 +561,10 @@ async def test_the_recall_is_delivered_to_webhook_subscribers(realdb, monkeypatc
         invoice_id = await _invoice(realdb)
         resp = await _recall(realdb, "ap_manager", invoice_id, reason="Wrong payee 12345678")
         assert resp.status_code == 200, resp.text
+        # The event is sent once the recall commits (decisions §427).
+        from app.services.post_commit import drain_post_commit
+
+        await drain_post_commit()
 
         async with control_mk() as s:
             (delivery,) = (

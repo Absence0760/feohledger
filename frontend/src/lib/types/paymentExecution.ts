@@ -110,16 +110,34 @@ export function nextBusinessDay(now: Date = new Date()): string {
 export const NACHA_SEC_CODES = ['CCD', 'PPD'] as const;
 export type NachaSecCode = (typeof NACHA_SEC_CODES)[number];
 
-/** `settings.payments.nacha` — the customer's side of a NACHA file. */
+/** The account types a balanced file's offset account may be (`services/nacha.OFFSET_ACCOUNT_TYPES`). */
+export const NACHA_OFFSET_ACCOUNT_TYPES = ['checking', 'savings'] as const;
+export type NachaOffsetAccountType = (typeof NACHA_OFFSET_ACCOUNT_TYPES)[number];
+
+/** `settings.payments.nacha` — the customer's side of a NACHA file. The three
+ *  `offset_*` keys are optional and all-or-none: with them the server writes a
+ *  balanced file (decisions §432). `offset_account` reads back masked
+ *  (`****1234`); saving it blank keeps the stored number. */
 export interface NachaSettings {
 	company_name: string;
 	company_id: string;
 	odfi_routing: string;
 	bank_name?: string;
+	offset_routing?: string;
+	offset_account?: string;
+	offset_account_type?: string;
 }
 
 /** The `settings.payments.nacha` field names, in display order. */
-export const NACHA_FIELDS = ['company_name', 'company_id', 'odfi_routing', 'bank_name'] as const;
+export const NACHA_FIELDS = [
+	'company_name',
+	'company_id',
+	'odfi_routing',
+	'bank_name',
+	'offset_routing',
+	'offset_account',
+	'offset_account_type'
+] as const;
 export type NachaField = (typeof NACHA_FIELDS)[number];
 
 /** The short label each NACHA field is named by in a sentence — the org
@@ -128,7 +146,10 @@ export const NACHA_FIELD_LABEL_KEYS: Record<NachaField, MessageKey> = {
 	company_name: 'org.payments.nachaField.companyName',
 	company_id: 'org.payments.nachaField.companyId',
 	odfi_routing: 'org.payments.nachaField.odfiRouting',
-	bank_name: 'org.payments.nachaField.bankName'
+	bank_name: 'org.payments.nachaField.bankName',
+	offset_routing: 'org.payments.nachaField.offsetRouting',
+	offset_account: 'org.payments.nachaField.offsetAccount',
+	offset_account_type: 'org.payments.nachaField.offsetAccountType'
 };
 
 export function nachaFieldLabelKey(field: string): MessageKey | null {
@@ -145,12 +166,31 @@ export function isValidAbaRouting(raw: string): boolean {
 	return sum % 10 === 0;
 }
 
+/** Whether a NACHA block asks for a balanced file — any offset key holding a
+ *  value, as `services/nacha.has_offset`. */
+export function nachaHasOffset(cfg: Partial<NachaSettings>): boolean {
+	return [cfg.offset_routing, cfg.offset_account, cfg.offset_account_type].some(
+		(v) => v !== undefined && v !== null && v !== ''
+	);
+}
+
 /**
  * The fields of a NACHA block the server would refuse, mirroring
  * `services/nacha.originator_problems` so the admin is told before the save
  * rather than by a 422. Field names only — never the values.
+ *
+ * `onFile`: the stored offset block when the server already holds an offset
+ * account number. A blank account in the form means "keep it" only while the
+ * routing number (whitespace aside) and the account type are the stored ones:
+ * a number belongs to its bank, so a save that moves the offset elsewhere must
+ * enter it again (`nacha.carry_offset_account`, decisions §432 amendment).
  */
-export function nachaProblems(cfg: Partial<NachaSettings>): NachaField[] {
+export function nachaProblems(
+	cfg: Partial<NachaSettings>,
+	{
+		onFile = null
+	}: { onFile?: { offset_routing: string; offset_account_type: string } | null } = {}
+): NachaField[] {
 	const problems: NachaField[] = [];
 	const name = (cfg.company_name ?? '').trim();
 	if (!name || name.length > 16) problems.push('company_name');
@@ -159,21 +199,45 @@ export function nachaProblems(cfg: Partial<NachaSettings>): NachaField[] {
 	if (id.length !== 10 || !ascii) problems.push('company_id');
 	if (!isValidAbaRouting(cfg.odfi_routing ?? '')) problems.push('odfi_routing');
 	if (cfg.bank_name !== undefined && cfg.bank_name.length > 23) problems.push('bank_name');
+	if (nachaHasOffset(cfg)) {
+		if (!isValidAbaRouting(cfg.offset_routing ?? '')) problems.push('offset_routing');
+		const account = (cfg.offset_account ?? '').replace(/[\s-]/g, '').toUpperCase();
+		const routingKey = (v: string | undefined) => (v ?? '').replace(/\s/g, '');
+		const sameBank =
+			onFile !== null &&
+			routingKey(cfg.offset_routing) === routingKey(onFile.offset_routing) &&
+			(cfg.offset_account_type ?? '') === onFile.offset_account_type;
+		const keep = account === '' && sameBank;
+		if (!keep && !/^[A-Z0-9]{1,17}$/.test(account)) problems.push('offset_account');
+		const type = cfg.offset_account_type ?? '';
+		if (!(NACHA_OFFSET_ACCOUNT_TYPES as readonly string[]).includes(type)) {
+			problems.push('offset_account_type');
+		}
+	}
 	return problems;
 }
 
 /**
- * The NACHA block to SAVE from the form's four fields: `null` when every field
+ * The NACHA block to SAVE from the form's fields: `null` when every field
  * is blank (no bank file configured — the record-outside path still works),
- * otherwise the block with a blank optional `bank_name` left out.
+ * otherwise the block with a blank optional `bank_name` left out. The offset
+ * keys go only when one of them is filled; a blank `offset_account` then rides
+ * along blank, which the server reads as "keep the stored number".
  */
 export function nachaForSave(form: NachaSettings): NachaSettings | null {
 	const company_name = form.company_name.trim();
 	const company_id = form.company_id.trim();
 	const odfi_routing = form.odfi_routing.replace(/\s+/g, '');
 	const bank_name = (form.bank_name ?? '').trim();
-	if (!company_name && !company_id && !odfi_routing && !bank_name) return null;
+	const offset_routing = (form.offset_routing ?? '').replace(/\s+/g, '');
+	const offset_account = (form.offset_account ?? '').trim();
+	const offset_account_type = form.offset_account_type ?? '';
+	const offset = { offset_routing, offset_account, offset_account_type };
+	if (!company_name && !company_id && !odfi_routing && !bank_name && !nachaHasOffset(offset)) {
+		return null;
+	}
 	const out: NachaSettings = { company_name, company_id, odfi_routing };
 	if (bank_name) out.bank_name = bank_name;
+	if (nachaHasOffset(offset)) Object.assign(out, offset);
 	return out;
 }

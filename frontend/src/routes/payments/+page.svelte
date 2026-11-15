@@ -11,7 +11,7 @@
 	} from '#lib/types/payment.ts';
 	import { paymentStore } from '#lib/stores/payments.svelte.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import RunDetailModal from '#lib/components/modals/RunDetailModal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -69,9 +69,15 @@
 		localToday,
 		type PaymentExecutionMode
 	} from '#lib/types/paymentExecution.ts';
-	import { erpPrefill, type QueueErpReportedPayment } from '#lib/types/erpReport.ts';
+	import {
+		erpPaymentParts,
+		erpPrefill,
+		spansSeveralRails,
+		type QueueErpReportedPayment
+	} from '#lib/types/erpReport.ts';
 	import { codedRefusalText } from '#lib/api/codedRefusals.ts';
 	import RecordPaymentFields from '#lib/components/payments/RecordPaymentFields.svelte';
+	import ErpPaymentSplit from '#lib/components/payments/ErpPaymentSplit.svelte';
 	import {
 		confirmCardRebate,
 		listCardRebates,
@@ -766,6 +772,10 @@
 	let recordPaidOn = $state('');
 	let recording = $state(false);
 	let recordError = $state('');
+	// The exception a refusal points at (`external_payment_erp_split`: the ERP
+	// reported a payment on several rails after this queue was loaded), so the
+	// dialog can link to where it is recorded with its split; else null.
+	let recordErrorExceptionId = $state<string | null>(null);
 	// The latest paid-on date offered: the reader's own calendar day. The
 	// server allows one day past the UTC date for exactly this reader, so a
 	// local "today" always passes and a later date is in the future anywhere.
@@ -817,10 +827,24 @@
 	// for "your ERP" when the adapter has none.
 	let recordErpName = $state<string | null>(null);
 
+	// The ERP's breakdown of the payment it reported, shown as `/exceptions`
+	// shows it (decisions §413, §426), from the same server data: the row's
+	// kept parts and the server's verdict on them. Shown only when it spans
+	// more than one rail; one rail is just the method the form pre-fills.
+	const recordReported = $derived(recordTarget?.erp_reported_payment ?? null);
+	const recordParts = $derived(erpPaymentParts(recordReported));
+	const recordShowSplit = $derived(spansSeveralRails(recordParts));
+	// The split is the record whatever rail is picked. `record-outside` would
+	// book one rail and refuse (`external_payment_erp_split`), so the record
+	// goes through the row's own one-click, which books the split, and names
+	// no rail, as `/exceptions` does (decisions §426).
+	const recordSplitStands = $derived(recordShowSplit && recordReported?.split_stands === true);
+
 	function openRecordOutside(item: QueueItem) {
 		recordTarget = item;
 		recordMaxDate = localToday();
 		recordError = '';
+		recordErrorExceptionId = null;
 		const reported = item.erp_reported_payment;
 		if (reported) {
 			// What the ERP already said — rail, reference, date — so nobody
@@ -842,27 +866,42 @@
 	function closeRecordOutside() {
 		recordTarget = null;
 		recordError = '';
+		recordErrorExceptionId = null;
 	}
 
 	async function commitRecordOutside() {
 		if (!recordTarget) return;
 		const reference = recordReference.trim();
 		const method = recordMethod;
-		if (!reference || !recordPaidOn || !method) return;
+		const splitStands = recordSplitStands;
+		const reported = recordReported;
+		if (!reference || !recordPaidOn || (!method && !splitStands)) return;
 		const target = recordTarget;
 		recording = true;
 		recordError = '';
+		recordErrorExceptionId = null;
 		try {
-			// No `amount`: the server binds it to what the invoice owes on
-			// `paid_on` (net of credits, and of an accepted discount only while
-			// its pay-by date holds). Sending the queue row's figure would 422 a
-			// legitimate payment dated after the discount lapsed.
-			await recordPaymentOutside({
-				invoice_id: target.id,
-				method,
-				reference,
-				paid_on: recordPaidOn
-			});
+			if (splitStands && reported) {
+				// The row's one-click: the payment and the row's resolve in one
+				// transaction, at the figure the ERP states, with its split. No
+				// `method`: the split is the record over any rail, so the audit's
+				// `method_stated` stays null rather than a pick nobody made.
+				await api.post(`/api/exceptions/${reported.exception_id}/record-erp-payment`, {
+					reference,
+					paid_on: recordPaidOn
+				});
+			} else if (method) {
+				// No `amount`: the server binds it to what the invoice owes on
+				// `paid_on` (net of credits, and of an accepted discount only while
+				// its pay-by date holds). Sending the queue row's figure would 422 a
+				// legitimate payment dated after the discount lapsed.
+				await recordPaymentOutside({
+					invoice_id: target.id,
+					method,
+					reference,
+					paid_on: recordPaidOn
+				});
+			}
 			toast(m('payments.recordOutside.recorded', { invoice: target.invoice_number }), 'success');
 			recordTarget = null;
 			// The selection may hold the row that just left the queue.
@@ -877,6 +916,10 @@
 			// there: a coded refusal names what to fix, and a second copy in a
 			// toast would sit over the dialog (one error, one signal).
 			recordError = err instanceof Error ? err.message : m('payments.recordOutside.failed');
+			if (err instanceof ApiError && err.code === 'external_payment_erp_split') {
+				const id = err.params.exception_id;
+				recordErrorExceptionId = typeof id === 'string' && id ? id : null;
+			}
 		} finally {
 			recording = false;
 		}
@@ -3035,10 +3078,33 @@
 				</strong>
 				<span class="record-owed-hint">{m('payments.recordOutside.amountHint')}</span>
 			</div>
+			{#if recordReported?.amount && recordErpName}
+				<!-- What the ERP says was paid, in the code it stated, beside what
+				     is owed in the invoice's own: rendered, never compared here
+				     (the server refuses a figure that differs, decisions §386). -->
+				<div class="record-owed">
+					<span class="record-owed-label">
+						{m('exceptions.erpPayment.reportedAmount', { erp: recordErpName })}
+					</span>
+					<strong class="mono" data-testid="record-erp-amount">
+						{formatCurrency(recordReported.amount, recordReported.amount_currency ?? null)}
+					</strong>
+				</div>
+			{/if}
 			{#if recordErpName}
 				<p class="modal-note" data-testid="record-prefilled-from-erp">
 					{m('payments.recordOutside.prefilledFromErp', { erp: recordErpName })}
 				</p>
+			{/if}
+			{#if recordShowSplit && recordErpName}
+				<ErpPaymentSplit
+					parts={recordParts}
+					currency={recordReported?.amount_currency ?? null}
+					erp={recordErpName}
+					stands={recordReported?.split_stands}
+					idPrefix="record"
+					testid="record"
+				/>
 			{/if}
 			<RecordPaymentFields
 				bind:method={recordMethod}
@@ -3046,9 +3112,17 @@
 				bind:paidOn={recordPaidOn}
 				maxDate={recordMaxDate}
 				idPrefix="record"
+				methodFixed={recordSplitStands ? m('exceptions.erpPayment.splitMethod') : null}
 			/>
 			{#if recordError}
-				<p class="review-error" role="alert" data-testid="record-error">{recordError}</p>
+				<p class="review-error" role="alert" data-testid="record-error">
+					{recordError}
+					{#if recordErrorExceptionId}
+						<a href="/exceptions?id={recordErrorExceptionId}" data-testid="record-error-exception">
+							{m('payments.queue.openException')}
+						</a>
+					{/if}
+				</p>
 			{/if}
 			<div class="modal-footer">
 				<button type="button" class="btn-cancel" onclick={closeRecordOutside}>
@@ -3059,7 +3133,7 @@
 					class="btn-primary"
 					data-testid="record-confirm"
 					disabled={recording ||
-						!recordMethod ||
+						(!recordMethod && !recordSplitStands) ||
 						!recordReference.trim() ||
 						!recordPaidOn ||
 						recordPaidOn > recordMaxDate}

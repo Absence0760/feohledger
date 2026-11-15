@@ -18,6 +18,8 @@ Two layers:
     fixture) — the link + approval + AgentDecision + audit_log writes are real:
     a clean 2-PO split auto-resolves; ambiguous escalates; sum-outside-tolerance
     escalates; the invoice amount is never mutated; idempotent re-run is a no-op;
+    the linked PO set lands in ``split_po_ids`` and survives a warning refresh
+    that rewrites ``po_match`` (decisions §433);
     sub-threshold (undated) confidence escalates under ``balanced``.
 """
 
@@ -277,6 +279,59 @@ async def test_clean_two_po_split_auto_resolves(realdb):
             .all()
         )
         assert "invoice.approved" in {a.action for a in audits}
+
+
+async def test_the_split_records_its_po_set_where_a_warning_refresh_cannot_erase_it(realdb):
+    """Decisions §433: the split links the invoice to its POs in
+    `split_po_ids`, not only in the `po_match` snapshot. A later warning refresh
+    rewrites `po_match` (the combined reference matches no PO), and the set must
+    survive it, because the approval door's receiver / inspector rules read it."""
+    from app.models.procurement import PurchaseOrder
+    from app.services.invoice_warnings import refresh_warnings
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+    inv_id, _, exc_id = await _seed_split(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_totals=[Decimal("600.00"), Decimal("400.00")],
+        number="INV-SPLIT-LINKS",
+    )
+    async with mk() as s:
+        exc = await s.get(APException, exc_id)
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings={"exception_agents": {"autonomy_level": "balanced"}},
+            actor_roles={"ap_manager"},
+        )
+        assert result.decision.action_taken == ACTION_AUTO_RESOLVED
+
+    async with mk() as s:
+        legs = {
+            str(i)
+            for i in (
+                await s.execute(
+                    select(PurchaseOrder.id).where(
+                        PurchaseOrder.po_number.like("PO-INV-SPLIT-LINKS-%")
+                    )
+                )
+            ).scalars()
+        }
+        inv = await s.get(Invoice, inv_id)
+        assert set(inv.split_po_ids) == legs
+        assert set(inv.po_match["po_ids"]) == legs  # the snapshot agrees, for now
+
+        await refresh_warnings(s, inv, org_settings={})
+        await s.commit()
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert "po_ids" not in (inv.po_match or {})  # the refresh rewrote it
+        assert set(inv.split_po_ids) == legs  # the split's record did not move
 
 
 async def test_a_po_in_another_currency_never_joins_the_sum(realdb):

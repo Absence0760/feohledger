@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -20,21 +21,18 @@ import '../support/role_permissions.dart';
 /// Wraps the screen in a MaterialApp carrying the localization delegates so
 /// `AppLocalizations.of(context)` resolves (defaults to English).
 Widget _localized() => MaterialApp(
-      localizationsDelegates: appLocalizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: const InvoiceDetailScreen(invoiceId: '1'),
-    );
+  localizationsDelegates: appLocalizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  home: const InvoiceDetailScreen(invoiceId: '1'),
+);
 
 http.Response _json(Object body, [int status = 200]) => http.Response(
-      jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
-Map<String, dynamic> _meBody(
-  List<String> roles, {
-  List<String>? permissions,
-}) =>
+Map<String, dynamic> _meBody(List<String> roles, {List<String>? permissions}) =>
     {
       'id': 'u1',
       'email': 'demo@acme.com',
@@ -58,29 +56,29 @@ Map<String, dynamic> _invoiceJson(
   List<Map<String, dynamic>>? warnings,
   Map<String, dynamic>? poMatch,
   bool? financiallyLocked,
-}) =>
-    {
-      'id': id,
-      'invoice_number': invoiceNumber,
-      'vendor_name': vendor,
-      'amount': amount,
-      'currency': 'USD',
-      'status': status,
-      'po_number': poNumber,
-      'description': description,
-      'file_url': fileUrl,
-      'gl_account': glAccount,
-      'approved_by': approvedBy,
-      'warnings': warnings,
-      'po_match': poMatch,
-      // What the server answers (`InvoiceResponse.financially_locked`,
-      // decisions §370): the app treats a missing field as locked, so a
-      // fixture that left it out would read every invoice as frozen.
-      'financially_locked': financiallyLocked ??
-          (_lockedStatuses.contains(status) ||
-              (status == 'failed' && approvedBy != null)),
-      'created_at': '2026-01-01T12:00:00',
-    };
+}) => {
+  'id': id,
+  'invoice_number': invoiceNumber,
+  'vendor_name': vendor,
+  'amount': amount,
+  'currency': 'USD',
+  'status': status,
+  'po_number': poNumber,
+  'description': description,
+  'file_url': fileUrl,
+  'gl_account': glAccount,
+  'approved_by': approvedBy,
+  'warnings': warnings,
+  'po_match': poMatch,
+  // What the server answers (`InvoiceResponse.financially_locked`,
+  // decisions §370): the app treats a missing field as locked, so a
+  // fixture that left it out would read every invoice as frozen.
+  'financially_locked':
+      financiallyLocked ??
+      (_lockedStatuses.contains(status) ||
+          (status == 'failed' && approvedBy != null)),
+  'created_at': '2026-01-01T12:00:00',
+};
 
 const _lockedStatuses = {
   'approved',
@@ -106,8 +104,11 @@ Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
 /// resets the session, so login must run after the client is installed.
 Future<void> _arrange(MockClient client) async {
   ApiClient().debugConfigure(client: client);
-  final result =
-      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+  final result = await AuthStore.instance.login(
+    'demo@acme.com',
+    'demo',
+    'acme',
+  );
   expect(result.isSuccess, isTrue, reason: 'login fixture should succeed');
 }
 
@@ -115,6 +116,15 @@ Future<void> _arrange(MockClient client) async {
 /// Optional [onApprove] / [onReject] / [onPatch] override those calls.
 /// [roles] sets the logged-in user's roles (default admin). [audit] is the
 /// audit-log array returned for `/audit-log` (default empty).
+/// Re-sends [req] through [base]. MockClient hands its handler a request it
+/// has already finalized, and sending that same object again throws, so a
+/// wrapping mock forwards a fresh copy.
+Future<http.Response> _forward(MockClient base, http.BaseRequest req) async {
+  final copy = http.Request(req.method, req.url)..headers.addAll(req.headers);
+  if (req is http.Request) copy.bodyBytes = req.bodyBytes;
+  return http.Response.fromStream(await base.send(copy));
+}
+
 MockClient _detailClient(
   Map<String, dynamic> invoice, {
   http.Response Function()? onGet,
@@ -155,6 +165,29 @@ MockClient _detailClient(
         reviewActions != null) {
       return _json(reviewActions);
     }
+    // Without an explicit [reviewActions], answer the review verdicts the way
+    // `services/review.review_refusals` does on its first two gates — the
+    // permission, then the review stage — so a test about something else
+    // still meets an Approve / Reject the server would offer. No
+    // `recall_approval` key: a recall is offered only when a test says so.
+    if (req.method == 'GET' && path.endsWith('/review-actions')) {
+      final perms = permissions ?? systemRolePermissions(roles);
+      Map<String, dynamic>? refusal;
+      if (!perms.contains('invoice.approve')) {
+        refusal = {
+          'code': 'role_not_permitted',
+          'message': 'x',
+          'params': <String, dynamic>{},
+        };
+      } else if (invoice['status'] != 'ready_for_review') {
+        refusal = {
+          'code': 'invoice_not_in_review',
+          'message': 'x',
+          'params': <String, dynamic>{},
+        };
+      }
+      return _json({'approve': refusal, 'reject': refusal});
+    }
     // InvoiceStore.approve/reject/update refetch the list after the write.
     if (req.method == 'GET' && path == '/api/invoices') {
       return _json({'invoices': <Map<String, dynamic>>[]});
@@ -179,8 +212,9 @@ void main() {
     ApiClient().debugConfigure();
   });
 
-  testWidgets('shows a loading spinner before the fetch resolves',
-      (tester) async {
+  testWidgets('shows a loading spinner before the fetch resolves', (
+    tester,
+  ) async {
     // Gate the detail GET on a Completer so we can assert the spinner while the
     // fetch is in flight, then resolve it so no async work outlives the test.
     final gate = Completer<http.Response>();
@@ -197,9 +231,7 @@ void main() {
     );
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await tester.pump();
 
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -211,20 +243,21 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
-  testWidgets('renders invoice detail fields once the fetch resolves',
-      (tester) async {
+  testWidgets('renders invoice detail fields once the fetch resolves', (
+    tester,
+  ) async {
     await _arrange(
-      _detailClient(_invoiceJson(
-        '1',
-        vendor: 'Globex LLC',
-        poNumber: 'PO-42',
-        description: 'Quarterly cloud bill',
-      )),
+      _detailClient(
+        _invoiceJson(
+          '1',
+          vendor: 'Globex LLC',
+          poNumber: 'PO-42',
+          description: 'Quarterly cloud bill',
+        ),
+      ),
     );
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Globex LLC'));
 
     expect(find.text('Globex LLC'), findsOneWidget);
@@ -236,15 +269,12 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
-  testWidgets('falls back to "Unknown Vendor" when vendor_name is null',
-      (tester) async {
-    await _arrange(
-      _detailClient(_invoiceJson('1', vendor: null)),
-    );
+  testWidgets('falls back to "Unknown Vendor" when vendor_name is null', (
+    tester,
+  ) async {
+    await _arrange(_detailClient(_invoiceJson('1', vendor: null)));
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Unknown Vendor'));
 
     expect(find.text('Unknown Vendor'), findsOneWidget);
@@ -260,9 +290,7 @@ void main() {
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.textContaining('Error:'));
 
     expect(find.textContaining('Error:'), findsOneWidget);
@@ -286,9 +314,7 @@ void main() {
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Retry'));
 
     failNext = false;
@@ -305,9 +331,7 @@ void main() {
       _detailClient(_invoiceJson('1', status: 'ready_for_review')),
     );
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Approve'));
 
     expect(find.widgetWithText(FilledButton, 'Approve'), findsOneWidget);
@@ -318,8 +342,9 @@ void main() {
   // holds it — and is the only role `require_cfo_above` accepts above the
   // threshold — so a role check of admin/ap_manager hid the one button a
   // high-value invoice needed.
-  testWidgets('a CFO gets Approve/Reject on an actionable invoice',
-      (tester) async {
+  testWidgets('a CFO gets Approve/Reject on an actionable invoice', (
+    tester,
+  ) async {
     await _arrange(
       _detailClient(
         _invoiceJson('1', status: 'ready_for_review'),
@@ -334,8 +359,9 @@ void main() {
     expect(find.widgetWithText(OutlinedButton, 'Reject'), findsOneWidget);
   });
 
-  testWidgets('the action bar follows the permission, not the role name',
-      (tester) async {
+  testWidgets('the action bar follows the permission, not the role name', (
+    tester,
+  ) async {
     // A custom role carrying invoice.approve is admitted by the backend…
     await _arrange(
       _detailClient(
@@ -365,76 +391,77 @@ void main() {
     expect(find.widgetWithText(OutlinedButton, 'Reject'), findsNothing);
   });
 
-  testWidgets('hides the action bar when the invoice is not actionable',
-      (tester) async {
-    await _arrange(
-      _detailClient(_invoiceJson('1', status: 'approved')),
-    );
+  testWidgets('hides the action bar when the invoice is not actionable', (
+    tester,
+  ) async {
+    await _arrange(_detailClient(_invoiceJson('1', status: 'approved')));
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.widgetWithText(FilledButton, 'Approve'), findsNothing);
     expect(find.widgetWithText(OutlinedButton, 'Reject'), findsNothing);
   });
 
-  testWidgets('hides the action bar for a clerk even on an actionable invoice',
-      (tester) async {
-    // ap_clerk cannot approve -> action bar suppressed by canApprove gate.
-    final client = MockClient((req) async {
-      final path = req.url.path;
-      if (path == '/api/auth/login') return _json({'access_token': 'tok-123'});
-      if (path == '/api/auth/me') return _json(_meBody(['ap_clerk']));
-      if (req.method == 'GET' && path.startsWith('/api/invoices/')) {
-        return _json(_invoiceJson('1', status: 'ready_for_review'));
-      }
-      return http.Response('not found', 404);
-    });
-    ApiClient().debugConfigure(client: client);
-    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+  testWidgets(
+    'hides the action bar for a clerk even on an actionable invoice',
+    (tester) async {
+      // A backend that answers no verdict (this client serves the invoice body
+      // for `/review-actions`) offers nothing: the screen fails closed.
+      final client = MockClient((req) async {
+        final path = req.url.path;
+        if (path == '/api/auth/login') {
+          return _json({'access_token': 'tok-123'});
+        }
+        if (path == '/api/auth/me') return _json(_meBody(['ap_clerk']));
+        if (req.method == 'GET' && path.startsWith('/api/invoices/')) {
+          return _json(_invoiceJson('1', status: 'ready_for_review'));
+        }
+        return http.Response('not found', 404);
+      });
+      ApiClient().debugConfigure(client: client);
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
-    await _pumpUntil(tester, find.text('Acme Corp'));
+      await tester.pumpWidget(_localized());
+      await _pumpUntil(tester, find.text('Acme Corp'));
 
-    expect(find.text('Acme Corp'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Approve'), findsNothing);
-    expect(find.widgetWithText(OutlinedButton, 'Reject'), findsNothing);
-  });
+      expect(find.text('Acme Corp'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Approve'), findsNothing);
+      expect(find.widgetWithText(OutlinedButton, 'Reject'), findsNothing);
+    },
+  );
 
-  testWidgets('tapping Approve posts approval and shows a confirmation snackbar',
-      (tester) async {
-    var approveCalls = 0;
-    final client = _detailClient(
-      _invoiceJson('1', status: 'ready_for_review'),
-      onApprove: (req) {
-        approveCalls++;
-        return _json(_invoiceJson('1', status: 'approved'));
-      },
-      onGet: () => approveCalls == 0
-          ? _json(_invoiceJson('1', status: 'ready_for_review'))
-          : _json(_invoiceJson('1', status: 'approved')),
-    );
-    ApiClient().debugConfigure(client: client);
-    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+  testWidgets(
+    'tapping Approve posts approval and shows a confirmation snackbar',
+    (tester) async {
+      var approveCalls = 0;
+      final client = _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        onApprove: (req) {
+          approveCalls++;
+          return _json(_invoiceJson('1', status: 'approved'));
+        },
+        onGet: () => approveCalls == 0
+            ? _json(_invoiceJson('1', status: 'ready_for_review'))
+            : _json(_invoiceJson('1', status: 'approved')),
+      );
+      ApiClient().debugConfigure(client: client);
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
-    await _pumpUntil(tester, find.text('Approve'));
+      await tester.pumpWidget(_localized());
+      await _pumpUntil(tester, find.text('Approve'));
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
-    await _pumpUntil(tester, find.text('Invoice approved'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+      await _pumpUntil(tester, find.text('Invoice approved'));
 
-    expect(approveCalls, 1);
-    expect(find.text('Invoice approved'), findsOneWidget);
-  });
+      expect(approveCalls, 1);
+      expect(find.text('Invoice approved'), findsOneWidget);
+    },
+  );
 
-  testWidgets('a double-tap on Approve only fires one approval POST',
-      (tester) async {
+  testWidgets('a double-tap on Approve only fires one approval POST', (
+    tester,
+  ) async {
     var approveCalls = 0;
     final gate = Completer<http.Response>();
     final client = MockClient((req) async {
@@ -449,24 +476,30 @@ void main() {
         approveCalls++;
         return gate.future; // hold the approval in flight
       }
+      if (req.method == 'GET' && path.endsWith('/review-actions')) {
+        return _json({'approve': null, 'reject': null});
+      }
       if (req.method == 'GET' && path == '/api/invoices') {
         return _json({'invoices': <Map<String, dynamic>>[]});
       }
       if (req.method == 'GET' && path.startsWith('/api/invoices/')) {
-        return _json(_invoiceJson('1',
-            status: approveCalls == 0 ? 'ready_for_review' : 'approved'));
+        return _json(
+          _invoiceJson(
+            '1',
+            status: approveCalls == 0 ? 'ready_for_review' : 'approved',
+          ),
+        );
       }
       return http.Response('not found', 404);
     });
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Approve'));
 
-    final approveBtn = find.widgetWithText(FilledButton, 'Approve');
+    // Offered from the verdict read answered above (no verdict, no button).
+    final approveBtn = find.byKey(const ValueKey('review-approve'));
     await tester.tap(approveBtn);
     await tester.pump(); // _submitting=true → button disabled
     // Second tap while the first is in flight must be ignored.
@@ -480,8 +513,9 @@ void main() {
     await _pumpUntil(tester, find.text('Invoice approved'));
   });
 
-  testWidgets('shows an error snackbar when the approval fails',
-      (tester) async {
+  testWidgets('shows an error snackbar when the approval fails', (
+    tester,
+  ) async {
     final client = _detailClient(
       _invoiceJson('1', status: 'ready_for_review'),
       onApprove: (req) => http.Response('boom', 500),
@@ -489,9 +523,7 @@ void main() {
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Approve'));
 
     await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
@@ -501,8 +533,9 @@ void main() {
     expect(find.textContaining('Could not approve'), findsOneWidget);
   });
 
-  testWidgets('a coded approval refusal is stated from its code, not retried',
-      (tester) async {
+  testWidgets('a coded approval refusal is stated from its code, not retried', (
+    tester,
+  ) async {
     // The backend's segregation-of-duties 403 (`approval_chain`), coded via
     // `api/refusals.coded_refusal`. "Try again" would be wrong advice: the
     // reason is the approver's own involvement.
@@ -530,15 +563,14 @@ void main() {
     expect(find.textContaining('server english'), findsNothing);
   });
 
-  testWidgets('tapping Reject opens the reason dialog with Cancel/Reject',
-      (tester) async {
+  testWidgets('tapping Reject opens the reason dialog with Cancel/Reject', (
+    tester,
+  ) async {
     await _arrange(
       _detailClient(_invoiceJson('1', status: 'ready_for_review')),
     );
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Reject'));
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Reject'));
@@ -552,8 +584,9 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Reject'), findsOneWidget);
   });
 
-  testWidgets('submitting a reject reason posts it and shows a snackbar',
-      (tester) async {
+  testWidgets('submitting a reject reason posts it and shows a snackbar', (
+    tester,
+  ) async {
     String? sentReason;
     var rejectCalls = 0;
     final client = _detailClient(
@@ -570,9 +603,7 @@ void main() {
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Reject'));
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Reject'));
@@ -591,11 +622,11 @@ void main() {
 
   testWidgets('shows the Edit action for an editable invoice when the user can '
       'edit', (tester) async {
-    await _arrange(_detailClient(_invoiceJson('1', status: 'ready_for_review')));
-
-    await tester.pumpWidget(
-      _localized(),
+    await _arrange(
+      _detailClient(_invoiceJson('1', status: 'ready_for_review')),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.byTooltip('Edit'), findsOneWidget);
@@ -605,96 +636,99 @@ void main() {
   // (`backend/app/api/invoice_entry.py`): PATCH takes ap_clerk, but
   // an entry-only caller only until they submit. `failed` with an approver is
   // an approved invoice whose ERP push failed — outside the window too.
-  testWidgets('shows the Edit action to a clerk on an invoice in entry',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'new'),
-      roles: ['ap_clerk'],
-    ));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('shows the Edit action to a clerk on an invoice in entry', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(_invoiceJson('1', status: 'new'), roles: ['ap_clerk']),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.byTooltip('Edit'), findsOneWidget);
   });
 
-  testWidgets('hides the Edit action from a clerk once submitted for review',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'ready_for_review'),
-      roles: ['ap_clerk'],
-    ));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('hides the Edit action from a clerk once submitted for review', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        roles: ['ap_clerk'],
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.byTooltip('Edit'), findsNothing);
   });
 
-  testWidgets('hides the Edit action from a clerk once approved',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-      roles: ['ap_clerk'],
-    ));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('hides the Edit action from a clerk once approved', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+        roles: ['ap_clerk'],
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.byTooltip('Edit'), findsNothing);
   });
 
-  testWidgets('hides the Edit action from a clerk after an ERP failure',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'failed', approvedBy: 'Some Approver'),
-      roles: ['ap_clerk'],
-    ));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('hides the Edit action from a clerk after an ERP failure', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'failed', approvedBy: 'Some Approver'),
+        roles: ['ap_clerk'],
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.byTooltip('Edit'), findsNothing);
   });
 
-  testWidgets('a manager keeps the Edit action on an approved invoice',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-      roles: ['ap_manager'],
-    ));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('a manager keeps the Edit action on an approved invoice', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+        roles: ['ap_manager'],
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.byTooltip('Edit'), findsOneWidget);
   });
 
-  testWidgets('hides the Edit action for an immutable-status invoice',
-      (tester) async {
+  testWidgets('hides the Edit action for an immutable-status invoice', (
+    tester,
+  ) async {
     // `paid` is in the backend IMMUTABLE_STATUSES set -> PATCH would 409, so
     // the affordance is hidden.
     await _arrange(_detailClient(_invoiceJson('1', status: 'paid')));
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.byTooltip('Edit'), findsNothing);
   });
 
-  testWidgets('editing a field PATCHes the change and confirms', (tester) async {
+  testWidgets('editing a field PATCHes the change and confirms', (
+    tester,
+  ) async {
     Map<String, dynamic>? sentBody;
     var patched = false;
     final client = _detailClient(
@@ -702,18 +736,26 @@ void main() {
       onPatch: (req) {
         sentBody = jsonDecode(req.body) as Map<String, dynamic>;
         patched = true;
-        return _json(_invoiceJson('1', status: 'ready_for_review', vendor: 'Globex'));
+        return _json(
+          _invoiceJson('1', status: 'ready_for_review', vendor: 'Globex'),
+        );
       },
       onGet: () => patched
-          ? _json(_invoiceJson('1', status: 'ready_for_review', vendor: 'Globex'))
-          : _json(_invoiceJson('1', status: 'ready_for_review', vendor: 'Acme Corp')),
+          ? _json(
+              _invoiceJson('1', status: 'ready_for_review', vendor: 'Globex'),
+            )
+          : _json(
+              _invoiceJson(
+                '1',
+                status: 'ready_for_review',
+                vendor: 'Acme Corp',
+              ),
+            ),
     );
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.byTooltip('Edit'));
 
     await tester.tap(find.byTooltip('Edit'));
@@ -723,7 +765,10 @@ void main() {
     expect(find.text('Edit Invoice'), findsOneWidget);
 
     // Change the vendor field and save.
-    await tester.enterText(find.widgetWithText(TextFormField, 'Acme Corp'), 'Globex');
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Acme Corp'),
+      'Globex',
+    );
     await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save'));
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await _pumpUntil(tester, find.text('Invoice updated'));
@@ -733,13 +778,15 @@ void main() {
     expect(find.text('Invoice updated'), findsOneWidget);
   });
 
-  testWidgets('a refused edit shows the server\'s sentence, not "try again"',
-      (tester) async {
+  testWidgets('a refused edit shows the server\'s sentence, not "try again"', (
+    tester,
+  ) async {
     // The server refuses a GL code outside the invoice's chart (decisions
     // §199). The sheet's GL field is free text, so this is where a mistyped
     // code lands — and the user needs to be told WHICH code and why, since
     // retrying the same save can only be refused again.
-    const refusal = "GL account '9999' is not in this invoice's chart of "
+    const refusal =
+        "GL account '9999' is not in this invoice's chart of "
         "accounts. Choose an active code from the invoice's own chart — the "
         "shared accounts plus its entity's own.";
     Map<String, dynamic>? sentBody;
@@ -767,17 +814,14 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await _pumpUntil(tester, find.textContaining("GL account '9999'"));
 
-    expect(
-      sentBody,
-      {'gl_account': '9999'},
-      reason: 'only the changed field is sent',
-    );
+    expect(sentBody, {
+      'gl_account': '9999',
+    }, reason: 'only the changed field is sent');
     expect(find.text('Could not save changes: $refusal'), findsOneWidget);
     expect(find.textContaining('ApiException'), findsNothing);
   });
 
-  testWidgets(
-      'a structured GL-chart refusal is stated from its code, not the '
+  testWidgets('a structured GL-chart refusal is stated from its code, not the '
       "server's English", (tester) async {
     // The backend sends the GL-chart refusal as `{code, foreign, retired,
     // unknown, on_lines, message}` so the client can state it in the reader's
@@ -824,8 +868,9 @@ void main() {
     expect(find.textContaining('SENTINEL'), findsNothing);
   });
 
-  testWidgets('the edit sheet sends the amount as a string-Decimal',
-      (tester) async {
+  testWidgets('the edit sheet sends the amount as a string-Decimal', (
+    tester,
+  ) async {
     Map<String, dynamic>? sentBody;
     var patched = false;
     final client = _detailClient(
@@ -833,32 +878,40 @@ void main() {
       onPatch: (req) {
         sentBody = jsonDecode(req.body) as Map<String, dynamic>;
         patched = true;
-        return _json(_invoiceJson('1', status: 'ready_for_review', amount: 999.99));
+        return _json(
+          _invoiceJson('1', status: 'ready_for_review', amount: 999.99),
+        );
       },
       onGet: () => patched
           ? _json(_invoiceJson('1', status: 'ready_for_review', amount: 999.99))
-          : _json(_invoiceJson('1', status: 'ready_for_review', amount: 1234.56)),
+          : _json(
+              _invoiceJson('1', status: 'ready_for_review', amount: 1234.56),
+            ),
     );
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.byTooltip('Edit'));
 
     await tester.tap(find.byTooltip('Edit'));
     await tester.pumpAndSettle();
 
     // The amount field is seeded with the plain decimal text.
-    await tester.enterText(find.widgetWithText(TextFormField, '1234.56'), '999.99');
+    await tester.enterText(
+      find.widgetWithText(TextFormField, '1234.56'),
+      '999.99',
+    );
     await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save'));
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await _pumpUntil(tester, find.text('Invoice updated'));
 
     expect(sentBody!['amount'], '999.99');
-    expect(sentBody!['amount'], isA<String>(),
-        reason: 'money must travel as string-Decimal, never a float');
+    expect(
+      sentBody!['amount'],
+      isA<String>(),
+      reason: 'money must travel as string-Decimal, never a float',
+    );
   });
 
   testWidgets('an invalid amount blocks the save (validation)', (tester) async {
@@ -873,9 +926,7 @@ void main() {
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.byTooltip('Edit'));
 
     await tester.tap(find.byTooltip('Edit'));
@@ -894,41 +945,42 @@ void main() {
     expect(patched, isFalse);
   });
 
-  testWidgets('renders the activity timeline from the audit log',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'ready_for_review'),
-      audit: [
-        {
-          'id': 'a1',
-          'actor_id': 'u1',
-          'actor_name': 'Demo User',
-          'action': 'invoice.uploaded',
-          'entity_type': 'invoice',
-          'entity_id': '1',
-          'details': null,
-          'created_at': '2026-01-01T10:00:00',
-        },
-        {
-          'id': 'a2',
-          'actor_id': 'u1',
-          'actor_name': 'Demo User',
-          'action': 'invoice.edited',
-          'entity_type': 'invoice',
-          'entity_id': '1',
-          'details': {
-            'changes': {
-              'amount': {'old': '100.00', 'new': '250.00'},
-            },
+  testWidgets('renders the activity timeline from the audit log', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        audit: [
+          {
+            'id': 'a1',
+            'actor_id': 'u1',
+            'actor_name': 'Demo User',
+            'action': 'invoice.uploaded',
+            'entity_type': 'invoice',
+            'entity_id': '1',
+            'details': null,
+            'created_at': '2026-01-01T10:00:00',
           },
-          'created_at': '2026-01-02T10:00:00',
-        },
-      ],
-    ));
-
-    await tester.pumpWidget(
-      _localized(),
+          {
+            'id': 'a2',
+            'actor_id': 'u1',
+            'actor_name': 'Demo User',
+            'action': 'invoice.edited',
+            'entity_type': 'invoice',
+            'entity_id': '1',
+            'details': {
+              'changes': {
+                'amount': {'old': '100.00', 'new': '250.00'},
+              },
+            },
+            'created_at': '2026-01-02T10:00:00',
+          },
+        ],
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Uploaded invoice'));
 
     expect(find.text('Activity'), findsOneWidget);
@@ -938,27 +990,29 @@ void main() {
     expect(find.textContaining('250.00', findRichText: true), findsOneWidget);
   });
 
-  testWidgets('shows the empty activity state when there is no audit history',
-      (tester) async {
-    await _arrange(_detailClient(_invoiceJson('1', status: 'ready_for_review')));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('shows the empty activity state when there is no audit history', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(_invoiceJson('1', status: 'ready_for_review')),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('No activity yet'));
 
     expect(find.text('No activity yet'), findsOneWidget);
   });
 
-  testWidgets('shows a PDF preview card when the file is a PDF', (tester) async {
-    await _arrange(_detailClient(_invoiceJson(
-      '1',
-      fileUrl: '/api/invoices/file/k/scan.pdf',
-    )));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('shows a PDF preview card when the file is a PDF', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', fileUrl: '/api/invoices/file/k/scan.pdf'),
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Tap to view PDF'));
 
     // The PDF can't render as a bitmap inline — a labelled card invites the
@@ -967,16 +1021,16 @@ void main() {
     expect(find.byIcon(Icons.picture_as_pdf), findsOneWidget);
   });
 
-  testWidgets('shows an image preview (not the PDF card) for an image file',
-      (tester) async {
-    await _arrange(_detailClient(_invoiceJson(
-      '1',
-      fileUrl: '/api/invoices/file/k/photo.png',
-    )));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('shows an image preview (not the PDF card) for an image file', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', fileUrl: '/api/invoices/file/k/photo.png'),
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.text('Tap to view PDF'), findsNothing);
@@ -984,13 +1038,12 @@ void main() {
     expect(find.byType(Image), findsWidgets);
   });
 
-  testWidgets('renders no file preview when the invoice has no file',
-      (tester) async {
+  testWidgets('renders no file preview when the invoice has no file', (
+    tester,
+  ) async {
     await _arrange(_detailClient(_invoiceJson('1', fileUrl: null)));
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.text('Tap to view PDF'), findsNothing);
@@ -1009,9 +1062,7 @@ void main() {
     ApiClient().debugConfigure(client: client);
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
-    await tester.pumpWidget(
-      _localized(),
-    );
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Reject'));
 
     await tester.tap(find.widgetWithText(OutlinedButton, 'Reject'));
@@ -1023,50 +1074,58 @@ void main() {
     expect(rejectCalls, 0);
   });
 
-  testWidgets('renders warnings / fraud flags from the invoice', (tester) async {
-    await _arrange(_detailClient(_invoiceJson(
-      '1',
-      warnings: [
-        {
-          'type': 'duplicate',
-          'severity': 'warning',
-          'message': 'Duplicate invoice number for this vendor',
-        },
-        {
-          'type': 'fraud_bank_change',
-          'severity': 'error',
-          'message': 'Vendor bank details recently changed',
-        },
-      ],
-    )));
-
-    await tester.pumpWidget(
-      _localized(),
+  testWidgets('renders warnings / fraud flags from the invoice', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson(
+          '1',
+          warnings: [
+            {
+              'type': 'duplicate',
+              'severity': 'warning',
+              'message': 'Duplicate invoice number for this vendor',
+            },
+            {
+              'type': 'fraud_bank_change',
+              'severity': 'error',
+              'message': 'Vendor bank details recently changed',
+            },
+          ],
+        ),
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.text('Warnings & fraud flags'), findsOneWidget);
-    expect(find.text('Duplicate invoice number for this vendor'),
-        findsOneWidget);
+    expect(
+      find.text('Duplicate invoice number for this vendor'),
+      findsOneWidget,
+    );
     expect(find.text('Vendor bank details recently changed'), findsOneWidget);
   });
 
   testWidgets('renders the PO match panel when present', (tester) async {
-    await _arrange(_detailClient(_invoiceJson(
-      '1',
-      poNumber: 'PO-9',
-      poMatch: {
-        'match_type': '3-way',
-        'status': 'mismatch',
-        'amount_variance_pct': 8.0,
-        'within_tolerance': false,
-        'issues': ['Amount variance of 8.0%'],
-      },
-    )));
-
-    await tester.pumpWidget(
-      _localized(),
+    await _arrange(
+      _detailClient(
+        _invoiceJson(
+          '1',
+          poNumber: 'PO-9',
+          poMatch: {
+            'match_type': '3-way',
+            'status': 'mismatch',
+            'amount_variance_pct': 8.0,
+            'within_tolerance': false,
+            'issues': ['Amount variance of 8.0%'],
+          },
+        ),
+      ),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.text('PO Match'), findsOneWidget);
@@ -1076,40 +1135,45 @@ void main() {
     expect(find.text('+8.0% variance'), findsOneWidget);
   });
 
-  testWidgets('shows ERP status: the bill from the invoice, the rest from the audit log',
-      (tester) async {
-    await _arrange(_detailClient(
-      {..._invoiceJson('1', status: 'sent_to_erp'), 'erp_document_id': 'ERP-12345'},
-      audit: [
-        {
-          'id': 'a1',
-          'actor_id': 'u1',
-          'actor_name': 'Demo User',
-          'action': 'invoice.erp_confirmed',
-          'entity_type': 'invoice',
-          'entity_id': '1',
-          'details': {'erp_reference': 'ERP-12345'},
-          'created_at': '2026-01-02T10:00:00',
-        },
-      ],
-    ));
+  testWidgets(
+    'shows ERP status: the bill from the invoice, the rest from the audit log',
+    (tester) async {
+      await _arrange(
+        _detailClient(
+          {
+            ..._invoiceJson('1', status: 'sent_to_erp'),
+            'erp_document_id': 'ERP-12345',
+          },
+          audit: [
+            {
+              'id': 'a1',
+              'actor_id': 'u1',
+              'actor_name': 'Demo User',
+              'action': 'invoice.erp_confirmed',
+              'entity_type': 'invoice',
+              'entity_id': '1',
+              'details': {'erp_reference': 'ERP-12345'},
+              'created_at': '2026-01-02T10:00:00',
+            },
+          ],
+        ),
+      );
 
-    await tester.pumpWidget(
-      _localized(),
-    );
-    await _pumpUntil(tester, find.text('ERP Status'));
+      await tester.pumpWidget(_localized());
+      await _pumpUntil(tester, find.text('ERP Status'));
 
-    expect(find.text('ERP Status'), findsOneWidget);
-    expect(find.text('ERP Reference'), findsOneWidget);
-    expect(find.text('ERP-12345'), findsOneWidget);
-  });
+      expect(find.text('ERP Status'), findsOneWidget);
+      expect(find.text('ERP Reference'), findsOneWidget);
+      expect(find.text('ERP-12345'), findsOneWidget);
+    },
+  );
 
   testWidgets('hides the ERP panel for a non-ERP status', (tester) async {
-    await _arrange(_detailClient(_invoiceJson('1', status: 'ready_for_review')));
-
-    await tester.pumpWidget(
-      _localized(),
+    await _arrange(
+      _detailClient(_invoiceJson('1', status: 'ready_for_review')),
     );
+
+    await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.text('ERP Status'), findsNothing);
@@ -1125,12 +1189,14 @@ void main() {
       Completer<void> gate,
     ) async {
       final navigator = GlobalKey<NavigatorState>();
-      await tester.pumpWidget(MaterialApp(
-        navigatorKey: navigator,
-        localizationsDelegates: appLocalizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: const Scaffold(body: Text('list')),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: navigator,
+          localizationsDelegates: appLocalizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const Scaffold(body: Text('list')),
+        ),
+      );
 
       navigator.currentState!.push(
         MaterialPageRoute(
@@ -1140,8 +1206,11 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.byType(InvoiceDetailScreen), findsOneWidget,
-          reason: 'the detail route must be mounted before we pop it');
+      expect(
+        find.byType(InvoiceDetailScreen),
+        findsOneWidget,
+        reason: 'the detail route must be mounted before we pop it',
+      );
 
       // Back out while the detail GET is still in flight, and wait on the real
       // signal — the route leaving the tree — rather than a fixed delay.
@@ -1151,8 +1220,11 @@ void main() {
       for (var i = 0; i < 40 && gone.evaluate().isNotEmpty; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
-      expect(gone, findsNothing,
-          reason: 'the detail route must be gone (its State disposed)');
+      expect(
+        gone,
+        findsNothing,
+        reason: 'the detail route must be gone (its State disposed)',
+      );
 
       gate.complete();
       for (var i = 0; i < 10; i++) {
@@ -1160,8 +1232,9 @@ void main() {
       }
     }
 
-    testWidgets('a late success response does not setState after dispose',
-        (tester) async {
+    testWidgets('a late success response does not setState after dispose', (
+      tester,
+    ) async {
       final gate = Completer<void>();
       // The invoice GET hangs until the test releases it.
       ApiClient().debugConfigure(
@@ -1181,8 +1254,9 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('a late failure response does not setState after dispose',
-        (tester) async {
+    testWidgets('a late failure response does not setState after dispose', (
+      tester,
+    ) async {
       final gate = Completer<void>();
       ApiClient().debugConfigure(
         client: MockClient((req) async {
@@ -1202,15 +1276,281 @@ void main() {
     });
   });
 
+  // ── Approve / Reject from the server's verdict (issue #575) ─────────────
+
+  Map<String, dynamic> refusal(String code, [Map<String, dynamic>? params]) => {
+    'code': code,
+    'message': 'server english',
+    'params': params ?? {},
+  };
+
+  testWidgets('a refused approve is shown disabled with the localized reason, '
+      'and Reject stays offered', (tester) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        reviewActions: {
+          'approve': refusal('approval_segregation'),
+          'reject': null,
+        },
+      ),
+    );
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Approve'));
+
+    final approve = tester.widget<FilledButton>(
+      find.ancestor(
+        of: find.text('Approve'),
+        matching: find.byType(FilledButton),
+      ),
+    );
+    expect(approve.onPressed, isNull);
+    final reject = tester.widget<OutlinedButton>(
+      find.ancestor(
+        of: find.text('Reject'),
+        matching: find.byType(OutlinedButton),
+      ),
+    );
+    expect(reject.onPressed, isNotNull);
+    expect(find.textContaining('Segregation of duties'), findsOneWidget);
+    expect(find.text('server english'), findsNothing);
+  });
+
+  testWidgets('a refusal this build cannot state shows the server\'s English', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        reviewActions: {
+          'approve': refusal('approval_refused_by_something_new'),
+          'reject': null,
+        },
+      ),
+    );
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('server english'));
+    expect(find.text('server english'), findsOneWidget);
+  });
+
+  testWidgets('the approval-gate refusal names its figures', (tester) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        reviewActions: {
+          'approve': refusal('approval_cfo_required', {
+            'amount': '12000.00',
+            'currency': 'USD',
+            'limit': '10000.00',
+            'limit_currency': 'USD',
+            'expressible': true,
+          }),
+          'reject': null,
+        },
+        roles: ['ap_manager'],
+      ),
+    );
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byKey(const ValueKey('review-refusal')));
+    final text = tester
+        .widget<Text>(find.byKey(const ValueKey('review-refusal')))
+        .data!;
+    expect(text, contains(r'$12,000.00'));
+    expect(text, contains(r'$10,000.00'));
+  });
+
+  for (final hidden in ['role_not_permitted', 'invoice_not_in_review']) {
+    testWidgets('no Approve / Reject on a $hidden verdict', (tester) async {
+      await _arrange(
+        _detailClient(
+          _invoiceJson('1', status: 'ready_for_review'),
+          reviewActions: {
+            'approve': refusal(hidden),
+            'reject': refusal(hidden),
+          },
+        ),
+      );
+      await tester.pumpWidget(_localized());
+      await _pumpUntil(tester, find.text('Acme Corp'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Approve'), findsNothing);
+      expect(find.text('Reject'), findsNothing);
+      expect(find.text('server english'), findsNothing);
+    });
+  }
+
+  testWidgets('a verdict answer without approve / reject offers neither '
+      '(fails closed)', (tester) async {
+    // An answer with neither key (an older backend) is unanswered.
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        reviewActions: {'recall_approval': null},
+      ),
+    );
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Acme Corp'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Approve'), findsNothing);
+    expect(find.text('Reject'), findsNothing);
+  });
+
+  testWidgets('a failed verdict read offers nothing, says it could not check, '
+      'and a pull-to-refresh asks again', (tester) async {
+    final base = _detailClient(_invoiceJson('1', status: 'ready_for_review'));
+    var verdictReads = 0;
+    final announced = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockDecodedMessageHandler<dynamic>(
+      SystemChannels.accessibility,
+      (message) async {
+        final m = message as Map;
+        if (m['type'] == 'announce') {
+          announced.add((m['data'] as Map)['message'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger
+          .setMockDecodedMessageHandler<dynamic>(
+            SystemChannels.accessibility,
+            null,
+          ),
+    );
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.url.path.endsWith('/review-actions') && verdictReads++ == 0) {
+          return http.Response('boom', 500);
+        }
+        return _forward(base, req);
+      }),
+    );
+    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(
+      tester,
+      find.byKey(const ValueKey('review-verdicts-unavailable')),
+    );
+    expect(find.text('Approve'), findsNothing);
+    expect(find.text('Reject'), findsNothing);
+    expect(
+      find.text("Couldn't check what you can do here — pull to retry"),
+      findsOneWidget,
+    );
+    expect(
+      announced,
+      contains("Couldn't check what you can do here — pull to retry"),
+    );
+
+    final refresh = tester.state<RefreshIndicatorState>(
+      find.byType(RefreshIndicator),
+    );
+    unawaited(refresh.show());
+    await _pumpUntil(tester, find.text('Approve'));
+    expect(find.text('Approve'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('review-verdicts-unavailable')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('the action bar holds a placeholder while the verdict loads', (
+    tester,
+  ) async {
+    final base = _detailClient(_invoiceJson('1', status: 'ready_for_review'));
+    final gate = Completer<void>();
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.url.path.endsWith('/review-actions')) await gate.future;
+        return _forward(base, req);
+      }),
+    );
+    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(
+      tester,
+      find.byKey(const ValueKey('review-verdicts-loading')),
+    );
+    expect(find.text('Checking what you can do here…'), findsOneWidget);
+    expect(find.text('Approve'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('review-verdicts-unavailable')),
+      findsNothing,
+    );
+
+    gate.complete();
+    await _pumpUntil(tester, find.text('Approve'));
+    expect(find.byKey(const ValueKey('review-verdicts-loading')), findsNothing);
+  });
+
+  testWidgets('Approve renders on an AA-contrast green; a refused Reject '
+      'takes the disabled colours instead of the destructive red', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        reviewActions: {
+          'approve': null,
+          'reject': refusal('approval_refused_by_something_new'),
+        },
+      ),
+    );
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byKey(const ValueKey('review-reject')));
+
+    final approve = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('review-approve')),
+    );
+    expect(approve.style!.backgroundColor!.resolve({}), Colors.green.shade800);
+    expect(approve.style!.foregroundColor!.resolve({}), Colors.white);
+
+    final reject = tester.widget<OutlinedButton>(
+      find.byKey(const ValueKey('review-reject')),
+    );
+    expect(reject.onPressed, isNull);
+    final style = reject.style!;
+    expect(style.foregroundColor!.resolve({}), Colors.red.shade700);
+    expect(
+      style.foregroundColor!.resolve({WidgetState.disabled}),
+      isNot(Colors.red.shade700),
+    );
+    expect(
+      style.iconColor!.resolve({WidgetState.disabled}),
+      isNot(Colors.red.shade700),
+    );
+    expect(
+      style.side!.resolve({WidgetState.disabled})!.color,
+      isNot(Colors.red.shade700),
+    );
+    // No colour pinned on the label or icon themselves, which would override
+    // the disabled state.
+    expect(tester.widget<Text>(find.text('Reject')).style, isNull);
+    expect(
+      tester
+          .widget<Icon>(
+            find.descendant(
+              of: find.byKey(const ValueKey('review-reject')),
+              matching: find.byIcon(Icons.close),
+            ),
+          )
+          .color,
+      isNull,
+    );
+  });
+
   // ── Recall approval (backend decisions §374) ────────────────────────────
 
-  testWidgets('an approved invoice offers Recall approval from the verdict',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-      reviewActions: {'recall_approval': null},
-      roles: ['ap_manager'],
-    ));
+  testWidgets('an approved invoice offers Recall approval from the verdict', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+        reviewActions: {'recall_approval': null},
+        roles: ['ap_manager'],
+      ),
+    );
 
     await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Recall approval'));
@@ -1221,19 +1561,22 @@ void main() {
     expect(button.onPressed, isNotNull);
   });
 
-  testWidgets('a refused recall is shown disabled with the server\'s reason',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-      reviewActions: {
-        'recall_approval': {
-          'code': 'invoice_recall_claimed',
-          'message': 'server english',
-          'params': {'claim': 'payment'},
+  testWidgets('a refused recall is shown disabled with the server\'s reason', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+        reviewActions: {
+          'recall_approval': {
+            'code': 'invoice_recall_claimed',
+            'message': 'server english',
+            'params': {'claim': 'payment'},
+          },
         },
-      },
-      roles: ['ap_manager'],
-    ));
+        roles: ['ap_manager'],
+      ),
+    );
 
     await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Recall approval'));
@@ -1250,16 +1593,18 @@ void main() {
 
   for (final hidden in ['invoice_not_recallable', 'role_not_permitted']) {
     testWidgets('no recall is offered on a $hidden verdict', (tester) async {
-      await _arrange(_detailClient(
-        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-        reviewActions: {
-          'recall_approval': {
-            'code': hidden,
-            'message': 'x',
-            'params': <String, dynamic>{},
+      await _arrange(
+        _detailClient(
+          _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+          reviewActions: {
+            'recall_approval': {
+              'code': hidden,
+              'message': 'x',
+              'params': <String, dynamic>{},
+            },
           },
-        },
-      ));
+        ),
+      );
       await tester.pumpWidget(_localized());
       await _pumpUntil(tester, find.text('Acme Corp'));
       await tester.pump(const Duration(milliseconds: 100));
@@ -1267,13 +1612,16 @@ void main() {
     });
   }
 
-  testWidgets('a backend without the verdict offers no recall (fails closed)',
-      (tester) async {
+  testWidgets('a backend without the verdict offers no recall (fails closed)', (
+    tester,
+  ) async {
     // No `reviewActions`: the GET answers with the invoice body, which carries
     // no `recall_approval` key.
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-    ));
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+      ),
+    );
     await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Acme Corp'));
     await tester.pump(const Duration(milliseconds: 100));
@@ -1282,15 +1630,17 @@ void main() {
 
   testWidgets('recalling posts the reason and confirms', (tester) async {
     http.Request? posted;
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-      reviewActions: {'recall_approval': null},
-      onRecall: (req) {
-        posted = req;
-        return _json(_invoiceJson('1', status: 'ready_for_review'));
-      },
-      roles: ['ap_manager'],
-    ));
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+        reviewActions: {'recall_approval': null},
+        onRecall: (req) {
+          posted = req;
+          return _json(_invoiceJson('1', status: 'ready_for_review'));
+        },
+        roles: ['ap_manager'],
+      ),
+    );
 
     await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Recall approval'));
@@ -1329,13 +1679,14 @@ void main() {
       'Correct or void it in the ERP',
     ),
   ]) {
-    testWidgets(
-        'the edit sheet lock notice follows the recall verdict '
+    testWidgets('the edit sheet lock notice follows the recall verdict '
         '(${verdict == null ? 'allowed' : verdict['code']})', (tester) async {
-      await _arrange(_detailClient(
-        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-        reviewActions: {'recall_approval': verdict},
-      ));
+      await _arrange(
+        _detailClient(
+          _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+          reviewActions: {'recall_approval': verdict},
+        ),
+      );
 
       await tester.pumpWidget(_localized());
       await _pumpUntil(tester, find.text('Recall approval'));
@@ -1344,27 +1695,31 @@ void main() {
 
       final notice = tester
           .widget<Text>(
-              find.byKey(const ValueKey('invoice-edit-locked-notice')))
+            find.byKey(const ValueKey('invoice-edit-locked-notice')),
+          )
           .data!;
       expect(notice, startsWith('Approved — the payee and amount are frozen.'));
       expect(notice, contains(expected));
     });
   }
 
-  testWidgets('a recall refused at the door is stated from its code',
-      (tester) async {
-    await _arrange(_detailClient(
-      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
-      reviewActions: {'recall_approval': null},
-      onRecall: (_) => _json({
-        'detail': {
-          'code': 'invoice_recall_in_erp',
-          'message': 'server english',
-          'params': <String, dynamic>{},
-        },
-      }, 409),
-      roles: ['ap_manager'],
-    ));
+  testWidgets('a recall refused at the door is stated from its code', (
+    tester,
+  ) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+        reviewActions: {'recall_approval': null},
+        onRecall: (_) => _json({
+          'detail': {
+            'code': 'invoice_recall_in_erp',
+            'message': 'server english',
+            'params': <String, dynamic>{},
+          },
+        }, 409),
+        roles: ['ap_manager'],
+      ),
+    );
 
     await tester.pumpWidget(_localized());
     await _pumpUntil(tester, find.text('Recall approval'));
@@ -1374,7 +1729,10 @@ void main() {
     await tester.enterText(find.byType(TextField), 'Wrong payee');
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Recall approval'));
-    await _pumpUntil(tester, find.textContaining('Correct or void it in the ERP'));
+    await _pumpUntil(
+      tester,
+      find.textContaining('Correct or void it in the ERP'),
+    );
 
     expect(find.textContaining('Correct or void it in the ERP'), findsWidgets);
   });

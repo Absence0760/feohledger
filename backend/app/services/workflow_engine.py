@@ -375,11 +375,13 @@ async def transition_invoice(
     # pull surface). Same chokepoint as the notification hook — keyed off the
     # resulting status so every path that converges on `approved`/`paid` emits
     # exactly once, and off the action for the recall, whose resulting status
-    # (`ready_for_review`) other transitions share. `emit_event` opens its own
-    # control-plane session, never raises into here, and is a silent no-op when
-    # FEOH_WEBHOOKS_ENABLED is off.
+    # (`ready_for_review`) other transitions share. The emitters queue the event
+    # on `db` and send it only once the caller commits (`post_commit`), so a
+    # transition that rolls back announces nothing (decisions §427). Never
+    # raises into here, and a silent no-op when FEOH_WEBHOOKS_ENABLED is off.
     try:
         await _maybe_emit_webhook(
+            db,
             invoice,
             target_status,
             occurrence_id=occurrence_id,
@@ -392,6 +394,7 @@ async def transition_invoice(
 
 
 async def _maybe_emit_webhook(
+    db: AsyncSession,
     invoice: Invoice,
     target_status: InvoiceStatus,
     *,
@@ -412,23 +415,26 @@ async def _maybe_emit_webhook(
     `occurrence_id` is the caller's per-transition id and becomes the event's
     dedupe key. Re-emitting the SAME transition (same id) still dedupes; a NEW
     transition mints a new id and therefore a new, deliverable event.
+
+    The event is built now and sent after `db` commits; a rollback drops it.
     """
     if action_name == RECALL_ACTION:
         from app.services.webhooks import emit_invoice_approval_recalled
 
         await emit_invoice_approval_recalled(
             invoice,
+            db=db,
             recalled_from=old_status,
             occurrence_id=occurrence_id,
         )
     elif target_status is InvoiceStatus.approved:
         from app.services.webhooks import emit_invoice_approved
 
-        await emit_invoice_approved(invoice, occurrence_id=occurrence_id)
+        await emit_invoice_approved(invoice, db=db, occurrence_id=occurrence_id)
     elif target_status is InvoiceStatus.paid:
         from app.services.webhooks import emit_payment_settled
 
-        await emit_payment_settled(invoice, occurrence_id=occurrence_id)
+        await emit_payment_settled(invoice, db=db, occurrence_id=occurrence_id)
 
 
 async def _maybe_notify_transition(

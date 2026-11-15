@@ -45,7 +45,10 @@ case "$1 $2" in
 "s3api list-objects-v2") cat "$STUB_DIR/listing" ;;
 "s3api delete-objects")
 	for a in "$@"; do
-		case "$a" in file://*) cp "${a#file://}" "$STUB_DIR/deleted.$(date +%s%N).json" ;; esac
+		case "$a" in file://*)
+			n=$(find "$STUB_DIR" -name "deleted.*.json" | wc -l)
+			cp "${a#file://}" "$STUB_DIR/deleted.$(printf %04d "$n").json" ;;
+		esac
 	done
 	if [ "${DELETE_ERRORS:-0}" = 1 ]; then echo "_app/immutable/x.js"; else echo None; fi
 	;;

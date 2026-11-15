@@ -216,6 +216,7 @@ async def refresh_warnings(
     *,
     org_settings: dict | None = None,
     erp_po_sync: dict | None = None,
+    match_po_on_new: bool = False,
 ) -> list[dict]:
     """Recompute warnings for a single invoice and persist them on the row.
 
@@ -230,6 +231,12 @@ async def refresh_warnings(
     finding it no longer reports stays open and is annotated instead
     (:func:`_reconcile_po_exceptions`). The dict is the PII-free context the
     annotation records (``erp_type``).
+
+    ``match_po_on_new`` runs the PO match on a ``new`` invoice too, which a
+    refresh otherwise skips as an unentered draft. ``POST /complete`` passes it
+    when it is about to take the invoice out of ``new`` through approval, so the
+    amount floor decides on a matched invoice and the reviewer sees the match
+    (decisions §425).
 
     Every category this function computes is rebuilt from scratch below —
     but `invoice.warnings` can already carry entries this function doesn't
@@ -487,8 +494,9 @@ async def refresh_warnings(
     # service handles 2-way (invoice vs PO) and 3-way (with goods receipt).
     # Result is persisted on `invoice.po_match` so the modal can render it
     # without re-running. Mismatches and missing POs raise exceptions for
-    # the queue. Skip on draft `new` invoices that haven't been extracted yet.
-    if invoice.po_number and _status_str(invoice.status) != "new":
+    # the queue. Skip on draft `new` invoices that haven't been extracted yet,
+    # unless the caller is submitting it now (`match_po_on_new`, §425).
+    if invoice.po_number and (match_po_on_new or _status_str(invoice.status) != "new"):
         await _refresh_po_match(db, invoice, warnings, org_settings, erp_po_sync=erp_po_sync)
     else:
         invoice.po_match = None
@@ -2119,6 +2127,7 @@ async def _finding_cleared_by_a_person(
     fingerprint: str,
     *,
     org_settings: dict | None,
+    approvers: set[str] | None = None,
 ) -> bool:
     """Has a person already resolved or dismissed THIS finding on this invoice,
     as it stands now, and could they still? (decisions §286, §366, §367)
@@ -2143,7 +2152,8 @@ async def _finding_cleared_by_a_person(
     finding is raised again for someone independent. A clearance by anyone
     the invoice does not implicate still suppresses. ``org_settings`` carries the queue's
     opt-out; omitted, segregation is enforced, so the error is an extra
-    review, never a bypass.
+    review, never a bypass. ``approvers`` replaces the approver set read from
+    the invoice, for :func:`po_match_hold_refusal`'s question before a stamp.
     """
     from app.services.exception_lifecycle import clearance_stands, workflow_instance_for
 
@@ -2167,7 +2177,10 @@ async def _finding_cleared_by_a_person(
     # `po_mismatch` / `quality_hold`; one query, only when such a row is closed.
     instance = await workflow_instance_for(db, rows[0], invoice)
     return any(
-        clearance_stands(row, invoice, org_settings=org_settings, instance=instance) for row in rows
+        clearance_stands(
+            row, invoice, org_settings=org_settings, instance=instance, approvers=approvers
+        )
+        for row in rows
     )
 
 
@@ -2204,10 +2217,33 @@ async def reraise_holds_cleared_by_an_approver(
     approvers from before its run (§420). A row an agent or a detector closed
     carries no fingerprint, so it is never a candidate.
     """
+    for row, current in await _cleared_holds_still_fingerprinted(db, invoice):
+        await _ensure_exception(
+            db,
+            invoice,
+            row.exception_type,
+            row.severity or "warning",
+            {
+                "code": row.description_code,
+                "params": row.description_params or {},
+                "message": row.description or "",
+            },
+            org_settings=org_settings,
+            fingerprint=current,
+        )
+
+
+async def _cleared_holds_still_fingerprinted(
+    db: AsyncSession, invoice: Invoice
+) -> list[tuple[APException, str]]:
+    """The closed ``po_mismatch`` / ``quality_hold`` rows a person's clearance
+    could still suppress, one per finding, each with the invoice's current
+    fingerprint for it: the candidates :func:`reraise_holds_cleared_by_an_approver`
+    re-judges and :func:`po_match_hold_refusal` asks about before a stamp."""
     from app.services.exception_lifecycle import APPROVER_SEGREGATED_TYPES
 
     if invoice.id is None:
-        return
+        return []
     rows = (
         (
             await db.execute(
@@ -2224,6 +2260,7 @@ async def reraise_holds_cleared_by_an_approver(
         .scalars()
         .all()
     )
+    out: list[tuple[APException, str]] = []
     seen: set[tuple[str, str]] = set()
     for row in rows:
         key = (row.exception_type, row.finding_fingerprint)
@@ -2233,21 +2270,69 @@ async def reraise_holds_cleared_by_an_approver(
         current = await current_finding_fingerprint(
             db, invoice, row.exception_type, row.description_code, row.description_params
         )
-        if current != row.finding_fingerprint:
-            continue
-        await _ensure_exception(
+        if current == row.finding_fingerprint:
+            out.append((row, current))
+    return out
+
+
+#: Why an unattended approval (``/complete``'s amount floor, extraction's
+#: auto-approve) stood aside for a PO-match hold (decisions §425). Recorded on
+#: the audit row's ``auto_approve_suppressed``.
+UNATTENDED_APPROVAL_PO_HOLD_OPEN = "po_match_hold"
+UNATTENDED_APPROVAL_PO_HOLD_WOULD_REOPEN = "po_match_hold_cleared_by_approver"
+
+
+async def po_match_hold_refusal(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    approver_id: uuid.UUID | None,
+    org_settings: dict | None,
+) -> str | None:
+    """Why an unattended approval of ``invoice`` must not be given, on the
+    PO-match axis, or ``None`` (decisions §425).
+
+    Asked after the refresh that ran the match and BEFORE the approval is
+    stamped, so no unattended door ever leaves an invoice ``approved`` with a
+    ``po_mismatch`` / ``quality_hold`` open:
+
+    * an open or escalated row of either type: the match failed, the PO cannot
+      be found, or the goods have not passed. The invoice goes to review.
+    * a person's clearance of one that would stop standing once
+      ``approver_id`` is the approver of record: the §422 re-judge would raise
+      it again straight after the stamp, so the floor or the auto-approve would
+      approve an invoice the next statement re-holds. Asked with the would-be
+      approver added to the approver set, the question
+      :func:`_finding_cleared_by_a_person` asks after the stamp.
+    """
+    from app.services.payment_runs import blocking_exception_types
+
+    if invoice.id is None:
+        return None
+    if await blocking_exception_types(db, [invoice.id], types=PO_MATCH_EXCEPTION_TYPES):
+        return UNATTENDED_APPROVAL_PO_HOLD_OPEN
+    if approver_id is None:
+        # The stamp names nobody, so no clearance changes standing.
+        return None
+    candidates = await _cleared_holds_still_fingerprinted(db, invoice)
+    if not candidates:
+        return None
+    from app.services.approval_chain import approver_ids
+    from app.services.exception_lifecycle import workflow_instance_for
+
+    instance = await workflow_instance_for(db, candidates[0][0], invoice)
+    approvers = set(approver_ids(invoice, instance)) | {str(approver_id)}
+    for row, current in candidates:
+        if not await _finding_cleared_by_a_person(
             db,
             invoice,
             row.exception_type,
-            row.severity or "warning",
-            {
-                "code": row.description_code,
-                "params": row.description_params or {},
-                "message": row.description or "",
-            },
+            current,
             org_settings=org_settings,
-            fingerprint=current,
-        )
+            approvers=approvers,
+        ):
+            return UNATTENDED_APPROVAL_PO_HOLD_WOULD_REOPEN
+    return None
 
 
 async def _ensure_exception(

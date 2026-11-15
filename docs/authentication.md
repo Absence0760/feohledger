@@ -1700,7 +1700,9 @@ invoice's PO cannot approve it: `review.approve_invoice` reads
 `approval_chain.receipt_recorders` (live = status outside
 `CANCELLED_GR_STATUSES`; `source = manual` with a named recorder; the POs the
 invoice's `po_number` names under the matcher's entity/vendor scope, plus the
-stored match's `po_id` / `po_ids`; receipts in the invoice's own entity) and
+stored match's `po_id` and every PO a multi-PO split linked,
+`invoices.split_po_ids`, which no warning refresh rewrites (decisions §433);
+receipts in the invoice's own entity) and
 `check_receiving_segregation` refuses with 403 `approval_segregation_receiver`.
 It runs after any corrections, so a `po_number` correction cannot slip past it,
 and on every door because every door calls `approve_invoice`; bulk approve
@@ -1929,13 +1931,16 @@ whose requester is the intake's), so migration 0102 added
 `purchase_requisitions.material_editor_ids`, appended on a real change to a
 field in `models/procurement.REQUISITION_MATERIAL_EDIT_FIELDS`, and `approve`
 refuses requester ∪ editors (`backend/docs/procurement-requisitions.md` § Who
-an approval refuses). Expense reports and pre-approvals pass `None`, for
-different reasons. A **report** has no second actor because nobody but its owner
-can author one: composing it, editing or deleting its lines, replacing their
-receipts, changing its fields and submitting it are all refused to anyone else
-(403 `expense_report_not_owner`, `backend/docs/expense-management.md` § Report
-ownership), so the owner is the complete author set without a column. A
-**pre-approval** records no editor and has no edit endpoint.
+an approval refuses). A **report** passes the recorded creators of its lines
+other than its owner (`expenses.created_by_user_id`, migration 0134, decisions
+§434). Nobody but its owner can author a report: composing it, editing or
+deleting its lines, replacing their receipts, changing its fields and submitting
+it are all refused to anyone else (403 `expense_report_not_owner`), and only a
+line its owner created may be attached (403 `expense_report_foreign_line`), so
+that set is empty in practice; it is read so the rule does not depend on those
+gates having held (`backend/docs/expense-management.md` § Report ownership,
+§ Line ownership). A **pre-approval** passes `None`: it records no editor and
+has no edit endpoint.
 
 The inter-company mirror (`POST /api/invoices/{id}/route-intercompany`)
 deliberately does **not** inherit the source invoice's set. Its segregation

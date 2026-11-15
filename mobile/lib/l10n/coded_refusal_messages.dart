@@ -7,9 +7,11 @@
 /// `detail = {code, message, params}`: a stable `code`, the typed `params` its
 /// sentence needs (money as exact decimal strings beside their currency), and
 /// the English `message` as the fallback. On mobile these reach the reader
-/// where an approver acts: approving an invoice (the detail screen and the
-/// approvals swipe) and resolving / dismissing an exception (the detail screen
-/// and the queue swipe). Only those codes are mapped here; the web registry
+/// where an approver acts: the approve / reject / recall verdicts and
+/// refusals on an invoice (the detail screen and the approvals swipe), a
+/// skipped row of a bulk status change (the invoices list), and resolving /
+/// dismissing an exception (the detail screen and the queue swipe). Only those
+/// codes are mapped here; the web registry
 /// covers the surfaces mobile does not ship (credit memos, expense reports,
 /// the invoice stale-edit prompt).
 ///
@@ -20,6 +22,8 @@
 library;
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/invoice_status_labels.dart';
+import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 
 final _exactDecimal = RegExp(r'^-?\d+(\.\d+)?$');
@@ -102,6 +106,31 @@ String? _approvalGate(AppLocalizations l, Map params, {required bool cfo}) {
   return notes == null ? null : [head, ...notes].join(' ');
 }
 
+/// An `InvoiceStatus` value named by its label, or `null` for a value this
+/// build does not know (never [InvoiceStatus.fromString]'s `new` fallback).
+String? _status(AppLocalizations l, Map params, String key) {
+  final v = _str(params, key);
+  for (final s in InvoiceStatus.values) {
+    if (s.value == v) return invoiceStatusLabel(l, s);
+  }
+  return null;
+}
+
+/// The invoice fields `invoice_required_fields_missing` names, labelled as
+/// the edit sheet labels them; an unknown field keeps its server name.
+String? _requiredFields(AppLocalizations l, Map params) {
+  final fields = params['fields'];
+  if (fields is! List || fields.isEmpty) return null;
+  if (!fields.every((f) => f is String && f.isNotEmpty)) return null;
+  final labels = fields.cast<String>().map((f) => switch (f) {
+        'vendor' => l.invoiceEditVendor,
+        'invoice_number' => l.invoiceEditInvoiceNumber,
+        'amount' => l.invoiceEditAmount,
+        _ => f,
+      });
+  return l.codedRefusalInvoiceRequiredFieldsMissing(labels.join(', '));
+}
+
 /// The codes this module states — pinned against the backend in the test.
 const codedRefusalCodes = <String>{
   'approval_segregation',
@@ -119,6 +148,14 @@ const codedRefusalCodes = <String>{
   'invoice_not_recallable',
   'invoice_recall_in_erp',
   'invoice_recall_claimed',
+  'invoice_not_in_review',
+  'invoice_bulk_not_found',
+  'invoice_status_immutable',
+  'invoice_recall_one_at_a_time',
+  'invoice_required_fields_missing',
+  'invoice_transition_invalid',
+  'invoice_transition_recall_only',
+  'invoice_once_approved_not_reread',
 };
 
 /// The localized refusal for [detail] (a decoded error `detail`), or `null`
@@ -171,6 +208,35 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
         'virtual_card' => l.codedRefusalCardBlocksRecall,
         _ => null,
       };
+    // `services/review.refuse_unless_in_review` — the approve / reject
+    // verdict on an invoice not in review, and a bulk approve / reject skip
+    // (backend decisions §418).
+    case 'invoice_not_in_review':
+      return l.codedRefusalInvoiceNotInReview;
+    // `api/invoices.bulk_status_change`'s own skips (backend decisions §387)
+    // and the state machine's 409s it reports per row. A status or target
+    // this build does not know keeps the server's sentence.
+    case 'invoice_bulk_not_found':
+      return l.codedRefusalInvoiceBulkNotFound;
+    case 'invoice_status_immutable':
+      final status = _status(l, params, 'status');
+      return status == null
+          ? null
+          : l.codedRefusalInvoiceStatusImmutable(status);
+    case 'invoice_recall_one_at_a_time':
+      return l.codedRefusalInvoiceRecallOneAtATime;
+    case 'invoice_required_fields_missing':
+      return _requiredFields(l, params);
+    case 'invoice_transition_invalid':
+    case 'invoice_transition_recall_only':
+      final from = _status(l, params, 'status');
+      final to = _status(l, params, 'target');
+      if (from == null || to == null) return null;
+      return code == 'invoice_transition_invalid'
+          ? l.codedRefusalInvoiceTransitionInvalid(from, to)
+          : l.codedRefusalInvoiceTransitionRecallOnly(from, to);
+    case 'invoice_once_approved_not_reread':
+      return l.codedRefusalInvoiceOnceApprovedNotReread;
   }
   return null;
 }

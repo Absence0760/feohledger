@@ -2,7 +2,6 @@
 
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -2040,6 +2039,384 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String erpRefusalVendorNotLinked(String provider) {
+    return 'この取引先はまだ $provider にありません。$provider から取引先を同期するか、そちらで取引先を登録してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalAccountNotLinked(String provider, String accounts) {
+    return '$provider の勘定科目に紐付いていません: $accounts。$provider から勘定科目表を同期するか、紐付いている勘定科目で請求書を仕訳し直してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalAccountNotLinkedUncoded(String provider) {
+    return '勘定科目のない明細があり、請求書にも代わりに使える勘定科目がありません。$provider に紐付いた勘定科目で仕訳してから再試行してください。';
+  }
+
+  @override
+  String get erpRefusalNotConnected =>
+      'ERP が接続されていないか、接続の有効期限が切れています。管理者が「組織」で再接続してから再試行してください。';
+
+  @override
+  String get erpRefusalInvoiceDueBeforeDate =>
+      'この請求書は請求日より前に支払期日が設定されているため、ERP に拒否されます。日付を修正してから再試行してください。';
+
+  @override
+  String erpRefusalAmountMismatch(String provider) {
+    return '明細の金額の合計が承認済み金額と一致しないため、請求書を $provider に送信しませんでした。明細または税額を修正してから再試行してください。';
+  }
+
+  @override
+  String get erpRefusalLineAmountMissing =>
+      '金額のない明細があります（合計も、金額を計算できる数量と単価もありません）。入力してから再試行してください。';
+
+  @override
+  String erpRefusalPostedTotalMismatch(String provider) {
+    return '$provider が承認済み金額と異なる合計を計算したため（多くは既定の税コードが原因）、請求書を保持しませんでした。$provider で取引先と勘定科目の税設定を確認してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalPostedTotalUnconfirmed(String provider) {
+    return '請求書は $provider に作成されましたが、$provider が合計額を返さなかったため確認できません。再試行する前に $provider で請求書を確認してください。';
+  }
+
+  @override
+  String erpRefusalPreviousBillRemoved(String provider) {
+    return 'この請求書について送信した請求はすべて $provider で削除または無効化されたため、自動では再送信しません。$provider を確認し、対応を管理者に相談してください。';
+  }
+
+  @override
+  String erpRefusalTaxNotItemised(String provider) {
+    return '$provider では明細ごとの税額が必要ですが、この請求書には合計の税額しかありません。明細ごとに税額を入力してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalTaxRateUnresolved(String provider) {
+    return '$provider にこの請求書の税額に一致する税率がありません。$provider で税率を設定するか、税額を修正してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalMissingDates(String provider) {
+    return '$provider には請求日と支払期日の両方が必要です。入力してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalBillRefused(String provider) {
+    return '$provider はこの請求書を拒否し、作成しませんでした。請求書の仕入先、勘定科目、日付、金額を $provider で確認して修正してから、再試行してください。';
+  }
+
+  @override
+  String erpRefusalDuplicateNumber(String provider) {
+    return '$provider にはこの請求書番号の請求がすでにあります。再試行する前に $provider で重複を確認してください。';
+  }
+
+  @override
+  String erpRefusalDocNumberTooLong(String provider) {
+    return '請求書番号が $provider で使える長さを超えています。短くしてから再試行してください。';
+  }
+
+  @override
+  String erpRefusalCurrencyUnknown(String provider) {
+    return '$provider に基本通貨が設定されていないため、請求書の通貨を確認できません。$provider で基本通貨を設定してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalCurrencyNotEnabled(String provider) {
+    return 'この請求書は $provider の基本通貨ではなく、複数通貨も無効になっています。$provider で複数通貨を有効にするか、通貨を修正してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalIdempotencyLookupIncomplete(String provider) {
+    return 'この請求書が送信済みかどうかを $provider で確認できなかったため、再送信しませんでした。数分後に再試行してください。';
+  }
+
+  @override
+  String erpRefusalPurchasesNotPermitted(String provider) {
+    return '$provider はこの請求書の作成を許可しませんでした。Accounting Start プランでは仕入請求書を作成できないか、接続している Sage ユーザーに仕入のアクセス権がありません。プランを変更するか、$provider でそのユーザーに仕入のアクセス権を付与してから、再試行してください。';
+  }
+
+  @override
+  String erpRefusalExistingInvoiceNotOpen(String provider) {
+    return '$provider にはこの請求書がすでにあり、下書きではなくなっているため、ここからは変更できません。$provider で確認してください。';
+  }
+
+  @override
+  String erpRefusalLineAmountPrecision(String provider) {
+    return '明細の金額の小数桁数が、$provider でこの通貨に使える桁数を超えています。丸めてから再試行してください。';
+  }
+
+  @override
+  String erpRefusalPayToVendorDiffers(String provider) {
+    return '$provider でこの請求書の支払先仕入先が承認済みの仕入先と異なるため、この請求書として転記しませんでした。$provider で請求書と仕入先カードの支払先仕入先を確認してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalBillNotPosted(String provider) {
+    return '$provider にこの請求書はありますが、まだ転記済みとして表示されていません。通常は承認待ちのためです。$provider で承認してから再試行してください。二重に作成されることはありません。';
+  }
+
+  @override
+  String erpRefusalBillRejected(String provider) {
+    return '$provider にこの請求書はありますが、却下または取り消されているため、転記されることはありません。再試行する前に $provider で削除するか入力し直してください。この請求書を完了にしないでください。誰も支払わなくなります。';
+  }
+
+  @override
+  String erpRefusalCurrencyNotSetUp(String provider) {
+    return '$provider には、この請求書の通貨コードに対応する有効な通貨がありません。$provider でその通貨を追加または再有効化するか（外貨の場合は複数通貨を有効にする必要があります）、請求書の通貨を修正してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalCurrencyNotSupported(String provider) {
+    return '$provider は自社通貨の請求しか受け付けません。通貨を修正するか、$provider で直接請求を登録してください。';
+  }
+
+  @override
+  String erpRefusalForeignCurrencySupplier(String provider) {
+    return 'この仕入先は $provider で外貨の仕入先として設定されており、ここからは計上できません。$provider で直接請求を登録してください。';
+  }
+
+  @override
+  String erpRefusalCorrelationTotalMismatch(String provider) {
+    return '$provider には以前の試行で作成された、合計額の異なる請求がすでにあります。再試行する前に $provider でその請求を確認してください。';
+  }
+
+  @override
+  String erpRefusalTaxTypeNotResolved(String provider) {
+    return '$provider の勘定科目の税区分が固定税率ではないため、税額を分けられません。$provider で勘定科目に税区分を設定してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalTaxMismatch(String provider) {
+    return '$provider で計上される税額が請求書の税額と一致しません。$provider で勘定科目の税区分を確認するか、税額を修正してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalTaxNotStated(String provider) {
+    return '請求書に税額がありませんが、$provider では勘定科目が課税対象になっています。請求書の税額を入力してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalSubscriptionKeyMissing(String provider) {
+    return '$provider のサブスクリプションキーがありません。管理者が「組織」で追加してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalApAccountNotConfigured(String provider) {
+    return '$provider の買掛金勘定が設定されていません。管理者が「組織」で設定してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalCurrencyNotConfigured(String provider) {
+    return '$provider の帳簿通貨が設定されていません。管理者が「組織」で設定してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalCurrencyMismatch(String provider) {
+    return '請求書の通貨が $provider の帳簿通貨ではありません。通貨を修正してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalInvoiceDateMissing(String provider) {
+    return '$provider には請求日が必要です。入力してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalDueDateMissing(String provider) {
+    return '$provider には支払期日が必要です。入力してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalAmountNotPositive(String provider) {
+    return '$provider は金額が 0 より大きい請求書のみ受け付けます。金額を修正するか、代わりにクレジットメモを登録してください。';
+  }
+
+  @override
+  String erpRefusalJobUnconfirmed(String provider) {
+    return '$provider は請求書を受け付けましたが、作成されたことをまだ確認できていません。再試行して確認してください（二重に送信されることはありません）。';
+  }
+
+  @override
+  String erpRefusalJobFailed(String provider) {
+    return '$provider は請求書を受け付けましたが、バックグラウンドジョブが失敗し、何も作成されませんでした。$provider で仕入先、勘定科目、取引コード、転記期間を確認してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalCallBudgetTenant(String provider) {
+    return 'このワークスペースは本日の $provider API 呼び出しの割り当てを使い切ったため、FeohLedger は呼び出しを行いませんでした。割り当ては UTC の午前 0 時にリセットされます。その後に再試行してください。';
+  }
+
+  @override
+  String erpRefusalCallBudgetQuota(String provider) {
+    return '$provider は FeohLedger が使用するサブスクリプションの API 呼び出しを一時停止しました（1 日のクォータを使い切りました）。そのため FeohLedger は呼び出しを行いませんでした。UTC の午前 0 時にリセットされます。その後に再試行してください。';
+  }
+
+  @override
+  String erpRefusalCallBudgetRateLimited(String provider) {
+    return '$provider から呼び出しを減らすよう求められたため、呼び出しは行われませんでした。1 分後に再試行してください。';
+  }
+
+  @override
+  String erpRefusalBillLeftUnposted(String provider) {
+    return '$provider ではこの請求書が下書きまたは承認待ちで、計上されていないため、買掛金にはまだ何も記録されていません。$provider で計上または承認してから、再試行してください。';
+  }
+
+  @override
+  String erpRefusalMergeSyncPending(String provider) {
+    return '$provider は、結果が不明な以前の送信試行以降、まだ請求書を同期していないため、この請求書がすでに存在する可能性があります。何も送信していません。$provider の次回の請求書同期の後に再試行してください。その時点で請求書があれば、2 件目を作成せずにそれに紐付けます。';
+  }
+
+  @override
+  String get erpRefusalCredentialsUnavailable =>
+      '現在 ERP の認証情報を開けませんでした。数分後に再試行してください。失敗が続く場合は管理者に連絡してください。';
+
+  @override
+  String erpRefusalPeriodClosed(String provider) {
+    return '請求の日付が締め済みの期間（帳簿の締め）に含まれるため、$provider がこの請求を拒否しました。請求書の日付を変更するか、$provider で期間を再オープンしてから再試行してください。';
+  }
+
+  @override
+  String erpRefusalVendorInactive(String provider) {
+    return '仕入先が無効または削除済みのため、$provider がこの請求を拒否しました。$provider で仕入先を有効にしてから再試行してください。';
+  }
+
+  @override
+  String erpRefusalAccountInactive(String provider, String accounts) {
+    return '$accounts が無効または削除済みのため、$provider がこの請求を拒否しました。$provider で勘定科目を有効にするか、請求書を有効な勘定科目に付け替えてから再試行してください。';
+  }
+
+  @override
+  String erpRefusalReferenceInvalid(String provider, String code) {
+    return '受け付けられない仕入先または勘定科目を参照しているため、$provider がこの請求を拒否しました（Intuit エラー $code）。仕入先と請求のすべての勘定科目が $provider に存在し有効であることを確認し、再同期してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalCompanySubscriptionInactive(String provider) {
+    return '会社のサブスクリプションが終了、解約、または支払いの問題があるため、$provider がこの請求を拒否しました。$provider で解決してから再試行してください。';
+  }
+
+  @override
+  String erpRefusalIntuitFault(String provider, String code) {
+    return '$provider がこの請求を拒否しました（Intuit エラー $code）。請求の内容を $provider と照らし合わせて修正してから再試行してください。失敗が続く場合は、管理者にエラーコードを伝えてください。';
+  }
+
+  @override
+  String erpRefusalPaymentAccountNotMapped(String provider) {
+    return 'この支払いは $provider に送られていません。記録元の勘定科目が設定されていないためです。組織 → ERP 連携で請求書の支払い用勘定を選び、支払いの同期をやり直してください。';
+  }
+
+  @override
+  String erpRefusalBillNotInErp(String provider) {
+    return 'この支払いの対象だった請求書が $provider にもうありません (削除されています)。そのため支払いは記録されていません。$provider で請求書を確認してください。';
+  }
+
+  @override
+  String erpRefusalPaymentExceedsBalance(String provider) {
+    return '$provider 上の請求書の未払残高がこの支払いより少ないため、記録すると過払いになります。$provider で支払済みの額を確認してください。';
+  }
+
+  @override
+  String erpRefusalBillPaymentVoided(String provider) {
+    return 'この支払いは $provider に記録された後、そこで取り消されたため、再度記録はしません。請求書が支払済みかどうかは $provider で判断してください。';
+  }
+
+  @override
+  String erpRefusalPaymentsScopeMissing(String provider) {
+    return '$provider は FeohLedger が支払い記録の権限を求める前に接続されたため、この支払いはそこに記録されません。組織設定で $provider に再接続して権限を付与してから、$provider で支払いを記録するか、再試行してください。';
+  }
+
+  @override
+  String erpRefusalExceptionBlocksExport(String type) {
+    return 'この請求書には未解決の例外（$type）があります。「例外」で解決または却下してから、ERP に送信してください。';
+  }
+
+  @override
+  String erpRefusalExceptionBlocksExportPossiblyPosted(String type) {
+    return 'この請求書には未解決の例外（$type）があり、以前の送信で ERP に請求書が既に作成されている可能性があります。支払われる前に ERP を確認し、「例外」で例外を解決または却下してください。';
+  }
+
+  @override
+  String get erpRefusalPaymentBlocksExport =>
+      'FeohLedger はこの請求書を既に支払い中です（有効な支払いがあります）。ERP に送信する前に、その支払いバッチを取り消すか支払いを無効にしてください。';
+
+  @override
+  String get erpRefusalPaymentBlocksExportPossiblyPosted =>
+      'FeohLedger はこの請求書を既に支払い中で、以前の送信で ERP に請求書が既に作成されている可能性があります。ERP を確認し、そちらでも支払われないようにしてください。';
+
+  @override
+  String get erpRefusalVendorBlocked =>
+      'この請求書の仕入先は支払いがブロックされています。ERP に送信する前に、仕入先のブロックを解除してください。';
+
+  @override
+  String get erpRefusalVendorSanctionsMatch =>
+      'この請求書の仕入先は制裁リストに該当しました。ERP に送信する前に、仕入先のスクリーニングを確認してください。';
+
+  @override
+  String get erpRefusalVendorSanctionsReview =>
+      'この請求書の仕入先は制裁スクリーニングの審査待ちです。審査が終わったら仕入先を再スクリーニングし、請求書を ERP に送信してください。';
+
+  @override
+  String get erpRefusalVendorRejected =>
+      'この請求書の仕入先は却下されています。ERP に送信する前に、請求書を正しい仕入先に紐付けてください。';
+
+  @override
+  String get erpRefusalVendorStatusUnknown =>
+      'この請求書の仕入先のステータスでは ERP に送信できません。ERP に送信する前に、仕入先を有効にしてください。';
+
+  @override
+  String get erpRefusalVendorHoldPossiblyPosted =>
+      '以前の送信で ERP に請求書が既に作成されている可能性があります。誰かが支払う前に ERP を確認してください。';
+
+  @override
+  String get erpRefusalRetriesExhausted =>
+      'この送信には残りの試行回数がなかったため、今回は試行されませんでした。再試行すると、新しい試行回数で送信します。';
+
+  @override
+  String get erpRefusalPushInterrupted =>
+      'この送信は中断され、完了しませんでした。確認なしで再送信するには古すぎます（または現在の ERP 接続より前のものです）。請求書が ERP に既にないことを確認してから再試行してください。';
+
+  @override
+  String get erpRefusalCardBlocksExport =>
+      'この請求書の支払いにバーチャルカードが発行されています。ERP に送信する前に、カードを取り消してください。';
+
+  @override
+  String get erpRefusalCardBlocksExportPossiblyPosted =>
+      'この請求書の支払いにバーチャルカードが発行されており、以前の送信で ERP に請求書が既に作成されている可能性があります。ERP を確認し、そちらでも支払われないようにしてください。';
+
+  @override
+  String get erpRefusalTypeDuplicate => '請求書の重複';
+
+  @override
+  String get erpRefusalTypeFraudFlag => '不正の疑い';
+
+  @override
+  String exceptionDetailErpPaymentTitle(String erp) {
+    return '$erp が報告した支払い';
+  }
+
+  @override
+  String exceptionDetailErpPaymentAmount(String erp) {
+    return '$erp が報告した支払額';
+  }
+
+  @override
+  String get exceptionDetailErpPaymentPaidOn => '支払日';
+
+  @override
+  String get exceptionDetailErpPaymentReference => '参照番号';
+
+  @override
+  String erpRefusalUnknown(String erp) {
+    return '$erp で拒否されましたが、このバージョンのアプリでは理由を表示できません。アプリを更新するか、$erp で記録を確認してください。';
+  }
+
+  @override
+  String get exceptionDetailErpPaymentNotStated => '記載なし';
+
+  @override
+  String get exceptionDetailErpPaymentRecordOnWeb =>
+      'この支払いはウェブアプリの「例外」から記録してください。記録すると例外が解決され、請求書が支払済みになります。';
+
+  @override
   String get exceptionDetailYourErp => 'お使いの ERP';
 
   @override
@@ -3427,4 +3804,52 @@ class AppLocalizationsJa extends AppLocalizations {
   String warningsPoMatchAnnouncement(String summary) {
     return '発注照合: $summary';
   }
+
+  @override
+  String get codedRefusalInvoiceNotInReview =>
+      'この請求書はレビュー待ちではないため、承認も却下もできません。';
+
+  @override
+  String get codedRefusalInvoiceBulkNotFound => '選択中のエンティティにこの請求書が見つかりません。';
+
+  @override
+  String codedRefusalInvoiceStatusImmutable(String status) {
+    return 'この請求書のステータスは$statusのため、変更できません。';
+  }
+
+  @override
+  String get codedRefusalInvoiceRecallOneAtATime =>
+      '承認の取り消しは理由を添えて1件ずつ行います。請求書の「承認を取り消す」を使用してください。';
+
+  @override
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
+    return '必須項目が入力されていません：$fields';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionInvalid(String from, String to) {
+    return 'この請求書は$fromから$toに移行できません。';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to) {
+    return 'この請求書を$fromから$toに移行するには、請求書ごとに承認を取り消す必要があります。請求書の「承認を取り消す」を使用してください。';
+  }
+
+  @override
+  String get codedRefusalInvoiceOnceApprovedNotReread =>
+      'この請求書はすでに承認されているため、書類を再読み取りできません。代わりに承認を取り消して修正してください。';
+
+  @override
+  String get invoicesBulkSkipNoReason => '理由は示されていません';
+
+  @override
+  String get invoicesBulkSkipNoNumber => '請求書（番号なし）';
+
+  @override
+  String get reviewVerdictsUnavailable =>
+      'ここで実行できる操作を確認できませんでした。下に引いて再試行してください';
+
+  @override
+  String get reviewVerdictsChecking => 'ここで実行できる操作を確認しています…';
 }

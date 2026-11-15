@@ -55,7 +55,11 @@ from app.schemas.workflow import (
 from app.services import review as review_svc
 from app.services.erp_send import schedule_auto_send, start_erp_send
 from app.services.extraction_dispatch import dispatch_extraction
-from app.services.invoice_warnings import refresh_warnings, reraise_holds_cleared_by_an_approver
+from app.services.invoice_warnings import (
+    po_match_hold_refusal,
+    refresh_warnings,
+    reraise_holds_cleared_by_an_approver,
+)
 from app.services.storage import upload_invoice_file
 from app.services.workflow_engine import (
     advance_workflow,
@@ -924,7 +928,15 @@ async def complete_invoice(
         if refused is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
 
-    await refresh_warnings(db, invoice, org_settings=org.settings)
+    # Leaving `new` through approval: the PO match runs now (a refresh skips it
+    # on `new`), so the amount floor below decides on a matched invoice and the
+    # reviewer sees the match (decisions §425).
+    await refresh_warnings(
+        db,
+        invoice,
+        org_settings=org.settings,
+        match_po_on_new=invoice.status == InvoiceStatus.new and approval_enabled,
+    )
 
     if invoice.status == InvoiceStatus.new and approval_enabled:
         # Check auto_approve_below — skip review for small invoices
@@ -989,7 +1001,7 @@ async def complete_invoice(
         # one fetched now. An invoice we can't express there fails closed: the
         # floor doesn't fire and the CFO / max gates do. Either way, a human.
         gate_amount = reporting_gate_amount(invoice, org_settings=org.settings)
-        if (
+        floor_fires = (
             decide_auto_approve(
                 {},  # no extraction result here — see the note above
                 approval_config,
@@ -1010,7 +1022,19 @@ async def complete_invoice(
             and not violates_inspection_segregation(
                 user.id, await inspection_recorders(db, invoice), approval_config
             )
-        ):
+        )
+        # The PO match the refresh above just ran gates the floor (decisions
+        # §425): an open `po_mismatch` / `quality_hold` (a failed match, a PO
+        # that cannot be found, goods not passed), or a clearance of one that
+        # stamping the caller would undo (§422), sends the invoice to a person.
+        # Asked BEFORE the stamp, so the floor never leaves it `approved` with a
+        # hold open. An invoice with no PO reference has no such row.
+        po_hold = (
+            await po_match_hold_refusal(db, invoice, approver_id=user.id, org_settings=org.settings)
+            if floor_fires
+            else None
+        )
+        if floor_fires and po_hold is None:
             # The caller is the effective approver (§267), so their later
             # receipt cannot release this invoice either (§389).
             record_final_approval(invoice, approved_by="system (below threshold)", actor_id=user.id)
@@ -1063,6 +1087,9 @@ async def complete_invoice(
             InvoiceStatus.ready_for_review,
             actor_id=user.id,
             action_name="invoice.submitted_for_review",
+            # Recorded only when the floor would have approved: "a person was
+            # required where the policy alone would have approved" (§425).
+            details={"auto_approve_suppressed": po_hold} if po_hold else None,
         )
         await db.commit()
         await db.refresh(invoice)

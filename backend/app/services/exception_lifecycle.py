@@ -484,6 +484,7 @@ def clearance_stands(
     *,
     org_settings: dict | None,
     instance: WorkflowInstance | None = None,
+    approvers: Collection[str] | None = None,
 ) -> bool:
     """Would :func:`record_decision` accept this closed row's decision TODAY?
 
@@ -500,7 +501,10 @@ def clearance_stands(
     still stands. That includes the approver axis (§420): a ``po_mismatch`` /
     ``quality_hold`` its decider has since approved is re-raised for someone
     independent. ``instance`` is the invoice's workflow instance, for the
-    level approvers.
+    level approvers. ``approvers``, when given, replaces the approver set read
+    from the invoice and ``instance``: an unattended approval asks whether a
+    clearance would still stand once its approver is stamped, before stamping
+    (``invoice_warnings.po_match_hold_refusal``, decisions §425).
 
     Outside segregation's scope (:func:`segregation_applies`) the decider does
     not matter and the clearance stands. Inside it, an unknown decider (NULL:
@@ -527,6 +531,7 @@ def clearance_stands(
             action=action,
             org_settings=org_settings,
             instance=instance,
+            approvers=approvers,
         )
         is None
     )

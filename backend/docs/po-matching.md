@@ -535,6 +535,25 @@ PO matching can run after extraction when the invoice has a `po_number`. The mat
 - Shown in the invoice modal
 - Routed to the exception queue if mismatched
 
+### Before an unattended approval
+An invoice citing a PO is matched before anything approves it unattended, and a
+failed match holds it for a person (decisions §425). Extraction's refresh runs
+the match on the `pending` invoice it has just read; `POST /api/invoices/{id}/complete`
+runs it on the `new` invoice it is submitting (`refresh_warnings(...,
+match_po_on_new=True)` — a refresh otherwise skips `new` as an unentered draft),
+so the reviewer also sees the match on every invoice `/complete` sends to review.
+Then `invoice_warnings.po_match_hold_refusal` is asked **before** the approval is
+stamped, by both unattended doors: `/complete`'s `auto_approve_below` floor and
+extraction's auto-approve. An open or escalated `po_mismatch` / `quality_hold`
+(a PO that cannot be found, an over-billed or cancelled PO, a failed inspection)
+sends the invoice to `ready_for_review` instead, recorded as
+`auto_approve_suppressed: "po_match_hold"` on the audit row. So does a clearance
+of one that the stamp itself would undo (`"po_match_hold_cleared_by_approver"`):
+the caller cleared the hold while not its approver, and the §422 re-judge would
+raise it again straight after stamping them. Neither door can leave an invoice
+`approved` with a PO-match hold open. An invoice with no PO reference has no
+such row, and the floor behaves as before.
+
 ### In the Review Step
 Reviewers see the match status:
 - **Matched** (green) — PO found, amounts within tolerance
@@ -657,7 +676,8 @@ where somebody could:
   plus every level signed on its approval chain, even with later levels still
   open (`approval_chain.approver_ids`). "Billed against" is the approval door's
   own receipt set (`approval_chain.receipt_recorders`: every PO the invoice
-  names), and the two are compared by one rule,
+  names, including every leg of a multi-PO split through
+  `invoices.split_po_ids`, decisions §433), and the two are compared by one rule,
   `approval_chain.receiving_conflicts`, so the orders cannot disagree. The
   receipt itself is recorded and counts towards the 3-way leg — for this
   invoice and every other on the PO, whose holds it lifts as before; it is only

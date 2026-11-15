@@ -109,6 +109,16 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   int get selectedCount => _selectedIds.length;
   bool isSelected(String id) => _selectedIds.contains(id);
 
+  /// Whether every selected row is a loaded invoice awaiting review — the
+  /// only state a bulk approve moves (backend decisions §418), so the bulk
+  /// sheet offers Approved only then, as the web picker does.
+  bool get selectionAwaitingReview {
+    if (_selectedIds.isEmpty) return false;
+    final statuses = {for (final inv in _invoices) inv.id: inv.status};
+    return _selectedIds
+        .every((id) => statuses[id] == InvoiceStatus.readyForReview);
+  }
+
   /// Invoices awaiting approval, as returned by the server for
   /// `status=ready_for_review` — NOT a slice of [invoices].
   List<Invoice> get pending => _pending;
@@ -271,7 +281,12 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
 
     const cacheKey = 'invoices_pending_approval';
     try {
-      final result = await InvoiceApi.list(status: pendingApprovalStatus);
+      final result = await InvoiceApi.list(
+        status: pendingApprovalStatus,
+        // The queue offers swipe-approve / swipe-reject from each row's own
+        // verdict, carried by this response rather than asked per row.
+        includeReviewActions: true,
+      );
       if (!_pendingSeq.isCurrent(token)) return; // superseded — discard
       _pending = result;
       _pendingFromCache = false;

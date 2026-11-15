@@ -99,6 +99,7 @@ from app.schemas.invoice import (
     ChatThreadResponse,
     InvoiceCountsResponse,
     InvoiceCreate,
+    InvoiceListItem,
     InvoiceListResponse,
     InvoiceResponse,
     InvoiceUpdate,
@@ -299,6 +300,10 @@ def _invoice_list_filters(
     return query
 
 
+#: What ``GET /api/invoices?include=`` may name.
+_LIST_INCLUDES = frozenset({"review_actions"})
+
+
 @router.get("", response_model=InvoiceListResponse)
 async def list_invoices(
     pagination: PaginationParams = Depends(pagination_params),
@@ -314,11 +319,28 @@ async def list_invoices(
     search: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
     vendor_id: uuid.UUID | None = None,
+    include: str | None = None,
     sort: SortParams = Depends(sort_params),
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    """The invoice list. ``?include=review_actions`` adds each row's
+    ``review_actions`` — the caller's ``approve`` / ``reject`` verdicts,
+    ``review.review_refusals_by_invoice`` (the rule ``GET /{id}/review-actions``
+    serves, batched over the page) — so an approvals queue offers its swipe
+    actions from one request instead of one verdict read per row. Opt-in: the
+    plain list never runs the approval gates."""
+    includes = {part.strip() for part in (include or "").split(",") if part.strip()}
+    unknown = includes - _LIST_INCLUDES
+    if unknown:
+        # 422 spelled out: this handler's `status` parameter is the status
+        # filter, which shadows the `fastapi.status` module here.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown include: {', '.join(sorted(unknown))}",
+        )
     # Scope to the selected entity (None = consolidated, all entities).
     query = apply_entity_scope(select(Invoice), Invoice, entity_id)
     query = _invoice_list_filters(
@@ -371,8 +393,21 @@ async def list_invoices(
     result = await db.execute(query)
     invoices = result.scalars().all()
 
+    from app.services.review import review_refusals_by_invoice
+
+    verdicts = (
+        await review_refusals_by_invoice(db, invoices, actor=user, org_settings=org.settings)
+        if "review_actions" in includes
+        else {}
+    )
+    items = []
+    for inv in invoices:
+        item = InvoiceListItem(**InvoiceResponse.from_db(inv).model_dump())
+        if inv.id in verdicts:
+            item.review_actions = verdicts[inv.id]
+        items.append(item)
     return InvoiceListResponse(
-        items=[InvoiceResponse.from_db(inv) for inv in invoices],
+        items=items,
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,

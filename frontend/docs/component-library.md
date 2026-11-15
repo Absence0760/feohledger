@@ -360,6 +360,14 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   "Record as paid" dialog and the exception dialog's "Record the ERP's payment"
   panel, which both pre-fill it with `types/erpReport.ts::erpPrefill`
   (decisions §319).
+- `ErpPaymentSplit.svelte` — how the ERP says a reported payment was made,
+  rail by rail, under a title naming the ERP, with the note on what the record
+  does with it. Props: `parts` (`RailPartView[]`, from `erpPaymentParts`),
+  `currency` (the code the ERP stated), `erp` (its name), `stands` (the
+  server's three-state verdict, read by `erpReport.splitNoteKey`), `idPrefix`
+  and `testid` (`{testid}-split`, `-split-part`, `-split-note`). Sums nothing.
+  Render it only when `spansSeveralRails(parts)`. Shared by the exception
+  dialog and the payment queue's "Record as paid" (decisions §413, §426).
 
 ### `organization/`
 

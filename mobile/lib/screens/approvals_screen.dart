@@ -3,6 +3,7 @@ import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/screens/invoice_detail_screen.dart';
 import 'package:feohledger_mobile/stores/invoice_store.dart';
@@ -17,6 +18,21 @@ class ApprovalsScreen extends StatefulWidget {
 }
 
 class _ApprovalsScreenState extends State<ApprovalsScreen> {
+  // Swipe-to-approve and the reject swipe are offered from each row's own
+  // `approve` / `reject` verdict ([Invoice.reviewActions]), which the queue's
+  // list read carries (`GET /api/invoices?include=review_actions`) — the
+  // queue's own status filter says nothing about segregation of duties or the
+  // CFO / max-amount gates. A row without one (served from the offline cache,
+  // or by a backend that does not carry them) offers neither, and the screen
+  // says it could not check rather than looking like "you may not approve".
+
+  // Whether the "couldn't check" notice has been announced since it appeared,
+  // so a rebuild does not repeat it to a screen reader.
+  bool _announcedUnavailable = false;
+
+  /// Refetch the queue, verdicts included.
+  Future<void> _refresh() => InvoiceStore.instance.fetchPending();
+
   @override
   void initState() {
     super.initState();
@@ -58,7 +74,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                   Text(l.approvalsLoadError),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: store.fetchPending,
+                    onPressed: _refresh,
                     child: Text(l.commonRetry),
                   ),
                 ],
@@ -87,8 +103,20 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
             );
           }
 
+          final verdictsUnavailable =
+              pending.any((invoice) => invoice.reviewActions == null);
+          if (!verdictsUnavailable) {
+            _announcedUnavailable = false;
+          } else if (!_announcedUnavailable) {
+            _announcedUnavailable = true;
+            // A cached or verdict-less queue must not read as "nothing you
+            // may do": say so, to a screen reader too (WCAG 4.1.3).
+            SchedulerBinding.instance.addPostFrameCallback((_) {
+              if (mounted) A11y.announce(context, l.reviewVerdictsUnavailable);
+            });
+          }
           return RefreshIndicator(
-            onRefresh: store.fetchPending,
+            onRefresh: _refresh,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -103,14 +131,65 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                     ),
                   ),
                 ),
+                if (verdictsUnavailable)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      children: [
+                        ExcludeSemantics(
+                          child: Icon(
+                            Icons.cloud_off,
+                            size: 18,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            l.reviewVerdictsUnavailable,
+                            key: const ValueKey('review-verdicts-unavailable'),
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
                   child: ListView.separated(
                     itemCount: pending.length,
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final invoice = pending[index];
+                      final verdicts = invoice.reviewActions ?? const {};
+                      const hidden = {'invoice_not_in_review'};
+                      final approve =
+                          ActionVerdict.fromVerdicts(verdicts, 'approve');
+                      final reject =
+                          ActionVerdict.fromVerdicts(verdicts, 'reject');
+                      final canSwipeApprove = approve.allowed;
+                      final canSwipeReject = reject.allowed;
+                      // Why Approve is refused, beside the row, for a reason
+                      // the reader can act on (a colleague must approve it).
+                      final refusal = approve.isOffered(hiddenCodes: hidden) &&
+                              !approve.allowed
+                          ? (localizeCodedRefusal(l, approve.refusal) ??
+                              _message(approve))
+                          : null;
                       return Dismissible(
                         key: ValueKey(invoice.id),
+                        direction: canSwipeApprove && canSwipeReject
+                            ? DismissDirection.horizontal
+                            : canSwipeApprove
+                                ? DismissDirection.startToEnd
+                                : canSwipeReject
+                                    ? DismissDirection.endToStart
+                                    : DismissDirection.none,
                         background: _swipeBackground(
                           Colors.green.shade700,
                           Icons.check,
@@ -154,9 +233,29 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                           }
                           return false; // Reject needs a reason — open detail
                         },
-                        child: InvoiceListTile(
-                          invoice: invoice,
-                          onTap: () => _openDetail(invoice),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            InvoiceListTile(
+                              invoice: invoice,
+                              onTap: () => _openDetail(invoice),
+                            ),
+                            if (refusal != null)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                                child: Text(
+                                  refusal,
+                                  key: ValueKey('approve-refusal-${invoice.id}'),
+                                  style: TextStyle(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       );
                     },
@@ -194,6 +293,11 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
         ],
       ),
     );
+  }
+
+  static String? _message(ActionVerdict verdict) {
+    final message = verdict.refusal?['message'];
+    return message is String && message.isNotEmpty ? message : null;
   }
 
   void _openDetail(Invoice invoice) {

@@ -994,9 +994,20 @@ async def _queue_erp_reported_payments(
     db: AsyncSession, invoice_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, dict]:
     """``{invoice_id: what the ERP reported}`` for rows holding a live
-    ``paid_not_recorded`` exception — the newest one per invoice. Only the
-    fields the "Record as paid" dialog pre-fills, plus the exception's id."""
-    from app.services.erp_status_sync import erp_product_name, live_erp_paid_reports
+    ``paid_not_recorded`` exception — the newest one per invoice. The fields
+    the "Record as paid" dialog pre-fills, the exception's id, and what it
+    shows beside them as ``/exceptions`` does (decisions §413, §426): the cash
+    the ERP states in the code it stated, its rail-by-rail breakdown as kept,
+    and ``split_stands``, the server's verdict on that breakdown
+    (``erp_status_sync.kept_split_stands``, the one the exception row carries
+    as ``erp_payment_split_stands``). Where it is true, the dialog books
+    through the row's one-click, since ``record-outside`` refuses
+    (``external_payment_erp_split``)."""
+    from app.services.erp_status_sync import (
+        erp_product_name,
+        kept_split_stands,
+        live_erp_paid_reports,
+    )
 
     out: dict[uuid.UUID, dict] = {}
     for exc in await live_erp_paid_reports(db, invoice_ids):
@@ -1009,6 +1020,10 @@ async def _queue_erp_reported_payments(
             "method": report.get("method"),
             "reference": report.get("reference"),
             "paid_on": report.get("paid_on"),
+            "amount": report.get("amount"),
+            "amount_currency": report.get("amount_currency"),
+            "payment_parts": report.get("payment_parts"),
+            "split_stands": kept_split_stands(report),
         }
     return out
 
@@ -1197,7 +1212,11 @@ async def payment_queue(
                 "blocking_exception": blockers.get(inv.id),
                 # The payment the ERP reported for this invoice and FeohLedger
                 # could not record, or `None`: rail, reference and paid-on date
-                # straight from the open `paid_not_recorded` exception.
+                # straight from the open `paid_not_recorded` exception, with
+                # its stated figure and split. A row whose split stands is NOT
+                # folded into `record_outside_refusal`: the queue's "Record as
+                # paid" books it through that row's one-click instead of
+                # `record-outside` (decisions §426), so the action stays offered.
                 "erp_reported_payment": erp_reports.get(inv.id),
             }
         )
@@ -5351,6 +5370,9 @@ async def export_run_nacha(
             "sec_code": sec_code,
             "effective_date": effective_date.isoformat(),
             "file_id_modifier": modifier,
+            # Whether it carries the offsetting debit (decisions §432) — the
+            # fact, never the offset account.
+            "balanced": originator.offset is not None,
             "regenerated": previous_status == "exported",
             "file_sha256": hashlib.sha256(content.encode("ascii")).hexdigest(),
         },

@@ -92,6 +92,11 @@ const PROVIDERLESS = new Set([
 	'invoice_due_before_date'
 ]);
 
+/** Pushes `services/erp` failed without an attempt (decisions §428). They name
+ *  no provider, and carry `possibly_posted: true` when an EARLIER attempt may
+ *  have created the bill, so the sentence says to look there before retrying. */
+const UNATTEMPTED = new Set(['erp_retries_exhausted', 'erp_push_interrupted']);
+
 /** Every code's sentence, each naming `{provider}` unless in `PROVIDERLESS`. */
 const KEYS: Record<string, MessageKey> = {
 	vendor_not_linked: 'erpRefusal.vendorNotLinked',
@@ -148,6 +153,9 @@ const KEYS: Record<string, MessageKey> = {
 	// Merge.dev: waits for a sync after an attempt whose outcome is unknown (decisions §405)
 	merge_sync_pending: 'erpRefusal.mergeSyncPending',
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
+	// A push with no attempts left, or stranded with none made (decisions §428)
+	erp_retries_exhausted: 'erpRefusal.retriesExhausted',
+	erp_push_interrupted: 'erpRefusal.pushInterrupted',
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
 	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',
 	[VENDOR_BLOCKS_ERP_EXPORT]: 'erpRefusal.vendorBlocked',
@@ -187,6 +195,10 @@ export function erpRefusalText(value: unknown, t: Translate): string | null {
 	const key = KEYS[refusal.code];
 	if (!key) return null;
 	if (PROVIDERLESS.has(refusal.code)) return t(key);
+	if (UNATTEMPTED.has(refusal.code)) {
+		if (refusal.params.possibly_posted !== true) return t(key);
+		return `${t(key)} ${t('erpRefusal.vendorHoldPossiblyPosted')}`;
+	}
 	if (refusal.code === EXCEPTION_BLOCKS_ERP_EXPORT) {
 		const type = refusal.params.exception_type;
 		if (typeof type !== 'string' || !type.trim()) return null;

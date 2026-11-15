@@ -46,6 +46,8 @@ for f in index.html _app/version.json; do
 done
 [ -d "$build/_app/immutable" ] || die "$build/_app/immutable is missing — not a complete adapter-static build"
 
+command -v python3 >/dev/null || die "python3 is not installed (it computes the prune cutoff)"
+
 dest="s3://${bucket}"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -98,7 +100,9 @@ aws cloudfront wait invalidation-completed \
 echo "    invalidation ${invalidation} completed"
 
 echo "==> 5/5 pruning hashed assets older than ${prune_days} days that this build does not use"
-cutoff=$(date -u -d "-${prune_days} days" +%Y-%m-%dT%H:%M:%S)
+# python3, not `date -d`: GNU date's relative dates are not in BSD/macOS date,
+# and this script also runs from a contributor's Mac.
+cutoff=$(python3 -c 'import datetime, sys; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=int(sys.argv[1]))).strftime("%Y-%m-%dT%H:%M:%S"))' "$prune_days")
 (cd "$build" && find _app/immutable -type f) | sort >"$work/keep"
 aws s3api list-objects-v2 \
 	--bucket "$bucket" \

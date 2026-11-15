@@ -706,4 +706,10 @@ async def test_the_queue_names_the_blocking_exception_and_the_erp_payment(realdb
         "method": "check",
         "reference": "BILL-145",
         "paid_on": "2026-10-20",
+        # What the dialog shows beside the pre-fill (decisions §426): the
+        # figure the ERP states and its verdict on a breakdown (none here).
+        "amount": "410.00",
+        "amount_currency": "USD",
+        "payment_parts": None,
+        "split_stands": None,
     }

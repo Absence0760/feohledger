@@ -609,6 +609,37 @@ def is_erp_paid_report(exception: APException) -> bool:
     return isinstance(report, dict) and report.get("kind") == ERP_REPORT_PAID_NOT_RECORDED
 
 
+def kept_split_stands(report: dict | None) -> bool | None:
+    """Whether a ``paid_not_recorded`` row's kept breakdown would be booked
+    whatever one rail a person names (``external_payment.
+    split_stands_over_any_rail``), judged against the cash the row states, the
+    figure the one-click books. ``None`` when the row states no figure or no
+    breakdown: the record then reads the bill again (§393) or books the rail
+    the person names, and the dialog keeps its picker.
+
+    The ONE reading of a kept split, for every surface that asks: the
+    exception row's ``erp_payment_split_stands`` (§413), the payment queue's
+    ``erp_reported_payment.split_stands`` and ``POST /api/payments/
+    record-outside``'s refusal to book a payment the split describes with one
+    rail (§426). Server-side because it is an exact sum the client may not do
+    (`frontend/docs/money-formatting.md`)."""
+    from decimal import InvalidOperation
+
+    from app.services.external_payment import split_stands_over_any_rail
+
+    if not isinstance(report, dict) or report.get("kind") != ERP_REPORT_PAID_NOT_RECORDED:
+        return None
+    stated = report.get("amount")
+    parts = rail_parts_from_json(report.get("payment_parts"))
+    if not stated or not parts:
+        return None
+    try:
+        amount = Decimal(str(stated))
+    except (InvalidOperation, ValueError):
+        return None
+    return split_stands_over_any_rail(reported_payment_parts(parts), amount)
+
+
 async def live_erp_paid_reports(
     db: AsyncSession, invoice_ids: list[uuid.UUID], *, fresh: bool = False
 ) -> list[APException]:

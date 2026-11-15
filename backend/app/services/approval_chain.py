@@ -164,9 +164,12 @@ def violates_segregation(
     passes the draft's material editors
     (``purchase_requisitions.material_editor_ids``, migration 0102 —
     ``PATCH`` lets another user rewrite a draft's lines, vendor, currency and
-    budget, then approve what they wrote). The expense-report and pre-approval
-    shims pass ``None``: neither table records who edited a row, so there is no
-    second actor to name. The ``getattr`` default is what keeps a *future*
+    budget, then approve what they wrote). The expense-report shim passes the
+    recorded creators of the report's lines other than its owner
+    (``expense_controls.report_line_creators``, migration 0134 — empty once
+    the attach gate holds, read anyway). The pre-approval shim passes
+    ``None``: that table records no editor, so there is no second actor to
+    name. The ``getattr`` default is what keeps a *future*
     subject that forgets from raising ``AttributeError`` on the approval path,
     where the cost of a 500 is an outage on the control rather than a bypass of
     it.
@@ -212,14 +215,21 @@ def check_segregation(
 # ------------------------------------------------------------------
 
 
-def _po_ids_in_match(po_match: object) -> set[uuid.UUID]:
-    """The PO ids the invoice's stored match names — ``po_id`` for a single
-    match, ``po_ids`` for the multi-PO split's snapshot. Malformed ids are
-    ignored: the ``po_number`` lookup in :func:`receipt_recorders_by_invoice`
-    still covers the invoice's own reference."""
-    if not isinstance(po_match, dict):
-        return set()
-    raw = [po_match.get("po_id"), *(po_match.get("po_ids") or [])]
+def _linked_po_ids(invoice: object) -> set[uuid.UUID]:
+    """The PO ids the invoice is linked to by id: the stored match's ``po_id``
+    (a single match) and every PO a multi-PO split linked
+    (``Invoice.split_po_ids``). The split's set is read from its own column,
+    never from ``po_match``: a warning refresh rewrites ``po_match`` and the
+    split's combined ``po_number`` resolves to no PO, so a set read from the
+    snapshot vanished on the next edit (decisions §433). Malformed ids are
+    ignored: the ``po_number`` lookup in :func:`_invoice_po_ids` still covers
+    the invoice's own reference."""
+    po_match = getattr(invoice, "po_match", None)
+    split = getattr(invoice, "split_po_ids", None)
+    raw = [
+        po_match.get("po_id") if isinstance(po_match, dict) else None,
+        *(split if isinstance(split, list) else []),
+    ]
     ids: set[uuid.UUID] = set()
     for value in raw:
         if not value:
@@ -243,10 +253,12 @@ async def receipt_recorders_by_invoice(
 
     * **The invoice's POs** — every PO its ``po_number`` names, under the
       matcher's own lookup (same entity, strictly; same vendor when the invoice
-      has one), plus every PO its stored ``po_match`` names (``po_id``, or the
-      multi-PO split's ``po_ids``, whose combined ``po_number`` resolves to
-      nothing). Every same-numbered candidate counts, not only the newest the
-      matcher reads: refusing a receiver of a sibling PO is the safe error.
+      has one), plus the stored match's ``po_id`` and every PO a multi-PO
+      split linked (``Invoice.split_po_ids``: the split's combined
+      ``po_number`` resolves to nothing, and a warning refresh rewrites
+      ``po_match``, so the split's set lives in its own column, §433).
+      Every same-numbered candidate counts, not only the newest the matcher
+      reads: refusing a receiver of a sibling PO is the safe error.
     * **Live, hand-entered receipts on them** — ``source = manual``, a status
       outside ``po_matching.CANCELLED_GR_STATUSES``, booked in the invoice's
       own entity (the matcher's strict scope). A cancelled receipt counts
@@ -309,13 +321,11 @@ async def _invoice_po_ids(
     """Every PO each invoice names, for the approval door's evidence sets
     (:func:`receipt_recorders_by_invoice`, :func:`inspection_recorders_by_invoice`):
     the POs its ``po_number`` names under the matcher's own lookup (same
-    entity, strictly; same vendor when the invoice has one) plus every PO its
-    stored ``po_match`` names. One query for the batch."""
+    entity, strictly; same vendor when the invoice has one) plus every PO it
+    is linked to by id (:func:`_linked_po_ids`). One query for the batch."""
     from app.models.procurement import PurchaseOrder
 
-    po_ids: dict[uuid.UUID, set[uuid.UUID]] = {
-        inv.id: _po_ids_in_match(getattr(inv, "po_match", None)) for inv in invoices
-    }
+    po_ids: dict[uuid.UUID, set[uuid.UUID]] = {inv.id: _linked_po_ids(inv) for inv in invoices}
     # ``getattr`` throughout: a subject need not be a mapped ``Invoice`` (see
     # :func:`violates_segregation`), and one with no PO has nothing to read.
     numbers = {n for inv in invoices if (n := getattr(inv, "po_number", None))}

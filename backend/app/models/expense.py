@@ -269,6 +269,18 @@ class Expense(Base, EntityMixin, TimestampMixin):
     reimbursable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     mileage_miles: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
 
+    # The control-plane user who created this line (migration 0134; no FK —
+    # `users` is control-plane, this table is tenant-local, as with
+    # `invoices.uploaded_by_id`). It is the line's owner while it sits on no
+    # report: only they may change its claim fields, replace its receipt or
+    # delete it, and it may be attached only to a report they own, so a report's
+    # lines are always its owner's (`services/expense_controls`, decisions
+    # §434). Every construction site stamps it
+    # (`tests/test_expense_creator_stamping.py`). NULL = a line written before
+    # the column, deliberately not backfilled (§141): no recorded creator, so
+    # the pre-0134 rules apply to it.
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True
     )

@@ -60,9 +60,10 @@
 		type ErpReport,
 		type RailPartView
 	} from '#lib/types/erpReport.ts';
-	import { paymentMethodLabelKey, type PaymentMethod } from '#lib/types/payment.ts';
+	import type { PaymentMethod } from '#lib/types/payment.ts';
 	import { localToday } from '#lib/types/paymentExecution.ts';
 	import RecordPaymentFields from '#lib/components/payments/RecordPaymentFields.svelte';
+	import ErpPaymentSplit from '#lib/components/payments/ErpPaymentSplit.svelte';
 
 	interface ExceptionItem {
 		id: string;
@@ -682,24 +683,8 @@
 	const erpShowSplit = $derived(spansSeveralRails(erpParts));
 	// The split is the record over any rail picked: the picker becomes a fact.
 	const erpSplitStands = $derived(erpShowSplit && resolveTarget?.erp_payment_split_stands === true);
-	// What the note under the split may claim. Three states, because the
-	// server's verdict has three: true (it stands), false (it was judged and
-	// does not), and null/absent (not judged: no stated figure, parts its
-	// stricter parser rejects, or an older server). Only `false` may say the
-	// parts do not add up; for null nobody checked, so the note says the
-	// record decides. The picker stays for both (decisions §413).
-	const erpSplitNote = $derived(
-		erpSplitStands
-			? m('exceptions.erpPayment.splitStands')
-			: resolveTarget?.erp_payment_split_stands === false
-				? m('exceptions.erpPayment.splitDropped')
-				: m('exceptions.erpPayment.splitUnjudged')
-	);
-
-	function railLabel(rail: PaymentMethod | null): string {
-		const key = rail ? paymentMethodLabelKey(rail) : null;
-		return key ? m(key) : m('exceptions.erpPayment.railNotStated');
-	}
+	// The note under the split reads the server's three-state verdict
+	// (`splitNoteKey`, in `ErpPaymentSplit`); the picker stays unless it stands.
 
 	async function commitRecordErpPayment() {
 		const target = resolveTarget;
@@ -1417,24 +1402,14 @@
 					</div>
 				</dl>
 				{#if erpShowSplit}
-					<div class="erp-split" data-testid="erp-payment-split">
-						<h4 id="erp-payment-split-title">
-							{m('exceptions.erpPayment.splitTitle', { erp: erpName(resolveTarget) })}
-						</h4>
-						<ul aria-labelledby="erp-payment-split-title">
-							{#each erpParts as part, i (i)}
-								<li data-testid="erp-payment-split-part">
-									<span>{railLabel(part.rail)}</span>
-									<Money
-										amount={part.amount}
-										currency={resolveTarget.erp_report?.amount_currency ?? null}
-										mono
-									/>
-								</li>
-							{/each}
-						</ul>
-						<p class="modal-hint" data-testid="erp-payment-split-note">{erpSplitNote}</p>
-					</div>
+					<ErpPaymentSplit
+						parts={erpParts}
+						currency={resolveTarget.erp_report?.amount_currency ?? null}
+						erp={erpName(resolveTarget)}
+						stands={resolveTarget.erp_payment_split_stands}
+						idPrefix="erp-payment"
+						testid="erp-payment"
+					/>
 				{/if}
 				<form
 					data-testid="erp-payment-form"
@@ -1813,8 +1788,7 @@
 		margin: 0 0 12px;
 	}
 
-	.erp-figures dt,
-	.erp-split h4 {
+	.erp-figures dt {
 		margin: 0 0 2px;
 		font-size: 0.78rem;
 		font-weight: 500;
@@ -1824,26 +1798,6 @@
 	.erp-figures dd {
 		margin: 0;
 		font-size: 0.9rem;
-		color: var(--text);
-	}
-
-	.erp-split {
-		margin: 0 0 12px;
-	}
-
-	.erp-split ul {
-		list-style: none;
-		margin: 0 0 6px;
-		padding: 0;
-	}
-
-	.erp-split li {
-		display: flex;
-		justify-content: space-between;
-		gap: 12px;
-		padding: 4px 0;
-		border-bottom: 1px solid var(--border);
-		font-size: 0.85rem;
 		color: var(--text);
 	}
 

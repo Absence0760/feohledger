@@ -28,6 +28,8 @@
 		EXPENSE_PREAPPROVAL_STATUS_TONES,
 		RECONCILIATION_STATUSES,
 		reconciliationStatusLabelKey,
+		canAuthorLooseLine,
+		isLineCreator,
 		RECONCILIATION_STATUS_TONES
 	} from '#lib/types/expense.ts';
 	import { expenseStore } from '#lib/stores/expenses.svelte.ts';
@@ -684,8 +686,28 @@
 		}
 	}
 
+	// The caller's own loaded lines that sit on no report: what the attach
+	// input suggests. Attach goes only onto a report its line's creator owns
+	// (decisions §434, `expense_report_foreign_line`), so a colleague's line is
+	// never offered. Only the loaded page is known here; an ID typed beyond it
+	// is the server's to judge.
+	const attachableExpenses = $derived(
+		activeReport
+			? expenseStore.all.filter(
+					(e) => e.report_id === null && isLineCreator(e, activeReport!.employee_user_id)
+				)
+			: []
+	);
+
 	async function attachToReport() {
 		if (!activeReport || !attachId.trim()) return;
+		// A line this page has loaded and knows is a colleague's is refused here
+		// with the server's own sentence, not sent to be refused.
+		const known = expenseStore.all.find((e) => e.id === attachId.trim());
+		if (known && !isLineCreator(known, activeReport.employee_user_id)) {
+			toast(m('refusal.expenseReportForeignLine'), 'error');
+			return;
+		}
 		reportBusy = true;
 		try {
 			const updated = await attachExpenses(activeReport.id, [attachId.trim()], false);
@@ -1308,7 +1330,9 @@
 							</span>
 						</td>
 						<td class="actions">
-							{#if canCreate}
+							<!-- A colleague's line on no report is theirs to delete
+							     (decisions §434, `expense_not_creator`). -->
+							{#if canCreate && canAuthorLooseLine(exp, auth.user?.id)}
 								<RowAction
 									variant="danger"
 									armed={confirmDeleteId === exp.id}
@@ -1450,9 +1474,18 @@
 							placeholder={m('expenses.reports.attachPlaceholder')}
 							bind:value={attachId}
 							aria-label={m('expenses.reports.attachAria')}
+							aria-describedby="expense-attach-hint"
+							list="expense-attach-options"
+							data-testid="expense-attach-input"
 						/>
+						<datalist id="expense-attach-options">
+							{#each attachableExpenses as e (e.id)}
+								<option value={e.id}>{e.merchant ?? e.id} · {formatMoney(e.amount, { currency: e.currency })}</option>
+							{/each}
+						</datalist>
 						<button class="btn-secondary" disabled={reportBusy || !attachId.trim()} onclick={attachToReport}>{m('expenses.reports.attach')}</button>
 					</div>
+					<p class="attach-hint" id="expense-attach-hint">{m('expenses.reports.attachHint')}</p>
 				{/if}
 
 				<DataTable
@@ -2067,6 +2100,12 @@
 	.btn-back:hover {
 		color: var(--accent);
 	}
+	.attach-hint {
+		margin: 6px 0 12px;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+	}
+
 	.attach-row,
 	.reject-row {
 		display: flex;

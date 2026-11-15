@@ -242,6 +242,11 @@ async def start_erp_send(
 
         await retry_erp(db, invoice, actor_id=actor_id)
     else:
+        from app.services.erp import reset_erp_push_budget
+
+        # A new push gets a full budget, as a retry does: the counter the last
+        # push left would otherwise fail this one unattempted (decisions §428).
+        await reset_erp_push_budget(db, invoice_id)
         await transition_invoice(
             db,
             invoice,

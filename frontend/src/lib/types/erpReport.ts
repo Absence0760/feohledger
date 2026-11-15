@@ -81,6 +81,16 @@ export interface QueueErpReportedPayment {
 	method: string | null;
 	reference: string | null;
 	paid_on: string | null;
+	/** The cash the ERP states and its code, as on the row's `erp_report`. */
+	amount?: string | null;
+	amount_currency?: string | null;
+	/** The ERP's breakdown as the row keeps it (`ErpReport.payment_parts`). */
+	payment_parts?: ErpPaymentPart[] | null;
+	/** The server's verdict on that breakdown, the one the exception row
+	 *  carries as `erp_payment_split_stands` (`erp_status_sync.
+	 *  kept_split_stands`). `true`: the queue's record books through the row's
+	 *  one-click, since `record-outside` refuses it (decisions §426). */
+	split_stands?: boolean | null;
 }
 
 /** Does this exception carry a payment the ERP reported and FeohLedger could
@@ -201,4 +211,18 @@ export function erpPaymentParts(report: Pick<ErpReport, 'payment_parts'> | null 
  */
 export function spansSeveralRails(parts: readonly RailPartView[]): boolean {
 	return new Set(parts.map((p) => p.rail)).size > 1;
+}
+
+/**
+ * What the note under a shown split says, from the server's three-state
+ * verdict (decisions §413): `true`, it stands and is the record; `false`, it
+ * was judged and does not add up, so the chosen rail is; `null` / absent, not
+ * judged (no stated figure, parts the server's stricter parser rejects, or an
+ * older server), so only the record decides. Shared by `/exceptions` and the
+ * payment queue's dialog, so the two cannot say different things.
+ */
+export function splitNoteKey(stands: boolean | null | undefined): MessageKey {
+	if (stands === true) return 'exceptions.erpPayment.splitStands';
+	if (stands === false) return 'exceptions.erpPayment.splitDropped';
+	return 'exceptions.erpPayment.splitUnjudged';
 }

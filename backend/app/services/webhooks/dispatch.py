@@ -22,6 +22,11 @@ break the invoice/payment transition that produced the event (same contract as
      retry sweep (``delivery.run_webhook_delivery_loop``) is the durable backstop
      for anything the immediate attempt doesn't land.
 
+The event sources do not call ``emit_event`` directly: the typed emitters at
+the bottom of this module queue it for after the caller's transaction commits
+(``_emit_after_commit``, decisions §427), so a rolled-back change announces
+nothing.
+
 The payload is built here, ONCE, and frozen on the delivery row so a retry
 re-sends byte-identical bytes (and thus the same signature).
 """
@@ -262,11 +267,62 @@ def _spawn_immediate_attempt(delivery_id: uuid.UUID) -> None:
     task.add_done_callback(_finish_delivery_task)
 
 
+async def _emit_after_commit(
+    db,
+    *,
+    organization_id: uuid.UUID,
+    event_type: str,
+    event_key: str,
+    data: dict,
+) -> None:
+    """Emit once ``db``'s transaction commits; drop the event if it rolls back.
+
+    Every event source is a change made inside a tenant transaction the caller
+    has not committed yet (a status transition, a freshly-flushed exception
+    row). ``emit_event`` commits the ``WebhookDelivery`` row in its OWN
+    control-plane session, so emitting inline made the delivery durable while
+    the change it announced could still roll back: a receiver heard of an
+    ``invoice.approved`` that never happened, or read the invoice back before
+    the approval was visible (decisions §427). The emit therefore rides
+    ``post_commit`` — the same ``Session.info`` queue + ``after_commit`` hook the
+    notification email / chat legs and the ERP auto-send use — and a rolled-back
+    transaction (or savepoint) drops it with the rest of its post-commit work.
+
+    ``data`` is built by the caller NOW, so the payload is the state the
+    transaction committed, not whatever the instance holds when the job runs.
+    ``db=None`` is the explicit "no caller transaction" case: emit immediately.
+    """
+    if db is None:
+        await emit_event(
+            organization_id=organization_id,
+            event_type=event_type,
+            event_key=event_key,
+            data=data,
+        )
+        return
+    if not settings.webhooks_enabled:
+        return  # nothing would be sent; don't queue a no-op job
+    from app.services.post_commit import enqueue_post_commit
+
+    async def _job() -> None:
+        await emit_event(
+            organization_id=organization_id,
+            event_type=event_type,
+            event_key=event_key,
+            data=data,
+        )
+
+    enqueue_post_commit(db, _job, name=f"webhook-{event_type}")
+
+
 # ---------------------------------------------------------------------------
 # Typed emit helpers for the event sources — keep the call sites at the emit
-# sites a single, obvious line. Each builds `data` through its model in
-# `app/schemas/webhook_events.py`, the same model the published OpenAPI
-# describes, so the contract and the bytes sent cannot drift apart.
+# sites a single, obvious line. Each takes the caller's session as ``db`` and
+# defers the emit to its commit (``_emit_after_commit``); it is a required
+# keyword so a new source cannot silently emit ahead of its own transaction.
+# Each builds `data` through its model in `app/schemas/webhook_events.py`, the
+# same model the published OpenAPI describes, so the contract and the bytes
+# sent cannot drift apart.
 # ---------------------------------------------------------------------------
 
 
@@ -282,14 +338,15 @@ def _invoice_fields(invoice) -> dict:
     }
 
 
-async def emit_invoice_approved(invoice, *, occurrence_id=None) -> None:
+async def emit_invoice_approved(invoice, *, db, occurrence_id=None) -> None:
     """Emit ``invoice.approved`` for a freshly-approved invoice.
 
     ``occurrence_id`` identifies THIS approval, not the invoice — see
     ``_occurrence_key``. ``workflow_engine.transition_invoice`` passes the id it
-    minted for the transition it just committed.
+    minted for the transition; the event is sent once ``db`` commits.
     """
-    await emit_event(
+    await _emit_after_commit(
+        db,
         organization_id=invoice.organization_id,
         event_type=EVENT_INVOICE_APPROVED,
         event_key=_occurrence_key(occurrence_id),
@@ -298,7 +355,7 @@ async def emit_invoice_approved(invoice, *, occurrence_id=None) -> None:
 
 
 async def emit_invoice_approval_recalled(
-    invoice, *, recalled_from: str, occurrence_id=None
+    invoice, *, db, recalled_from: str, occurrence_id=None
 ) -> None:
     """Emit ``invoice.approval_recalled`` when an approval is taken back
     (``review.recall_approval``, decisions §374, §414).
@@ -311,7 +368,8 @@ async def emit_invoice_approval_recalled(
     ``occurrence_id`` identifies THIS recall: an invoice can be recalled,
     re-approved and recalled again.
     """
-    await emit_event(
+    await _emit_after_commit(
+        db,
         organization_id=invoice.organization_id,
         event_type=EVENT_INVOICE_APPROVAL_RECALLED,
         event_key=_occurrence_key(occurrence_id),
@@ -322,14 +380,15 @@ async def emit_invoice_approval_recalled(
     )
 
 
-async def emit_payment_settled(invoice, *, occurrence_id=None) -> None:
+async def emit_payment_settled(invoice, *, db, occurrence_id=None) -> None:
     """Emit ``payment.settled`` when an invoice reaches the ``paid`` state.
 
     ``occurrence_id`` identifies THIS settlement, not the invoice — a voided and
     re-paid invoice settles twice and must deliver twice. See
     ``_occurrence_key``.
     """
-    await emit_event(
+    await _emit_after_commit(
+        db,
         organization_id=invoice.organization_id,
         event_type=EVENT_PAYMENT_SETTLED,
         event_key=_occurrence_key(occurrence_id),
@@ -339,6 +398,7 @@ async def emit_payment_settled(invoice, *, occurrence_id=None) -> None:
 
 async def emit_exception_raised(
     *,
+    db,
     organization_id,
     exception_id,
     exception_type,
@@ -363,7 +423,8 @@ async def emit_exception_raised(
     ``None`` and only ``invoice_id`` (also ``None``) is carried.
     """
     inv_id = invoice_id if invoice_id is not None else getattr(invoice, "id", None)
-    await emit_event(
+    await _emit_after_commit(
+        db,
         organization_id=organization_id,
         event_type=EVENT_EXCEPTION_RAISED,
         event_key=str(exception_id),

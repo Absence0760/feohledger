@@ -253,6 +253,15 @@ measuring the **single** invoice — it is a "too small to be worth a human's ti
 convenience, not a spend control, and aggregating it would quietly stop it firing
 for any frequent vendor.
 
+**Neither unattended path approves past a PO-match hold.** An invoice citing a
+PO is matched first (`/complete` runs the match on the `new` invoice it submits;
+extraction's refresh already ran it), and `invoice_warnings.po_match_hold_refusal`
+is asked before the approval is stamped: an open `po_mismatch` / `quality_hold`,
+or a clearance of one the stamp would undo (§422), lands the invoice at
+`ready_for_review` with `auto_approve_suppressed` on the audit row. An invoice
+with no PO reference is unaffected (decisions §425,
+[po-matching.md](po-matching.md) § Before an unattended approval).
+
 **Neither unattended path fires for an entry-only caller.** Entry is open to
 `ap_clerk` (`api/invoice_entry.py`), and a clerk with no manage role cannot
 approve. So their `/complete` skips the

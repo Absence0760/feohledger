@@ -181,7 +181,7 @@ The mobile app talks to the same FastAPI backend as the web frontend:
 | Admin — Organization Settings | `GET /api/organization`, `PATCH /api/organization` (`{name, settings:{company, invoice_defaults}}` — shallow-merged; admin only) |
 | Admin — Workflows (read-only) | `GET /api/workflows` (list), `GET /api/workflows/{id}` (detail) — reads open to any authed role; the mobile entry point is admin-only (mirrors web nav `roles: ['admin']`). No create/edit on mobile |
 | Invoice Detail | `GET /api/invoices/{id}` (carries `warnings` + `po_match`), `POST /api/invoices/{id}/approve` (sends the loaded `updated_at` as `expected_updated_at`; a 409 `invoice_stale_approval` reloads the screen — decisions §263; the Approvals swipe and bulk approve bind the listed version the same way), `POST /api/invoices/{id}/reject`, `PATCH /api/invoices/{id}` (edit fields — admin/ap_manager/cfo, hidden in immutable statuses; financial fields omitted once approved), `GET /api/invoices/{id}/audit-log` (activity timeline + ERP-status derivation, any authenticated role) |
-| Approvals | `GET /api/invoices?status=ready_for_review` — a **server-side** filter into `InvoiceStore._pending`, with its own `SequencedFetch` token. It used to slice the Invoices tab's already-fetched page client-side, so tapping the *Paid* chip on Invoices made Approvals read "All caught up" while invoices sat awaiting review — and because both live in one `IndexedStack`, `initState` never re-fired and pull-to-refresh re-applied the same filter, so it could not self-correct. |
+| Approvals | `GET /api/invoices?status=ready_for_review&include=review_actions` — each row carries the caller's `approve` / `reject` verdict (`Invoice.reviewActions`), which the swipe actions are offered from; no per-row `review-actions` read. A row without one (the offline cache never stores a verdict) offers neither swipe, and the screen says it could not check (`reviewVerdictsUnavailable`, announced). A **server-side** filter into `InvoiceStore._pending`, with its own `SequencedFetch` token. It used to slice the Invoices tab's already-fetched page client-side, so tapping the *Paid* chip on Invoices made Approvals read "All caught up" while invoices sat awaiting review — and because both live in one `IndexedStack`, `initState` never re-fired and pull-to-refresh re-applied the same filter, so it could not self-correct. |
 | Exceptions | `GET /api/exceptions` (status filter), `POST /api/exceptions/{id}/resolve` (action=resolve\|escalate\|dismiss), `POST /api/exceptions/bulk/resolve` (`{ids, action, resolution}` → `{updated, skipped:[{id,reason}]}`) |
 | Exception Detail | `GET /api/exceptions/{id}` (full row + invoice), `POST /api/exceptions/{id}/assign` (`{user_id}`, null = unassign), plus the resolve/bulk routes above. The assignee picker reuses `GET /api/admin/users` (admin-only) |
 | Contracts | `GET /api/contracts` (`status` / `contract_type` / `search` / paginated) — read open to admin/ap_manager/ap_clerk/cfo |
@@ -203,7 +203,7 @@ Bottom navigation adapts based on user roles (same as web frontend):
 | Dashboard | All roles |
 | Invoices | All roles |
 | Contracts | All roles (activate / terminate / cancel: Admin, AP Manager only) |
-| Approvals | Anyone holding `invoice.approve` — Admin, AP Manager, CFO by default, or a custom role (`AuthStore.canApproveInvoice`, read from `/auth/me`'s `permissions`; the invoice-detail Approve/Reject bar uses the same gate) |
+| Approvals | Anyone holding `invoice.approve` — Admin, AP Manager, CFO by default, or a custom role (`AuthStore.canApproveInvoice`, read from `/auth/me`'s `permissions`). The tab only: Approve / Reject on an invoice come from the server's verdict, never this gate — the detail bar from `GET /api/invoices/{id}/review-actions` (a placeholder while it loads, "couldn't check" when the read fails), the queue swipe from the list's `review_actions` |
 | Exceptions | Admin, AP Manager |
 | Vendors | Admin, AP Manager, CFO (verify/reject + ERP sync: Admin, AP Manager only) |
 | Pay | Admin, AP Manager, CFO |
@@ -309,11 +309,15 @@ await expectLater(tester, meetsGuideline(textContrastGuideline));
 
 plus `find.bySemanticsLabel(...)` to confirm icon buttons expose labels. Covers
 the invoice list tile, KPI card, status badge, login screen, the capture action,
-the approvals approve/reject affordances, the exception list tile + exception
+the approvals approve/reject affordances (an allowed row beside a refused
+one, plus the could-not-check notice), the invoice detail's Approve / Reject
+bar (allowed and refused verdicts; Approve is `green.shade800` under its white
+label, where full-saturation green was 2.78:1), the exception list tile + exception
 status badge + exceptions screen (queue swipe actions) + the exception list tile
 in **selection mode** (exposes a `selected`/checked state, keeps its tap target,
 still announces one merged row label) + the `ExceptionDetailScreen` (the loaded
-detail meets tap-target/label/contrast), the invoice
+detail meets tap-target/label/contrast, also with a `paid_not_recorded` ERP
+payment panel and with a coded write-back refusal), the invoice
 activity timeline + invoice edit-sheet (icon-only close/clear controls labelled,
 one merged announcement per timeline entry; the financially-locked variant keeps
 its labels + AA contrast on the lock notice and per-field "Frozen after

@@ -18,6 +18,8 @@ form and names which ERP fields are secrets; those are sealed in
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
@@ -889,3 +891,71 @@ async def test_a_sync_with_an_unopenable_store_is_a_503(realdb, monkeypatch, pat
         resp = await c.post(path)
     assert resp.status_code == 503, resp.text
     assert resp.json()["detail"] == provider_credentials.CREDENTIALS_UNAVAILABLE_DETAIL
+
+
+# ---------------------------------------------------------------------------
+# `settings.erp.configured_at`: when the block began naming its connection
+# (decisions §428; the auto-send recovery sweep fences on it)
+# ---------------------------------------------------------------------------
+
+
+def _configured_at(block: dict) -> datetime:
+    moment = datetime.fromisoformat(block[catalog.CONFIGURED_AT_KEY])
+    assert moment.tzinfo is not None
+    return moment
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+async def test_a_first_erp_save_stamps_configured_at_and_a_same_connection_save_keeps_it(realdb):
+    before = datetime.now(UTC)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch("/api/organization", json={"settings": {"erp": dict(STORED)}})
+        assert resp.status_code == 200, resp.text
+        first = _configured_at(await _stored_erp(realdb))
+        assert first >= before
+
+        # Same ERP, same destination: an edit, and a forged stamp, change nothing.
+        shown = (await c.get("/api/organization")).json()["settings"]["erp"]
+        forged = "2000-01-01T00:00:00+00:00"
+        resp = await c.patch(
+            "/api/organization",
+            json={
+                "settings": {
+                    "erp": {**shown, "token_id": "tid-2", catalog.CONFIGURED_AT_KEY: forged}
+                }
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    stored = await _stored_erp(realdb)
+    assert stored["token_id"] == "tid-2"
+    assert _configured_at(stored) == first
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+@pytest.mark.parametrize(
+    ("seeded", "saved"),
+    [
+        (STORED, {**STORED, "account_id": "456"}),  # same ERP, another account
+        (STORED, dict(SYSPRO)),  # another ERP
+        (
+            {"type": "sage_intacct", "integration_method": "direct", "company_id": "acme"},
+            {
+                "type": "sage_intacct",
+                "integration_method": "direct",
+                "company_id": "acme",
+                "location_id": "EU",
+            },
+        ),  # Intacct entity: the link realm moves (§412)
+    ],
+    ids=["destination", "erp", "realm"],
+)
+async def test_a_save_that_moves_the_connection_restamps_configured_at(realdb, seeded, saved):
+    old = "2026-01-01T00:00:00+00:00"
+    await _seed_erp(realdb, {**seeded, catalog.CONFIGURED_AT_KEY: old})
+    before = datetime.now(UTC)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch("/api/organization", json={"settings": {"erp": saved}})
+    assert resp.status_code == 200, resp.text
+    assert _configured_at(await _stored_erp(realdb)) >= before
