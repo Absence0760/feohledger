@@ -1934,14 +1934,6 @@ user-visible halves still open.
       refusal-localization path (ARB strings per code). **Durable fix:** that
       path, then both screens on the verdict, with widget tests. **Trigger:** the
       next change to mobile approval.
-- [ ] **(c) The deploy-script tests fail on macOS.** `test_deploy_release.py`,
-      `test_frontend_publish.py` and `test_deploy_script_failures.py` (30 tests)
-      run scripts using GNU `cp` / `date -d` flags that macOS rejects (`cp:
-      illegal option`, `date: illegal option -- d`), so a full local suite on a
-      Mac is never green; CI is Linux and passes. **Durable fix:** make the
-      scripts portable (POSIX flags, or `python3` for the date arithmetic) since
-      contributors run them from macOS too, not a platform skip. **Trigger:** the
-      next change to `deploy/` or those tests.
 - [ ] **(c) `test_rename_databases_script.py` can hang with several local
       pytest slots running.** Seen once with four concurrent groups (passed when
       run alone): likely the script waiting on a lock another slot's databases

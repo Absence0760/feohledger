@@ -599,3 +599,85 @@ def test_every_runnable_deploy_script_is_committed_executable() -> None:
         path for path, mode in modes.items() if mode != "100755" and path != "deploy/lib.sh"
     )
     assert not_executable == []
+
+
+# ── portability guard ────────────────────────────────────────────────────────
+#
+# These scripts run on the VM (Linux) and from contributors' Macs, and this
+# suite runs them on both: a GNU-only flag makes the tests red on macOS
+# (`date: illegal option -- d`). Each pattern is a construct BSD/macOS rejects
+# or bash 3.2 lacks; use the portable form named beside it.
+
+_GNU_ISMS = {
+    r"\bdate\b[^|;\n]*\s(-d|--date)\b": "relative/parsed dates: compute them in python3",
+    r"\bcp\b[^|;\n]*\s(-[a-zA-Z]*[TtrbuvnL]?--|--[a-z])": "GNU long options on cp",
+    r"\bcp\s+-[a-zA-Z]*[Tt]": "cp -T / -t (GNU only)",
+    r"\bsed\s+(-[a-zA-Z]*\s+)*-i(\s|$|[^a-zA-Z'\"])": (
+        "sed -i (needs a suffix on BSD): write a tmp file and mv"
+    ),
+    r"\breadlink\s+-[a-zA-Z]*f": "readlink -f: use cd + pwd -P",
+    r"\bstat\s+(-c|--format)": "stat -c: use wc -c or ls",
+    r"\bgrep\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*P": "grep -P: use grep -E",
+    r"\bxargs\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*r\b": "xargs -r: guard the empty case instead",
+    r"\bmktemp\s+--": "mktemp long options: use -d / a XXXXXX template",
+    r"\b(mapfile|readarray)\b": "mapfile (bash 4+; macOS ships 3.2): use a read loop",
+    r"\$\(date [^)]*%N": "date %N (GNU only)",
+}
+
+
+def _code_lines(path: Path) -> list[tuple[int, str]]:
+    return [
+        (n, line)
+        for n, line in enumerate(path.read_text().splitlines(), 1)
+        if not line.lstrip().startswith("#")
+    ]
+
+
+def test_deploy_scripts_use_only_portable_flags() -> None:
+    scripts = sorted(DEPLOY.glob("*.sh"))
+    assert scripts, "no deploy/*.sh found — the guard would pass vacuously"
+    hits = [
+        f"{p.name}:{n}: {why}: {line.strip()}"
+        for p in scripts
+        for n, line in _code_lines(p)
+        for pattern, why in _GNU_ISMS.items()
+        if re.search(pattern, line)
+    ]
+    assert not hits, "GNU-only constructs in deploy/:\n" + "\n".join(hits)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'cutoff=$(date -u -d "-30 days" +%F)',
+        "cp -T a b",
+        "cp --archive a b",
+        "sed -i 's/a/b/' f",
+        "sed -E -i 's/a/b/' f",
+        "readlink -f x",
+        "stat -c %s f",
+        "grep -oP 'x' f",
+        "xargs -r rm",
+        "mktemp --tmpdir x",
+        "mapfile -t A < f",
+        'n="$(date +%s%N)"',
+    ],
+)
+def test_portability_guard_catches(line: str) -> None:
+    assert any(re.search(p, line) for p in _GNU_ISMS), line
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "STAMP=$(date -u +%F)",
+        "cp tenants.caddy.example tenants.caddy",
+        'aws s3 cp - "${PREFIX}/x.dump"',
+        "sed -nE 's/a/b/p' f",
+        "grep -Eq '^x$' f",
+        "work=$(mktemp -d)",
+        "pg_dump -U postgres -Fc -d feohledger",
+    ],
+)
+def test_portability_guard_allows(line: str) -> None:
+    assert not any(re.search(p, line) for p in _GNU_ISMS), line

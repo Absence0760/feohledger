@@ -109,7 +109,10 @@ else
 fi
 
 if [ ${#DBS[@]} -eq 0 ]; then
-	mapfile -t DBS < <(aws s3 ls "${PREFIX}/" | awk '{print $NF}' | grep '\.dump$' | sed 's/\.dump$//')
+	# A read loop, not mapfile: macOS ships bash 3.2, which has no mapfile.
+	while IFS= read -r db; do
+		DBS+=("$db")
+	done < <(aws s3 ls "${PREFIX}/" | awk '{print $NF}' | grep '\.dump$' | sed 's/\.dump$//')
 fi
 [ ${#DBS[@]} -gt 0 ] || die "no dumps found under ${PREFIX}/ (wrong date? wrong bucket?)"
 
