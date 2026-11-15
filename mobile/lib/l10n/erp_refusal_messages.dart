@@ -215,8 +215,9 @@ String? erpRefusalText(AppLocalizations l, Object? refusal) {
     case 'account_not_linked':
       final accounts = _accounts(params['accounts']);
       if (accounts == null) return null;
-      if (accounts.isEmpty)
+      if (accounts.isEmpty) {
         return l.erpRefusalAccountNotLinkedUncoded(provider);
+      }
       return l.erpRefusalAccountNotLinked(provider, accounts.join(', '));
     case 'account_inactive':
       final accounts = _accounts(params['accounts']);
