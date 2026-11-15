@@ -22021,3 +22021,53 @@ the way back to it.
 / link parity per link state, the refused link reads nothing, unlink reopens it)
 and `frontend/tests-e2e/vendors/erp-unlink.spec.ts` (the panel is gone after a
 link; a refused vendor gets the sentence or nothing).
+
+## 427. An outbound webhook event is sent after the change it announces commits, and the emitter takes the session (closes a `docs/followups.md` entry, §414 / §421 follow-up, round 13, 2026-11-15)
+
+**The gap.** `transition_invoice` called the webhook emitters inline, and
+`emit_event` commits the `WebhookDelivery` row in its own control-plane
+session. The delivery was therefore durable while the tenant transaction that
+changed the status was still open: a rollback (a failed chain step, a refused
+bulk row, a failed commit) left a subscriber told of an `invoice.approved`,
+`invoice.approval_recalled` or `payment.settled` that never happened, and a
+receiver that read the invoice back on receipt could see the old status.
+`exception.raised` from `exception_service.create_exception` had the same shape:
+the event named an exception row the caller could still roll back.
+
+**Decision.** The typed emitters in `services/webhooks/dispatch.py` take the
+caller's session as a required keyword (`db=`), build the payload at once, and
+queue the `emit_event` call on `services/post_commit` — the `Session.info`
+queue and `after_commit` hook the notification email / chat legs (§46) and the
+ERP auto-send already use. A rolled-back transaction drops the event; a
+rolled-back savepoint drops only the events queued inside it (§304), so a bulk
+approve emits one event per invoice it actually approved, after the outer
+commit. The payload is built at queue time, so it is the state the transaction
+committed, not whatever the instance holds when the job runs. Delivery rows,
+the `(subscription_id, event_id)` dedupe and the per-transition occurrence ids
+are unchanged.
+
+**Why at the emitter.** The follow-up proposed queuing in `transition_invoice`.
+Putting it in the emitters covers both sources (the engine and
+`create_exception`) with one mechanism, and the required `db=` keyword makes a
+new event source state its transaction: `db=None` is the explicit "nothing to
+wait for" case and emits immediately, so it cannot be reached by omission.
+
+**Rejected.** A third deferral mechanism (an outbox table, or a webhook-own
+`Session.info` key like `erp_send`'s): `post_commit` already has the right
+savepoint and dispatch-scope semantics, and the durable backstop for a lost
+emit attempt is unchanged. An outbox would make the emit itself durable across
+a crash between commit and emit; that window existed before as the gap between
+the delivery commit and the tenant commit, in the worse direction, and no
+integrator has needed it.
+
+**Trade-off.** An emit now runs after the request's commit, on a task (or
+inline under a dispatcher's scope, where the control pool is free by then);
+a process that dies in that instant loses the event, where before it could
+announce one that never happened. Missing an event is recoverable through the
+`/api/v1` pull surface; a false one is not.
+
+**Enforced by** `backend/tests/test_outbound_webhooks.py`
+(`test_a_committed_approval_emits_once_after_the_commit`,
+`test_a_rolled_back_approval_emits_nothing`,
+`test_a_bulk_approval_emits_one_event_per_committed_invoice`) and
+`backend/tests/test_outbound_webhooks_exception.py::test_a_rolled_back_exception_emits_nothing`.

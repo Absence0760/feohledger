@@ -32,6 +32,7 @@ from app.models.webhook import (
     WebhookDelivery,
     WebhookSubscription,
 )
+from app.services.post_commit import drain_post_commit
 from app.services.webhooks.signing import generate_signing_secret
 
 # Outbound webhooks are plan-gated (decisions §258) — both the subscription CRUD
@@ -157,6 +158,7 @@ async def test_create_exception_emits_exception_raised_with_clean_payload(realdb
                 invoice=row,
             )
             await s.commit()
+        await drain_post_commit()
 
         rows = await _deliveries(control_mk, org_id)
         assert len(rows) == 1, "one exception.raised delivery to the subscribed sub"
@@ -187,6 +189,51 @@ async def test_create_exception_emits_exception_raised_with_clean_payload(realdb
         async with mk() as s:
             from app.models.exception import Exception as APException
 
+            await s.execute(delete(APException).where(APException.invoice_id == inv.id))
+            await s.execute(delete(Invoice).where(Invoice.id == inv.id))
+            await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_rolled_back_exception_emits_nothing(realdb, monkeypatch):
+    """The event waits for the caller's commit (decisions §427): an exception
+    row that rolls back was never raised, so no subscriber hears of it — and
+    nothing is queued while the transaction is still open."""
+    from app.config import settings
+    from app.models.exception import Exception as APException
+    from app.services.exception_service import create_exception
+    from app.services.webhooks import dispatch as dispatch_mod
+
+    org_id = realdb.info("a").org_id
+    control_mk = realdb.control_sessionmaker()
+    mk = realdb.sessionmaker("a")
+    inv = await _make_invoice(mk, org_id)
+    sub = _make_sub(org_id)
+    await _persist_sub(control_mk, sub)
+
+    monkeypatch.setattr(settings, "webhooks_enabled", True)
+    monkeypatch.setattr(dispatch_mod, "_spawn_immediate_attempt", lambda did: None)
+
+    try:
+        async with mk() as s:
+            row = await s.get(Invoice, inv.id)
+            await create_exception(
+                s,
+                exception_type="duplicate",
+                severity="warning",
+                description="rolled back",
+                organization_id=org_id,
+                invoice=row,
+            )
+            await drain_post_commit()
+            assert await _deliveries(control_mk, org_id) == []
+            await s.rollback()
+        await drain_post_commit()
+
+        assert await _deliveries(control_mk, org_id) == []
+    finally:
+        await _cleanup(control_mk, sub.id)
+        async with mk() as s:
             await s.execute(delete(APException).where(APException.invoice_id == inv.id))
             await s.execute(delete(Invoice).where(Invoice.id == inv.id))
             await s.commit()
@@ -272,6 +319,7 @@ async def test_no_emit_when_webhooks_disabled(realdb, monkeypatch):
                 invoice=row,
             )
             await s.commit()
+        await drain_post_commit()
 
         assert await _deliveries(control_mk, org_id) == []
     finally:
@@ -302,6 +350,7 @@ async def test_same_exception_dedupes_to_one_delivery(realdb, monkeypatch):
     try:
         for _ in range(2):
             await emit_exception_raised(
+                db=None,
                 organization_id=org_id,
                 exception_id=exc_id,
                 exception_type="amount_exceeded",
@@ -347,6 +396,7 @@ async def test_invoiceless_exception_emits_identifiers_only(realdb, monkeypatch)
                 invoice_id=None,
             )
             await s.commit()
+        await drain_post_commit()
 
         rows = await _deliveries(control_mk, org_id)
         assert len(rows) == 1

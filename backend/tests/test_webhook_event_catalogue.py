@@ -140,10 +140,11 @@ async def test_each_emitter_sends_exactly_its_models_fields(captured):
     from app.services.webhooks import dispatch
 
     inv = _invoice(InvoiceStatus.approved)
-    await dispatch.emit_invoice_approved(inv, occurrence_id=uuid.uuid4())
-    await dispatch.emit_invoice_approval_recalled(inv, recalled_from="approved")
-    await dispatch.emit_payment_settled(inv, occurrence_id=uuid.uuid4())
+    await dispatch.emit_invoice_approved(inv, db=None, occurrence_id=uuid.uuid4())
+    await dispatch.emit_invoice_approval_recalled(inv, db=None, recalled_from="approved")
+    await dispatch.emit_payment_settled(inv, db=None, occurrence_id=uuid.uuid4())
     await dispatch.emit_exception_raised(
+        db=None,
         organization_id=inv.organization_id,
         exception_id=uuid.uuid4(),
         exception_type="duplicate",
@@ -164,7 +165,7 @@ async def test_the_recall_payload(captured):
     inv = _invoice()
     occurrence = uuid.uuid4()
     await dispatch.emit_invoice_approval_recalled(
-        inv, recalled_from="failed", occurrence_id=occurrence
+        inv, db=None, recalled_from="failed", occurrence_id=occurrence
     )
     (call,) = captured
     assert call["event_type"] == EVENT_INVOICE_APPROVAL_RECALLED

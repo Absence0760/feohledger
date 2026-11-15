@@ -862,26 +862,6 @@ or is a sibling of a fix that needs its own pass.
 
 ### Surfaced by the approval recall (2026-11-13, decisions §374)
 
-- [ ] **(c) The invoice webhooks are queued before the transaction that
-      produced them commits.** `transition_invoice` calls
-      `_maybe_emit_webhook` inline, and `emit_event` commits the
-      `WebhookDelivery` row in its own control-plane session, so the delivery
-      is durable while the tenant transaction that changed the status is still
-      open. If that transaction then rolls back (the recall's
-      `advance_workflow`, an approval's chain bookkeeping, a failed commit),
-      the receiver is told of an `invoice.approved` /
-      `invoice.approval_recalled` / `payment.settled` that never happened.
-      Found closing the recall event (decisions §414), which kept the hook's
-      existing timing rather than diverge from its siblings. **Durable fix:**
-      queue the emit with `post_commit.enqueue_post_commit(db, …,
-      name="webhook")` in `transition_invoice`, as the email / chat legs
-      already are, so a rolled-back transition queues nothing; the unit tests
-      that drive the engine with a `MagicMock` session
-      (`test_outbound_webhooks.py::test_transition_mints_a_new_occurrence_per_transition`,
-      `test_webhook_event_catalogue.py`) then need a real session or a drained
-      queue. **Trigger:** the next change to `transition_invoice`'s hooks, or
-      the first integrator reporting an event for a status change that is not
-      there.
 - [ ] **(c) A recalled invoice's PEPPOL transmission and inter-company mirror
       keep the recalled figures.** `recall_refusal` does not ask whether the
       approved invoice was already sent over PEPPOL (`POST {id}/peppol-send`)
