@@ -179,6 +179,16 @@ attach does not stamp it. That residue shrinks as old loose lines are attached
 or deleted; failing closed on it would strand every existing loose line, since
 nobody could ever edit, attach or delete it.
 
+**On `/expenses`** the page offers only what these gates allow. A colleague's
+loose line shows no Delete, and its modal opens with every claim field and the
+receipt upload read-only (a note says why) while the GL account stays editable;
+Save then PATCHes `gl_account_id` alone. The report's attach input suggests only
+the owner's own loose lines and refuses a loaded line it knows is someone
+else's before sending. The list ships no per-line verdict, so this reads one
+mirror of the two gates, `types/expense.ts::isLineCreator` / `canAuthorLooseLine`
+(`frontend/docs/ui-patterns.md` § Whether to offer an action); the server still
+refuses, localized, whatever the page cannot see.
+
 The server is the
 control; the web app offers attach / detach / submit / approve / reject from
 the report's `actions` verdicts (below), so it shows only what the server would

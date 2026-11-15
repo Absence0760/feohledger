@@ -259,6 +259,42 @@ export interface Expense {
 	updated_at: string;
 }
 
+/**
+ * Whether `userId` counts as this line's creator, the one question both
+ * §434 gates ask: `services/expense_controls.expense_creator_refusal` (only
+ * a LOOSE line's creator may change its claim fields, replace its receipt or
+ * delete it) and `.report_line_creator_refusal` (a line goes only onto a
+ * report its creator owns). A NULL creator is a line written before migration
+ * 0134; there is no recorded owner to refuse on, so it passes, as it does on
+ * the server.
+ *
+ * This is a mirror, not a verdict: the expense list ships no per-row
+ * refusal (frontend/docs/ui-patterns.md § Whether to offer an action), so
+ * this is the one place the page restates the rule. It only decides what to
+ * offer; the server still refuses, and its coded refusal is localized.
+ */
+export function isLineCreator(
+	expense: Pick<Expense, 'created_by_user_id'>,
+	userId: string | null | undefined
+): boolean {
+	const creator = expense.created_by_user_id;
+	return creator == null || (userId != null && creator === userId);
+}
+
+/**
+ * Whether `userId` may author this line: change its claim fields, replace its
+ * receipt, delete it. A line on a report is its report owner's, which the
+ * endpoint gates separately, so only a LOOSE line is judged here
+ * (`api/expenses._require_loose_line_creator`). GL coding stays open to
+ * every entry role either way.
+ */
+export function canAuthorLooseLine(
+	expense: Pick<Expense, 'report_id' | 'created_by_user_id'>,
+	userId: string | null | undefined
+): boolean {
+	return expense.report_id != null || isLineCreator(expense, userId);
+}
+
 export interface ExpenseListResponse {
 	items: Expense[];
 	total: number;

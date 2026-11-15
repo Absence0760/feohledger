@@ -13,7 +13,9 @@ import {
 	expenseStatusLabelKey,
 	expenseReportStatusLabelKey,
 	expensePreapprovalStatusLabelKey,
-	reconciliationStatusLabelKey
+	reconciliationStatusLabelKey,
+	isLineCreator,
+	canAuthorLooseLine
 } from './expense';
 import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
@@ -95,5 +97,31 @@ describe('EXPENSE_PAYMENT_METHOD_LABEL_KEYS', () => {
 			expect(key, `${method} has no label key`).toBeTruthy();
 			expect(Object.keys(EN_ALL), `${method} → "${key}" is not in the catalogue`).toContain(key);
 		}
+	});
+});
+
+// The §434 mirror (`services/expense_controls.expense_creator_refusal` +
+// `.report_line_creator_refusal`): a NULL creator passes, the creator passes,
+// anyone else is refused — and a line on a report is its owner's, not judged.
+describe('isLineCreator / canAuthorLooseLine', () => {
+	const me = 'user-me';
+	const other = 'user-other';
+
+	it('passes the creator and a NULL (pre-0134) creator, refuses anyone else', () => {
+		expect(isLineCreator({ created_by_user_id: me }, me)).toBe(true);
+		expect(isLineCreator({ created_by_user_id: null }, me)).toBe(true);
+		expect(isLineCreator({ created_by_user_id: other }, me)).toBe(false);
+	});
+
+	it('refuses a recorded creator when the caller is unknown', () => {
+		expect(isLineCreator({ created_by_user_id: other }, undefined)).toBe(false);
+		expect(isLineCreator({ created_by_user_id: other }, null)).toBe(false);
+		expect(isLineCreator({ created_by_user_id: null }, undefined)).toBe(true);
+	});
+
+	it('judges only a loose line: one on a report is left to its report gate', () => {
+		expect(canAuthorLooseLine({ report_id: null, created_by_user_id: other }, me)).toBe(false);
+		expect(canAuthorLooseLine({ report_id: null, created_by_user_id: me }, me)).toBe(true);
+		expect(canAuthorLooseLine({ report_id: 'r1', created_by_user_id: other }, me)).toBe(true);
 	});
 });

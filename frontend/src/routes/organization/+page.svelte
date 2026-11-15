@@ -2601,17 +2601,34 @@
 											aria-describedby="org-payments-nacha-offset-hint"
 										/>
 									</label>
-									<label>
-										<span>{m('org.payments.nachaField.offsetAccount')}</span>
-										<input
-											type="text"
-											bind:value={nachaOffsetAccount}
-											maxlength="20"
-											autocomplete="off"
-											placeholder={nachaOffsetAccountMask || undefined}
-											aria-describedby="org-payments-nacha-offset-hint"
-										/>
-									</label>
+									<div>
+										<label>
+											<span>{m('org.payments.nachaField.offsetAccount')}</span>
+											<input
+												type="text"
+												bind:value={nachaOffsetAccount}
+												maxlength="20"
+												autocomplete="off"
+												placeholder={nachaOffsetAccountMask || undefined}
+												aria-describedby={nachaOffsetAccountMask
+													? 'org-payments-nacha-offset-hint org-payments-nacha-offset-onfile'
+													: 'org-payments-nacha-offset-hint'}
+											/>
+										</label>
+										<!-- The placeholder alone was the only sign an account is on
+										     file: it vanishes on focus and is no accessible
+										     description. Visible text outside the <label> (so it is
+										     not swallowed into the name), tied to the input. -->
+										{#if nachaOffsetAccountMask}
+											<p
+												class="field-hint"
+												id="org-payments-nacha-offset-onfile"
+												data-testid="payments-nacha-offset-onfile"
+											>
+												{m('org.payments.nachaOffsetOnFile', { mask: nachaOffsetAccountMask })}
+											</p>
+										{/if}
+									</div>
 									<label>
 										<span>{m('org.payments.nachaField.offsetAccountType')}</span>
 										<select

@@ -875,6 +875,15 @@ restated rule. The expenses page explains only `expense_cfo_required` (Approve
 stays visible, disabled, naming the CFO gate) and hides every other refusal,
 the reader's own report included.
 
+One documented mirror stands in for a missing verdict: the expense list ships no
+per-line refusal, so `/expenses` reads line ownership (decisions §434) through
+`types/expense.ts::isLineCreator` / `canAuthorLooseLine`, the single restatement
+of `expense_controls.expense_creator_refusal` / `.report_line_creator_refusal`.
+It hides Delete and makes the claim fields read-only on a colleague's loose line
+and filters the attach suggestions. Replace it with an `actions` verdict on
+`ExpenseResponse` if a second line-level gate ever needs offering; do not add a
+second copy beside it.
+
 ### Clickable rows (`RowLink` + `isRowOpenClick`)
 
 A list row that has a detail/edit destination opens it **by clicking the
