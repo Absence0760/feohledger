@@ -26,6 +26,15 @@ tenant, Sage business, Blackbaud environment) or the company fields a direct
 adapter is configured with. Merge.dev's ids are Merge-assigned UUIDs, unique
 across every linked account, so its identity is the adapter alone.
 
+**A Sage Intacct entity is its own realm** (docs/decisions.md §412). With
+``location_id`` set, every call is scoped by ``X-IA-API-Param-Entity``, and an
+entity holds vendors and accounts the top level and its sibling entities do
+not. So the Intacct identity is ``<company>|<location>``. The location is
+appended only when set: a top-level connection keeps the realm it had before
+the location counted, ``sage_intacct:<company>``, so its links and bills were
+not disturbed. Migration 0131 stamped the links and bills of a connection that
+already had a location with that location, the only one anything recorded.
+
 ``None`` means "no company can be named": the ``mock`` adapter (its ids are
 fixtures and it posts nowhere), or an OAuth ERP with no completed consent
 (which cannot post at all: ``OAuthErpAdapter.external_tenant_id`` raises). Links
@@ -63,13 +72,21 @@ _OAUTH_ADAPTERS = frozenset({"quickbooks_online", "xero", "sage_accounting", "bl
 
 #: Direct adapters: the configured fields that name the company. Every field an
 #: id is scoped by — a NetSuite account, a Business Central tenant +
-#: environment + company, an Intacct company, a SYSPRO / Sage ZA host + company.
+#: environment + company, an Intacct company (its entity is optional, below), a
+#: SYSPRO / Sage ZA host + company.
 _DIRECT_IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
     "netsuite": ("account_id",),
     "dynamics_365_bc": ("base_url", "tenant_id", "environment", "company_id"),
     "sage_intacct": ("company_id",),
     "syspro": ("base_url", "company_id"),
     "sage_accounting_za": ("base_url", "company_id"),
+}
+
+#: Fields that join the identity only when set, so a connection without them
+#: keeps the realm it had before they counted (migration 0131, §412). Intacct's
+#: entity: blank is the company's top level.
+_OPTIONAL_IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
+    "sage_intacct": ("location_id",),
 }
 
 #: A field's value when the adapter itself applies a default for a blank one,
@@ -101,6 +118,9 @@ def connection_realm(erp_config: Any) -> str | None:
             _norm(erp_config.get(f) or _FIELD_DEFAULTS.get((key, f)))
             for f in _DIRECT_IDENTITY_FIELDS[key]
         )
+        for f in _OPTIONAL_IDENTITY_FIELDS.get(key, ()):
+            if value := _norm(erp_config.get(f)):
+                identity = f"{identity}|{value}"
     else:
         # Merge.dev (globally unique ids) and any adapter that has not named
         # its company fields: the adapter is the realm.

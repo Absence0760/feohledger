@@ -21047,6 +21047,94 @@ logged; the gate asked again after a backoff; on a real tenant, a stale
 real `sending_to_erp` push still lands. The mock-session tests point the gate
 at the fixture invoice's own status through an autouse fixture.
 
+## 412. A Sage Intacct entity is its own ERP realm; migration 0131 stamps a located connection's links with its current location (§395 follow-up, 2026-11-14)
+
+**The gap.** `services/erp_link_realm` keyed Sage Intacct by `company_id`
+alone (§284's realm). With `location_id` set, every Intacct call carries
+`X-IA-API-Param-Entity`, and an entity holds vendors and accounts the top
+level and its sibling entities do not. Re-pointing a connection at another
+entity of the same company therefore kept the first entity's vendor and GL
+links as this realm's, and the push sent a vendor id the new entity does not
+hold. Intacct refuses it and the adapter reads the refusal back as
+`vendor_inactive`, which tells the user to reactivate a vendor that is fine.
+
+**The realm.** The Intacct identity is now `<company>|<location>`, the
+location normalised like every identity field and **appended only when set**
+(`_OPTIONAL_IDENTITY_FIELDS`). A location change is then a realm change like
+a QuickBooks company change, with nothing new to build: the push refuses the
+old entity's links (`vendor_not_linked` / `account_not_linked`); the next
+vendor and chart sync files them as kept links for that entity (§356, §376)
+and re-judges each by evidence; a return to the first entity posts its vendor
+links at once and restores its GL state at the next chart sync. A pushed
+bill's `state_data.erp_realm` carries the entity too, so the status sync and
+the write-back stop reading a bill in an entity the connection no longer
+reaches, and a bill there is held as `erp_bill_unlinked_other_company`.
+
+**Rejected: always writing the delimiter** (`sage_intacct:<company>|` for the
+top level). It would make every pre-0131 stamp distinguishable from a new one,
+but it changes the realm of every Intacct connection, so every top-level
+tenant's links and bills would need rewriting for no change in meaning, and
+0115's frozen realm (pinned to the live function by its test) would stop
+matching. Appending only when set leaves a top-level connection's realm
+exactly as it was.
+
+**Migration 0131: what an existing stamp's location was.** Nothing recorded
+the location a link or bill was made under. The only location anything knows
+is the connection's own at migration time, so 0131 reads a stamp naming the
+org's **current** company as made under its **current** location, and
+rewrites `sage_intacct:<company>` to `sage_intacct:<company>|<location>` in
+every place a realm is stored: `vendors` / `gl_accounts.erp_link_realm`, the
+pending `erp_link_candidates.realm`, `vendor_erp_links` /
+`gl_account_erp_links` (+ candidates), `workflow_instances.state_data.erp_realm`,
+and 0115's `settings.erp.legacy_link_realm` on the control plane. That is a
+guess for one case, and this says so: a link made at the top level before the
+location was set is attributed to the location. Nothing distinguishes it, and
+if the guess is wrong the next sync re-judges it by evidence. A top-level
+connection's stamps are untouched, since its realm did not change. A stamp
+naming another Intacct company is untouched too, and now reads as that
+company's top level. With no connection to that company there is no location
+to name. Leaving the stamp is the honest reading. It matters only if the
+tenant reconnects to that company's top level, where a kept vendor link made
+under one of its entities would post before any sync, as every kept link does
+(§356). Whether Intacct then refuses the id or another vendor holds it depends
+on whether vendor ids repeat across entities, which is not verified yet; the
+sandbox pass in `docs/followups.md` (Verify the SYSPRO, Sage Intacct, ...
+adapters, #654) now names that question.
+
+**Rejected: nulling the old stamps and leaning on 0115's legacy trust.** A
+NULL link is trusted by the push only while the realm equals
+`legacy_link_realm`. Re-pointing that snapshot at the Intacct entity would
+also trust every older NULL link in the tenant, including those made under a
+previous ERP or a mock sync, on Intacct pushes. **Rejected: leaving old stamps
+to the next sync, no migration.** A located connection's links would refuse
+until a sync, and every bill it had pushed would read as another company's,
+opening `erp_bill_unlinked_other_company` holds on invoices that are fine.
+**Rejected: a realm alias** (a control-plane map of "old stamp means new
+realm") honoured by every reader. Every link reader, both syncs, the kept-link
+restore and four bill-realm comparisons would carry it permanently, for a
+one-off.
+
+**How a tenant migration knows its organization's connection.** A tenant
+database holds no organization settings, so `alembic/env.py`, on a
+`FEOH_MIGRATE_TENANT` run, puts a lookup in
+`config.attributes["tenant_organization_erp"]`. It reads that tenant's
+`organizations.settings->'erp'` from the control plane by `db_name`, through
+the app's engine factory (IAM auth included), on first call only, awaited on
+the migration's greenlet. It reads and never writes, so the objection to a
+tenant migration that reads the control plane (§266: two databases, no
+atomicity between a copy and a strip) does not arise. Without the lookup (a bare
+`MigrationContext`, or the control plane's own run over its tenant-table
+copies) 0131 cannot tell which stamps to rewrite. It raises if the database
+holds any `sage_intacct:` stamp, and is a no-op otherwise.
+
+Tests: `tests/test_erp_link_realm.py` (the entity realm, and a location change
+that refuses, re-judges, keeps and restores the entity's vendor and GL links);
+`tests/test_migration_0131_intacct_location_realm.py` (the frozen realm pinned
+to the live one; every stamp kind rewritten for the current company only,
+idempotent and reversible; other connections untouched; the refusal without
+the org's settings; the control-plane snapshot; and a real
+`FEOH_MIGRATE_TENANT` `alembic upgrade` from 0130 through env.py's lookup).
+
 ## 413. The record dialog shows the ERP's figure and split, and names no rail over a split that stands (§386 and §396 follow-ups, 2026-11-15)
 
 **The gap.** A `paid_not_recorded` row keeps the cash the ERP states

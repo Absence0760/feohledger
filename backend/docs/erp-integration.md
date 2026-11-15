@@ -1530,6 +1530,9 @@ links each pulled account through `services/gl_account_sync.sync_chart_from_erp`
    company, so sandbox "7" and production "7" are different accounts. Every link
    records its connection realm (`erp_link_realm`, `services/erp_link_realm`:
    the OAuth company id, or a direct adapter's company fields; never a secret).
+   A Sage Intacct entity (`location_id`) is a realm of its own, appended only
+   when set, so a top-level connection keeps `sage_intacct:<company>`
+   (decisions §412, migration 0131).
    A link from another realm — or from before migration 0115 (NULL) — is kept
    only when the pull shows the same id holding the row's own code; otherwise
    it is dropped and the row is re-matched by code. Between two named realms
@@ -2549,7 +2552,7 @@ documented answer; a refused mint, a refusal or an outage is `failed`.
 | `client_secret` | **yes** | OAuth client secret |
 | `company_id` | no | Intacct company id |
 | `user_id` | no | Web Services user authorized for the app (token `username` is `user_id@company_id`) |
-| `location_id` | no (optional) | Top-level entity of a multi-entity company; sent as `X-IA-API-Param-Entity` on every call |
+| `location_id` | no (optional) | Top-level entity of a multi-entity company; sent as `X-IA-API-Param-Entity` on every call. Part of the connection realm when set (`sage_intacct:<company>\|<location>`), so changing it re-judges every vendor and GL link at the next sync (decisions §412) |
 | `po_document_type` | no (optional) | Purchasing transaction definition used for POs (default `Purchase Order`) |
 
 | Operation | Call |
@@ -2590,6 +2593,15 @@ Request rules worth knowing:
 - **GL account types.** Intacct classifies only balance sheet vs income
   statement, so balance-sheet credit accounts (liability or equity) stay
   unclassified rather than guessed.
+
+- **The entity is the realm.** An entity holds vendors and accounts the top
+  level and its siblings do not, so a link (and a pushed bill's
+  `state_data.erp_realm`) made under one `location_id` counts only under that
+  one. Re-pointing the connection at another entity refuses the old links
+  (`vendor_not_linked` / `account_not_linked`) until a sync re-judges them, and
+  keeps them for a return (decisions §412). Migration 0131 stamped the links
+  and bills of a connection that already had a location with its location at
+  migration time: nothing recorded an earlier one.
 
 Tests: `backend/tests/test_erp_sage_intacct_adapter.py`. fake-erp surface:
 `/intacct/ia/api/v1` (`FEOH_ERP_INTACCT_API_BASE`).
