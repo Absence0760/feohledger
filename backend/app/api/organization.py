@@ -282,6 +282,32 @@ def _changed_key_names(before: object, after: object) -> list[str]:
     return sorted(k for k in set(b) | set(a) if b.get(k) != a.get(k))
 
 
+def _stamp_erp_configured_at(stored: object, merged: dict) -> dict:
+    """``merged`` with ``configured_at`` set by the server, never by the save.
+
+    Stamped now when the save names a different ERP, destination
+    (``catalog.same_connection``, the condition the sealed secrets follow) or
+    link realm (``erp_link_realm.connection_realm``); otherwise the stored
+    stamp is kept. A directly configured ERP (NetSuite, Business Central,
+    Intacct, SYSPRO) has no OAuth ``connected_at``, so this is the moment the
+    auto-send recovery sweep fences on: an approval before it was made against
+    another ERP, or none, and is never pushed as "recovered" (decisions §428).
+    """
+    from datetime import UTC, datetime
+
+    from app.services.erp_link_realm import connection_realm
+
+    key = erp_catalog.CONFIGURED_AT_KEY
+    out = {k: v for k, v in merged.items() if k != key}
+    if not erp_catalog.same_connection(stored, out) or connection_realm(stored) != connection_realm(
+        out
+    ):
+        out[key] = datetime.now(UTC).isoformat()
+    elif isinstance(stored, dict) and isinstance(stored.get(key), str):
+        out[key] = stored[key]
+    return out
+
+
 @router.patch("", response_model=OrganizationResponse)
 async def update_organization(
     body: UpdateOrganizationRequest,
@@ -340,7 +366,9 @@ async def update_organization(
             # silently and report the save as a success.
             _refuse_credentials_in_patch("erp", incoming_erp)
             if isinstance(incoming_erp, dict):
-                body.settings["erp"] = erp_catalog.merge_erp_update(erp_before, incoming_erp)
+                body.settings["erp"] = _stamp_erp_configured_at(
+                    erp_before, erp_catalog.merge_erp_update(erp_before, incoming_erp)
+                )
             else:
                 # Clearing the ERP still keeps the OAuth block: only the OAuth
                 # disconnect removes it (it revokes at the provider first).

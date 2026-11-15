@@ -22134,6 +22134,90 @@ announce one that never happened. Missing an event is recoverable through the
 `test_a_bulk_approval_emits_one_event_per_committed_invoice`) and
 `backend/tests/test_outbound_webhooks_exception.py::test_a_rolled_back_exception_emits_nothing`.
 
+## 428. A push stranded at `sending_to_erp` is re-driven or failed by the auto-send sweep; a spent push fails coded; a direct ERP's save is its fence (§410, §411 follow-ups, round 13, 2026-11-15)
+
+Three gaps round 12 left open, all around a push that sits at `sending_to_erp`
+with nothing that will ever move it.
+
+**A new push gets a full retry budget.** `send_to_erp_internal` resumes from
+`state_data.erp_retries`, which only `retry_erp` reset. A send from `approved`
+inherited whatever the invoice's last push left, so a push that failed three
+times, then had its approval recalled and re-approved (§374), was sent with no
+attempts left. That was the path the follow-up called unknown. `start_erp_send`
+now resets the counter on every new push, through the one helper `retry_erp`
+uses (`erp.reset_erp_push_budget`). Only the counter: the outcome-unknown flag,
+the pending job and the orphan keys describe what may already be in the ERP,
+and the next attempt must still read them.
+
+**No attempt left is a final failure.** A job that still arrives spent (a
+redelivery after the last attempt, a re-drive of one) used to return without
+an attempt or a transition. After the §410 gate, so a spent redelivery for a
+recalled invoice is still only skipped, it lands at `failed` with
+`invoice.erp_failed` coded `erp_retries_exhausted`. The refusal's params carry
+`possibly_posted: true` when an earlier attempt may have left the bill, as the
+export gate's do (§286), and the row carries the flag and any known orphan as
+a failed attempt's does, so whoever retries looks in the ERP first. An
+unreadable counter is read as spent rather than guessed at.
+
+**A stranded push is the sweep's second pass.** `start_erp_send` commits
+`→ sending_to_erp` and then dispatches; a death in between leaves no job.
+`erp_auto_send_sweep` now also takes invoices at `sending_to_erp` whose latest
+entry into it (by its transition's audit row) is older than the delay with no
+`invoice.erp_*` row since, and decides each under the invoice row lock from the
+instance's attempt stamp (`erp_outcome_unknown_at`, committed before every
+adapter call, §409):
+
+- *No attempt since the transition, inside the window* → re-dispatched through
+  `dispatch_erp(inline=True)`, so it lands in `send_to_erp_internal` with the
+  same §410 gate, the correlation-id idempotency key and the possibly-posted
+  state handed to the adapter. It cannot post twice: in Lambda mode the FIFO
+  queue's per-invoice message group runs it after any original message, which
+  then finds the invoice moved and skips; in local mode the original job is a
+  task started at the commit, and one that has stamped no attempt within the
+  delay died with its process.
+- *No attempt, outside the window* → `failed`, coded `erp_push_interrupted`.
+  The window is the §411 lookback and the ERP's live-from moment (below). A
+  push stranded for a day may have been keyed into the ERP by hand, and the
+  idempotency key cannot see a hand-keyed bill; a push started before the
+  current ERP was saved was meant for another one. Neither is sent on nobody's
+  say-so; at `failed` a person can retry it.
+- *An attempt began and nothing ended it* (a local worker that died mid-call)
+  → left while the attempt is inside the lookback, since it may still be
+  running or be redelivered by SQS; past it, failed the same way, and flagged
+  possibly posted. Rejected: re-driving it after the delay. An adapter call can
+  outlive five minutes (a Lambda runs up to fifteen, Merge.dev waits for a
+  sync), and two live attempts would rest on the idempotency key alone.
+
+The re-drive writes no audit row of its own: no transition happens, and an
+`invoice.erp_*` row would become the "latest ERP entry" the invoice panels
+read (§410's reason). The push's own outcome rows are the record; the sweep
+logs and counts (`pushes_redriven`, `pushes_interrupted`). A row that is left
+stays a candidate, so the cap could hold it; the lookback releases it, as
+§411's argues for its own skipped rows.
+
+**`settings.erp.configured_at`.** §411 fenced an OAuth ERP's recovery on
+`connected_at`; a directly configured ERP had no such moment. `PATCH
+/api/organization` now stamps `configured_at` when a save names a different
+ERP, destination (`catalog.same_connection`, the condition the sealed secrets
+follow, as `catalog.secrets_to_drop` does) or link realm (`connection_realm`, so an
+Intacct entity change counts, §412), keeps the stored stamp otherwise, and
+never takes one from the request. The sweep's floor is the later of the two
+moments, for approvals and for stranded pushes alike. A block saved before
+this change has no stamp and keeps the lookback alone; that window closed at
+its save.
+
+Tests: `tests/test_erp_push_flow.py` (spent push failed coded, with and without
+possibly-posted; a spent push for a moved invoice still skipped; a new send
+from `approved` resets the counter and keeps the ERP state; the interrupted
+exit), `tests/test_erp_auto_send_sweep.py` (re-drive; an earlier push's stamp
+ignored; too fresh and answered left; an in-flight attempt left; the three
+interrupted cases; the end-to-end re-drive through the local dispatcher landing
+once; the `configured_at` fence and the later-of-two rule),
+`tests/test_erp_catalog.py` (stamped on a first save, kept and unforgeable on a
+same-connection save, restamped on a destination, ERP or realm change), and
+`frontend/src/lib/api/erpRefusals.test.ts` (both codes in every locale, with
+the possibly-posted note).
+
 ## 429. Mobile offers Approve / Reject from the per-invoice verdict, on the detail screen and per row of the approvals queue; the Approvals tab stays on the permission (closes two `docs/followups.md` entries, round 13, 2026-11-15)
 
 **Context.** The mobile detail screen and the approvals swipe offered Approve /

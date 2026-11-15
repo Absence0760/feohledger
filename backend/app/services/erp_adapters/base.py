@@ -354,6 +354,10 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "vendor_blocks_erp_export",
         # `services/erp` itself: the invoice is due before it is dated
         "invoice_due_before_date",
+        # `services/erp` itself: a push with no attempts left, and one stranded
+        # at `sending_to_erp` that the recovery sweep will not re-drive (§428)
+        "erp_retries_exhausted",
+        "erp_push_interrupted",
         # A payment written back to the ERP (`post_payment`, decisions §295)
         "payment_account_not_mapped",
         "bill_not_in_erp",

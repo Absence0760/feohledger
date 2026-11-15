@@ -32,6 +32,11 @@ OAUTH_KEY = "oauth"
 #: ``settings.erp`` key: the ERP company every pre-0115 link is assumed to
 #: belong to (``services/erp_link_realm``). Written only by migration 0115.
 LEGACY_REALM_KEY = "legacy_link_realm"
+#: ``settings.erp`` key: when the block last started naming its current ERP
+#: connection (ISO time). Written only by ``PATCH /api/organization``, when a
+#: save changes the ERP or its destination / link realm; never taken from a
+#: save. The auto-send recovery sweep fences on it (decisions §428).
+CONFIGURED_AT_KEY = "configured_at"
 #: Token keys that must never sit in the JSONB OAuth block.
 _OAUTH_TOKEN_KEYS = frozenset({"access_token", "refresh_token"})
 

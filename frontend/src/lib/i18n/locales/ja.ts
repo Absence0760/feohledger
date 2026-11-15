@@ -5257,6 +5257,8 @@ export const messages = {
 	'erpRefusal.billLeftUnposted': "{provider} ではこの請求書が下書きまたは承認待ちで、計上されていないため、買掛金にはまだ何も記録されていません。{provider} で計上または承認してから、再試行してください。",
 	'erpRefusal.mergeSyncPending': "{provider} は、結果が不明な以前の送信試行以降、まだ請求書を同期していないため、この請求書がすでに存在する可能性があります。何も送信していません。{provider} の次回の請求書同期の後に再試行してください。その時点で請求書があれば、2 件目を作成せずにそれに紐付けます。",
 	'erpRefusal.credentialsUnavailable': "現在 ERP の認証情報を開けませんでした。数分後に再試行してください。失敗が続く場合は管理者に連絡してください。",
+	'erpRefusal.retriesExhausted': "この送信には残りの試行回数がなかったため、今回は試行されませんでした。再試行すると、新しい試行回数で送信します。",
+	'erpRefusal.pushInterrupted': "この送信は中断され、完了しませんでした。確認なしで再送信するには古すぎます（または現在の ERP 接続より前のものです）。請求書が ERP に既にないことを確認してから再試行してください。",
 	'erpRefusal.periodClosed': "請求の日付が締め済みの期間（帳簿の締め）に含まれるため、{provider} がこの請求を拒否しました。請求書の日付を変更するか、{provider} で期間を再オープンしてから再試行してください。",
 	'erpRefusal.vendorInactive': "仕入先が無効または削除済みのため、{provider} がこの請求を拒否しました。{provider} で仕入先を有効にしてから再試行してください。",
 	'erpRefusal.accountInactive': "{accounts} が無効または削除済みのため、{provider} がこの請求を拒否しました。{provider} で勘定科目を有効にするか、請求書を有効な勘定科目に付け替えてから再試行してください。",

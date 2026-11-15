@@ -1939,43 +1939,6 @@ user-visible halves still open.
 
 ### Surfaced by round 12 (2026-11-15, round PR #716, decisions §410–§421)
 
-- [ ] **(c) An invoice can stay at `sending_to_erp` when its process dies
-      before the push is dispatched.** `erp_send.start_erp_send` commits
-      `approved → sending_to_erp` and then dispatches the job; a deploy or OOM
-      between the two leaves the invoice there with no job, and nothing
-      re-drives it: the §411 auto-send sweep selects only `approved`, and
-      §410's gate makes any later job act only on `sending_to_erp`, which is
-      right but needs a job to exist. **Durable fix:** extend
-      `erp_auto_send_sweep` (or a sibling pass) to pick up invoices at
-      `sending_to_erp` older than the sweep delay with no pending ERP job and
-      no `invoice.erp_*` row since the transition, and re-dispatch them through
-      the same `send_to_erp_internal` path (which re-locks and gates on the
-      status), with a test. **Trigger:** turning the auto-send sweep on in
-      production, or an invoice found stuck at `sending_to_erp`.
-- [ ] **(c) A push that reaches `sending_to_erp` with its retry counter spent
-      makes no attempt and leaves the invoice there.** §410's gate lets a push
-      through only at `sending_to_erp`, but `send_to_erp_internal` still reads
-      the instance's retry count before its first attempt; a count already at
-      the limit (a redelivery after the last retry, or an operator re-queue)
-      returns without calling the adapter or moving the invoice to `failed`,
-      so it sits at `sending_to_erp` with no refusal on its trail. No current
-      path is known to produce it. **Durable fix:** treat "no attempts left" as
-      a final failure: transition to `failed` with a coded
-      `erp_retries_exhausted` refusal (possibly-posted if the outcome flag is
-      set), with a `tests/test_erp_push_flow.py` case. **Trigger:** the next
-      change to `services/erp.py`'s retry loop, or an invoice found stuck at
-      `sending_to_erp`.
-- [ ] **(c) The auto-send sweep cannot fence a directly configured ERP's
-      connection time.** §411 skips approvals made before an OAuth ERP's
-      `connected_at`, but NetSuite, Business Central, Sage Intacct and SYSPRO
-      are saved as settings and record no connection time, so an approval made
-      while the tenant was on the mock, up to the 24 h lookback before the live
-      ERP was saved, can be pushed once by the sweep. **Durable fix:** stamp
-      `erp.configured_at` whenever `PATCH /api/organization` changes the ERP
-      type or its realm-defining fields (the same writer that drops sealed
-      secrets, `erp_adapters/catalog.secrets_to_drop`), and fence on it in
-      `erp_auto_send_sweep`. **Trigger:** turning the sweep on for a tenant on
-      a directly configured ERP.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
@@ -2496,6 +2459,9 @@ from that work is the one entry below.
       `GET /api/health/sweeps` shows `erp-auto-send` running. Turning it on
       pushes any approval from the last 24 hours whose snapshot says
       "send" and that nothing answered, so do it after the stored flags are
-      confirmed, not before. **Trigger:** the first tenant that relies on
+      confirmed, not before. It also re-drives any push stranded at
+      `sending_to_erp` from the last 24 hours with no attempt made, and fails
+      older stranded pushes as `erp_push_interrupted` (decisions §428), so
+      list `sending_to_erp` invoices first and expect those. **Trigger:** the first tenant that relies on
       auto-send in production, or the first report of an approved invoice
       that did not reach the ERP.

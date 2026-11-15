@@ -5341,6 +5341,8 @@ export const messages = {
 	'erpRefusal.billLeftUnposted': "O {provider} mantém esta fatura como rascunho ou aguardando aprovação, sem lançamento, então ainda não há nada em contas a pagar. Lance ou aprove a fatura no {provider} e tente novamente.",
 	'erpRefusal.mergeSyncPending': "O {provider} ainda não sincronizou as faturas desde uma tentativa de envio anterior cujo resultado é desconhecido, então ele pode já ter esta fatura. Nada foi enviado. Tente novamente após a próxima sincronização de faturas do {provider}: se a fatura já estiver lá, ela será vinculada em vez de criada uma segunda vez.",
 	'erpRefusal.credentialsUnavailable': "Não foi possível abrir as credenciais do ERP agora. Tente novamente em alguns minutos; se continuar falhando, avise um administrador.",
+	'erpRefusal.retriesExhausted': "Este envio não tinha mais tentativas, então nenhuma tentativa foi feita desta vez. Tente novamente para enviá-lo com novas tentativas.",
+	'erpRefusal.pushInterrupted': "Este envio foi interrompido e nunca terminou. É antigo demais (ou anterior à conexão atual com o ERP) para ser reenviado sem verificação. Confirme que a fatura ainda não está no ERP e tente novamente.",
 	'erpRefusal.periodClosed': "O {provider} recusou esta conta porque a data dela está em um período fechado (os livros estão fechados). Altere a data da fatura ou reabra o período no {provider} e tente novamente.",
 	'erpRefusal.vendorInactive': "O {provider} recusou esta conta porque o fornecedor está inativo ou excluído lá. Ative o fornecedor no {provider} e tente novamente.",
 	'erpRefusal.accountInactive': "O {provider} recusou esta conta porque {accounts} está inativa ou excluída lá. Ative a conta no {provider} ou reclassifique a fatura para uma conta ativa e tente novamente.",
