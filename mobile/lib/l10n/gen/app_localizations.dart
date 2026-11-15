@@ -5838,6 +5838,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'PO match: {summary}'**
   String warningsPoMatchAnnouncement(String summary);
+
+  /// Coded refusal `invoice_not_in_review` (services/review.refuse_unless_in_review): the approve / reject verdict on an invoice not in ready_for_review, and a bulk approve / reject skip.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice is not awaiting review, so it cannot be approved or rejected.'**
+  String get codedRefusalInvoiceNotInReview;
+
+  /// Coded refusal `invoice_bulk_not_found`: a bulk status skip for an id not found in the selected entity.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice wasn\'t found in the selected entity.'**
+  String get codedRefusalInvoiceBulkNotFound;
+
+  /// Coded refusal `invoice_status_immutable`: a bulk status skip for an invoice in an immutable status.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice is {status}, so it can no longer be changed.'**
+  String codedRefusalInvoiceStatusImmutable(String status);
+
+  /// Coded refusal `invoice_recall_one_at_a_time`: a bulk move to Ready for Review of an approved invoice, which only Recall approval may do. Names the invoiceDetailRecall button.
+  ///
+  /// In en, this message translates to:
+  /// **'An approval is recalled one invoice at a time, with a reason: use Recall approval on the invoice.'**
+  String get codedRefusalInvoiceRecallOneAtATime;
+
+  /// Coded refusal `invoice_required_fields_missing`: a bulk submit for review skipped for missing fields.
+  ///
+  /// In en, this message translates to:
+  /// **'Required fields missing: {fields}'**
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields);
+
+  /// Coded refusal `invoice_transition_invalid`: the state machine refused the edge (a bulk status skip).
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice can\'t move from {from} to {to}.'**
+  String codedRefusalInvoiceTransitionInvalid(String from, String to);
+
+  /// Coded refusal `invoice_transition_recall_only`: the edge exists only as a recall of the approval. Names the invoiceDetailRecall button.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice can move from {from} to {to} only by recalling its approval, one invoice at a time: use Recall approval on the invoice.'**
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to);
+
+  /// Coded refusal `invoice_once_approved_not_reread`: a once-approved invoice can't be sent back to extraction (a bulk move to Pending).
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice has already been approved, so its document can\'t be read again. Recall its approval and correct it instead.'**
+  String get codedRefusalInvoiceOnceApprovedNotReread;
+
+  /// Shown under a skipped invoice in the bulk status result dialog when the server gave no reason.
+  ///
+  /// In en, this message translates to:
+  /// **'No reason given'**
+  String get invoicesBulkSkipNoReason;
 }
 
 class _AppLocalizationsDelegate

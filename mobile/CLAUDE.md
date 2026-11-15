@@ -203,7 +203,7 @@ Bottom navigation adapts based on user roles (same as web frontend):
 | Dashboard | All roles |
 | Invoices | All roles |
 | Contracts | All roles (activate / terminate / cancel: Admin, AP Manager only) |
-| Approvals | Anyone holding `invoice.approve` — Admin, AP Manager, CFO by default, or a custom role (`AuthStore.canApproveInvoice`, read from `/auth/me`'s `permissions`; the invoice-detail Approve/Reject bar uses the same gate) |
+| Approvals | Anyone holding `invoice.approve` — Admin, AP Manager, CFO by default, or a custom role (`AuthStore.canApproveInvoice`, read from `/auth/me`'s `permissions`). The tab only: Approve / Reject on an invoice — the detail bar and the queue swipe — come from that invoice's `GET /api/invoices/{id}/review-actions` verdict, never this gate |
 | Exceptions | Admin, AP Manager |
 | Vendors | Admin, AP Manager, CFO (verify/reject + ERP sync: Admin, AP Manager only) |
 | Pay | Admin, AP Manager, CFO |

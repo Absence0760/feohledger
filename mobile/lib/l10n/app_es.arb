@@ -952,5 +952,14 @@
   "warningsPoMatchStatusMismatch": "Discrepancia",
   "warningsPoMatchStatusPartial": "Parcial",
   "warningsPoMatchStatusNoPo": "Sin pedido",
-  "warningsPoMatchAnnouncement": "Conciliación con pedido: {summary}"
+  "warningsPoMatchAnnouncement": "Conciliación con pedido: {summary}",
+  "codedRefusalInvoiceNotInReview": "Esta factura no está pendiente de revisión, por lo que no se puede aprobar ni rechazar.",
+  "codedRefusalInvoiceBulkNotFound": "No se encontró esta factura en la entidad seleccionada.",
+  "codedRefusalInvoiceStatusImmutable": "Esta factura está en estado {status}, así que ya no puede modificarse.",
+  "codedRefusalInvoiceRecallOneAtATime": "Una aprobación se retira de factura en factura, con un motivo: use Retirar aprobación en la factura.",
+  "codedRefusalInvoiceRequiredFieldsMissing": "Faltan campos obligatorios: {fields}",
+  "codedRefusalInvoiceTransitionInvalid": "Esta factura no puede pasar de {from} a {to}.",
+  "codedRefusalInvoiceTransitionRecallOnly": "Esta factura solo puede pasar de {from} a {to} retirando su aprobación, una factura cada vez: use Retirar aprobación en la factura.",
+  "codedRefusalInvoiceOnceApprovedNotReread": "Esta factura ya se aprobó, así que su documento no puede volver a leerse. Retire su aprobación y corríjala en su lugar.",
+  "invoicesBulkSkipNoReason": "No se indicó ningún motivo"
 }

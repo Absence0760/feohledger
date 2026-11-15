@@ -952,5 +952,14 @@
   "warningsPoMatchStatusMismatch": "Écart",
   "warningsPoMatchStatusPartial": "Partiel",
   "warningsPoMatchStatusNoPo": "Aucune commande",
-  "warningsPoMatchAnnouncement": "Rapprochement commande : {summary}"
+  "warningsPoMatchAnnouncement": "Rapprochement commande : {summary}",
+  "codedRefusalInvoiceNotInReview": "Cette facture n'est pas en attente de revue ; elle ne peut donc être ni approuvée ni rejetée.",
+  "codedRefusalInvoiceBulkNotFound": "Cette facture est introuvable dans l’entité sélectionnée.",
+  "codedRefusalInvoiceStatusImmutable": "Cette facture est au statut {status} : elle ne peut plus être modifiée.",
+  "codedRefusalInvoiceRecallOneAtATime": "Une approbation se retire une facture à la fois, avec un motif : utilisez « Retirer l'approbation » sur la facture.",
+  "codedRefusalInvoiceRequiredFieldsMissing": "Champs obligatoires manquants : {fields}",
+  "codedRefusalInvoiceTransitionInvalid": "Cette facture ne peut pas passer de {from} à {to}.",
+  "codedRefusalInvoiceTransitionRecallOnly": "Cette facture ne peut passer de {from} à {to} qu'en retirant son approbation, une facture à la fois : utilisez « Retirer l'approbation » sur la facture.",
+  "codedRefusalInvoiceOnceApprovedNotReread": "Cette facture a déjà été approuvée : son document ne peut donc pas être relu. Retirez plutôt son approbation et corrigez-la.",
+  "invoicesBulkSkipNoReason": "Aucun motif indiqué"
 }

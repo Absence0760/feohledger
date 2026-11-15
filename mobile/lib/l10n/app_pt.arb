@@ -1118,5 +1118,14 @@
   "warningsPoMatchStatusMismatch": "Divergência",
   "warningsPoMatchStatusPartial": "Parcial",
   "warningsPoMatchStatusNoPo": "Sem pedido",
-  "warningsPoMatchAnnouncement": "Conciliação com pedido: {summary}"
+  "warningsPoMatchAnnouncement": "Conciliação com pedido: {summary}",
+  "codedRefusalInvoiceNotInReview": "Esta fatura não está aguardando revisão, portanto não pode ser aprovada nem rejeitada.",
+  "codedRefusalInvoiceBulkNotFound": "Esta fatura não foi encontrada na entidade selecionada.",
+  "codedRefusalInvoiceStatusImmutable": "Esta fatura está com status {status}, então não pode mais ser alterada.",
+  "codedRefusalInvoiceRecallOneAtATime": "Uma aprovação é revogada uma fatura por vez, com um motivo: use Revogar aprovação na fatura.",
+  "codedRefusalInvoiceRequiredFieldsMissing": "Campos obrigatórios ausentes: {fields}",
+  "codedRefusalInvoiceTransitionInvalid": "Esta fatura não pode passar de {from} para {to}.",
+  "codedRefusalInvoiceTransitionRecallOnly": "Esta fatura só pode passar de {from} para {to} revogando a aprovação dela, uma fatura por vez: use Revogar aprovação na fatura.",
+  "codedRefusalInvoiceOnceApprovedNotReread": "Esta fatura já foi aprovada, então o documento dela não pode ser lido novamente. Revogue a aprovação e corrija-a em vez disso.",
+  "invoicesBulkSkipNoReason": "Nenhum motivo informado"
 }

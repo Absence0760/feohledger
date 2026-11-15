@@ -1,6 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/api/endpoints.dart';
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/invoice_status_labels.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
@@ -18,8 +20,10 @@ import 'package:feohledger_mobile/widgets/reject_reason_dialog.dart';
 
 /// Bulk status-change targets offered on mobile. A deliberately small, safe
 /// subset of the 12-state machine — the common manual moves an AP user makes in
-/// a batch. The backend validates each row's transition and skips invalid ones,
-/// so an option that doesn't apply to a given row is simply a no-op for it.
+/// a batch. The backend validates each row's transition and skips invalid ones
+/// with a coded reason the result dialog states. Approved is offered only when
+/// every selected row is awaiting review (`InvoiceStore.selectionAwaitingReview`,
+/// backend decisions §418), as the web picker does.
 const _bulkStatusTargets = <InvoiceStatus>[
   InvoiceStatus.readyForReview,
   InvoiceStatus.approved,
@@ -347,6 +351,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
               ),
               const Divider(height: 1),
               for (final status in _bulkStatusTargets)
+                if (status != InvoiceStatus.approved ||
+                    InvoiceStore.instance.selectionAwaitingReview)
                 ListTile(
                   title: Text(
                     invoiceStatusLabel(
@@ -375,6 +381,12 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       if (reason == null || !mounted) return;
     }
 
+    // The rows as listed, to name a skipped one by its number once the list
+    // has been refetched.
+    final numbers = {
+      for (final inv in InvoiceStore.instance.invoices)
+        inv.id: inv.invoiceNumber,
+    };
     setState(() => _busy = true);
     final result = await InvoiceStore.instance
         .bulkStatusSelected(target.value, reason: reason);
@@ -389,9 +401,59 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
             l.invoicesBulkMoved(result.count, invoiceStatusLabel(l, target)),
             result.skipped.length,
           );
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
     A11y.announce(context, message);
+    if (result == null || result.skipped.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+      return;
+    }
+    // A skipped row says why, in the reader's language: "N skipped" alone
+    // left the user guessing which invoices stayed put and what to do.
+    await _showSkipped(message, result.skipped, numbers);
+  }
+
+  /// The bulk result [message] with one line per skipped row: its invoice
+  /// number and the server's reason, stated from its code
+  /// (`coded_refusal_messages.dart`), else the server's English.
+  Future<void> _showSkipped(
+    String message,
+    List<BulkSkip> skipped,
+    Map<String, String?> numbers,
+  ) {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final dl = AppLocalizations.of(dialogContext);
+        return AlertDialog(
+          title: Text(message),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final skip in skipped)
+                  ListTile(
+                    key: ValueKey('bulk-skip-${skip.id}'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(numbers[skip.id] ?? skip.id),
+                    subtitle: Text(
+                      localizeCodedRefusal(dl, skip.refusal) ??
+                          skip.reason ??
+                          dl.invoicesBulkSkipNoReason,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(dl.commonClose),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _bulkExport() async {

@@ -109,6 +109,16 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   int get selectedCount => _selectedIds.length;
   bool isSelected(String id) => _selectedIds.contains(id);
 
+  /// Whether every selected row is a loaded invoice awaiting review — the
+  /// only state a bulk approve moves (backend decisions §418), so the bulk
+  /// sheet offers Approved only then, as the web picker does.
+  bool get selectionAwaitingReview {
+    if (_selectedIds.isEmpty) return false;
+    final statuses = {for (final inv in _invoices) inv.id: inv.status};
+    return _selectedIds
+        .every((id) => statuses[id] == InvoiceStatus.readyForReview);
+  }
+
   /// Invoices awaiting approval, as returned by the server for
   /// `status=ready_for_review` — NOT a slice of [invoices].
   List<Invoice> get pending => _pending;

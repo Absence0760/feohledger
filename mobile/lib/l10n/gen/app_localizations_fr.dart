@@ -3991,4 +3991,43 @@ class AppLocalizationsFr extends AppLocalizations {
   String warningsPoMatchAnnouncement(String summary) {
     return 'Rapprochement commande : $summary';
   }
+
+  @override
+  String get codedRefusalInvoiceNotInReview =>
+      'Cette facture n\'est pas en attente de revue ; elle ne peut donc être ni approuvée ni rejetée.';
+
+  @override
+  String get codedRefusalInvoiceBulkNotFound =>
+      'Cette facture est introuvable dans l’entité sélectionnée.';
+
+  @override
+  String codedRefusalInvoiceStatusImmutable(String status) {
+    return 'Cette facture est au statut $status : elle ne peut plus être modifiée.';
+  }
+
+  @override
+  String get codedRefusalInvoiceRecallOneAtATime =>
+      'Une approbation se retire une facture à la fois, avec un motif : utilisez « Retirer l\'approbation » sur la facture.';
+
+  @override
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
+    return 'Champs obligatoires manquants : $fields';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionInvalid(String from, String to) {
+    return 'Cette facture ne peut pas passer de $from à $to.';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to) {
+    return 'Cette facture ne peut passer de $from à $to qu\'en retirant son approbation, une facture à la fois : utilisez « Retirer l\'approbation » sur la facture.';
+  }
+
+  @override
+  String get codedRefusalInvoiceOnceApprovedNotReread =>
+      'Cette facture a déjà été approuvée : son document ne peut donc pas être relu. Retirez plutôt son approbation et corrigez-la.';
+
+  @override
+  String get invoicesBulkSkipNoReason => 'Aucun motif indiqué';
 }

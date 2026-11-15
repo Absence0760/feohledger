@@ -3982,6 +3982,45 @@ class AppLocalizationsPt extends AppLocalizations {
   String warningsPoMatchAnnouncement(String summary) {
     return 'Conciliação com pedido: $summary';
   }
+
+  @override
+  String get codedRefusalInvoiceNotInReview =>
+      'Esta fatura não está aguardando revisão, portanto não pode ser aprovada nem rejeitada.';
+
+  @override
+  String get codedRefusalInvoiceBulkNotFound =>
+      'Esta fatura não foi encontrada na entidade selecionada.';
+
+  @override
+  String codedRefusalInvoiceStatusImmutable(String status) {
+    return 'Esta fatura está com status $status, então não pode mais ser alterada.';
+  }
+
+  @override
+  String get codedRefusalInvoiceRecallOneAtATime =>
+      'Uma aprovação é revogada uma fatura por vez, com um motivo: use Revogar aprovação na fatura.';
+
+  @override
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
+    return 'Campos obrigatórios ausentes: $fields';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionInvalid(String from, String to) {
+    return 'Esta fatura não pode passar de $from para $to.';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to) {
+    return 'Esta fatura só pode passar de $from para $to revogando a aprovação dela, uma fatura por vez: use Revogar aprovação na fatura.';
+  }
+
+  @override
+  String get codedRefusalInvoiceOnceApprovedNotReread =>
+      'Esta fatura já foi aprovada, então o documento dela não pode ser lido novamente. Revogue a aprovação e corrija-a em vez disso.';
+
+  @override
+  String get invoicesBulkSkipNoReason => 'Nenhum motivo informado';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -7960,4 +7999,43 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String warningsPoMatchAnnouncement(String summary) {
     return 'Conciliação com pedido: $summary';
   }
+
+  @override
+  String get codedRefusalInvoiceNotInReview =>
+      'Esta fatura não está aguardando revisão, portanto não pode ser aprovada nem rejeitada.';
+
+  @override
+  String get codedRefusalInvoiceBulkNotFound =>
+      'Esta fatura não foi encontrada na entidade selecionada.';
+
+  @override
+  String codedRefusalInvoiceStatusImmutable(String status) {
+    return 'Esta fatura está com status $status, então não pode mais ser alterada.';
+  }
+
+  @override
+  String get codedRefusalInvoiceRecallOneAtATime =>
+      'Uma aprovação é revogada uma fatura por vez, com um motivo: use Revogar aprovação na fatura.';
+
+  @override
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
+    return 'Campos obrigatórios ausentes: $fields';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionInvalid(String from, String to) {
+    return 'Esta fatura não pode passar de $from para $to.';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to) {
+    return 'Esta fatura só pode passar de $from para $to revogando a aprovação dela, uma fatura por vez: use Revogar aprovação na fatura.';
+  }
+
+  @override
+  String get codedRefusalInvoiceOnceApprovedNotReread =>
+      'Esta fatura já foi aprovada, então o documento dela não pode ser lido novamente. Revogue a aprovação e corrija-a em vez disso.';
+
+  @override
+  String get invoicesBulkSkipNoReason => 'Nenhum motivo informado';
 }

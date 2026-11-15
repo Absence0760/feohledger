@@ -155,6 +155,29 @@ MockClient _detailClient(
         reviewActions != null) {
       return _json(reviewActions);
     }
+    // Without an explicit [reviewActions], answer the review verdicts the way
+    // `services/review.review_refusals` does on its first two gates — the
+    // permission, then the review stage — so a test about something else
+    // still meets an Approve / Reject the server would offer. No
+    // `recall_approval` key: a recall is offered only when a test says so.
+    if (req.method == 'GET' && path.endsWith('/review-actions')) {
+      final perms = permissions ?? systemRolePermissions(roles);
+      Map<String, dynamic>? refusal;
+      if (!perms.contains('invoice.approve')) {
+        refusal = {
+          'code': 'role_not_permitted',
+          'message': 'x',
+          'params': <String, dynamic>{},
+        };
+      } else if (invoice['status'] != 'ready_for_review') {
+        refusal = {
+          'code': 'invoice_not_in_review',
+          'message': 'x',
+          'params': <String, dynamic>{},
+        };
+      }
+      return _json({'approve': refusal, 'reject': refusal});
+    }
     // InvoiceStore.approve/reject/update refetch the list after the write.
     if (req.method == 'GET' && path == '/api/invoices') {
       return _json({'invoices': <Map<String, dynamic>>[]});
@@ -382,7 +405,8 @@ void main() {
 
   testWidgets('hides the action bar for a clerk even on an actionable invoice',
       (tester) async {
-    // ap_clerk cannot approve -> action bar suppressed by canApprove gate.
+    // A backend that answers no verdict (this client serves the invoice body
+    // for `/review-actions`) offers nothing: the screen fails closed.
     final client = MockClient((req) async {
       final path = req.url.path;
       if (path == '/api/auth/login') return _json({'access_token': 'tok-123'});
@@ -1200,6 +1224,120 @@ void main() {
 
       expect(tester.takeException(), isNull);
     });
+  });
+
+  // ── Approve / Reject from the server's verdict (issue #575) ─────────────
+
+  Map<String, dynamic> refusal(String code, [Map<String, dynamic>? params]) =>
+      {'code': code, 'message': 'server english', 'params': params ?? {}};
+
+  testWidgets('a refused approve is shown disabled with the localized reason, '
+      'and Reject stays offered', (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'ready_for_review'),
+      reviewActions: {
+        'approve': refusal('approval_segregation'),
+        'reject': null,
+      },
+    ));
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Approve'));
+
+    final approve = tester.widget<FilledButton>(
+      find.ancestor(of: find.text('Approve'), matching: find.byType(FilledButton)),
+    );
+    expect(approve.onPressed, isNull);
+    final reject = tester.widget<OutlinedButton>(
+      find.ancestor(of: find.text('Reject'), matching: find.byType(OutlinedButton)),
+    );
+    expect(reject.onPressed, isNotNull);
+    expect(find.textContaining('Segregation of duties'), findsOneWidget);
+    expect(find.text('server english'), findsNothing);
+  });
+
+  testWidgets('a refusal this build cannot state shows the server\'s English',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'ready_for_review'),
+      reviewActions: {
+        'approve': refusal('approval_refused_by_something_new'),
+        'reject': null,
+      },
+    ));
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('server english'));
+    expect(find.text('server english'), findsOneWidget);
+  });
+
+  testWidgets('the approval-gate refusal names its figures', (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'ready_for_review'),
+      reviewActions: {
+        'approve': refusal('approval_cfo_required', {
+          'amount': '12000.00',
+          'currency': 'USD',
+          'limit': '10000.00',
+          'limit_currency': 'USD',
+          'expressible': true,
+        }),
+        'reject': null,
+      },
+      roles: ['ap_manager'],
+    ));
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byKey(const ValueKey('review-refusal')));
+    final text = tester
+        .widget<Text>(find.byKey(const ValueKey('review-refusal')))
+        .data!;
+    expect(text, contains(r'$12,000.00'));
+    expect(text, contains(r'$10,000.00'));
+  });
+
+  for (final hidden in ['role_not_permitted', 'invoice_not_in_review']) {
+    testWidgets('no Approve / Reject on a $hidden verdict', (tester) async {
+      await _arrange(_detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        reviewActions: {'approve': refusal(hidden), 'reject': refusal(hidden)},
+      ));
+      await tester.pumpWidget(_localized());
+      await _pumpUntil(tester, find.text('Acme Corp'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Approve'), findsNothing);
+      expect(find.text('Reject'), findsNothing);
+      expect(find.text('server english'), findsNothing);
+    });
+  }
+
+  testWidgets('a verdict answer without approve / reject offers neither '
+      '(fails closed)', (tester) async {
+    // An answer with neither key (an older backend) is unanswered.
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'ready_for_review'),
+      reviewActions: {'recall_approval': null},
+    ));
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Acme Corp'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Approve'), findsNothing);
+    expect(find.text('Reject'), findsNothing);
+  });
+
+  testWidgets('a failed verdict read offers nothing', (tester) async {
+    final base = _detailClient(_invoiceJson('1', status: 'ready_for_review'));
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.url.path.endsWith('/review-actions')) {
+          return http.Response('boom', 500);
+        }
+        return base.send(req).then(http.Response.fromStream);
+      }),
+    );
+    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Acme Corp'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Approve'), findsNothing);
+    expect(find.text('Reject'), findsNothing);
   });
 
   // ── Recall approval (backend decisions §374) ────────────────────────────

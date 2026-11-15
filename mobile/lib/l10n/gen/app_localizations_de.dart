@@ -3983,4 +3983,43 @@ class AppLocalizationsDe extends AppLocalizations {
   String warningsPoMatchAnnouncement(String summary) {
     return 'Bestellabgleich: $summary';
   }
+
+  @override
+  String get codedRefusalInvoiceNotInReview =>
+      'Diese Rechnung wartet nicht auf Prüfung und kann daher weder genehmigt noch abgelehnt werden.';
+
+  @override
+  String get codedRefusalInvoiceBulkNotFound =>
+      'Diese Rechnung wurde in der ausgewählten Einheit nicht gefunden.';
+
+  @override
+  String codedRefusalInvoiceStatusImmutable(String status) {
+    return 'Diese Rechnung hat den Status $status und kann nicht mehr geändert werden.';
+  }
+
+  @override
+  String get codedRefusalInvoiceRecallOneAtATime =>
+      'Eine Genehmigung wird je Rechnung einzeln und mit Begründung zurückgenommen: Verwenden Sie „Genehmigung zurücknehmen“ an der Rechnung.';
+
+  @override
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
+    return 'Pflichtfelder fehlen: $fields';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionInvalid(String from, String to) {
+    return 'Diese Rechnung kann nicht von $from zu $to wechseln.';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to) {
+    return 'Diese Rechnung kann nur durch Zurücknehmen ihrer Genehmigung von $from zu $to wechseln, eine Rechnung nach der anderen: Verwenden Sie „Genehmigung zurücknehmen“ an der Rechnung.';
+  }
+
+  @override
+  String get codedRefusalInvoiceOnceApprovedNotReread =>
+      'Diese Rechnung wurde bereits genehmigt, daher kann ihr Beleg nicht erneut ausgelesen werden. Nehmen Sie stattdessen ihre Genehmigung zurück und korrigieren Sie sie.';
+
+  @override
+  String get invoicesBulkSkipNoReason => 'Kein Grund angegeben';
 }

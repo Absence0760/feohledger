@@ -61,6 +61,12 @@ class AuthStore extends ChangeNotifier {
   // hid the Approvals tab and the Approve button from the CFO — the one role
   // the `require_cfo_above` gate (services/review.py) demands for a high-value
   // invoice — so such an invoice could not be approved from mobile at all.
+  //
+  // It gates the Approvals TAB only (`home_screen`): whether this user reviews
+  // invoices at all, the permission the server lists on `/auth/me`. Whether to
+  // offer Approve / Reject on a given invoice is the server's per-invoice
+  // verdict (`GET /api/invoices/{id}/review-actions`), read by the detail
+  // screen and the approvals queue; never gate those buttons on this.
   bool get canApproveInvoice => _user?.can(kPermInvoiceApprove) ?? false;
   bool get canViewPayments => isAdmin || isManager || isCfo;
   // Vendor verify/reject + ERP sync — mirrors the backend gate on those
