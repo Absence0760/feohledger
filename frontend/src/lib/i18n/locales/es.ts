@@ -5179,6 +5179,7 @@ export const messages = {
 	'paymentRuns.status.exported': "Exportado",
 	'refusal.externalPaymentAmountChanged': "Lo que adeuda esta factura ha cambiado desde que se preparó el lote ({staged} en el lote, {amount} adeudado ahora) por una nota de crédito o un descuento por pronto pago. Resuelva la diferencia con el proveedor y luego registre la factura por separado.",
 	'refusal.externalPaymentErpSplit': "El ERP indica que esta factura se pagó con más de un método de pago. Regístrela desde su excepción, que conserva cómo se dividió el pago.",
+	'refusal.externalPaymentErpSplitInRun': "Esta factura está en el lote de pago {run} y el ERP indica que se pagó con más de un método de pago, algo que solo su excepción puede registrar. Cancele primero el lote y luego registre la factura desde su excepción.",
 	'refusal.nachaPaymentNotPayable': "El pago de la factura {invoice} ya no puede enviarse tal como se preparó. Cancele el lote y vuelva a prepararlo.",
 	'refusal.nachaAlreadyExported': "El archivo bancario de este lote ya se exportó. Subir un segundo archivo pagaría dos veces a estos proveedores. Regenérelo solo si su banco nunca aceptó el primero.",
 	'refusal.paymentRunSegregationExport': "Segregación de funciones: el usuario que creó esta remesa de pagos no puede también exportar su archivo bancario. Debe hacerlo otro usuario.",

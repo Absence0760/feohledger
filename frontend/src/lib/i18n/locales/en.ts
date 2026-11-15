@@ -5368,6 +5368,7 @@ export const en = {
 	'paymentRuns.status.exported': "Exported",
 	'refusal.externalPaymentAmountChanged': "What this invoice owes has changed since the run was staged ({staged} staged, {amount} owed now) because of a credit memo or an early-payment discount. Resolve the difference with the supplier, then record the invoice on its own.",
 	'refusal.externalPaymentErpSplit': "The ERP reports this invoice paid with more than one payment method. Record it from its exception, which keeps how the payment was split.",
+	'refusal.externalPaymentErpSplitInRun': "This invoice is in payment run {run}, and the ERP reports it paid with more than one payment method, which only its exception can record. Cancel the run first, then record the invoice from its exception.",
 	'refusal.nachaPaymentNotPayable': "The payment for invoice {invoice} can no longer be sent as it was staged. Cancel the run and stage it again.",
 	'refusal.nachaAlreadyExported': "This run's bank file was already exported. Uploading a second file would pay these suppliers twice. Regenerate it only if your bank never took the first one.",
 	'refusal.paymentRunSegregationExport': "Segregation of duties: the user who created this payment run cannot also export its bank file. A different user must.",

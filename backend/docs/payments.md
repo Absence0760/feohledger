@@ -2244,7 +2244,8 @@ Controls (all in `services/external_payment.py`):
 - A **live virtual card**, an **applied credit that no longer pairs**, or
   **another live payment** (dispatched, or held in a run) refuses — each is a
   double-pay risk or an amount we can't state. An invoice inside a draft run is
-  refused with `external_payment_in_run` and pointed at the run-level record.
+  refused with `external_payment_in_run` and pointed at the run-level record,
+  or, when a kept ERP split also stands, told to cancel the run first (below).
 - A `pending` standalone payment FeohLedger booked but **never dispatched** is
   completed in place rather than left holding the live-payment slot.
 - A **payment the ERP reported on several rails** refuses (409
@@ -2307,6 +2308,19 @@ the split is booked and audited exactly as from `/exceptions` (decisions
 §413, §426). Anywhere else it posts this endpoint as before; should that be
 refused with `external_payment_erp_split` (the queue was read before the row
 kept its split), the dialog links to `/exceptions?id=<row>`.
+
+**An invoice held by a draft run AND a standing split must leave the run
+first.** The run-level record refuses it (`external_payment_erp_split`, only the
+row books the split) and the row's one-click refuses it too
+(`external_payment_in_run`, a run holds it). Each refusal therefore says the
+same thing: cancel the run first (a draft run gives up its invoices only by
+being cancelled), then record the invoice from its exception. Both carry
+`params.payment_run_id` and `params.exception_id`, and the browser renders the
+shared `refusal.externalPaymentErpSplitInRun` sentence from either code when
+both are present. The in-run refusal adds `exception_id` only for a person's
+record over a split that stands; with no such row it keeps `payment_run_id`
+alone and its own sentence, since recording the whole run is then a way out
+(decisions §426, round-13 amendment).
 `tests/test_payment_queue_blocked.py` POSTs every kind of row and compares the
 endpoint's answer to the field.
 
@@ -2423,8 +2437,13 @@ sealed with the provider credentials (it authenticates nothing), but it is
 **write-only on the way out**: `GET /api/organization` shows it as a last-4
 mask (`****6789`) to admins (non-admins never see the payments block), and a
 save that sends it blank or sends the mask back keeps the stored number
-(`nacha.carry_offset_account`). A save that clears the routing and type clears
-it too. It never enters a log line, an error body or an audit row: the
+(`nacha.carry_offset_account`), but only while the save names the same
+`offset_routing` (whitespace aside) and `offset_account_type`: a number belongs
+to its bank, so a save that changes either without re-entering the number is
+refused 422 (`payments.nacha.offset_account must be re-entered: offset_routing
+or offset_account_type changed.`, the field named, never the number) and
+nothing is written (round-13 amendment to §432). A save that clears the
+routing and type clears it too. It never enters a log line, an error body or an audit row: the
 settings audit (`organization.provider_config_updated`) names the changed keys
 under `nacha_changed`, never a value.
 

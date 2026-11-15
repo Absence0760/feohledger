@@ -5186,6 +5186,7 @@ export const messages = {
 	'paymentRuns.status.exported': "Exporté",
 	'refusal.externalPaymentAmountChanged': "Le montant dû sur cette facture a changé depuis la préparation du lot ({staged} dans le lot, {amount} dû maintenant) à cause d'un avoir ou d'un escompte pour paiement anticipé. Réglez l'écart avec le fournisseur, puis enregistrez la facture seule.",
 	'refusal.externalPaymentErpSplit': "D'après l'ERP, cette facture a été payée avec plusieurs moyens de paiement. Enregistrez-la depuis son exception, qui conserve la répartition du paiement.",
+	'refusal.externalPaymentErpSplitInRun': "Cette facture fait partie du lot de paiement {run}, et d'après l'ERP elle a été payée avec plusieurs moyens de paiement, ce que seule son exception peut enregistrer. Annulez d'abord le lot, puis enregistrez la facture depuis son exception.",
 	'refusal.nachaPaymentNotPayable': "Le paiement de la facture {invoice} ne peut plus être envoyé tel qu'il a été préparé. Annulez le lot et préparez-le à nouveau.",
 	'refusal.nachaAlreadyExported': "Le fichier bancaire de ce lot a déjà été exporté. Déposer un second fichier paierait ces fournisseurs deux fois. Ne le régénérez que si votre banque n'a jamais accepté le premier.",
 	'refusal.paymentRunSegregationExport': "Séparation des tâches : l'utilisateur qui a créé ce lot de paiements ne peut pas aussi exporter son fichier bancaire. Un autre utilisateur doit le faire.",

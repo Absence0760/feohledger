@@ -5096,6 +5096,7 @@ export const messages = {
 	'paymentRuns.status.exported': "エクスポート済み",
 	'refusal.externalPaymentAmountChanged': "クレジットメモまたは早期支払割引により、バッチ作成後にこの請求書の支払額が変わりました（バッチ上 {staged}、現在の支払額 {amount}）。仕入先と差額を解消してから、請求書を個別に記録してください。",
 	'refusal.externalPaymentErpSplit': "ERP によると、この請求書は複数の支払方法で支払われています。支払いの内訳を保持する例外から記録してください。",
+	'refusal.externalPaymentErpSplitInRun': "この請求書は支払バッチ {run} に含まれており、ERP によると複数の支払方法で支払われています。これはその例外からしか記録できません。先にバッチをキャンセルしてから、例外から請求書を記録してください。",
 	'refusal.nachaPaymentNotPayable': "請求書 {invoice} の支払いは、作成時の内容のままでは送金できなくなりました。バッチをキャンセルして作成し直してください。",
 	'refusal.nachaAlreadyExported': "このバッチの銀行ファイルはすでにエクスポートされています。2 つ目のファイルをアップロードすると、仕入先に二重に支払われます。最初のファイルを銀行が受け付けなかった場合にのみ再生成してください。",
 	'refusal.paymentRunSegregationExport': "職務分掌: この支払いランを作成したユーザーは、その銀行ファイルをエクスポートすることはできません。別のユーザーが行う必要があります。",

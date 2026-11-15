@@ -5187,6 +5187,7 @@ export const messages = {
 	'paymentRuns.status.exported': "Exportiert",
 	'refusal.externalPaymentAmountChanged': "Der offene Betrag dieser Rechnung hat sich seit dem Anlegen des Laufs geändert ({staged} im Lauf, jetzt {amount} offen), wegen einer Gutschrift oder eines Skontos. Klären Sie die Differenz mit dem Lieferanten und erfassen Sie die Rechnung dann einzeln.",
 	'refusal.externalPaymentErpSplit': "Laut ERP wurde diese Rechnung mit mehr als einer Zahlungsart bezahlt. Erfassen Sie sie über ihre Ausnahme, die die Aufteilung der Zahlung beibehält.",
+	'refusal.externalPaymentErpSplitInRun': "Diese Rechnung ist Teil des Zahlungslaufs {run}, und laut ERP wurde sie mit mehr als einer Zahlungsart bezahlt, was nur ihre Ausnahme erfassen kann. Stornieren Sie zuerst den Lauf und erfassen Sie die Rechnung dann über ihre Ausnahme.",
 	'refusal.nachaPaymentNotPayable': "Die Zahlung für Rechnung {invoice} kann nicht mehr so versendet werden, wie sie angelegt wurde. Stornieren Sie den Lauf und legen Sie ihn neu an.",
 	'refusal.nachaAlreadyExported': "Die Bankdatei dieses Laufs wurde bereits exportiert. Eine zweite hochgeladene Datei würde diese Lieferanten doppelt bezahlen. Erstellen Sie sie nur neu, wenn Ihre Bank die erste nie angenommen hat.",
 	'refusal.paymentRunSegregationExport': "Funktionstrennung: Wer diesen Zahlungslauf erstellt hat, darf nicht auch seine Bankdatei exportieren. Das muss eine andere Person tun.",
