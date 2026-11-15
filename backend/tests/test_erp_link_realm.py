@@ -185,6 +185,28 @@ def test_each_adapter_names_its_company_from_non_secret_config():
     )
 
 
+INTACCT_CFG = {"type": "sage_intacct", "integration_method": "direct", "company_id": "ACME-US"}
+INTACCT_TOP = "sage_intacct:acme-us"
+INTACCT_EAST_CFG = {**INTACCT_CFG, "location_id": "EAST"}
+INTACCT_EAST = "sage_intacct:acme-us|east"
+INTACCT_WEST_CFG = {**INTACCT_CFG, "location_id": "WEST"}
+INTACCT_WEST = "sage_intacct:acme-us|west"
+
+
+def test_an_intacct_entity_is_its_own_realm():
+    """§412: every Intacct call is scoped by ``X-IA-API-Param-Entity`` when a
+    location is set, and an entity holds records its siblings do not."""
+    assert connection_realm(INTACCT_EAST_CFG) == INTACCT_EAST
+    assert connection_realm(INTACCT_WEST_CFG) == INTACCT_WEST
+    # The top level keeps the realm it had before the location counted, so
+    # nothing a top-level connection stamped changed meaning.
+    assert connection_realm(INTACCT_CFG) == INTACCT_TOP
+    assert connection_realm({**INTACCT_CFG, "location_id": "  "}) == INTACCT_TOP
+    assert connection_realm({**INTACCT_CFG, "location_id": None}) == INTACCT_TOP
+    # Case and padding fold away, as for every other identity field.
+    assert connection_realm({**INTACCT_CFG, "location_id": " east "}) == INTACCT_EAST
+
+
 def test_a_null_realm_link_is_trusted_only_while_the_snapshot_still_names_the_company():
     migrated_on_sandbox = {**SANDBOX_CFG, LEGACY_REALM_KEY: SANDBOX}
     assert legacy_links_trusted(migrated_on_sandbox, SANDBOX)
@@ -881,6 +903,60 @@ async def test_switching_erp_never_pushes_the_old_id_and_switching_back_restores
     }
     assert (changes["unlinked"]["from_realm"], changes["unlinked"]["kept"]) == (PROD, True)
     assert (changes["restored"]["from_realm"], changes["restored"]["to_realm"]) == (NS, PROD)
+
+
+async def test_an_intacct_location_change_re_judges_the_entitys_links(realdb):
+    """§412: Acme is "V-100" in Intacct's EAST entity; WEST holds no such
+    vendor, and GL 6000 is "6000" in EAST. Re-pointed at WEST, the push sends
+    neither (it used to send "V-100", which WEST refused as inactive); a WEST
+    sync re-judges both by evidence, keeping EAST's copies; back on EAST, the
+    vendor posts at once and the next chart sync restores the account."""
+    acme_id = await _add(
+        realdb,
+        Vendor,
+        name="Acme",
+        erp_vendor_id="V-100",
+        erp_link_realm=INTACCT_EAST,
+        source="erp_sync",
+    )
+    await _add(
+        realdb,
+        code="Office Supplies",
+        name="Office Supplies",
+        erp_account_id="6000",
+        erp_link_realm=INTACCT_EAST,
+    )
+    org_id = realdb.info(TENANT).org_id
+
+    async def refs(cfg):
+        from app.services.erp import _resolve_erp_refs
+
+        async with realdb.sessionmaker(TENANT)() as s:
+            got = await _resolve_erp_refs(s, _invoice(org_id, acme_id), [], cfg)
+        return got.vendor_erp_id, got.account_erp_ids
+
+    assert await refs(INTACCT_EAST_CFG) == ("V-100", {"Office Supplies": "6000"})
+    # Re-pointed at WEST (or at the top level), before any sync: refused.
+    assert await refs(INTACCT_WEST_CFG) == (None, {})
+    assert await refs(INTACCT_CFG) == (None, {})
+
+    # WEST's pull: no V-100, a different account under the same code.
+    vresult = await _vsync(realdb, [_vendor("V-900", "Acme West")], realm=INTACCT_WEST)
+    cresult = await _sync(realdb, [_acct("Office Supplies", "6100")], realm=INTACCT_WEST)
+    acme = (await _vendors(realdb))["Acme"]
+    assert (acme.erp_vendor_id, acme.erp_link_realm) == (None, None)
+    assert vresult["unlinked"] == ["Acme"]
+    assert await _kept(realdb) == {("Acme", INTACCT_EAST, "V-100")}
+    row = (await _chart(realdb))["Office Supplies"]
+    assert (row.erp_account_id, row.erp_link_realm) == ("6100", INTACCT_WEST)
+    assert cresult.realm == INTACCT_WEST
+    assert await refs(INTACCT_WEST_CFG) == (None, {"Office Supplies": "6100"})
+
+    # Back on EAST: the vendor's EAST link posts at once.
+    assert (await refs(INTACCT_EAST_CFG))[0] == "V-100"
+    await _sync(realdb, [_acct("Office Supplies", "6000")], realm=INTACCT_EAST)
+    row = (await _chart(realdb))["Office Supplies"]
+    assert (row.erp_account_id, row.erp_link_realm) == ("6000", INTACCT_EAST)
 
 
 async def test_a_move_kept_by_evidence_keeps_the_old_companys_copy(realdb):

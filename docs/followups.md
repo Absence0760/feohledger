@@ -1785,21 +1785,6 @@ scope (§260) — do not fold them into any of these.
       the first tenant that hits its share in production, or a support request
       to retry a batch by hand.
 
-### Surfaced by porting the Sage Intacct audit fixes (#655, decisions §395)
-
-- [ ] **(c) Intacct's link realm ignores `location_id`.** `erp_link_realm`
-      keys a Sage Intacct connection by `company_id` alone, but every call is
-      scoped by `X-IA-API-Param-Entity` when `location_id` is set, and an
-      entity can hold vendors and accounts the top level does not. Re-pointing
-      a connection at another entity of the same company therefore keeps the
-      first entity's vendor and GL links as this realm's: a bill can be pushed
-      to a vendor id the new entity does not hold, which Intacct refuses and
-      the adapter reads back as `vendor_inactive`. **Durable fix:** fold `location_id` into the Intacct realm
-      (`services/erp_link_realm`), with a realm migration that stamps existing
-      links with the location they were made under, and a test that a
-      location change re-judges them. **Trigger:** the first multi-entity
-      Intacct tenant, or the next change to `services/erp_link_realm`.
-
 ### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §304)
 
 - [ ] **(c) An approval whose auto-send never ran is not noticed.** The push
@@ -2248,7 +2233,10 @@ as oversights.
       settled by a debit memo reads `paid`, the purchasing-document `state`
       strings for a draft or unapproved PO (the sync reads draft / submitted /
       partially approved / analyzing as `unissued`, §394), multi-currency without an
-      exchange rate, a top-level create in a multi-entity company, whether the
+      exchange rate, a top-level create in a multi-entity company, whether a
+      vendor id can name different vendors in two entities of one company
+      (a kept link made in an entity posts at the top level before any sync,
+      decisions §412), whether the
       token endpoint takes the form-encoded body, the reverse-workflow
       answer in a reversal-enabled company, and whether `POST /oauth2/revoke`
       on a client-credentials token ends every token for the Web Services user
