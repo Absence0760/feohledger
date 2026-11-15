@@ -683,6 +683,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Séparation des tâches : un utilisateur ayant enregistré une réception de marchandises facturée sur cette facture ne peut pas aussi l\'approuver.';
 
   @override
+  String get codedRefusalApprovalSegregationInspector =>
+      'Séparation des tâches : un utilisateur ayant enregistré un contrôle qualité des marchandises facturées sur cette facture ne peut pas aussi l\'approuver.';
+
+  @override
   String get codedRefusalInvoiceStaleApproval =>
       'Cette facture a été modifiée après son chargement. Rechargez-la et vérifiez la version actuelle avant de l’approuver.';
 

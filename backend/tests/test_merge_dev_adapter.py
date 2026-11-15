@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services.erp_adapters.base import InvoicePayload, LineItemPayload
-from app.services.erp_adapters.merge_dev import MergeDevAdapter
+from app.services.erp_adapters.merge_dev import MergeDevAdapter, invoice_sync_covers
 
 
 def _run(coro):
@@ -254,9 +254,12 @@ def test_an_undocumented_or_absent_problem_stays_possibly_posted(create):
     assert result.message.startswith("Merge.dev post failed: HTTP 400")
 
 
-def test_merges_rate_limit_is_retried():
+def test_merges_rate_limit_stays_possibly_posted():
+    """Whether Merge ever answers 429 after the write reached the integration
+    is unverified (#654), so a 429 is an unknown outcome like a 5xx: not
+    retried automatically, and a person's retry waits for a sync (§409)."""
     result, _ = _push(_refused("RATE_LIMITED", status=429))
-    assert not result.success and result.retryable and result.not_posted is False
+    assert not result.success and not result.retryable and result.not_posted is False
 
 
 @pytest.mark.parametrize("status", [500, 502, 503, 408])
@@ -384,3 +387,253 @@ def test_bill_report_never_reads_an_unreadable_bill_as_gone():
         client.get = AsyncMock(return_value=_resp(200, {"id": "b2", "status": "VOID"}))
         with pytest.raises(RuntimeError):
             _run(adapter.bill_report("b1"))
+
+
+# ---------------------------------------------------------------------------
+# a retry after an attempt whose outcome is unknown waits for Merge's sync
+# (decisions §405, GET /sync-status read 2026-11-14)
+# ---------------------------------------------------------------------------
+
+_SINCE = datetime(2026, 11, 14, 10, 0, tzinfo=UTC)
+_AFTER = "2026-11-14T10:10:01Z"  # just past SYNC_SETTLE_MARGIN (10 min)
+_BEFORE = "2026-11-14T09:55:00Z"
+
+
+def _sync_row(model: str = "Invoice", **fields) -> dict:
+    row = {"model_name": model, "model_id": f"accounting.{model}", "status": "DONE"}
+    row.update(fields)
+    return row
+
+
+def _sync_status(*rows: dict, next_cursor: str | None = None) -> MagicMock:
+    return _resp(200, {"next": next_cursor, "previous": None, "results": list(rows)})
+
+
+@pytest.mark.parametrize(
+    ("row", "covers"),
+    [
+        # Merge's own answer: complete through the last successful sync's start.
+        (_sync_row(data_fresh_as_of=_AFTER), True),
+        (_sync_row(data_fresh_as_of=_BEFORE), False),
+        # Inside the margin: Merge may still have been writing the bill (§409).
+        (_sync_row(data_fresh_as_of="2026-11-14T10:00:01Z"), False),
+        (_sync_row(data_fresh_as_of="2026-11-14T10:05:00Z"), False),
+        (_sync_row(last_sync_result="DONE", last_sync_start="2026-11-14T10:05:00Z"), False),
+        # Exactly at the margin's end cannot be shown to see it either.
+        (_sync_row(data_fresh_as_of="2026-11-14T10:10:00Z"), False),
+        # Null: no sync has completed.
+        (_sync_row(data_fresh_as_of=None, last_sync_result="DONE", last_sync_start=_AFTER), False),
+        # Without the field: a link at rest whose last sync is DONE and began after.
+        (_sync_row(last_sync_result="DONE", last_sync_start=_AFTER), True),
+        (_sync_row(last_sync_result="DONE", last_sync_start=_BEFORE), False),
+        # While SYNCING, last_sync_start is the running sync's.
+        (_sync_row(status="SYNCING", last_sync_result="DONE", last_sync_start=_AFTER), False),
+        (_sync_row(last_sync_result="FAILED", last_sync_start=_AFTER), False),
+        (_sync_row(last_sync_result="PARTIALLY_SYNCED", last_sync_start=_AFTER), False),
+        # A time with no zone cannot be ordered against ours.
+        (_sync_row(data_fresh_as_of="2026-11-14T10:10:01"), False),
+        (_sync_row(), False),
+    ],
+)
+def test_invoice_sync_covers(row, covers):
+    assert invoice_sync_covers(row, _SINCE) is covers
+
+
+def _retry(
+    sync: MagicMock | Exception,
+    lookup: MagicMock = _NO_BILL,
+    *,
+    create: MagicMock | None = None,
+):
+    """A push after an attempt whose outcome is unknown: ``sync`` answers
+    ``GET /sync-status`` (or is raised), ``lookup`` the pre-create lookup."""
+    calls: list[str] = []
+
+    async def get(url, **kwargs):
+        calls.append(url.rsplit("/", 1)[-1])
+        if url.endswith("/sync-status"):
+            if isinstance(sync, Exception):
+                raise sync
+            return sync
+        if url.endswith("/invoices"):
+            return lookup
+        return _resp(404)
+
+    created = create or _resp(201, {"model": {"id": "m2", "number": "INV-7", "total_amount": 120}})
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(side_effect=get)
+        client.post = AsyncMock(return_value=created)
+        result = _run(
+            MergeDevAdapter(_ADAPTER).post_invoice(_payload(outcome_unknown_since=_SINCE))
+        )
+    return result, client, calls
+
+
+def test_a_retry_after_a_sync_that_covers_the_attempt_creates_the_bill():
+    result, client, calls = _retry(_sync_status(_sync_row(data_fresh_as_of=_AFTER)))
+    assert result.success and result.erp_document_id == "m2"
+    # Asked before the lookup, so the listing the lookup reads is that fresh.
+    assert calls == ["sync-status", "invoices"]
+    assert client.post.await_count == 1
+
+
+def test_a_retry_before_merge_has_synced_is_refused_coded_and_sends_nothing():
+    result, client, _calls = _retry(_sync_status(_sync_row(data_fresh_as_of=_BEFORE)))
+    assert not result.success
+    assert result.refusal_code == "merge_sync_pending"
+    assert result.not_posted is True and result.retryable is False
+    client.post.assert_not_awaited()
+
+
+def test_a_retry_before_merge_has_synced_still_finds_the_bill_already_listed():
+    """A listing that already shows the bill needs no wait: the bill is ours."""
+    listed = _resp(
+        200,
+        {
+            "next": None,
+            "results": [
+                {
+                    "id": "m1",
+                    "number": "INV-7",
+                    "total_amount": 120,
+                    "currency": "USD",
+                    "status": "OPEN",
+                }
+            ],
+        },
+    )
+    result, client, _calls = _retry(_sync_status(_sync_row(data_fresh_as_of=_BEFORE)), listed)
+    assert result.success and result.erp_document_id == "m1"
+    client.post.assert_not_awaited()
+
+
+def test_a_sync_status_that_does_not_list_invoices_is_not_yet():
+    result, client, _calls = _retry(_sync_status(_sync_row("Contact", data_fresh_as_of=_AFTER)))
+    assert result.refusal_code == "merge_sync_pending"
+    client.post.assert_not_awaited()
+
+
+def test_the_invoice_row_is_found_on_a_later_page():
+    pages = iter(
+        [
+            _sync_status(_sync_row("Account", data_fresh_as_of=_AFTER), next_cursor="c2"),
+            _sync_status(_sync_row(data_fresh_as_of=_AFTER)),
+        ]
+    )
+    seen_params: list[dict] = []
+
+    async def get(url, **kwargs):
+        if url.endswith("/sync-status"):
+            seen_params.append(dict(kwargs.get("params") or {}))
+            return next(pages)
+        return _NO_BILL
+
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(side_effect=get)
+        client.post = AsyncMock(
+            return_value=_resp(201, {"model": {"id": "m2", "total_amount": 120}})
+        )
+        result = _run(
+            MergeDevAdapter(_ADAPTER).post_invoice(_payload(outcome_unknown_since=_SINCE))
+        )
+    assert result.success
+    assert seen_params[1].get("cursor") == "c2"
+
+
+@pytest.mark.parametrize(
+    "sync",
+    [_resp(503), _resp(200, {"results": "nope"}), "ReadTimeout"],
+)
+def test_an_unreadable_sync_status_sends_nothing_and_may_be_retried(sync):
+    import httpx
+
+    if isinstance(sync, str):
+        sync = getattr(httpx, sync)("t")
+    result, client, calls = _retry(sync)
+    assert not result.success and result.retryable and result.not_posted is True
+    assert "sync_status_unavailable" in result.message
+    assert calls == ["sync-status"]
+    client.post.assert_not_awaited()
+
+
+def test_a_401_on_sync_status_is_not_connected():
+    result, client, _calls = _retry(_resp(401))
+    assert result.refusal_code == "not_connected" and result.not_posted is True
+    client.post.assert_not_awaited()
+
+
+def test_a_first_attempt_never_asks_for_the_sync_status():
+    result, client = _push(_resp(201, {"model": {"id": "m1", "total_amount": 120}}))
+    assert result.success
+    assert not any(c.args[0].endswith("/sync-status") for c in client.get.await_args_list)
+
+
+@pytest.mark.parametrize("exc", ["ConnectError", "ConnectTimeout"])
+def test_a_create_that_never_connected_sent_nothing(exc):
+    """Not an attempt whose outcome is unknown, so its retry waits for no sync."""
+    import httpx
+
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_NO_BILL)
+        client.post = AsyncMock(side_effect=getattr(httpx, exc)("t"))
+        result = _run(MergeDevAdapter(_ADAPTER).post_invoice(_payload()))
+    assert result.not_posted is True
+
+
+# ---------------------------------------------------------------------------
+# tenant deletion deletes the linked account (decisions §405)
+# ---------------------------------------------------------------------------
+
+
+def test_the_provider_side_step_names_the_webhook_its_key_and_the_api_key():
+    step = MergeDevAdapter.provider_side_disconnect
+    assert MergeDevAdapter.revokes_stored_access is True
+    for needed in ("webhook", "signature key", "API key", "linked account"):
+        assert needed in step
+
+
+def test_revoke_deletes_the_linked_account_with_its_own_token():
+    from app.services.erp_oauth import REVOKED
+
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_resp(200))
+        outcome = _run(MergeDevAdapter({**_ADAPTER, "region": "EU"}).revoke_stored_access())
+    assert outcome == REVOKED
+    (call,) = client.post.await_args_list
+    assert call.args[0] == "https://api-eu.merge.dev/api/accounting/v1/delete-account"
+    assert call.kwargs["headers"]["X-Account-Token"] == "tok"
+    assert call.kwargs["headers"]["Authorization"] == "Bearer k"
+
+
+@pytest.mark.parametrize("answer", [401, 404, 500, "ConnectError", "missing_token"])
+def test_a_linked_account_deletion_that_fails_is_failed_and_never_raises(answer, caplog):
+    import httpx
+
+    from app.services.erp_oauth import REVOKE_FAILED
+
+    config = dict(_ADAPTER)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        if answer == "ConnectError":
+            client.post = AsyncMock(side_effect=httpx.ConnectError("t"))
+        else:
+            client.post = AsyncMock(return_value=_resp(answer if isinstance(answer, int) else 200))
+        if answer == "missing_token":
+            del config["account_token"]
+        outcome = _run(MergeDevAdapter(config).revoke_stored_access())
+    assert outcome == REVOKE_FAILED
+    assert "tok" not in caplog.text and "Bearer" not in caplog.text
+
+
+def test_the_settle_margin_is_minutes_not_seconds():
+    """Guard against the margin being trimmed back to nothing: our client's own
+    timeouts alone can run past a minute (httpx's 30 s is per operation)."""
+    from datetime import timedelta
+
+    from app.services.erp_adapters.merge_dev import SYNC_SETTLE_MARGIN
+
+    assert SYNC_SETTLE_MARGIN >= timedelta(minutes=5)

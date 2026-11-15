@@ -106,6 +106,7 @@ String? _approvalGate(AppLocalizations l, Map params, {required bool cfo}) {
 const codedRefusalCodes = <String>{
   'approval_segregation',
   'approval_segregation_receiver',
+  'approval_segregation_inspector',
   'approval_level_reuse',
   'approval_not_named_approver',
   'approval_max_amount_exceeded',
@@ -132,6 +133,8 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
       return l.codedRefusalApprovalSegregation;
     case 'approval_segregation_receiver':
       return l.codedRefusalApprovalSegregationReceiver;
+    case 'approval_segregation_inspector':
+      return l.codedRefusalApprovalSegregationInspector;
     case 'approval_level_reuse':
       return l.codedRefusalApprovalLevelReuse;
     case 'approval_not_named_approver':

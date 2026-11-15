@@ -4010,6 +4010,7 @@ export const messages = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregación de funciones: un usuario que participó en la creación de esta factura no puede también aprobarla.",
 	'refusal.approvalSegregationReceiver': "Segregación de funciones: un usuario que registró una recepción de mercancías facturada en esta factura no puede también aprobarla.",
+	'refusal.approvalSegregationInspector': "Segregación de funciones: un usuario que registró una inspección de calidad de la mercancía facturada en esta factura no puede también aprobarla.",
 	'refusal.approvalLevelReuse': "Ya aprobó un nivel anterior de esta cadena; se requiere un aprobador distinto.",
 	'refusal.approvalNotNamedApprover': "No es un aprobador autorizado para este paso.",
 	'refusal.invoiceNotInReview': "Esta factura no está pendiente de revisión, por lo que no se puede aprobar ni rechazar.",
@@ -5290,6 +5291,7 @@ export const messages = {
 	'erpRefusal.callBudgetQuota': "{provider} ha pausado las llamadas a la API de la suscripción que usa FeohLedger (su cuota diaria está agotada), así que FeohLedger no hizo ninguna llamada. Se restablece a medianoche UTC; vuelva a intentarlo entonces.",
 	'erpRefusal.callBudgetRateLimited': "{provider} pidió a FeohLedger que redujera el ritmo, así que no se hizo ninguna llamada. Vuelva a intentarlo en un minuto.",
 	'erpRefusal.billLeftUnposted': "{provider} tiene esta factura como borrador o pendiente de aprobación, no contabilizada, así que aún no figura en cuentas por pagar. Contabilícela o apruébela en {provider} y vuelva a intentarlo.",
+	'erpRefusal.mergeSyncPending': "{provider} aún no ha sincronizado las facturas desde un intento de envío anterior cuyo resultado se desconoce, así que es posible que ya tenga esta factura. No se envió nada. Vuelva a intentarlo después de la próxima sincronización de facturas de {provider}: si la factura ya está allí, se vinculará en lugar de crearse una segunda vez.",
 	'erpRefusal.credentialsUnavailable': "No se pudieron abrir las credenciales del ERP en este momento. Vuelva a intentarlo en unos minutos; si sigue fallando, avise a un administrador.",
 	'erpRefusal.periodClosed': "{provider} rechazó esta factura porque su fecha está en un período cerrado (los libros están cerrados). Cambie la fecha de la factura o vuelva a abrir el período en {provider} y vuelva a intentarlo.",
 	'erpRefusal.vendorInactive': "{provider} rechazó esta factura porque su proveedor está inactivo o eliminado allí. Active el proveedor en {provider} y vuelva a intentarlo.",

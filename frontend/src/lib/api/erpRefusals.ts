@@ -145,6 +145,8 @@ const KEYS: Record<string, MessageKey> = {
 	job_failed: 'erpRefusal.jobFailed',
 	[ERP_CALL_BUDGET_EXHAUSTED]: 'erpRefusal.callBudgetTenant',
 	bill_left_unposted: 'erpRefusal.billLeftUnposted',
+	// Merge.dev: waits for a sync after an attempt whose outcome is unknown (decisions §405)
+	merge_sync_pending: 'erpRefusal.mergeSyncPending',
 	erp_credentials_unavailable: 'erpRefusal.credentialsUnavailable',
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
 	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',

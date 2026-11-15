@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -102,6 +103,26 @@ def _invoice(
         remit_to_address=None,
         vendor_address=None,
     )
+
+
+def _unstamped(state: dict) -> dict:
+    """``state`` without its outcome-unknown stamp, which must be an aware ISO
+    time whenever the outcome is unknown (§405), and absent otherwise."""
+    from app.services.erp import (
+        OUTCOME_UNKNOWN_AT_FINAL_KEY,
+        OUTCOME_UNKNOWN_AT_KEY,
+        OUTCOME_UNKNOWN_KEY,
+    )
+
+    out = dict(state)
+    stamp = out.pop(OUTCOME_UNKNOWN_AT_KEY, None)
+    final = out.pop(OUTCOME_UNKNOWN_AT_FINAL_KEY, None)
+    if out.get(OUTCOME_UNKNOWN_KEY):
+        assert datetime.fromisoformat(stamp).tzinfo is not None
+        assert final is True, "an attempt that came back records its end as final"
+    else:
+        assert stamp is None and final is None
+    return out
 
 
 def _instance(*, state_data=None):
@@ -546,7 +567,7 @@ async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
     with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
         with pytest.raises(ErpPostRefusedError):
             await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
-        assert inst.state_data == {
+        assert _unstamped(inst.state_data) == {
             "erp_retries": 0,
             PENDING_JOB_KEY: "job-41",
             OUTCOME_UNKNOWN_KEY: True,
@@ -1134,7 +1155,7 @@ async def test_call_erp_keeps_the_id_of_a_bill_a_refusal_left_in_the_erp(kind):
     assert exc.value.erp_document_id == "XERO-BILL-7"
     assert exc.value.erp_document_number == "BILL-0007"
     assert str(exc.value) == result.message
-    assert inst.state_data == {
+    assert _unstamped(inst.state_data) == {
         "erp_retries": 0,
         ORPHAN_DOCUMENT_ID_KEY: "XERO-BILL-7",
         ORPHAN_DOCUMENT_NUMBER_KEY: "BILL-0007",
@@ -1179,7 +1200,7 @@ async def test_call_erp_failure_without_a_document_keeps_the_earlier_orphan():
         with pytest.raises(ErpPostRefusedError) as exc:
             await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
     assert exc.value.erp_document_id is None
-    assert inst.state_data == {**state, OUTCOME_UNKNOWN_KEY: True}
+    assert _unstamped(inst.state_data) == {**state, OUTCOME_UNKNOWN_KEY: True}
 
 
 @pytest.mark.asyncio
@@ -1642,8 +1663,9 @@ def _merge_send(status: int):
 @pytest.mark.asyncio
 # 503: Merge.dev's create may have landed, and its listing may not show the
 # bill seconds later, so the adapter does not let it be retried automatically
-# (decisions §399); 429 is Merge's rate limit, which processed nothing.
-@pytest.mark.parametrize(("status", "attempts"), [(400, 1), (422, 1), (503, 1), (429, 3)])
+# (decisions §399). A 429 is treated the same until #654 shows Merge never
+# answers one after the write reached the integration (§409).
+@pytest.mark.parametrize(("status", "attempts"), [(400, 1), (422, 1), (503, 1), (429, 1)])
 async def test_send_to_erp_retries_only_an_answer_that_can_change(status, attempts):
     from app.services.erp_link_realm import connection_realm
 
@@ -1946,3 +1968,209 @@ async def test_call_erp_refuses_a_bill_due_before_it_is_dated():
     adapter.post_invoice.return_value = ErpPostResult(success=True, erp_document_id="B-1")
     with patch("app.services.erp.get_erp_adapter", return_value=adapter):
         assert await _call_erp(_line_items_db([]), inv, {"type": "x"}) == "B-1"
+
+
+# ---------------------------------------------------------------------------
+# The time an unknown outcome dates from, handed to the next attempt (§405)
+# ---------------------------------------------------------------------------
+
+
+class _Recording:
+    """An adapter answering ``results`` in turn, recording what each attempt
+    was told about an earlier unknown outcome."""
+
+    def __init__(self, *results):
+        self.results = list(results)
+        self.since: list[datetime | None] = []
+
+    async def post_invoice(self, payload):
+        self.since.append(payload.outcome_unknown_since)
+        return self.results.pop(0)
+
+
+async def _attempt(inst, adapter) -> None:
+    from app.services.erp import _call_erp
+
+    with patch("app.services.erp.get_erp_adapter", return_value=adapter):
+        try:
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+        except ErpPostRefusedError:
+            pass
+        except RuntimeError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_outcome_is_dated_from_the_attempts_end_and_handed_on():
+    from app.services.erp import OUTCOME_UNKNOWN_AT_KEY
+    from app.services.erp_adapters.base import ErpPostResult
+
+    adapter = _Recording(
+        ErpPostResult(success=False, message="read timeout (outcome unknown)", retryable=False),
+        ErpPostResult(success=True, erp_document_id="M-1"),
+    )
+    inst = _instance(state_data={})
+    before = datetime.now(UTC)
+    await _attempt(inst, adapter)
+    stamp = datetime.fromisoformat(inst.state_data[OUTCOME_UNKNOWN_AT_KEY])
+    assert before <= stamp <= datetime.now(UTC)
+
+    await _attempt(inst, adapter)
+    # The first attempt was told nothing; the second gets the first's end.
+    assert adapter.since == [None, stamp]
+    # A success settles it: no stamp left to wait on.
+    assert OUTCOME_UNKNOWN_AT_KEY not in inst.state_data
+
+
+@pytest.mark.asyncio
+async def test_an_attempt_that_sent_nothing_keeps_the_earlier_stamp():
+    """A refusal made before anything was sent (Merge's own wait for a sync)
+    must not move the time the wait is for, or it would never end."""
+    from app.services.erp import (
+        OUTCOME_UNKNOWN_AT_FINAL_KEY,
+        OUTCOME_UNKNOWN_AT_KEY,
+        OUTCOME_UNKNOWN_KEY,
+    )
+    from app.services.erp_adapters.base import erp_preflight_refusal
+
+    earlier = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    adapter = _Recording(erp_preflight_refusal("Merge.dev", "merge_sync_pending"))
+    inst = _instance(
+        state_data={
+            OUTCOME_UNKNOWN_KEY: True,
+            OUTCOME_UNKNOWN_AT_KEY: earlier,
+            OUTCOME_UNKNOWN_AT_FINAL_KEY: True,
+        }
+    )
+    await _attempt(inst, adapter)
+
+    assert adapter.since == [datetime.fromisoformat(earlier)]
+    assert inst.state_data[OUTCOME_UNKNOWN_KEY] is True
+    assert inst.state_data[OUTCOME_UNKNOWN_AT_KEY] == earlier
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_outcome_recorded_before_the_stamp_is_dated_now_and_pinned():
+    """A row flagged unknown before the stamp existed: now is after that
+    attempt too, and the time is kept, so the next read waits for the same."""
+    from app.services.erp import OUTCOME_UNKNOWN_AT_KEY, OUTCOME_UNKNOWN_KEY
+    from app.services.erp_adapters.base import erp_preflight_refusal
+
+    adapter = _Recording(
+        erp_preflight_refusal("Merge.dev", "merge_sync_pending"),
+        erp_preflight_refusal("Merge.dev", "merge_sync_pending"),
+    )
+    inst = _instance(state_data={"erp_retries": 1, "last_error": "HTTP 503"})
+    before = datetime.now(UTC)
+    await _attempt(inst, adapter)
+    await _attempt(inst, adapter)
+
+    first, second = adapter.since
+    assert first is not None and first >= before
+    assert second == first
+    assert inst.state_data[OUTCOME_UNKNOWN_KEY] is True
+    assert datetime.fromisoformat(inst.state_data[OUTCOME_UNKNOWN_AT_KEY]) == first
+
+
+@pytest.mark.asyncio
+async def test_a_definite_refusal_with_nothing_unknown_before_leaves_no_stamp():
+    from app.services.erp import OUTCOME_UNKNOWN_AT_KEY, OUTCOME_UNKNOWN_KEY
+    from app.services.erp_adapters.base import erp_preflight_refusal
+
+    adapter = _Recording(erp_preflight_refusal("Xero", "vendor_not_linked"))
+    inst = _instance(state_data={})
+    await _attempt(inst, adapter)
+    assert adapter.since == [None]
+    assert inst.state_data[OUTCOME_UNKNOWN_KEY] is False
+    assert OUTCOME_UNKNOWN_AT_KEY not in inst.state_data
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_that_raises_is_dated_from_when_it_raised():
+    """The pre-call stamp is the attempt's start; a raise moves it to the end,
+    since the request may have reached the ERP at any point until then."""
+    from app.services.erp import OUTCOME_UNKNOWN_AT_KEY, OUTCOME_UNKNOWN_KEY, _call_erp
+
+    started: list[datetime] = []
+
+    class _Raises:
+        async def post_invoice(self, payload):
+            started.append(datetime.now(UTC))
+            raise TimeoutError("read timed out")
+
+    inst = _instance(state_data={})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Raises()):
+        with pytest.raises(TimeoutError):
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+    assert inst.state_data[OUTCOME_UNKNOWN_KEY] is True
+    assert datetime.fromisoformat(inst.state_data[OUTCOME_UNKNOWN_AT_KEY]) >= started[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("final", [False, None])
+async def test_a_stamp_that_is_not_final_is_replaced_by_the_time_it_is_read(final):
+    """Only an attempt's END is final; a start left by an attempt that died
+    (False), or a stamp written before the flag existed (None), is restamped
+    when read, since the dead attempt may have created the bill after it."""
+    from app.services.erp import (
+        OUTCOME_UNKNOWN_AT_FINAL_KEY,
+        OUTCOME_UNKNOWN_AT_KEY,
+        OUTCOME_UNKNOWN_KEY,
+    )
+    from app.services.erp_adapters.base import erp_preflight_refusal
+
+    start = datetime.now(UTC) - timedelta(minutes=30)
+    state = {OUTCOME_UNKNOWN_KEY: True, OUTCOME_UNKNOWN_AT_KEY: start.isoformat()}
+    if final is not None:
+        state[OUTCOME_UNKNOWN_AT_FINAL_KEY] = final
+    adapter = _Recording(erp_preflight_refusal("Merge.dev", "merge_sync_pending"))
+    inst = _instance(state_data=state)
+    before = datetime.now(UTC)
+    await _attempt(inst, adapter)
+
+    (since,) = adapter.since
+    assert since >= before > start
+    assert inst.state_data[OUTCOME_UNKNOWN_AT_FINAL_KEY] is True
+    assert datetime.fromisoformat(inst.state_data[OUTCOME_UNKNOWN_AT_KEY]) == since
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_attempt_is_never_dated_from_its_start():
+    """A deploy cancelling the task (``CancelledError`` is no ``Exception``,
+    so no failure handler commits) rolls back to what was committed before
+    the call: the attempt's START. The next attempt must still wait for a
+    sync after the cancellation, not after that start (decisions §409)."""
+    import asyncio
+
+    from app.services.erp import OUTCOME_UNKNOWN_AT_FINAL_KEY, OUTCOME_UNKNOWN_KEY, _call_erp
+
+    inst = _instance(state_data={})
+    committed: list[dict] = []
+    db = _line_items_db([])
+    db.commit = AsyncMock(side_effect=lambda: committed.append(dict(inst.state_data or {})))
+    cancelled_at: list[datetime] = []
+
+    class _Cancelled:
+        async def post_invoice(self, payload):
+            cancelled_at.append(datetime.now(UTC))
+            raise asyncio.CancelledError
+
+    with patch("app.services.erp.get_erp_adapter", return_value=_Cancelled()):
+        with pytest.raises(asyncio.CancelledError):
+            await _call_erp(db, _invoice(), {"type": "x"}, instance=inst)
+
+    # The session rolls back: the row holds only the pre-call commit.
+    (row,) = committed
+    assert row[OUTCOME_UNKNOWN_KEY] is True
+    assert row[OUTCOME_UNKNOWN_AT_FINAL_KEY] is False
+
+    adapter = _Recording(_merge_sync_pending())
+    await _attempt(_instance(state_data=row), adapter)
+    (since,) = adapter.since
+    assert since > cancelled_at[0]
+
+
+def _merge_sync_pending():
+    from app.services.erp_adapters.base import erp_preflight_refusal
+
+    return erp_preflight_refusal("Merge.dev", "merge_sync_pending")

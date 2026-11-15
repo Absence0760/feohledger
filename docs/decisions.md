@@ -20493,3 +20493,493 @@ the record's own `vendorId`, which is refused even with a blank pay-to;
 `tests/test_erp_refusal_codes.py` and `frontend/src/lib/api/erpRefusals.test.ts`
 (the code catalogued and stated). fake-erp's BC create now states
 `payToVendorId` (the vendor card's, else the vendor's own).
+
+## 404. Whoever recorded the invoice's quality inspection may not approve it (§401 follow-up, 2026-11-15)
+
+**The gap.** §401 stopped an approver's later `pass` from lifting their own
+invoice's `quality_hold`, §389's order applied to the fourth leg. The other
+order was open: a manager records the `pass` that lifts the hold (they are not
+yet an approver, so `_inspection_clears_hold` allows it), then approves the
+invoice, and the payment run pays it. For receipts §267 refuses that second
+step at the approval door; no door refused an inspector.
+
+**Decision.** Inspecting and approving are different duties, as receiving and
+approving are. The approval door refuses the inspector with its own code.
+
+- **The set.** `approval_chain.inspection_recorders_by_invoice`: on the POs
+  the receipt rule reads (`_invoice_po_ids`, now shared by both, so the two
+  sets name the same goods), every inspection the 4-way leg could read — a
+  PO-level row (`po_id` on one of them, no `gr_id`) or a receipt's own row
+  (`gr_id` a live receipt of one of them) — that is `source = manual`, names
+  its recorder, and is booked in the invoice's own entity. An inspection on a
+  cancelled receipt is never read by the matcher and vouches for nothing, as a
+  cancelled receipt's recorder does not. A QMS verdict was typed by nobody
+  here; a row predating migration 0105 names nobody to refuse.
+- **Every verdict counts**, not only `pass`. The rule is about the duty, not
+  the outcome — a receipt's recorder is refused whatever quantity they
+  counted — and a `fail` recorder who approves is still the person who judged
+  the goods signing off the bill for them.
+- **Its own code, `approval_segregation_inspector`**, for §267's reason: the
+  refusal must name the duty that collides, or the reader cannot tell who
+  should approve instead. Catalogued for web (`codedRefusals.ts`, six
+  locales) and mobile (`coded_refusal_messages.dart`, the ARBs).
+- **The receiver's doors, all of them.** `review._figure_gates` checks it
+  after the receiving check, after any correction (a `po_number` correction
+  cannot re-point the invoice at a PO the approver inspected); bulk approve
+  resolves the batch up front (three queries whatever its size); the
+  `/complete` amount floor lands such an invoice at review; the escalation
+  sweep's `escalation_ineligible` excludes inspectors; `review_refusals`, which
+  runs the same gates, states it before the click. The approval step's
+  `require_segregation: false` lifts it, as it lifts every segregation check.
+- **Not in `implicated_actors`**, for the reason receivers are not: that set
+  is what `_inspection_clears_hold` measures an inspection's recorder against,
+  so folding inspectors in would make every typed inspection implicate its
+  own recorder and no `pass` could ever lift a hold.
+
+**Rejected:**
+- *Reusing `approval_segregation_receiver`.* Its sentence names a goods
+  receipt the approver did not record.
+- *Counting only the inspection the matcher currently reads.* Which row is
+  "latest" changes as rows arrive; the approval door would refuse or allow the
+  same person depending on someone else's later entry. Every readable row is
+  coarser and the safe error, as §267 counts every same-numbered PO.
+- *A status filter on inspections.* Nothing cancels an inspection (the QMS
+  sync and the door both write `completed`), so a filter would have nothing
+  to read; liveness comes from the receipt the row is tied to.
+
+Tests: `backend/tests/test_approval_receiver_segregation.py` (§ Inspecting ≠
+approving: the single door, bulk skip with the code, the shared
+`approve_invoice`, a correction re-pointing at an inspected PO, a receipt's
+own inspection counting and a cancelled receipt's not, every verdict counting,
+QMS / sibling-entity / unnamed / sourceless rows not counting, the opt-out,
+the batch lookup's three statements, the predicate and `escalation_ineligible`,
+the `/complete` floor); `tests/test_approval_escalation.py` (the sweep never
+targets an inspector); `tests/test_review_actions_parity.py` (the verdict
+matches the POST); `frontend/src/lib/api/codedRefusals.test.ts` and
+`mobile/test/l10n/coded_refusal_messages_test.dart` (the code stated).
+
+## 405. A Merge.dev retry after an unknown outcome waits for Merge's invoice sync, and tenant deletion deletes the Merge linked account (§399 / §400 follow-ups, 2026-11-14)
+
+**Context.** Two `docs/followups.md` (c) entries named `merge_dev.py`. **§399's
+residual:** the pre-create lookup reads `GET /invoices`, which is Merge's synced
+copy of the ERP, and the `Idempotency-Key` beta may be off for a tenant's Merge
+organisation. So a person's `retry-erp` after a create whose response was lost
+could find nothing and post a second bill. **§400's Merge share:** a deleted
+Merge tenant's confirmation said nothing about the linked account, nor about
+the webhook signature key §399 stores as `webhook_signing_secret`, which is the
+customer's own Merge organisation's.
+
+Read 2026-11-14 in Merge's Accounting OpenAPI spec
+(<https://docs.merge.dev/openapi/accounting.json>) and its pages:
+
+- `GET /sync-status`
+  (<https://docs.merge.dev/merge-unified/accounting/data-management/sync-status/list>)
+  is a cursor-paginated list of `SyncStatus` rows: `model_name`, `status` and
+  `last_sync_result` (`SYNCING, DONE, FAILED, DISABLED, PAUSED,
+  PARTIALLY_SYNCED`), `last_sync_start`, `last_sync_finished`, and
+  `data_fresh_as_of`, "the start time of the most recent sync that completed
+  successfully for the model", null until one has. Merge warns that
+  `last_sync_start` and `last_sync_finished` may belong to different syncs.
+- `POST /delete-account`
+  (<https://docs.merge.dev/merge-unified/accounting/linked-account/delete-account/delete>)
+  takes `X-Account-Token` and answers 200 with no body. Merge's help centre
+  (<https://help.merge.dev/en/articles/5388451-deleting-a-linked-account>) says
+  deletion removes the account at once and its logs later. Neither page says
+  what happens to the credentials Merge holds for the ERP behind the link.
+- The webhook guide
+  (<https://docs.merge.dev/merge-unified/reading-data/webhooks/merge-webhooks>)
+  says the signature key is per organisation and "can be regenerated".
+
+**Decision.**
+
+- **`services/erp` records when the outcome became unknown.**
+  `erp_outcome_unknown_at` sits beside `erp_outcome_unknown`. It is stamped
+  before the call, so a worker that dies mid-call leaves the attempt's start.
+  It moves to the attempt's end when the attempt comes back unknown or the
+  adapter raises. An attempt
+  that sent nothing (`not_posted`) keeps the earlier stamp, so a refusal made
+  while waiting never pushes the wait further out. A success drops it. It
+  reaches the adapter as `InvoicePayload.outcome_unknown_since`. A row flagged
+  unknown before the key existed is stamped when next read and pinned there.
+  That time is after the attempt too, so the wait it sets is safe, only longer.
+- **Merge's push asks `GET /sync-status` first, and only after an unknown
+  outcome.** The `Invoice` row must be fresh as of a time strictly after the
+  stamp. That means `data_fresh_as_of` when Merge reports it. Without that
+  field, it means a link at rest (not `SYNCING`) whose last result is `DONE`
+  and whose last sync started after the stamp. The sync status is read
+  **before** the lookup, so the listing the lookup reads is at least that
+  fresh. A bill the lookup finds is our own, and the push succeeds whatever the
+  sync says. If the lookup finds nothing and the sync is not yet past the
+  stamp, or `Invoice` is not listed, the push is refused `merge_sync_pending`.
+  That refusal is coded and not posted. It is catalogued on the web (six
+  locales); mobile has no ERP-refusal catalogue, as for every other adapter
+  code. An unreadable sync status is the retryable `sync_status_unavailable`
+  with nothing sent, the same shape as an unreadable lookup. A 401 is
+  `not_connected`. A first attempt never asks.
+- **`merge_sync_pending` is not retried automatically.** "Retryable" here means
+  that a person's retry after Merge's next sync goes through. `services/erp`'s
+  backoff retries 2 and 4 seconds later, which would meet the same sync and
+  only spend calls.
+- **A 429 and a connection never made are now `not_posted`.** Both were
+  already retried automatically on §399's reasoning that nothing reached the
+  ERP. Left counted as unknown, their own automatic retry would now wait for a
+  sync and fail the push.
+- **Tenant deletion deletes the linked account.** `revoke_stored_access` sends
+  `POST /delete-account` with the tenant's tokens (`revokes_stored_access`, so
+  a closure sends it after its commit, as for Intacct). It reads `revoked` only
+  on 200. Anything else, an outage, or a missing credential is `failed`.
+  `provider_side_disconnect` names what only the customer can end in the Merge
+  dashboard: the webhook that points at FeohLedger, the webhook signature key
+  (regenerate), the API key FeohLedger held (regenerate or delete), and the
+  linked account if it is still listed. Every outcome line names that step,
+  including `revoked`. Until the customer acts, the webhook keeps calling the
+  deleted slug's URL. A later tenant on that slug verifies under its own key,
+  so those deliveries are dropped.
+- **fake-erp** serves `GET /sync-status` with `Invoice` fresh as of now,
+  because its listing shows a write at once. It also serves
+  `POST /delete-account` (200, no body), and keeps the token working, since
+  parallel e2e workers share the fake.
+
+**Rejected.**
+
+- *Waiting on `last_sync_finished` alone.* Merge says it can belong to a
+  different sync from `last_sync_start`. A sync that started before the lost
+  create and finished after it would pass without having seen the bill.
+- *Asking for the sync status after the lookup.* A sync that finished between
+  the two reads would vouch for a listing older than itself.
+- *Forcing a resync (`POST /sync-status/resync`).* It is an organisation-wide
+  action that Merge rate-limits. It would also not change the rule: the push
+  would still have to wait for that sync to finish.
+- *Mentioning the webhook only when a signing key is stored.* A tenant can
+  register the webhook without storing the key. The step costs nothing to
+  state when there is no webhook.
+
+**Unverified (#654 sandbox).** Whether `GET /invoices` lags a write through
+Merge at all, which is the premise of the wait. The `model_name` spelling
+Merge uses for invoices: the example reads `Invoice`, matched
+case-insensitively. Whether Merge can finish a create after our client gave up
+on it (the stamp is the attempt's end, not Merge's). Whether a 429 is ever
+answered after the write reached the integration. What deleting the linked
+account does to the ERP credentials Merge holds.
+
+Tests: `tests/test_merge_dev_adapter.py` (each sync-status answer:
+`invoice_sync_covers` per field shape; covered, not yet, found anyway, not
+listed, a later page, unreadable, 401, never asked on a first attempt; a
+connection never made is not posted; the delete-account call, its failures, the
+step's wording); `tests/test_erp_push_flow.py` (the stamp: set at an unknown
+attempt's end and handed on, kept by an attempt that sent nothing, pinned for a
+legacy row, absent without an unknown outcome, moved to the end of an
+attempt that raised; the three exact-state asserts
+now strip and check it); `tests/test_tenant_deletion.py` (Merge revoked and
+named, a failed deletion never stopping the tenant's, a closure calling Merge
+only after its commit); `frontend/src/lib/api/erpRefusals.test.ts` (the code
+catalogued and stated in every locale).
+
+## 406. NetSuite connects through the pinned client, revokes its TBA token at tenant deletion, and names the certificate otherwise (§334 / §400 follow-up, issue #655, 2026-11-14)
+
+**Context.** NetSuite built six plain `httpx.AsyncClient`s and sat on
+`_PLAIN_CLIENT_ALLOWED` because its host is built from `account_id`, which is
+validated to one hostname label under Oracle's domain. That stops the token
+going to another domain, but not a rebinding record for
+`<account>.suitetalk.api.netsuite.com` answering the connect's own lookup with
+an internal address while the request carries the TBA signature or the bearer.
+And NetSuite was one of the four stored-credential ERPs §400 left silent at
+tenant deletion.
+
+**Decision.**
+
+- **Every call goes through `NetSuiteAdapter._client`**, which builds
+  `url_safety.pinned_async_client` with NetSuite's own resolver. The resolver
+  applies the shared public-address rule and raises a non-public answer as
+  `httpcore.ConnectError`, so it reaches callers as `httpx.ConnectError`: the
+  SuiteQL listings, the void-after-refusal path and the connection test
+  already treat that as a failed fetch, and an `UnsafeUrlError` (a
+  `ValueError`) would have escaped all of them. The operator override
+  (`FEOH_ERP_NETSUITE_API_BASE`, fake-erp) keeps one plain client, as §334 and
+  SYSPRO do. So NetSuite moves to `_ORG_HOST_BESPOKE` and its
+  `_PLAIN_CLIENT_ALLOWED` entry drops from six calls to that one branch; the
+  count guard now fails any new plain client in the module.
+- **TBA tokens are revoked at deletion.** Oracle's "Issue Token and Revoke
+  Token REST Services for Token-based Authentication"
+  (<https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/chapter_157017286140.html>,
+  checked 2026-11-14) documents `GET https://<account>.restlets.api.netsuite.com/rest/revoketoken`
+  with `consumerKey` and `token`, authenticated by an OAuth header, and forbids
+  only revoking another user's token. We hold the token's own consumer key and
+  secret and token id and secret, so `revoke_stored_access` signs the call with
+  that token. Oracle documents no response body, so a 2xx is not taken as
+  proof: the outcome is `revoked` only when the same token is then refused
+  `401` on `GET /vendor?limit=1`. A refusal, an outage, or a token that still
+  works is `failed`. `revokes_stored_access` is True for TBA, so a closure
+  defers the call past its commit (§371).
+- **OAuth 2.0 client credentials are `unsupported`.** Oracle's OAuth 2.0
+  revoke endpoint
+  (<https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_161071224088.html>,
+  checked 2026-11-14) revokes a refresh token and its access tokens, and this
+  grant issues no refresh token. What ends it is revoking the certificate
+  mapping, which takes an administrator or the OAuth 2.0 Authorized
+  Applications Management permission
+  (<https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162686838198.html>,
+  checked 2026-11-14).
+- **The step follows the sign-in method.** `provider_side_disconnect` is a
+  property. For TBA it says to revoke the token under Setup > Users/Roles > User
+  Management > Access Tokens
+  (<https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/bridgehead_4249078810.html>,
+  checked 2026-11-14), "if it does not already show as inactive". For OAuth 2.0
+  it says to revoke the certificate under Setup > Integration > Manage
+  Authentication > OAuth 2.0 Client Credentials (M2M) Setup. A block whose
+  `auth_method` is unreadable names both, reads `failed`, and makes no call.
+- **fake-erp answers `revoketoken`** at `/netsuite/rest/revoketoken`, beside the
+  overridden REST root. After that, the revoked token gets `401 INVALID_LOGIN`
+  everywhere, so the adapter suite proves the call in process against the same
+  handlers.
+
+**Rejected.**
+
+- *Pinning the operator override too* (`allow_private=True`), which would take
+  NetSuite off `_PLAIN_CLIENT_ALLOWED` entirely. §334 keeps trusted operator
+  overrides plain. SYSPRO and the commerce client sit on the list for the same
+  one branch, and the list's job is to count it.
+- *Calling the certificate rotation endpoint to revoke an M2M certificate.*
+  It needs the "Manage own OAuth 2.0 Client Credentials certificates"
+  permission, which our setup never asks the customer to grant. On a role
+  without it, the call fails every time, and a failed revoke would read as an
+  attempt.
+- *Reading a 2xx from `revoketoken` as `revoked`.* The response body is
+  undocumented. Probing the token afterwards is the only evidence we can read.
+- *Blocking the integration record as the step.* The customer may use that
+  record for other integrations. The token, or the certificate, is ours alone.
+
+**Not verified.** No real NetSuite account has accepted the revoke. The fake
+encodes our reading of Oracle's page, as the rest of the NetSuite suite does
+(the sandbox follow-up, #654).
+
+## 407. Business Central and SYSPRO name the customer's step at tenant deletion, with nothing to call (§400 follow-up, 2026-11-14)
+
+**Context.** §400 made tenant deletion end or name the access a
+stored-credential ERP holds, keyed on the adapter's `provider_side_disconnect`,
+and left Merge.dev, Business Central, NetSuite and SYSPRO silent. A deleted
+Business Central or SYSPRO tenant's confirmation said nothing about access that
+outlives our sealed copy.
+
+**Decision.**
+
+- **Business Central: `unsupported`, and the customer disables our client ID
+  and deletes the secret.** The connection is service-to-service: the customer
+  registers an app in their own Microsoft Entra tenant, gives us its client id
+  and a client secret, and enables the client id on BC's *Microsoft Entra
+  Applications* page ("Using Service to Service Authentication", Task 1 and
+  Task 2,
+  <https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication>,
+  checked 2026-11-14). We hold the secret, never a consent or a refresh token,
+  and mint access tokens that live 60–90 minutes ("Access tokens" § Token
+  lifetime, <https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens>,
+  checked 2026-11-14). The identity platform's discovery document
+  (<https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration>,
+  read 2026-11-14) lists no `revocation_endpoint`. So
+  `BusinessCentralAdapter.provider_side_disconnect` names both halves: set our
+  client ID to Disabled (or delete it) on that BC page, and delete the client
+  secret from the app registration in the Entra admin center.
+- **SYSPRO: `unsupported`, and the customer locks out the operator.** The access
+  is the stored operator code and password. e.net's `Logoff` ends one session,
+  not the operator's ability to log on, and every operation already sends it in
+  a `finally`, so there is no session of ours to end and no call that ends the
+  credential. SYSPRO's Operator Maintenance
+  (<https://help.syspro.com/syspro-8-2025/g_programs/imp/imppmp/imppmp.htm>,
+  checked 2026-11-14) documents **Operator locked out** ("the operator is unable
+  to load SYSPRO") and **Usage for e.net business objects** = **No access**
+  ("the operator code cannot be used as a login for the business objects of
+  e.net Solutions"); the step names those, or a new password.
+- Neither adapter sets `revokes_stored_access`: the outcome is decided at the
+  read with no provider call, so a closure defers nothing.
+
+**Rejected.**
+
+- *Counting a SYSPRO `Logoff` at deletion as a revoke.* It would need a `Logon`
+  first, with the very credential we are told to forget, only to end the
+  session it just opened. It ends nothing that outlives the call, and reporting
+  `revoked` would tell the customer the operator is safe when it is not.
+- *Deleting our client secret or disabling the service principal through
+  Microsoft Graph.* Our token is scoped to the Business Central API only. Asking
+  every customer to grant us `Application.ReadWrite.*` in their directory to
+  make deletion tidier would widen what a leaked secret can do far more than
+  it narrows what deletion leaves.
+- *Asking the SYSPRO customer to change the company password too.* Every
+  operator of the company shares it; changing it breaks every other user and
+  integration, and the operator lockout already ends our access.
+- *A generic "remove FeohLedger from connected apps" line.* Neither product has
+  such a list (as §400 found for Intacct).
+
+**Side effect, accepted.** BC access tokens already issued live out their 60–90
+minutes after the customer acts; nothing on either side can shorten that. The
+confirmation's "NOT revoked: the provider has no revocation endpoint" wording
+is accurate for both: neither documents a revocation for what we hold.
+
+**Tests.** `tests/test_tenant_deletion.py`
+(`test_bc_and_syspro_are_unsupported_at_once_and_name_the_step`: no HTTP call,
+`unsupported` decided at the read on a closure's session, the step named, no
+secret in the log or confirmation) and `tests/test_erp_syspro_adapter.py`
+(`test_revoke_is_unsupported_and_calls_no_one`: no `Logon` or `Logoff`). Business
+Central has no adapter-specific suite; its case is the deletion test.
+
+## 408. The per-tenant ERP webhooks open a tenant's sealed key only after the checks that need no secret, and answer every unverified delivery the same (§399 follow-up, issue #655, 2026-11-15)
+
+**Context.** The generic `POST /api/erp/webhook/{erp_type}` and the per-tenant
+`POST /api/erp/webhook/merge_dev/{tenant_slug}` (§399) verify a delivery
+against a key sealed in the tenant's ERP credentials. Both looked the slug up
+and opened the whole sealed ERP block (`provider_config`) before they looked at
+the signature, so an unauthenticated caller could make us unseal any tenant's
+credentials on demand, without even sending a signature header. And a block
+that could not be opened (`CredentialCryptoError`) answered a bodyless 503 —
+before the signature was checked — while an unknown slug answered 204: the
+response told a slug with unreadable credentials from every other one. The
+webhook invariant is that every rejection path is the same silent 204 and only
+our own failure on a verified delivery asks for a retry. The QuickBooks and
+Xero routes verify against one platform key from the environment
+(`FEOH_ERP_QBO_WEBHOOK_VERIFIER_TOKEN`, `FEOH_ERP_XERO_WEBHOOK_KEY`) and open no
+tenant secret, so they had neither problem; their 503 already follows the
+signature.
+
+**Decision.**
+
+- **Cheap checks first, the unseal last, every refusal the same 204.** Both
+  routes now refuse, in order and without any secret: a body over the cap; on
+  the generic route, `erp_type == merge_dev`; a signature header that could
+  never verify (`webhook_security.well_formed_hex_sha256`: 64 lower-case hex
+  digits, the only thing `hexdigest()` can equal;
+  `well_formed_base64url_sha256`: strict base64url decoding to 32 bytes); on the
+  generic route, a body that is not a JSON object or a `tenant_slug` that is not
+  a string (it reached the query as a non-string bind, a 500). Then one helper,
+  `api/erp_webhook._tenant_webhook_config`, shared by both routes: the slug
+  names an organisation; its PUBLIC ERP configuration resolves to the route's
+  adapter (`integration_method` / `type` are configuration, never sealed); a
+  webhook key is stored at all, read from the sealed row's path NAMES with no
+  decrypt (`provider_credentials.stored_secret_paths`, the names-only sibling
+  of `credential_status`); and only then `provider_config` opens the block,
+  once. The signature is verified against the key it returns.
+- **A key that cannot be opened is the 204 too, not a 503.** The task allowed
+  a 503 for a real tenant's transient failure only after the signature had
+  verified, and here it cannot: the key that failed to open is the key the
+  signature needs. A 503 before verification answers a configured slug
+  differently from every other. It is logged as an error naming the slug and
+  adapter (no value), so an operator sees it. The cost is real: a genuine
+  delivery that arrives while the credential store is down is acknowledged and
+  not redelivered. With the DEK cache (`credential_crypto`, five minutes per
+  data key per process) a KMS blip mostly misses tenants that received a
+  delivery recently; a corrupted row loses every delivery until it is
+  re-saved. Tracked in `docs/followups.md`.
+- **Two small paths on the generic route corrected while there.** The dedup
+  store unreachable after the signature verifies escaped as a 500; it is now
+  the bodyless 503 the other ERP routes give. A verified body whose
+  `correlation_id` is not a UUID raised inside the handler's `try` into the 503
+  path, so the ERP redelivered the same unparseable body for ever; it is parsed
+  before the tenant DB is opened and is a silent 204 (a decision: it names no
+  invoice of ours).
+
+**What remains, stated plainly.**
+
+- The sealed block is ONE envelope per (organisation, block), so opening it
+  decrypts the block's other secrets with the webhook key. Nothing reads them
+  before the signature verifies (the Merge route needs the API key afterwards
+  to read the bill back). Sealing the webhook key on its own would need a
+  second envelope per tenant and a migration; not worth it for what it buys
+  while the plaintext lives only in this request's memory.
+- A configured tenant with a well-formed but wrong signature still costs one
+  unseal: verification needs the key. The KMS `Decrypt` behind it happens at
+  most once per data key per process per five minutes; after that it is one
+  AES-GCM operation. So the response TIME of a configured tenant can differ
+  measurably from an unknown slug's (a second control-plane query and an
+  unseal) even though the response never does. Tenant slugs are the app's
+  public subdomains, so what timing can still reveal is "this tenant has a
+  webhook key stored", not that the tenant exists.
+- The DEK cache holds at most 512 keys and clears when full, so a caller
+  cycling well-formed signatures across more configured tenants than that
+  could force a KMS call per request. Only KMS's own request quota bounds
+  that today; no limiter was added on these routes (`docs/followups.md`).
+
+*Rejected:* keeping the 503 on a credential-store failure for the provider's
+retry. It is the oracle the change removes, and it fires before anything is
+proven about the sender. *Rejected:* equalising the timing by opening a dummy
+envelope for unknown slugs — it would spend a KMS call on exactly the requests
+we want to be cheap, which is the amplification the change removes.
+
+**Tests.** `tests/test_merge_webhook.py`: a signature that could never verify
+looks nothing up; unknown slug, a tenant on another ERP, no key stored and no
+ERP open nothing; an unknown slug and a bad signature answer the same; a key
+that cannot be opened is a silent 204 logged without the key; and, against the
+real store through the ASGI app, `credential_crypto.open_envelope` is called
+zero times for an unknown slug, a keyless tenant and a malformed signature, and
+once for a well-formed wrong one. `tests/test_webhook_security.py`: the same
+for the generic route, plus the non-string slug, the non-UUID correlation id
+and the dedup store down after verifying.
+
+## 409. A Merge.dev retry's wait dates only from an attempt's recorded end, past a settle margin, and a 429 stays possibly posted (amends §405, round-11 money-path review, 2026-11-15)
+
+**Context.** The round's money-path review of §405 found one double-post path
+and two assumptions the wait leaned on that §405 itself listed as unverified.
+
+- **A dead attempt left its start as the stamp.** `services/erp` committed
+  `erp_outcome_unknown_at` before the adapter call, and only the post-call or
+  exception write moved it to the attempt's end. If the attempt died before
+  its failure was committed — a worker crash, or a deploy cancelling the task
+  (`asyncio.CancelledError` is not an `Exception`, so `send_to_erp_internal`
+  never handles it and the session rolls back) — the row kept the start. The
+  sequence: 10:00:00 the attempt starts and commits; 10:00:05 a Merge sync
+  starts and finishes; 10:00:12 our POST creates the bill; 10:00:20 the worker
+  dies. A later retry reads `data_fresh_as_of` 10:00:05 > 10:00:00, the lookup
+  reads the 10:00:05 copy, finds nothing, and posts a second bill.
+- **`fresh > since` had no margin.** `since` is when our client gave up, not
+  when Merge finished. httpx's `timeout=30` is per operation, so a request can
+  run past a minute, and whether Merge completes a create the client
+  abandoned is a #654 item.
+- **§405 moved a 429 to "nothing sent"** on §399's reading that Merge's rate
+  limit processed nothing, while listing "whether a 429 is ever answered after
+  the write reached the integration" as unverified.
+
+**Decision.**
+
+- **Only an attempt's end is a final stamp.** The pre-call commit writes the
+  start with `erp_outcome_unknown_at_final: False`. The post-call write of an
+  unknown result and the exception path write the end with `True`. A read
+  that finds the outcome unknown and the stamp not `True` (provisional, absent,
+  unreadable, or written before the flag existed) replaces it with the time of
+  the read, which is after the dead attempt, and pins that as final. An
+  attempt that sent nothing keeps the pinned stamp, as in §405. A success
+  drops both keys.
+- **`SYNC_SETTLE_MARGIN` = 10 minutes.** `invoice_sync_covers` requires the
+  `Invoice` row fresh as of strictly more than `since + SYNC_SETTLE_MARGIN`,
+  on both the `data_fresh_as_of` path and the at-rest fallback. Too short a
+  margin costs a second bill; too long costs one more sync's wait, so it is
+  generous. #654's answer to how long Merge can keep writing after the client
+  gives up resizes it.
+- **A 429 is possibly posted again, and not retried automatically.** It goes
+  through the same branch as a 5xx: non-retryable, `not_posted` False. Kept
+  retryable, `services/erp`'s retry 2 seconds later would always meet the sync
+  wait (no sync can be 10 minutes past an attempt seconds old) and fail
+  `merge_sync_pending` after a wasted call. So a rate-limited push now waits
+  for a person's retry after Merge's next sync, until #654 shows Merge never
+  answers 429 after the write reached the integration. A connection never
+  made stays `not_posted`: nothing was sent.
+
+**Rejected.**
+
+- *Committing the exception path's end stamp from inside `_call_erp`.* A
+  cancelled task cannot be relied on to finish an `await db.commit()`, and a
+  crash runs nothing. Treating the pre-call stamp as provisional covers every
+  way an attempt can die.
+- *Dating a dead attempt from its start plus the margin.* The attempt could
+  have run for longer than any fixed margin before it died; the time of the
+  next read is the only time known to be after it.
+
+**Cost.** A Merge push whose attempt died, or that met a 429, now waits for a
+Merge sync that starts more than 10 minutes after the next read or the
+attempt's end before it can be retried. That is one sync's delay, against a
+second bill in the customer's ledger.
+
+Tests: `tests/test_erp_push_flow.py` (a cancelled attempt: the row holds only
+the provisional start, and the next attempt waits from after the
+cancellation; a provisional or flag-less stamp is restamped when read; the
+exact-state helper checks the final flag; Merge's 429 sent once);
+`tests/test_merge_dev_adapter.py` (`invoice_sync_covers` inside, at and past
+the margin on both paths; the margin's floor; a 429 possibly posted and not
+retried). The #654 sandbox entry in `docs/followups.md` now names the margin
+and the 429 as what that pass settles.

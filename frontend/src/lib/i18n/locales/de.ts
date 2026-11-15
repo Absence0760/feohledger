@@ -4018,6 +4018,7 @@ export const messages = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.",
 	'refusal.approvalSegregationReceiver': "Funktionstrennung: Wer einen Wareneingang zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
+	'refusal.approvalSegregationInspector': "Funktionstrennung: Wer eine Qualitätsprüfung der Ware zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
 	'refusal.approvalLevelReuse': "Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.",
 	'refusal.approvalNotNamedApprover': "Sie sind für diesen Schritt nicht als Freigebende(r) berechtigt.",
 	'refusal.invoiceNotInReview': "Diese Rechnung wartet nicht auf Prüfung und kann daher weder genehmigt noch abgelehnt werden.",
@@ -5298,6 +5299,7 @@ export const messages = {
 	'erpRefusal.callBudgetQuota': "{provider} hat die API-Aufrufe für das von FeohLedger genutzte Abonnement pausiert (das Tageskontingent ist verbraucht), daher hat FeohLedger keinen Aufruf gesendet. Es wird um Mitternacht UTC zurückgesetzt – versuchen Sie es dann erneut.",
 	'erpRefusal.callBudgetRateLimited': "{provider} hat FeohLedger gebeten, langsamer zu werden, daher wurde kein Aufruf gesendet. Versuchen Sie es in einer Minute erneut.",
 	'erpRefusal.billLeftUnposted': "{provider} führt diese Rechnung als Entwurf oder zur Genehmigung, nicht gebucht, daher steht dort noch nichts in der Kreditorenbuchhaltung. Buchen oder genehmigen Sie sie in {provider}, und versuchen Sie es dann erneut.",
+	'erpRefusal.mergeSyncPending': "{provider} hat die Rechnungen seit einem früheren Sendeversuch mit unbekanntem Ausgang noch nicht synchronisiert, daher könnte die Rechnung dort bereits vorhanden sein. Es wurde nichts gesendet. Versuchen Sie es nach der nächsten Rechnungssynchronisierung in {provider} erneut: Ist die Rechnung dann vorhanden, wird sie verknüpft statt ein zweites Mal angelegt.",
 	'erpRefusal.credentialsUnavailable': "Die ERP-Zugangsdaten konnten gerade nicht geöffnet werden. Versuchen Sie es in einigen Minuten erneut; wenn es weiterhin fehlschlägt, wenden Sie sich an einen Administrator.",
 	'erpRefusal.periodClosed': "{provider} hat diese Rechnung abgelehnt, weil ihr Datum in einem abgeschlossenen Zeitraum liegt (die Bücher sind geschlossen). Ändern Sie das Rechnungsdatum oder öffnen Sie den Zeitraum in {provider} wieder, und versuchen Sie es dann erneut.",
 	'erpRefusal.vendorInactive': "{provider} hat diese Rechnung abgelehnt, weil der Lieferant dort inaktiv oder gelöscht ist. Aktivieren Sie den Lieferanten in {provider}, und versuchen Sie es dann erneut.",

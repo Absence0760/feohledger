@@ -26,6 +26,14 @@ against it. Real-Postgres harness (`realdb`). Pinned here:
     every chain level's approvals, and `receiving_conflicts` is the one rule
     both orders read. The hold side is pinned in `test_goods_receipt_entry.py`
     and `test_exception_agent_receipt_segregation.py`.
+
+Inspecting ≠ approving (decisions §404) is the fourth leg's copy of the same
+rule, pinned in the last section: whoever hand-recorded a quality inspection of
+the goods an invoice is billed against (a PO-level row on its PO, or a row on a
+live receipt of it) is refused with 403 `approval_segregation_inspector` at the
+same doors, the `/complete` floor and escalation honour it, and the approval
+step's opt-out lifts it. §401 pins the other order (an approver's later `pass`
+does not lift the hold) in `test_inspections_api.py`.
 """
 
 from __future__ import annotations
@@ -40,16 +48,22 @@ from sqlalchemy import select
 from app.models.entity import Entity
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.procurement import GoodsReceipt, POLineItem, PurchaseOrder
+from app.models.quality_inspection import QualityInspection
 from app.models.workflow import WorkflowDefinition, WorkflowInstance
 from app.services.approval_chain import (
+    APPROVAL_SEGREGATION_INSPECTOR,
     APPROVAL_SEGREGATION_RECEIVER,
     CHAIN_STATE_KEY,
     approver_ids,
+    escalation_ineligible,
     implicated_actors,
+    inspection_recorders,
+    inspection_recorders_by_invoice,
     receipt_recorders,
     receipt_recorders_by_invoice,
     receiving_conflicts,
     stamp_approver,
+    violates_inspection_segregation,
     violates_receiving_segregation,
 )
 from app.utils.dates import utc_today
@@ -542,3 +556,259 @@ def test_only_record_final_approval_writes_the_approval_of_record():
     assert "record_final_approval(" in (app_root / "services" / "review.py").read_text()
     assert "record_final_approval(" in (app_root / "api" / "workflow.py").read_text()
     assert "record_final_approval(" in (app_root / "services" / "extraction.py").read_text()
+
+
+# --------------------------------------------------------------------------- #
+# Inspecting ≠ approving (decisions §404)
+# --------------------------------------------------------------------------- #
+
+
+async def _inspect(realdb, role, *, po_id=None, gr_id=None, result="pass"):
+    """Record a quality inspection by hand through the API, as `role`."""
+    body = {"inspection_number": f"QI-{uuid.uuid4().hex[:6]}", "result": result}
+    if po_id is not None:
+        body["po_id"] = str(po_id)
+    if gr_id is not None:
+        body["gr_id"] = str(gr_id)
+    async with realdb.client(key=TENANT, role=role) as c:
+        resp = await c.post("/api/inspections", json=body)
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+async def test_the_inspector_who_passed_the_goods_cannot_approve_and_someone_else_can(realdb):
+    """The followup's order: a manager's `pass` lifts the hold while they are
+    not yet an approver (§401 allows it), then they try to approve."""
+    po_id, number, _ = await _po(realdb)
+    inv_id = await _invoice(realdb, number)
+    await _inspect(realdb, "ap_manager", po_id=po_id)
+
+    refused = await _approve(realdb, "ap_manager", inv_id)
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["code"] == APPROVAL_SEGREGATION_INSPECTOR
+    assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review
+
+    approved = await _approve(realdb, "admin", inv_id)
+    assert approved.status_code == 200, approved.text
+    assert await _status(realdb, inv_id) == InvoiceStatus.approved
+
+
+async def test_bulk_approve_skips_the_inspectors_rows_and_names_the_rule(realdb):
+    po_a, number_a, _ = await _po(realdb)
+    _, number_b, _ = await _po(realdb)
+    await _inspect(realdb, "ap_manager", po_id=po_a)
+    inspected = await _invoice(realdb, number_a)
+    clean = await _invoice(realdb, number_b)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={"ids": [str(inspected), str(clean)], "status": "approved"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated"] == 1
+    (skip,) = body["skipped"]
+    assert skip["id"] == str(inspected)
+    assert skip["code"] == APPROVAL_SEGREGATION_INSPECTOR
+    assert await _status(realdb, inspected) == InvoiceStatus.ready_for_review
+    assert await _status(realdb, clean) == InvoiceStatus.approved
+
+
+async def test_the_shared_approval_door_refuses_the_inspector(realdb):
+    from app.services.review import approve_invoice
+
+    po_id, number, _ = await _po(realdb)
+    await _inspect(realdb, "ap_manager", po_id=po_id)
+    inv_id = await _invoice(realdb, number)
+    manager = realdb.info(TENANT).users["ap_manager"]
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        with pytest.raises(HTTPException) as refused:
+            await approve_invoice(
+                s, inv, actor_id=manager, actor_name="Manager", actor_roles={"ap_manager"}
+            )
+        await s.rollback()
+    assert refused.value.status_code == 403
+    assert refused.value.detail["code"] == APPROVAL_SEGREGATION_INSPECTOR
+
+
+async def test_a_correction_cannot_repoint_the_invoice_at_a_po_the_approver_inspected(realdb):
+    _, clean_number, _ = await _po(realdb)
+    po_id, inspected_number, _ = await _po(realdb)
+    await _inspect(realdb, "ap_manager", po_id=po_id)
+    inv_id = await _invoice(realdb, clean_number)
+
+    refused = await _approve(realdb, "ap_manager", inv_id, po_number=inspected_number)
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["code"] == APPROVAL_SEGREGATION_INSPECTOR
+    async with realdb.sessionmaker(TENANT)() as s:
+        stored = (
+            await s.execute(select(Invoice.po_number).where(Invoice.id == inv_id))
+        ).scalar_one()
+    assert stored == clean_number
+
+
+async def test_an_inspection_of_a_live_receipt_counts_and_of_a_cancelled_one_does_not(realdb):
+    """A receipt's own inspection (`gr_id`, no `po_id`) is the 4-way leg the
+    matcher reads first, so it counts. One on a cancelled receipt is never
+    read and vouches for nothing."""
+    po_live, number_live, li_live = await _po(realdb)
+    live = await _receive(realdb, "admin", po_live, li_live)
+    await _inspect(realdb, "ap_manager", gr_id=live)
+    refused = await _approve(realdb, "ap_manager", await _invoice(realdb, number_live))
+    assert refused.status_code == 403
+    assert refused.json()["detail"]["code"] == APPROVAL_SEGREGATION_INSPECTOR
+
+    po_gone, number_gone, li_gone = await _po(realdb)
+    gone = await _receive(realdb, "admin", po_gone, li_gone)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        assert (await c.post(f"/api/goods-receipts/{gone}/cancel")).status_code == 200
+    await _inspect(realdb, "ap_manager", gr_id=gone)
+    resp = await _approve(realdb, "ap_manager", await _invoice(realdb, number_gone))
+    assert resp.status_code == 200, resp.text
+
+
+async def test_every_verdict_counts_not_only_a_pass(realdb):
+    """The rule is about the duty, not its outcome — as a receipt's recorder
+    is refused whatever quantity they counted."""
+    po_id, number, _ = await _po(realdb)
+    await _inspect(realdb, "ap_manager", po_id=po_id, result="fail")
+    inv_id = await _invoice(realdb, number)
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert await inspection_recorders(s, inv) == frozenset(
+            {str(realdb.info(TENANT).users["ap_manager"])}
+        )
+
+
+async def test_qms_inspections_and_ones_in_a_sibling_entity_do_not_count(realdb):
+    """A QMS verdict was typed by nobody in this app; one booked in another
+    entity never feeds this invoice's 4-way leg; a manual row with no recorder
+    predates the column and names nobody."""
+    manager = realdb.info(TENANT).users["ap_manager"]
+    po_id, number, _ = await _po(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        sibling = Entity(
+            name=f"Sibling {uuid.uuid4().hex[:4]}",
+            slug=f"sib-{uuid.uuid4().hex[:6]}",
+            organization_id=realdb.info(TENANT).org_id,
+        )
+        s.add(sibling)
+        await s.flush()
+        default = await _default_entity(s)
+        for source, recorder, entity_id in (
+            ("qms", manager, default),
+            ("manual", manager, sibling.id),
+            ("manual", None, default),
+            (None, manager, default),
+        ):
+            s.add(
+                QualityInspection(
+                    inspection_number=f"QI-{uuid.uuid4().hex[:6]}",
+                    po_id=po_id,
+                    result="pass",
+                    source=source,
+                    recorded_by_user_id=recorder,
+                    organization_id=realdb.info(TENANT).org_id,
+                    entity_id=entity_id,
+                )
+            )
+        await s.commit()
+    inv_id = await _invoice(realdb, number)
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert await inspection_recorders(s, inv) == frozenset()
+
+
+async def test_the_approval_steps_segregation_opt_out_lifts_the_inspector_rule(realdb):
+    po_id, number, _ = await _po(realdb)
+    await _inspect(realdb, "ap_manager", po_id=po_id)
+    inv_id = await _invoice(realdb, number, approval_config={"require_segregation": False})
+    resp = await _approve(realdb, "ap_manager", inv_id)
+    assert resp.status_code == 200, resp.text
+
+
+async def test_the_inspector_batch_lookup_is_three_statements_whatever_the_batch(realdb):
+    rows = []
+    for _ in range(4):
+        po_id, number, li = await _po(realdb)
+        receipt = await _receive(realdb, "admin", po_id, li)
+        await _inspect(realdb, "ap_manager", gr_id=receipt)
+        rows.append(await _invoice(realdb, number))
+    manager = str(realdb.info(TENANT).users["ap_manager"])
+    async with realdb.sessionmaker(TENANT)() as s:
+        invoices = (await s.execute(select(Invoice).where(Invoice.id.in_(rows)))).scalars().all()
+        with QueryCounter() as one:
+            await inspection_recorders_by_invoice(s, invoices[:1])
+        with QueryCounter() as four:
+            found = await inspection_recorders_by_invoice(s, invoices)
+    assert len(one.statements) == len(four.statements) == 3
+    assert all(found[i] == frozenset({manager}) for i in rows)
+
+
+def test_the_inspector_predicate_and_escalation_honour_the_opt_out():
+    from types import SimpleNamespace
+
+    actor = uuid.uuid4()
+    recorders = {str(actor)}
+    assert violates_inspection_segregation(actor, recorders, {})
+    assert not violates_inspection_segregation(actor, recorders, {"require_segregation": False})
+    assert not violates_inspection_segregation(None, recorders, {})
+    assert not violates_inspection_segregation(uuid.uuid4(), recorders, {})
+    assert violates_inspection_segregation(actor, {actor}, {})  # UUID / str alike
+
+    inv = SimpleNamespace(uploaded_by_id=None, segregation_actor_ids=None)
+    assert str(actor) in escalation_ineligible(inv, {}, (), recorders)
+    assert escalation_ineligible(inv, {"require_segregation": False}, (), recorders) == set()
+
+
+async def test_the_complete_amount_floor_does_not_auto_approve_for_the_inspector(realdb):
+    """The floor would make `/complete`'s caller the approver; an inspector of
+    the invoice's goods must land it at review instead."""
+    async with realdb.client(key=TENANT, role="admin") as c:
+        wfs = (await c.get("/api/workflows")).json()["items"]
+        workflow_id = next(w for w in wfs if w["is_active"])["id"]
+        original = (await c.get(f"/api/workflows/{workflow_id}")).json()["steps_config"]["steps"]
+    steps = [dict(s) for s in original]
+    for step in steps:
+        if step["type"] == "approval":
+            step["enabled"] = True
+            step["config"] = {
+                **step.get("config", {}),
+                "required": True,
+                "auto_approve_below": "5000.00",
+            }
+    try:
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.patch(f"/api/workflows/{workflow_id}", json={"steps": steps})
+            assert resp.status_code == 200, resp.text
+
+        po_id, number, _ = await _po(realdb)
+        await _inspect(realdb, "admin", po_id=po_id)
+        async with realdb.client(key=TENANT, role="ap_manager") as c:
+            created = await c.post(
+                "/api/invoices",
+                json={
+                    "vendor": "Racket Wholesale Co",
+                    "invoice_number": f"QX-{uuid.uuid4().hex[:8]}",
+                    "amount": "1037.00",
+                    "currency": "USD",
+                    "po_number": number,
+                },
+            )
+        assert created.status_code == 201, created.text
+        inv_id = created.json()["id"]
+        async with realdb.sessionmaker(TENANT)() as s:
+            inv = await s.get(Invoice, uuid.UUID(inv_id))
+            po = await s.get(PurchaseOrder, po_id)
+            po.vendor_id = inv.vendor_id
+            await s.commit()
+
+        async with realdb.client(key=TENANT, role="admin") as c:
+            done = await c.post(f"/api/invoices/{inv_id}/complete")
+        assert done.status_code == 200, done.text
+        assert done.json()["status"] == "ready_for_review"
+    finally:
+        async with realdb.client(key=TENANT, role="admin") as c:
+            await c.patch(f"/api/workflows/{workflow_id}", json={"steps": original})

@@ -4019,6 +4019,7 @@ export const messages = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas aussi l'approuver.",
 	'refusal.approvalSegregationReceiver': "Séparation des tâches : un utilisateur ayant enregistré une réception de marchandises facturée sur cette facture ne peut pas aussi l'approuver.",
+	'refusal.approvalSegregationInspector': "Séparation des tâches : un utilisateur ayant enregistré un contrôle qualité des marchandises facturées sur cette facture ne peut pas aussi l'approuver.",
 	'refusal.approvalLevelReuse': "Vous avez déjà approuvé un niveau précédent de cette chaîne ; un autre approbateur est requis.",
 	'refusal.approvalNotNamedApprover': "Vous n'êtes pas un approbateur autorisé pour cette étape.",
 	'refusal.invoiceNotInReview': "Cette facture n'est pas en attente de revue ; elle ne peut donc être ni approuvée ni rejetée.",
@@ -5297,6 +5298,7 @@ export const messages = {
 	'erpRefusal.callBudgetQuota': "{provider} a suspendu les appels à l'API pour l'abonnement utilisé par FeohLedger (son quota quotidien est épuisé) ; FeohLedger n'a donc effectué aucun appel. Il est réinitialisé à minuit UTC : réessayez ensuite.",
 	'erpRefusal.callBudgetRateLimited': "{provider} a demandé à FeohLedger de ralentir ; aucun appel n'a donc été effectué. Réessayez dans une minute.",
 	'erpRefusal.billLeftUnposted': "{provider} conserve cette facture en brouillon ou en attente d'approbation, non comptabilisée, donc rien n'est encore en comptes fournisseurs. Comptabilisez-la ou approuvez-la dans {provider}, puis réessayez.",
+	'erpRefusal.mergeSyncPending': "{provider} n'a pas encore synchronisé les factures depuis une tentative d'envoi précédente dont l'issue est inconnue ; il détient donc peut-être déjà cette facture. Rien n'a été envoyé. Réessayez après la prochaine synchronisation des factures de {provider} : si la facture y figure alors, elle sera liée au lieu d'être créée une seconde fois.",
 	'erpRefusal.credentialsUnavailable': "Les identifiants ERP n'ont pas pu être ouverts pour le moment. Réessayez dans quelques minutes ; si l'échec persiste, prévenez un administrateur.",
 	'erpRefusal.periodClosed': "{provider} a refusé cette facture car sa date se situe dans une période clôturée (les livres sont fermés). Modifiez la date de la facture ou rouvrez la période dans {provider}, puis réessayez.",
 	'erpRefusal.vendorInactive': "{provider} a refusé cette facture car son fournisseur y est inactif ou supprimé. Réactivez le fournisseur dans {provider}, puis réessayez.",

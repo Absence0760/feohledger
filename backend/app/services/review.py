@@ -418,24 +418,34 @@ async def _figure_gates(
     approval_config: dict,
     org_settings: dict | None,
     receipt_recorders: Collection[str] | None,
+    inspection_recorders: Collection[str] | None,
 ) -> None:
-    """The gates read AFTER any correction: receiving ≠ approving, then the
-    max-amount and CFO money gates.
+    """The gates read AFTER any correction: receiving ≠ approving, inspecting ≠
+    approving, then the max-amount and CFO money gates.
 
     Receiving: whoever hand-recorded a live goods receipt on the invoice's PO
-    may not approve it (decisions §267) — after the corrections, so a
-    ``po_number`` correction cannot re-point the invoice at a PO the approver
-    received and slip past a set read for the old one. Not looked up at all when
-    the step opted out of segregation. ``receipt_recorders`` is a set resolved
-    up front (bulk approve), or ``None`` to look it up here.
+    may not approve it (decisions §267); inspecting: nor may whoever
+    hand-recorded a quality inspection of those goods (decisions §404). Both
+    after the corrections, so a ``po_number`` correction cannot re-point the
+    invoice at a PO the approver received or inspected and slip past a set
+    read for the old one. Not looked up at all when the step opted out of
+    segregation. Each set is resolved up front (bulk approve), or ``None`` to
+    look it up here.
     """
-    from app.services.approval_chain import check_receiving_segregation
+    from app.services.approval_chain import (
+        check_inspection_segregation,
+        check_receiving_segregation,
+    )
+    from app.services.approval_chain import inspection_recorders as lookup_inspection_recorders
     from app.services.approval_chain import receipt_recorders as lookup_receipt_recorders
 
     if approval_config.get("require_segregation", True) is not False:
         if receipt_recorders is None:
             receipt_recorders = await lookup_receipt_recorders(db, invoice)
         check_receiving_segregation(actor_id, receipt_recorders, approval_config)
+        if inspection_recorders is None:
+            inspection_recorders = await lookup_inspection_recorders(db, invoice)
+        check_inspection_segregation(actor_id, inspection_recorders, approval_config)
     await _enforce_approval_thresholds(
         db,
         invoice,
@@ -544,6 +554,7 @@ async def review_refusals(
             approval_config=approval_config,
             org_settings=org_settings,
             receipt_recorders=None,
+            inspection_recorders=None,
         )
         if approval_config.get("approver_strategy") == "chain" and instance:
             scratch = SimpleNamespace(state_data=copy.deepcopy(instance.state_data or {}))
@@ -566,15 +577,17 @@ async def approve_invoice(
     corrections: dict | None = None,
     org_settings: dict | None = None,
     receipt_recorders: Collection[str] | None = None,
+    inspection_recorders: Collection[str] | None = None,
 ) -> Invoice:
     """Approve ``invoice`` as ``actor_id`` — the one door every approval path
     (in-app single and bulk, email / Slack / Teams links, mobile, the exception
     agents) goes through, so every control below holds on all of them.
 
-    ``receipt_recorders`` lets bulk approve hand in the batch's
-    ``approval_chain.receipt_recorders_by_invoice`` resolved up front; ``None``
-    looks it up here. Either way it is re-read after a correction, which can
-    re-point the invoice at another PO.
+    ``receipt_recorders`` / ``inspection_recorders`` let bulk approve hand in
+    the batch's ``approval_chain.receipt_recorders_by_invoice`` /
+    ``inspection_recorders_by_invoice`` resolved up front; ``None`` looks them
+    up here. Either way they are re-read after a correction, which can re-point
+    the invoice at another PO.
     """
     from app.services.approval_chain import advance_approval_chain
 
@@ -691,9 +704,10 @@ async def approve_invoice(
         except Exception as exc:  # noqa: BLE001
             _log.warning("refresh_warnings after corrections failed for %s: %s", invoice.id, exc)
 
-    # Receiving segregation + the money gates, against the now-corrected invoice
-    # (`_figure_gates`, shared with `review_refusals`). A correction can re-point
-    # the invoice at another PO, so a batch-resolved recorder set is re-read.
+    # Receiving / inspecting segregation + the money gates, against the
+    # now-corrected invoice (`_figure_gates`, shared with `review_refusals`). A
+    # correction can re-point the invoice at another PO, so batch-resolved
+    # recorder sets are re-read.
     await _figure_gates(
         db,
         invoice,
@@ -702,6 +716,7 @@ async def approve_invoice(
         approval_config=approval_config,
         org_settings=org_settings,
         receipt_recorders=None if corrections else receipt_recorders,
+        inspection_recorders=None if corrections else inspection_recorders,
     )
 
     # Upsert the RAG embedding using the invoice's NOW-correct fields.

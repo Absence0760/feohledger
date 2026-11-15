@@ -392,6 +392,24 @@ async def settings_with_secrets(org, *blocks: str, db: AsyncSession | None = Non
     return out
 
 
+async def stored_secret_paths(org, block: str, *, db: AsyncSession) -> frozenset[str]:
+    """The secret paths sealed in ``org``'s ``block`` row — names only, no decrypt.
+
+    For a caller that must decide whether opening the row is worth it before
+    it opens it: the per-tenant ERP webhook routes check that a signing key is
+    stored at all before an unauthenticated request can make them unseal
+    (decisions §408). An org with no row has nothing stored.
+    """
+    fields = (
+        await db.execute(
+            select(ProviderCredential.secret_fields).where(
+                ProviderCredential.organization_id == org.id, ProviderCredential.block == block
+            )
+        )
+    ).scalar_one_or_none()
+    return frozenset(fields or ())
+
+
 async def credential_status(db: AsyncSession, org_id: uuid.UUID) -> dict[str, list[str]]:
     """Which secret paths are set, per block — names only, no decrypt."""
     rows = (

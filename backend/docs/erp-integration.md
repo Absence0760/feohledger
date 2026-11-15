@@ -280,6 +280,33 @@ switch to another ERP drops every sealed secret, the webhook key included
 (`catalog.secrets_to_drop`), so a key stored for one ERP never verifies another
 (decisions §399, amendment).
 
+**Per-tenant webhooks: nothing unsealed before the cheap checks (decisions
+§408).** The generic route and `/webhook/merge_dev/{tenant_slug}` verify
+against a key sealed in the tenant's ERP credentials, so an unauthenticated
+caller could once make us open a tenant's sealed block on demand, and the
+answer differed by slug (a 503 when the credentials could not be opened, before
+the signature was checked). Both now run every check that needs no secret
+first, in this order, each refusal the same silent 204: the body size; the
+route's ERP (`merge_dev` refused on the generic route); a signature header of
+the route's digest shape (`webhook_security.well_formed_hex_sha256` — 64
+lower-case hex digits — or `well_formed_base64url_sha256` — strict base64url of
+32 bytes), since anything else can never verify; on the generic route the
+body's shape and a string `tenant_slug`; the slug naming a tenant; its PUBLIC
+ERP configuration resolving to the route's adapter; and a webhook key being
+stored at all, read from the sealed row's path NAMES without decrypting
+(`provider_credentials.stored_secret_paths`). Only then is the block opened
+(`api/erp_webhook._tenant_webhook_config`), once. A block that cannot be opened
+is the same 204, logged as an error. What remains: the block is one envelope, so
+opening it decrypts its other secrets with the key (nothing reads them before
+the signature verifies); a well-formed signature at a configured tenant still
+costs one unseal (a KMS `Decrypt` at most once per data key per process per
+five minutes, then the in-process cache), so the response TIME of a configured
+tenant can differ from an unknown slug's — the response itself never does; and
+a genuine delivery that arrives while the credential store is down is not
+redelivered (`docs/followups.md`). The QuickBooks and Xero routes verify against
+one platform key from the environment, never a tenant's sealed one, so none of
+this applies to them.
+
 The webhook handler:
 1. Validates the request (signature, API key, or IP whitelist)
 2. Dedupes by `event_id` (`services/webhook_security.is_event_already_processed`)
@@ -697,8 +724,11 @@ webhooks, older spelling `webhook_secret`) — are **not** in
   `connection_id`, expiry, company id) and reads as `{"connected": bool}`.
 - **Fail closed.** A store that cannot be opened (KMS unreachable, a bad
   envelope) is never "no ERP": an ERP send lands `failed`
-  (`erp_credentials_unavailable`, retryable), the ERP webhook answers a bodyless
-  503 so the ERP retries, the vendor / GL / PO syncs answer 503, an OAuth refresh
+  (`erp_credentials_unavailable`, retryable), the per-tenant ERP webhooks
+  (generic and Merge.dev) refuse the delivery with the same silent 204 as a bad
+  signature and log an error — the key they could not open is the key the
+  signature needed, so a 503 there would answer a configured slug differently
+  before anything was verified (decisions §408) — the vendor / GL / PO syncs answer 503, an OAuth refresh
   raises `ErpCredentialUnreadableError` (a failed push, never a reconnect mark),
   and a payment-sync leg fails into `erp_reconciliation`.
 - **A configuration change is audited too** (`organization.provider_config_updated`,
@@ -759,6 +789,22 @@ request, so a public look-alike host the SSRF guard would pass is a credential l
 `post_invoice` refuses it non-retryably before the token exchange. The operator override
 `FEOH_ERP_D365_API_BASE` is exempt.
 **Auth:** OAuth 2.0 client credentials
+
+**Nothing to revoke** (decisions §407). The customer registers an app in their
+own Microsoft Entra tenant, gives us its client id and a client secret, and
+enables that client id on Business Central's *Microsoft Entra Applications*
+page. We hold the secret, never a consent or refresh token, and mint
+60–90-minute access tokens. The Microsoft identity platform publishes no
+revocation endpoint (its discovery document has no `revocation_endpoint`), and
+ending the secret or the BC record needs rights our BC-scoped token does not
+carry. Tenant deletion reports `unsupported` without a call, and its
+confirmation tells the customer to set our client ID to Disabled (or delete it)
+on that page and delete the client secret from the app registration. Sources,
+checked 2026-11-14: *Using Service to Service Authentication*
+(<https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication>),
+*Access tokens* § Token lifetime
+(<https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens>), and
+<https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration>.
 
 **Create Purchase Invoice:**
 ```
@@ -1340,7 +1386,13 @@ reasoning).
   QuickBooks also sets it for any refusal before its bill create is sent and
   when Intuit refused the create itself with a 4xx, e.g. closed books), and
   even then an earlier attempt's unknown outcome is kept. A refusal after a
-  lookup stays unknown: the lookup may have found our own earlier bill. `erp.possibly_posted` reads that flag,
+  lookup stays unknown: the lookup may have found our own earlier bill. Beside the
+  flag, `erp_outcome_unknown_at` keeps when that attempt ended, handed to the
+  adapter as `InvoicePayload.outcome_unknown_since` (Merge.dev waits on it, §405,
+  § Merge.dev below). Only an attempt's end is final
+  (`erp_outcome_unknown_at_final`): the start committed before the call is
+  provisional, and a provisional stamp read later (the attempt died before its
+  failure was committed) is replaced by the time it is read (§409). `erp.possibly_posted` reads that flag,
   an unconfirmed ERP job, an orphan document or an `erp_reference`. When it is
   true, the refusal's params, the 409 and the `invoice.erp_failed` row carry
   `possibly_posted: true`, and the browser says to check the ERP before anyone
@@ -1942,7 +1994,7 @@ target ERP actually supports:
 
 | Adapter | Mechanism |
 |---|---|
-| `merge_dev` | Pre-create lookup: `GET /invoices?number=<invoice number>&contact_id=<vendor's Merge id>&type=ACCOUNTS_PAYABLE` (exact filters, the number compared again; a `VOID` or deleted bill ignored). One live bill at exactly the approved total, in the invoice's currency, is our earlier attempt and short-circuits to success; anything else under the number refuses `duplicate_document_number`; a lookup that cannot finish is a retryable failure that creates nothing (a 401 is `not_connected`). Then `Idempotency-Key: <correlation_id>` on `POST /invoices`. That header is a **beta Merge enables per customer and keeps 24 hours**, so the lookup is what is relied on; the `X-Idempotency-Key` this sent until decisions §399 is not one Merge reads at all. The residual: Merge's listing may not show a bill written through it until its next sync, so a create whose outcome is unknown is not retried automatically (§ Merge.dev: idempotency, refusals, region and webhook), and only the header (where enabled) covers a person's retry inside that window. |
+| `merge_dev` | Pre-create lookup: `GET /invoices?number=<invoice number>&contact_id=<vendor's Merge id>&type=ACCOUNTS_PAYABLE` (exact filters, the number compared again; a `VOID` or deleted bill ignored). One live bill at exactly the approved total, in the invoice's currency, is our earlier attempt and short-circuits to success; anything else under the number refuses `duplicate_document_number`; a lookup that cannot finish is a retryable failure that creates nothing (a 401 is `not_connected`). Then `Idempotency-Key: <correlation_id>` on `POST /invoices`. That header is a **beta Merge enables per customer and keeps 24 hours**, so the lookup is what is relied on; the `X-Idempotency-Key` this sent until decisions §399 is not one Merge reads at all. Merge's listing may not show a bill written through it until its next sync, so a create whose outcome is unknown is not retried automatically, and a person's retry waits until `GET /sync-status` shows `Invoice` synced since that attempt (`merge_sync_pending` until then, decisions §405; § Merge.dev: idempotency, refusals, region and webhook). |
 | `netsuite` | Pre-create lookup: `GET /vendorBill/eid:<correlation_id>`, Oracle's form for addressing a record by external id (NetSuite enforces `externalId` uniqueness per record type). The collection query `?q=externalId IS "…"` it replaced is documented only as a pipe workaround and reported refused on transactions (decisions §398, N2). A miss is a 404 whose `o:errorCode` is `NONEXISTENT_ID`; any other 404 or an unreadable 200 fails the push. A hit is the bill itself and short-circuits `post_invoice` to success only when its `total` is the approved amount, its `currency` the invoice's and NetSuite shows it approved (the same checks as a fresh create); only a miss proceeds to `POST /vendorBill`. |
 | `dynamics_365_bc` | Pre-create lookup on BC's own duplicate key: `GET purchaseInvoices?$filter=vendorId eq <vendor guid> and vendorInvoiceNumber eq '<NUMBER>'` (upper-cased, since `Vendor Invoice No.` is a `Code[35]` field; a quote doubled). API v2.0's purchaseInvoice has no `externalDocumentNumber`, so the old filter on it failed every push. More than one hit refuses `duplicate_document_number`; a 200 whose body is not a collection is a retryable failure, never a miss. A hit found `Paid` refuses `existing_invoice_not_open` whatever its total — BC has paid a bill we cannot prove we sent, and since BC has no status sync, success would close the invoice at `done` as our own push, with that payment recorded nowhere here. Any other hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount **and** its `currencyCode` is the invoice's (a blank code is BC's local currency, read from `GET companyInformation`; any difference, or an LCY BC does not state, refuses `posted_total_mismatch`; a failed LCY read is retryable); a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` at the approved total and in the invoice's currency (an earlier attempt whose post step failed or whose response was lost) is finished: `Microsoft.NAV.post` re-run and the posted total read back — never a second create. A `Draft` at any other total may be a BC user's own draft of this bill, so it is refused `posted_total_mismatch` and **left in BC, never deleted or repriced** (decisions §391); a coded post refusal of a found draft leaves it in BC too. **The one exception is our own draft** (decisions §397): a `Draft` whose id is the one an earlier attempt recorded from its own create (`own_orphan_document_id`), and which is still exactly what we sent — its three totals equal to the ones BC answered our create with (which catches a line's tax group changed, a field we never send), its lines (`GET purchaseInvoices({id})/purchaseInvoiceLines`: type, account, description, quantity, unit cost, as a multiset), `totalAmountExcludingTax` equal to those lines' sum, the dates we sent, and the invoice's currency — is handled as a draft just created: a gross one BC taxed on top is repriced to the net, a net one is not repriced again, and a mismatch is deleted. Any other id, an edited draft, or one no longer a draft gets the found treatment above. A failed read before the draft is judged is retryable, touches nothing and keeps the claim for the next attempt. A create whose response was lost outright reports no id, so its draft is never recognised and still needs deleting in BC before the retry. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. **Whoever the bill pays is checked too** (decisions §403): a hit, or a draft we created, whose `payToVendorId` is set (not blank or BC's empty GUID) and is not our linked vendor, or whose own `vendorId` is not ours, refuses `pay_to_vendor_differs` whatever its total — a found record left in BC, a draft we created deleted, a posted one never deleted. We never send a pay-to vendor, so a different one means a BC user redirected the bill or the vendor card's `Pay-to Vendor No.` filled it. |
 
@@ -2097,7 +2149,7 @@ One server fakes three provider surfaces by path prefix:
 | Provider | Fake surface | Path prefix |
 |---|---|---|
 | Merge.dev | Unified accounting API | `/merge/api/accounting/v1` |
-| NetSuite | SuiteTalk REST records + SuiteQL, OAuth 2.0 token endpoint | `/netsuite/services/rest/record/v1` (token at `/netsuite/services/rest/auth/oauth2/v1/token`) |
+| NetSuite | SuiteTalk REST records + SuiteQL, OAuth 2.0 token endpoint, TBA `revoketoken` | `/netsuite/services/rest/record/v1` (token at `/netsuite/services/rest/auth/oauth2/v1/token`, revoke at `/netsuite/rest/revoketoken`) |
 | Dynamics 365 BC | OData + OAuth token endpoint | `/d365` (token at `/d365/oauth2/token`) |
 
 `GET /health` reports liveness; `POST /__reset` restores the fixture state.
@@ -2130,7 +2182,11 @@ config. An admin-entered `base_url` in Organization settings is still guarded
 arbitrary host. NetSuite has no admin `base_url`: its host is built from
 `account_id`, which must be one hostname label (`[A-Za-z0-9_-]+`, so no dot,
 port, `@`, `/` or non-ASCII) before it reaches a URL — the token only ever goes
-to `<account>.suitetalk.api.netsuite.com`. Every adapter's host class is in
+to `<account>.suitetalk.api.netsuite.com`. Every NetSuite call still goes through
+the pinned client (`NetSuiteAdapter._client`, decisions §406), so a record that
+answers that host with an internal address is refused at connect, before the
+signed request is sent, and fails as an ordinary `httpx.ConnectError`; only the
+operator override keeps a plain client. Every adapter's host class is in
 `adapter-patterns.md` § Where an adapter's host comes from.
 
 ### Running the suite
@@ -2343,14 +2399,53 @@ write-error guides (read 2026-11-13). Reasoning: `docs/decisions.md` §399.
   (`account_inactive`, `params.accounts`), both not posted; with neither it is
   `bill_refused` kept **possibly posted**, since it is the integration's
   catch-all; every other documented "not created" problem is `bill_refused`,
-  not posted. Each carries `params.merge_problem`. Only 429 (Merge's rate
-  limit) and a connection that was never made are retried automatically. A 5xx,
+  not posted. Each carries `params.merge_problem`. Only a connection that was
+  never made is retried automatically, and it is not posted (nothing reached
+  the ERP). A 429, 5xx,
   408, 409 or a lost response (read timeout, dropped connection) after the
   create was sent is non-retryable and possibly posted ("outcome unknown"): the
   automatic retry would come within seconds, before Merge's listing may show a
   bill written through it, and the `Idempotency-Key` that would catch it may be
   off. A person's retry runs the lookup again. `ERROR`, an undocumented code or
   no `errors` at all is the plain non-retryable HTTP failure, possibly posted.
+- **A retry after an unknown outcome waits for Merge's sync** (decisions §405).
+  Merge's `GET /invoices` is its synced copy of the ERP, so the lookup cannot
+  rule out a bill an earlier attempt may have made until Merge has synced
+  invoices since. `services/erp` keeps the time that attempt ended
+  (`erp_outcome_unknown_at` beside `erp_outcome_unknown`, final only once the
+  attempt came back or raised; a row flagged before the stamp existed, or one
+  left with an attempt's provisional start by a crash or a cancelled task, is
+  stamped when next read, §409) and hands it over as
+  `InvoicePayload.outcome_unknown_since`. The adapter then reads
+  `GET /sync-status` **before** the lookup
+  (<https://docs.merge.dev/merge-unified/accounting/data-management/sync-status/list>,
+  read 2026-11-14) and takes the `Invoice` row's `data_fresh_as_of`, the start
+  of the last sync that completed. Only a time strictly more than
+  `SYNC_SETTLE_MARGIN` (10 minutes) after the stamp counts (§409): the stamp is
+  when our client gave up, httpx's 30 s timeout is per operation, and Merge
+  may still be writing the bill after that. Without that field, only a link at
+  rest (not `SYNCING`) whose last sync is `DONE` and started past the margin
+  counts, because Merge says
+  `last_sync_start` and `last_sync_finished` can belong to different syncs. If
+  the lookup finds our bill, the push succeeds whatever the sync says. If it
+  finds nothing and the sync is not yet past the stamp (or `Invoice` is not
+  listed), the push is refused `merge_sync_pending`. That refusal is not posted
+  and not retried automatically: a retry seconds later meets the same sync, so
+  a person retries after Merge's next one. An unreadable sync status is the
+  retryable `sync_status_unavailable` (nothing sent), and a 401 is
+  `not_connected`. A first attempt never asks.
+- **Tenant deletion** (decisions §405). `revoke_stored_access` calls
+  `POST /delete-account` with the account token
+  (<https://docs.merge.dev/merge-unified/accounting/linked-account/delete-account/delete>,
+  read 2026-11-14; 200, no body), which deletes the linked account. It reads
+  `revoked` only on that 200. The API key and the webhook with its signature
+  key (our `webhook_signing_secret`) belong to the customer's Merge
+  organisation, so the confirmation's `provider_side_disconnect` tells the
+  customer to delete the webhook, regenerate the signature key, regenerate or
+  delete the API key, and delete the linked account if it is still listed.
+  Until they do, the webhook keeps calling the deleted slug's URL. That is
+  safe: a later tenant on that slug verifies under its own key, so those
+  deliveries are dropped.
 - **Status read.** `get_invoice_status` reads Merge's enum (`PAID, DRAFT,
   SUBMITTED, PARTIALLY_PAID, OPEN, VOID`; the old map read `VOIDED`, which Merge
   never sends). `PAID` is `paid` only with a payment listed and no credit;
@@ -2391,10 +2486,11 @@ write-error guides (read 2026-11-13). Reasoning: `docs/decisions.md` §399.
   `erp_reconciliation` exception, and a payment there changes nothing. Every
   decision (unknown tenant, a tenant not on Merge or with no key, a bad
   signature, another event, a duplicate, a bill nobody pushed) is a silent 204;
-  our own failure (dedup store, the bill read, tenant DB) is a bodyless 503 with
-  the claim released. Credentials that cannot be opened are a 503 too, before
-  the signature can be checked (the key is what failed), as on the generic
-  route. Unlike the QuickBooks and Xero webhooks it is not gated on
+  our own failure after the signature verifies (dedup store, the bill read,
+  tenant DB) is a bodyless 503 with the claim released. Nothing before it is:
+  the tenant's key is opened only after the checks that need no secret (§
+  Per-tenant webhooks: nothing unsealed before the cheap checks), and a key
+  that cannot be opened is the same silent 204. Unlike the QuickBooks and Xero webhooks it is not gated on
   `FEOH_ERP_STATUS_SYNC_ENABLED`: that switch decides whether a push stays
   payable, which never applies to Merge; storing the key is the tenant's
   opt-in. The generic `/webhook/{erp_type}` route no longer reads
@@ -2504,7 +2600,18 @@ the customer's own server.
 | `posting_period` | no (optional) | APSTIN `PostingPeriod` (default `C`, current) |
 
 Every operation is `Logon` → work → `Logoff`, with the logoff in a `finally`:
-an orphaned session holds a SYSPRO licence seat. All calls are `GET` with
+an orphaned session holds a SYSPRO licence seat.
+
+**Nothing to revoke** (decisions §407). The stored operator login is the access;
+`Logoff` ends a session, not the operator's ability to log on again, and every
+operation already sends it. Tenant deletion reports `unsupported` without a
+call, and its confirmation tells the customer to set **Operator locked out**, or
+**Usage for e.net business objects** = **No access**, on that operator in
+Operator Maintenance, or change its password. It never asks for the company
+password to change: every operator of the company shares it. Source: *Operator
+Maintenance*
+(<https://help.syspro.com/syspro-8-2025/g_programs/imp/imppmp/imppmp.htm>,
+checked 2026-11-14). All calls are `GET` with
 query-string parameters, which is how the WCF REST host takes them:
 
 | Operation | Business object |
@@ -3441,6 +3548,37 @@ retry, a refused assertion, every config refusal, and TBA unchanged),
 the re-mint after a 401, and a full send, against the running fake). Only a real
 NetSuite account proves Oracle accepts the assertion (`docs/followups.md`).
 
+**Tenant deletion** (decisions §400, §406). The confirmation names the
+customer's step by sign-in method, and deletion ends what it can:
+
+- **TBA:** Oracle documents a revoke endpoint the token's own user may call
+  ([Issue Token and Revoke Token REST Services](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/chapter_157017286140.html),
+  checked 2026-11-14): `GET https://<account>.restlets.api.netsuite.com/rest/revoketoken?consumerKey=…&token=…`,
+  signed with that token's OAuth header; a revoked token is inactive for good.
+  `NetSuiteAdapter.revoke_stored_access` calls it (after a closure's commit,
+  like every provider call at deletion). Oracle documents no response body, so
+  `revoked` is reported only when the same token, asked for one vendor right
+  after, is refused 401; a refusal, an outage or a token that still works is
+  `failed`. The step named is revoking the token under *Setup > Users/Roles >
+  User Management > Access Tokens*
+  ([Viewing, Editing, Creating, and Revoking TBA Tokens](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/bridgehead_4249078810.html)),
+  if it does not already show as inactive.
+- **OAuth 2.0 client credentials:** `unsupported`, with no call. Oracle's
+  OAuth 2.0 revoke endpoint
+  ([POST Request to the Revoke Token Endpoint](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_161071224088.html))
+  takes a refresh token, which this grant never issues, and the 60-minute
+  access tokens cannot be revoked. What ends the access is revoking the
+  certificate under *Setup > Integration > Manage Authentication > OAuth 2.0
+  Client Credentials (M2M) Setup*
+  ([OAuth 2.0 Client Credentials Setup](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162686838198.html)),
+  which an administrator does; the certificate rotation endpoint needs a
+  permission our role is never asked for. That is the step named.
+
+Under `FEOH_ERP_NETSUITE_API_BASE` the revoke goes to `<root>/rest/revoketoken`
+beside the overridden REST root, which fake-erp answers (a revoked token then
+401s). Tests: `tests/test_erp_netsuite_adapter.py` (against fake-erp, and the
+failure outcomes) and `tests/test_tenant_deletion.py`.
+
 ## NetSuite: SuiteQL syncs and void
 
 `erp_adapters/netsuite.py`. Every list sync is one SuiteQL query
@@ -3800,10 +3938,12 @@ the control-plane rows (which hold them) are deleted, calls
 It never blocks the deletion and never logs a token. An ERP reached with
 **stored credentials** instead of a consent is covered when its adapter states
 `provider_side_disconnect` (§400): Sage Intacct's tokens are revoked at Intacct
-(`revoke_stored_access`, after a closure's commit like an OAuth revoke) and
-Sage Accounting (ZA) reads `unsupported`; the confirmation's `ERP credentials:`
-line names the step the customer takes at the provider. Merge.dev, Business
-Central, NetSuite and SYSPRO state none yet (`docs/followups.md`). An empty
+(`revoke_stored_access`, after a closure's commit like an OAuth revoke),
+Merge.dev's linked account is deleted at Merge (§405) and NetSuite's TBA token
+revoked (§406, § NetSuite sign-in → Tenant deletion), and Sage Accounting (ZA),
+Business Central and SYSPRO read `unsupported` (§400, §407); the confirmation's
+`ERP credentials:` line names the step the customer takes at the provider in
+every case. An empty
 `scopes` sends no `scope`. Operator URL overrides (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before

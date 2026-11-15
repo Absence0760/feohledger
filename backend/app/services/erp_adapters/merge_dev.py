@@ -23,11 +23,34 @@ and write-error guides, read 2026-11-13 (decisions §399):
 
 A bill the webhook names (``api/erp_webhook.merge_webhook``) is read back by
 :meth:`MergeDevAdapter.bill_report` and mapped by :func:`merge_bill_report`.
+
+Checked against the same spec, read 2026-11-14 (decisions §405):
+
+* ``GET /sync-status`` lists one ``SyncStatus`` per model (``model_name``,
+  ``status``, ``last_sync_result``, ``last_sync_start``,
+  ``last_sync_finished``, ``data_fresh_as_of``), cursor-paginated. Merge's
+  description: ``last_sync_start`` and ``last_sync_finished`` may belong to
+  different syncs, and ``data_fresh_as_of`` is "the start time of the most
+  recent sync that completed successfully for the model", null until one has
+  (https://docs.merge.dev/merge-unified/accounting/data-management/sync-status/list).
+  Before re-creating a bill after an attempt whose outcome is unknown, the
+  push waits until ``Invoice`` is fresh as of after that attempt
+  (:func:`invoice_sync_covers`), so the pre-create lookup reads a listing that
+  would show the bill if the attempt made one;
+* ``POST /delete-account`` (``X-Account-Token``, answering 200 with no body)
+  deletes the linked account
+  (https://docs.merge.dev/merge-unified/accounting/linked-account/delete-account/delete;
+  https://help.merge.dev/en/articles/5388451-deleting-a-linked-account).
+  Tenant deletion calls it (:meth:`MergeDevAdapter.revoke_stored_access`).
+  The API key and the webhook signature key belong to the customer's Merge
+  organisation, and only the customer can regenerate them: the webhook guide
+  (https://docs.merge.dev/merge-unified/reading-data/webhooks/merge-webhooks)
+  says the signature key "can be regenerated".
 """
 
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -117,6 +140,17 @@ _NOT_CREATED_PROBLEMS = frozenset(
         *_RECONNECT_PROBLEMS,
     }
 )
+
+#: No sync of ``Invoice`` has finished since an earlier attempt of this push
+#: whose outcome is unknown, so the pre-create lookup cannot yet rule out the
+#: bill that attempt may have made (decisions §405). Nothing was sent.
+MERGE_SYNC_PENDING = "merge_sync_pending"
+
+#: ``SyncStatus.model_name`` of the model a bill is (Merge's ``Invoice``).
+_INVOICE_MODEL = "INVOICE"
+#: Pages of ``GET /sync-status`` read; an accounting link has a few dozen
+#: models, so more than this is an answer we cannot read.
+_SYNC_STATUS_MAX_PAGES = 5
 
 #: The shape of a Merge ``problem_type``. Only such a value is ever read.
 _PROBLEM_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
@@ -226,6 +260,52 @@ def _outcome_unknown(message: str) -> ErpPostResult:
     ``Idempotency-Key`` that would catch it is a beta that may be off). Stays
     possibly posted; a person's retry runs the lookup again (decisions §399)."""
     return ErpPostResult(success=False, message=f"{message} (outcome unknown)", retryable=False)
+
+
+def _merge_time(value: object) -> datetime | None:
+    """A Merge ``date-time`` as an aware datetime, or None (absent, null,
+    unparseable, or naive: a time with no zone cannot be ordered against ours)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+#: How long after ``since`` (when our client gave up on the create) a sync must
+#: have started to vouch for the listing (decisions §409). ``since`` is our
+#: side's end: httpx's ``timeout=30`` is per operation, so the request can run
+#: past a minute, and Merge may still be writing to the ERP after we stop
+#: waiting — whether it finishes a create the client abandoned is unverified
+#: (#654). Too short a margin costs a second bill; too long costs one more
+#: sync's wait, so it is generous.
+SYNC_SETTLE_MARGIN = timedelta(minutes=10)
+
+
+def invoice_sync_covers(row: dict, since: datetime) -> bool:
+    """Does Merge's ``SyncStatus`` row say its ``Invoice`` data is complete
+    through a time more than :data:`SYNC_SETTLE_MARGIN` after ``since``?
+
+    ``data_fresh_as_of`` is that time when Merge reports it: the start of the
+    most recent sync that completed successfully. Without it, only a link at
+    rest whose last sync is ``DONE`` and started after ``since`` qualifies:
+    while one is ``SYNCING``, ``last_sync_start`` is the running sync's start
+    and says nothing about what is complete. Anything else, a ``FAILED`` or
+    ``PARTIALLY_SYNCED`` result included, is "not yet". Strictly after: a sync
+    that started at the very moment cannot be shown to have seen the bill.
+    """
+    since = since + SYNC_SETTLE_MARGIN
+    fresh = _merge_time(row.get("data_fresh_as_of"))
+    if fresh is not None:
+        return fresh > since
+    if "data_fresh_as_of" in row:
+        return False  # null: no sync has completed yet
+    status = str(row.get("status") or "").upper()
+    result = str(row.get("last_sync_result") or "").upper()
+    started = _merge_time(row.get("last_sync_start"))
+    return status != "SYNCING" and result == "DONE" and started is not None and started > since
 
 
 class MergeConfigError(ValueError):
@@ -427,6 +507,18 @@ class MergeDevAdapter(ErpAdapter):
     erp_type = "merge_dev"
     # Every PO with no number used to be filed under this one row (§328).
     retired_po_numbers = ("UNKNOWN",)
+    # Tenant deletion deletes the linked account (`revoke_stored_access`), but
+    # the API key and the webhook with its signature key (our
+    # `webhook_signing_secret`) are the customer's Merge organisation's, and
+    # only the customer can regenerate them (decisions §405). Until they do,
+    # the webhook keeps calling the deleted slug's URL; a later tenant on that
+    # slug verifies under its own key, so those deliveries are dropped.
+    provider_side_disconnect = (
+        "in the Merge dashboard, delete the webhook that points at FeohLedger, "
+        "regenerate the webhook signature key, regenerate or delete the Merge API "
+        "key FeohLedger held, and delete the linked account if it is still listed"
+    )
+    revokes_stored_access = True
 
     def _base(self) -> str:
         return _api_base(self.config.get("region"))
@@ -491,6 +583,45 @@ class MergeDevAdapter(ErpAdapter):
             params["cursor"] = cursor
         return None
 
+    async def _invoice_synced_since(
+        self, client: httpx.AsyncClient, since: datetime
+    ) -> bool | None:
+        """Has Merge finished a sync of ``Invoice`` covering a time after
+        ``since`` (:func:`invoice_sync_covers`)?
+
+        False when it has not, or when ``GET /sync-status`` lists no
+        ``Invoice`` model: the listing cannot be shown to be current. None when
+        the answer could not be read. Raises :class:`_LookupUnauthorized` on a
+        401.
+        """
+        params = {"page_size": "100"}
+        for _ in range(_SYNC_STATUS_MAX_PAGES):
+            try:
+                resp = await client.get(
+                    f"{self._base()}/sync-status", params=params, headers=self._headers()
+                )
+            except httpx.HTTPError:
+                return None
+            if resp.status_code == 401:
+                raise _LookupUnauthorized
+            if resp.status_code != 200:
+                return None
+            body = _json_body(resp)
+            results = body.get("results")
+            if not isinstance(results, list):
+                return None
+            for row in results:
+                if (
+                    isinstance(row, dict)
+                    and str(row.get("model_name") or "").strip().upper() == _INVOICE_MODEL
+                ):
+                    return invoice_sync_covers(row, since)
+            cursor = body.get("next")
+            if not cursor:
+                return False
+            params["cursor"] = cursor
+        return None
+
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         # Merge's Invoice references its vendor (`contact`) and each line's
         # `account` by MERGE object id — the ids our vendor and chart syncs
@@ -546,11 +677,28 @@ class MergeDevAdapter(ErpAdapter):
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                # Merge hands back no field of ours to find the bill by, so an
-                # earlier attempt is found by vendor + number: one live bill
-                # with our total is it; anything else is a different document
-                # under the same number.
+                # After an attempt whose outcome is unknown, the lookup below
+                # only rules that attempt's bill out once Merge has synced
+                # invoices since it: Merge's listing is its synced copy, and
+                # the Idempotency-Key beta may be off. Asked BEFORE the lookup,
+                # so the listing it reads is at least that fresh (§405).
+                synced = True
                 try:
+                    if payload.outcome_unknown_since is not None:
+                        synced = await self._invoice_synced_since(
+                            client, payload.outcome_unknown_since
+                        )
+                        if synced is None:
+                            result = ErpPostResult(
+                                success=False,
+                                message=f"{PROVIDER} post failed: sync_status_unavailable",
+                            )
+                            result.not_posted = True
+                            return result
+                    # Merge hands back no field of ours to find the bill by, so
+                    # an earlier attempt is found by vendor + number: one live
+                    # bill with our total is it; anything else is a different
+                    # document under the same number.
                     existing = await self._find_existing(client, payload)
                 except _LookupUnauthorized:
                     return _coded(NOT_CONNECTED, not_posted=True)
@@ -564,6 +712,11 @@ class MergeDevAdapter(ErpAdapter):
                     return result
                 if existing:
                     return self._found(existing, payload)
+                if not synced:
+                    # Found nothing, but the listing may not show that attempt's
+                    # bill yet. Not retried automatically: a retry seconds later
+                    # meets the same sync; a person retries after Merge's next.
+                    return _coded(MERGE_SYNC_PENDING, not_posted=True)
 
                 resp = await client.post(
                     f"{self._base()}/invoices",
@@ -574,8 +727,11 @@ class MergeDevAdapter(ErpAdapter):
                     return await self._created(resp, payload)
                 return await self._create_refusal(client, resp, payload)
         except (httpx.ConnectError, httpx.ConnectTimeout):
-            # No connection was made, so nothing was sent: safe to send again.
-            return ErpPostResult(success=False, message=f"{PROVIDER} post failed: network_error")
+            # No connection was made, so nothing was sent: safe to send again,
+            # and no earlier bill's wait (§405) starts over for it.
+            result = ErpPostResult(success=False, message=f"{PROVIDER} post failed: network_error")
+            result.not_posted = True
+            return result
         except httpx.HTTPError:
             return _outcome_unknown(f"{PROVIDER} post failed: network_error")
 
@@ -645,10 +801,11 @@ class MergeDevAdapter(ErpAdapter):
 
         * 401 — a bad API key or account token: ``not_connected``, not retried
           (Merge has no token for us to refresh).
-        * 429 — Merge's rate limit, which processed nothing: retryable.
-        * any other status a re-send could change (5xx, 408, 409, ...) — the
+        * any status a re-send could change (429, 5xx, 408, 409, ...) — the
           create may have landed, and Merge's listing may not show it for
-          seconds: not retried automatically (:func:`_outcome_unknown`).
+          seconds: not retried automatically (:func:`_outcome_unknown`). A
+          429 is no exception: whether Merge ever answers one after the write
+          reached the integration is unverified (#654, decisions §409).
         * otherwise Merge's ``errors[].problem_type`` decides: relink →
           ``not_connected``; a duplicate → ``duplicate_document_number``
           (fail-closed, :data:`_DUPLICATE_PROBLEMS`); ``PROVIDER_ERROR`` →
@@ -662,8 +819,6 @@ class MergeDevAdapter(ErpAdapter):
         status = resp.status_code
         if status == 401:
             return _coded(NOT_CONNECTED, not_posted=True)
-        if status == 429:
-            return erp_http_failure(PROVIDER, status)
         if erp_status_retryable(status):
             result = erp_http_failure(PROVIDER, status)
             result.retryable = False
@@ -716,6 +871,32 @@ class MergeDevAdapter(ErpAdapter):
         if resp.status_code != 200:
             return None
         return _json_body(resp) or None
+
+    async def revoke_stored_access(self) -> str | None:
+        """Delete the linked account at Merge, once the tenant is being
+        deleted (decisions §405).
+
+        ``POST /delete-account`` with the account token, which Merge answers 200
+        with no body. ``revoked`` only on that 200; anything else, an outage
+        or a missing credential, is ``failed``, and the confirmation then tells
+        the customer to delete it. The API key and the webhook are the
+        customer's to end either way (:attr:`provider_side_disconnect`). Never
+        raises; names the status only, never a key or a token.
+        """
+        from app.services.erp_oauth import REVOKE_FAILED, REVOKED
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(f"{self._base()}/delete-account", headers=self._headers())
+        except Exception as exc:  # noqa: BLE001 — best-effort by contract
+            logger.warning("%s linked-account deletion failed: %s", PROVIDER, type(exc).__name__)
+            return REVOKE_FAILED
+        if resp.status_code != 200:
+            logger.warning(
+                "%s linked-account deletion refused: HTTP %s", PROVIDER, resp.status_code
+            )
+            return REVOKE_FAILED
+        return REVOKED
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
         try:

@@ -1,6 +1,37 @@
 """Microsoft Dynamics 365 Business Central adapter — direct OAuth2 REST integration.
 
 API reference (API v2.0): https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/api-reference/v2.0/
+
+**Revocation (decisions §407).** The access is service-to-service: the customer
+registers an application in their own Microsoft Entra tenant, gives us its
+client id and a client secret, and grants that client id access on Business
+Central's **Microsoft Entra Applications** page (State ``Enabled``, permission
+sets). We hold no consent and no refresh token, only the client secret, and
+mint 60-90-minute access tokens with the client-credentials grant. Nothing on
+Microsoft's side lets us end that access:
+
+* the Microsoft identity platform publishes no token revocation endpoint (its
+  discovery document has no ``revocation_endpoint``), and an issued access
+  token lives out its lifetime;
+* ending the credential means deleting the client secret, disabling the
+  application in Entra, or disabling / deleting the BC record, and our token
+  carries only the Business Central API scope, not the Microsoft Graph
+  permission to touch the customer's app registration.
+
+So :attr:`BusinessCentralAdapter.provider_side_disconnect` names both halves
+of the customer's step and tenant deletion reports ``unsupported`` without a
+call.
+
+References (checked 2026-11-14):
+
+* Using Service to Service Authentication (Task 1: app registration and
+  client secret; Task 2: the Microsoft Entra Applications page, State
+  ``Enabled``) —
+  https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication
+* Access tokens, "Token lifetime" (60-90 minutes by default) —
+  https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens
+* The discovery document, which lists no ``revocation_endpoint`` —
+  https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration
 """
 
 from __future__ import annotations
@@ -137,6 +168,15 @@ class BusinessCentralAdapter(ErpAdapter):
     """
 
     erp_type = "dynamics_365_bc"
+    # Nothing to revoke (decisions §407): Microsoft publishes no revocation
+    # endpoint for a client-credentials token, and ending the client secret or
+    # the BC record needs rights our BC-scoped token does not carry. Deleting
+    # our sealed secret ends nothing at Microsoft, so the customer does both.
+    provider_side_disconnect = (
+        "set FeohLedger's client ID to Disabled (or delete it) on the Microsoft Entra "
+        "Applications page in Business Central, and delete the client secret FeohLedger "
+        "held from that app registration in the Microsoft Entra admin center"
+    )
 
     async def _get_token(self) -> str:
         # OPERATOR-controlled override (env/process level, not tenant-admin

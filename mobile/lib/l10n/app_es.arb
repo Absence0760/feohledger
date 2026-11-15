@@ -187,6 +187,7 @@
   "glChartRefusalOnLines": "Líneas de la factura: {reasons}",
   "codedRefusalApprovalSegregation": "Segregación de funciones: un usuario que participó en la creación de esta factura no puede también aprobarla.",
   "codedRefusalApprovalSegregationReceiver": "Segregación de funciones: un usuario que registró una recepción de mercancías facturada en esta factura no puede también aprobarla.",
+  "codedRefusalApprovalSegregationInspector": "Segregación de funciones: un usuario que registró una inspección de calidad de la mercancía facturada en esta factura no puede también aprobarla.",
   "codedRefusalInvoiceStaleApproval": "Esta factura se modificó después de que la cargara. Vuelva a cargarla y revise la versión actual antes de aprobarla.",
   "codedRefusalApprovalLevelReuse": "Ya aprobó un nivel anterior de esta cadena; se requiere un aprobador distinto.",
   "codedRefusalApprovalNotNamedApprover": "No es un aprobador autorizado para este paso.",

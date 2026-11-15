@@ -643,13 +643,19 @@ async def test_erp_webhook_silently_returns_for_unknown_tenant(fake_redis):
         }
     ).encode("utf-8")
 
-    with patch("app.api.erp_webhook.control_session_factory", _ctrl_session_for_org(None)):
+    opened = AsyncMock()
+    with (
+        patch("app.api.erp_webhook.control_session_factory", _ctrl_session_for_org(None)),
+        patch("app.api.erp_webhook.provider_config", opened),
+    ):
         result = await erp_webhook(
             erp_type="generic",
-            request=_fake_request(body_bytes, {"X-Webhook-Signature": "sig"}),
+            # Well-formed, so the request reaches the slug lookup (decisions §408).
+            request=_fake_request(body_bytes, {"X-Webhook-Signature": _sign("guess", body_bytes)}),
         )
 
     assert result is None
+    opened.assert_not_awaited()  # nothing unsealed for a slug that names no tenant
 
 
 @pytest.mark.asyncio
@@ -746,3 +752,187 @@ async def test_erp_webhook_logs_when_signing_secret_unconfigured(fake_redis, cap
     assert any(
         "signing_secret" in r.getMessage() and "acme" in r.getMessage() for r in caplog.records
     ), "expected a PII-free unconfigured-secret warning"
+
+
+# ---------------------------------------------------------------------------
+# ERP webhook: nothing unsealed before the checks that need no secret (§408)
+# ---------------------------------------------------------------------------
+
+
+def _erp_body(**overrides) -> bytes:
+    import json
+
+    body = {
+        "tenant_slug": "acme",
+        "correlation_id": str(uuid.uuid4()),
+        "erp_document_id": "doc_408",
+        "status": "Open",
+        "event_id": "ev_408",
+    }
+    body.update(overrides)
+    return json.dumps(body).encode("utf-8")
+
+
+async def _erp_post_counting_unseals(body: bytes, headers: dict, *, org, opened=None):
+    """The generic route with ``provider_config`` — the one opening of the
+    sealed ERP block — as a spy, and the tenant DB refused outright."""
+    from app.api.erp_webhook import erp_webhook
+
+    opened = opened or AsyncMock(side_effect=lambda o, *_a, **_k: o.settings["erp"])
+    ctrl = _ctrl_session_for_org(org)
+    with (
+        patch("app.api.erp_webhook.control_session_factory", ctrl),
+        patch("app.api.erp_webhook.provider_config", opened),
+        patch("app.api.erp_webhook.get_tenant_engine") as engine,
+    ):
+        result = await erp_webhook(erp_type="generic", request=_fake_request(body, headers))
+    return result, opened, ctrl, engine
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "signature",
+    [None, "", "sig", "A" * 64, "sha256=" + "a" * 64, "a" * 63],
+    ids=["absent", "empty", "short", "upper-case", "prefixed", "63-digits"],
+)
+async def test_erp_webhook_signature_that_could_never_verify_looks_nothing_up(
+    fake_redis, signature
+):
+    """Only 64 lower-case hex digits can ever equal `hexdigest()`; anything
+    else is refused before the tenant is even looked up."""
+    body = _erp_body()
+    headers = {} if signature is None else {"X-Webhook-Signature": signature}
+    result, opened, ctrl, engine = await _erp_post_counting_unseals(
+        body, headers, org=_org_with_erp_secret("real")
+    )
+    assert result is None
+    ctrl.assert_not_called()
+    opened.assert_not_awaited()
+    engine.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "org",
+    [
+        None,
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            slug="acme",
+            db_name="feoh_acme",
+            settings={
+                "erp": {
+                    "type": "netsuite",
+                    "integration_method": "direct",
+                    "webhook_signing_secret": "real",
+                }
+            },
+        ),
+        _org_with_erp_secret(""),  # the tenant's ERP, no key stored
+        SimpleNamespace(id=uuid.uuid4(), slug="acme", db_name="feoh_acme", settings={}),
+    ],
+    ids=["unknown-slug", "another-erp", "no-key-stored", "no-erp"],
+)
+async def test_erp_webhook_unseals_nothing_for_a_tenant_whose_key_could_not_verify(fake_redis, org):
+    body = _erp_body()
+    result, opened, _ctrl, engine = await _erp_post_counting_unseals(
+        body, {"X-Webhook-Signature": _sign("guess", body)}, org=org
+    )
+    assert result is None
+    opened.assert_not_awaited()
+    engine.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_erp_webhook_unknown_slug_answers_exactly_as_a_bad_signature(fake_redis):
+    body = _erp_body()
+    headers = {"X-Webhook-Signature": _sign("not-the-tenants-key", body)}
+    unknown, opened_unknown, _, _ = await _erp_post_counting_unseals(body, headers, org=None)
+    refused, opened_real, _, engine = await _erp_post_counting_unseals(
+        body, headers, org=_org_with_erp_secret("real")
+    )
+    assert unknown is None and refused is None
+    opened_unknown.assert_not_awaited()
+    opened_real.assert_awaited_once()  # the residual: the real key is opened to check
+    engine.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_erp_webhook_credentials_that_cannot_be_opened_are_a_silent_204(fake_redis):
+    """Not a 503: the signature cannot be checked without the key, and a 503
+    before it verifies would answer a configured slug differently (§408)."""
+    from app.services.credential_crypto import CredentialCryptoError
+
+    body = _erp_body()
+    result, _opened, _ctrl, engine = await _erp_post_counting_unseals(
+        body,
+        {"X-Webhook-Signature": _sign("real", body)},
+        org=_org_with_erp_secret("real"),
+        opened=AsyncMock(side_effect=CredentialCryptoError("kms")),
+    )
+    assert result is None
+    engine.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slug", [123, ["acme"], {"slug": "acme"}])
+async def test_erp_webhook_non_string_tenant_slug_is_a_silent_204(fake_redis, slug):
+    """Used to reach the slug query as a non-string bind (a 500)."""
+    body = _erp_body(tenant_slug=slug)
+    result, opened, ctrl, _engine = await _erp_post_counting_unseals(
+        body, {"X-Webhook-Signature": _sign("real", body)}, org=_org_with_erp_secret("real")
+    )
+    assert result is None
+    ctrl.assert_not_called()
+    opened.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_erp_webhook_verified_body_with_a_non_uuid_correlation_id_is_a_silent_204(
+    fake_redis,
+):
+    """It names no invoice of ours: a decision, not our failure. It used to
+    raise inside the handler's try into the 503 path, so the ERP redelivered
+    the same unparseable body for ever."""
+    body = _erp_body(correlation_id="not-a-uuid")
+    result, opened, _ctrl, engine = await _erp_post_counting_unseals(
+        body, {"X-Webhook-Signature": _sign("real", body)}, org=_org_with_erp_secret("real")
+    )
+    assert result is None
+    opened.assert_awaited_once()
+    engine.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_erp_webhook_dedup_store_down_after_verifying_asks_for_redelivery():
+    """Our failure on a verified delivery: a bodyless 503 (it escaped as a 500)."""
+    body = _erp_body()
+    with patch(
+        "app.api.erp_webhook.is_event_already_processed",
+        AsyncMock(side_effect=ConnectionError("redis")),
+    ):
+        result, _opened, _ctrl, engine = await _erp_post_counting_unseals(
+            body, {"X-Webhook-Signature": _sign("real", body)}, org=_org_with_erp_secret("real")
+        )
+    assert result.status_code == 503 and result.body == b""
+    engine.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("provided", "ok"),
+    [
+        ("a" * 64, True),
+        ("0123456789abcdef" * 4, True),
+        ("a" * 63, False),
+        ("a" * 65, False),
+        ("A" * 64, False),  # the verifier compares against hexdigest(), lower-case only
+        ("g" * 64, False),
+        ("a" * 63 + "\n", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_well_formed_hex_sha256_accepts_only_what_the_verifier_can(provided, ok):
+    from app.services.webhook_security import well_formed_hex_sha256
+
+    assert well_formed_hex_sha256(provided) is ok

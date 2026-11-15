@@ -2830,14 +2830,19 @@ async def bulk_status_change(
     # single chokepoint that clears it.
     actor_roles = {r.name for r in user.roles}
     entry_only = is_entry_only(user)
-    # Who received each invoice's goods, for the receiving ≠ approving gate in
-    # `approve_invoice` — resolved for the whole batch in two queries rather
-    # than twice per row.
+    # Who received and who inspected each invoice's goods, for the receiving /
+    # inspecting ≠ approving gates in `approve_invoice` — resolved for the
+    # whole batch up front rather than per row.
     receivers: dict[uuid.UUID, frozenset[str]] = {}
+    inspectors: dict[uuid.UUID, frozenset[str]] = {}
     if target == DBInvoiceStatus.approved:
-        from app.services.approval_chain import receipt_recorders_by_invoice
+        from app.services.approval_chain import (
+            inspection_recorders_by_invoice,
+            receipt_recorders_by_invoice,
+        )
 
         receivers = await receipt_recorders_by_invoice(db, invoices)
+        inspectors = await inspection_recorders_by_invoice(db, invoices)
     # Closing by hand asks the rule `/complete` asks (`api/workflow.close_refusals`,
     # decisions §357): only from `new` / `approved`, and never while a live
     # payment or card holds the invoice — a staged or exported run, or a minted
@@ -2923,6 +2928,7 @@ async def bulk_status_change(
                         actor_roles=actor_roles,
                         org_settings=org.settings,
                         receipt_recorders=receivers.get(inv.id, frozenset()),
+                        inspection_recorders=inspectors.get(inv.id, frozenset()),
                     )
             except HTTPException as exc:
                 # Segregation / threshold / CFO-gate violation — skip this one,

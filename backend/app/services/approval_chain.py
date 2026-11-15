@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 # falling back to the English `message` for a code a client predates.
 APPROVAL_SEGREGATION = "approval_segregation"
 APPROVAL_SEGREGATION_RECEIVER = "approval_segregation_receiver"
+APPROVAL_SEGREGATION_INSPECTOR = "approval_segregation_inspector"
 APPROVAL_LEVEL_REUSE = "approval_level_reuse"
 APPROVAL_NOT_NAMED_APPROVER = "approval_not_named_approver"
 
@@ -272,8 +273,45 @@ async def receipt_recorders_by_invoice(
     """
     if not invoices:
         return {}
-    from app.models.procurement import GR_SOURCE_MANUAL, GoodsReceipt, PurchaseOrder
+    from app.models.procurement import GR_SOURCE_MANUAL, GoodsReceipt
     from app.services.po_matching import CANCELLED_GR_STATUSES
+
+    po_ids = await _invoice_po_ids(db, invoices)
+    every_po = set().union(*po_ids.values())
+    result: dict[uuid.UUID, frozenset[str]] = {inv.id: frozenset() for inv in invoices}
+    if not every_po:
+        return result
+    receipts = (
+        await db.execute(
+            select(
+                GoodsReceipt.po_id, GoodsReceipt.entity_id, GoodsReceipt.recorded_by_user_id
+            ).where(
+                GoodsReceipt.po_id.in_(every_po),
+                GoodsReceipt.source == GR_SOURCE_MANUAL,
+                GoodsReceipt.recorded_by_user_id.is_not(None),
+                func.lower(func.coalesce(GoodsReceipt.status, "")).notin_(CANCELLED_GR_STATUSES),
+            )
+        )
+    ).all()
+    for inv in invoices:
+        entity_id = getattr(inv, "entity_id", None)
+        result[inv.id] = frozenset(
+            str(recorder)
+            for po_id, gr_entity, recorder in receipts
+            if po_id in po_ids[inv.id] and (entity_id is None or gr_entity == entity_id)
+        )
+    return result
+
+
+async def _invoice_po_ids(
+    db: AsyncSession, invoices: Sequence[Invoice]
+) -> dict[uuid.UUID, set[uuid.UUID]]:
+    """Every PO each invoice names, for the approval door's evidence sets
+    (:func:`receipt_recorders_by_invoice`, :func:`inspection_recorders_by_invoice`):
+    the POs its ``po_number`` names under the matcher's own lookup (same
+    entity, strictly; same vendor when the invoice has one) plus every PO its
+    stored ``po_match`` names. One query for the batch."""
+    from app.models.procurement import PurchaseOrder
 
     po_ids: dict[uuid.UUID, set[uuid.UUID]] = {
         inv.id: _po_ids_in_match(getattr(inv, "po_match", None)) for inv in invoices
@@ -307,20 +345,84 @@ async def receipt_recorders_by_invoice(
                 if vendor_id is not None and po_vendor != vendor_id:
                     continue
                 po_ids[inv.id].add(po_id)
+    return po_ids
 
+
+async def receipt_recorders(db: AsyncSession, invoice: Invoice) -> frozenset[str]:
+    """:func:`receipt_recorders_by_invoice` for one invoice."""
+    return (await receipt_recorders_by_invoice(db, [invoice]))[invoice.id]
+
+
+async def inspection_recorders_by_invoice(
+    db: AsyncSession, invoices: Sequence[Invoice]
+) -> dict[uuid.UUID, frozenset[str]]:
+    """Who hand-recorded a quality inspection on the goods each invoice is
+    billed against — the fourth leg's counterpart of
+    :func:`receipt_recorders_by_invoice` (decisions §404).
+
+    Inspecting and approving are different duties, as receiving and approving
+    are (§267): a ``pass`` lifts the invoice's ``quality_hold``, so whoever
+    typed it in must not also sign the invoice off. §401 refuses the order
+    approval-then-inspection (``invoice_warnings._inspection_clears_hold``);
+    this set is what the approval door refuses in the other order.
+
+    * **The invoice's POs** — exactly :func:`receipt_recorders_by_invoice`'s
+      (:func:`_invoice_po_ids`), so the two sets name the same goods.
+    * **Inspections the matcher could read for them** — a PO-level row
+      (``po_id`` one of those POs, no ``gr_id``) or a receipt's own row
+      (``gr_id`` a live receipt on one of them, whatever its source). One on a
+      cancelled receipt is never read by the 4-way leg and vouches for nothing,
+      as a cancelled receipt's recorder vouches for nothing.
+    * **Hand-entered, with a named recorder** — ``source = manual``. A QMS
+      verdict was typed by nobody in this app; a row predating the column
+      names nobody to refuse.
+    * **In the invoice's own entity** (the matcher's strict scope), every
+      verdict alike: the rule is about the duty, not its outcome — a receipt's
+      recorder is refused whatever quantity they counted.
+
+    Three queries for any number of invoices, so bulk approve resolves the
+    batch up front. Kept out of :func:`implicated_actors` for the reason the
+    receipt set is.
+    """
+    if not invoices:
+        return {}
+    from sqlalchemy import and_, or_
+
+    from app.models.procurement import GoodsReceipt
+    from app.models.quality_inspection import INSPECTION_SOURCE_MANUAL, QualityInspection
+    from app.services.po_matching import CANCELLED_GR_STATUSES
+
+    po_ids = await _invoice_po_ids(db, invoices)
     every_po = set().union(*po_ids.values())
     result: dict[uuid.UUID, frozenset[str]] = {inv.id: frozenset() for inv in invoices}
     if not every_po:
         return result
-    receipts = (
+    receipt_po: dict[uuid.UUID, uuid.UUID] = dict(
+        (
+            await db.execute(
+                select(GoodsReceipt.id, GoodsReceipt.po_id).where(
+                    GoodsReceipt.po_id.in_(every_po),
+                    func.lower(func.coalesce(GoodsReceipt.status, "")).notin_(
+                        CANCELLED_GR_STATUSES
+                    ),
+                )
+            )
+        ).all()
+    )
+    on_goods = and_(QualityInspection.po_id.in_(every_po), QualityInspection.gr_id.is_(None))
+    if receipt_po:
+        on_goods = or_(on_goods, QualityInspection.gr_id.in_(set(receipt_po)))
+    rows = (
         await db.execute(
             select(
-                GoodsReceipt.po_id, GoodsReceipt.entity_id, GoodsReceipt.recorded_by_user_id
+                QualityInspection.po_id,
+                QualityInspection.gr_id,
+                QualityInspection.entity_id,
+                QualityInspection.recorded_by_user_id,
             ).where(
-                GoodsReceipt.po_id.in_(every_po),
-                GoodsReceipt.source == GR_SOURCE_MANUAL,
-                GoodsReceipt.recorded_by_user_id.is_not(None),
-                func.lower(func.coalesce(GoodsReceipt.status, "")).notin_(CANCELLED_GR_STATUSES),
+                on_goods,
+                QualityInspection.source == INSPECTION_SOURCE_MANUAL,
+                QualityInspection.recorded_by_user_id.is_not(None),
             )
         )
     ).all()
@@ -328,15 +430,51 @@ async def receipt_recorders_by_invoice(
         entity_id = getattr(inv, "entity_id", None)
         result[inv.id] = frozenset(
             str(recorder)
-            for po_id, gr_entity, recorder in receipts
-            if po_id in po_ids[inv.id] and (entity_id is None or gr_entity == entity_id)
+            for qi_po, qi_gr, qi_entity, recorder in rows
+            if (receipt_po.get(qi_gr) if qi_gr is not None else qi_po) in po_ids[inv.id]
+            and (entity_id is None or qi_entity == entity_id)
         )
     return result
 
 
-async def receipt_recorders(db: AsyncSession, invoice: Invoice) -> frozenset[str]:
-    """:func:`receipt_recorders_by_invoice` for one invoice."""
-    return (await receipt_recorders_by_invoice(db, [invoice]))[invoice.id]
+async def inspection_recorders(db: AsyncSession, invoice: Invoice) -> frozenset[str]:
+    """:func:`inspection_recorders_by_invoice` for one invoice."""
+    return (await inspection_recorders_by_invoice(db, [invoice]))[invoice.id]
+
+
+def violates_inspection_segregation(
+    actor_id: uuid.UUID | None,
+    inspection_recorders: Collection[str],
+    approval_config: dict,
+) -> bool:
+    """True if ``actor_id`` hand-recorded an inspection of the goods the
+    invoice is billed against and the approval step enforces segregation — the
+    one ``require_segregation`` opt-out every segregation check honours."""
+    if approval_config.get("require_segregation", True) is False:
+        return False
+    if actor_id is None:
+        return False
+    return str(actor_id) in {str(x) for x in inspection_recorders}
+
+
+def check_inspection_segregation(
+    actor_id: uuid.UUID,
+    inspection_recorders: Collection[str],
+    approval_config: dict,
+) -> None:
+    """Raise 403 ``approval_segregation_inspector`` if the approver recorded a
+    quality inspection of the goods this invoice is billed against. Its own
+    code, for the reason :func:`check_receiving_segregation` has one: the
+    refusal names the duty that collides."""
+    if violates_inspection_segregation(actor_id, inspection_recorders, approval_config):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=coded_refusal(
+                APPROVAL_SEGREGATION_INSPECTOR,
+                "Segregation of duties: a user who recorded a quality inspection "
+                "of the goods this invoice is billed against cannot also approve it.",
+            ),
+        )
 
 
 def violates_receiving_segregation(
@@ -1092,20 +1230,27 @@ def escalation_ineligible(
     invoice,
     approval_config: dict,
     receipt_recorders: Collection[str] = (),
+    inspection_recorders: Collection[str] = (),
 ) -> set[str]:
     """User ids an escalation must never make a level's approver on ``invoice``.
 
     Exactly the people the approval path's segregation checks would refuse —
-    the payable's implicated actors (:func:`check_segregation`) and whoever
+    the payable's implicated actors (:func:`check_segregation`), whoever
     recorded a goods receipt it is billed against
-    (:func:`check_receiving_segregation`), unless the approval step opted out
-    of segregation — so the sweep and the approval path read one rule. (The
+    (:func:`check_receiving_segregation`) and whoever recorded an inspection of
+    those goods (:func:`check_inspection_segregation`), unless the approval
+    step opted out of segregation — so the sweep and the approval path read
+    one rule. (The
     other approval-time refusal, the cross-level guard, needs no input from
     here: :func:`apply_escalation` reads it off the chain itself.)
     """
     if approval_config.get("require_segregation", True) is False:
         return set()
-    return implicated_actors(invoice) | set(receipt_recorders)
+    return (
+        implicated_actors(invoice)
+        | {str(x) for x in receipt_recorders}
+        | {str(x) for x in inspection_recorders}
+    )
 
 
 async def _resolve_authorized_approvers(approver_ids: list[str]) -> set[str]:

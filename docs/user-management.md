@@ -71,7 +71,9 @@ can still never approve figures they keyed. Receiving is separated the same
 way: whoever hand-recorded a live goods receipt on the invoice's PO is refused
 as its approver (`approval_segregation_receiver`; decisions §267), and a
 receipt an approver records afterwards does not lift that invoice's payment
-hold (decisions §389).
+hold (decisions §389). Inspecting is separated the same way: whoever
+hand-recorded a quality inspection of those goods is refused as its approver
+(`approval_segregation_inspector`; decisions §404).
 
 The gates live in `backend/app/api/invoice_entry.py`: `INVOICE_ENTRY_ROLES`
 (admin, AP manager, AP clerk, CFO) on `POST /api/invoices`,

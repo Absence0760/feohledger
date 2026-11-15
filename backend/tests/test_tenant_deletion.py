@@ -813,7 +813,13 @@ _STORED = {
         "password": _SAGE_ZA_PASSWORD,
         "company_id": "4711",
     },
-    "netsuite": {"account_id": "123"},
+    "netsuite": {
+        "account_id": "123",
+        "consumer_key": "ns-ck",
+        "consumer_secret": "ns-consumer-secret-7",
+        "token_id": "ns-token-id",
+        "token_secret": "ns-token-secret-7",
+    },
 }
 
 
@@ -951,8 +957,117 @@ async def test_sage_za_is_unsupported_at_once_and_names_the_password(monkeypatch
     assert _SAGE_ZA_PASSWORD not in caplog.text
 
 
+class _ScriptedNetSuite:
+    """NetSuite's TBA ``revoketoken`` and the record API, through the operator
+    override (a plain client) over ``httpx.MockTransport``. Once revoked, the
+    token is refused, as NetSuite does (§406)."""
+
+    def __init__(self, revoke_status: int = 200):
+        self.revoke_status = revoke_status
+        self.revoked = False
+        self.requests: list[httpx.Request] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.url.path.endswith("/rest/revoketoken"):
+            self.revoked = self.revoke_status == 200
+            return httpx.Response(self.revoke_status, json={})
+        return httpx.Response(401 if self.revoked else 200, json={"items": []})
+
+    def install(self, monkeypatch):
+        real = httpx.AsyncClient
+
+        def factory(*args, **kwargs):
+            return real(*args, transport=httpx.MockTransport(self.handler), **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", factory)
+        monkeypatch.setattr(
+            settings, "erp_netsuite_api_base", "https://ns.test/services/rest/record/v1"
+        )
+        return self
+
+    def revokes(self) -> list[httpx.Request]:
+        return [r for r in self.requests if r.url.path.endswith("/rest/revoketoken")]
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("erp_type", ["netsuite", "mock"])
+async def test_a_netsuite_tba_token_is_revoked_and_the_step_still_named(monkeypatch, caplog):
+    """TBA: Oracle's revoke endpoint ends the token, proved by its next call
+    being refused; the confirmation still names the Access Tokens page."""
+    ns = _ScriptedNetSuite().install(monkeypatch)
+    caplog.set_level("DEBUG")
+
+    result, session = await _delete_stored(monkeypatch, "netsuite")
+
+    (call,) = ns.revokes()
+    assert str(call.url) == ("https://ns.test/rest/revoketoken?consumerKey=ns-ck&token=ns-token-id")
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "netsuite",
+        erp_oauth.REVOKED,
+    )
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "revoked at the provider" in line and "Access Tokens" in line
+    for secret in ("ns-consumer-secret-7", "ns-token-secret-7"):
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_closure_revokes_netsuite_only_after_its_commit(monkeypatch):
+    ns = _ScriptedNetSuite().install(monkeypatch)
+    held = _GrantSession(_stored_settings("netsuite"))
+
+    result, _other = await _delete_stored(monkeypatch, "netsuite", control_session=held)
+
+    assert ns.requests == [], "NetSuite was called while the closure held its locks"
+    assert result.erp_grant_revocation == tenant_deletion.GRANT_REVOKE_AFTER_COMMIT
+    await held.commit()
+    assert len(ns.revokes()) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKED
+
+
+@pytest.mark.asyncio
+async def test_a_refused_netsuite_revoke_never_stops_the_deletion(monkeypatch):
+    ns = _ScriptedNetSuite(revoke_status=403).install(monkeypatch)
+
+    result, session = await _delete_stored(monkeypatch, "netsuite")
+
+    assert len(ns.revokes()) == 1
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_FAILED
+    confirmation = format_confirmation(result)
+    assert "NOT revoked" in confirmation and "Access Tokens" in confirmation
+
+
+@pytest.mark.asyncio
+async def test_netsuite_client_credentials_are_unsupported_at_once(monkeypatch):
+    """OAuth 2.0 M2M: nothing we can revoke, so decided at the read with no
+    call, and the customer is told to revoke the certificate mapping."""
+    ns = _ScriptedNetSuite().install(monkeypatch)
+    monkeypatch.setitem(
+        _STORED,
+        "netsuite",
+        {
+            "account_id": "123",
+            "auth_method": "oauth2_m2m",
+            "client_id": "cid",
+            "certificate_id": "cert",
+            "private_key": "unused",
+        },
+    )
+    held = _GrantSession(_stored_settings("netsuite"))
+
+    result, _other = await _delete_stored(monkeypatch, "netsuite", control_session=held)
+    await held.commit()
+
+    assert ns.requests == []
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_UNSUPPORTED
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "NOT revoked" in line and "OAuth 2.0 Client Credentials (M2M) Setup" in line
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("erp_type", ["mock"])
 async def test_an_erp_with_no_stated_step_adds_nothing(monkeypatch, erp_type):
     """An adapter that states no provider-side step (or the local mock) is
     not reported: the confirmation never invents a step."""
@@ -1012,6 +1127,67 @@ async def test_an_adapter_that_breaks_while_assessed_never_stops_the_deletion(mo
         erp_oauth.REVOKE_FAILED,
     )
     assert "password" in format_confirmation(result)
+
+
+_BC_SECRET = "bc-client-secret-7"
+_SYSPRO_PASSWORD = "syspro-operator-password-7"
+_STORED_407 = {
+    "dynamics_365_bc": {
+        "tenant_id": "11111111-2222-3333-4444-555555555555",
+        "client_id": "bc-client",
+        "client_secret": _BC_SECRET,
+        "environment": "production",
+        "company_id": "66666666-7777-8888-9999-000000000000",
+    },
+    "syspro": {
+        "base_url": "https://syspro.example.co.za:20190",
+        "operator": "FEOHAP",
+        "operator_password": _SYSPRO_PASSWORD,
+        "company_id": "EDU1",
+        "company_password": "syspro-company-password-7",
+    },
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("erp_type", "step_words"),
+    [
+        # §407: Microsoft publishes no revocation for a client-credentials
+        # token; the customer disables the BC record and deletes the secret.
+        ("dynamics_365_bc", ("Microsoft Entra Applications", "client secret")),
+        # §407: e.net Logoff ends a session, not the operator login.
+        ("syspro", ("Operator locked out", "Operator Maintenance")),
+    ],
+)
+async def test_bc_and_syspro_are_unsupported_at_once_and_name_the_step(
+    monkeypatch, caplog, erp_type, step_words
+):
+    """Nothing is called (no token mint, no Logon/Logoff), the outcome is
+    decided at the read so a closure defers nothing, and the confirmation names
+    the provider's own control rather than the generic connected-apps line."""
+    trap = _ScriptedIntacct().install(monkeypatch)  # any HTTP call would land here
+    monkeypatch.setitem(_STORED, erp_type, _STORED_407[erp_type])
+    caplog.set_level("DEBUG")
+    held = _GrantSession(_stored_settings(erp_type))
+
+    result, _other = await _delete_stored(monkeypatch, erp_type, control_session=held)
+    await held.commit()
+
+    assert trap.requests == []
+    assert held.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        erp_type,
+        erp_oauth.REVOKE_UNSUPPORTED,
+    )
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "NOT revoked" in line
+    for words in step_words:
+        assert words in line
+    assert "connected apps" not in line
+    for secret in (_BC_SECRET, _SYSPRO_PASSWORD, "syspro-company-password-7"):
+        assert secret not in caplog.text
+        assert secret not in format_confirmation(result)
 
 
 def test_every_stored_credential_outcome_names_the_provider_side_step():
@@ -1333,3 +1509,91 @@ async def test_the_cli_fails_when_the_deletion_itself_refuses(monkeypatch):
     monkeypatch.setattr("sys.argv", ["delete_tenant.py", "--slug", "x", "--yes"])
 
     assert await cli.main() == 2
+
+
+# ---------------------------------------------------------------------------
+# Merge.dev: the linked account is deleted at Merge, and the customer is told
+# to end the webhook, its signature key and the API key (decisions §405)
+# ---------------------------------------------------------------------------
+
+_MERGE_ACCOUNT_TOKEN = "merge-account-token-7"
+_MERGE_STORED = {
+    "api_key": "merge-api-key-7",
+    "account_token": _MERGE_ACCOUNT_TOKEN,
+    "webhook_signing_secret": "merge-webhook-key-7",
+}
+
+
+class _ScriptedMerge:
+    def __init__(self, status: int = 200):
+        self.status = status
+        self.requests: list[httpx.Request] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(self.status)
+
+    def install(self, monkeypatch):
+        real = httpx.AsyncClient
+
+        def factory(*args, **kwargs):
+            return real(*args, transport=httpx.MockTransport(self.handler), **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", factory)
+        monkeypatch.setattr(settings, "erp_merge_api_base", "https://merge.test/api/accounting/v1")
+        monkeypatch.setitem(_STORED, "merge_dev", _MERGE_STORED)
+        return self
+
+
+@pytest.mark.asyncio
+async def test_merge_s_linked_account_is_deleted_and_the_webhook_named(monkeypatch, caplog):
+    merge = _ScriptedMerge().install(monkeypatch)
+    caplog.set_level("DEBUG")
+
+    result, session = await _delete_stored(monkeypatch, "merge_dev")
+
+    (call,) = merge.requests
+    assert (call.method, str(call.url)) == (
+        "POST",
+        "https://merge.test/api/accounting/v1/delete-account",
+    )
+    assert call.headers["X-Account-Token"] == _MERGE_ACCOUNT_TOKEN
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "merge_dev",
+        erp_oauth.REVOKED,
+    )
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "revoked at the provider" in line
+    # The webhook and its key, and the API key, are the customer's Merge
+    # organisation's: only they can end them.
+    assert "webhook" in line and "signature key" in line and "API key" in line
+    for secret in _MERGE_STORED.values():
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_merge_deletion_that_fails_never_stops_the_tenant_deletion(monkeypatch):
+    merge = _ScriptedMerge(status=500).install(monkeypatch)
+
+    result, session = await _delete_stored(monkeypatch, "merge_dev")
+
+    assert len(merge.requests) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_FAILED
+    assert session.deletes == len(CONTROL_DELETIONS)
+    confirmation = format_confirmation(result)
+    assert "NOT revoked" in confirmation and "delete the linked account" in confirmation
+
+
+@pytest.mark.asyncio
+async def test_a_closure_deletes_merge_s_linked_account_only_after_its_commit(monkeypatch):
+    merge = _ScriptedMerge().install(monkeypatch)
+    held = _GrantSession(_stored_settings("merge_dev"))
+
+    result, _other = await _delete_stored(monkeypatch, "merge_dev", control_session=held)
+
+    assert merge.requests == [], "Merge was called while the closure held its locks"
+    assert result.erp_grant_revocation == tenant_deletion.GRANT_REVOKE_AFTER_COMMIT
+    await held.commit()
+    assert len(merge.requests) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKED

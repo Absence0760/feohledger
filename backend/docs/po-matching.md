@@ -1042,7 +1042,10 @@ in the same transaction, with the org's own settings and the invoices locked
 lock_invoices=True)`), as receipt entry does (decisions §401). A `fail` or
 `partial` therefore raises the `quality_hold` before the response returns; a
 `pass` closes one only when `_inspection_clears_hold` allows it (above: not the
-invoice's implicated actors, not anyone who approved it). Before this, the row
+invoice's implicated actors, not anyone who approved it). In the other order,
+whoever recorded a manual inspection of the invoice's goods is refused as its
+approver (403 `approval_segregation_inspector`,
+`approval_chain.inspection_recorders`, decisions §404). Before this, the row
 landed and the invoice kept describing the old verdict until something else
 refreshed it. A rematch failure rolls the inspection back (not best-effort; the
 QMS sync's batch rematch stays best-effort), and the audit row is written after

@@ -4194,6 +4194,7 @@ export const en = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregation of duties: a user involved in creating this invoice cannot also approve it.",
 	'refusal.approvalSegregationReceiver': "Segregation of duties: a user who recorded a goods receipt this invoice is billed against cannot also approve it.",
+	'refusal.approvalSegregationInspector': "Segregation of duties: a user who recorded a quality inspection of the goods this invoice is billed against cannot also approve it.",
 	'refusal.approvalLevelReuse': "You already approved an earlier level of this chain; a different approver is required.",
 	'refusal.approvalNotNamedApprover': "You are not an authorized approver for this step.",
 	'refusal.invoiceNotInReview': "This invoice is not awaiting review, so it cannot be approved or rejected.",
@@ -5480,6 +5481,7 @@ export const en = {
 	'erpRefusal.callBudgetQuota': "{provider} has paused API calls for the subscription FeohLedger uses (its daily quota is used), so FeohLedger made no call. It resets at midnight UTC — retry then.",
 	'erpRefusal.callBudgetRateLimited': "{provider} asked FeohLedger to slow down, so no call was made. Retry in a minute.",
 	'erpRefusal.billLeftUnposted': "{provider} holds this bill as a draft or awaiting approval, not posted, so nothing is in accounts payable there yet. Post or approve it in {provider}, then retry.",
+	'erpRefusal.mergeSyncPending': "{provider} has not finished syncing invoices since an earlier attempt to send this bill, whose outcome is unknown, so it may already hold the bill. Nothing was sent. Retry after {provider}'s next invoice sync: if the bill is there by then, the retry links to it instead of creating a second one.",
 	'erpRefusal.credentialsUnavailable': "The ERP credentials couldn't be opened just now. Retry in a few minutes; if it keeps failing, tell an administrator.",
 	'erpRefusal.periodClosed': "{provider} refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in {provider}, then retry.",
 	'erpRefusal.vendorInactive': "{provider} refused this bill because its vendor is inactive or deleted there. Make the vendor active in {provider}, then retry.",
