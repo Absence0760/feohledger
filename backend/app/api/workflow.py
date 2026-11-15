@@ -952,9 +952,11 @@ async def complete_invoice(
         # floor is the only trigger that means anything.
         from app.services.approval_chain import (
             finite_money_threshold,
+            inspection_recorders,
             receipt_recorders,
             record_final_approval,
             reporting_gate_amount,
+            violates_inspection_segregation,
             violates_receiving_segregation,
             violates_segregation,
         )
@@ -972,7 +974,9 @@ async def complete_invoice(
         # the CFO/max-amount gates already do) rather than 403 a legitimate
         # submission — a second pair of eyes still signs off. The same holds for
         # whoever hand-recorded a goods receipt this invoice is billed against
-        # (decisions §267): the floor would make the receiver its approver.
+        # (decisions §267), and for whoever hand-recorded an inspection of those
+        # goods (§404): the floor would make the receiver or inspector its
+        # approver.
         # The max-amount / CFO gates inside decide_auto_approve are measured
         # against the same same-vendor rolling aggregate `review`'s human path
         # uses (the structuring guard), so splitting a payable can't slip each
@@ -1002,6 +1006,9 @@ async def complete_invoice(
             and not violates_segregation(invoice, user.id, approval_config)
             and not violates_receiving_segregation(
                 user.id, await receipt_recorders(db, invoice), approval_config
+            )
+            and not violates_inspection_segregation(
+                user.id, await inspection_recorders(db, invoice), approval_config
             )
         ):
             # The caller is the effective approver (§267), so their later

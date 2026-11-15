@@ -253,6 +253,25 @@ async def test_the_receiving_verdict_matches_approve(realdb, role):
         _assert_parity(verdict["approve"], resp, (role, recorder))
 
 
+@pytest.mark.parametrize("role", ["admin", "ap_manager"])
+async def test_the_inspecting_verdict_matches_approve(realdb, role):
+    """Inspecting ≠ approving (decisions §404) is a figure gate beside the
+    receiving one: the verdict must refuse the caller who hand-recorded an
+    inspection on the invoice's PO — and only them."""
+    from tests.test_approval_receiver_segregation import _inspect, _po
+
+    other = "ap_manager" if role == "admin" else "admin"
+    for recorder, expected in ((role, "approval_segregation_inspector"), (other, None)):
+        po_id, po_number, _ = await _po(realdb)
+        await _inspect(realdb, recorder, po_id=po_id)
+        invoice_id = await _invoice_on_po(realdb, po_number)
+        verdict = await _verdict(realdb, role, invoice_id)
+        assert (verdict["approve"] and verdict["approve"]["code"]) == expected, verdict
+        async with realdb.client(key=TENANT, role=role) as c:
+            resp = await c.post(f"/api/invoices/{invoice_id}/approve", json={})
+        _assert_parity(verdict["approve"], resp, (role, recorder))
+
+
 async def test_a_chain_routed_by_amount_band_matches_approve(realdb):
     """Chain routing reads the amount (`ensure_chain_routed`): a level whose
     band the invoice falls in applies, one it falls outside does not. The
