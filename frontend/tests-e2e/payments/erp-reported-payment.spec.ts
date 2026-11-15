@@ -582,6 +582,9 @@ test.describe('/payments + /exceptions — the ERP-reported payment', () => {
 				'href',
 				`/exceptions?id=${erpId}`
 			);
+			// The link names its destination; the refusal sentence before it
+			// already says why (it used to repeat that sentence).
+			await expect(dialog.getByTestId('record-error-exception')).toHaveText('Open exception');
 			expect(await getInvoiceStatus(page, invoiceId)).toBe('approved');
 		} finally {
 			deleteVendorsWhere(`name='${tag} Supplier'`);

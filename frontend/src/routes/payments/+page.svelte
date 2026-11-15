@@ -3119,7 +3119,7 @@
 					{recordError}
 					{#if recordErrorExceptionId}
 						<a href="/exceptions?id={recordErrorExceptionId}" data-testid="record-error-exception">
-							{m('payments.recordOutside.openException')}
+							{m('payments.queue.openException')}
 						</a>
 					{/if}
 				</p>
