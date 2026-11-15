@@ -22022,6 +22022,68 @@ the way back to it.
 and `frontend/tests-e2e/vendors/erp-unlink.spec.ts` (the panel is gone after a
 link; a refused vendor gets the sentence or nothing).
 
+## 425. An unattended approval asks the PO match first, and a PO-match hold sends the invoice to review (closes a `docs/known-issues.md` entry, round 13, 2026-11-15)
+
+**The gap.** `POST /api/invoices/{id}/complete` auto-approves an invoice under
+the approval step's `auto_approve_below` floor straight from `new`, and
+`refresh_warnings` skips the PO match on `new` as an unentered draft. So an
+invoice citing a PO that did not exist came back `approved` with no match run
+and no `po_mismatch` raised (found by round 12's §422 lane). Extraction's
+auto-approve had the other half of the gap: its refresh runs on the `pending`
+invoice, so the match ran and the hold was raised, but the auto-approve read no
+exception and approved anyway, leaving an `approved` invoice with an open hold
+for the run builder to catch.
+
+**Decision.** The operator's recommended default from PR #716: match first,
+and hold on failure (fail closed).
+
+- `/complete` passes `refresh_warnings(..., match_po_on_new=True)` when it is
+  taking a `new` invoice out through approval, so the match runs whether the
+  floor fires or the invoice goes to review (the reviewer now sees the match
+  too). The `new → done` close of a workflow with no approval step is unchanged.
+- Both unattended doors, the floor and extraction's auto-approve, ask
+  `invoice_warnings.po_match_hold_refusal` **before** `record_final_approval`.
+  It refuses on an open or escalated `po_mismatch` / `quality_hold` (the same
+  `payment_runs.blocking_exception_types` predicate the run builder reads), and
+  on a clearance of one that stamping the would-be approver would undo: the
+  caller cleared the hold while not its approver (§420 allows that), and §422's
+  re-judge right after the stamp would raise it again. That second question is
+  §422's own, asked with the would-be approver added to the approver set
+  (`exception_lifecycle.clearance_stands(..., approvers=...)`), so the
+  unattended doors never leave an `approved` invoice with a hold open.
+- A refusal lands the invoice at `ready_for_review` with
+  `auto_approve_suppressed: "po_match_hold"` or
+  `"po_match_hold_cleared_by_approver"` on the audit row (extraction's
+  `invoice.extraction_completed`, `/complete`'s `invoice.submitted_for_review`).
+  The caller's clearance is left standing for the human reviewer, whose own
+  approval then re-judges it as §422 says.
+- An invoice with no PO reference has no such row; the floor behaves as before.
+
+**Rejected.**
+
+- *Sending every invoice that cites a PO to review.* The other option PR #716
+  named. It is simpler but gives up the floor for every PO-backed invoice,
+  including the clean matches the floor exists for.
+- *Stamping, re-judging, then undoing the stamp if a hold came back.*
+  `record_final_approval` is the one writer of the approval fields (§389), and
+  an undo would be a second writer whose mistakes leave `approved_by` on an
+  invoice nobody approved. Asking first keeps the stamp a one-way act.
+- *Gating the human approval doors on open holds too.* §422 already chose for
+  those: a person approves with the hold visible, and the hold stops the run.
+  This entry is about the doors with no person in them.
+
+**Cost.** A PO-backed invoice under the floor whose match fails now needs a
+person, which is the point. `/complete` runs the matcher on every PO-citing
+invoice it submits for review, one more query set per submit.
+
+**Enforced by** `backend/tests/test_invoice_complete_auto_approve.py` (an
+unknown and an over-billed PO hold the invoice at review with an open
+`po_mismatch` and no stamp; a clean match approves; no PO is unchanged; a
+hold the caller cleared sends the invoice to review with the clearance left
+standing; the predicate on an extracted invoice; an AST pin that both doors ask
+before they stamp) and `backend/tests/test_extraction_reextract_options.py`
+(extraction lands at review on either refusal, with nothing stamped).
+
 ## 427. An outbound webhook event is sent after the change it announces commits, and the emitter takes the session (closes a `docs/followups.md` entry, §414 / §421 follow-up, round 13, 2026-11-15)
 
 **The gap.** `transition_invoice` called the webhook emitters inline, and

@@ -442,6 +442,72 @@ async def test_without_the_flag_auto_approve_still_fires():
     assert kwargs["details"]["auto_approve_suppressed"] is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["po_match_hold", "po_match_hold_cleared_by_approver"])
+async def test_a_po_match_hold_lands_the_auto_approve_at_review(reason):
+    """The PO match the refresh ran gates the unattended approval, as it gates
+    `/complete`'s floor (decisions §425): asked before the stamp, so the
+    invoice reaches review with nothing stamped, never `approved` with a hold."""
+    from app.models.invoice import InvoiceStatus
+    from app.services.extraction import run_extraction
+
+    invoice = _invoice(vendor_id=uuid.uuid4(), vendor_name="Bound Supply Co")
+    invoice.po_number = "PO-425"
+    instance = MagicMock()
+    instance.steps_config_snapshot = _AUTO_APPROVE_SNAPSHOT
+    transition = AsyncMock()
+    refusal = AsyncMock(return_value=reason)
+    reraise = AsyncMock()
+
+    with (
+        _extraction_stack(vendor_name="Bound Supply Co", instance=instance),
+        patch("app.services.extraction.transition_invoice", transition),
+        patch("app.services.extraction.decide_auto_approve", return_value=True),
+        patch("app.services.extraction.resolve_gate_aggregate", AsyncMock(return_value=None)),
+        patch("app.services.invoice_warnings.po_match_hold_refusal", refusal),
+        patch("app.services.invoice_warnings.reraise_holds_cleared_by_an_approver", reraise),
+    ):
+        await run_extraction(_db(), invoice, actor_id=None)
+
+    refusal.assert_awaited_once()
+    reraise.assert_not_awaited()
+    args, kwargs = transition.await_args
+    assert args[2] is InvoiceStatus.ready_for_review
+    assert kwargs["action_name"] == "invoice.extraction_completed"
+    assert kwargs["details"]["auto_approved"] is False
+    assert kwargs["details"]["auto_approve_suppressed"] == reason
+    assert invoice.approved_by is None
+    assert invoice.approval_date is None
+
+
+@pytest.mark.asyncio
+async def test_no_po_match_hold_leaves_the_auto_approve_alone():
+    """Counterpart: with no hold the predicate answers `None` and the
+    unattended approval fires as before."""
+    from app.models.invoice import InvoiceStatus
+    from app.services.extraction import run_extraction
+
+    invoice = _invoice(vendor_id=uuid.uuid4(), vendor_name="Bound Supply Co")
+    instance = MagicMock()
+    instance.steps_config_snapshot = _AUTO_APPROVE_SNAPSHOT
+    transition = AsyncMock()
+    refusal = AsyncMock(return_value=None)
+
+    with (
+        _extraction_stack(vendor_name="Bound Supply Co", instance=instance),
+        patch("app.services.extraction.transition_invoice", transition),
+        patch("app.services.extraction.decide_auto_approve", return_value=True),
+        patch("app.services.extraction.resolve_gate_aggregate", AsyncMock(return_value=None)),
+        patch("app.services.invoice_warnings.po_match_hold_refusal", refusal),
+        patch("app.services.invoice_warnings.reraise_holds_cleared_by_an_approver", AsyncMock()),
+    ):
+        await run_extraction(_db(), invoice, actor_id=None)
+
+    refusal.assert_awaited_once()
+    args, _ = transition.await_args
+    assert args[2] is InvoiceStatus.approved
+
+
 # ---------------------------------------------------------------------------
 # Who supplied the document — `auto_approve_suppression`
 # ---------------------------------------------------------------------------
