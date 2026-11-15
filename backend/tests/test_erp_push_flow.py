@@ -2329,3 +2329,158 @@ def _merge_sync_pending():
     from app.services.erp_adapters.base import erp_preflight_refusal
 
     return erp_preflight_refusal("Merge.dev", "merge_sync_pending")
+
+
+# ---------------------------------------------------------------------------
+# A push with no attempts left is a final failure, not a silent stall (§428)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome_unknown", [False, True], ids=["nothing-sent", "possibly-posted"])
+async def test_a_push_with_its_retries_spent_fails_coded_without_calling_the_erp(
+    outcome_unknown,
+):
+    """A job that reaches `sending_to_erp` with `erp_retries` already at the
+    limit (a redelivery after the last attempt, a re-drive of one) used to
+    return without an attempt or a transition, leaving the invoice at
+    `sending_to_erp` for ever. It lands at `failed`, coded, and says so when an
+    earlier attempt may have left the bill in the ERP."""
+    from app.services.erp import ERP_RETRIES_EXHAUSTED, MAX_RETRIES, OUTCOME_UNKNOWN_KEY
+
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    state = {"erp_retries": MAX_RETRIES, OUTCOME_UNKNOWN_KEY: outcome_unknown}
+    inst = _instance(state_data=dict(state))
+    recorder = _AuditRecorder()
+    call = AsyncMock(return_value="ERP-1")
+    db = AsyncMock()
+
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", call),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=inst)),
+    ):
+        await send_to_erp_internal(db, inv)
+
+    call.assert_not_called()
+    assert inv.status == InvoiceStatus.failed
+    assert recorder.transitions() == [("sending_to_erp", "failed")]
+    (row,) = recorder.rows
+    assert row["action"] == "invoice.erp_failed"
+    assert row["details"]["retries"] == MAX_RETRIES
+    refusal = row["details"]["refusal"]
+    assert refusal["code"] == ERP_RETRIES_EXHAUSTED
+    if outcome_unknown:
+        assert refusal["params"] == {"possibly_posted": True}
+        assert row["details"]["possibly_posted"] is True
+    else:
+        assert refusal["params"] == {}
+        assert "possibly_posted" not in row["details"]
+    assert inst.state == "failed"
+    # The record of what may be in the ERP is left for the retry to read.
+    assert inst.state_data == state
+    db.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_spent_push_for_an_invoice_that_moved_on_is_still_only_skipped():
+    """The §410 gate comes first: a spent redelivery for a recalled invoice is
+    a no-op, not a failure of an invoice that is no longer pushing."""
+    from app.services.erp import MAX_RETRIES
+
+    inv = _invoice(status=InvoiceStatus.ready_for_review)
+    inst = _instance(state_data={"erp_retries": MAX_RETRIES})
+    recorder = _AuditRecorder()
+    db = AsyncMock()
+
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", AsyncMock()) as call,
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=inst)),
+    ):
+        await send_to_erp_internal(db, inv)
+
+    call.assert_not_called()
+    assert inv.status == InvoiceStatus.ready_for_review
+    assert recorder.rows == []
+    db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_new_send_from_approved_starts_with_a_full_budget(realdb):
+    """A push that ended spent, then a recall and a re-approval: the next send
+    from `approved` used to inherit `erp_retries == 3` and make no attempt.
+    `start_erp_send` resets the counter as `retry_erp` does, and keeps what may
+    already be in the ERP."""
+    from app.services.erp import OUTCOME_UNKNOWN_KEY, PENDING_JOB_KEY
+    from app.services.erp_send import start_erp_send
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_erp_failed_invoice(
+        mk,
+        info.org_id,
+        state_data={"erp_retries": 3, OUTCOME_UNKNOWN_KEY: True, PENDING_JOB_KEY: "job-9"},
+        status=InvoiceStatus.approved,
+    )
+
+    with patch("app.services.erp_send.dispatch_erp", AsyncMock()) as dispatched:
+        async with mk() as s:
+            await start_erp_send(
+                s, org_id=info.org_id, org_settings={}, invoice_id=inv_id, actor_id=None
+            )
+
+    dispatched.assert_awaited_once()
+    inv, inst, _ = await _reload(mk, inv_id)
+    assert inv.status == InvoiceStatus.sending_to_erp
+    assert inst.state_data == {
+        "erp_retries": 0,
+        OUTCOME_UNKNOWN_KEY: True,
+        PENDING_JOB_KEY: "job-9",
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_push_lands_at_failed_coded_and_possibly_posted(realdb):
+    """`fail_interrupted_erp_send`, the recovery sweep's exit for a stranded
+    push it will not re-drive: `failed`, coded `erp_push_interrupted`, flagged
+    when the ERP may hold the bill, and only from `sending_to_erp`."""
+    from app.services.erp import (
+        ERP_PUSH_INTERRUPTED,
+        ORPHAN_DOCUMENT_ID_KEY,
+        fail_interrupted_erp_send,
+    )
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    stranded = await _seed_erp_failed_invoice(
+        mk,
+        info.org_id,
+        state_data={"erp_retries": 1, ORPHAN_DOCUMENT_ID_KEY: "BILL-3"},
+        status=InvoiceStatus.sending_to_erp,
+    )
+    moved = await _seed_erp_failed_invoice(
+        mk, info.org_id, state_data={}, status=InvoiceStatus.ready_for_review
+    )
+
+    async with mk() as s:
+        assert await fail_interrupted_erp_send(s, stranded) is True
+    async with mk() as s:
+        assert await fail_interrupted_erp_send(s, moved) is False
+
+    inv, inst, rows = await _reload(mk, stranded)
+    assert inv.status == InvoiceStatus.failed
+    assert inst.state == "failed"
+    (row,) = [r for r in rows if r.action == "invoice.erp_failed"]
+    assert row.actor_id is None
+    assert row.details["refusal"] == {
+        "code": ERP_PUSH_INTERRUPTED,
+        "params": {"possibly_posted": True},
+    }
+    assert row.details["possibly_posted"] is True
+    assert row.details["erp_document_id"] == "BILL-3"
+    assert row.details["retries"] == 1
+
+    inv, _, rows = await _reload(mk, moved)
+    assert inv.status == InvoiceStatus.ready_for_review
+    assert rows == []

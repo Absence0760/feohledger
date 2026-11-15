@@ -327,4 +327,28 @@ describe('refusals QuickBooks answered with (Intuit Fault codes)', () => {
 	])('falls back to the server sentence for %s', (_label, refusal) => {
 		expect(erpRefusalText(refusal, enT)).toBeNull();
 	});
+
+	it.each([
+		['erp_retries_exhausted', 'erpRefusal.retriesExhausted'],
+		['erp_push_interrupted', 'erpRefusal.pushInterrupted']
+	] as const)(
+		'states %s with no provider, adding where to look when it may be posted (§428)',
+		(code, key) => {
+			const locales = { en, de, es, fr, ja, 'pt-BR': ptBR } as Record<
+				string,
+				Record<string, string>
+			>;
+			const posted = 'erpRefusal.vendorHoldPossiblyPosted';
+			for (const [locale, messages] of Object.entries(locales)) {
+				const t = translator(messages, locale);
+				expect(messages[key], `${locale} ${key}`).toBeTruthy();
+				expect(erpRefusalText({ code, params: {} }, t)).toBe(messages[key]);
+				expect(erpRefusalText({ code, params: { possibly_posted: true } }, t)).toBe(
+					`${messages[key]} ${messages[posted]}`
+				);
+			}
+			// Only the literal flag counts, as on the export gate's refusals.
+			expect(erpRefusalText({ code, params: { possibly_posted: 'true' } }, enT)).toBe(en[key]);
+		}
+	);
 });

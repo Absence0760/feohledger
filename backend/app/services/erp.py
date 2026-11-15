@@ -109,6 +109,18 @@ OUTCOME_UNKNOWN_AT_FINAL_KEY = "erp_outcome_unknown_at_final"
 #: The push refusal for an invoice due before it is dated (`api/refusals`).
 INVOICE_DUE_BEFORE_DATE = "invoice_due_before_date"
 
+#: The push refusal for a push that reached `sending_to_erp` with its retry
+#: counter already spent (a redelivered job after the last attempt, or a re-drive
+#: of one): nothing is attempted, and the invoice lands at `failed` where
+#: `POST /{id}/retry-erp` gives it a fresh budget (decisions §428).
+ERP_RETRIES_EXHAUSTED = "erp_retries_exhausted"
+
+#: The push refusal for a push that sat at `sending_to_erp` with no attempt made
+#: for longer than the recovery sweep re-drives (its lookback), or since before
+#: the tenant's current ERP was configured: a person decides whether it still
+#: belongs in that ERP, through `POST /{id}/retry-erp` (decisions §428).
+ERP_PUSH_INTERRUPTED = "erp_push_interrupted"
+
 
 def _outcome_unknown(state_data: dict | None) -> bool:
     """The recorded :data:`OUTCOME_UNKNOWN_KEY`, read fail-closed for a row
@@ -377,10 +389,7 @@ async def retry_erp(
     # an earlier attempt queued before it queues another, or the retry posts a
     # second bill. The orphan-document keys stay: that bill is still in the ERP
     # until a successful push supersedes it.
-    instance = await get_workflow_instance(db, invoice.id)
-    if instance:
-        instance.state_data = {**(instance.state_data or {}), "erp_retries": 0}
-        instance.state = "active"
+    await reset_erp_push_budget(db, invoice.id)
 
     await transition_invoice(
         db,
@@ -390,6 +399,23 @@ async def retry_erp(
         action_name="invoice.erp_retried",
     )
     await db.commit()
+
+
+async def reset_erp_push_budget(db: AsyncSession, invoice_id: uuid.UUID) -> None:
+    """Give the push about to start a full retry budget (``erp_retries`` = 0).
+
+    Every new push calls it, not only ``retry_erp``: a send from ``approved``
+    inherits the counter the invoice's last push left, and a push that ended
+    spent (three failures, then a recall and a re-approval, §374) would
+    otherwise start with no attempts left and be failed at once as
+    ``erp_retries_exhausted`` (decisions §428). Only the counter: the
+    outcome-unknown flag, the pending job and the orphan keys describe what may
+    already be in the ERP, and the next attempt must still read them.
+    """
+    instance = await get_workflow_instance(db, invoice_id)
+    if instance:
+        instance.state_data = {**(instance.state_data or {}), "erp_retries": 0}
+        instance.state = "active"
 
 
 class ErpPostFailedError(RuntimeError):
@@ -460,7 +486,7 @@ def _refusal_details(exc: BaseException) -> dict:
     return {"refusal": refusal} if refusal else {}
 
 
-def _orphan_details(exc: BaseException, state_data: dict | None) -> dict:
+def _orphan_details(exc: BaseException | None, state_data: dict | None) -> dict:
     """The ERP ids of a bill a failed push left behind, for the audit row.
 
     The failing attempt's own report first; else what an earlier attempt of
@@ -548,6 +574,30 @@ async def send_to_erp_internal(
     # `POST /{id}/retry-erp` (which resets the counter to 0) gets a full budget
     # while an in-flight sequence is not restarted from scratch.
     retry_count = state_data.get("erp_retries", 0)
+    if not isinstance(retry_count, int) or retry_count < 0:
+        # Unreadable: spend nothing on a guess, fail closed as spent below.
+        retry_count = MAX_RETRIES
+
+    if retry_count >= MAX_RETRIES:
+        # No attempt left: a redelivered job after the last attempt, or a
+        # re-drive of a push whose budget was already spent. Making none and
+        # returning left the invoice at `sending_to_erp` with nothing on its
+        # trail and nothing that would ever move it. It is a final failure,
+        # stated as one, so `POST /{id}/retry-erp` can give it a fresh budget
+        # (decisions §428). Still only from `sending_to_erp` (§410).
+        if not await _push_gate_open(db, invoice):
+            return
+        await _fail_push(
+            db,
+            invoice,
+            instance,
+            actor_id=actor_id,
+            error=f"ERP push not attempted: {ERP_RETRIES_EXHAUSTED}",
+            retries=retry_count,
+            refusal_code=ERP_RETRIES_EXHAUSTED,
+        )
+        await db.commit()
+        return
 
     for attempt in range(retry_count, MAX_RETRIES):
         # Only an invoice still at `sending_to_erp` is pushed (decisions §410).
@@ -558,16 +608,7 @@ async def send_to_erp_internal(
         # attempt, under the row lock and from the committed row (the
         # dispatchers' sessions do not expire on commit), because each backoff
         # releases the lock and a concurrent push may finish meanwhile.
-        current = await _locked_push_status(db, invoice)
-        if current is not InvoiceStatus.sending_to_erp:
-            # Logged before the rollback that releases the lock: a rollback
-            # expires every loaded attribute, `invoice.id` included.
-            logger.warning(
-                "ERP push skipped: invoice %s is at %s, not sending_to_erp",
-                invoice.id,
-                current.value if current is not None else "missing",
-            )
-            await db.rollback()
+        if not await _push_gate_open(db, invoice):
             return
         try:
             erp_ref = await _call_erp(db, invoice, erp_config, instance=instance)
@@ -658,6 +699,89 @@ async def send_to_erp_internal(
                     }
                 await db.commit()
                 return
+
+
+async def _push_gate_open(db: AsyncSession, invoice: Invoice) -> bool:
+    """The §410 gate: True, holding the row lock, when the invoice is still at
+    `sending_to_erp`. Otherwise one warning, a rollback, and False: the job is
+    done and nothing about the invoice is the push's to change."""
+    current = await _locked_push_status(db, invoice)
+    if current is InvoiceStatus.sending_to_erp:
+        return True
+    # Logged before the rollback that releases the lock: a rollback expires
+    # every loaded attribute, `invoice.id` included.
+    logger.warning(
+        "ERP push skipped: invoice %s is at %s, not sending_to_erp",
+        invoice.id,
+        current.value if current is not None else "missing",
+    )
+    await db.rollback()
+    return False
+
+
+async def _fail_push(
+    db: AsyncSession,
+    invoice: Invoice,
+    instance: WorkflowInstance | None,
+    *,
+    actor_id: uuid.UUID | None,
+    error: str,
+    retries: int,
+    refusal_code: str,
+) -> None:
+    """Land a push at `failed` without an attempt now, with a coded refusal.
+
+    The refusal carries ``possibly_posted`` when an EARLIER attempt may have
+    left the bill in the ERP (:func:`possibly_posted`), as the export gate's
+    refusals do, so whoever retries looks there first; the audit row carries
+    the flag and any known orphan as a failed attempt's does. The counter and
+    every other state key are left as they are. The caller commits."""
+    state = instance.state_data if instance is not None else None
+    extra = {"possibly_posted": True} if possibly_posted(state) else None
+    await transition_invoice(
+        db,
+        invoice,
+        InvoiceStatus.failed,
+        actor_id=actor_id,
+        action_name="invoice.erp_failed",
+        details={
+            "error": error,
+            "retries": retries,
+            "refusal": erp_refusal_record(refusal_code, extra=extra),
+            **_orphan_details(None, state),
+            **_possibly_posted_details(instance),
+        },
+    )
+    if instance is not None:
+        instance.state = "failed"
+
+
+async def fail_interrupted_erp_send(db: AsyncSession, invoice_id: uuid.UUID) -> bool:
+    """Land a push the recovery sweep will not re-drive at `failed` (§428).
+
+    A push that has sat at `sending_to_erp` with no attempt for longer than the
+    sweep's lookback, or since before the tenant's current ERP was configured,
+    is not sent on nobody's say-so: the bill may have been keyed into the ERP
+    by hand meanwhile, or the push was meant for a different ERP. At `failed`
+    it is visible, coded ``erp_push_interrupted``, and `POST /{id}/retry-erp`
+    takes it. Re-locked, and only moved from `sending_to_erp`. True when moved.
+    """
+    invoice = await get_invoice_for_update(db, invoice_id)
+    if invoice.status is not InvoiceStatus.sending_to_erp:
+        await db.rollback()
+        return False
+    instance = await get_workflow_instance(db, invoice_id)
+    await _fail_push(
+        db,
+        invoice,
+        instance,
+        actor_id=None,
+        error=f"ERP push interrupted: {ERP_PUSH_INTERRUPTED}",
+        retries=((instance.state_data or {}).get("erp_retries", 0) if instance else 0),
+        refusal_code=ERP_PUSH_INTERRUPTED,
+    )
+    await db.commit()
+    return True
 
 
 async def _locked_push_status(db: AsyncSession, invoice: Invoice) -> InvoiceStatus | None:

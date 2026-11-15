@@ -5523,6 +5523,8 @@ export const en = {
 	'erpRefusal.billLeftUnposted': "{provider} holds this bill as a draft or awaiting approval, not posted, so nothing is in accounts payable there yet. Post or approve it in {provider}, then retry.",
 	'erpRefusal.mergeSyncPending': "{provider} has not finished syncing invoices since an earlier attempt to send this bill, whose outcome is unknown, so it may already hold the bill. Nothing was sent. Retry after {provider}'s next invoice sync: if the bill is there by then, the retry links to it instead of creating a second one.",
 	'erpRefusal.credentialsUnavailable': "The ERP credentials couldn't be opened just now. Retry in a few minutes; if it keeps failing, tell an administrator.",
+	'erpRefusal.retriesExhausted': "This push had no attempts left, so no attempt was made this time. Retry to send it with a fresh set of attempts.",
+	'erpRefusal.pushInterrupted': "This push was interrupted and never finished. It is too old (or older than the current ERP connection) to send again without someone checking. Make sure the bill isn't already in the ERP, then retry.",
 	'erpRefusal.periodClosed': "{provider} refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in {provider}, then retry.",
 	'erpRefusal.vendorInactive': "{provider} refused this bill because its vendor is inactive or deleted there. Make the vendor active in {provider}, then retry.",
 	'erpRefusal.accountInactive': "{provider} refused this bill because {accounts} is inactive or deleted there. Make the account active in {provider}, or recode the invoice to an active account, then retry.",
