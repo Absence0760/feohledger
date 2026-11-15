@@ -19,6 +19,13 @@ because both are data-layer facts:
   above cannot reach (the approver is not the invoices' uploader) and the open
   end of the BEC chain ``docs/authentication.md`` recorded.
 
+A third axis applies to ``po_mismatch`` and ``quality_hold`` only (decisions
+§420): **the invoice's approvers** (``approval_chain.approver_ids`` — the
+approval of record ∪ every level approval on its chain). Those holds wait for
+independent evidence, and since §389 / §401 an approver's own receipt or
+inspection does not lift them, so the approver's own word in the queue must not
+either.
+
 Also pinned here, because each is a way the control could be wrong rather than
 merely absent: ``escalate`` stays open (it is the refused actor's exit, and an
 escalated row still blocks the run); non-blocking types are out of scope
@@ -573,13 +580,14 @@ def test_every_refusal_code_has_a_message():
     the messages are what the single-row 403 says. A code with no message would
     fall back to the wrong sentence."""
     from app.services.exception_lifecycle import (
+        REFUSAL_APPROVER,
         REFUSAL_IMPLICATED,
         REFUSAL_MESSAGES,
         REFUSAL_RAISER,
         refusal_message,
     )
 
-    assert set(REFUSAL_MESSAGES) == {REFUSAL_RAISER, REFUSAL_IMPLICATED}
+    assert set(REFUSAL_MESSAGES) == {REFUSAL_RAISER, REFUSAL_IMPLICATED, REFUSAL_APPROVER}
     for code, message in REFUSAL_MESSAGES.items():
         assert refusal_message(code) == message
         assert message.startswith("Segregation of duties:")
@@ -711,3 +719,271 @@ async def test_the_uploader_cannot_clear_a_po_mismatch_or_quality_hold(realdb, e
         )
     assert cleared.status_code == 200, cleared.text
     assert await _status(mk, exc_id) == "resolved"
+
+
+# ---------------------------------------------------------------------------
+# The approver axis (decisions §420) — `po_mismatch` / `quality_hold` only.
+# ---------------------------------------------------------------------------
+
+
+HOLD_TYPES = ["po_mismatch", "quality_hold"]
+
+
+def _transient(*, approved_by=None, uploaded_by=None, exception_type="po_mismatch", **exc):
+    """An unsaved invoice + exception pair for the pure predicate."""
+    inv = Invoice(
+        id=uuid.uuid4(),
+        approved_by_user_id=approved_by,
+        uploaded_by_id=uploaded_by,
+        segregation_actor_ids=None,
+    )
+    row = APException(id=uuid.uuid4(), exception_type=exception_type, invoice_id=inv.id, **exc)
+    return row, inv
+
+
+def _chain(*user_ids):
+    """A workflow instance whose multi-level chain records these approvals."""
+    from app.models.workflow import WorkflowInstance
+
+    return WorkflowInstance(
+        state_data={
+            "approval_levels": {"levels": [{"approvals": [{"user_id": str(u)} for u in user_ids]}]}
+        }
+    )
+
+
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+@pytest.mark.parametrize("action", ["resolve", "dismiss"])
+def test_the_approver_of_record_may_not_clear_a_receipt_or_inspection_hold(exception_type, action):
+    """``approved_by_user_id`` is on the row, so the pure predicate reads the
+    approval of record with no I/O."""
+    from app.services.exception_lifecycle import REFUSAL_APPROVER, segregation_refusal
+
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me, exception_type=exception_type)
+    assert segregation_refusal(row, inv, me, action=action, org_settings=None) == REFUSAL_APPROVER
+    # Someone who did not approve it is not refused.
+    assert segregation_refusal(row, inv, uuid.uuid4(), action=action, org_settings=None) is None
+
+
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+def test_a_level_approver_on_the_chain_is_refused_too(exception_type):
+    """A level approver is in the approval chain whether or not the last level
+    has signed — the same set §389 measures a receipt's recorder against."""
+    from app.services.exception_lifecycle import REFUSAL_APPROVER, segregation_refusal
+
+    level_approver = uuid.uuid4()
+    row, inv = _transient(exception_type=exception_type)
+    instance = _chain(level_approver)
+
+    assert (
+        segregation_refusal(
+            row, inv, level_approver, action="resolve", org_settings=None, instance=instance
+        )
+        == REFUSAL_APPROVER
+    )
+    # Without the chain, only the approval of record is read.
+    assert (
+        segregation_refusal(row, inv, level_approver, action="resolve", org_settings=None) is None
+    )
+
+
+def test_escalate_stays_open_to_the_approver():
+    """An escalated hold still blocks the run; it is the refused actor's exit."""
+    from app.services.exception_lifecycle import segregation_refusal
+
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me)
+    assert segregation_refusal(row, inv, me, action="escalate", org_settings=None) is None
+
+
+@pytest.mark.parametrize("other_type", ["duplicate", "fraud_flag", "line_total_mismatch"])
+def test_the_approver_axis_is_only_for_receipt_and_inspection_holds(other_type):
+    """Approving an invoice with a duplicate or fraud flag on it is not a
+    conflict the approver axis was widened for: those holds are not lifted by a
+    receipt or an inspection. They keep §169's two axes only."""
+    from app.services.exception_lifecycle import (
+        APPROVER_SEGREGATED_TYPES,
+        segregation_refusal,
+    )
+
+    assert APPROVER_SEGREGATED_TYPES == {"po_mismatch", "quality_hold"}
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me, exception_type=other_type)
+    assert segregation_refusal(row, inv, me, action="resolve", org_settings=None) is None
+
+
+def test_the_org_opt_out_lifts_the_approver_axis():
+    from app.services.exception_lifecycle import segregation_refusal
+
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me)
+    opted_out = {"exceptions": {"require_segregation": False}}
+    assert segregation_refusal(row, inv, me, action="resolve", org_settings=opted_out) is None
+
+
+def test_the_implicated_axis_still_answers_first():
+    """An uploader who also approved is told the older, broader sentence."""
+    from app.services.exception_lifecycle import REFUSAL_IMPLICATED, segregation_refusal
+
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me, uploaded_by=me)
+    assert (
+        segregation_refusal(row, inv, me, action="resolve", org_settings=None) == REFUSAL_IMPLICATED
+    )
+
+
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+def test_an_approvers_own_clearance_no_longer_stands(exception_type):
+    """``clearance_stands`` re-asks the same predicate of the recorded decider:
+    a hold its decider has since approved is raised again for someone
+    independent, as §367 / §374 do for a decider implicated later."""
+    from app.services.exception_lifecycle import clearance_stands
+
+    me = uuid.uuid4()
+    row, inv = _transient(
+        approved_by=me, exception_type=exception_type, status="resolved", decided_by_user_id=me
+    )
+    assert clearance_stands(row, inv, org_settings=None) is False
+
+    level = uuid.uuid4()
+    row.decided_by_user_id = level
+    inv.approved_by_user_id = None
+    assert clearance_stands(row, inv, org_settings=None, instance=_chain(level)) is False
+
+    row.decided_by_user_id = uuid.uuid4()
+    assert clearance_stands(row, inv, org_settings=None, instance=_chain(level)) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+async def test_the_approver_is_refused_at_the_queue_and_a_colleague_clears(realdb, exception_type):
+    """End to end over HTTP: the verdicts the detail offers, the single-row
+    403 with its own code, escalate as the exit, and a colleague's resolve."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv = await _make_invoice(mk, info.org_id, number=f"INV-SOD-APR-{exception_type}")
+    async with mk() as s:
+        await s.execute(
+            update(Invoice)
+            .where(Invoice.id == inv.id)
+            .values(status="approved", approved_by_user_id=info.users["admin"])
+        )
+        await s.commit()
+    exc_id = await _open_exception(mk, info.org_id, inv, exception_type=exception_type)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        detail = await c.get(f"/api/exceptions/{exc_id}")
+        refused = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "resolve", "resolution": "I approved it; the goods came."},
+        )
+        dismissed = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "dismiss", "resolution": "Not a real hold."},
+        )
+        escalated = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "escalate", "resolution": "Someone else must check delivery."},
+        )
+
+    verdicts = detail.json()["decision_refusals"]
+    assert verdicts["resolve"]["code"] == "segregation_approver"
+    assert verdicts["dismiss"]["code"] == "segregation_approver"
+    assert verdicts["escalate"] is None
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["detail"]["code"] == "segregation_approver"
+    assert dismissed.status_code == 403, dismissed.text
+    assert dismissed.json()["detail"]["code"] == "segregation_approver"
+    assert escalated.status_code == 200, escalated.text
+    assert await _status(mk, exc_id) == "escalated"
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c2:
+        cleared = await c2.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "resolve", "resolution": "Checked the delivery note."},
+        )
+    assert cleared.status_code == 200, cleared.text
+    assert await _status(mk, exc_id) == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_bulk_resolve_reports_the_approver_per_row_with_a_chain(realdb):
+    """The bulk door batches the workflow chains and refuses a level approver
+    per row, clearing the rest of the batch."""
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    signed = await _make_invoice(mk, info.org_id, number="INV-SOD-APR-BULK-1")
+    other = await _make_invoice(mk, info.org_id, number="INV-SOD-APR-BULK-2")
+    async with mk() as s:
+        definition = WorkflowDefinition(
+            id=uuid.uuid4(),
+            organization_id=info.org_id,
+            name=f"sod-approver-{uuid.uuid4().hex[:8]}",
+            steps_config=[],
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                id=uuid.uuid4(),
+                invoice_id=signed.id,
+                definition_id=definition.id,
+                steps_config_snapshot=[],
+                state_data={
+                    "approval_levels": {
+                        "levels": [{"approvals": [{"user_id": str(info.users["admin"])}]}]
+                    }
+                },
+            )
+        )
+        await s.commit()
+    exc_signed = await _open_exception(mk, info.org_id, signed, exception_type="po_mismatch")
+    exc_other = await _open_exception(mk, info.org_id, other, exception_type="po_mismatch")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(
+            "/api/exceptions/bulk/resolve",
+            json={
+                "ids": [str(exc_signed), str(exc_other)],
+                "action": "resolve",
+                "resolution": "Bulk sweep.",
+            },
+        )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["updated"] == 1
+    assert body["skipped"] == [{"id": str(exc_signed), "reason": "segregation_approver"}]
+    assert await _status(mk, exc_signed) == "open"
+    assert await _status(mk, exc_other) == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_the_payments_queue_names_the_approver_refusal(realdb):
+    """The payment queue's banner reads the same predicate, so the approver of
+    a held invoice is told a colleague must clear it rather than finding out
+    from a 403."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv = await _make_invoice(mk, info.org_id, number="INV-SOD-APR-QUEUE")
+    async with mk() as s:
+        await s.execute(
+            update(Invoice)
+            .where(Invoice.id == inv.id)
+            .values(status="approved", approved_by_user_id=info.users["admin"])
+        )
+        await s.commit()
+    exc_id = await _open_exception(mk, info.org_id, inv, exception_type="po_mismatch")
+
+    for role, expected in (("admin", "segregation_approver"), ("ap_manager", None)):
+        async with realdb.client(key=TENANT, role=role) as c:
+            res = await c.get("/api/payments/queue", params={"page_size": 100})
+        assert res.status_code == 200, res.text
+        [row] = [i for i in res.json()["items"] if i["id"] == str(inv.id)]
+        assert row["blocking_exception"] == {
+            "id": str(exc_id),
+            "exception_type": "po_mismatch",
+            "clear_refusal": expected,
+        }

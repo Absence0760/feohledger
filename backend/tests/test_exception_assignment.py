@@ -408,6 +408,7 @@ def test_get_exception_returns_full_dict_for_found_row():
     # `currency` too: a real `Invoice` always carries one, and it is what the
     # queue formats the amount against.
     inv = SimpleNamespace(
+        id=exc.invoice_id,
         invoice_number="INV-100",
         vendor_name="Acme",
         amount=Decimal("250.00"),
