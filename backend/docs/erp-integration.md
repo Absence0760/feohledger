@@ -1427,8 +1427,14 @@ reasoning).
   refusal there is not a 409 to the approver: the invoice stays `approved` and
   an `invoice.erp_auto_send_refused` audit row records the coded refusal. With
   the flag off (or absent), approving advances the step pointer only. The push
-  is post-commit work: a process that dies between the approval and the job
-  skips it without a trace (tracked in `docs/followups.md`).
+  is post-commit work, so a process that dies between the approval and the
+  job skips it; the recovery sweep (`services/erp_auto_send_sweep`, sweep
+  `erp-auto-send`, `FEOH_ERP_AUTO_SEND_SWEEP_ENABLED`, off by default,
+  decisions §411) finds an approval older than a few minutes and younger than
+  the lookback that nothing on the trail answers, and runs it through the
+  same `send_after_approval`. Its rows carry `details.recovered: true` and no
+  actor. A payment void back to `approved` is not an approval and is never
+  auto-sent.
 - **A hand-off that raises lands at `failed`.** When `dispatch_erp` raises after
   the `sending_to_erp` commit (an SQS send), `start_erp_send` moves the invoice
   to `failed` with an `invoice.erp_failed` row (`error: "ERP send could not be

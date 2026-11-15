@@ -1800,22 +1800,6 @@ scope (§260) — do not fold them into any of these.
       location change re-judges them. **Trigger:** the first multi-entity
       Intacct tenant, or the next change to `services/erp_link_realm`.
 
-### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §304)
-
-- [ ] **(c) An approval whose auto-send never ran is not noticed.** The push
-      after an approval is post-commit work, so a process that dies between the
-      approval's commit and the job (a deploy, an OOM) leaves the invoice at
-      `approved` with neither `invoice.erp_submitted` nor
-      `invoice.erp_auto_send_refused` on its trail. It is still payable and
-      sendable by hand, so nothing is lost, but the configured automation was
-      skipped silently. **Durable fix:** a sweep that finds `approved` invoices
-      whose snapshot has `erp_export.auto_send_on_approval` on, approved more
-      than a few minutes ago with no auto-send row of either kind since that
-      approval, and runs `erp_send.send_after_approval` for them (it already
-      re-locks and acts only on `approved`). **Trigger:** the first tenant that
-      relies on auto-send in production, or the first report of an approved
-      invoice that did not reach the ERP.
-
 ### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §302)
 
 - [ ] **(c) The ERP status webhook still ignores an event that carries only
@@ -2621,3 +2605,17 @@ from that work is the one entry below.
       keep the snapshot they froze, so the same check covers the unapproved
       invoices under such a definition. **Trigger:** the first deploy carrying
       decisions §304 to an environment with a tenant on a live ERP.
+- [ ] **(b) Turn on the auto-send recovery sweep in production.** Built and
+      off by default (decisions §411, `services/erp_auto_send_sweep`, sweep
+      `erp-auto-send`): an approval whose auto-send never ran because the
+      process died between the approval's commit and the push is found and
+      sent through the approval's own path. **Durable fix:** after the
+      §304 check above, set `FEOH_ERP_AUTO_SEND_SWEEP_ENABLED=true` in the
+      deployed env (the delay, lookback and batch defaults are meant for
+      production: 5 min, 24 h, 100 per tenant a tick) and confirm
+      `GET /api/health/sweeps` shows `erp-auto-send` running. Turning it on
+      pushes any approval from the last 24 hours whose snapshot says
+      "send" and that nothing answered, so do it after the stored flags are
+      confirmed, not before. **Trigger:** the first tenant that relies on
+      auto-send in production, or the first report of an approved invoice
+      that did not reach the ERP.

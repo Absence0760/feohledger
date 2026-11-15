@@ -31,6 +31,17 @@ AUTO_SEND_REFUSED_ACTION = "invoice.erp_auto_send_refused"
 #: the trail tells an automatic push from a person's "Send to ERP".
 AUTO_SEND_TRIGGER = "auto_send_on_approval"
 
+#: What :func:`send_after_approval` did, for a caller that counts (the
+#: recovery sweep, `services/erp_auto_send_sweep`). ``sent``: the invoice moved
+#: to `sending_to_erp`. ``refused``: a gate refused and the refusal row was
+#: written. ``skipped``: nothing to do (no live ERP, the snapshot does not say
+#: so, or the invoice had already moved on). ``failed``: something unexpected
+#: raised and nothing was recorded on the trail.
+AUTO_SEND_SENT = "sent"
+AUTO_SEND_REFUSED = "refused"
+AUTO_SEND_SKIPPED = "skipped"
+AUTO_SEND_FAILED = "failed"
+
 #: `Session.info` key holding the approvals this transaction will auto-send
 #: once it commits. One post-commit job per transaction, however many invoices
 #: a bulk approve finalised, so they run one after another on one connection
@@ -157,6 +168,7 @@ async def start_erp_send(
     control_db: AsyncSession | None = None,
     retry: bool = False,
     trigger: str | None = None,
+    trigger_details: dict | None = None,
     only_from: InvoiceStatus | None = None,
     inline_dispatch: bool = False,
 ) -> Invoice | None:
@@ -173,6 +185,8 @@ async def start_erp_send(
     is not in that status (the auto path, where a person may have got there
     first). ``inline_dispatch``: await the local send instead of scheduling it,
     for a caller on a worker loop that closes when its job returns.
+    ``trigger_details``: extra fixed literals for the transition's audit row
+    beside ``trigger`` (the recovery sweep marks its push ``recovered``).
 
     The dispatch runs after the commit, so the dispatcher never reads an
     uncommitted ``sending_to_erp``. When it raises (an SQS send), nothing will
@@ -228,7 +242,7 @@ async def start_erp_send(
             InvoiceStatus.sending_to_erp,
             actor_id=actor_id,
             action_name="invoice.erp_submitted",
-            details={"trigger": trigger} if trigger else None,
+            details={"trigger": trigger, **(trigger_details or {})} if trigger else None,
         )
     await db.commit()
 
@@ -336,7 +350,8 @@ async def send_after_approval(
     org_settings: dict | None,
     actor_id: uuid.UUID | None,
     inline_dispatch: bool = False,
-) -> None:
+    recovered: bool = False,
+) -> str:
     """Push an invoice whose approval has just committed, when its workflow says so.
 
     ``bind`` is the tenant engine the approval ran on. The work runs on a
@@ -350,15 +365,21 @@ async def send_after_approval(
     ``inline_dispatch``: a caller on a worker loop that closes when its job
     returns (the extraction worker, in-process or in Lambda) passes True, so a
     local-mode send runs to completion instead of being abandoned as a task.
+
+    ``recovered``: the recovery sweep is running an auto-send the approval's
+    own job never ran (`services/erp_auto_send_sweep`, decisions §411); the
+    rows written say so (``details.recovered``). Returns one of the
+    ``AUTO_SEND_*`` outcomes; the approval doors ignore it.
     """
     async with AsyncSession(bind, expire_on_commit=False) as db:
-        await _send_after_approval(
+        return await _send_after_approval(
             db,
             invoice_id=invoice_id,
             org_id=org_id,
             org_settings=org_settings,
             actor_id=actor_id,
             inline_dispatch=inline_dispatch,
+            recovered=recovered,
         )
 
 
@@ -370,7 +391,8 @@ async def _send_after_approval(
     org_settings: dict | None,
     actor_id: uuid.UUID | None,
     inline_dispatch: bool,
-) -> None:
+    recovered: bool = False,
+) -> str:
     from app.services.erp_adapters.dispatcher import erp_config_is_live
     from app.services.workflow_engine import get_workflow_instance
 
@@ -379,26 +401,28 @@ async def _send_after_approval(
         # pays from: auto-sending to it would walk every approved invoice in a
         # dev or e2e tenant to `done`. No ERP at all has nothing to push to.
         if not erp_config_is_live((org_settings or {}).get("erp")):
-            return
+            return AUTO_SEND_SKIPPED
         instance = await get_workflow_instance(db, invoice_id)
         if instance is None or not auto_send_configured(instance.steps_config_snapshot):
-            return
+            return AUTO_SEND_SKIPPED
         invoice = await db.get(Invoice, invoice_id)
         if invoice is None or invoice.status is not InvoiceStatus.approved:
             # Already sent, scheduled for payment, or otherwise moved on.
-            return
+            return AUTO_SEND_SKIPPED
         correlation_id = invoice.correlation_id
         organization_id = invoice.organization_id
         await db.rollback()
+        marker = {"recovered": True} if recovered else None
         try:
             # Re-checked under the row lock: a person may get there first.
-            await start_erp_send(
+            sent = await start_erp_send(
                 db,
                 org_id=org_id,
                 org_settings=org_settings,
                 invoice_id=invoice_id,
                 actor_id=actor_id,
                 trigger=AUTO_SEND_TRIGGER,
+                trigger_details=marker,
                 only_from=InvoiceStatus.approved,
                 inline_dispatch=inline_dispatch,
             )
@@ -411,8 +435,11 @@ async def _send_after_approval(
                 organization_id=organization_id,
                 actor_id=actor_id,
                 exc=exc,
+                extra=marker,
             )
             await db.commit()
+            return AUTO_SEND_REFUSED
+        return AUTO_SEND_SENT if sent is not None else AUTO_SEND_SKIPPED
     except Exception as exc:  # noqa: BLE001 — the approval has committed; never undo it
         _log.warning(
             "ERP auto-send after approval failed for invoice %s: %s",
@@ -427,6 +454,7 @@ async def _send_after_approval(
                 invoice_id,
                 rollback_exc.__class__.__name__,
             )
+        return AUTO_SEND_FAILED
 
 
 async def _record_refusal(
@@ -437,6 +465,7 @@ async def _record_refusal(
     organization_id: uuid.UUID,
     actor_id: uuid.UUID | None,
     exc: HTTPException,
+    extra: dict | None = None,
 ) -> None:
     """The `invoice.erp_auto_send_refused` row: the code and params only.
 
@@ -463,5 +492,6 @@ async def _record_refusal(
             "trigger": AUTO_SEND_TRIGGER,
             "status_code": exc.status_code,
             "refusal": {"code": code, "params": params},
+            **(extra or {}),
         },
     )

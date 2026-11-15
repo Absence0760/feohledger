@@ -222,6 +222,7 @@ async def lifespan(app: FastAPI):
     from app.services.commerce_sync import run_commerce_sync_loop
     from app.services.contract_renewal import run_renewal_loop
     from app.services.discount_auto_trigger import run_discount_optimization_loop
+    from app.services.erp_auto_send_sweep import run_auto_send_sweep_loop
     from app.services.erp_connection_health import run_connection_health_loop
     from app.services.erp_status_sync import run_status_sync_loop
     from app.services.extraction_reaper import run_reaper_loop
@@ -362,6 +363,14 @@ async def lifespan(app: FastAPI):
             run_subprocessor_notices_loop(), name="subprocessor-notices"
         )
 
+    # Auto-send recovery (decisions §411): an approval whose "send to the ERP on
+    # approval" job never ran (a deploy or crash between the approval's commit
+    # and the post-commit push) is pushed through the approval's own path.
+    # Disabled by default. Books a bill in the ERP — never moves money.
+    auto_send_task: asyncio.Task | None = None
+    if settings.erp_auto_send_sweep_enabled:
+        auto_send_task = start_sweep(run_auto_send_sweep_loop(), name="erp-auto-send")
+
     try:
         yield
     finally:
@@ -385,6 +394,7 @@ async def lifespan(app: FastAPI):
             status_sync_task,
             connection_health_task,
             subprocessor_notices_task,
+            auto_send_task,
         ):
             if task is not None:
                 task.cancel()
