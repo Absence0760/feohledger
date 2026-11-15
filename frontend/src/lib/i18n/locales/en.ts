@@ -4194,6 +4194,7 @@ export const en = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregation of duties: a user involved in creating this invoice cannot also approve it.",
 	'refusal.approvalSegregationReceiver': "Segregation of duties: a user who recorded a goods receipt this invoice is billed against cannot also approve it.",
+	'refusal.approvalSegregationInspector': "Segregation of duties: a user who recorded a quality inspection of the goods this invoice is billed against cannot also approve it.",
 	'refusal.approvalLevelReuse': "You already approved an earlier level of this chain; a different approver is required.",
 	'refusal.approvalNotNamedApprover': "You are not an authorized approver for this step.",
 	'refusal.invoiceNotInReview': "This invoice is not awaiting review, so it cannot be approved or rejected.",

@@ -91,6 +91,7 @@ describe('codedRefusalText', () => {
 	it.each([
 		['approval_segregation', 'refusal.approvalSegregation'],
 		['approval_segregation_receiver', 'refusal.approvalSegregationReceiver'],
+		['approval_segregation_inspector', 'refusal.approvalSegregationInspector'],
 		['approval_level_reuse', 'refusal.approvalLevelReuse'],
 		['approval_not_named_approver', 'refusal.approvalNotNamedApprover'],
 		['approval_max_amount_misconfigured', 'refusal.approvalMaxMisconfigured'],

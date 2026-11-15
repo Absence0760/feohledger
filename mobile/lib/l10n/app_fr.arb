@@ -187,6 +187,7 @@
   "glChartRefusalOnLines": "Lignes de facture : {reasons}",
   "codedRefusalApprovalSegregation": "Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas aussi l'approuver.",
   "codedRefusalApprovalSegregationReceiver": "Séparation des tâches : un utilisateur ayant enregistré une réception de marchandises facturée sur cette facture ne peut pas aussi l'approuver.",
+  "codedRefusalApprovalSegregationInspector": "Séparation des tâches : un utilisateur ayant enregistré un contrôle qualité des marchandises facturées sur cette facture ne peut pas aussi l'approuver.",
   "codedRefusalInvoiceStaleApproval": "Cette facture a été modifiée après son chargement. Rechargez-la et vérifiez la version actuelle avant de l’approuver.",
   "codedRefusalApprovalLevelReuse": "Vous avez déjà approuvé un niveau précédent de cette chaîne ; un autre approbateur est requis.",
   "codedRefusalApprovalNotNamedApprover": "Vous n'êtes pas un approbateur autorisé pour cette étape.",

@@ -313,6 +313,10 @@
   "@codedRefusalApprovalSegregationReceiver": {
     "description": "Coded refusal (lib/l10n/coded_refusal_messages.dart) `approval_segregation_receiver`: the approver recorded a goods receipt the invoice is billed against."
   },
+  "codedRefusalApprovalSegregationInspector": "Segregation of duties: a user who recorded a quality inspection of the goods this invoice is billed against cannot also approve it.",
+  "@codedRefusalApprovalSegregationInspector": {
+    "description": "Coded refusal (lib/l10n/coded_refusal_messages.dart) `approval_segregation_inspector`: the approver recorded a quality inspection of the goods the invoice is billed against."
+  },
   "codedRefusalInvoiceStaleApproval": "This invoice was changed after you loaded it. Reload it and review the current version before approving.",
   "@codedRefusalInvoiceStaleApproval": {
     "description": "Coded refusal (lib/l10n/coded_refusal_messages.dart) `invoice_stale_approval`: the invoice changed after the approver loaded it, so nothing was approved."

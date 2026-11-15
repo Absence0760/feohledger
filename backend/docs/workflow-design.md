@@ -409,6 +409,12 @@ turns it off (`approval_chain.violates_segregation`). When enabled:
   corrections; not part of the implicated set (decisions §267). The
   manual-complete amount floor (`POST /invoices/{id}/complete`) honours it too:
   a receiver completing such an invoice lands it at review, not approved.
+- Nor may the approver have hand-recorded a quality inspection of those goods
+  (`approval_chain.inspection_recorders` → `check_inspection_segregation`, 403
+  `approval_segregation_inspector`) — a PO-level inspection on the invoice's
+  PO, or one on a live receipt of it, in the invoice's entity. Same opt-out,
+  same post-correction read, same `/complete` floor and escalation behaviour
+  (decisions §404).
 - With `uploaded_by_id` NULL **and** the set empty there is nothing to refuse.
   That combination means the invoice came in through a channel with no employee
   behind it — email intake, inbound PEPPOL, or the supplier portal — not

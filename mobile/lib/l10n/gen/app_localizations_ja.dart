@@ -637,6 +637,10 @@ class AppLocalizationsJa extends AppLocalizations {
       '職務分掌：この請求書の対象となる入荷を記録したユーザーは、承認することもできません。';
 
   @override
+  String get codedRefusalApprovalSegregationInspector =>
+      '職務分掌：この請求書の対象となる商品の品質検査を記録したユーザーは、承認することもできません。';
+
+  @override
   String get codedRefusalInvoiceStaleApproval =>
       'この請求書は読み込み後に変更されています。再読み込みし、最新の内容を確認してから承認してください。';
 

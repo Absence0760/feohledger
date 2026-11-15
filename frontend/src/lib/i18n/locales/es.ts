@@ -4010,6 +4010,7 @@ export const messages = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregación de funciones: un usuario que participó en la creación de esta factura no puede también aprobarla.",
 	'refusal.approvalSegregationReceiver': "Segregación de funciones: un usuario que registró una recepción de mercancías facturada en esta factura no puede también aprobarla.",
+	'refusal.approvalSegregationInspector': "Segregación de funciones: un usuario que registró una inspección de calidad de la mercancía facturada en esta factura no puede también aprobarla.",
 	'refusal.approvalLevelReuse': "Ya aprobó un nivel anterior de esta cadena; se requiere un aprobador distinto.",
 	'refusal.approvalNotNamedApprover': "No es un aprobador autorizado para este paso.",
 	'refusal.invoiceNotInReview': "Esta factura no está pendiente de revisión, por lo que no se puede aprobar ni rechazar.",
