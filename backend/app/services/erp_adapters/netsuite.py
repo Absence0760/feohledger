@@ -25,6 +25,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl, quote, urlsplit
 
+import httpcore
 import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
@@ -59,6 +60,7 @@ from app.services.erp_adapters.base import (
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json, loads_exact_json
+from app.utils.url_safety import UnsafeUrlError, pinned_async_client, resolve_public_addresses
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +172,21 @@ _ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 AUTH_TBA = "tba"
 AUTH_OAUTH2_M2M = "oauth2_m2m"
 AUTH_METHODS: tuple[str, ...] = (AUTH_OAUTH2_M2M, AUTH_TBA)
+
+#: The step a deleted tenant's customer takes in NetSuite, per sign-in method
+#: (``NetSuiteAdapter.provider_side_disconnect``, decisions §406). Menu paths
+#: from Oracle's "Viewing, Editing, Creating, and Revoking TBA Tokens"
+#: (bridgehead_4249078810) and "OAuth 2.0 Client Credentials Setup"
+#: (section_162686838198), both checked 2026-11-14. TBA's says "if it is not
+#: already inactive" because deletion revokes that token itself when it can.
+_TBA_DISCONNECT_STEP = (
+    "revoke FeohLedger's access token under Setup > Users/Roles > User Management > "
+    "Access Tokens in NetSuite, if it does not already show as inactive"
+)
+_M2M_DISCONNECT_STEP = (
+    "revoke FeohLedger's certificate under Setup > Integration > Manage Authentication > "
+    "OAuth 2.0 Client Credentials (M2M) Setup in NetSuite"
+)
 
 #: The config keys each method needs. The secrets among them
 #: (``consumer_secret``, ``token_secret``, ``private_key``) are sealed in
@@ -500,6 +517,114 @@ class NetSuiteAdapter(ErpAdapter):
         account = self._account_id().replace("_", "-").lower()
         return f"https://{account}.suitetalk.api.netsuite.com/services/rest/record/v1"
 
+    def _client(self, timeout: float) -> httpx.AsyncClient:
+        """The HTTP client for every NetSuite call.
+
+        The host is built from the admin-supplied ``account_id``. The id is
+        validated to one hostname label, so it always lands under Oracle's
+        domain, but the request carries the TBA signature or the bearer, so the
+        connect is pinned too (decisions §334, §406): the address dialled is
+        one the resolver vetted, never a second lookup a rebinding record could
+        answer with an internal one. A refused address surfaces as
+        ``httpx.ConnectError`` (:func:`_resolve_netsuite_host`), so every
+        caller's network-failure handling already covers it. The operator
+        override (fake-erp on localhost) is trusted and keeps a plain client,
+        as SYSPRO's does.
+        """
+        if settings.erp_netsuite_api_base:
+            return httpx.AsyncClient(timeout=timeout)
+        return pinned_async_client(resolve=_resolve_netsuite_host, timeout=timeout)
+
+    # -- tenant deletion (decisions §400, §406) --------------------------------
+
+    @property
+    def provider_side_disconnect(self) -> str:
+        """What the customer ends in NetSuite, by sign-in method.
+
+        TBA: the access token (Oracle: Setup > Users/Roles > User Management >
+        Access Tokens, Edit, Revoke). OAuth 2.0 client credentials: the
+        certificate mapping (Setup > Integration > Manage Authentication >
+        OAuth 2.0 Client Credentials (M2M) Setup, Revoke). A block whose
+        ``auth_method`` cannot be read names both, rather than guess.
+        """
+        try:
+            method = self._auth_method()
+        except NetSuiteConfigError:
+            return f"{_M2M_DISCONNECT_STEP}, or {_TBA_DISCONNECT_STEP}"
+        return _TBA_DISCONNECT_STEP if method == AUTH_TBA else _M2M_DISCONNECT_STEP
+
+    @property
+    def revokes_stored_access(self) -> bool:
+        """Only TBA has an endpoint we can call with what we store."""
+        try:
+            return self._auth_method() == AUTH_TBA
+        except NetSuiteConfigError:
+            return False
+
+    def _revoke_token_url(self) -> str:
+        """Oracle's TBA revoke endpoint for our token: ``GET
+        https://<account>.restlets.api.netsuite.com/rest/revoketoken`` with
+        ``consumerKey`` and ``token``. Under ``FEOH_ERP_NETSUITE_API_BASE`` it
+        sits beside the overridden REST root (``<root>/rest/revoketoken``), so
+        the fake gets it and real NetSuite never does."""
+        query = (
+            f"consumerKey={quote(str(self.config['consumer_key']), safe='')}"
+            f"&token={quote(str(self.config['token_id']), safe='')}"
+        )
+        if settings.erp_netsuite_api_base:
+            root = self._rest_root().removesuffix("/services/rest")
+            return f"{root}/rest/revoketoken?{query}"
+        account = self._account_id().replace("_", "-").lower()
+        return f"https://{account}.restlets.api.netsuite.com/rest/revoketoken?{query}"
+
+    async def revoke_stored_access(self) -> str | None:
+        """Revoke our TBA token at NetSuite once the tenant is deleted.
+
+        Oracle's revoke endpoint
+        (https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/chapter_157017286140.html)
+        takes the OAuth header of the token's own user, and a revoked token is
+        inactive for good. Oracle documents no response body, so a 2xx alone
+        proves nothing: the outcome is ``revoked`` only when the same token,
+        asked for one vendor straight after, is refused 401. Anything else (a
+        refusal, an outage, a token that still signs in) is ``failed`` and the
+        confirmation names the step.
+
+        OAuth 2.0 client credentials: Oracle's revoke endpoint takes a refresh
+        token, which this grant never issues, and its access tokens cannot be
+        revoked; the certificate mapping ends it, and only the customer's
+        administrator can revoke that. So ``unsupported``, with no call.
+
+        Never raises; logs the status only, never a token or a secret.
+        """
+        from app.services.erp_oauth import REVOKE_FAILED, REVOKE_UNSUPPORTED, REVOKED
+
+        try:
+            method = self._auth_method()
+        except NetSuiteConfigError:
+            return REVOKE_FAILED
+        if method != AUTH_TBA:
+            return REVOKE_UNSUPPORTED
+        try:
+            await self._check_config()
+            revoke_url = self._revoke_token_url()
+            probe_url = f"{self._base_url()}/vendor?limit=1"
+            async with self._client(timeout=15) as client:
+                resp = await self._send(client, "GET", revoke_url)
+                if not 200 <= resp.status_code < 300:
+                    logger.warning("NetSuite token revocation refused: HTTP %s", resp.status_code)
+                    return REVOKE_FAILED
+                probe = await self._send(client, "GET", probe_url)
+        except Exception as exc:  # noqa: BLE001 — best-effort by contract
+            logger.warning("NetSuite token revocation failed: %s", type(exc).__name__)
+            return REVOKE_FAILED
+        if probe.status_code != 401:
+            logger.warning(
+                "NetSuite token revocation unconfirmed: the token still answered HTTP %s",
+                probe.status_code,
+            )
+            return REVOKE_FAILED
+        return REVOKED
+
     def _auth_header(self, method: str, url: str) -> str:
         """Generate OAuth 1.0 authorization header for NetSuite TBA."""
         nonce = uuid.uuid4().hex
@@ -557,7 +682,7 @@ class NetSuiteAdapter(ErpAdapter):
         which the caller fails: a lookup that could not be made is not a miss.
         """
         url = f"{self._base_url()}/vendorBill/eid:{quote(external_id, safe='')}"
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self._client(timeout=15) as client:
             resp = await self._send(client, "GET", url)
         if resp.status_code == 404:
             return (200, None) if _netsuite_error_code(resp) == "NONEXISTENT_ID" else (404, None)
@@ -669,7 +794,7 @@ class NetSuiteAdapter(ErpAdapter):
         # Synchronous on purpose: `Prefer: respond-async` turns the create into
         # a job (202, Location = the job), and the total check below needs the
         # record's own Location.
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self._client(timeout=30) as client:
             resp = await self._send(
                 client,
                 "POST",
@@ -792,7 +917,7 @@ class NetSuiteAdapter(ErpAdapter):
         """The vendorBill record, parsed exactly (never via a float), or None
         when it could not be read."""
         url = f"{self._base_url()}/vendorBill/{quote(doc_id, safe='')}"
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self._client(timeout=15) as client:
             resp = await self._send(client, "GET", url)
         if resp.status_code != 200:
             return None
@@ -961,7 +1086,7 @@ class NetSuiteAdapter(ErpAdapter):
         no longer has.
         """
         url = f"{self._base_url()}/vendorBill/{quote(erp_document_id, safe='')}"
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self._client(timeout=15) as client:
             resp = await self._send(client, "GET", url)
             if resp.status_code != 200:
                 return False
@@ -988,7 +1113,7 @@ class NetSuiteAdapter(ErpAdapter):
         rows: list[dict] = []
         offset = 0
         body_text = dumps_exact_json({"q": query})
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with self._client(timeout=30) as client:
             for _ in range(sync_listing_pages(_PAGE_SIZE)):
                 url = f"{self._suiteql_url()}?limit={_PAGE_SIZE}&offset={offset}"
                 headers = {"Content-Type": "application/json", "Prefer": "transient"}
@@ -1132,11 +1257,22 @@ class NetSuiteAdapter(ErpAdapter):
             # and role).
             await self._check_config()
             url = f"{self._base_url()}/vendor?limit=1"
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with self._client(timeout=10) as client:
                 resp = await self._send(client, "GET", url)
             return resp.status_code == 200
         except Exception:
             return False
+
+
+async def _resolve_netsuite_host(host: str, port: int) -> list[str]:
+    """The pinned client's resolver: the shared public-address rule, with a
+    non-public answer raised as a failed connect (``httpcore.ConnectError``,
+    which httpx surfaces as ``httpx.ConnectError``) rather than a
+    ``ValueError`` no NetSuite caller expects. Nothing is dialled either way."""
+    try:
+        return await resolve_public_addresses(host, port)
+    except UnsafeUrlError:
+        raise httpcore.ConnectError("NetSuite host did not resolve to a public address") from None
 
 
 def _oauth1_encode(value: str) -> str:

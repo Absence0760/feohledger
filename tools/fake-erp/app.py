@@ -6,6 +6,7 @@ real ERP adapters (backend/app/services/erp_adapters/):
     /merge/api/accounting/v1/...            Merge.dev unified accounting API
     /netsuite/services/rest/record/v1/...   NetSuite SuiteTalk REST (TBA or OAuth 2.0 bearer)
     /netsuite/services/rest/auth/oauth2/v1/token   NetSuite OAuth 2.0 client credentials (M2M)
+    /netsuite/rest/revoketoken              NetSuite TBA token revocation (RESTlet domain)
     /d365/...                               Dynamics 365 Business Central OData
 
 State is in-memory only (module-level dicts), fully deterministic, and
@@ -26,7 +27,7 @@ import time
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 from defusedxml import DefusedXmlException
 from defusedxml import ElementTree as SafeET
@@ -901,6 +902,40 @@ def _require_netsuite_auth(request: Request) -> None:
     for param in ("oauth_consumer_key", "oauth_token", "oauth_signature"):
         if f"{param}=" not in auth:
             raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
+    if _tba_header_param(auth, "oauth_token") in _netsuite_tba_revoked():
+        # A revoked token is inactive for good (Oracle's revoketoken).
+        raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
+
+
+def _tba_header_param(auth: str, name: str) -> str:
+    """One parameter's decoded value from a TBA ``OAuth ...`` header."""
+    match = re.search(rf'{name}="([^"]*)"', auth)
+    return unquote(match.group(1)) if match else ""
+
+
+def _netsuite_tba_revoked() -> dict[str, bool]:
+    return STATE.setdefault("netsuite_tba_revoked", {})
+
+
+@app.get("/netsuite/rest/revoketoken")
+async def netsuite_tba_revoke_token(request: Request) -> dict:
+    """NetSuite's TBA revoke endpoint (``GET <restlets domain>/rest/revoketoken``,
+    ``consumerKey`` + ``token``, an OAuth header): the token signing the
+    request may revoke itself, never another user's. Oracle documents no
+    response body, so this one says only that it worked; the adapter proves
+    the revocation by the token's next call being refused."""
+    _require_netsuite_auth(request)
+    auth = request.headers.get("authorization", "")
+    consumer_key = request.query_params.get("consumerKey", "")
+    token = request.query_params.get("token", "")
+    if not consumer_key or not token:
+        raise _netsuite_error(400, "INVALID_REQUEST", "consumerKey and token are required.")
+    if token != _tba_header_param(auth, "oauth_token") or consumer_key != _tba_header_param(
+        auth, "oauth_consumer_key"
+    ):
+        raise _netsuite_error(403, "INSUFFICIENT_PERMISSION", "Cannot revoke this token.")
+    _netsuite_tba_revoked()[token] = True
+    return {"status": "ok"}
 
 
 # OAuth 2.0 client credentials (M2M). The token endpoint verifies the JWT

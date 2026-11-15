@@ -88,8 +88,15 @@ Security > Authorized Client Applications. Intacct's revoke ends every token for
 that Web Services user and company, so anything else sharing the user (another
 integration of the customer's) must sign in again. Sage Accounting (ZA) issues no token,
 so it always reads `unsupported`: tell the customer to change the password of
-the Sage user whose login FeohLedger held, or remove that user. The operator's
-written confirmation names the step in both cases.
+the Sage user whose login FeohLedger held, or remove that user. NetSuite (§406)
+depends on the sign-in method: a TBA token is revoked through Oracle's
+`revoketoken` and reads `revoked` only once that token is refused, so on
+anything else tell the customer to revoke it under Setup > Users/Roles > User
+Management > Access Tokens; an OAuth 2.0 client-credentials connection always
+reads `unsupported` (no endpoint revokes it), so tell them to revoke our
+certificate under Setup > Integration > Manage Authentication > OAuth 2.0
+Client Credentials (M2M) Setup. The operator's written confirmation names the
+step in every case.
 
 ## What stays, on purpose
 

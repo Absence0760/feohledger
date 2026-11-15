@@ -38,7 +38,7 @@ the client (`utils/url_safety`, decisions §334 / §339):
 | Chat `slack` / `teams` | `settings.chat_notifications.webhook_url` | per-org → `org_host_client` |
 | Enrichment `clearbit` / `dun_bradstreet` | `settings.enrichment.base_url` | per-org → `org_host_client` |
 | ERP `syspro`, SSO, branding logo, outbound webhooks, commerce `woocommerce` | admin URL | per-org → own check + pinned client (`_ORG_HOST_BESPOKE`) |
-| ERP `netsuite` | `account_id` → `<id>.suitetalk.api.netsuite.com` | constrained (`_ACCOUNT_ID_RE`) |
+| ERP `netsuite` | `account_id` → `<id>.suitetalk.api.netsuite.com` / `<id>.restlets.api.netsuite.com` | constrained (`_ACCOUNT_ID_RE`), and pinned (`_ORG_HOST_BESPOKE`) |
 | ERP `dynamics_365_bc` / `sage_accounting_za` | `base_url` allowlisted to the vendor host | constrained |
 | Commerce `shopify` / `lightspeed` | `<handle>.myshopify.com` / `<prefix>.retail.lightspeed.app` | constrained, and pinned via the commerce client |
 | ERP `quickbooks_online`, commerce `square` | `environment` picks one of two vendor hosts | constrained |

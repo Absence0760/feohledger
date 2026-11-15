@@ -20493,3 +20493,81 @@ the record's own `vendorId`, which is refused even with a blank pay-to;
 `tests/test_erp_refusal_codes.py` and `frontend/src/lib/api/erpRefusals.test.ts`
 (the code catalogued and stated). fake-erp's BC create now states
 `payToVendorId` (the vendor card's, else the vendor's own).
+
+## 406. NetSuite connects through the pinned client, revokes its TBA token at tenant deletion, and names the certificate otherwise (§334 / §400 follow-up, issue #655, 2026-11-14)
+
+**Context.** NetSuite built six plain `httpx.AsyncClient`s and sat on
+`_PLAIN_CLIENT_ALLOWED` because its host is built from `account_id`, which is
+validated to one hostname label under Oracle's domain. That stops the token
+going to another domain, but not a rebinding record for
+`<account>.suitetalk.api.netsuite.com` answering the connect's own lookup with
+an internal address while the request carries the TBA signature or the bearer.
+And NetSuite was one of the four stored-credential ERPs §400 left silent at
+tenant deletion.
+
+**Decision.**
+
+- **Every call goes through `NetSuiteAdapter._client`**, which builds
+  `url_safety.pinned_async_client` with NetSuite's own resolver. The resolver
+  applies the shared public-address rule and raises a non-public answer as
+  `httpcore.ConnectError`, so it reaches callers as `httpx.ConnectError`: the
+  SuiteQL listings, the void-after-refusal path and the connection test
+  already treat that as a failed fetch, and an `UnsafeUrlError` (a
+  `ValueError`) would have escaped all of them. The operator override
+  (`FEOH_ERP_NETSUITE_API_BASE`, fake-erp) keeps one plain client, as §334 and
+  SYSPRO do. So NetSuite moves to `_ORG_HOST_BESPOKE` and its
+  `_PLAIN_CLIENT_ALLOWED` entry drops from six calls to that one branch; the
+  count guard now fails any new plain client in the module.
+- **TBA tokens are revoked at deletion.** Oracle's "Issue Token and Revoke
+  Token REST Services for Token-based Authentication"
+  (<https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/chapter_157017286140.html>,
+  checked 2026-11-14) documents `GET https://<account>.restlets.api.netsuite.com/rest/revoketoken`
+  with `consumerKey` and `token`, authenticated by an OAuth header, and forbids
+  only revoking another user's token. We hold the token's own consumer key and
+  secret and token id and secret, so `revoke_stored_access` signs the call with
+  that token. Oracle documents no response body, so a 2xx is not taken as
+  proof: the outcome is `revoked` only when the same token is then refused
+  `401` on `GET /vendor?limit=1`. A refusal, an outage, or a token that still
+  works is `failed`. `revokes_stored_access` is True for TBA, so a closure
+  defers the call past its commit (§371).
+- **OAuth 2.0 client credentials are `unsupported`.** Oracle's OAuth 2.0
+  revoke endpoint
+  (<https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_161071224088.html>,
+  checked 2026-11-14) revokes a refresh token and its access tokens, and this
+  grant issues no refresh token. What ends it is revoking the certificate
+  mapping, which takes an administrator or the OAuth 2.0 Authorized
+  Applications Management permission
+  (<https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162686838198.html>,
+  checked 2026-11-14).
+- **The step follows the sign-in method.** `provider_side_disconnect` is a
+  property. For TBA it says to revoke the token under Setup > Users/Roles > User
+  Management > Access Tokens
+  (<https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/bridgehead_4249078810.html>,
+  checked 2026-11-14), "if it does not already show as inactive". For OAuth 2.0
+  it says to revoke the certificate under Setup > Integration > Manage
+  Authentication > OAuth 2.0 Client Credentials (M2M) Setup. A block whose
+  `auth_method` is unreadable names both, reads `failed`, and makes no call.
+- **fake-erp answers `revoketoken`** at `/netsuite/rest/revoketoken`, beside the
+  overridden REST root. After that, the revoked token gets `401 INVALID_LOGIN`
+  everywhere, so the adapter suite proves the call in process against the same
+  handlers.
+
+**Rejected.**
+
+- *Pinning the operator override too* (`allow_private=True`), which would take
+  NetSuite off `_PLAIN_CLIENT_ALLOWED` entirely. §334 keeps trusted operator
+  overrides plain. SYSPRO and the commerce client sit on the list for the same
+  one branch, and the list's job is to count it.
+- *Calling the certificate rotation endpoint to revoke an M2M certificate.*
+  It needs the "Manage own OAuth 2.0 Client Credentials certificates"
+  permission, which our setup never asks the customer to grant. On a role
+  without it, the call fails every time, and a failed revoke would read as an
+  attempt.
+- *Reading a 2xx from `revoketoken` as `revoked`.* The response body is
+  undocumented. Probing the token afterwards is the only evidence we can read.
+- *Blocking the integration record as the step.* The customer may use that
+  record for other integrations. The token, or the certificate, is ours alone.
+
+**Not verified.** No real NetSuite account has accepted the revoke. The fake
+encodes our reading of Oracle's page, as the rest of the NetSuite suite does
+(the sandbox follow-up, #654).

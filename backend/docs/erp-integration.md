@@ -2097,7 +2097,7 @@ One server fakes three provider surfaces by path prefix:
 | Provider | Fake surface | Path prefix |
 |---|---|---|
 | Merge.dev | Unified accounting API | `/merge/api/accounting/v1` |
-| NetSuite | SuiteTalk REST records + SuiteQL, OAuth 2.0 token endpoint | `/netsuite/services/rest/record/v1` (token at `/netsuite/services/rest/auth/oauth2/v1/token`) |
+| NetSuite | SuiteTalk REST records + SuiteQL, OAuth 2.0 token endpoint, TBA `revoketoken` | `/netsuite/services/rest/record/v1` (token at `/netsuite/services/rest/auth/oauth2/v1/token`, revoke at `/netsuite/rest/revoketoken`) |
 | Dynamics 365 BC | OData + OAuth token endpoint | `/d365` (token at `/d365/oauth2/token`) |
 
 `GET /health` reports liveness; `POST /__reset` restores the fixture state.
@@ -2130,7 +2130,11 @@ config. An admin-entered `base_url` in Organization settings is still guarded
 arbitrary host. NetSuite has no admin `base_url`: its host is built from
 `account_id`, which must be one hostname label (`[A-Za-z0-9_-]+`, so no dot,
 port, `@`, `/` or non-ASCII) before it reaches a URL — the token only ever goes
-to `<account>.suitetalk.api.netsuite.com`. Every adapter's host class is in
+to `<account>.suitetalk.api.netsuite.com`. Every NetSuite call still goes through
+the pinned client (`NetSuiteAdapter._client`, decisions §406), so a record that
+answers that host with an internal address is refused at connect, before the
+signed request is sent, and fails as an ordinary `httpx.ConnectError`; only the
+operator override keeps a plain client. Every adapter's host class is in
 `adapter-patterns.md` § Where an adapter's host comes from.
 
 ### Running the suite
@@ -3441,6 +3445,37 @@ retry, a refused assertion, every config refusal, and TBA unchanged),
 the re-mint after a 401, and a full send, against the running fake). Only a real
 NetSuite account proves Oracle accepts the assertion (`docs/followups.md`).
 
+**Tenant deletion** (decisions §400, §406). The confirmation names the
+customer's step by sign-in method, and deletion ends what it can:
+
+- **TBA:** Oracle documents a revoke endpoint the token's own user may call
+  ([Issue Token and Revoke Token REST Services](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/chapter_157017286140.html),
+  checked 2026-11-14): `GET https://<account>.restlets.api.netsuite.com/rest/revoketoken?consumerKey=…&token=…`,
+  signed with that token's OAuth header; a revoked token is inactive for good.
+  `NetSuiteAdapter.revoke_stored_access` calls it (after a closure's commit,
+  like every provider call at deletion). Oracle documents no response body, so
+  `revoked` is reported only when the same token, asked for one vendor right
+  after, is refused 401; a refusal, an outage or a token that still works is
+  `failed`. The step named is revoking the token under *Setup > Users/Roles >
+  User Management > Access Tokens*
+  ([Viewing, Editing, Creating, and Revoking TBA Tokens](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/bridgehead_4249078810.html)),
+  if it does not already show as inactive.
+- **OAuth 2.0 client credentials:** `unsupported`, with no call. Oracle's
+  OAuth 2.0 revoke endpoint
+  ([POST Request to the Revoke Token Endpoint](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_161071224088.html))
+  takes a refresh token, which this grant never issues, and the 60-minute
+  access tokens cannot be revoked. What ends the access is revoking the
+  certificate under *Setup > Integration > Manage Authentication > OAuth 2.0
+  Client Credentials (M2M) Setup*
+  ([OAuth 2.0 Client Credentials Setup](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162686838198.html)),
+  which an administrator does; the certificate rotation endpoint needs a
+  permission our role is never asked for. That is the step named.
+
+Under `FEOH_ERP_NETSUITE_API_BASE` the revoke goes to `<root>/rest/revoketoken`
+beside the overridden REST root, which fake-erp answers (a revoked token then
+401s). Tests: `tests/test_erp_netsuite_adapter.py` (against fake-erp, and the
+failure outcomes) and `tests/test_tenant_deletion.py`.
+
 ## NetSuite: SuiteQL syncs and void
 
 `erp_adapters/netsuite.py`. Every list sync is one SuiteQL query
@@ -3803,7 +3838,8 @@ It never blocks the deletion and never logs a token. An ERP reached with
 (`revoke_stored_access`, after a closure's commit like an OAuth revoke) and
 Sage Accounting (ZA) reads `unsupported`; the confirmation's `ERP credentials:`
 line names the step the customer takes at the provider. Merge.dev, Business
-Central, NetSuite and SYSPRO state none yet (`docs/followups.md`). An empty
+Central and SYSPRO state none yet (`docs/followups.md`); NetSuite's TBA token is
+revoked and its OAuth 2.0 certificate named (§ NetSuite sign-in → Tenant deletion). An empty
 `scopes` sends no `scope`. Operator URL overrides (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before

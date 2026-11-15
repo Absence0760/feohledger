@@ -813,7 +813,13 @@ _STORED = {
         "password": _SAGE_ZA_PASSWORD,
         "company_id": "4711",
     },
-    "netsuite": {"account_id": "123"},
+    "netsuite": {
+        "account_id": "123",
+        "consumer_key": "ns-ck",
+        "consumer_secret": "ns-consumer-secret-7",
+        "token_id": "ns-token-id",
+        "token_secret": "ns-token-secret-7",
+    },
 }
 
 
@@ -951,8 +957,117 @@ async def test_sage_za_is_unsupported_at_once_and_names_the_password(monkeypatch
     assert _SAGE_ZA_PASSWORD not in caplog.text
 
 
+class _ScriptedNetSuite:
+    """NetSuite's TBA ``revoketoken`` and the record API, through the operator
+    override (a plain client) over ``httpx.MockTransport``. Once revoked, the
+    token is refused, as NetSuite does (§406)."""
+
+    def __init__(self, revoke_status: int = 200):
+        self.revoke_status = revoke_status
+        self.revoked = False
+        self.requests: list[httpx.Request] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.url.path.endswith("/rest/revoketoken"):
+            self.revoked = self.revoke_status == 200
+            return httpx.Response(self.revoke_status, json={})
+        return httpx.Response(401 if self.revoked else 200, json={"items": []})
+
+    def install(self, monkeypatch):
+        real = httpx.AsyncClient
+
+        def factory(*args, **kwargs):
+            return real(*args, transport=httpx.MockTransport(self.handler), **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", factory)
+        monkeypatch.setattr(
+            settings, "erp_netsuite_api_base", "https://ns.test/services/rest/record/v1"
+        )
+        return self
+
+    def revokes(self) -> list[httpx.Request]:
+        return [r for r in self.requests if r.url.path.endswith("/rest/revoketoken")]
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("erp_type", ["netsuite", "mock"])
+async def test_a_netsuite_tba_token_is_revoked_and_the_step_still_named(monkeypatch, caplog):
+    """TBA: Oracle's revoke endpoint ends the token, proved by its next call
+    being refused; the confirmation still names the Access Tokens page."""
+    ns = _ScriptedNetSuite().install(monkeypatch)
+    caplog.set_level("DEBUG")
+
+    result, session = await _delete_stored(monkeypatch, "netsuite")
+
+    (call,) = ns.revokes()
+    assert str(call.url) == ("https://ns.test/rest/revoketoken?consumerKey=ns-ck&token=ns-token-id")
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "netsuite",
+        erp_oauth.REVOKED,
+    )
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "revoked at the provider" in line and "Access Tokens" in line
+    for secret in ("ns-consumer-secret-7", "ns-token-secret-7"):
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_closure_revokes_netsuite_only_after_its_commit(monkeypatch):
+    ns = _ScriptedNetSuite().install(monkeypatch)
+    held = _GrantSession(_stored_settings("netsuite"))
+
+    result, _other = await _delete_stored(monkeypatch, "netsuite", control_session=held)
+
+    assert ns.requests == [], "NetSuite was called while the closure held its locks"
+    assert result.erp_grant_revocation == tenant_deletion.GRANT_REVOKE_AFTER_COMMIT
+    await held.commit()
+    assert len(ns.revokes()) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKED
+
+
+@pytest.mark.asyncio
+async def test_a_refused_netsuite_revoke_never_stops_the_deletion(monkeypatch):
+    ns = _ScriptedNetSuite(revoke_status=403).install(monkeypatch)
+
+    result, session = await _delete_stored(monkeypatch, "netsuite")
+
+    assert len(ns.revokes()) == 1
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_FAILED
+    confirmation = format_confirmation(result)
+    assert "NOT revoked" in confirmation and "Access Tokens" in confirmation
+
+
+@pytest.mark.asyncio
+async def test_netsuite_client_credentials_are_unsupported_at_once(monkeypatch):
+    """OAuth 2.0 M2M: nothing we can revoke, so decided at the read with no
+    call, and the customer is told to revoke the certificate mapping."""
+    ns = _ScriptedNetSuite().install(monkeypatch)
+    monkeypatch.setitem(
+        _STORED,
+        "netsuite",
+        {
+            "account_id": "123",
+            "auth_method": "oauth2_m2m",
+            "client_id": "cid",
+            "certificate_id": "cert",
+            "private_key": "unused",
+        },
+    )
+    held = _GrantSession(_stored_settings("netsuite"))
+
+    result, _other = await _delete_stored(monkeypatch, "netsuite", control_session=held)
+    await held.commit()
+
+    assert ns.requests == []
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_UNSUPPORTED
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "NOT revoked" in line and "OAuth 2.0 Client Credentials (M2M) Setup" in line
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("erp_type", ["mock"])
 async def test_an_erp_with_no_stated_step_adds_nothing(monkeypatch, erp_type):
     """An adapter that states no provider-side step (or the local mock) is
     not reported: the confirmation never invents a step."""

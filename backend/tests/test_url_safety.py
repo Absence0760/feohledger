@@ -576,14 +576,9 @@ _PLAIN_CLIENT_ALLOWED: dict[str, tuple[int, str]] = {
         1,
         "only the trusted operator branch of _client (FEOH_OLLAMA_BASE_URL)",
     ),
-    # Listed though it imports nothing from url_safety: its host is BUILT from a
-    # per-org value, so its plain clients are pinned here like the others.
     "services/erp_adapters/netsuite.py": (
-        6,
-        "the host is <account_id>.suitetalk.api.netsuite.com and account_id must "
-        "match [A-Za-z0-9_-]+ before it reaches a URL (_ACCOUNT_ID_RE; injection "
-        "cases in test_erp_base_url_overrides), so the token only ever goes to "
-        "Oracle's domain; the other branch is the operator override (fake-erp)",
+        1,
+        "only the trusted operator-override branch of _client (fake-erp)",
     ),
 }
 
@@ -602,16 +597,17 @@ _ORG_HOST_MODULES = (
 
 #: Modules that send to a per-org host through their OWN check + pinned client,
 #: because they need something ``org_host_client`` does not offer: a resolver
-#: raising the caller's error type (SSO, commerce), the stricter outbound-webhook
-#: address rule, a blocking client in a worker thread (the PDF logo), or a check
-#: and a client built in different methods (SYSPRO). Each must still build a
-#: pinned client, so the guard is the same and only the spelling differs.
+#: raising the caller's error type (SSO, commerce, NetSuite), the stricter
+#: outbound-webhook address rule, a blocking client in a worker thread (the PDF
+#: logo), or a check and a client built in different methods (SYSPRO). Each must
+#: still build a pinned client, so the guard is the same and only the spelling differs.
 _ORG_HOST_BESPOKE = {
     "services/sso.py": "settings.sso discovery / JWKS / token URLs",
     "services/branding.py": "settings.company.logo_url (blocking, worker thread)",
     "services/webhooks/delivery.py": "an outbound webhook subscription's URL",
     "services/commerce_adapters/base.py": "store_url / shop domain / prefix hosts",
     "services/erp_adapters/syspro.py": "settings.erp.base_url (customer-hosted)",
+    "services/erp_adapters/netsuite.py": "settings.erp.account_id -> <id>.suitetalk / .restlets",
 }
 
 #: Modules that READ a per-org host but send nothing to it yet (skeletons, or
