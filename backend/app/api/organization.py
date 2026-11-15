@@ -332,16 +332,26 @@ async def update_organization(
         # number rather than validate the blank and refuse (decisions §432).
         incoming_payments = body.settings.get("payments")
         if isinstance(incoming_payments, dict) and "nacha" in incoming_payments:
-            from app.services.nacha import carry_offset_account
+            from app.services.nacha import OffsetAccountReentryRequired, carry_offset_account
 
             stored_payments = (org.settings or {}).get("payments")
-            body.settings["payments"] = {
-                **incoming_payments,
-                "nacha": carry_offset_account(
+            try:
+                carried = carry_offset_account(
                     incoming_payments.get("nacha"),
                     stored_payments.get("nacha") if isinstance(stored_payments, dict) else None,
-                ),
-            }
+                )
+            except OffsetAccountReentryRequired as exc:
+                # The stored number belongs to the old bank or account type:
+                # never carried onto a new one (§432, round-13 amendment).
+                # Field name only: the number is never echoed.
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"payments.nacha.{exc.field} must be re-entered: "
+                        "offset_routing or offset_account_type changed."
+                    ),
+                ) from None
+            body.settings["payments"] = {**incoming_payments, "nacha": carried}
         _validate_settings_patch(body.settings)
 
         # Saving a LIVE ERP adapter is plan-gated, and one routed through

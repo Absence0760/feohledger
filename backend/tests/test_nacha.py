@@ -29,6 +29,7 @@ from app.services.nacha import (
     NachaError,
     NachaOffset,
     NachaOriginator,
+    OffsetAccountReentryRequired,
     build_nacha_file,
     carry_offset_account,
     entry_from_bank_details,
@@ -371,6 +372,41 @@ def test_a_resave_keeps_the_stored_offset_account():
     cleared = {**OFFSET_CFG, "offset_routing": "", "offset_account": "", "offset_account_type": ""}
     assert carry_offset_account(cleared, stored)["offset_account"] == ""
     assert carry_offset_account(None, stored) is None
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"offset_routing": ODFI},
+        {"offset_account_type": "savings"},
+        {"offset_routing": ODFI, "offset_account_type": "savings"},
+    ],
+    ids=["new-routing", "new-type", "both"],
+)
+@pytest.mark.parametrize("sent", ["", None, "****3210", "absent"])
+def test_a_bank_change_never_carries_the_stored_offset_account(change, sent):
+    """The stored number belongs to its bank and account type. A save that
+    moves the offset to another routing number or type without re-entering the
+    number is refused, naming the field only, rather than debiting the old
+    number at the new bank (decisions §432, round-13 amendment)."""
+    stored = {**OFFSET_CFG, "offset_account": "9876543210"}
+    incoming = {**OFFSET_CFG, **change, "offset_account": sent}
+    if sent == "absent":
+        incoming.pop("offset_account")
+    with pytest.raises(OffsetAccountReentryRequired) as refused:
+        carry_offset_account(incoming, stored)
+    assert str(refused.value) == "offset_account"
+    assert "3210" not in str(refused.value)
+    # Re-entering a number with the change is a plain save of that number.
+    entered = carry_offset_account({**incoming, "offset_account": "5555"}, stored)
+    assert entered["offset_account"] == "5555"
+
+
+def test_the_same_routing_with_other_whitespace_still_carries():
+    stored = {**OFFSET_CFG, "offset_account": "9876543210"}
+    spaced = {**OFFSET_CFG, "offset_routing": f" {OFFSET_ROUTING[:4]} {OFFSET_ROUTING[4:]} "}
+    carried = carry_offset_account({**spaced, "offset_account": ""}, stored)
+    assert carried["offset_account"] == "9876543210"
 
 
 def test_the_settings_response_masks_the_offset_account():
@@ -813,6 +849,51 @@ async def test_the_offset_account_saves_reads_back_masked_and_survives_a_resave(
     [audit] = [a for a in audits if a.details.get("nacha_changed")]
     assert audit.details["nacha_changed"] == sorted({*NACHA_CFG, *offset})
     assert all("44455566677" not in str(a.details) for a in audits)
+
+
+@pytest.mark.asyncio
+async def test_a_bank_change_without_the_account_is_refused_and_keeps_the_stored_one(realdb):
+    """Round-13 amendment to §432: the settings page re-saves the offset with
+    the account blank; if the routing number changed with it, the stored number
+    is not carried to the new bank. 422, naming the field and never the
+    number, and nothing is written."""
+    info = realdb.info("a")
+    offset = {
+        "offset_routing": RDFI,
+        "offset_account": "44455566677",
+        "offset_account_type": "savings",
+    }
+    async with realdb.client(key="a", role="admin") as c:
+        saved = await c.patch(
+            "/api/organization",
+            json={
+                "settings": {"payments": {"mode": "record_only", "nacha": {**NACHA_CFG, **offset}}}
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        shown = (await c.get("/api/organization")).json()["settings"]["payments"]
+        moved = await c.patch(
+            "/api/organization",
+            json={
+                "settings": {
+                    "payments": {
+                        **shown,
+                        "nacha": {**shown["nacha"], "offset_routing": ODFI},
+                    }
+                }
+            },
+        )
+    assert moved.status_code == 422, moved.text
+    assert moved.json()["detail"] == (
+        "payments.nacha.offset_account must be re-entered: "
+        "offset_routing or offset_account_type changed."
+    )
+    assert "44455566677" not in moved.text
+    assert "6677" not in moved.json()["detail"]
+    async with realdb.control_sessionmaker()() as s:
+        org = await s.get(Organization, info.org_id)
+        stored = org.settings["payments"]["nacha"]
+        assert (stored["offset_routing"], stored["offset_account"]) == (RDFI, "44455566677")
 
 
 @pytest.mark.asyncio
