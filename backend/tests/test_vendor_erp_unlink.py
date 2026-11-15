@@ -257,9 +257,10 @@ async def test_list_erp_links_reports_row_then_kept(realdb):
         r = await client.get(f"/api/vendors/{vid}/erp-links")
     assert r.status_code == 200, r.text
     body = r.json()
-    # Whether the ERP can be searched to link by hand (decisions §415):
+    # The verdict on searching the ERP to link by hand (decisions §415):
     # `test_vendor_erp_manual_link.py` pins it.
-    assert isinstance(body.pop("search_available"), bool)
+    refusal = body.pop("search_refusal")
+    assert refusal is None or isinstance(refusal["code"], str)
     assert body == {
         "vendor_id": str(vid),
         "links": [

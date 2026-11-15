@@ -88,7 +88,7 @@ def status_sync_adapter_keys() -> tuple[str, ...]:
 def adapter_class(adapter_key: str) -> type[ErpAdapter] | None:
     """The registered adapter class for ``adapter_key``, or None — for a
     capability read from the class alone, with no config resolved and no
-    credential opened (``api/vendors`` ``search_available``, decisions §415)."""
+    credential opened (``api/vendors`` ``search_refusal``, decisions §415)."""
     load_builtin_adapters()
     return _ADAPTER_REGISTRY.get(adapter_key)
 

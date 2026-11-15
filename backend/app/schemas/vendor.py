@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.api.pagination import PageMeta
+from app.schemas.action_verdict import CodedRefusal
 from app.schemas.sanctions import ScreeningReviewItem
 from app.services.vendor_consolidation import mask_tax_id
 from app.utils.banking import (
@@ -511,10 +512,13 @@ class VendorErpLinksResponse(BaseModel):
 
     vendor_id: str
     links: list[VendorErpLinkItem] = Field(default_factory=list)
-    #: The connected ERP can be searched for a supplier record and the vendor
-    #: linked to it by hand (`POST …/erp-links/search` / `…/link`, decisions
-    #: §415): an adapter that implements it, connected to a named company.
-    search_available: bool = False
+    #: The verdict on searching the connected ERP for a supplier record and
+    #: linking this vendor to it by hand (`POST …/erp-links/search` / `…/link`,
+    #: decisions §415): `None` when both would accept, else the coded refusal
+    #: they answer with — `vendor_erp_search_unavailable` (no adapter that can
+    #: search, or no named company) or `vendor_erp_link_exists` (this vendor is
+    #: already linked in the connected company; unlink first).
+    search_refusal: CodedRefusal | None = None
 
 
 class VendorErpSearchRequest(BaseModel):
@@ -560,6 +564,8 @@ class VendorErpLinkResponse(BaseModel):
     erp_vendor_id: str
     vendor: VendorResponse
     links: list[VendorErpLinkItem] = Field(default_factory=list)
+    #: The vendor's `search_refusal` after the change (`VendorErpLinksResponse`).
+    search_refusal: CodedRefusal | None = None
 
 
 class VendorErpUnlinkRequest(BaseModel):
@@ -578,6 +584,8 @@ class VendorErpUnlinkResponse(BaseModel):
     cleared: list[dict]
     vendor: VendorResponse
     links: list[VendorErpLinkItem] = Field(default_factory=list)
+    #: The vendor's `search_refusal` after the change (`VendorErpLinksResponse`).
+    search_refusal: CodedRefusal | None = None
 
 
 class VendorStatusCounts(BaseModel):

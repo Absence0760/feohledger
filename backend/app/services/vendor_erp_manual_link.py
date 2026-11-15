@@ -68,6 +68,8 @@ __all__ = [
     "link_vendor_to_erp_record",
     "search_available",
     "search_candidates",
+    "search_refusal",
+    "vendor_link_exists_refusal",
 ]
 
 #: The refusal codes (``frontend/src/lib/api/codedRefusals.ts``). None names a
@@ -110,6 +112,54 @@ def search_available(adapter_cls: type[ErpAdapter] | None, realm: str | None) ->
     that implements it, connected to a named company (every link is stamped
     with its company, §284; a link with none is the kind §356 cannot keep)."""
     return bool(adapter_cls is not None and adapter_cls.supports_vendor_search and realm)
+
+
+async def vendor_link_exists_refusal(
+    db: AsyncSession, vendor: Vendor, realm: str
+) -> ErpManualLinkError | None:
+    """:data:`VENDOR_ERP_LINK_EXISTS` when ``vendor`` already holds a link in
+    ``realm``: on its row naming ``realm``, on its row naming no company (which
+    may be this one), or kept for ``realm``. ``None`` when it may be linked
+    here. The one reading of the rule: the link refuses with it under its
+    locks, and :func:`search_refusal` reports it before anyone searches."""
+    if vendor.erp_vendor_id and vendor.erp_link_realm in (realm, None):
+        return _link_exists()
+    kept_here = (
+        await db.execute(
+            select(VendorErpLink.id).where(
+                VendorErpLink.vendor_id == vendor.id, VendorErpLink.realm == realm
+            )
+        )
+    ).first()
+    return _link_exists() if kept_here else None
+
+
+def _link_exists() -> ErpManualLinkError:
+    return ErpManualLinkError(
+        VENDOR_ERP_LINK_EXISTS,
+        "This vendor is already linked to a supplier record in this ERP company. "
+        "Clear that link first.",
+        status_code=409,
+    )
+
+
+async def search_refusal(
+    db: AsyncSession,
+    vendor: Vendor,
+    *,
+    adapter_cls: type[ErpAdapter] | None,
+    realm: str | None,
+) -> ErpManualLinkError | None:
+    """The verdict on searching for, and linking, a record for ``vendor`` (the
+    "Find this vendor in the ERP" panel; ``frontend/docs/ui-patterns.md`` §
+    Whether to offer an action): :data:`VENDOR_ERP_SEARCH_UNAVAILABLE` when
+    :func:`search_available` says no, else :func:`vendor_link_exists_refusal`,
+    else ``None``. Both doors raise from it, and ``GET …/erp-links`` reports
+    it, so the page never offers a Link the server would refuse."""
+    if not search_available(adapter_cls, realm):
+        return ErpManualLinkError.unavailable()
+    assert realm is not None
+    return await vendor_link_exists_refusal(db, vendor, realm)
 
 
 async def link_lock(db: AsyncSession, organization_id: uuid.UUID, realm: str) -> None:
@@ -187,10 +237,13 @@ async def search_candidates(
     vendor's own name when blank) or the vendor's tax number, each saying
     whether its tax number matches and whether another vendor holds it here.
     Tax matches first, then by name. Refused :data:`VENDOR_ERP_SEARCH_
-    UNAVAILABLE` when :func:`search_available` says no. Raises what the
-    adapter raises on a failed read (the caller's 502)."""
-    if not search_available(type(adapter), realm):
-        raise ErpManualLinkError.unavailable()
+    UNAVAILABLE` / :data:`VENDOR_ERP_LINK_EXISTS` when :func:`search_refusal`
+    says no: a vendor already linked in this company has nothing to search
+    for until that link is cleared. Raises what the adapter raises on a failed
+    read (the caller's 502)."""
+    refusal = await search_refusal(db, vendor, adapter_cls=type(adapter), realm=realm)
+    if refusal is not None:
+        raise refusal
     assert realm is not None
     name = (query or "").strip()[:SEARCH_QUERY_MAX] or vendor.name
     result = await adapter.search_vendors(name=name, tax_id=vendor.tax_id)
@@ -242,8 +295,12 @@ async def link_vendor_to_erp_record(
     row in the same transaction. The ERP read happens before the locks, so no
     row lock is held across a provider round trip.
     """
-    if not search_available(type(adapter), realm):
-        raise ErpManualLinkError.unavailable()
+    # The verdict first, before any ERP round trip: a vendor already linked
+    # here is refused without reading the record (re-checked under the locks).
+    vendor = (await db.execute(select(Vendor).where(Vendor.id == vendor_id))).scalar_one()
+    refusal = await search_refusal(db, vendor, adapter_cls=type(adapter), realm=realm)
+    if refusal is not None:
+        raise refusal
     assert realm is not None
     erp_vendor_id = str(erp_vendor_id or "").strip()
     record = await adapter.get_vendor(erp_vendor_id) if erp_vendor_id else None
@@ -263,10 +320,7 @@ async def link_vendor_to_erp_record(
     # The company-wide lock first, then the vendor row: the order the vendor
     # sync takes them in (it locks, then updates vendor rows), so the two can
     # never deadlock.
-    organization_id = (
-        await db.execute(select(Vendor.organization_id).where(Vendor.id == vendor_id))
-    ).scalar_one()
-    await link_lock(db, organization_id, realm)
+    await link_lock(db, vendor.organization_id, realm)
     vendor = (
         await db.execute(
             select(Vendor)
@@ -275,20 +329,9 @@ async def link_vendor_to_erp_record(
             .execution_options(populate_existing=True)
         )
     ).scalar_one()
-    kept_here = (
-        await db.execute(
-            select(VendorErpLink.id).where(
-                VendorErpLink.vendor_id == vendor.id, VendorErpLink.realm == realm
-            )
-        )
-    ).first()
-    if (vendor.erp_vendor_id and vendor.erp_link_realm in (realm, None)) or kept_here:
-        raise ErpManualLinkError(
-            VENDOR_ERP_LINK_EXISTS,
-            "This vendor is already linked to a supplier record in this ERP company. "
-            "Clear that link first.",
-            status_code=409,
-        )
+    refusal = await vendor_link_exists_refusal(db, vendor, realm)
+    if refusal is not None:
+        raise refusal
     holder = (await _holders(db, vendor.organization_id, realm, [erp_vendor_id])).get(erp_vendor_id)
     if holder is not None:
         raise ErpManualLinkError(

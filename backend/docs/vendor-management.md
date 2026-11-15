@@ -273,10 +273,19 @@ cannot see a contact that is already a **customer** and has had no bill and no
 PO from us (Xero sets `IsSupplier` only on a contact's first bill), so its first
 push would be refused `vendor_not_linked` for good. The vendor modal's ERP
 links panel therefore offers **Find this vendor in the ERP** to a `vendor.manage`
-holder, while `GET /api/vendors/{id}/erp-links` says `search_available` (an
-adapter with `supports_vendor_search`, Xero today, connected to a named
-company; read from the stored settings, no credential opened) —
+holder while `GET /api/vendors/{id}/erp-links` answers `search_refusal: null` —
 `services/vendor_erp_manual_link`, decisions §415.
+
+`search_refusal` is a per-vendor verdict (`frontend/docs/ui-patterns.md` §
+Whether to offer an action), computed by `search_refusal()`, the gate both
+doors below raise from: `vendor_erp_search_unavailable` unless the stored
+settings select an adapter with `supports_vendor_search` (Xero today)
+connected to a named company and not needing a reconnect (read from the stored
+settings, no credential opened); else `vendor_erp_link_exists` when this vendor
+already holds a link in that company; else `null`. The link and unlink
+responses carry the vendor's new verdict, so the panel stops offering Link the
+moment a link lands (it states the `vendor_erp_link_exists` sentence in its
+place) and offers the search again once that company's link is cleared.
 
 - `POST /api/vendors/{id}/erp-links/search` `{"query": "<name>" | null}` reads
   the ERP's whole contact list by name (the vendor's own when blank) and by the
@@ -286,15 +295,19 @@ company; read from the stored settings, no credential opened) —
   `linked_elsewhere` when another vendor already holds it in this company (a
   flag, never the holder's id).
   `truncated` when the ERP had more matches than one search reads. Reads only.
+  Refused like the verdict: 409 `vendor_erp_search_unavailable`, or
+  `vendor_erp_link_exists` for a vendor already linked in this company (there
+  is nothing to search for until that link is cleared).
 - `POST /api/vendors/{id}/erp-links/link` `{"erp_vendor_id"}` re-reads the
   record from the ERP first: 404 `erp_vendor_not_found`, 409
   `erp_vendor_inactive` (archived / erased). 409 `vendor_erp_link_exists` when
   the vendor already holds a link in this company (on its row, kept for it, or
   a row link naming no company): unlink first. 409 `erp_vendor_already_linked`
   when another vendor holds the record here. 409
-  `vendor_erp_search_unavailable` when the ERP cannot be searched. Checked
-  under the vendor row lock and an advisory lock on `(organization, realm)`
-  that the vendor sync takes too.
+  `vendor_erp_search_unavailable` when the ERP cannot be searched. The
+  verdict is checked before the record is read (no ERP round trip for a vendor
+  already linked here) and again under the vendor row lock and an advisory
+  lock on `(organization, realm)` that the vendor sync takes too.
 - **Only the link is written**, stamped with the connected company. A row link
   from another company is kept for it (§356). The vendor's name and tax id stay
   as keyed; a later sync that lists the record matches it by id and updates

@@ -349,34 +349,147 @@ async def test_a_hand_made_link_survives_a_sync_that_does_not_list_the_record(re
     assert await _row(mk, vid) == ((realm, CUSTOMER.erp_vendor_id), {})
 
 
-async def test_the_links_read_says_whether_a_search_is_available(realdb):
+async def _set_erp(realdb, erp):
+    async with realdb.control_sessionmaker()() as s:
+        org = await s.get(Organization, realdb.info("a").org_id)
+        before = (org.settings or {}).get("erp")
+        org.settings = {**(org.settings or {}), "erp": erp}
+        await s.commit()
+        return before
+
+
+async def _verdict(realdb, vid):
+    async with realdb.client(key="a", role="ap_manager") as c:
+        r = await c.get(f"/api/vendors/{vid}/erp-links")
+    assert r.status_code == 200, r.text
+    refusal = r.json()["search_refusal"]
+    return None if refusal is None else refusal["code"]
+
+
+XERO = {
+    "type": "xero",
+    "integration_method": "direct",
+    "oauth": {"provider": "xero", "external_tenant_id": "xt-1"},
+}
+XERO_REALM = "xero:xt-1"
+
+
+async def test_the_links_read_states_the_search_verdict_from_the_settings(realdb):
     """From the stored settings alone: a searchable adapter connected to a named
     company, not one needing a reconnect, never the mock."""
     mk = realdb.sessionmaker("a")
     vid = await _vendor(mk, realdb.info("a").org_id, name="Read Co")
+    before = await _set_erp(realdb, XERO)
+    try:
+        assert await _verdict(realdb, vid) is None
+        await _set_erp(realdb, {**XERO, "oauth": {**XERO["oauth"], "needs_reconnect": True}})
+        assert await _verdict(realdb, vid) == VENDOR_ERP_SEARCH_UNAVAILABLE
+        await _set_erp(realdb, {**XERO, "oauth": {"provider": "xero"}})  # no company yet
+        assert await _verdict(realdb, vid) == VENDOR_ERP_SEARCH_UNAVAILABLE
+        await _set_erp(realdb, {"type": "mock", "integration_method": "direct"})
+        assert await _verdict(realdb, vid) == VENDOR_ERP_SEARCH_UNAVAILABLE
+    finally:
+        await _set_erp(realdb, before)
 
-    async def set_erp(erp):
-        async with realdb.control_sessionmaker()() as s:
-            org = await s.get(Organization, realdb.info("a").org_id)
-            org.settings = {**(org.settings or {}), "erp": erp}
-            await s.commit()
 
-    async def available():
-        async with realdb.client(key="a", role="ap_manager") as c:
-            r = await c.get(f"/api/vendors/{vid}/erp-links")
-        assert r.status_code == 200, r.text
-        return r.json()["search_available"]
-
-    xero = {
-        "type": "xero",
-        "integration_method": "direct",
-        "oauth": {"provider": "xero", "external_tenant_id": "xt-1"},
+async def test_the_search_verdict_agrees_with_both_doors_per_vendor(realdb):
+    """The verdict is per vendor (issue #575): a vendor already linked in the
+    connected company is refused `vendor_erp_link_exists` by the read, by the
+    search and by the link alike — on its row, kept for this company, or a row
+    link naming no company. One linked only in another company, or not at all,
+    is offered both."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    states = {
+        "unlinked": await _vendor(mk, org_id, name="Free Co"),
+        "other_company": await _vendor(
+            mk, org_id, name="Away Co", erp_vendor_id="a-1", realm=_realm()
+        ),
+        "on_row": await _vendor(mk, org_id, name="Row Co", erp_vendor_id="r-1", realm=XERO_REALM),
+        "kept": await _vendor(
+            mk,
+            org_id,
+            name="Kept Co",
+            erp_vendor_id="k-1",
+            realm=_realm(),
+            kept={XERO_REALM: "k-2"},
+        ),
+        "unnamed": await _vendor(mk, org_id, name="Unnamed Co", erp_vendor_id="u-1"),
     }
-    await set_erp(xero)
-    assert await available() is True
-    await set_erp({**xero, "oauth": {**xero["oauth"], "needs_reconnect": True}})
-    assert await available() is False
-    await set_erp({**xero, "oauth": {"provider": "xero"}})  # no company yet
-    assert await available() is False
-    await set_erp({"type": "mock", "integration_method": "direct"})
-    assert await available() is False
+    expected = {
+        "unlinked": None,
+        "other_company": None,
+        "on_row": VENDOR_ERP_LINK_EXISTS,
+        "kept": VENDOR_ERP_LINK_EXISTS,
+        "unnamed": VENDOR_ERP_LINK_EXISTS,
+    }
+    before = await _set_erp(realdb, XERO)
+    try:
+        for state, vid in states.items():
+            verdict = await _verdict(realdb, vid)
+            assert verdict == expected[state], state
+            with _patched(_Erp([]), XERO_REALM):
+                search = await _post(realdb, f"/api/vendors/{vid}/erp-links/search", {})
+            if verdict is None:
+                assert search.status_code == 200, (state, search.text)
+            else:
+                assert search.status_code == 409, (state, search.text)
+                assert search.json()["detail"]["code"] == verdict, state
+            record = VendorPayload(erp_vendor_id=f"rec-{state}", name=f"Record {state}")
+            with _patched(_Erp([record]), XERO_REALM):
+                link = await _post(
+                    realdb,
+                    f"/api/vendors/{vid}/erp-links/link",
+                    {"erp_vendor_id": record.erp_vendor_id},
+                )
+            if verdict is None:
+                assert link.status_code == 200, (state, link.text)
+                # Now linked here: the response says so, and so does the read.
+                assert link.json()["search_refusal"]["code"] == VENDOR_ERP_LINK_EXISTS
+                assert await _verdict(realdb, vid) == VENDOR_ERP_LINK_EXISTS
+            else:
+                assert link.status_code == 409, (state, link.text)
+                assert link.json()["detail"]["code"] == verdict, state
+    finally:
+        await _set_erp(realdb, before)
+
+
+async def test_a_refused_link_reads_nothing_from_the_erp(realdb):
+    """A vendor already linked here is refused before the record is re-read:
+    no provider round trip for an answer the vendor row already gives."""
+    mk = realdb.sessionmaker("a")
+    realm = _realm()
+    vid = await _vendor(mk, realdb.info("a").org_id, name="Row Co", erp_vendor_id="1", realm=realm)
+
+    class _Counting(_Erp):
+        reads = 0
+
+        async def get_vendor(self, erp_vendor_id):
+            type(self).reads += 1
+            return await super().get_vendor(erp_vendor_id)
+
+    erp = _Counting([CUSTOMER])
+    with _patched(erp, realm):
+        r = await _post(
+            realdb, f"/api/vendors/{vid}/erp-links/link", {"erp_vendor_id": CUSTOMER.erp_vendor_id}
+        )
+        s = await _post(realdb, f"/api/vendors/{vid}/erp-links/search", {})
+    assert r.json()["detail"]["code"] == VENDOR_ERP_LINK_EXISTS
+    assert s.json()["detail"]["code"] == VENDOR_ERP_LINK_EXISTS
+    assert _Counting.reads == 0 and erp.searches == []
+
+
+async def test_unlinking_the_connected_company_reopens_the_search(realdb):
+    mk = realdb.sessionmaker("a")
+    vid = await _vendor(
+        mk, realdb.info("a").org_id, name="Undo Co", erp_vendor_id="1", realm=XERO_REALM
+    )
+    before = await _set_erp(realdb, XERO)
+    try:
+        assert await _verdict(realdb, vid) == VENDOR_ERP_LINK_EXISTS
+        r = await _post(realdb, f"/api/vendors/{vid}/erp-links/unlink", {"realm": XERO_REALM})
+        assert r.status_code == 200, r.text
+        assert r.json()["search_refusal"] is None
+        assert await _verdict(realdb, vid) is None
+    finally:
+        await _set_erp(realdb, before)

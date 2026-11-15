@@ -21912,3 +21912,41 @@ Pinned in `backend/tests/test_erp_webhook_transitions.py`
 (`test_a_pre_realm_push_is_matched_only_while_its_legacy_realm_is_trusted`,
 `test_a_pre_realm_push_and_a_current_one_sharing_an_id_resolve_to_the_current`,
 `test_a_document_id_matches_nothing_when_no_company_can_be_named`).
+
+## 424. The hand-link search is offered on a per-vendor verdict, and a vendor already linked in the connected company cannot search (§415 follow-up, round 12, 2026-11-14)
+
+**Context.** §415 shipped `search_available` on `GET /api/vendors/{id}/erp-links`:
+whether the connected ERP can be searched at all, the same answer for every
+vendor. A vendor already linked in the connected company was therefore still
+offered **Find this vendor in the ERP**, and every Link it pressed was refused
+`vendor_erp_link_exists`, including the second one, right after a link it had
+just made. That is the page restating half of the endpoint's rule, the drift
+issue #575 retired (`frontend/docs/ui-patterns.md` § Whether to offer an
+action).
+
+**Decision.**
+
+- **The read answers a verdict, not a capability.** `search_available` is
+  replaced by `search_refusal`: `null`, or the coded refusal
+  `vendor_erp_search_unavailable` / `vendor_erp_link_exists`, computed by
+  `vendor_erp_manual_link.search_refusal`, which the search and the link both
+  raise from. The link and unlink responses carry the vendor's new verdict, so
+  the panel closes the moment a link lands and reopens when that company's
+  link is cleared. The page explains `vendor_erp_link_exists` (unlinking is
+  something the reader can do, in the same panel) and hides on anything else.
+- **The search refuses a vendor already linked here.** Its only purpose is
+  the link, which would be refused; a search that answers candidates nobody can
+  link is the dead end the panel just stopped offering.
+- **The link refuses it before reading the record from the ERP**, and again
+  under the locks as before, so a refused link costs no provider call.
+
+**Rejected.** Keeping `search_available` beside the verdict: a second signal
+the page could read instead (ui-patterns: never add a second check beside the
+verdict). Hiding the panel without a reason for a linked vendor: the reader
+would not know why the search they used yesterday is gone, nor that Unlink is
+the way back to it.
+
+**Enforced by** `backend/tests/test_vendor_erp_manual_link.py` (verdict / search
+/ link parity per link state, the refused link reads nothing, unlink reopens it)
+and `frontend/tests-e2e/vendors/erp-unlink.spec.ts` (the panel is gone after a
+link; a refused vendor gets the sentence or nothing).
