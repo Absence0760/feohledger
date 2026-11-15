@@ -489,9 +489,14 @@ or three POs. This is the deferred *"Multi-PO split matching"* follow-up to
   **invoice** amount, which never changes — the combined PO total is informational),
   sets `invoice.po_number` to a combined `"PO-A,PO-B"` reference + aligns
   `vendor_id` (escalating instead when that would set the payee of an invoice
-  ever approved, as `missing_po_v1` does), and writes a **multi-PO match snapshot** onto `invoice.po_match`
+  ever approved, as `missing_po_v1` does), records the set in
+  **`invoice.split_po_ids`** (append only; its one writer), and writes a
+  **multi-PO match snapshot** onto `invoice.po_match`
   (`match_type: "multi-po-split"`, the PO ids/numbers + combined total) for the
-  modal. The single-PO matcher can't produce a `matched` for a split, so the
+  modal. The snapshot is display only: the next warning refresh rewrites
+  `po_match` and the combined reference matches no PO, so the approval door's
+  receiver / inspector sets read the split's POs from `split_po_ids`
+  (decisions §433). The single-PO matcher can't produce a `matched` for a split, so the
   snapshot is written **directly** — `refresh_warnings` is deliberately **not**
   called (it would re-run the single-PO matcher and re-raise a `no_po` exception).
   It then approves through `review.approve_invoice` (with the triggering user's real `actor_roles`).

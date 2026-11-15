@@ -657,7 +657,8 @@ where somebody could:
   plus every level signed on its approval chain, even with later levels still
   open (`approval_chain.approver_ids`). "Billed against" is the approval door's
   own receipt set (`approval_chain.receipt_recorders`: every PO the invoice
-  names), and the two are compared by one rule,
+  names, including every leg of a multi-PO split through
+  `invoices.split_po_ids`, decisions §433), and the two are compared by one rule,
   `approval_chain.receiving_conflicts`, so the orders cannot disagree. The
   receipt itself is recorded and counts towards the 3-way leg — for this
   invoice and every other on the PO, whose holds it lifts as before; it is only

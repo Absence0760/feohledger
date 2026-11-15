@@ -524,6 +524,14 @@ class MultiPOSplitResolver(ExceptionResolver):
 
         combined_ref = ",".join(str(t[1]) for t in triples)
         locked.po_number = combined_ref
+        # The durable record of the set (decisions §433): `po_match` below is a
+        # snapshot the next warning refresh rewrites, and the combined
+        # `po_number` resolves to no PO, so the approval door's receiver /
+        # inspector sets read the split's POs from this column. Append only — a
+        # PO linked once stays linked, so over-refusing is the only error.
+        linked = [str(t[0]) for t in triples]
+        prior = [str(i) for i in (locked.split_po_ids or [])]
+        locked.split_po_ids = sorted(set(prior) | set(linked))
         if locked.vendor_id is None and rows[0].vendor_id is not None:
             locked.vendor_id = rows[0].vendor_id
         # Money in the snapshot is exact string-Decimal (never float) — the
@@ -532,7 +540,7 @@ class MultiPOSplitResolver(ExceptionResolver):
             "status": "matched",
             "match_type": "multi-po-split",
             "po_count": len(triples),
-            "po_ids": [str(t[0]) for t in triples],
+            "po_ids": linked,
             "po_numbers": [str(t[1]) for t in triples],
             "po_total": str(combined),
             # Every PO in the set was proven to be in the invoice's currency
@@ -562,6 +570,7 @@ class MultiPOSplitResolver(ExceptionResolver):
         invoice.po_number = locked.po_number
         invoice.vendor_id = locked.vendor_id
         invoice.po_match = locked.po_match
+        invoice.split_po_ids = locked.split_po_ids
         invoice.status = locked.status
 
 

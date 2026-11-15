@@ -22119,3 +22119,57 @@ Tests: `mobile/test/screens/invoice_detail_screen_test.dart`,
 `mobile/test/screens/invoices_screen_test.dart` (picker + skip dialog),
 `mobile/test/stores/invoice_store_test.dart`,
 `mobile/test/l10n/coded_refusal_messages_test.dart`.
+
+## 433. A multi-PO split's POs live in their own column, `invoices.split_po_ids`, which no warning refresh rewrites (closes a §267 / §404 follow-up, round 13, 2026-11-15)
+
+**The gap.** The multi-PO split agent (`multi_po_split_v1`) links one invoice to
+several POs by writing a combined `po_number` ("PO-A,PO-B") and a `po_match`
+snapshot naming the set in `po_ids`. The approval door's evidence sets — who
+received the goods (§267), who inspected them (§404), and the reverse order's
+receiving conflict that `receipts_clear_hold` reads (§389) — took the
+invoice's POs from that `po_number` and that snapshot. But `refresh_warnings`
+rewrites `po_match` on every later edit, and the combined reference resolves to
+no PO, so after any refresh the sets named no PO at all: a receiver of one leg
+could approve, after a recall for instance, and a receipt the approver typed
+in on one leg was not a conflict.
+
+**Decision.**
+
+- **The split's links are a column the matcher never writes.**
+  `invoices.split_po_ids` (JSONB, stringified UUIDs like
+  `segregation_actor_ids`, migration 0133) has one writer, the split resolver's
+  `apply`, which unions the set it links into what is there. Nothing clears it:
+  a later `po_number` edit or a recall leaves it, because a PO the invoice was
+  once linked to by the agent is still goods it was approved against, and
+  refusing one more receiver is the safe error the receiver set already takes
+  for same-numbered sibling POs.
+- **`approval_chain._invoice_po_ids` reads it** (through `_linked_po_ids`,
+  with the stored match's single `po_id`), and no longer reads
+  `po_match.po_ids`: one durable source instead of a snapshot that is right
+  until the next edit. Every evidence set reads `_invoice_po_ids`, so the
+  receiver rule, the inspector rule and the reverse order all see the split.
+  `po_match` keeps its `po_ids` for the modal only.
+- **Backfill** from `po_match.po_ids` where it is still present, then — for a
+  split already refreshed — from the split agent's own `auto_resolved`
+  decision, whose `changes.po_number.new` still records the combined reference;
+  each number resolves to every PO of that number in the invoice's entity, with
+  no vendor filter (the vendor may have changed since; over-naming refuses one
+  more receiver, never fewer).
+
+**Rejected.** A link table (`invoice_po_links`): FKs and a row per link buy
+nothing a read needs here — the only reader wants the ids for a batch of
+invoices it already has loaded, and a JSONB list on the row costs no extra
+query (the bulk approve lookups stay at two and three statements). Teaching
+the matcher to preserve `po_ids` on refresh: the matcher would then own a
+field it never computes, and any future rewrite of `po_match` (a re-extract, a
+new match shape) would reopen the hole silently. Teaching the single-PO matcher
+to match a split: a separate, larger change (the split would stop re-raising
+`no_po` on refresh); it does not need the segregation fix to wait for it.
+
+**Enforced by** `backend/tests/test_approval_receiver_segregation.py` (a leg's
+receiver is refused after a refresh rewrote `po_match`; the reverse-order
+conflict and `receipts_clear_hold`; the inspector),
+`backend/tests/test_exception_agents_multi_po_split.py` (the agent writes the
+set and it survives a refresh) and
+`backend/tests/test_migration_0133_invoice_split_po_ids.py` (model parity,
+both backfills, re-runs, control-plane no-op).
