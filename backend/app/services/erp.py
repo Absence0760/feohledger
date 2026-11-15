@@ -88,12 +88,20 @@ OUTCOME_UNKNOWN_KEY = "erp_outcome_unknown"
 #: ISO time no earlier than the end of the latest attempt whose outcome is
 #: unknown. Handed to the adapter as ``InvoicePayload.outcome_unknown_since``,
 #: so one whose duplicate lookup reads a synced copy (Merge.dev) can wait for a
-#: sync after it (decisions §405). Stamped before the call (a worker that dies
-#: mid-call leaves the attempt's start), moved to the attempt's end when it
-#: comes back unknown or raises, kept when an attempt sent nothing, dropped on a success.
-#: A row flagged unknown before the key existed is stamped with the time it is
-#: next read, which is after that attempt too.
+#: sync after it (decisions §405). Written when an attempt comes back unknown
+#: or raises (its end), kept when an attempt sent nothing, dropped on a
+#: success. Only such a write is final (:data:`OUTCOME_UNKNOWN_AT_FINAL_KEY`).
 OUTCOME_UNKNOWN_AT_KEY = "erp_outcome_unknown_at"
+
+#: True once :data:`OUTCOME_UNKNOWN_AT_KEY` names an attempt's END. The stamp
+#: committed before the call is the attempt's start and is written False: an
+#: attempt that dies before its failure is committed (a worker crash, a deploy
+#: cancelling the task) leaves only that start, and a sync that began after
+#: the start but before the create landed would vouch for a listing without
+#: the bill (decisions §409). A stamp read back not final, like a row from
+#: before the stamp existed, is replaced by the time it is read, which is
+#: after the dead attempt, and pinned final.
+OUTCOME_UNKNOWN_AT_FINAL_KEY = "erp_outcome_unknown_at_final"
 
 #: The push refusal for an invoice due before it is dated (`api/refusals`).
 INVOICE_DUE_BEFORE_DATE = "invoice_due_before_date"
@@ -118,6 +126,11 @@ def _stamp_time(raw: object) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else None
+
+
+def _final_stamp(at: datetime) -> dict:
+    """The state keys that record ``at`` as a final unknown-outcome stamp."""
+    return {OUTCOME_UNKNOWN_AT_KEY: at.isoformat(), OUTCOME_UNKNOWN_AT_FINAL_KEY: True}
 
 
 def possibly_posted(state_data: dict | None) -> bool:
@@ -717,13 +730,18 @@ async def _call_erp(
         state = {**state, OUTCOME_UNKNOWN_KEY: prior_unknown}
         instance.state_data = state
     # When that earlier outcome is unknown, the time it was unknown since. A
-    # row flagged before the stamp existed (or with an unreadable one) is
-    # stamped now, which is after that attempt too, and pinned like the flag,
-    # so a later read takes the same time (§405).
-    prior_unknown_at = _stamp_time(state.get(OUTCOME_UNKNOWN_AT_KEY)) if prior_unknown else None
+    # stamp that is not final (the start an attempt that died left behind), an
+    # unreadable one, or none (a row from before the stamp existed) is
+    # replaced by now, which is after that attempt too, and pinned final like
+    # the flag, so a later read takes the same time (§405, §409).
+    prior_unknown_at = (
+        _stamp_time(state.get(OUTCOME_UNKNOWN_AT_KEY))
+        if prior_unknown and state.get(OUTCOME_UNKNOWN_AT_FINAL_KEY) is True
+        else None
+    )
     if prior_unknown and prior_unknown_at is None:
         prior_unknown_at = datetime.now(UTC)
-        state = {**state, OUTCOME_UNKNOWN_AT_KEY: prior_unknown_at.isoformat()}
+        state = {**state, **_final_stamp(prior_unknown_at)}
         if instance is not None:
             instance.state_data = state
 
@@ -781,21 +799,26 @@ async def _call_erp(
     # leaves it in the row the redelivered attempt reads. The commit also ends
     # the transaction for the length of the HTTP call.
     if instance is not None:
+        # The attempt's start, NOT final: if this attempt dies before its end
+        # is committed, the next read restamps it (§409).
         instance.state_data = {
             **state,
             OUTCOME_UNKNOWN_KEY: True,
             OUTCOME_UNKNOWN_AT_KEY: datetime.now(UTC).isoformat(),
+            OUTCOME_UNKNOWN_AT_FINAL_KEY: False,
         }
         await db.commit()
     try:
         result = await adapter.post_invoice(payload)
     except BaseException:
         if instance is not None:
-            # Unknown since this attempt ended, as for an unknown result below;
-            # the caller's failure path persists it with the flag.
+            # Unknown since this attempt ended, as for an unknown result below.
+            # In memory only: the caller's failure path commits it, and if it
+            # never runs (a cancellation, a crash) the provisional start stays
+            # and is restamped on the next read.
             instance.state_data = {
                 **(instance.state_data or {}),
-                OUTCOME_UNKNOWN_AT_KEY: datetime.now(UTC).isoformat(),
+                **_final_stamp(datetime.now(UTC)),
             }
         raise
     reference = result.erp_document_id or result.erp_document_number or "UNKNOWN"
@@ -821,9 +844,10 @@ async def _call_erp(
         )
         if not result.success and not result.not_posted:
             # Unknown since this attempt ended: whatever it created was sent by now.
-            new_state[OUTCOME_UNKNOWN_AT_KEY] = datetime.now(UTC).isoformat()
+            new_state.update(_final_stamp(datetime.now(UTC)))
         elif not new_state[OUTCOME_UNKNOWN_KEY]:
             new_state.pop(OUTCOME_UNKNOWN_AT_KEY, None)
+            new_state.pop(OUTCOME_UNKNOWN_AT_FINAL_KEY, None)
         # else: this attempt sent nothing, so the earlier attempt's stamp stands.
         if result.success:
             # Recorded with the success itself, not only once the caller's

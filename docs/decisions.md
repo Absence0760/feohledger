@@ -20911,3 +20911,75 @@ zero times for an unknown slug, a keyless tenant and a malformed signature, and
 once for a well-formed wrong one. `tests/test_webhook_security.py`: the same
 for the generic route, plus the non-string slug, the non-UUID correlation id
 and the dedup store down after verifying.
+
+## 409. A Merge.dev retry's wait dates only from an attempt's recorded end, past a settle margin, and a 429 stays possibly posted (amends §405, round-11 money-path review, 2026-11-15)
+
+**Context.** The round's money-path review of §405 found one double-post path
+and two assumptions the wait leaned on that §405 itself listed as unverified.
+
+- **A dead attempt left its start as the stamp.** `services/erp` committed
+  `erp_outcome_unknown_at` before the adapter call, and only the post-call or
+  exception write moved it to the attempt's end. If the attempt died before
+  its failure was committed — a worker crash, or a deploy cancelling the task
+  (`asyncio.CancelledError` is not an `Exception`, so `send_to_erp_internal`
+  never handles it and the session rolls back) — the row kept the start. The
+  sequence: 10:00:00 the attempt starts and commits; 10:00:05 a Merge sync
+  starts and finishes; 10:00:12 our POST creates the bill; 10:00:20 the worker
+  dies. A later retry reads `data_fresh_as_of` 10:00:05 > 10:00:00, the lookup
+  reads the 10:00:05 copy, finds nothing, and posts a second bill.
+- **`fresh > since` had no margin.** `since` is when our client gave up, not
+  when Merge finished. httpx's `timeout=30` is per operation, so a request can
+  run past a minute, and whether Merge completes a create the client
+  abandoned is a #654 item.
+- **§405 moved a 429 to "nothing sent"** on §399's reading that Merge's rate
+  limit processed nothing, while listing "whether a 429 is ever answered after
+  the write reached the integration" as unverified.
+
+**Decision.**
+
+- **Only an attempt's end is a final stamp.** The pre-call commit writes the
+  start with `erp_outcome_unknown_at_final: False`. The post-call write of an
+  unknown result and the exception path write the end with `True`. A read
+  that finds the outcome unknown and the stamp not `True` (provisional, absent,
+  unreadable, or written before the flag existed) replaces it with the time of
+  the read, which is after the dead attempt, and pins that as final. An
+  attempt that sent nothing keeps the pinned stamp, as in §405. A success
+  drops both keys.
+- **`SYNC_SETTLE_MARGIN` = 10 minutes.** `invoice_sync_covers` requires the
+  `Invoice` row fresh as of strictly more than `since + SYNC_SETTLE_MARGIN`,
+  on both the `data_fresh_as_of` path and the at-rest fallback. Too short a
+  margin costs a second bill; too long costs one more sync's wait, so it is
+  generous. #654's answer to how long Merge can keep writing after the client
+  gives up resizes it.
+- **A 429 is possibly posted again, and not retried automatically.** It goes
+  through the same branch as a 5xx: non-retryable, `not_posted` False. Kept
+  retryable, `services/erp`'s retry 2 seconds later would always meet the sync
+  wait (no sync can be 10 minutes past an attempt seconds old) and fail
+  `merge_sync_pending` after a wasted call. So a rate-limited push now waits
+  for a person's retry after Merge's next sync, until #654 shows Merge never
+  answers 429 after the write reached the integration. A connection never
+  made stays `not_posted`: nothing was sent.
+
+**Rejected.**
+
+- *Committing the exception path's end stamp from inside `_call_erp`.* A
+  cancelled task cannot be relied on to finish an `await db.commit()`, and a
+  crash runs nothing. Treating the pre-call stamp as provisional covers every
+  way an attempt can die.
+- *Dating a dead attempt from its start plus the margin.* The attempt could
+  have run for longer than any fixed margin before it died; the time of the
+  next read is the only time known to be after it.
+
+**Cost.** A Merge push whose attempt died, or that met a 429, now waits for a
+Merge sync that starts more than 10 minutes after the next read or the
+attempt's end before it can be retried. That is one sync's delay, against a
+second bill in the customer's ledger.
+
+Tests: `tests/test_erp_push_flow.py` (a cancelled attempt: the row holds only
+the provisional start, and the next attempt waits from after the
+cancellation; a provisional or flag-less stamp is restamped when read; the
+exact-state helper checks the final flag; Merge's 429 sent once);
+`tests/test_merge_dev_adapter.py` (`invoice_sync_covers` inside, at and past
+the margin on both paths; the margin's floor; a 429 possibly posted and not
+retried). The #654 sandbox entry in `docs/followups.md` now names the margin
+and the 429 as what that pass settles.

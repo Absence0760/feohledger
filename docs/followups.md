@@ -2256,9 +2256,11 @@ as oversights.
       **Merge.dev** (decisions §399, §405): whether `GET /invoices` lags a
       write through Merge at all (the premise of the `merge_sync_pending`
       wait), the `model_name` `GET /sync-status` gives invoices, whether Merge
-      can finish a create after our client gave up on it, whether a 429 is
-      ever answered after the write reached the integration, and what
-      `POST /delete-account` does to the ERP credentials Merge holds.
+      can finish a create after our client gave up on it, and how long after
+      (it sizes `merge_dev.SYNC_SETTLE_MARGIN`, 10 minutes until known), whether
+      a 429 is ever answered after the write reached the integration (until it
+      is known never to be, a 429 stays possibly posted, decisions §409), and
+      what `POST /delete-account` does to the ERP credentials Merge holds.
       **Sage SA** (decisions §385; the docs-level defects are fixed): whether a
       string `$filter` 400s or is ignored, the `datetime'…'` literal the
       lookup's date window uses, the 400 body for a locked period / inactive

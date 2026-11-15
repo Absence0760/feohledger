@@ -254,9 +254,12 @@ def test_an_undocumented_or_absent_problem_stays_possibly_posted(create):
     assert result.message.startswith("Merge.dev post failed: HTTP 400")
 
 
-def test_merges_rate_limit_is_retried():
+def test_merges_rate_limit_stays_possibly_posted():
+    """Whether Merge ever answers 429 after the write reached the integration
+    is unverified (#654), so a 429 is an unknown outcome like a 5xx: not
+    retried automatically, and a person's retry waits for a sync (§409)."""
     result, _ = _push(_refused("RATE_LIMITED", status=429))
-    assert not result.success and result.retryable and result.not_posted is True
+    assert not result.success and not result.retryable and result.not_posted is False
 
 
 @pytest.mark.parametrize("status", [500, 502, 503, 408])
@@ -392,7 +395,7 @@ def test_bill_report_never_reads_an_unreadable_bill_as_gone():
 # ---------------------------------------------------------------------------
 
 _SINCE = datetime(2026, 11, 14, 10, 0, tzinfo=UTC)
-_AFTER = "2026-11-14T10:05:00Z"
+_AFTER = "2026-11-14T10:10:01Z"  # just past SYNC_SETTLE_MARGIN (10 min)
 _BEFORE = "2026-11-14T09:55:00Z"
 
 
@@ -412,8 +415,12 @@ def _sync_status(*rows: dict, next_cursor: str | None = None) -> MagicMock:
         # Merge's own answer: complete through the last successful sync's start.
         (_sync_row(data_fresh_as_of=_AFTER), True),
         (_sync_row(data_fresh_as_of=_BEFORE), False),
-        # A sync that started at the very moment cannot be shown to see it.
-        (_sync_row(data_fresh_as_of="2026-11-14T10:00:00Z"), False),
+        # Inside the margin: Merge may still have been writing the bill (§409).
+        (_sync_row(data_fresh_as_of="2026-11-14T10:00:01Z"), False),
+        (_sync_row(data_fresh_as_of="2026-11-14T10:05:00Z"), False),
+        (_sync_row(last_sync_result="DONE", last_sync_start="2026-11-14T10:05:00Z"), False),
+        # Exactly at the margin's end cannot be shown to see it either.
+        (_sync_row(data_fresh_as_of="2026-11-14T10:10:00Z"), False),
         # Null: no sync has completed.
         (_sync_row(data_fresh_as_of=None, last_sync_result="DONE", last_sync_start=_AFTER), False),
         # Without the field: a link at rest whose last sync is DONE and began after.
@@ -424,7 +431,7 @@ def _sync_status(*rows: dict, next_cursor: str | None = None) -> MagicMock:
         (_sync_row(last_sync_result="FAILED", last_sync_start=_AFTER), False),
         (_sync_row(last_sync_result="PARTIALLY_SYNCED", last_sync_start=_AFTER), False),
         # A time with no zone cannot be ordered against ours.
-        (_sync_row(data_fresh_as_of="2026-11-14T10:05:00"), False),
+        (_sync_row(data_fresh_as_of="2026-11-14T10:10:01"), False),
         (_sync_row(), False),
     ],
 )
@@ -620,3 +627,13 @@ def test_a_linked_account_deletion_that_fails_is_failed_and_never_raises(answer,
         outcome = _run(MergeDevAdapter(config).revoke_stored_access())
     assert outcome == REVOKE_FAILED
     assert "tok" not in caplog.text and "Bearer" not in caplog.text
+
+
+def test_the_settle_margin_is_minutes_not_seconds():
+    """Guard against the margin being trimmed back to nothing: our client's own
+    timeouts alone can run past a minute (httpx's 30 s is per operation)."""
+    from datetime import timedelta
+
+    from app.services.erp_adapters.merge_dev import SYNC_SETTLE_MARGIN
+
+    assert SYNC_SETTLE_MARGIN >= timedelta(minutes=5)
