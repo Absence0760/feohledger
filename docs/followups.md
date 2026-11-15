@@ -879,15 +879,6 @@ or is a sibling of a fix that needs its own pass.
       refusing the recall for a transmitted / routed invoice and re-sending /
       re-syncing the mirror after re-approval. **Trigger:** the first
       customer using PEPPOL send or inter-company routing who recalls.
-- [ ] **(c) The ERP dispatchers do not re-check `sending_to_erp`.**
-      `erp_dispatch` and `erp_lambda` call `send_to_erp_internal` on whatever
-      status the invoice now holds, so a redelivered push for an invoice that
-      has since failed and been recalled could post a bill for an invoice in
-      review. **Durable fix:** re-read the invoice `FOR UPDATE` in
-      `send_to_erp_internal` and return without calling the adapter unless it
-      is `sending_to_erp`, with `tests/test_erp_push_flow.py` updated for the
-      fixtures that call it on other statuses. **Trigger:** the next change to
-      `services/erp.py` or either dispatcher.
 
 ### Surfaced by the vendors table column fix (2026-10-06)
 

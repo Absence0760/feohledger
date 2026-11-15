@@ -2024,6 +2024,18 @@ re-entered push resumes rather than restarts. A **non-retryable** result
 on the first attempt. After the last attempt the invoice goes to `failed`, with
 `last_error` on the instance and an `invoice.erp_failed` audit row.
 
+**Only an invoice still at `sending_to_erp` is pushed** (decisions §410).
+Before every attempt, the first included, `send_to_erp_internal` re-reads the
+invoice `FOR UPDATE` from the committed row and goes no further unless it is
+`sending_to_erp`. Both dispatchers (`erp_dispatch`, `erp_lambda`) hand over
+whatever row they load, and an SQS redelivery or a second dispatch can arrive
+after the push it repeats has landed, failed, or failed and had its approval
+recalled. Without the gate, that last case posts a bill for an invoice back in
+review. A skipped push makes no adapter call, changes no status, writes no
+audit row and leaves `state_data` alone. It logs one warning naming the
+invoice id and the status it found, then returns normally, so the Lambda
+deletes the message instead of redelivering it.
+
 **A deterministic 4xx is never retried** (decisions §285). Every adapter builds
 an HTTP failure with `base.erp_http_failure(provider, status)`, whose
 `retryable` is `base.erp_status_retryable(status)`: 5xx and network errors

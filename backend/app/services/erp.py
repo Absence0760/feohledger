@@ -1,6 +1,7 @@
 """ERP integration service — push approved invoices to an external ERP system."""
 
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -29,6 +30,8 @@ from app.services.workflow_engine import (
     get_workflow_instance,
     transition_invoice,
 )
+
+logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 BASE_DELAY_SECONDS = 2
@@ -513,8 +516,12 @@ async def send_to_erp_internal(
     actor_id: uuid.UUID | None = None,
     erp_config: dict | None = None,
 ) -> None:
-    """Run the ERP call, with bounded retries (invoice is already in
-    `sending_to_erp`).
+    """Run the ERP call, with bounded retries, for an invoice at `sending_to_erp`.
+
+    Any other status (a redelivered job for a push that already landed or
+    failed, or whose approval was since recalled) is left exactly as it is: no
+    adapter call, no transition, no audit row, one warning log line, and a
+    normal return so the job is done rather than retried (decisions §410).
 
     This is the ONLY path that pushes an invoice to an ERP —
     `api/workflow.py` → `dispatch_erp` → `erp_dispatch` / `erp_lambda` all land
@@ -543,6 +550,25 @@ async def send_to_erp_internal(
     retry_count = state_data.get("erp_retries", 0)
 
     for attempt in range(retry_count, MAX_RETRIES):
+        # Only an invoice still at `sending_to_erp` is pushed (decisions §410).
+        # The dispatchers hand over whatever row they find, and a redelivered
+        # job can arrive after the push it repeats has already landed, failed,
+        # or been followed by a recall of the approval, so a bill would be
+        # posted for an invoice that is in review again. Asked before EVERY
+        # attempt, under the row lock and from the committed row (the
+        # dispatchers' sessions do not expire on commit), because each backoff
+        # releases the lock and a concurrent push may finish meanwhile.
+        current = await _locked_push_status(db, invoice)
+        if current is not InvoiceStatus.sending_to_erp:
+            # Logged before the rollback that releases the lock: a rollback
+            # expires every loaded attribute, `invoice.id` included.
+            logger.warning(
+                "ERP push skipped: invoice %s is at %s, not sending_to_erp",
+                invoice.id,
+                current.value if current is not None else "missing",
+            )
+            await db.rollback()
+            return
         try:
             erp_ref = await _call_erp(db, invoice, erp_config, instance=instance)
 
@@ -632,6 +658,22 @@ async def send_to_erp_internal(
                     }
                 await db.commit()
                 return
+
+
+async def _locked_push_status(db: AsyncSession, invoice: Invoice) -> InvoiceStatus | None:
+    """The invoice's committed status, read under ``FOR UPDATE``; None if gone.
+
+    ``populate_existing`` so the caller's in-memory ``Invoice`` (same session)
+    is refreshed too: a dispatcher's session keeps attributes across commits.
+    """
+    result = await db.execute(
+        select(Invoice)
+        .where(Invoice.id == invoice.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    row = result.scalar_one_or_none()
+    return row.status if row is not None else None
 
 
 #: The `invoice.erp_failed` reason when a push was committed at `sending_to_erp`

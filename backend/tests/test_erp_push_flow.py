@@ -152,6 +152,23 @@ class _AuditRecorder:
         ]
 
 
+@pytest.fixture(autouse=True)
+def _push_gate_reads_the_fixture(request, monkeypatch):
+    """The `sending_to_erp` gate (decisions §410) re-reads the row under a lock.
+
+    These unit tests hand `send_to_erp_internal` an in-memory invoice and a
+    mocked session, so the gate is pointed at that invoice's own status. A test
+    on a real tenant (`realdb`) keeps the real locked read.
+    """
+    if "realdb" in request.fixturenames:
+        return
+
+    async def _status(_db, invoice):
+        return invoice.status
+
+    monkeypatch.setattr("app.services.erp._locked_push_status", _status)
+
+
 # ---------------------------------------------------------------------------
 # send_to_erp_internal — happy path.
 # ---------------------------------------------------------------------------
@@ -1374,7 +1391,7 @@ async def test_send_to_erp_failed_audit_row_falls_back_to_an_earlier_orphan():
 # ---------------------------------------------------------------------------
 
 
-async def _seed_erp_failed_invoice(mk, org_id, *, state_data):
+async def _seed_erp_failed_invoice(mk, org_id, *, state_data, status=InvoiceStatus.failed):
     from app.models.invoice import Invoice
     from app.models.workflow import WorkflowDefinition, WorkflowInstance
 
@@ -1388,7 +1405,7 @@ async def _seed_erp_failed_invoice(mk, org_id, *, state_data):
             vendor_name="Acme",
             amount=Decimal("100.00"),
             currency="USD",
-            status=InvoiceStatus.failed,
+            status=status,
             approved_by=str(uuid.uuid4()),
         )
         s.add_all([definition, inv])
@@ -1506,6 +1523,144 @@ async def test_send_to_erp_commits_the_orphan_bill_and_its_audit_row(realdb):
     assert fail_row.details["erp_document_id"] == "XERO-BILL-7"
     assert fail_row.details["erp_document_number"] == "BILL-0007"
     assert _PROVIDER_BODY_MARKER not in json.dumps(fail_row.details)
+
+
+# ---------------------------------------------------------------------------
+# Only an invoice still at `sending_to_erp` is pushed (decisions §410)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [
+        InvoiceStatus.ready_for_review,  # failed, then its approval was recalled
+        InvoiceStatus.failed,
+        InvoiceStatus.approved,
+        InvoiceStatus.sent_to_erp,
+        InvoiceStatus.done,
+    ],
+)
+async def test_a_push_for_an_invoice_no_longer_sending_is_skipped(status, caplog):
+    """A redelivered job for an invoice that has moved on is left alone: no
+    adapter call, no transition, no audit row, the instance untouched, and a
+    normal return so the dispatcher counts the job done."""
+    inv = _invoice(status=status)
+    # A budget left to spend, so the gate, not an exhausted counter, is what
+    # stops it.
+    state = {"erp_retries": 1, "last_error": "down"}
+    inst = _instance(state_data=dict(state))
+    recorder = _AuditRecorder()
+    call = AsyncMock(return_value="ERP-1")
+    db = AsyncMock()
+
+    with (
+        caplog.at_level("WARNING", logger="app.services.erp"),
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", call),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=inst)),
+    ):
+        await send_to_erp_internal(db, inv)
+
+    call.assert_not_called()
+    assert inv.status == status
+    assert recorder.rows == []
+    assert inst.state_data == state
+    db.commit.assert_not_called()
+    db.rollback.assert_awaited()
+    assert f"invoice {inv.id} is at {status.value}, not sending_to_erp" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_gate_is_asked_again_after_every_backoff():
+    """Each backoff gives the row lock back, so the next attempt re-reads it: a
+    concurrent push that landed the bill meanwhile ends this one."""
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    inst = _instance(state_data={})
+    recorder = _AuditRecorder()
+    seen = iter([InvoiceStatus.sending_to_erp, InvoiceStatus.done])
+
+    async def _status(_db, _invoice):
+        return next(seen)
+
+    call = AsyncMock(side_effect=RuntimeError("timeout"))
+    with (
+        patch("app.services.erp._locked_push_status", _status),
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", call),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=inst)),
+        patch("app.services.erp.asyncio.sleep", AsyncMock()),
+    ):
+        await send_to_erp_internal(AsyncMock(), inv)
+
+    assert call.await_count == 1
+    assert recorder.rows == []
+    assert inst.state_data["erp_retries"] == 1
+
+
+class _NeverCalledAdapter:
+    async def post_invoice(self, payload):  # pragma: no cover - the assertion
+        raise AssertionError("the adapter must not be reached")
+
+
+@pytest.mark.asyncio
+async def test_a_redelivered_push_after_a_recall_posts_nothing(realdb):
+    """End to end on a real tenant, with the dispatcher's own shape: the job's
+    session loaded the invoice while it was `sending_to_erp`, and before the
+    push ran the invoice failed and its approval was recalled. The committed row
+    decides, not the stale object, and nothing is posted or written."""
+    from sqlalchemy import select, update
+
+    from app.models.invoice import Invoice
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    state = {"erp_retries": 0}
+    inv_id = await _seed_erp_failed_invoice(
+        mk, info.org_id, state_data=state, status=InvoiceStatus.sending_to_erp
+    )
+    _, _, rows_before = await _reload(mk, inv_id)
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert inv.status == InvoiceStatus.sending_to_erp
+        await s.commit()  # the dispatcher's sessions keep attributes across commits
+        async with mk() as other:
+            await other.execute(
+                update(Invoice)
+                .where(Invoice.id == inv_id)
+                .values(status=InvoiceStatus.ready_for_review)
+            )
+            await other.commit()
+        with patch("app.services.erp.get_erp_adapter", return_value=_NeverCalledAdapter()):
+            await send_to_erp_internal(s, inv, erp_config={"type": "x"})
+
+    inv, inst, rows = await _reload(mk, inv_id)
+    assert inv.status == InvoiceStatus.ready_for_review
+    assert inst.state_data == state
+    assert len(rows) == len(rows_before)
+
+
+@pytest.mark.asyncio
+async def test_a_push_at_sending_to_erp_still_runs_on_a_real_tenant(realdb):
+    """The gate's real locked read lets the push it is meant to let through."""
+    from sqlalchemy import select
+
+    from app.models.invoice import Invoice
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_erp_failed_invoice(
+        mk, info.org_id, state_data={"erp_retries": 0}, status=InvoiceStatus.sending_to_erp
+    )
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        with patch("app.services.erp._call_erp", AsyncMock(return_value="ERP-9")):
+            await send_to_erp_internal(s, inv)
+
+    inv, _, rows = await _reload(mk, inv_id)
+    assert inv.status == InvoiceStatus.done
+    assert any(r.action == "invoice.erp_confirmed" for r in rows)
 
 
 # ---------------------------------------------------------------------------
