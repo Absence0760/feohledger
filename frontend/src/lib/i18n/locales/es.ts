@@ -1404,6 +1404,7 @@ export const messages = {
 	'exceptions.erpPayment.splitMethod': "Repartido entre los métodos de arriba",
 	'exceptions.erpPayment.splitStands': "Este pago se hizo con más de un método, por lo que se registra con este reparto. Un solo método no puede describirlo.",
 	'exceptions.erpPayment.splitDropped': "Estas partes no suman el importe pagado, así que el reparto no se conserva. El método que elija se registra para todo el pago.",
+	'exceptions.erpPayment.splitUnjudged': "Si este reparto se conserva se decide al registrar el pago. Si no se conserva, el método que elija se registra para todo el pago.",
 	'exceptions.toast.notFound': "No se pudo abrir esa excepción.",
 	'exceptions.toast.resolved': 'Excepción resuelta',
 	'exceptions.toast.escalated': 'Excepción escalada',

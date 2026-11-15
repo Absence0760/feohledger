@@ -1540,6 +1540,7 @@ export const en = {
 	'exceptions.erpPayment.splitMethod': "Split across the methods above",
 	'exceptions.erpPayment.splitStands': "This payment was made with more than one method, so it is recorded with this split. One method cannot describe it.",
 	'exceptions.erpPayment.splitDropped': "These parts do not add up to the amount paid, so the split is not kept. The method you choose is recorded for the whole payment.",
+	'exceptions.erpPayment.splitUnjudged': "Whether this split is kept is decided when the payment is recorded. If it is not kept, the method you choose is recorded for the whole payment.",
 	'exceptions.toast.notFound': "That exception could not be opened.",
 	'exceptions.toast.resolved': 'Exception resolved',
 	'exceptions.toast.escalated': 'Exception escalated',

@@ -1408,6 +1408,7 @@ export const messages = {
 	'exceptions.erpPayment.splitMethod': "Dividido entre as formas acima",
 	'exceptions.erpPayment.splitStands': "Este pagamento foi feito com mais de uma forma de pagamento, por isso é registrado com esta divisão. Uma única forma não consegue descrevê-lo.",
 	'exceptions.erpPayment.splitDropped': "Estas partes não somam o valor pago, por isso a divisão não é mantida. A forma que você escolher é registrada para o pagamento inteiro.",
+	'exceptions.erpPayment.splitUnjudged': "Se esta divisão é mantida é decidido quando o pagamento é registrado. Se não for mantida, a forma que você escolher é registrada para o pagamento inteiro.",
 	'exceptions.toast.notFound': "Não foi possível abrir essa exceção.",
 	'exceptions.toast.resolved': 'Exceção resolvida',
 	'exceptions.toast.escalated': 'Exceção escalada',

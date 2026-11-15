@@ -682,6 +682,19 @@
 	const erpShowSplit = $derived(spansSeveralRails(erpParts));
 	// The split is the record over any rail picked: the picker becomes a fact.
 	const erpSplitStands = $derived(erpShowSplit && resolveTarget?.erp_payment_split_stands === true);
+	// What the note under the split may claim. Three states, because the
+	// server's verdict has three: true (it stands), false (it was judged and
+	// does not), and null/absent (not judged: no stated figure, parts its
+	// stricter parser rejects, or an older server). Only `false` may say the
+	// parts do not add up; for null nobody checked, so the note says the
+	// record decides. The picker stays for both (decisions §413).
+	const erpSplitNote = $derived(
+		erpSplitStands
+			? m('exceptions.erpPayment.splitStands')
+			: resolveTarget?.erp_payment_split_stands === false
+				? m('exceptions.erpPayment.splitDropped')
+				: m('exceptions.erpPayment.splitUnjudged')
+	);
 
 	function railLabel(rail: PaymentMethod | null): string {
 		const key = rail ? paymentMethodLabelKey(rail) : null;
@@ -1420,11 +1433,7 @@
 								</li>
 							{/each}
 						</ul>
-						<p class="modal-hint" data-testid="erp-payment-split-note">
-							{erpSplitStands
-								? m('exceptions.erpPayment.splitStands')
-								: m('exceptions.erpPayment.splitDropped')}
-						</p>
+						<p class="modal-hint" data-testid="erp-payment-split-note">{erpSplitNote}</p>
 					</div>
 				{/if}
 				<form
