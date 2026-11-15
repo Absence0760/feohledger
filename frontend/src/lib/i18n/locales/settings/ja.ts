@@ -427,7 +427,7 @@ export const messages = {
 	'org.erp.oauth.needsReconnect': '{erp} との接続の有効期限が切れました。請求書の送信を続けるには再接続してください。',
 	'org.erp.oauth.reconnect': '{erp} に再接続',
 	'org.erp.oauth.expiresSoon': "{erp} との接続は {date} に期限切れになります。請求書の送信と支払いの同期を続けるには、それまでに再接続してください。",
-	'org.erp.oauth.scopeGapPayments': "この {erp} との接続は、FeohLedger が支払いの読み取りと記録の権限を求める前に作成されました。再接続して権限を付与するまで、{erp} で行われた支払いは請求書自体が変更されたときにしか検出されず、FeohLedger 経由の支払いは {erp} に記録されません。",
+	'org.erp.oauth.scopeGapPayments': "この {erp} との接続は、FeohLedger が支払いの読み取りと記録の権限を求める前に作成されました。再接続して権限を付与するまで、{erp} で行われた支払いは請求書自体が変更されたときにしか検出されず、FeohLedger 経由の支払いは {erp} に記録されません。早めに再接続してください。そうしないと、{erp} で支払われた請求書を FeohLedger が見落とすおそれがあります。",
 	'org.erp.oauth.scopeGap': "この {erp} との接続には、FeohLedger が現在求めている権限がありません。再接続して付与してください。",
 	'org.erp.usage.ofShare': "本日の {erp} API 呼び出し: 1 日の割り当て {limit} のうち {used}。カウントは {reset} にリセットされます。",
 	'org.erp.usage.ofQuota': "本日の {erp} API 呼び出し: サブスクリプションキーの 1 日の上限 {limit} のうち {used}。カウントは {reset} にリセットされます。",

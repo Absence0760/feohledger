@@ -428,7 +428,7 @@ export const messages = {
 	'org.erp.oauth.needsReconnect': 'Die Verbindung zu {erp} ist abgelaufen. Verbinden Sie sich erneut, um weiter Rechnungen zu senden.',
 	'org.erp.oauth.reconnect': 'Erneut mit {erp} verbinden',
 	'org.erp.oauth.expiresSoon': "Die Verbindung zu {erp} läuft am {date} ab. Verbinden Sie sie vorher neu, damit Rechnungen weiter gesendet und Zahlungen abgeglichen werden.",
-	'org.erp.oauth.scopeGapPayments': "Diese Verbindung zu {erp} wurde hergestellt, bevor FeohLedger die Berechtigung zum Lesen und Verbuchen von Zahlungen angefordert hat. Bis Sie neu verbinden und sie erteilen, werden in {erp} geleistete Zahlungen nur erkannt, wenn sich die Rechnung selbst ändert, und über FeohLedger geleistete Zahlungen werden nicht in {erp} verbucht.",
+	'org.erp.oauth.scopeGapPayments': "Diese Verbindung zu {erp} wurde hergestellt, bevor FeohLedger die Berechtigung zum Lesen und Verbuchen von Zahlungen angefordert hat. Bis Sie neu verbinden und sie erteilen, werden in {erp} geleistete Zahlungen nur erkannt, wenn sich die Rechnung selbst ändert, und über FeohLedger geleistete Zahlungen werden nicht in {erp} verbucht. Verbinden Sie bald neu, sonst könnte FeohLedger eine in {erp} bezahlte Rechnung übersehen.",
 	'org.erp.oauth.scopeGap': "Dieser Verbindung zu {erp} fehlt eine Berechtigung, die FeohLedger jetzt anfordert. Verbinden Sie neu, um sie zu erteilen.",
 	'org.erp.usage.ofShare': "API-Aufrufe an {erp} heute: {used} von Ihrem Tagesanteil von {limit}. Der Zähler wird um {reset} zurückgesetzt.",
 	'org.erp.usage.ofQuota': "API-Aufrufe an {erp} heute: {used} vom Tageskontingent Ihres Abonnementschlüssels ({limit}). Der Zähler wird um {reset} zurückgesetzt.",
