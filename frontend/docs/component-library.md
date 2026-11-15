@@ -149,6 +149,7 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
 - `RunDetailModal.svelte` — payment run detail; status, total, payments table; Execute button when run is `draft` **and** the page's `executionMode` prop is `processor` (an unknown mode hides it — fail closed). On a draft run, a holder of `payment.record_external` also gets **Record run as paid…** (reference + paid-on, `POST /runs/{id}/record-outside`) and, on a `record_only` tenant for a holder of `payment.execute`, the **Bank file (NACHA)** panel (weekday effective date + CCD/PPD, `GET /runs/{id}/nacha` via `downloadRunNacha`). The first download moves the run to `exported`; the panel then offers an armed **Regenerate file** and **Bank rejected the file** (`voidRunNachaExport`, reason required), and Record becomes the primary control. On a run that finished with failures (processor tenant only) it offers an armed **Retry failed payments** (`retryFailedRunPayments`, `POST /runs/{id}/retry-failed`) from the run's `actions.retry_failed` verdict (`#lib/types/runRetry.ts::isRunRetryOffered`), then keeps a `role="status"` note of what was sent again and why the rest was skipped (`[data-testid="run-retry-result"]`). A payment with `provider === "external"` is labelled *Paid outside FeohLedger*. On an exported run the bank-file panel also offers **Verify before upload** (`verifyRunNacha`, `POST /runs/{id}/nacha/verify`, decisions §362) from `actions.nacha_verify`, and keeps what it found on screen after the reload (`[data-testid="nacha-verify-result"]`, `data-result` verified / superseded / held): a superseded file is a `role="alert"` "don't upload" naming the payments taken out, a held one a `role="status"` list to verify again. Every bank-file control the server refuses but does not hide is rendered disabled with `aria-describedby` on its reason line (`run-nacha-{export,regenerate,verify,void}-refusal`). `tests-e2e/payments/nacha-verify.spec.ts`.
 - `RecallApprovalModal.svelte` — the **Recall this approval?** reason dialog (`POST /api/invoices/{id}/recall-approval`, decisions §374). Props: `invoiceId`, `onclose`, `onrecalled(invoice)`. Opened by `InvoiceModal` only when the `recall_approval` verdict is `null`; the reason is required (blank or whitespace keeps Confirm disabled), and a refusal the door raises in between (a run staged meanwhile) is stated in the dialog (`role="alert"`, `[data-testid="recall-approval-error"]`) while nothing moves. `tests-e2e/invoices/recall-approval.spec.ts`.
 - `VendorModal.svelte` — vendor detail modal; the "Screening & Risk" panel (status, last-screened, payment-block + reason, risk level/score), re-screen / recompute-risk / block-unblock actions (gated to admin + ap_manager), and the screening-history timeline. Over `#lib/api/vendors.ts`
+- `VendorErpLinkSearch.svelte` — the vendor modal's **Find this vendor in the ERP** (decisions §415): searches the connected ERP's whole contact list by name (the server adds the vendor's tax number itself; a result says only whether it matches), then an armed two-click **Link** (`searchVendorErpRecords` / `linkVendorErpRecord`). Mounted by `VendorModal` for `vendor.manage` while `GET …/erp-links` says `search_available`.
 
 **`chat/` — supplier collaboration:**
 - `SupplierChatThread.svelte` — surface-agnostic per-invoice chat thread shared
@@ -389,9 +390,13 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   `POST …/oauth/status-sync`): the 202 says the check started or one was already running, and a
   refusal is the coded sentence in the reader's language (the 429 with how long to wait, a 409's
   `status_sync_*` reason, after which the status is read again so the button follows the new
-  verdict) — all in `erp-status` (decisions §392). Pure helpers
+  verdict) — all in `erp-status` (decisions §392). A connected ERP whose consent lacks a
+  permission FeohLedger now asks for (`scope_gaps`, e.g. `payments_scope_missing` on a Xero
+  connection from before `accounting.payments`) says what that limits (`erp-oauth-scope-gap`) and
+  offers **Reconnect** (`erp-oauth-reconnect`), as for an expiring one (decisions §415). Pure helpers
   (grouping, the configuration and secret payloads, destination changes, OAuth return params,
-  `fieldApplies`, `callUsageLines`, `statusSyncNowOffered`, `statusSyncStartedKey`) live in
+  `fieldApplies`, `callUsageLines`, `statusSyncNowOffered`, `statusSyncStartedKey`,
+  `oauthScopeGapKeys`) live in
   `#lib/types/erpConnection.ts` with a vitest.
 - `ErpCompanyPicker.svelte` — choose which company an OAuth consent connects, shown by
   `ErpConnectionPanel` when the callback returns with `?erp_choose_company=` (a Xero login with

@@ -266,6 +266,43 @@ an approved invoice therefore refuses the merge too; cancel or settle the card
 first. An approval that lands while the merge runs is caught as well: the
 invoice reassignment skips such a row and a recount refuses the merge.
 
+### Linking a vendor to an ERP record by hand
+
+A sync links only the records the adapter's vendor walk lists. Xero's walk
+cannot see a contact that is already a **customer** and has had no bill and no
+PO from us (Xero sets `IsSupplier` only on a contact's first bill), so its first
+push would be refused `vendor_not_linked` for good. The vendor modal's ERP
+links panel therefore offers **Find this vendor in the ERP** to a `vendor.manage`
+holder, while `GET /api/vendors/{id}/erp-links` says `search_available` (an
+adapter with `supports_vendor_search`, Xero today, connected to a named
+company; read from the stored settings, no credential opened) —
+`services/vendor_erp_manual_link`, decisions §415.
+
+- `POST /api/vendors/{id}/erp-links/search` `{"query": "<name>" | null}` reads
+  the ERP's whole contact list by name (the vendor's own when blank) and by the
+  vendor's stored tax number, which the server reads from the row: a tax number
+  never travels in a request or comes back. Each candidate states
+  `tax_id_matches` (separators and case aside), `active`, and
+  `linked_elsewhere` when another vendor already holds it in this company (a
+  flag, never the holder's id).
+  `truncated` when the ERP had more matches than one search reads. Reads only.
+- `POST /api/vendors/{id}/erp-links/link` `{"erp_vendor_id"}` re-reads the
+  record from the ERP first: 404 `erp_vendor_not_found`, 409
+  `erp_vendor_inactive` (archived / erased). 409 `vendor_erp_link_exists` when
+  the vendor already holds a link in this company (on its row, kept for it, or
+  a row link naming no company): unlink first. 409 `erp_vendor_already_linked`
+  when another vendor holds the record here. 409
+  `vendor_erp_search_unavailable` when the ERP cannot be searched. Checked
+  under the vendor row lock and an advisory lock on `(organization, realm)`
+  that the vendor sync takes too.
+- **Only the link is written**, stamped with the connected company. A row link
+  from another company is kept for it (§356). The vendor's name and tax id stay
+  as keyed; a later sync that lists the record matches it by id and updates
+  them by the normal rules, and a sync that does not list it leaves the link
+  alone (a same-company link is never re-judged).
+- **Audited** as `vendor.erp_linked`, `details` `{realm, erp_vendor_id,
+  erp_name, tax_id_matches, kept?}`.
+
 ### Unlinking a vendor from one ERP company
 
 `GET /api/vendors/{id}/erp-links` lists the vendor's links, one per company:
@@ -490,6 +527,8 @@ that it changed plus a last-4 — never the number.
 | `POST` | `/api/vendors/{id}/cancel-cards` | Retry the card leg on an un-payable vendor (`vendor.manage` or `vendor.block`; 409 on a payable vendor) |
 | `GET` | `/api/vendors/{id}/erp-links` | The vendor's ERP links, one per company (row + kept) |
 | `POST` | `/api/vendors/{id}/erp-links/unlink` | Clear the vendor's link in one ERP company (`vendor.manage`; 409 while an invoice is in flight there) — § Unlinking a vendor from one ERP company |
+| `POST` | `/api/vendors/{id}/erp-links/search` | Search the connected ERP's whole contact list for this vendor's record, by name and its tax number (`vendor.manage`) — § Linking a vendor to an ERP record by hand |
+| `POST` | `/api/vendors/{id}/erp-links/link` | Link the vendor to one ERP record in the connected company, re-read first (`vendor.manage`) — § Linking a vendor to an ERP record by hand |
 | `POST` | `/api/vendors/sync-erp` | Pull vendors from connected ERP |
 
 ### The paginated lists issue a fixed number of queries

@@ -1366,15 +1366,6 @@ scope (§260) — do not fold them into any of these.
       payment's breakdown on `PaymentResponse`. **Trigger:** the first two-rail
       row a person records, or the next change to the exception dialog (with
       the ERP-amount entry below it).
-- [ ] **(c) A Xero connection made before `accounting.payments` reads every
-      payable bill on every pass.** Its `Payments` change listing answers
-      401/403, which the sweep reads as an incomplete listing and falls back
-      to the full read (§386): correct, but it spends Xero's daily allowance
-      (1,000 calls on Starter) every tick, and nothing tells the admin why.
-      **Durable fix:** record the scope gap on the connection as a coded state
-      that `/status` and the ERP panel show ("reconnect to grant payments"),
-      and read only the incremental `Invoices` listing until then.
-      **Trigger:** the first pre-§386 Xero connection with status sync on.
 - [ ] **(c) The exception dialog does not show the amount the ERP reports
       paid.** A `paid_not_recorded` row now keeps it (`erp_report.amount` /
       `amount_currency`, §386), and the one-click record books it or refuses,
@@ -1384,14 +1375,6 @@ scope (§260) — do not fold them into any of these.
       the amount in the invoice's currency (`frontend/docs/money-formatting.md`)
       in the record dialog. **Trigger:** the first Xero tenant, or the next
       change to the exception dialog.
-- [ ] **(c) A Xero customer who becomes a supplier is missed until its first
-      bill or PO.** The vendor sync reads `IsSupplier==true OR
-      IsCustomer==false` (§386): Xero sets `IsSupplier` only once a contact has
-      a bill, so a contact that is already a customer and has no bill and no
-      PO from us yet carries neither flag we can read, and its first push
-      refuses `vendor_not_linked`. **Durable fix:** a vendor-link search by
-      name or tax number against all contacts, run on demand from the vendor
-      page. **Trigger:** the first such refusal seen.
 - [ ] **(c) A bill already posted to the ERP can't be voided or recalled from
       FeohLedger.** `void_invoice` has no caller under `app/` beyond
       `posted_total`'s cleanup of a mismatched bill, and no user action voids
@@ -2465,8 +2448,14 @@ as oversights.
       confirm what §392 could not: that paying a bill in Xero raises an
       INVOICE UPDATE for it (a bill payment has no category of its own), that
       `eventDateUtc` repeats exactly on Xero's retry (the dedup key), and that
-      a delivery carries `tenantType` `ORGANISATION`. **Trigger:** before the
-      first pilot customer on Xero pays a bill in Xero.
+      a delivery carries `tenantType` `ORGANISATION`. Also confirm what §415
+      could not: that applying or deleting a payment moves the bill's
+      `UpdatedDateUTC` (a connection with the payments scope gap recorded
+      reads the `Invoices` listing alone), that a `Payments` listing under a
+      consent without `accounting.payments` answers 403 (not 401), and that
+      `Contacts?searchTerm=` and `?where=TaxNumber==` find a customer-only
+      contact. **Trigger:** before the first pilot customer on Xero pays a
+      bill in Xero.
 
 - [ ] **Clear up what the wrong QuickBooks bill-payment reader left behind.**
       Until decisions §317 the adapter saw no payments on any real QuickBooks
