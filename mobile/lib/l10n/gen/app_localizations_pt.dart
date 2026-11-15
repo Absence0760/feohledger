@@ -748,6 +748,10 @@ class AppLocalizationsPt extends AppLocalizations {
       'Segregação de funções: um usuário envolvido na criação desta fatura não pode resolver uma exceção que bloqueia o pagamento dela. Escale-a ou peça a outro usuário para decidir.';
 
   @override
+  String get codedRefusalExceptionSegregationApprover =>
+      'Segregação de funções: um usuário que aprovou esta fatura não pode também resolver a retenção de recebimento ou inspeção dela. Escale-a ou peça a outro usuário para decidir.';
+
+  @override
   String get invoiceDetailApproved => 'Fatura aprovada';
 
   @override
@@ -4350,6 +4354,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get codedRefusalExceptionSegregationImplicated =>
       'Segregação de funções: um usuário envolvido na criação desta fatura não pode resolver uma exceção que bloqueia o pagamento dela. Escale-a ou peça a outro usuário para decidir.';
+
+  @override
+  String get codedRefusalExceptionSegregationApprover =>
+      'Segregação de funções: um usuário que aprovou esta fatura não pode também resolver a retenção de recebimento ou inspeção dela. Escale-a ou peça a outro usuário para decidir.';
 
   @override
   String get invoiceDetailApproved => 'Fatura aprovada';

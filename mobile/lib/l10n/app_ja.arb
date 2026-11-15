@@ -187,6 +187,7 @@
   "codedRefusalGateMeasured": "{measured} として測定しました。上限は {currency} で設定されています。",
   "codedRefusalExceptionSegregationRaiser": "職務分掌：この例外を発生させた操作のユーザーは、解消することもできません。エスカレーションするか、別のユーザーに判断を依頼してください。",
   "codedRefusalExceptionSegregationImplicated": "職務分掌：この請求書の作成に関与したユーザーは、その支払いを止めている例外を解消できません。エスカレーションするか、別のユーザーに判断を依頼してください。",
+  "codedRefusalExceptionSegregationApprover": "職務分掌：この請求書を承認したユーザーは、その入荷または検査による保留を解消することもできません。エスカレーションするか、別のユーザーに判断を依頼してください。",
   "invoiceDetailApproved": "請求書を承認しました",
   "invoiceDetailApproveFailed": "請求書を承認できませんでした。もう一度お試しください",
   "invoiceDetailRejected": "請求書を却下しました",

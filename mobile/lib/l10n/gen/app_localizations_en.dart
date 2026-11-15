@@ -741,6 +741,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide.';
 
   @override
+  String get codedRefusalExceptionSegregationApprover =>
+      'Segregation of duties: a user who approved this invoice cannot also clear its receipt or inspection hold. Escalate it, or ask a different user to decide.';
+
+  @override
   String get invoiceDetailApproved => 'Invoice approved';
 
   @override

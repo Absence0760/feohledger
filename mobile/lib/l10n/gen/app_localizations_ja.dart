@@ -703,6 +703,10 @@ class AppLocalizationsJa extends AppLocalizations {
       '職務分掌：この請求書の作成に関与したユーザーは、その支払いを止めている例外を解消できません。エスカレーションするか、別のユーザーに判断を依頼してください。';
 
   @override
+  String get codedRefusalExceptionSegregationApprover =>
+      '職務分掌：この請求書を承認したユーザーは、その入荷または検査による保留を解消することもできません。エスカレーションするか、別のユーザーに判断を依頼してください。';
+
+  @override
   String get invoiceDetailApproved => '請求書を承認しました';
 
   @override

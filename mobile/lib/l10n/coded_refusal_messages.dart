@@ -114,6 +114,7 @@ const codedRefusalCodes = <String>{
   'approval_cfo_required',
   'segregation_raiser',
   'segregation_implicated',
+  'segregation_approver',
   'invoice_stale_approval',
   'invoice_not_recallable',
   'invoice_recall_in_erp',
@@ -150,6 +151,10 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
       return l.codedRefusalExceptionSegregationRaiser;
     case 'segregation_implicated':
       return l.codedRefusalExceptionSegregationImplicated;
+    // Backend decisions §420: an approver may not clear a receipt or
+    // inspection hold on the invoice they approved.
+    case 'segregation_approver':
+      return l.codedRefusalExceptionSegregationApprover;
     // The invoice changed after this screen loaded it; nothing was approved.
     case 'invoice_stale_approval':
       return l.codedRefusalInvoiceStaleApproval;
