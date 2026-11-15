@@ -296,10 +296,26 @@ async def update_organization(
     if body.name is not None:
         org.name = body.name
     credential_changes: dict[str, list[str]] = {}
+    nacha_changes: dict[str, list[str]] = {}
     erp_secrets_to_drop: frozenset[str] = frozenset()
     erp_drop_reason = "erp_destination_changed"
 
     if body.settings is not None:
+        # The NACHA offset account number reads back masked, so a re-save of
+        # the payments block sends it blank (or as the mask): keep the stored
+        # number rather than validate the blank and refuse (decisions §432).
+        incoming_payments = body.settings.get("payments")
+        if isinstance(incoming_payments, dict) and "nacha" in incoming_payments:
+            from app.services.nacha import carry_offset_account
+
+            stored_payments = (org.settings or {}).get("payments")
+            body.settings["payments"] = {
+                **incoming_payments,
+                "nacha": carry_offset_account(
+                    incoming_payments.get("nacha"),
+                    stored_payments.get("nacha") if isinstance(stored_payments, dict) else None,
+                ),
+            }
         _validate_settings_patch(body.settings)
 
         # Saving a LIVE ERP adapter is plan-gated, and one routed through
@@ -451,9 +467,19 @@ async def update_organization(
                 continue
             _refuse_credentials_in_patch(block, incoming_settings[block])
             incoming_settings[block] = strip_secrets(block, incoming_settings[block])
-            changed = _changed_key_names((org.settings or {}).get(block), incoming_settings[block])
+            before_block = (org.settings or {}).get(block)
+            changed = _changed_key_names(before_block, incoming_settings[block])
             if changed:
                 credential_changes[block] = changed
+            if block == "payments" and "nacha" in changed:
+                # The NACHA block holds the originator and the offset account
+                # (banking data): name which of its keys moved, never a value.
+                nacha_changes[block] = _changed_key_names(
+                    before_block.get("nacha") if isinstance(before_block, dict) else None,
+                    incoming_settings[block].get("nacha")
+                    if isinstance(incoming_settings[block], dict)
+                    else None,
+                )
 
         # Merge incoming keys into existing settings (don't replace the whole dict)
         existing = dict(org.settings or {})
@@ -493,7 +519,11 @@ async def update_organization(
                 action="organization.provider_config_updated",
                 entity_type="organization",
                 entity_id=org.id,
-                details={"block": block, "changed": changed},
+                details={
+                    "block": block,
+                    "changed": changed,
+                    **({"nacha_changed": nacha_changes[block]} if block in nacha_changes else {}),
+                },
             )
         except Exception:
             await db.rollback()

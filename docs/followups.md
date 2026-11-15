@@ -1154,14 +1154,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       widget tests and the l10n strings in every ARB. **Trigger:** the first pilot
       customer whose approvers use the mobile app, or the next mobile payments
       change, whichever comes first.
-- [ ] **(c) The NACHA file is always unbalanced.** `services/nacha.py` writes
-      credits only, which most ODFIs expect from a corporate originator, but some
-      banks require a balanced file (an offsetting debit to the originator's own
-      account). **Durable fix:** an optional `settings.payments.nacha` block for
-      the offset account (`offset_routing`, `offset_account`, `offset_account_type`)
-      that, when present, appends one debit entry for the batch total and switches
-      the batch to service class 200, with builder tests on the control totals.
-      **Trigger:** a pilot customer's bank rejects or asks for a balanced file.
 
 ### Surfaced by scoping the QuickBooks Online adapter (2026-10-07)
 
