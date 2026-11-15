@@ -174,6 +174,7 @@
   "glChartRefusalOnLines": "明細行: {reasons}",
   "codedRefusalApprovalSegregation": "職務分掌：この請求書の作成に関与したユーザーは、承認することもできません。",
   "codedRefusalApprovalSegregationReceiver": "職務分掌：この請求書の対象となる入荷を記録したユーザーは、承認することもできません。",
+  "codedRefusalApprovalSegregationInspector": "職務分掌：この請求書の対象となる商品の品質検査を記録したユーザーは、承認することもできません。",
   "codedRefusalInvoiceStaleApproval": "この請求書は読み込み後に変更されています。再読み込みし、最新の内容を確認してから承認してください。",
   "codedRefusalApprovalLevelReuse": "このチェーンの前のレベルをすでに承認しています。別の承認者が必要です。",
   "codedRefusalApprovalNotNamedApprover": "このステップの承認者として認められていません。",

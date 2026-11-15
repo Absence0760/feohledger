@@ -83,6 +83,10 @@ void main() {
       de.codedRefusalApprovalSegregationReceiver,
     );
     expect(
+      localizeCodedRefusal(de, refusal('approval_segregation_inspector')),
+      de.codedRefusalApprovalSegregationInspector,
+    );
+    expect(
       localizeCodedRefusal(de, refusal('approval_not_named_approver')),
       de.codedRefusalApprovalNotNamedApprover,
     );

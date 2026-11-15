@@ -4018,6 +4018,7 @@ export const messages = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.",
 	'refusal.approvalSegregationReceiver': "Funktionstrennung: Wer einen Wareneingang zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
+	'refusal.approvalSegregationInspector': "Funktionstrennung: Wer eine Qualitätsprüfung der Ware zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
 	'refusal.approvalLevelReuse': "Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.",
 	'refusal.approvalNotNamedApprover': "Sie sind für diesen Schritt nicht als Freigebende(r) berechtigt.",
 	'refusal.invoiceNotInReview': "Diese Rechnung wartet nicht auf Prüfung und kann daher weder genehmigt noch abgelehnt werden.",

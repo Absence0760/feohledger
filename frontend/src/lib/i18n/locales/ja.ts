@@ -3950,6 +3950,7 @@ export const messages = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "職務分掌：この請求書の作成に関与したユーザーは、承認することもできません。",
 	'refusal.approvalSegregationReceiver': "職務分掌：この請求書の対象となる入荷を記録したユーザーは、承認することもできません。",
+	'refusal.approvalSegregationInspector': "職務分掌：この請求書の対象となる商品の品質検査を記録したユーザーは、承認することもできません。",
 	'refusal.approvalLevelReuse': "このチェーンの前のレベルをすでに承認しています。別の承認者が必要です。",
 	'refusal.approvalNotNamedApprover': "このステップの承認者として認められていません。",
 	'refusal.invoiceNotInReview': "この請求書はレビュー待ちではないため、承認も却下もできません。",

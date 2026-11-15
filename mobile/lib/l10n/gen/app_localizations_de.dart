@@ -680,6 +680,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Funktionstrennung: Wer einen Wareneingang zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.';
 
   @override
+  String get codedRefusalApprovalSegregationInspector =>
+      'Funktionstrennung: Wer eine Qualitätsprüfung der Ware zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.';
+
+  @override
   String get codedRefusalInvoiceStaleApproval =>
       'Diese Rechnung wurde geändert, nachdem Sie sie geladen haben. Laden Sie sie neu und prüfen Sie die aktuelle Fassung, bevor Sie sie genehmigen.';
 
