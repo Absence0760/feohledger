@@ -760,6 +760,22 @@ request, so a public look-alike host the SSRF guard would pass is a credential l
 `FEOH_ERP_D365_API_BASE` is exempt.
 **Auth:** OAuth 2.0 client credentials
 
+**Nothing to revoke** (decisions §407). The customer registers an app in their
+own Microsoft Entra tenant, gives us its client id and a client secret, and
+enables that client id on Business Central's *Microsoft Entra Applications*
+page. We hold the secret, never a consent or refresh token, and mint
+60–90-minute access tokens. The Microsoft identity platform publishes no
+revocation endpoint (its discovery document has no `revocation_endpoint`), and
+ending the secret or the BC record needs rights our BC-scoped token does not
+carry. Tenant deletion reports `unsupported` without a call, and its
+confirmation tells the customer to set our client ID to Disabled (or delete it)
+on that page and delete the client secret from the app registration. Sources,
+checked 2026-11-14: *Using Service to Service Authentication*
+(<https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication>),
+*Access tokens* § Token lifetime
+(<https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens>), and
+<https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration>.
+
 **Create Purchase Invoice:**
 ```
 POST /purchaseInvoices
@@ -2504,7 +2520,18 @@ the customer's own server.
 | `posting_period` | no (optional) | APSTIN `PostingPeriod` (default `C`, current) |
 
 Every operation is `Logon` → work → `Logoff`, with the logoff in a `finally`:
-an orphaned session holds a SYSPRO licence seat. All calls are `GET` with
+an orphaned session holds a SYSPRO licence seat.
+
+**Nothing to revoke** (decisions §407). The stored operator login is the access;
+`Logoff` ends a session, not the operator's ability to log on again, and every
+operation already sends it. Tenant deletion reports `unsupported` without a
+call, and its confirmation tells the customer to set **Operator locked out**, or
+**Usage for e.net business objects** = **No access**, on that operator in
+Operator Maintenance, or change its password. It never asks for the company
+password to change: every operator of the company shares it. Source: *Operator
+Maintenance*
+(<https://help.syspro.com/syspro-8-2025/g_programs/imp/imppmp/imppmp.htm>,
+checked 2026-11-14). All calls are `GET` with
 query-string parameters, which is how the WCF REST host takes them:
 
 | Operation | Business object |
@@ -3801,9 +3828,9 @@ It never blocks the deletion and never logs a token. An ERP reached with
 **stored credentials** instead of a consent is covered when its adapter states
 `provider_side_disconnect` (§400): Sage Intacct's tokens are revoked at Intacct
 (`revoke_stored_access`, after a closure's commit like an OAuth revoke) and
-Sage Accounting (ZA) reads `unsupported`; the confirmation's `ERP credentials:`
-line names the step the customer takes at the provider. Merge.dev, Business
-Central, NetSuite and SYSPRO state none yet (`docs/followups.md`). An empty
+Sage Accounting (ZA), Business Central and SYSPRO read `unsupported` (§400,
+§407); the confirmation's `ERP credentials:` line names the step the customer
+takes at the provider. Merge.dev and NetSuite state none yet (`docs/followups.md`). An empty
 `scopes` sends no `scope`. Operator URL overrides (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before

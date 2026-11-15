@@ -1014,6 +1014,67 @@ async def test_an_adapter_that_breaks_while_assessed_never_stops_the_deletion(mo
     assert "password" in format_confirmation(result)
 
 
+_BC_SECRET = "bc-client-secret-7"
+_SYSPRO_PASSWORD = "syspro-operator-password-7"
+_STORED_407 = {
+    "dynamics_365_bc": {
+        "tenant_id": "11111111-2222-3333-4444-555555555555",
+        "client_id": "bc-client",
+        "client_secret": _BC_SECRET,
+        "environment": "production",
+        "company_id": "66666666-7777-8888-9999-000000000000",
+    },
+    "syspro": {
+        "base_url": "https://syspro.example.co.za:20190",
+        "operator": "FEOHAP",
+        "operator_password": _SYSPRO_PASSWORD,
+        "company_id": "EDU1",
+        "company_password": "syspro-company-password-7",
+    },
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("erp_type", "step_words"),
+    [
+        # §407: Microsoft publishes no revocation for a client-credentials
+        # token; the customer disables the BC record and deletes the secret.
+        ("dynamics_365_bc", ("Microsoft Entra Applications", "client secret")),
+        # §407: e.net Logoff ends a session, not the operator login.
+        ("syspro", ("Operator locked out", "Operator Maintenance")),
+    ],
+)
+async def test_bc_and_syspro_are_unsupported_at_once_and_name_the_step(
+    monkeypatch, caplog, erp_type, step_words
+):
+    """Nothing is called (no token mint, no Logon/Logoff), the outcome is
+    decided at the read so a closure defers nothing, and the confirmation names
+    the provider's own control rather than the generic connected-apps line."""
+    trap = _ScriptedIntacct().install(monkeypatch)  # any HTTP call would land here
+    monkeypatch.setitem(_STORED, erp_type, _STORED_407[erp_type])
+    caplog.set_level("DEBUG")
+    held = _GrantSession(_stored_settings(erp_type))
+
+    result, _other = await _delete_stored(monkeypatch, erp_type, control_session=held)
+    await held.commit()
+
+    assert trap.requests == []
+    assert held.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        erp_type,
+        erp_oauth.REVOKE_UNSUPPORTED,
+    )
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "NOT revoked" in line
+    for words in step_words:
+        assert words in line
+    assert "connected apps" not in line
+    for secret in (_BC_SECRET, _SYSPRO_PASSWORD, "syspro-company-password-7"):
+        assert secret not in caplog.text
+        assert secret not in format_confirmation(result)
+
+
 def test_every_stored_credential_outcome_names_the_provider_side_step():
     step = "remove FeohLedger's client ID under Authorized Client Applications"
     for outcome in (

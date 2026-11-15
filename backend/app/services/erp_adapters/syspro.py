@@ -53,6 +53,22 @@ Optional:
 Every call logs on, does its work and logs off in a ``finally``, so a session
 never outlives the operation — an orphaned session holds a SYSPRO licence seat.
 
+**Revocation (decisions §407).** The access is the stored operator code and
+password (and the company password, when the company has one). e.net's
+``Logoff`` ends one session, not the operator's ability to log on again, and
+every operation already sends it, so there is no session of ours to end at
+deletion and no call that ends the credential. Deleting our sealed copy ends
+nothing at SYSPRO, so tenant deletion reports ``unsupported`` without a call
+and the confirmation names SYSPRO's own controls in Operator Maintenance:
+**Operator locked out** ("the operator is unable to load SYSPRO"), or **Usage
+for e.net business objects** = **No access** ("the operator code cannot be used
+as a login for the business objects of e.net Solutions"), or a new password.
+The company password is shared by every operator of the company, so the step
+does not ask for it to change.
+
+* Operator Maintenance (checked 2026-11-14) —
+  https://help.syspro.com/syspro-8-2025/g_programs/imp/imppmp/imppmp.htm
+
 ``post_invoice`` never raises past its configuration checks: a refused logon,
 an APSTIN refusal and a transport failure each come back as a coded
 :class:`ErpPostResult` (``classify_logon_error`` / ``classify_apstin_error``,
@@ -696,6 +712,14 @@ class SysproAdapter(ErpAdapter):
     """Direct integration with a customer-hosted SYSPRO 8 e.net REST endpoint."""
 
     erp_type = "syspro"
+    # Nothing to revoke (decisions §407): the stored operator login is the
+    # access, and e.net's Logoff ends a session (every operation already sends
+    # it), never the operator. The customer ends it in Operator Maintenance.
+    provider_side_disconnect = (
+        "lock out the SYSPRO operator FeohLedger logged on as (Operator locked out, or "
+        "Usage for e.net business objects set to No access, in Operator Maintenance), "
+        "or change that operator's password"
+    )
 
     def _require(self, key: str) -> str:
         value = self.config.get(key)

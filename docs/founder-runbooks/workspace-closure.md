@@ -88,8 +88,17 @@ Security > Authorized Client Applications. Intacct's revoke ends every token for
 that Web Services user and company, so anything else sharing the user (another
 integration of the customer's) must sign in again. Sage Accounting (ZA) issues no token,
 so it always reads `unsupported`: tell the customer to change the password of
-the Sage user whose login FeohLedger held, or remove that user. The operator's
-written confirmation names the step in both cases.
+the Sage user whose login FeohLedger held, or remove that user. Business
+Central and SYSPRO also always read `unsupported` (§407). For Business Central,
+Microsoft publishes no revocation for a client-credentials token: tell the
+customer to set our client ID to Disabled (or delete it) on BC's Microsoft Entra
+Applications page and delete the client secret they gave us from that app
+registration in the Microsoft Entra admin center; tokens already issued lapse
+within 60–90 minutes. For SYSPRO, e.net's `Logoff` ends a session, not the
+operator, and we log off after every call: tell the customer to set Operator
+locked out (or Usage for e.net business objects to No access) on the operator
+we logged on as in Operator Maintenance, or change its password. The operator's
+written confirmation names the step in every case.
 
 ## What stays, on purpose
 
