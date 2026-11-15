@@ -498,7 +498,9 @@ async def test_patch_drops_blank_secrets_keeps_stored_ones_and_audits_config(rea
     (audit,) = await _audit(realdb, "organization.provider_config_updated")
     assert audit.details == {
         "block": "erp",
-        "changed": ["base_url", "integration_method", "type"],
+        # `configured_at` is the server's stamp of when the ERP moved (§428):
+        # this save moved it, so the stored key changed with the others.
+        "changed": ["base_url", "configured_at", "integration_method", "type"],
     }
 
 

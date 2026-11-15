@@ -33,7 +33,10 @@ from app.main import app
 
 # Paging / ordering shape the VIEW, not the population, so a rollup over the
 # whole set has no use for them.
-_VIEW_ONLY_PARAMS = {"page", "page_size", "sort", "order"}
+# `include` asks for more per-row detail (`GET /api/invoices?include=review_actions`,
+# the per-row approve / reject verdicts); like the paging and sort keys it
+# changes what each row carries, never which rows are in the set.
+_VIEW_ONLY_PARAMS = {"page", "page_size", "sort", "order", "include"}
 
 # Summary endpoints that deliberately describe a WIDER set than any filtered
 # table, with the reason. Each is called from the frontend with no query

@@ -2647,9 +2647,15 @@
 										{/if}
 									</div>
 									<label>
-										<span>{m('org.payments.nachaField.offsetAccountType')}</span>
+										<!-- Named by its label text alone: a <select> inside its
+										     <label> otherwise takes the chosen option into its name
+										     ("Offset account type None"). -->
+										<span id="org-payments-nacha-offset-type-label"
+											>{m('org.payments.nachaField.offsetAccountType')}</span
+										>
 										<select
 											bind:value={nachaOffsetAccountType}
+											aria-labelledby="org-payments-nacha-offset-type-label"
 											aria-describedby="org-payments-nacha-offset-hint"
 										>
 											<option value="">{m('org.payments.nachaOffsetTypeNone')}</option>

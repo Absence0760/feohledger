@@ -410,8 +410,9 @@ void main() {
       // for `/review-actions`) offers nothing: the screen fails closed.
       final client = MockClient((req) async {
         final path = req.url.path;
-        if (path == '/api/auth/login')
+        if (path == '/api/auth/login') {
           return _json({'access_token': 'tok-123'});
+        }
         if (path == '/api/auth/me') return _json(_meBody(['ap_clerk']));
         if (req.method == 'GET' && path.startsWith('/api/invoices/')) {
           return _json(_invoiceJson('1', status: 'ready_for_review'));
