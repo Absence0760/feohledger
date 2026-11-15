@@ -118,8 +118,12 @@ class RecordErpReportedPaymentRequest(BaseModel):
 
     # How the customer paid — it decides 1099 treatment (`payment_methods`).
     # `virtual_card` is FeohLedger's own card program, never a way to pay
-    # outside it.
-    method: PaymentMethod
+    # outside it. Optional HERE only: a kept ERP breakdown over several rails
+    # is the record whatever one rail a person names (decisions §396), so the
+    # dialog asks for none there and the endpoint refuses an omitted rail
+    # anywhere else (`api/exceptions.py::ERP_PAYMENT_METHOD_REQUIRED`, §413).
+    # `RecordPaymentOutsideRequest` requires it again.
+    method: PaymentMethod | None = None
     # The cheque number / bank-portal confirmation. Required: it is what bank
     # reconciliation matches the statement line on, and the only evidence the
     # record carries.
@@ -132,7 +136,7 @@ class RecordErpReportedPaymentRequest(BaseModel):
 
     @field_validator("method")
     @classmethod
-    def _not_card(cls, v: PaymentMethod) -> PaymentMethod:
+    def _not_card(cls, v: PaymentMethod | None) -> PaymentMethod | None:
         if v == PaymentMethod.virtual_card:
             raise ValueError("virtual_card is not a way to pay outside FeohLedger")
         return v
@@ -150,6 +154,9 @@ class RecordPaymentOutsideRequest(RecordErpReportedPaymentRequest):
     """`POST /api/payments/record-outside` — an invoice the customer paid themselves."""
 
     invoice_id: uuid.UUID
+    # Required: no ERP breakdown stands behind this record, so the rail the
+    # person names is the only one there is.
+    method: PaymentMethod
 
 
 class RecordRunOutsideRequest(BaseModel):
@@ -166,6 +173,16 @@ class RecordRunOutsideRequest(BaseModel):
         if not v:
             raise ValueError("reference must not be blank")
         return v
+
+
+class PaymentRailPart(BaseModel):
+    """One cash payment behind a recorded payment, as the ERP stated it
+    (`payments.rail_breakdown`, migration 0130, decisions §396): its rail
+    (`None` = not stated, which is 1099-reportable) and the exact amount it
+    paid, in the payment's own currency. No account data."""
+
+    method: str | None
+    amount: MoneyAmount
 
 
 class PaymentResponse(BaseModel):
@@ -265,6 +282,13 @@ class PaymentResponse(BaseModel):
     card_provider: str | None = None
     card_id: str | None = None
 
+    # Which rails paid how much, when the ERP stated a breakdown that stands
+    # (decisions §396): what explains `method: null` on a payment made on two
+    # rails, and what the 1099 splits it by. `None` when no breakdown is kept
+    # (one rail, a breakdown that did not reconcile, or a payment recorded
+    # before migration 0130), never an empty list standing in for "unknown".
+    rail_breakdown: list[PaymentRailPart] | None = None
+
     model_config = {"from_attributes": True}
 
     @classmethod
@@ -299,7 +323,20 @@ class PaymentResponse(BaseModel):
             card_last_four=card.last_four if card else None,
             card_provider=card.card_provider if card else None,
             card_id=str(card.id) if card else None,
+            rail_breakdown=_rail_breakdown(getattr(p, "rail_breakdown", None)),
         )
+
+
+def _rail_breakdown(value: object) -> list[PaymentRailPart] | None:
+    """The stored breakdown for the read surface, through the one parser
+    (`payment_methods.rail_parts_from_json`): a malformed array reads as none,
+    never as a partial list that would look like the whole."""
+    from app.services.payment_methods import rail_parts_from_json
+
+    parts = rail_parts_from_json(value)
+    if not parts:
+        return None
+    return [PaymentRailPart(method=part.method, amount=part.amount) for part in parts]
 
 
 class PaymentListItem(PaymentResponse):
