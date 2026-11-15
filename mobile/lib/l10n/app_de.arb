@@ -873,5 +873,14 @@
   "warningsPoMatchStatusMismatch": "Abweichung",
   "warningsPoMatchStatusPartial": "Teilweise",
   "warningsPoMatchStatusNoPo": "Keine Bestellung",
-  "warningsPoMatchAnnouncement": "Bestellabgleich: {summary}"
+  "warningsPoMatchAnnouncement": "Bestellabgleich: {summary}",
+  "codedRefusalInvoiceNotInReview": "Diese Rechnung wartet nicht auf Prüfung und kann daher weder genehmigt noch abgelehnt werden.",
+  "codedRefusalInvoiceBulkNotFound": "Diese Rechnung wurde in der ausgewählten Einheit nicht gefunden.",
+  "codedRefusalInvoiceStatusImmutable": "Diese Rechnung hat den Status {status} und kann nicht mehr geändert werden.",
+  "codedRefusalInvoiceRecallOneAtATime": "Eine Genehmigung wird je Rechnung einzeln und mit Begründung zurückgenommen: Verwenden Sie „Genehmigung zurücknehmen“ an der Rechnung.",
+  "codedRefusalInvoiceRequiredFieldsMissing": "Pflichtfelder fehlen: {fields}",
+  "codedRefusalInvoiceTransitionInvalid": "Diese Rechnung kann nicht von {from} zu {to} wechseln.",
+  "codedRefusalInvoiceTransitionRecallOnly": "Diese Rechnung kann nur durch Zurücknehmen ihrer Genehmigung von {from} zu {to} wechseln, eine Rechnung nach der anderen: Verwenden Sie „Genehmigung zurücknehmen“ an der Rechnung.",
+  "codedRefusalInvoiceOnceApprovedNotReread": "Diese Rechnung wurde bereits genehmigt, daher kann ihr Beleg nicht erneut ausgelesen werden. Nehmen Sie stattdessen ihre Genehmigung zurück und korrigieren Sie sie.",
+  "invoicesBulkSkipNoReason": "Kein Grund angegeben"
 }

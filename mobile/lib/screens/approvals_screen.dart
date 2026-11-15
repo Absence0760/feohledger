@@ -1,8 +1,10 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/screens/invoice_detail_screen.dart';
 import 'package:feohledger_mobile/stores/invoice_store.dart';
@@ -17,6 +19,47 @@ class ApprovalsScreen extends StatefulWidget {
 }
 
 class _ApprovalsScreenState extends State<ApprovalsScreen> {
+  // The server's `approve` / `reject` verdicts per queued row
+  // (`GET /api/invoices/{id}/review-actions`), keyed by id and the version
+  // they judged, so an edited row is asked again. Swipe-to-approve and the
+  // reject swipe are offered from these alone — the queue's own status filter
+  // says nothing about segregation of duties or the CFO / max-amount gates —
+  // and a row not yet answered (or whose read failed) offers neither.
+  final Map<String, ({ActionVerdict approve, ActionVerdict reject})>
+      _verdicts = {};
+  final Set<String> _asking = {};
+
+  String _verdictKey(Invoice invoice) =>
+      '${invoice.id}@${invoice.updatedAt ?? ''}';
+
+  /// Ask the server for every queued row's verdict not yet held or in flight.
+  void _askVerdicts(List<Invoice> pending) {
+    for (final invoice in pending) {
+      final key = _verdictKey(invoice);
+      if (_verdicts.containsKey(key) || !_asking.add(key)) continue;
+      InvoiceApi.reviewActions(invoice.id).then(
+        (v) => (
+          approve: ActionVerdict.fromVerdicts(v, 'approve'),
+          reject: ActionVerdict.fromVerdicts(v, 'reject'),
+        ),
+        onError: (Object _) => (
+          approve: ActionVerdict.unanswered,
+          reject: ActionVerdict.unanswered,
+        ),
+      ).then((verdict) {
+        _asking.remove(key);
+        if (!mounted) return;
+        setState(() => _verdicts[key] = verdict);
+      });
+    }
+  }
+
+  /// Refetch the queue and re-ask every verdict.
+  Future<void> _refresh() {
+    setState(_verdicts.clear);
+    return InvoiceStore.instance.fetchPending();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -58,7 +101,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                   Text(l.approvalsLoadError),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: store.fetchPending,
+                    onPressed: _refresh,
                     child: Text(l.commonRetry),
                   ),
                 ],
@@ -87,8 +130,9 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
             );
           }
 
+          _askVerdicts(pending);
           return RefreshIndicator(
-            onRefresh: store.fetchPending,
+            onRefresh: _refresh,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -109,8 +153,30 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final invoice = pending[index];
+                      final verdict = _verdicts[_verdictKey(invoice)];
+                      const hidden = {'invoice_not_in_review'};
+                      final approve =
+                          verdict?.approve ?? ActionVerdict.unanswered;
+                      final reject =
+                          verdict?.reject ?? ActionVerdict.unanswered;
+                      final canSwipeApprove = approve.allowed;
+                      final canSwipeReject = reject.allowed;
+                      // Why Approve is refused, beside the row, for a reason
+                      // the reader can act on (a colleague must approve it).
+                      final refusal = approve.isOffered(hiddenCodes: hidden) &&
+                              !approve.allowed
+                          ? (localizeCodedRefusal(l, approve.refusal) ??
+                              _message(approve))
+                          : null;
                       return Dismissible(
                         key: ValueKey(invoice.id),
+                        direction: canSwipeApprove && canSwipeReject
+                            ? DismissDirection.horizontal
+                            : canSwipeApprove
+                                ? DismissDirection.startToEnd
+                                : canSwipeReject
+                                    ? DismissDirection.endToStart
+                                    : DismissDirection.none,
                         background: _swipeBackground(
                           Colors.green.shade700,
                           Icons.check,
@@ -154,9 +220,29 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                           }
                           return false; // Reject needs a reason — open detail
                         },
-                        child: InvoiceListTile(
-                          invoice: invoice,
-                          onTap: () => _openDetail(invoice),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            InvoiceListTile(
+                              invoice: invoice,
+                              onTap: () => _openDetail(invoice),
+                            ),
+                            if (refusal != null)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                                child: Text(
+                                  refusal,
+                                  key: ValueKey('approve-refusal-${invoice.id}'),
+                                  style: TextStyle(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       );
                     },
@@ -194,6 +280,11 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
         ],
       ),
     );
+  }
+
+  static String? _message(ActionVerdict verdict) {
+    final message = verdict.refusal?['message'];
+    return message is String && message.isNotEmpty ? message : null;
   }
 
   void _openDetail(Invoice invoice) {

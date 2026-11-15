@@ -3613,4 +3613,43 @@ class AppLocalizationsEs extends AppLocalizations {
   String warningsPoMatchAnnouncement(String summary) {
     return 'Conciliación con pedido: $summary';
   }
+
+  @override
+  String get codedRefusalInvoiceNotInReview =>
+      'Esta factura no está pendiente de revisión, por lo que no se puede aprobar ni rechazar.';
+
+  @override
+  String get codedRefusalInvoiceBulkNotFound =>
+      'No se encontró esta factura en la entidad seleccionada.';
+
+  @override
+  String codedRefusalInvoiceStatusImmutable(String status) {
+    return 'Esta factura está en estado $status, así que ya no puede modificarse.';
+  }
+
+  @override
+  String get codedRefusalInvoiceRecallOneAtATime =>
+      'Una aprobación se retira de factura en factura, con un motivo: use Retirar aprobación en la factura.';
+
+  @override
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
+    return 'Faltan campos obligatorios: $fields';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionInvalid(String from, String to) {
+    return 'Esta factura no puede pasar de $from a $to.';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to) {
+    return 'Esta factura solo puede pasar de $from a $to retirando su aprobación, una factura cada vez: use Retirar aprobación en la factura.';
+  }
+
+  @override
+  String get codedRefusalInvoiceOnceApprovedNotReread =>
+      'Esta factura ya se aprobó, así que su documento no puede volver a leerse. Retire su aprobación y corríjala en su lugar.';
+
+  @override
+  String get invoicesBulkSkipNoReason => 'No se indicó ningún motivo';
 }

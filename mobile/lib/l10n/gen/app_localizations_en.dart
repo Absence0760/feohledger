@@ -3592,4 +3592,43 @@ class AppLocalizationsEn extends AppLocalizations {
   String warningsPoMatchAnnouncement(String summary) {
     return 'PO match: $summary';
   }
+
+  @override
+  String get codedRefusalInvoiceNotInReview =>
+      'This invoice is not awaiting review, so it cannot be approved or rejected.';
+
+  @override
+  String get codedRefusalInvoiceBulkNotFound =>
+      'This invoice wasn\'t found in the selected entity.';
+
+  @override
+  String codedRefusalInvoiceStatusImmutable(String status) {
+    return 'This invoice is $status, so it can no longer be changed.';
+  }
+
+  @override
+  String get codedRefusalInvoiceRecallOneAtATime =>
+      'An approval is recalled one invoice at a time, with a reason: use Recall approval on the invoice.';
+
+  @override
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
+    return 'Required fields missing: $fields';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionInvalid(String from, String to) {
+    return 'This invoice can\'t move from $from to $to.';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to) {
+    return 'This invoice can move from $from to $to only by recalling its approval, one invoice at a time: use Recall approval on the invoice.';
+  }
+
+  @override
+  String get codedRefusalInvoiceOnceApprovedNotReread =>
+      'This invoice has already been approved, so its document can\'t be read again. Recall its approval and correct it instead.';
+
+  @override
+  String get invoicesBulkSkipNoReason => 'No reason given';
 }

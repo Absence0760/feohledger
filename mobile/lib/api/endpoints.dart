@@ -153,12 +153,14 @@ class InvoiceApi {
     return Invoice.fromJson(data);
   }
 
-  /// The `recall_approval` verdict of `GET /api/invoices/{id}/review-actions`
-  /// (`services/review.recall_refusal`, backend decisions §374): whether
-  /// [recallApproval] would accept the signed-in user now, and why not.
-  static Future<ActionVerdict> recallVerdict(String id) async {
-    final data = await _api.get('/invoices/$id/review-actions');
-    return ActionVerdict.fromVerdicts(data, 'recall_approval');
+  /// `GET /api/invoices/{id}/review-actions`: the server's verdict on each
+  /// workflow action for the signed-in user, keyed by action — `approve` /
+  /// `reject` (`services/review.review_refusals`) and `recall_approval`
+  /// (`services/review.recall_refusal`, backend decisions §374), among others.
+  /// Read one with [ActionVerdict.fromVerdicts]; the app offers Approve,
+  /// Reject and Recall from these and never restates the gates.
+  static Future<Map<String, dynamic>> reviewActions(String id) async {
+    return await _api.get('/invoices/$id/review-actions');
   }
 
   /// `POST /api/invoices/{id}/recall-approval`: take back the approval of an
@@ -249,12 +251,56 @@ class InvoiceApi {
   }
 }
 
+/// One row a bulk invoice mutation did not change, and why.
+///
+/// `POST /bulk/status` answers each skip as `{id, reason, code?, params?}`
+/// (`schemas/invoice.BulkStatusSkip`): a coded refusal keeps its [code] and
+/// [params] so the list states it in the reader's language through
+/// `coded_refusal_messages.dart`, and [reason] is the server's English for a
+/// code this build does not know. `POST /bulk/delete` answers bare ids, which
+/// parse with neither.
+class BulkSkip {
+  final String id;
+  final String? code;
+  final Map<String, dynamic> params;
+  final String? reason;
+
+  const BulkSkip({
+    required this.id,
+    this.code,
+    this.params = const {},
+    this.reason,
+  });
+
+  factory BulkSkip.fromJson(Object? json) {
+    if (json is Map) {
+      final code = json['code'];
+      final params = json['params'];
+      final reason = json['reason'];
+      return BulkSkip(
+        id: json['id']?.toString() ?? '',
+        code: code is String ? code : null,
+        params: params is Map ? Map<String, dynamic>.from(params) : const {},
+        reason: reason is String && reason.isNotEmpty ? reason : null,
+      );
+    }
+    return BulkSkip(id: json.toString());
+  }
+
+  /// The skip as a coded refusal `detail` (`{code, message, params}`), the
+  /// shape `localizeCodedRefusal` reads; `null` for an uncoded skip.
+  Map<String, dynamic>? get refusal => code == null
+      ? null
+      : {'code': code, 'message': reason, 'params': params};
+}
+
 /// Result of a bulk invoice mutation (`{deleted|updated, skipped}`). [count] is
-/// the number actually mutated; [skipped] lists ids the backend refused
-/// (immutable status). Reused for both bulk-delete and bulk-status.
+/// the number actually mutated; [skipped] lists the rows the backend refused,
+/// each with its reason where the endpoint gives one. Reused for both
+/// bulk-delete and bulk-status.
 class BulkResult {
   final int count;
-  final List<String> skipped;
+  final List<BulkSkip> skipped;
 
   const BulkResult({required this.count, required this.skipped});
 
@@ -266,7 +312,7 @@ class BulkResult {
     return BulkResult(
       count: (json[countKey] as num?)?.toInt() ?? 0,
       skipped: skipped is List
-          ? skipped.map((e) => e.toString()).toList()
+          ? skipped.map(BulkSkip.fromJson).toList()
           : const [],
     );
   }

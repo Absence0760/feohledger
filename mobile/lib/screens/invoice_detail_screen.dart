@@ -38,9 +38,14 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   // double-tap firing the money-path POST twice and disables the buttons.
   bool _submitting = false;
 
-  // The server's verdict on "Recall approval" for this user and invoice
-  // (`GET /review-actions` → `recall_approval`, backend decisions §374), asked
-  // only where a recall could apply. Unanswered offers nothing.
+  // The server's verdicts on this user's workflow actions for the invoice
+  // (`GET /review-actions`): `approve` / `reject` (`review.review_refusals`)
+  // on an invoice in review, `recall_approval` (backend decisions §374) on
+  // one holding an approval. Whether to offer Approve, Reject or Recall is
+  // read from these alone, never a rule restated here; unanswered offers
+  // nothing.
+  ActionVerdict _approveVerdict = ActionVerdict.unanswered;
+  ActionVerdict _rejectVerdict = ActionVerdict.unanswered;
   ActionVerdict _recall = ActionVerdict.unanswered;
 
   // Activity timeline (audit log) state — loaded independently of the invoice
@@ -70,7 +75,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         _invoice = invoice;
         _loading = false;
       });
-      await _loadRecallVerdict(invoice);
+      await _loadVerdicts(invoice);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -80,24 +85,47 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     }
   }
 
-  /// Ask the server whether this user may recall the invoice's approval.
-  /// Only an approved invoice, or a failed one (an approved invoice's failed
-  /// ERP push), can hold one; for anything else nothing is asked. A failed
-  /// read leaves the verdict unanswered, which offers nothing.
-  Future<void> _loadRecallVerdict(Invoice invoice) async {
+  /// Ask the server which workflow actions this user may take on [invoice].
+  /// Only an invoice in review can be approved or rejected, and only an
+  /// approved one, or a failed one (an approved invoice's failed ERP push),
+  /// can have an approval recalled; for anything else nothing is asked. A
+  /// failed read leaves every verdict unanswered, which offers nothing.
+  Future<void> _loadVerdicts(Invoice invoice) async {
     final status = invoice.status;
-    if (status != InvoiceStatus.approved && status != InvoiceStatus.failed) {
-      if (mounted) setState(() => _recall = ActionVerdict.unanswered);
+    final asks = status == InvoiceStatus.readyForReview ||
+        status == InvoiceStatus.approved ||
+        status == InvoiceStatus.failed;
+    // A verdict judged the version this screen held before; drop it until
+    // the server answers for the one now on screen.
+    if (mounted) {
+      setState(() {
+        _approveVerdict = ActionVerdict.unanswered;
+        _rejectVerdict = ActionVerdict.unanswered;
+        _recall = ActionVerdict.unanswered;
+      });
+    }
+    if (!asks) return;
+    Map<String, dynamic> verdicts;
+    try {
+      verdicts = await InvoiceApi.reviewActions(invoice.id);
+    } catch (_) {
       return;
     }
-    ActionVerdict verdict;
-    try {
-      verdict = await InvoiceApi.recallVerdict(invoice.id);
-    } catch (_) {
-      verdict = ActionVerdict.unanswered;
-    }
     if (!mounted) return;
-    setState(() => _recall = verdict);
+    setState(() {
+      _approveVerdict = ActionVerdict.fromVerdicts(verdicts, 'approve');
+      _rejectVerdict = ActionVerdict.fromVerdicts(verdicts, 'reject');
+      _recall = ActionVerdict.fromVerdicts(verdicts, 'recall_approval');
+    });
+  }
+
+  /// The reason a refused verdict states beside its disabled control: the
+  /// localized sentence for its code, else the server's English.
+  String? _refusalText(AppLocalizations l, ActionVerdict verdict) {
+    if (verdict.allowed) return null;
+    final message = verdict.refusal?['message'];
+    return localizeCodedRefusal(l, verdict.refusal) ??
+        (message is String && message.isNotEmpty ? message : null);
   }
 
   Future<void> _recallApproval() async {
@@ -552,10 +580,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       return null;
     }
     final l = AppLocalizations.of(context);
-    final refusal = verdict.allowed
-        ? null
-        : (localizeCodedRefusal(l, verdict.refusal) ??
-            verdict.refusal?['message'] as String?);
+    final refusal = _refusalText(l, verdict);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -595,44 +620,79 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     );
   }
 
+  /// Approve / Reject on an invoice in review, each offered from the
+  /// server's verdict alone (`frontend/docs/ui-patterns.md` § Whether to offer
+  /// an action): hidden for a role that cannot review and for a status the
+  /// action does not start from, otherwise shown, and disabled beside the
+  /// server's reason when refused (segregation of duties, the CFO or
+  /// max-amount gate, the named-approver gate).
   Widget? _buildActions() {
     final inv = _invoice;
     if (inv == null) return null;
     if (!inv.status.isActionable) return _buildRecallAction();
-    if (!AuthStore.instance.canApproveInvoice) return null;
+    const hidden = {'invoice_not_in_review'};
+    final approveOffered = _approveVerdict.isOffered(hiddenCodes: hidden);
+    final rejectOffered = _rejectVerdict.isOffered(hiddenCodes: hidden);
+    if (!approveOffered && !rejectOffered) return null;
     final l = AppLocalizations.of(context);
+    final refusals = <String>{
+      if (approveOffered) ?_refusalText(l, _approveVerdict),
+      if (rejectOffered) ?_refusalText(l, _rejectVerdict),
+    };
 
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _submitting ? null : _reject,
-                icon: Icon(Icons.close, color: Colors.red.shade700),
-                label: Text(
-                  l.invoiceDetailReject,
-                  // shade700 keeps the destructive label at AA contrast.
-                  style: TextStyle(color: Colors.red.shade700),
-                ),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: BorderSide(color: Colors.red.shade700),
+            if (refusals.isNotEmpty) ...[
+              Text(
+                refusals.join(' '),
+                key: const ValueKey('review-refusal'),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _submitting ? null : _approve,
-                icon: const Icon(Icons.check),
-                label: Text(l.invoiceDetailApprove),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  backgroundColor: Colors.green,
-                ),
-              ),
+              const SizedBox(height: 8),
+            ],
+            Row(
+              children: [
+                if (rejectOffered)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          _submitting || !_rejectVerdict.allowed ? null : _reject,
+                      icon: Icon(Icons.close, color: Colors.red.shade700),
+                      label: Text(
+                        l.invoiceDetailReject,
+                        // shade700 keeps the destructive label at AA contrast.
+                        style: TextStyle(color: Colors.red.shade700),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(color: Colors.red.shade700),
+                      ),
+                    ),
+                  ),
+                if (rejectOffered && approveOffered) const SizedBox(width: 16),
+                if (approveOffered)
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed:
+                          _submitting || !_approveVerdict.allowed
+                          ? null
+                          : _approve,
+                      icon: const Icon(Icons.check),
+                      label: Text(l.invoiceDetailApprove),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        backgroundColor: Colors.green,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
         ),

@@ -208,4 +208,95 @@ void main() {
       isNull,
     );
   });
+
+  // The review verdict's not-in-review code and the bulk-status skips
+  // (`api/invoices.bulk_status_change`, backend decisions §387, §418).
+  test('the review and bulk-status refusals are stated in the reader\'s '
+      'language', () {
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_not_in_review')),
+      de.codedRefusalInvoiceNotInReview,
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_bulk_not_found')),
+      de.codedRefusalInvoiceBulkNotFound,
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_recall_one_at_a_time')),
+      de.codedRefusalInvoiceRecallOneAtATime,
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_once_approved_not_reread')),
+      de.codedRefusalInvoiceOnceApprovedNotReread,
+    );
+  });
+
+  test('a status is named by its label, and an unknown one falls back', () {
+    expect(
+      localizeCodedRefusal(
+          en, refusal('invoice_status_immutable', {'status': 'paid'})),
+      'This invoice is Paid, so it can no longer be changed.',
+    );
+    expect(
+      localizeCodedRefusal(de,
+          refusal('invoice_status_immutable', {'status': 'paid'})),
+      de.codedRefusalInvoiceStatusImmutable(de.invoiceStatusPaid),
+    );
+    expect(
+      localizeCodedRefusal(en, refusal('invoice_transition_invalid', {
+        'status': 'ready_for_review',
+        'target': 'pending',
+      })),
+      "This invoice can't move from Ready for Review to Pending.",
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_transition_recall_only', {
+        'status': 'approved',
+        'target': 'ready_for_review',
+      })),
+      de.codedRefusalInvoiceTransitionRecallOnly(
+        de.invoiceStatusApproved,
+        de.invoiceStatusReadyForReview,
+      ),
+    );
+    // Never `InvoiceStatus.fromString`'s `new` fallback for a value this
+    // build does not know: the server's sentence instead.
+    expect(
+      localizeCodedRefusal(
+          en, refusal('invoice_status_immutable', {'status': 'archived'})),
+      isNull,
+    );
+    expect(localizeCodedRefusal(en, refusal('invoice_status_immutable')),
+        isNull);
+    expect(
+      localizeCodedRefusal(
+          en, refusal('invoice_transition_invalid', {'status': 'new'})),
+      isNull,
+    );
+  });
+
+  test('the missing required fields are named by their labels', () {
+    expect(
+      localizeCodedRefusal(en, refusal('invoice_required_fields_missing', {
+        'fields': ['vendor', 'amount'],
+      })),
+      'Required fields missing: Vendor, Amount',
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_required_fields_missing', {
+        'fields': ['invoice_number'],
+      })),
+      de.codedRefusalInvoiceRequiredFieldsMissing(de.invoiceEditInvoiceNumber),
+    );
+    expect(
+      localizeCodedRefusal(
+          en, refusal('invoice_required_fields_missing', {'fields': []})),
+      isNull,
+    );
+    expect(
+      localizeCodedRefusal(
+          en, refusal('invoice_required_fields_missing', {'fields': [1]})),
+      isNull,
+    );
+  });
 }

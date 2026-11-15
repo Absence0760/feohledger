@@ -551,7 +551,9 @@ void main() {
 
       expect(result, isNotNull);
       expect(result!.count, 2);
-      expect(result.skipped, ['3']);
+      expect(result.skipped.map((s) => s.id), ['3']);
+      expect(result.skipped.single.code, isNull,
+          reason: 'bulk delete answers bare ids');
       expect((sentBody!['ids'] as List).toSet(), {'1', '2'});
       expect(store.selectionMode, isFalse, reason: 'exits selection on success');
       expect(listCalls, 1, reason: 'success triggers a refetch');
@@ -584,6 +586,77 @@ void main() {
       expect(sentBody!['ids'], ['1']);
       expect(sentBody!.containsKey('reason'), isFalse,
           reason: 'no reason key unless one was given');
+    });
+
+    test('a bulk status skip keeps its code, params and reason', () async {
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (req.method == 'POST' && req.url.path.endsWith('/bulk/status')) {
+            return http.Response(
+              jsonEncode({
+                'updated': 0,
+                'skipped': [
+                  {
+                    'id': '1',
+                    'reason': 'invoice is not awaiting review',
+                    'code': 'invoice_not_in_review',
+                    'params': {'status': 'new'},
+                  },
+                  {'id': '2', 'reason': 'transition was refused'},
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return _list([]);
+        }),
+      );
+      store
+        ..reset()
+        ..enterSelectionMode('1')
+        ..toggleSelected('2');
+
+      final result = await store.bulkStatusSelected('rejected', reason: 'x');
+
+      final coded = result!.skipped.first;
+      expect(coded.id, '1');
+      expect(coded.code, 'invoice_not_in_review');
+      expect(coded.params, {'status': 'new'});
+      expect(coded.refusal, {
+        'code': 'invoice_not_in_review',
+        'message': 'invoice is not awaiting review',
+        'params': {'status': 'new'},
+      });
+      final plain = result.skipped.last;
+      expect(plain.id, '2');
+      expect(plain.code, isNull);
+      expect(plain.refusal, isNull);
+      expect(plain.reason, 'transition was refused');
+    });
+
+    test('selectionAwaitingReview holds only when every selected row is in '
+        'review', () async {
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _list([
+              _invoiceJson('1', status: 'ready_for_review'),
+              _invoiceJson('2', status: 'ready_for_review'),
+              _invoiceJson('3', status: 'new'),
+            ])),
+      );
+      store.reset();
+      await store.fetch();
+      expect(store.selectionAwaitingReview, isFalse, reason: 'nothing selected');
+      store
+        ..enterSelectionMode('1')
+        ..toggleSelected('2');
+      expect(store.selectionAwaitingReview, isTrue);
+      store.toggleSelected('3');
+      expect(store.selectionAwaitingReview, isFalse);
+      store
+        ..toggleSelected('3')
+        ..toggleSelected('9'); // not in the loaded list
+      expect(store.selectionAwaitingReview, isFalse);
     });
 
     test('a bulk approval binds each selected row to the version listed',

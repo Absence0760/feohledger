@@ -29,6 +29,18 @@ http.Response _list(List<Map<String, dynamic>> items) => http.Response(
       headers: {'content-type': 'application/json'},
     );
 
+http.Response _json(Object body) => http.Response(
+      jsonEncode(body),
+      200,
+      headers: {'content-type': 'application/json'},
+    );
+
+/// The server's `GET /review-actions` verdicts allowing both decisions.
+const _allowed = <String, dynamic>{'approve': null, 'reject': null};
+
+Map<String, dynamic> _refusal(String code, [Map<String, dynamic>? params]) =>
+    {'code': code, 'message': 'server english', 'params': params ?? {}};
+
 /// A fake that filters SERVER-side on `?status=`, the way the real
 /// `GET /api/invoices` does. The approvals queue is a server-filtered request
 /// now, so a fake that ignored the param would let a client-side filter pass.
@@ -261,6 +273,7 @@ void main() {
             headers: {'content-type': 'application/json'},
           );
         }
+        if (req.url.path.endsWith('/review-actions')) return _json(_allowed);
         listCalls++;
         // After approval, the refetch returns an empty pending list.
         return _list(approveCalls == 0 ? [_invoiceJson('1')] : []);
@@ -297,6 +310,7 @@ void main() {
           return http.Response('{}', 200,
               headers: {'content-type': 'application/json'});
         }
+        if (req.url.path.endsWith('/review-actions')) return _json(_allowed);
         return _list([_invoiceJson('1')]);
       }),
     );
@@ -315,5 +329,121 @@ void main() {
     expect(approveCalls, 0, reason: 'reject swipe must not call approve');
     // The row snaps back — still present and pending.
     expect(find.byType(InvoiceListTile), findsOneWidget);
+  });
+
+  // ── Swipe-to-approve from the server's verdict (issue #575) ─────────────
+
+  /// A queue of [invoices] whose `/review-actions` answers [verdicts] by id,
+  /// counting approve POSTs into [approveCalls].
+  MockClient queueWith(
+    List<Map<String, dynamic>> invoices,
+    Map<String, Map<String, dynamic>> verdicts,
+    List<String> approveCalls,
+  ) =>
+      MockClient((req) async {
+        final path = req.url.path;
+        if (req.method == 'POST' && path.endsWith('/approve')) {
+          approveCalls.add(path);
+          return _json(_invoiceJson('1', status: 'approved'));
+        }
+        if (path.endsWith('/review-actions')) {
+          final id = path.split('/')[3];
+          final verdict = verdicts[id];
+          return verdict == null
+              ? http.Response('boom', 500)
+              : _json(verdict);
+        }
+        return _list(invoices);
+      });
+
+  testWidgets('a refused approve is stated beside the row and its swipe does '
+      'not approve', (tester) async {
+    final approveCalls = <String>[];
+    ApiClient().debugConfigure(
+      client: queueWith(
+        [_invoiceJson('1')],
+        {
+          '1': {'approve': _refusal('approval_segregation'), 'reject': null},
+        },
+        approveCalls,
+      ),
+    );
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byKey(const ValueKey('approve-refusal-1')));
+    expect(find.textContaining('Segregation of duties'), findsOneWidget);
+
+    await tester.drag(find.byType(InvoiceListTile), const Offset(600, 0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(approveCalls, isEmpty);
+    expect(find.byType(InvoiceListTile), findsOneWidget);
+  });
+
+  testWidgets('a role the server does not let approve gets no swipe and no '
+      'reason', (tester) async {
+    final approveCalls = <String>[];
+    ApiClient().debugConfigure(
+      client: queueWith(
+        [_invoiceJson('1')],
+        {
+          '1': {
+            'approve': _refusal('role_not_permitted'),
+            'reject': _refusal('role_not_permitted'),
+          },
+        },
+        approveCalls,
+      ),
+    );
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byType(InvoiceListTile));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final dismissible = tester.widget<Dismissible>(find.byType(Dismissible));
+    expect(dismissible.direction, DismissDirection.none);
+    expect(find.text('server english'), findsNothing);
+  });
+
+  testWidgets('a row whose verdict read failed offers no swipe-to-approve',
+      (tester) async {
+    final approveCalls = <String>[];
+    ApiClient().debugConfigure(
+      client: queueWith([_invoiceJson('1')], const {}, approveCalls),
+    );
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byType(InvoiceListTile));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.drag(find.byType(InvoiceListTile), const Offset(600, 0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(approveCalls, isEmpty);
+  });
+
+  testWidgets('each row is offered from its own verdict', (tester) async {
+    final approveCalls = <String>[];
+    ApiClient().debugConfigure(
+      client: queueWith(
+        [_invoiceJson('1'), _invoiceJson('2')],
+        {
+          '1': _allowed,
+          '2': {'approve': _refusal('approval_not_named_approver'), 'reject': null},
+        },
+        approveCalls,
+      ),
+    );
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byKey(const ValueKey('approve-refusal-2')));
+
+    expect(find.byKey(const ValueKey('approve-refusal-1')), findsNothing);
+    final directions = tester
+        .widgetList<Dismissible>(find.byType(Dismissible))
+        .map((d) => d.direction)
+        .toList();
+    expect(directions, [DismissDirection.horizontal, DismissDirection.endToStart]);
   });
 }

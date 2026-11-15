@@ -22021,3 +22021,51 @@ the way back to it.
 / link parity per link state, the refused link reads nothing, unlink reopens it)
 and `frontend/tests-e2e/vendors/erp-unlink.spec.ts` (the panel is gone after a
 link; a refused vendor gets the sentence or nothing).
+
+## 429. Mobile offers Approve / Reject from the per-invoice verdict, on the detail screen and per row of the approvals queue; the Approvals tab stays on the permission (closes two `docs/followups.md` entries, round 13, 2026-11-15)
+
+**Context.** The mobile detail screen and the approvals swipe offered Approve /
+Reject to anyone holding `invoice.approve` (`AuthStore.canApproveInvoice`), so
+the uploader, a non-named approver and an ap_manager over the CFO limit met a
+control that could only 403 — the restated rule issue #575 removed from the
+web. Separately, the mobile bulk sheet offered Approved for any selection and
+`BulkResult` kept bare ids (in fact it stringified the `{id, reason, code,
+params}` skip objects), so since §418 a bulk approve of drafts said "N
+skipped" with no reason.
+
+**Decision.**
+
+- The detail screen reads `GET /api/invoices/{id}/review-actions` once for an
+  invoice in review or holding an approval and offers Approve, Reject and
+  Recall from its `approve` / `reject` / `recall_approval` verdicts
+  (`ActionVerdict`), the web modal's rules: hidden on `role_not_permitted` and
+  `invoice_not_in_review`, disabled beside the localized reason otherwise,
+  nothing while unanswered.
+- The approvals queue asks the same read **per row**, keyed by id and
+  `updated_at`, and swipes a row to approve only on an allowed verdict, stating
+  a refusal under the row. One GET per queued row is the cost; the queue is one
+  server-filtered page of `ready_for_review` invoices, and the alternative —
+  keep swiping and let the POST refuse — is exactly the offer-then-403 the
+  verdict exists to prevent. A failed read stays unanswered until
+  pull-to-refresh rather than being re-asked on every rebuild.
+- The **Approvals tab** stays gated on `canApproveInvoice`. It is not a
+  per-invoice decision but "does this user review invoices at all", which is
+  the permission the server itself states on `/auth/me`; every row of a user
+  without it would be `role_not_permitted`. So `canApproveInvoice` keeps that
+  one caller, documented as tab-only.
+- Bulk status keeps each skip as `BulkSkip {id, code, params, reason}` and,
+  when a batch skips rows, lists each in a dialog (invoice number + the reason
+  through `coded_refusal_messages.dart`, else the server's English). Approved
+  is offered only when every selected row is loaded and `ready_for_review`, as
+  the web picker's `commonTransitions` does.
+
+**Rejected.** A list-level verdict field on `GET /api/invoices` (one read for
+the whole queue): a backend change outside this lane, and `review_refusals`
+runs per-invoice chain gates that would make every list read pay for them.
+Worth revisiting if the queue's per-row reads show up as a cost.
+
+Tests: `mobile/test/screens/invoice_detail_screen_test.dart`,
+`mobile/test/screens/approvals_screen_test.dart`,
+`mobile/test/screens/invoices_screen_test.dart` (picker + skip dialog),
+`mobile/test/stores/invoice_store_test.dart`,
+`mobile/test/l10n/coded_refusal_messages_test.dart`.

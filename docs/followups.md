@@ -1927,13 +1927,6 @@ user-visible halves still open.
       exception detail.
 ### Surfaced by the 2026-10-31 follow-ups batch, round 4 (decisions §345–§348)
 
-- [ ] **(c) Mobile's invoice approve still restates its rule.**
-      `invoice_detail_screen` and the home-screen approve use
-      `canApproveInvoice` only, not `GET /api/invoices/{id}/review-actions`.
-      Reading the verdict is one GET, but showing a refusal needs a mobile
-      refusal-localization path (ARB strings per code). **Durable fix:** that
-      path, then both screens on the verdict, with widget tests. **Trigger:** the
-      next change to mobile approval.
 - [ ] **(c) The deploy-script tests fail on macOS.** `test_deploy_release.py`,
       `test_frontend_publish.py` and `test_deploy_script_failures.py` (30 tests)
       run scripts using GNU `cp` / `date -d` flags that macOS rejects (`cp:
@@ -2024,15 +2017,6 @@ user-visible halves still open.
       set), with a `tests/test_erp_push_flow.py` case. **Trigger:** the next
       change to `services/erp.py`'s retry loop, or an invoice found stuck at
       `sending_to_erp`.
-- [ ] **(c) Mobile bulk status shows no reason for a skipped row.** The
-      mobile bulk sheet offers Approved for any selection, and `BulkResult`
-      keeps only the skipped ids, so since §418 a bulk approve of drafts on
-      mobile says "N skipped" with no reason (true of every skip type before
-      §418 too). **Durable fix:** keep `{id, code, params}` per skip in the
-      mobile `BulkResult`, render each through `coded_refusal_messages.dart`,
-      and offer Approved only for `ready_for_review` rows as the web picker
-      does, with a widget test. **Trigger:** the next change to mobile bulk
-      actions.
 - [ ] **(c) The auto-send sweep cannot fence a directly configured ERP's
       connection time.** §411 skips approvals made before an OAuth ERP's
       `connected_at`, but NetSuite, Business Central, Sage Intacct and SYSPRO

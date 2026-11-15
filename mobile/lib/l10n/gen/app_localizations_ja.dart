@@ -3427,4 +3427,42 @@ class AppLocalizationsJa extends AppLocalizations {
   String warningsPoMatchAnnouncement(String summary) {
     return '発注照合: $summary';
   }
+
+  @override
+  String get codedRefusalInvoiceNotInReview =>
+      'この請求書はレビュー待ちではないため、承認も却下もできません。';
+
+  @override
+  String get codedRefusalInvoiceBulkNotFound => '選択中のエンティティにこの請求書が見つかりません。';
+
+  @override
+  String codedRefusalInvoiceStatusImmutable(String status) {
+    return 'この請求書のステータスは$statusのため、変更できません。';
+  }
+
+  @override
+  String get codedRefusalInvoiceRecallOneAtATime =>
+      '承認の取り消しは理由を添えて1件ずつ行います。請求書の「承認を取り消す」を使用してください。';
+
+  @override
+  String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
+    return '必須項目が入力されていません：$fields';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionInvalid(String from, String to) {
+    return 'この請求書は$fromから$toに移行できません。';
+  }
+
+  @override
+  String codedRefusalInvoiceTransitionRecallOnly(String from, String to) {
+    return 'この請求書を$fromから$toに移行するには、請求書ごとに承認を取り消す必要があります。請求書の「承認を取り消す」を使用してください。';
+  }
+
+  @override
+  String get codedRefusalInvoiceOnceApprovedNotReread =>
+      'この請求書はすでに承認されているため、書類を再読み取りできません。代わりに承認を取り消して修正してください。';
+
+  @override
+  String get invoicesBulkSkipNoReason => '理由は示されていません';
 }
