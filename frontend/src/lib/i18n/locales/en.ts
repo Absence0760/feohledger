@@ -5320,6 +5320,7 @@ export const en = {
 	'payments.recordOutside.failed': "Could not record the payment",
 	'payments.recordOutside.methodChoose': "Choose how it was paid",
 	'payments.recordOutside.prefilledFromErp': "Filled in from the payment {erp} reported. Check the details before you record it.",
+	'payments.recordOutside.openException': "Open its exception to record it with the split.",
 	'payments.recordOutside.yourErp': "your ERP",
 	'payments.recordOutside.unavailable': "This invoice can't be recorded as paid yet.",
 	'payments.queue.openException': "Open exception",
@@ -5364,6 +5365,7 @@ export const en = {
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "Exported",
 	'refusal.externalPaymentAmountChanged': "What this invoice owes has changed since the run was staged ({staged} staged, {amount} owed now) because of a credit memo or an early-payment discount. Resolve the difference with the supplier, then record the invoice on its own.",
+	'refusal.externalPaymentErpSplit': "The ERP reports this invoice paid with more than one payment method. Record it from its exception, which keeps how the payment was split.",
 	'refusal.nachaPaymentNotPayable': "The payment for invoice {invoice} can no longer be sent as it was staged. Cancel the run and stage it again.",
 	'refusal.nachaAlreadyExported': "This run's bank file was already exported. Uploading a second file would pay these suppliers twice. Regenerate it only if your bank never took the first one.",
 	'refusal.paymentRunSegregationExport': "Segregation of duties: the user who created this payment run cannot also export its bank file. A different user must.",

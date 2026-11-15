@@ -6,7 +6,8 @@ import {
 	isErpPaidReport,
 	isPoRematchClears,
 	poRematchNote,
-	spansSeveralRails
+	spansSeveralRails,
+	splitNoteKey
 } from './erpReport.ts';
 
 describe('isErpPaidReport', () => {
@@ -148,5 +149,41 @@ describe('spansSeveralRails', () => {
 		expect(spansSeveralRails([{ rail: 'card', amount: '1.00' }, { rail: 'card', amount: '2.00' }])).toBe(false);
 		expect(spansSeveralRails([{ rail: null, amount: '1.00' }])).toBe(false);
 		expect(spansSeveralRails([])).toBe(false);
+	});
+});
+
+describe('splitNoteKey', () => {
+	it('reads the server verdict in three states, never guessing a judgement', () => {
+		expect(splitNoteKey(true)).toBe('exceptions.erpPayment.splitStands');
+		expect(splitNoteKey(false)).toBe('exceptions.erpPayment.splitDropped');
+		// Not judged: only the record decides; never "does not add up".
+		expect(splitNoteKey(null)).toBe('exceptions.erpPayment.splitUnjudged');
+		expect(splitNoteKey(undefined)).toBe('exceptions.erpPayment.splitUnjudged');
+	});
+});
+
+describe('the payment queue row reads its parts like the exception row', () => {
+	it('takes the same breakdown from the queue payload', () => {
+		const queued = {
+			exception_id: 'e1',
+			erp_name: 'QuickBooks Online',
+			method: null,
+			reference: '501',
+			paid_on: '2026-11-15',
+			amount: '250.00',
+			amount_currency: 'USD',
+			payment_parts: [
+				{ method: 'check', amount: '150.00' },
+				{ method: 'card', amount: '100.00' }
+			],
+			split_stands: true
+		};
+		const parts = erpPaymentParts(queued);
+		expect(parts).toEqual([
+			{ rail: 'check', amount: '150.00' },
+			{ rail: 'card', amount: '100.00' }
+		]);
+		expect(spansSeveralRails(parts)).toBe(true);
+		expect(erpPaymentParts({ ...queued, payment_parts: null })).toEqual([]);
 	});
 });

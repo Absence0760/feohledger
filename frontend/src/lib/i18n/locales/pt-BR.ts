@@ -5134,6 +5134,7 @@ export const messages = {
 	'payments.recordOutside.failed': "Não foi possível registrar o pagamento",
 	'payments.recordOutside.methodChoose': "Escolha como foi pago",
 	'payments.recordOutside.prefilledFromErp': "Preenchido com o pagamento informado por {erp}. Confira os dados antes de registrá-lo.",
+	'payments.recordOutside.openException': "Abra a exceção para registrá-lo com a divisão.",
 	'payments.recordOutside.yourErp': "seu ERP",
 	'payments.recordOutside.unavailable': "Esta fatura ainda não pode ser registrada como paga.",
 	'payments.queue.openException': "Abrir exceção",
@@ -5176,6 +5177,7 @@ export const messages = {
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "Exportado",
 	'refusal.externalPaymentAmountChanged': "O valor devido desta fatura mudou desde que o lote foi preparado ({staged} no lote, {amount} devido agora) por causa de uma nota de crédito ou de um desconto por pagamento antecipado. Resolva a diferença com o fornecedor e depois registre a fatura separadamente.",
+	'refusal.externalPaymentErpSplit': "O ERP informa que esta fatura foi paga com mais de uma forma de pagamento. Registre-a a partir da exceção, que mantém como o pagamento foi dividido.",
 	'refusal.nachaPaymentNotPayable': "O pagamento da fatura {invoice} não pode mais ser enviado como foi preparado. Cancele o lote e prepare-o novamente.",
 	'refusal.nachaAlreadyExported': "O arquivo bancário deste lote já foi exportado. Enviar um segundo arquivo pagaria esses fornecedores duas vezes. Gere-o novamente apenas se o banco nunca aceitou o primeiro.",
 	'refusal.paymentRunSegregationExport': "Segregação de funções: o usuário que criou este lote de pagamentos não pode também exportar o arquivo bancário dele. Outro usuário precisa fazer isso.",

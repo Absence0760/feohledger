@@ -5140,6 +5140,7 @@ export const messages = {
 	'payments.recordOutside.failed': "Impossible d'enregistrer le paiement",
 	'payments.recordOutside.methodChoose': "Choisissez le mode de paiement",
 	'payments.recordOutside.prefilledFromErp': "Renseigné à partir du paiement signalé par {erp}. Vérifiez les informations avant de l'enregistrer.",
+	'payments.recordOutside.openException': "Ouvrez son exception pour l'enregistrer avec la répartition.",
 	'payments.recordOutside.yourErp': "votre ERP",
 	'payments.recordOutside.unavailable': "Cette facture ne peut pas encore être enregistrée comme payée.",
 	'payments.queue.openException': "Ouvrir l'exception",
@@ -5182,6 +5183,7 @@ export const messages = {
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "Exporté",
 	'refusal.externalPaymentAmountChanged': "Le montant dû sur cette facture a changé depuis la préparation du lot ({staged} dans le lot, {amount} dû maintenant) à cause d'un avoir ou d'un escompte pour paiement anticipé. Réglez l'écart avec le fournisseur, puis enregistrez la facture seule.",
+	'refusal.externalPaymentErpSplit': "D'après l'ERP, cette facture a été payée avec plusieurs moyens de paiement. Enregistrez-la depuis son exception, qui conserve la répartition du paiement.",
 	'refusal.nachaPaymentNotPayable': "Le paiement de la facture {invoice} ne peut plus être envoyé tel qu'il a été préparé. Annulez le lot et préparez-le à nouveau.",
 	'refusal.nachaAlreadyExported': "Le fichier bancaire de ce lot a déjà été exporté. Déposer un second fichier paierait ces fournisseurs deux fois. Ne le régénérez que si votre banque n'a jamais accepté le premier.",
 	'refusal.paymentRunSegregationExport': "Séparation des tâches : l'utilisateur qui a créé ce lot de paiements ne peut pas aussi exporter son fichier bancaire. Un autre utilisateur doit le faire.",

@@ -22084,6 +22084,64 @@ standing; the predicate on an extracted invoice; an AST pin that both doors ask
 before they stamp) and `backend/tests/test_extraction_reextract_options.py`
 (extraction lands at review on either refusal, with nothing stamped).
 
+## 426. A payment the ERP reported on several rails is booked only by its row's one-click; `record-outside` refuses it, and the queue's dialog records through the row (§396 / §413 follow-up, round 13, 2026-11-15)
+
+**The gap.** A live `paid_not_recorded` row keeps how the ERP says the payment
+was split rail by rail (§396), and its one-click books that split (§413). The
+payment queue's "Record as paid" posted `POST /api/payments/record-outside`
+instead, which books the one rail the person picks and the figure the invoice
+owes, and `_complete` then resolved the row on the way. A cheque-plus-card
+payment was closed as one rail with no `rail_breakdown`, so the card part
+landed on the payer's 1099-NEC, and the queue's dialog never showed the split
+it was dropping.
+
+**The rule.**
+
+- **One door books a kept split: the row's own one-click.** A person's record
+  by any other door (`record-outside`, the run-level record) of an invoice
+  holding a live `paid_not_recorded` row whose kept breakdown stands is refused
+  with 409 `external_payment_erp_split`, `params.exception_id` the row
+  (`external_payment.erp_split_refusal`). It runs after the live-claim
+  refusals (§309) and before anything is written or audited. The one-click
+  passes the row in `answering_exception_ids`, so it is never refused by
+  itself; an ERP-sourced record carries its own parts and is not gated.
+- **"Stands" is the §413 verdict, now in one place.** `erp_status_sync.
+  kept_split_stands` (moved from `api/exceptions._kept_split_stands`) is the
+  exception row's `erp_payment_split_stands`, the queue row's
+  `erp_reported_payment.split_stands`, and the refusal's test. A row whose
+  breakdown does not stand (one rail, parts that do not add up, none) leaves
+  the person's rail as the record, so `record-outside` still books it and
+  closes the row, as §319 has it.
+- **The queue's dialog records through the row.** Its `erp_reported_payment`
+  carries the stated figure, the kept parts and `split_stands`. The dialog
+  shows the ERP's figure beside the amount owed and the split through the
+  shared `ErpPaymentSplit` component (the `/exceptions` markup, extracted, with
+  the three-state note in `erpReport.splitNoteKey`). Where the split stands it
+  shows no picker and posts `record-erp-payment` with no `method`, exactly as
+  `/exceptions` does, so the payment, its audit (`method_stated: null`) and
+  the row's resolve happen in one transaction. A refusal with this code (a
+  queue read before the row kept its split) links to `/exceptions?id=<row>`.
+- **`record_outside_refusal` does not carry the new code.** The queue's action
+  is no longer `record-outside` alone, and folding the code in would disable
+  the very button that books the split.
+
+**Rejected.** Teaching `record-outside` to read the row and book its split:
+it would need the one-click's whole rule set (the ERP's stated figure over the
+invoice's, §386; the read-back of an unstated one, §393; the no-rail rule,
+§413) a second time, and two doors applying one rule drift. Refusing every
+live row at `record-outside`: it would reverse §319's "any door answers the
+row" for the rows a person's rail does describe, with no 1099 consequence to
+justify it.
+
+**Enforced by** `backend/tests/test_erp_status_sync.py` (the refusal names the
+row and writes nothing; a row whose split does not stand still records; the
+queue carries the figure, parts and the same verdict; refused, then booked
+through the row, the 1099 reports the cheque part only; the run-level refusal),
+`frontend/src/lib/types/erpReport.test.ts`, `codedRefusals.test.ts`, and
+`frontend/tests-e2e/payments/erp-reported-payment.spec.ts` (the queue dialog
+shows the split and books it through the row with no rail sent; a refused
+record links to the exception).
+
 ## 427. An outbound webhook event is sent after the change it announces commits, and the emitter takes the session (closes a `docs/followups.md` entry, §414 / §421 follow-up, round 13, 2026-11-15)
 
 **The gap.** `transition_invoice` called the webhook emitters inline, and
