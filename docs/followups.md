@@ -1763,7 +1763,6 @@ scope (§260) — do not fold them into any of these.
       the first tenant that hits its share in production, or a support request
       to retry a batch by hand.
 
-
 ### Surfaced by the UI action-verdict pass (2026-10-21, issue #575 § One rule, one place, decisions §305)
 
 - [ ] **(c) The invoice modal still hides Approve / Reject from a reviewer the
