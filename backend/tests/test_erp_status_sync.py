@@ -2169,3 +2169,182 @@ async def test_the_one_click_refuses_no_rail_when_the_read_back_is_one_rail(real
     assert await _payments(realdb, inv_id) == []
     async with realdb.sessionmaker("a")() as s:
         assert (await s.get(APException, row_id)).status == "open"
+
+
+# ---------------------------------------------------------------------------
+# The payment queue's "Record as paid" over a kept split (decisions §426):
+# `record-outside` refuses it and points at the row, the queue carries what
+# the dialog shows, and the row's one-click books the split, so the 1099
+# never counts the card part.
+# ---------------------------------------------------------------------------
+
+_TWO_RAILS = [{"method": "check", "amount": "150.00"}, {"method": "card", "amount": "100.00"}]
+
+
+async def _with_1099_vendor(realdb, inv_id) -> uuid.UUID:
+    from datetime import UTC, datetime
+
+    from app.models.vendor import Vendor
+
+    async with realdb.sessionmaker("a")() as s:
+        vendor = Vendor(
+            organization_id=realdb.info("a").org_id,
+            name=f"Split Rails {uuid.uuid4().hex[:6]}",
+            tax_id="12-3456789",
+            is_1099_eligible=True,
+            w9_file_key="org/w9/x.pdf",
+            tin_verified_at=datetime.now(UTC),
+        )
+        s.add(vendor)
+        await s.flush()
+        (await s.get(Invoice, inv_id)).vendor_id = vendor.id
+        await s.commit()
+        return vendor.id
+
+
+def _record_outside_body(inv_id) -> dict:
+    return {
+        "invoice_id": str(inv_id),
+        "method": "check",
+        "reference": BILL,
+        "paid_on": utc_today().isoformat(),
+    }
+
+
+async def test_record_outside_refuses_a_kept_split_and_names_its_row(realdb):
+    """The follow-up's case: booking the person's one rail would drop the card
+    part onto the payer's 1099. Refused before anything is written, with the
+    row to record it from; the row stays open."""
+    from app.models.workflow import AuditLog
+
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(realdb, inv_id, _TWO_RAILS)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/payments/record-outside", json=_record_outside_body(inv_id))
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "external_payment_erp_split"
+    assert detail["params"] == {"exception_id": str(row_id)}
+    assert await _payments(realdb, inv_id) == []
+    assert (await _invoice(realdb, inv_id)).status == InvoiceStatus.posted_in_erp
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "open"
+        audited = (
+            await s.execute(
+                select(AuditLog.id).where(
+                    AuditLog.action == "payment.recorded_outside",
+                    AuditLog.details["invoice_id"].astext == str(inv_id),
+                )
+            )
+        ).all()
+    assert audited == []
+
+
+@pytest.mark.parametrize(
+    "parts",
+    [
+        # One rail: the person's rail is the record (corrects or fills it in).
+        [{"method": "card", "amount": "200.00"}, {"method": "card", "amount": "50.00"}],
+        # A cent short: dropped, the person's rail is the record.
+        [{"method": "check", "amount": "150.00"}, {"method": "card", "amount": "99.99"}],
+    ],
+)
+async def test_record_outside_still_books_a_kept_row_whose_split_does_not_stand(realdb, parts):
+    """Only a split that stands is the one-click's alone; any other kept row is
+    answered by the person's own record, as before (§319)."""
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(realdb, inv_id, parts)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post("/api/payments/record-outside", json=_record_outside_body(inv_id))
+    assert resp.status_code == 201, resp.text
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method == "check" and booked.rail_breakdown is None
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "resolved"
+
+
+async def test_the_queue_carries_the_kept_split_and_offers_the_record(realdb):
+    """What the queue's dialog shows, from the server data `/exceptions` reads:
+    the stated figure in its own code, the parts as kept and the server's
+    verdict. The action stays offered: the dialog books through the row."""
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(realdb, inv_id, _TWO_RAILS)
+    async with realdb.client(key="a", role="admin") as c:
+        queue = await c.get("/api/payments/queue", params={"page_size": 100})
+        detail = await c.get(f"/api/exceptions/{row_id}")
+    assert queue.status_code == 200, queue.text
+    [item] = [i for i in queue.json()["items"] if i["id"] == str(inv_id)]
+    assert item["record_outside_refusal"] is None
+    reported = item["erp_reported_payment"]
+    assert reported["exception_id"] == str(row_id)
+    assert reported["amount"] == "250.00" and reported["amount_currency"] == "USD"
+    assert reported["payment_parts"] == _TWO_RAILS
+    # One rule: the same verdict the exception row carries.
+    assert reported["split_stands"] is True
+    assert detail.json()["erp_payment_split_stands"] is True
+
+
+async def test_the_queues_record_through_the_row_keeps_the_card_part_off_the_1099(realdb):
+    """End to end: refused at `record-outside`, booked through the row's
+    one-click with no rail named, the 1099 reports the cheque part only."""
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    vendor_id = await _with_1099_vendor(realdb, inv_id)
+    row_id = await _kept_paid_row(realdb, inv_id, _TWO_RAILS)
+    async with realdb.client(key="a", role="admin") as c:
+        refused = await c.post("/api/payments/record-outside", json=_record_outside_body(inv_id))
+        booked_resp = await c.post(
+            f"/api/exceptions/{row_id}/record-erp-payment",
+            json={"reference": BILL, "paid_on": utc_today().isoformat()},
+        )
+        report = await c.get(f"/api/tax/1099-report?year={utc_today().year}")
+    assert refused.status_code == 409, refused.text
+    assert booked_resp.status_code == 201, booked_resp.text
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None and booked.rail_breakdown == _TWO_RAILS
+    assert report.status_code == 200, report.text
+    row = next(r for r in report.json()["rows"] if r["vendor_id"] == str(vendor_id))
+    assert row["ytd_paid"] == "150.00"
+    assert row["card_paid"] == "100.00"
+
+
+async def test_a_run_record_is_refused_over_a_kept_split(realdb):
+    """The run-level door books one rail per payment too, so it is refused the
+    same way, before any payment of the run is recorded."""
+    from app.models.payment import PaymentRun
+    from app.services.external_payment import REFUSAL_ERP_SPLIT, run_payment_refusal
+
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(realdb, inv_id, _TWO_RAILS)
+    org = await _org(realdb)
+    async with realdb.sessionmaker("a")() as s:
+        run = PaymentRun(
+            organization_id=org.id,
+            status="draft",
+            total_amount=Decimal("250.00"),
+            initiated_by=realdb.info("a").users["ap_manager"],
+        )
+        s.add(run)
+        await s.flush()
+        payment = Payment(
+            invoice_id=inv_id,
+            payment_run_id=run.id,
+            amount=Decimal("250.00"),
+            method="ach",
+            status="pending",
+            correlation_id=uuid.uuid4(),
+        )
+        s.add(payment)
+        await s.flush()
+        invoice = await s.get(Invoice, inv_id)
+        refusal = await run_payment_refusal(
+            s,
+            org=org,
+            invoice=invoice,
+            payment=payment,
+            actor_id=realdb.info("a").users["admin"],
+            paid_on=utc_today(),
+        )
+        await s.rollback()
+    assert refusal is not None
+    assert refusal.code == REFUSAL_ERP_SPLIT
+    assert refusal.params == {"exception_id": str(row_id)}

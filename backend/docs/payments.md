@@ -2247,6 +2247,16 @@ Controls (all in `services/external_payment.py`):
   refused with `external_payment_in_run` and pointed at the run-level record.
 - A `pending` standalone payment FeohLedger booked but **never dispatched** is
   completed in place rather than left holding the live-payment slot.
+- A **payment the ERP reported on several rails** refuses (409
+  `external_payment_erp_split`, `params.exception_id` = the row): the invoice
+  holds a live `paid_not_recorded` row whose kept breakdown stands
+  (`erp_status_sync.kept_split_stands`, the row's `erp_payment_split_stands`),
+  and this endpoint books one rail. Only that row's one-click books the split
+  (`external_payment.erp_split_refusal`, after the live-claim refusals and
+  before anything is written; the run-level record is refused the same way).
+  Without it the card part landed on the payer's 1099 (decisions §426). A kept
+  row whose breakdown does not stand (one rail, or parts that do not add up)
+  is still recorded here at the person's rail, and `_complete` closes it.
 - The **amount** is what the invoice owes — net of applied credit memos and any
   accepted early-pay discount at `paid_on`. A stated `amount` must equal it
   (422 `external_payment_amount_mismatch`); partial payments aren't supported.
@@ -2283,6 +2293,20 @@ at all (#566). Two gates are deliberately left out of the field: the
 payable-status and live-payment gates, which the queue's own base filter
 already is, and segregation of duties, which depends on who records — the
 endpoint's coded 403 is what tells the creator a colleague must record it.
+Nor is `external_payment_erp_split`: the queue's "Record as paid" books such a
+row through its one-click instead (below), so the action stays offered.
+
+**Over a kept ERP split the queue's dialog is the `/exceptions` one.** A queue
+row's `erp_reported_payment` carries the row's stated figure
+(`amount` / `amount_currency`), its kept `payment_parts` and `split_stands`
+(the same `kept_split_stands` verdict). The dialog shows the ERP's figure beside
+the amount owed and the split through the shared `ErpPaymentSplit` component.
+Where `split_stands` is true it shows no rail picker and posts
+`POST /api/exceptions/{exception_id}/record-erp-payment` with no `method`, so
+the split is booked and audited exactly as from `/exceptions` (decisions
+§413, §426). Anywhere else it posts this endpoint as before; should that be
+refused with `external_payment_erp_split` (the queue was read before the row
+kept its split), the dialog links to `/exceptions?id=<row>`.
 `tests/test_payment_queue_blocked.py` POSTs every kind of row and compares the
 endpoint's answer to the field.
 
@@ -2483,7 +2507,10 @@ stays open for a person but is never recorded.
   body is the `Payment`, whose `rail_breakdown` (each part's rail or null and
   amount) explains a split payment's `method: null`.
 - *Any other record.* Whichever door records the invoice paid, `_complete`
-  resolves its live `paid_not_recorded` rows (`via: payment_recorded`).
+  resolves its live `paid_not_recorded` rows (`via: payment_recorded`). A row
+  whose kept split stands is the exception: a person's record by any other
+  door is refused (`external_payment_erp_split`), so its split is only ever
+  booked by the one-click (decisions §426).
 Segregation of duties doesn't apply — there is no human actor. The payment is
 dated by the ERP's own payment date and classified by its rail when the report
 states them — the generic webhook's optional `paid_on` / `payment_method`, or
@@ -2962,7 +2989,7 @@ and clear.
 | `required_method` | the one rail this invoice is still payable on, or `null` |
 | `record_outside_refusal` | a different question: the code `POST /api/payments/record-outside` would refuse this row with, or `null` — see § Recording a payment made outside FeohLedger |
 | `blocking_exception` | `{id, exception_type, clear_refusal}` of the open payment-blocking exception behind the row (the type `blocked_reason` names), or `null`. `clear_refusal` is `exception_lifecycle.segregation_refusal` for THIS caller resolving it (`segregation_implicated` / `segregation_raiser` / `segregation_approver`, decisions §420), so the page can say someone else must clear it (decisions §319) |
-| `erp_reported_payment` | `{exception_id, erp_name, method, reference, paid_on}` from the newest live `paid_not_recorded` exception on the invoice, or `null` — what "Record as paid" pre-fills |
+| `erp_reported_payment` | `{exception_id, erp_name, method, reference, paid_on, amount, amount_currency, payment_parts, split_stands}` from the newest live `paid_not_recorded` exception on the invoice, or `null` — what "Record as paid" pre-fills and shows; `split_stands` true sends the record through that exception's one-click (decisions §426) |
 | `selectable_total` | rows "select all N matching" resolves (`/queue/ids`) — excludes blocked AND rail-pinned rows |
 | `blocked_total` | rows whose checkbox is disabled, i.e. exactly the `blocked` ones |
 

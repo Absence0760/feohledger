@@ -1341,20 +1341,6 @@ scope (§260) — do not fold them into any of these.
       `feat/erp-status-sync` branch. It contradicts §295's "either place may
       pay" decision and needs a product call before reuse. **Trigger:** the
       first tenant on one of those ERPs who pays bills in the ERP.
-- [ ] **(c) "Record as paid" on the payment queue drops a kept ERP split.**
-      The queue's record (`POST /api/payments/record-outside`) books the rail
-      the person picks and the figure the invoice owes, and `_complete`
-      resolves any live `paid_not_recorded` row on the way, so a row whose ERP
-      breakdown spans two rails (decisions §396) is closed with one rail and
-      no `rail_breakdown`: the card part lands on the payer's 1099. The
-      exception dialog books the split (§413), and the queue's dialog is
-      pre-filled from the same row (`erp_reported_payment`) but never sees it.
-      **Durable fix:** when the invoice has a live `paid_not_recorded` row,
-      send the queue's record through the row's one-click path (or refuse
-      `record-outside` there and point at `/exceptions?id=`), and show the
-      split in the queue's dialog as `/exceptions` does. **Trigger:** the
-      first two-rail row recorded from the queue, or the next change to the
-      queue's record dialog.
 - [ ] **(c) A bill already posted to the ERP can't be voided or recalled from
       FeohLedger.** `void_invoice` has no caller under `app/` beyond
       `posted_total`'s cleanup of a mismatched bill, and no user action voids

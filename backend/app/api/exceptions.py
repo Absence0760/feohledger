@@ -36,9 +36,9 @@ from app.models.workflow import WorkflowInstance
 from app.schemas.money import json_money_string
 from app.schemas.payment import RecordErpReportedPaymentRequest
 from app.services.erp_status_sync import (
-    ERP_REPORT_PAID_NOT_RECORDED,
     erp_product_name,
     is_erp_paid_report,
+    kept_split_stands,
 )
 from app.services.exception_lifecycle import (
     ACTIONABLE_STATUSES,
@@ -144,33 +144,6 @@ EXCEPTION_NOT_ERP_PAID_REPORT = "exception_not_erp_paid_report"
 #: to the stated cash leave the person's rail as the record, so it must be
 #: named (decisions §413).
 ERP_PAYMENT_METHOD_REQUIRED = "erp_payment_method_required"
-
-
-def _kept_split_stands(report: dict | None) -> bool | None:
-    """Whether a ``paid_not_recorded`` row's kept breakdown would be booked
-    whatever one rail a person names (``external_payment.
-    split_stands_over_any_rail``), judged against the cash the row states, the
-    figure the one-click books. ``None`` when the row states no figure or no
-    breakdown: the record then reads the bill again (§393) or books the rail
-    the person names, and the dialog keeps its picker. Server-side because it
-    is an exact sum the client may not do (`frontend/docs/money-formatting.md`)."""
-    from decimal import Decimal, InvalidOperation
-
-    from app.services.erp_status_sync import reported_payment_parts
-    from app.services.external_payment import split_stands_over_any_rail
-    from app.services.payment_methods import rail_parts_from_json
-
-    if not isinstance(report, dict) or report.get("kind") != ERP_REPORT_PAID_NOT_RECORDED:
-        return None
-    stated = report.get("amount")
-    parts = rail_parts_from_json(report.get("payment_parts"))
-    if not stated or not parts:
-        return None
-    try:
-        amount = Decimal(str(stated))
-    except (InvalidOperation, ValueError):
-        return None
-    return split_stands_over_any_rail(reported_payment_parts(parts), amount)
 
 
 def record_erp_payment_refusal(
@@ -310,7 +283,7 @@ def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
         # dialog shows the split in place of its rail picker and may send no
         # rail; False when the person's rail would be the record. None on
         # every other row (§413).
-        "erp_payment_split_stands": _kept_split_stands(exc.erp_report),
+        "erp_payment_split_stands": kept_split_stands(exc.erp_report),
         "status": exc.status,
         "resolution": exc.resolution,
         "resolved_by": exc.resolved_by,
