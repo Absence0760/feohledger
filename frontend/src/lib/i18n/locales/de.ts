@@ -1406,6 +1406,7 @@ export const messages = {
 	'exceptions.erpPayment.splitMethod': "Aufgeteilt auf die oben genannten Zahlungsarten",
 	'exceptions.erpPayment.splitStands': "Diese Zahlung erfolgte mit mehr als einer Zahlungsart und wird deshalb mit dieser Aufteilung erfasst. Eine einzelne Zahlungsart kann sie nicht beschreiben.",
 	'exceptions.erpPayment.splitDropped': "Diese Teilbeträge ergeben nicht den gezahlten Betrag, daher wird die Aufteilung nicht übernommen. Die gewählte Zahlungsart wird für die gesamte Zahlung erfasst.",
+	'exceptions.erpPayment.splitUnjudged': "Ob diese Aufteilung übernommen wird, wird beim Erfassen der Zahlung entschieden. Wird sie nicht übernommen, wird die gewählte Zahlungsart für die gesamte Zahlung erfasst.",
 	'exceptions.toast.notFound': "Diese Ausnahme konnte nicht geöffnet werden.",
 	'exceptions.toast.resolved': 'Ausnahme gelöst',
 	'exceptions.toast.escalated': 'Ausnahme eskaliert',

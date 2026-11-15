@@ -1407,6 +1407,7 @@ export const messages = {
 	'exceptions.erpPayment.splitMethod': "Réparti entre les modes ci-dessus",
 	'exceptions.erpPayment.splitStands': "Ce paiement a été effectué avec plusieurs modes de paiement : il est donc enregistré avec cette répartition. Un seul mode ne peut pas le décrire.",
 	'exceptions.erpPayment.splitDropped': "La somme de ces parts ne correspond pas au montant payé : la répartition n'est donc pas conservée. Le mode que vous choisissez est enregistré pour l'ensemble du paiement.",
+	'exceptions.erpPayment.splitUnjudged': "La conservation de cette répartition est décidée lors de l'enregistrement du paiement. Si elle n'est pas conservée, le mode que vous choisissez est enregistré pour l'ensemble du paiement.",
 	'exceptions.toast.notFound': "Impossible d'ouvrir cette exception.",
 	'exceptions.toast.resolved': 'Exception résolue',
 	'exceptions.toast.escalated': 'Exception escaladée',

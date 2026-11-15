@@ -552,7 +552,7 @@ test.describe('/organization ERP connection', () => {
 		try {
 			await card.getByTestId('erp-provider-select').selectOption('xero');
 			await expect(card.getByTestId('erp-oauth-scope-gap')).toHaveText(
-				'This connection to Xero was made before FeohLedger asked for permission to read and record payments. Until you reconnect to grant it, payments made in Xero are picked up only when the bill itself changes, and payments made through FeohLedger aren\'t recorded in Xero.'
+				'This connection to Xero was made before FeohLedger asked for permission to read and record payments. Until you reconnect to grant it, payments made in Xero are picked up only when the bill itself changes, and payments made through FeohLedger aren\'t recorded in Xero. Reconnect soon, or FeohLedger could miss a bill paid in Xero.'
 			);
 			await expect(card.getByTestId('erp-oauth-reconnect')).toHaveText('Reconnect to Xero');
 			await expectNoA11yViolations(page);

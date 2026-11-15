@@ -1385,6 +1385,7 @@ export const messages = {
 	'exceptions.erpPayment.splitMethod': "上記の支払方法に分割",
 	'exceptions.erpPayment.splitStands': "この支払いは複数の支払方法で行われたため、この内訳のまま記録されます。1 つの支払方法では表せません。",
 	'exceptions.erpPayment.splitDropped': "これらの内訳の合計が支払額と一致しないため、内訳は保持されません。選択した支払方法が支払い全体に記録されます。",
+	'exceptions.erpPayment.splitUnjudged': "この内訳を保持するかどうかは、支払いを記録するときに判断されます。保持されない場合は、選択した支払方法が支払い全体に記録されます。",
 	'exceptions.toast.notFound': "その例外を開けませんでした。",
 	'exceptions.toast.resolved': '例外を解決しました',
 	'exceptions.toast.escalated': '例外をエスカレーションしました',
