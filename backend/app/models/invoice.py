@@ -154,8 +154,10 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     # confirmed push (cleared if that push reports no id).
     # `erp_document_url` is the provider's deep link to it, built once from the
     # adapter config that posted it (`erp_adapters.deep_links`); NULL for a
-    # provider with no stable deep link. Migration 0118.
-    erp_document_id: Mapped[str | None] = mapped_column(String(255))
+    # provider with no stable deep link. Migration 0118. Indexed (migration
+    # 0132) because the generic ERP status webhook resolves an invoice by it
+    # when a delivery carries no correlation id (decisions §417).
+    erp_document_id: Mapped[str | None] = mapped_column(String(255), index=True)
     erp_document_url: Mapped[str | None] = mapped_column(String(1024))
     # Free-form per-invoice metadata bag. Currently holds the cached
     # audit-log summary under `meta["audit_summary"]`:
