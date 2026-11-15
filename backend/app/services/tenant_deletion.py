@@ -56,9 +56,11 @@ lapses with its Redis TTL.
 
 **An ERP reached with stored credentials is handled the same way** (decisions
 §400) when its adapter states a ``provider_side_disconnect``: Sage Intacct's
-tokens are revoked at Intacct (``revoke_stored_access``, deferred past a
-closure's commit like an OAuth revoke), and Sage Accounting (ZA), which issues
-no token, reads ``unsupported``. Either way the confirmation names the step the
+tokens, Merge.dev's linked account (§405) and a NetSuite TBA token (§406) are
+ended at the provider (``revoke_stored_access``, deferred past a closure's
+commit like an OAuth revoke), and Sage Accounting (ZA), Business Central,
+SYSPRO and a NetSuite OAuth 2.0 connection, which have nothing to call, read
+``unsupported`` (§407). Either way the confirmation names the step the
 customer takes at the provider, because deleting our copy of a credential does
 not end the access it was given.
 
@@ -602,8 +604,8 @@ async def _stored_access_grant(
     None with no live ERP config or an adapter with nothing to say. ``outcome``
     is the read's own verdict when the sealed store could not be read (the
     config then carries no secrets, and no call is made). Otherwise an adapter
-    that calls no provider (Sage Accounting ZA) is decided here, so nothing
-    waits for a closure's commit; one that does (Sage Intacct) is revoked by
+    that calls no provider (Sage Accounting ZA, Business Central, SYSPRO) is decided here, so nothing
+    waits for a closure's commit; one that does (Sage Intacct, Merge.dev, NetSuite TBA) is revoked by
     the caller, after the commit on a closure's session. Calls no provider and
     never raises: the deletion is never stopped by its courtesy call.
     """
