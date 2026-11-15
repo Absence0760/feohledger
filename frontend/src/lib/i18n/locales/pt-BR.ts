@@ -5291,6 +5291,7 @@ export const messages = {
 	'erpRefusal.callBudgetQuota': "O {provider} pausou as chamadas à API da assinatura que o FeohLedger usa (a cota diária foi esgotada), então o FeohLedger não fez nenhuma chamada. Ela é redefinida à meia-noite UTC; tente novamente depois disso.",
 	'erpRefusal.callBudgetRateLimited': "O {provider} pediu ao FeohLedger que reduzisse o ritmo, então nenhuma chamada foi feita. Tente novamente em um minuto.",
 	'erpRefusal.billLeftUnposted': "O {provider} mantém esta fatura como rascunho ou aguardando aprovação, sem lançamento, então ainda não há nada em contas a pagar. Lance ou aprove a fatura no {provider} e tente novamente.",
+	'erpRefusal.mergeSyncPending': "O {provider} ainda não sincronizou as faturas desde uma tentativa de envio anterior cujo resultado é desconhecido, então ele pode já ter esta fatura. Nada foi enviado. Tente novamente após a próxima sincronização de faturas do {provider}: se a fatura já estiver lá, ela será vinculada em vez de criada uma segunda vez.",
 	'erpRefusal.credentialsUnavailable': "Não foi possível abrir as credenciais do ERP agora. Tente novamente em alguns minutos; se continuar falhando, avise um administrador.",
 	'erpRefusal.periodClosed': "O {provider} recusou esta conta porque a data dela está em um período fechado (os livros estão fechados). Altere a data da fatura ou reabra o período no {provider} e tente novamente.",
 	'erpRefusal.vendorInactive': "O {provider} recusou esta conta porque o fornecedor está inativo ou excluído lá. Ative o fornecedor no {provider} e tente novamente.",

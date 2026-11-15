@@ -57,7 +57,11 @@ surfaces:
   `remote_was_deleted`, `modified_at`), `GET /purchase-orders` + `GET /accounts`
   + `GET /contacts` (all cursor-paginated 2 + rest via `next` / `?cursor=`),
   `GET /accounts/{id}`, `GET /contacts/{id}`, `GET /account-details`
-  (test_connection, `status: COMPLETE`). There is no `/vendors`: Merge has none.
+  (test_connection, `status: COMPLETE`), `GET /sync-status` (Merge's
+  `SyncStatus` rows; `Invoice` always fresh as of now, since the fake's listing
+  shows a write at once — decisions §405) and `POST /delete-account` (200, no
+  body; the token keeps working, as parallel workers share it). There is no
+  `/vendors`: Merge has none.
 - **NetSuite**: `POST /vendorBill` → **204** with the new numeric id (`1001`,
   `1002`, …) in the `Location` header, status `Open` (`Pending Approval` for
   vendor `28`, which is under approval routing);

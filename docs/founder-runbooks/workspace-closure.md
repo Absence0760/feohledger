@@ -88,8 +88,14 @@ Security > Authorized Client Applications. Intacct's revoke ends every token for
 that Web Services user and company, so anything else sharing the user (another
 integration of the customer's) must sign in again. Sage Accounting (ZA) issues no token,
 so it always reads `unsupported`: tell the customer to change the password of
-the Sage user whose login FeohLedger held, or remove that user. The operator's
-written confirmation names the step in both cases.
+the Sage user whose login FeohLedger held, or remove that user. For Merge.dev
+a `revoked` outcome means Merge deleted the linked account (§405); a `failed`
+one means the customer must delete it. Either way the API key and the webhook
+are the customer's own Merge organisation's: tell them to delete the webhook
+that points at FeohLedger, regenerate the webhook signature key, and regenerate
+or delete the API key FeohLedger held. Until they do, the webhook keeps calling
+the deleted slug's URL, and those deliveries are dropped. The operator's
+written confirmation names the step in each case.
 
 ## What stays, on purpose
 

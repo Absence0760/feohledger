@@ -110,6 +110,13 @@ class InvoicePayload:
     #: (:attr:`ErpPostResult.erp_document_fingerprint`), so the adapter can
     #: tell it is unchanged. None means no proof, and the document is not ours.
     own_orphan_document_fingerprint: str | None = None
+    #: Set when an earlier attempt of this push may have created the bill
+    #: (``services/erp.possibly_posted`` by way of its unknown outcome): a time
+    #: no earlier than that attempt's end, persisted by ``services/erp``. An
+    #: adapter whose duplicate lookup reads a copy the provider refreshes by
+    #: sync waits for a sync after it before re-creating (Merge.dev, decisions
+    #: §405). None when no earlier attempt is unknown.
+    outcome_unknown_since: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +342,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "erp_call_budget_exhausted",
         # Sage Intacct
         "bill_left_unposted",
+        # Merge.dev: no sync of invoices since an attempt whose outcome is unknown (§405)
+        "merge_sync_pending",
         # `services/erp` itself: the sealed ERP credentials could not be opened
         "erp_credentials_unavailable",
         # `services/erp_export_gate`: an open duplicate / fraud exception (§286)

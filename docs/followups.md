@@ -1808,27 +1808,21 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by the ERP revoke work (#655, decisions §400)
 
-- [ ] **(c) Four stored-credential ERPs say nothing at tenant deletion.**
+- [ ] **(c) Three stored-credential ERPs say nothing at tenant deletion.**
       Tenant deletion now revokes Sage Intacct's tokens and names the step the
       customer takes for Intacct and Sage Accounting (ZA), keyed on the
-      adapter's `provider_side_disconnect`. Merge.dev, Business Central,
-      NetSuite and SYSPRO state none, so a deleted tenant's confirmation is
-      silent about access that outlives our sealed copy: the Merge.dev linked
-      account (Merge documents a delete-account endpoint that ends it), BC's
+      adapter's `provider_side_disconnect`; Merge.dev's linked account is
+      deleted at Merge and its webhook and keys named (§405). Business
+      Central, NetSuite and SYSPRO state none, so a deleted tenant's
+      confirmation is silent about access that outlives our sealed copy: BC's
       Entra app consent, NetSuite's token-based-auth token, and SYSPRO's
       operator logon. **Durable fix:** per adapter, read the provider's
       documentation (URL + date in the docs), set `provider_side_disconnect`,
       and override `revoke_stored_access` where a revoke or delete endpoint is
       documented (`revokes_stored_access = True`), with a test in
       `test_tenant_deletion.py` and the adapter's own suite. **Trigger:** each
-      adapter's next change; Merge.dev and Business Central were left out of
-      round 10 only because parallel lanes owned those files. **Merge.dev
-      also has a second credential since §399:** the Merge webhook signature
-      key the tenant stored as `webhook_signing_secret` is Merge's, so the
-      customer must end it (and the webhook) at Merge too. Until they do, the
-      webhook registered against the deleted slug keeps calling it; that is
-      safe, since a later tenant on that slug has its own key and those
-      deliveries fail its signature check, but the confirmation should say so.
+      adapter's next change; Business Central was left out of round 10 only
+      because a parallel lane owned that file.
 
 ### Surfaced by porting the Sage Intacct audit fixes (#655, decisions §395)
 
@@ -1844,25 +1838,6 @@ scope (§260) — do not fold them into any of these.
       links with the location they were made under, and a test that a
       location change re-judges them. **Trigger:** the first multi-entity
       Intacct tenant, or the next change to `services/erp_link_realm`.
-
-### Surfaced by porting the Merge.dev audit fixes (#655, decisions §399)
-
-- [ ] **(c) A Merge.dev push whose create response was lost can be re-created
-      before Merge lists it.** The adapter's idempotency is a pre-create lookup
-      (`GET /invoices?number=&contact_id=&type=ACCOUNTS_PAYABLE`) plus Merge's
-      `Idempotency-Key`. The key is a beta Merge enables per customer and keeps
-      24 hours, and each tenant connects its own Merge organisation, so it may
-      be off. If Merge's listing does not show a bill written through it until
-      its next sync (unconfirmed; a sandbox item under #654), a retry inside
-      that window finds nothing and posts a second bill. Such a create is no
-      longer retried automatically (§399), so what is left is a person's
-      `retry-erp` inside the window. **Durable fix:**
-      before re-creating after an attempt whose outcome is unknown
-      (`erp.possibly_posted`), read `GET /sync-status` and refuse retryably
-      until a sync of `Invoice` finished after that attempt; with a
-      `tests/test_merge_dev_adapter.py` case for each answer. **Trigger:** the
-      #654 live pass showing the listing lags a write, or the first Merge.dev
-      production tenant without the idempotency beta.
 
 ### Surfaced by auto-sending approved invoices to the ERP (2026-10-20, decisions §304)
 
@@ -2292,6 +2267,12 @@ as oversights.
       answer in a reversal-enabled company, and whether `POST /oauth2/revoke`
       on a client-credentials token ends every token for the Web Services user
       and company as documented (decisions §400).
+      **Merge.dev** (decisions §399, §405): whether `GET /invoices` lags a
+      write through Merge at all (the premise of the `merge_sync_pending`
+      wait), the `model_name` `GET /sync-status` gives invoices, whether Merge
+      can finish a create after our client gave up on it, whether a 429 is
+      ever answered after the write reached the integration, and what
+      `POST /delete-account` does to the ERP credentials Merge holds.
       **Sage SA** (decisions §385; the docs-level defects are fixed): whether a
       string `$filter` 400s or is ignored, the `datetime'…'` literal the
       lookup's date window uses, the 400 body for a locked period / inactive

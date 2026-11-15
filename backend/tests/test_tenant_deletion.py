@@ -1333,3 +1333,91 @@ async def test_the_cli_fails_when_the_deletion_itself_refuses(monkeypatch):
     monkeypatch.setattr("sys.argv", ["delete_tenant.py", "--slug", "x", "--yes"])
 
     assert await cli.main() == 2
+
+
+# ---------------------------------------------------------------------------
+# Merge.dev: the linked account is deleted at Merge, and the customer is told
+# to end the webhook, its signature key and the API key (decisions §405)
+# ---------------------------------------------------------------------------
+
+_MERGE_ACCOUNT_TOKEN = "merge-account-token-7"
+_MERGE_STORED = {
+    "api_key": "merge-api-key-7",
+    "account_token": _MERGE_ACCOUNT_TOKEN,
+    "webhook_signing_secret": "merge-webhook-key-7",
+}
+
+
+class _ScriptedMerge:
+    def __init__(self, status: int = 200):
+        self.status = status
+        self.requests: list[httpx.Request] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(self.status)
+
+    def install(self, monkeypatch):
+        real = httpx.AsyncClient
+
+        def factory(*args, **kwargs):
+            return real(*args, transport=httpx.MockTransport(self.handler), **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", factory)
+        monkeypatch.setattr(settings, "erp_merge_api_base", "https://merge.test/api/accounting/v1")
+        monkeypatch.setitem(_STORED, "merge_dev", _MERGE_STORED)
+        return self
+
+
+@pytest.mark.asyncio
+async def test_merge_s_linked_account_is_deleted_and_the_webhook_named(monkeypatch, caplog):
+    merge = _ScriptedMerge().install(monkeypatch)
+    caplog.set_level("DEBUG")
+
+    result, session = await _delete_stored(monkeypatch, "merge_dev")
+
+    (call,) = merge.requests
+    assert (call.method, str(call.url)) == (
+        "POST",
+        "https://merge.test/api/accounting/v1/delete-account",
+    )
+    assert call.headers["X-Account-Token"] == _MERGE_ACCOUNT_TOKEN
+    assert session.deletes == len(CONTROL_DELETIONS)
+    assert (result.erp_grant_provider, result.erp_grant_revocation) == (
+        "merge_dev",
+        erp_oauth.REVOKED,
+    )
+    line = next(ln for ln in format_confirmation(result).splitlines() if "ERP credentials:" in ln)
+    assert "revoked at the provider" in line
+    # The webhook and its key, and the API key, are the customer's Merge
+    # organisation's: only they can end them.
+    assert "webhook" in line and "signature key" in line and "API key" in line
+    for secret in _MERGE_STORED.values():
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_merge_deletion_that_fails_never_stops_the_tenant_deletion(monkeypatch):
+    merge = _ScriptedMerge(status=500).install(monkeypatch)
+
+    result, session = await _delete_stored(monkeypatch, "merge_dev")
+
+    assert len(merge.requests) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKE_FAILED
+    assert session.deletes == len(CONTROL_DELETIONS)
+    confirmation = format_confirmation(result)
+    assert "NOT revoked" in confirmation and "delete the linked account" in confirmation
+
+
+@pytest.mark.asyncio
+async def test_a_closure_deletes_merge_s_linked_account_only_after_its_commit(monkeypatch):
+    merge = _ScriptedMerge().install(monkeypatch)
+    held = _GrantSession(_stored_settings("merge_dev"))
+
+    result, _other = await _delete_stored(monkeypatch, "merge_dev", control_session=held)
+
+    assert merge.requests == [], "Merge was called while the closure held its locks"
+    assert result.erp_grant_revocation == tenant_deletion.GRANT_REVOKE_AFTER_COMMIT
+    await held.commit()
+    assert len(merge.requests) == 1
+    assert result.erp_grant_revocation == erp_oauth.REVOKED
