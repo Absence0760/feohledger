@@ -8,6 +8,7 @@ import {
 	tenantPsql,
 	test
 } from '../fixtures/helpers';
+import { expectNoA11yViolations } from '../a11y/axe-helper';
 
 /**
  * A payment the ERP reported, kept and recorded without re-keying it
@@ -24,6 +25,11 @@ import {
  *    beside the figure the ERP states and the invoice's own (§386);
  *  - a payment the ERP split across two rails shows the split, offers no rail
  *    picker, and is booked with that split and no rail named (§396, §413);
+ *  - a split whose parts do not add up is shown with the picker kept, and the
+ *    rail chosen is sent and booked; a row stating no figure says so, shows
+ *    its split without claiming the sum fails, and keeps the picker (§413);
+ *  - a blocked row says WHICH duty stops this reader clearing it: creator,
+ *    raiser, or the invoice's approver (§169, §420);
  *  - "Record as paid" opens pre-filled from the ERP's report (a cheque stays a
  *    cheque, not the old ACH default).
  *
@@ -109,6 +115,46 @@ function chequeReport(tag: string): Record<string, unknown> {
 
 function queueRow(page: Page, tag: string) {
 	return page.locator('table tbody tr', { hasText: tag });
+}
+
+const DESKTOP = { width: 1280, height: 800 };
+const PHONE = { width: 320, height: 800 };
+
+/** Scan the open record dialog at desktop and at phone width (WCAG 1.4.10
+ *  reflow: the figures, the split list and the read-only method block must
+ *  hold up at 320 px as well), leaving the page at desktop width. */
+async function expectDialogAccessibleAtBothWidths(page: Page) {
+	await expect(page.getByTestId('erp-payment-panel')).toBeVisible();
+	await expectNoA11yViolations(page);
+	await page.setViewportSize(PHONE);
+	await expect(page.getByTestId('erp-payment-panel')).toBeVisible();
+	await expectNoA11yViolations(page);
+	await page.setViewportSize(DESKTOP);
+}
+
+/** Rewrite `GET /api/payments/queue` so the row for `tag` carries
+ *  `clearRefusal` as this reader's verdict on its blocking exception. The rest
+ *  of the payload is the real backend's. */
+async function injectClearRefusal(page: Page, tag: string, clearRefusal: string) {
+	await page.route('**/api/payments/queue**', async (route) => {
+		if (route.request().method() !== 'GET') {
+			await route.continue();
+			return;
+		}
+		const response = await route.fetch();
+		const body = (await response.json()) as {
+			items?: {
+				invoice_number: string;
+				blocking_exception?: { clear_refusal: string | null } | null;
+			}[];
+		};
+		for (const item of body.items ?? []) {
+			if (item.invoice_number === tag && item.blocking_exception) {
+				item.blocking_exception.clear_refusal = clearRefusal;
+			}
+		}
+		await route.fulfill({ response, json: body });
+	});
 }
 
 test.describe('/payments + /exceptions — the ERP-reported payment', () => {
@@ -247,6 +293,8 @@ test.describe('/payments + /exceptions — the ERP-reported payment', () => {
 			// The split is the record whatever rail is named, so there is no picker.
 			await expect(panel.getByTestId('erp-payment-method')).toHaveCount(0);
 			await expect(panel.getByTestId('erp-payment-method-fixed')).toBeVisible();
+			// The figures, the split list and the read-only method block.
+			await expectDialogAccessibleAtBothWidths(page);
 
 			const recorded = page.waitForResponse(
 				(r) =>
@@ -272,6 +320,121 @@ test.describe('/payments + /exceptions — the ERP-reported payment', () => {
 			deleteVendorsWhere(`name='${tag} Supplier'`);
 		}
 	});
+
+	test('a split whose parts do not add up is shown, keeps the picker, and books the rail chosen', async ({
+		page
+	}) => {
+		const tag = `E413D-${Date.now().toString(36)}`;
+		try {
+			const invoiceId = await payableInvoice(page, tag, { uploadedBy: false });
+			// 100 + 40 is not the 150 QuickBooks states: the server judges the
+			// split does not stand (`erp_payment_split_stands: false`).
+			const erpId = openException(invoiceId, 'payment_reconciliation', {
+				...chequeReport(tag),
+				method: null,
+				payment_parts: [
+					{ method: 'check', amount: '100.00' },
+					{ method: 'card', amount: '40.00' }
+				],
+				refusal_code: 'external_payment_in_run'
+			});
+
+			await page.goto(`/exceptions?id=${erpId}`);
+			const panel = page.getByTestId('erp-payment-panel');
+			await expect(panel).toBeVisible();
+			await expect(panel.getByTestId('erp-payment-split-part')).toHaveCount(2);
+			await expect(panel.getByTestId('erp-payment-split-note')).toContainText(
+				'do not add up to the amount paid'
+			);
+			await expect(panel.getByTestId('erp-payment-method-fixed')).toHaveCount(0);
+			const picker = panel.getByTestId('erp-payment-method');
+			await expect(picker).toBeVisible();
+			await expectDialogAccessibleAtBothWidths(page);
+
+			await picker.selectOption('check');
+			const recorded = page.waitForResponse(
+				(r) =>
+					new URL(r.url()).pathname === `/api/exceptions/${erpId}/record-erp-payment` &&
+					r.request().method() === 'POST'
+			);
+			await panel.getByTestId('erp-payment-submit').click();
+			const response = await recorded;
+			expect(response.status(), await response.text()).toBe(201);
+			expect(response.request().postDataJSON()).toMatchObject({ method: 'check' });
+			// The person's rail is the record for the whole payment.
+			expect(((await response.json()) as { method: string | null }).method).toBe('check');
+			await expect(panel).toBeHidden();
+			expect(await getInvoiceStatus(page, invoiceId)).toBe('paid');
+		} finally {
+			deleteVendorsWhere(`name='${tag} Supplier'`);
+		}
+	});
+
+	test('a row stating no figure says so, shows its split without judging it, and keeps the picker', async ({
+		page
+	}) => {
+		const tag = `E413N-${Date.now().toString(36)}`;
+		try {
+			const invoiceId = await payableInvoice(page, tag, { uploadedBy: false });
+			// A row kept before §393 states no cash, so nobody can say whether
+			// its parts add up (`erp_payment_split_stands: null`).
+			const erpId = openException(invoiceId, 'payment_reconciliation', {
+				...chequeReport(tag),
+				method: null,
+				amount: null,
+				amount_currency: null,
+				payment_parts: [
+					{ method: 'check', amount: '100.00' },
+					{ method: 'card', amount: '50.00' }
+				],
+				refusal_code: 'external_payment_in_run'
+			});
+
+			await page.goto(`/exceptions?id=${erpId}`);
+			const panel = page.getByTestId('erp-payment-panel');
+			await expect(panel).toBeVisible();
+			await expect(panel.getByTestId('erp-payment-reported-amount')).toHaveText(
+				'Not stated. The bill is read again in the ERP when you record the payment.'
+			);
+			await expect(panel.getByTestId('erp-payment-invoice-amount')).toHaveText('$150.00');
+			await expect(panel.getByTestId('erp-payment-split-part')).toHaveCount(2);
+			const note = panel.getByTestId('erp-payment-split-note');
+			await expect(note).toContainText('decided when the payment is recorded');
+			await expect(note).not.toContainText('do not add up');
+			await expect(panel.getByTestId('erp-payment-method')).toBeVisible();
+			await expect(panel.getByTestId('erp-payment-method-fixed')).toHaveCount(0);
+			await expectDialogAccessibleAtBothWidths(page);
+		} finally {
+			deleteVendorsWhere(`name='${tag} Supplier'`);
+		}
+	});
+
+	for (const [code, sentence] of [
+		['segregation_approver', 'Someone else must clear it: you approved this invoice.'],
+		['segregation_raiser', 'Someone else must clear it: your own action raised it.']
+	] as const) {
+		test(`a blocked row states the ${code} duty that stops this reader clearing it`, async ({
+			page
+		}) => {
+			const tag = `E420${code === 'segregation_approver' ? 'A' : 'R'}-${Date.now().toString(36)}`;
+			try {
+				const invoiceId = await payableInvoice(page, tag, { uploadedBy: false });
+				const blockerId = openException(invoiceId, 'po_mismatch');
+				await injectClearRefusal(page, tag, code);
+
+				await page.goto('/payments');
+				const row = queueRow(page, tag);
+				await loadMoreUntilRow(page, row);
+				await expect(row.getByTestId('queue-blocked-exception-link')).toHaveAttribute(
+					'href',
+					`/exceptions?id=${blockerId}`
+				);
+				await expect(row.getByTestId('queue-blocked-clear-refusal')).toHaveText(sentence);
+			} finally {
+				deleteVendorsWhere(`name='${tag} Supplier'`);
+			}
+		});
+	}
 
 	test('Record as paid opens pre-filled from what the ERP reported', async ({ page }) => {
 		const tag = `E318D-${Date.now().toString(36)}`;
