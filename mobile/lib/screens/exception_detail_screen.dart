@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
+import 'package:feohledger_mobile/l10n/erp_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/invoice_warning_messages.dart';
 import 'package:feohledger_mobile/models/admin_user.dart';
@@ -118,6 +119,18 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
             ),
             const SizedBox(height: 16),
           ],
+          if (erpRefusalNoteFor(l, exc) case final note?) ...[
+            Text(
+              note,
+              key: const Key('exception-erp-refusal'),
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (exc.erpPayment case final payment?) ...[
+            _erpPaymentPanel(l, exc, payment),
+            const SizedBox(height: 16),
+          ],
           _invoicePanel(l, exc),
           const SizedBox(height: 16),
           _slaPanel(l, exc),
@@ -211,6 +224,43 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
             ),
           ),
           Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+
+  /// What the ERP says was paid, beside the invoice panel's own figure. Both
+  /// rendered, never compared here: the server refuses a record whose figure
+  /// or currency differs (decisions §386, §413). Recording it is web-only.
+  Widget _erpPaymentPanel(
+    AppLocalizations l,
+    ApException exc,
+    ErpReportedPayment payment,
+  ) {
+    final erp = exc.erpName ?? l.exceptionDetailYourErp;
+    final amount = payment.amount;
+    final paidOn = payment.paidOn;
+    final reference = payment.reference;
+    return KeyedSubtree(
+      key: const Key('exception-erp-payment'),
+      child: _card(
+        title: l.exceptionDetailErpPaymentTitle(erp),
+        children: [
+          _row(
+            l.exceptionDetailErpPaymentAmount(erp),
+            amount == null
+                ? l.exceptionDetailErpPaymentNotStated
+                : formatMoneyString(amount, currency: payment.amountCurrency),
+          ),
+          if (paidOn != null)
+            _row(l.exceptionDetailErpPaymentPaidOn, formatDate(paidOn)),
+          if (reference != null)
+            _row(l.exceptionDetailErpPaymentReference, reference),
+          const SizedBox(height: 8),
+          Text(
+            l.exceptionDetailErpPaymentRecordOnWeb,
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+          ),
         ],
       ),
     );
@@ -496,3 +546,14 @@ String? poRematchText(AppLocalizations l, ApException exc) {
   if (day == null) return l.exceptionDetailPoRematchNoDate(po, erp);
   return l.exceptionDetailPoRematch(po, erp, formatDate(day));
 }
+
+/// Why the ERP refused this row's payment write-back, in the reader's
+/// language (`erp_refusal_messages.dart`, the web resolve dialog's
+/// `erpRefusalNote`, decisions §332), or null on any other row.
+String? erpRefusalNoteFor(AppLocalizations l, ApException exc) =>
+    erpRefusalNote(
+      l,
+      exc.erpReportKind,
+      exc.erpRefusal,
+      exc.erpName ?? l.exceptionDetailYourErp,
+    );

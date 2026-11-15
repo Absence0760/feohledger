@@ -2,7 +2,6 @@
 
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -2159,6 +2158,376 @@ class AppLocalizationsEn extends AppLocalizations {
   String exceptionDetailPoRematchNoPo(String erp) {
     return 'The purchase order changed in $erp, and a re-check now matches. Review it to clear the hold.';
   }
+
+  @override
+  String erpRefusalVendorNotLinked(String provider) {
+    return 'This vendor isn\'t in $provider yet. Sync vendors from $provider, or add the vendor there, then retry.';
+  }
+
+  @override
+  String erpRefusalAccountNotLinked(String provider, String accounts) {
+    return 'Not linked to an account in $provider: $accounts. Sync the chart of accounts from $provider, or recode the invoice to a linked account, then retry.';
+  }
+
+  @override
+  String erpRefusalAccountNotLinkedUncoded(String provider) {
+    return 'A line has no GL account, and the invoice has none to fall back on. Code it to an account linked to $provider, then retry.';
+  }
+
+  @override
+  String get erpRefusalNotConnected =>
+      'The ERP isn\'t connected, or its connection has expired. An administrator can reconnect it under Organization, then retry.';
+
+  @override
+  String get erpRefusalInvoiceDueBeforeDate =>
+      'This invoice is due before its invoice date, which the ERP rejects. Correct the dates, then retry.';
+
+  @override
+  String erpRefusalAmountMismatch(String provider) {
+    return 'The line amounts don\'t add up to the approved amount, so the bill wasn\'t sent to $provider. Correct the lines or the tax, then retry.';
+  }
+
+  @override
+  String get erpRefusalLineAmountMissing =>
+      'A line has no amount — no total, and no quantity and unit price to work one out from. Fill it in, then retry.';
+
+  @override
+  String erpRefusalPostedTotalMismatch(String provider) {
+    return '$provider worked out a different total from the approved amount (often a default tax code), so the bill wasn\'t kept. Check the vendor\'s and accounts\' tax settings in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalPostedTotalUnconfirmed(String provider) {
+    return 'The bill was created in $provider, but $provider didn\'t report its total, so it can\'t be confirmed. Check the bill in $provider before you retry.';
+  }
+
+  @override
+  String erpRefusalPreviousBillRemoved(String provider) {
+    return 'Every bill sent for this invoice was deleted or voided in $provider, so it won\'t be sent again automatically. Check $provider, then ask an administrator how to proceed.';
+  }
+
+  @override
+  String erpRefusalTaxNotItemised(String provider) {
+    return '$provider needs the tax on each line, but this invoice states it only in total. Enter the tax per line, then retry.';
+  }
+
+  @override
+  String erpRefusalTaxRateUnresolved(String provider) {
+    return '$provider has no tax rate that matches this invoice\'s tax. Set the rate up in $provider, or correct the tax, then retry.';
+  }
+
+  @override
+  String erpRefusalMissingDates(String provider) {
+    return '$provider needs both an invoice date and a due date. Add them, then retry.';
+  }
+
+  @override
+  String erpRefusalBillRefused(String provider) {
+    return '$provider refused this bill and did not create it. Check the bill\'s vendor, accounts, dates and amounts against $provider, correct them, then retry.';
+  }
+
+  @override
+  String erpRefusalDuplicateNumber(String provider) {
+    return '$provider already has a bill with this invoice number. Check $provider for a duplicate before you retry.';
+  }
+
+  @override
+  String erpRefusalDocNumberTooLong(String provider) {
+    return 'The invoice number is longer than $provider allows. Shorten it, then retry.';
+  }
+
+  @override
+  String erpRefusalCurrencyUnknown(String provider) {
+    return '$provider reports no home currency, so the bill\'s currency can\'t be checked. Set the home currency in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotEnabled(String provider) {
+    return 'This invoice isn\'t in $provider\'s home currency, and multicurrency is off there. Turn multicurrency on in $provider, or correct the currency, then retry.';
+  }
+
+  @override
+  String erpRefusalIdempotencyLookupIncomplete(String provider) {
+    return '$provider couldn\'t confirm whether this invoice was already sent, so it wasn\'t sent again. Retry in a few minutes.';
+  }
+
+  @override
+  String erpRefusalPurchasesNotPermitted(String provider) {
+    return '$provider did not allow this bill to be created. Either the business is on Accounting Start, which cannot create purchase invoices, or the connected Sage user lacks Purchases access. Upgrade the plan or give that user Purchases access in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalExistingInvoiceNotOpen(String provider) {
+    return '$provider already holds this invoice and it\'s no longer a draft, so it can\'t be changed from here. Review it in $provider.';
+  }
+
+  @override
+  String erpRefusalLineAmountPrecision(String provider) {
+    return 'A line amount has more decimal places than this currency allows in $provider. Round it, then retry.';
+  }
+
+  @override
+  String erpRefusalPayToVendorDiffers(String provider) {
+    return '$provider has this bill set to pay a different vendor from the one approved (its pay-to vendor), so it wasn\'t posted as this bill. Check the pay-to vendor on the bill and on the vendor\'s card in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalBillNotPosted(String provider) {
+    return '$provider holds this bill but doesn\'t show it as posted yet, usually because it\'s waiting for approval there. Approve it in $provider, then retry. It won\'t be created twice.';
+  }
+
+  @override
+  String erpRefusalBillRejected(String provider) {
+    return '$provider holds this bill, but it was rejected or cancelled there, so it will never post. Delete it or enter it again in $provider before you retry, and don\'t mark this invoice done: nothing will pay it.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotSetUp(String provider) {
+    return '$provider has no active currency for this invoice\'s currency code. Add or reactivate that currency in $provider (a foreign one needs Multiple Currencies turned on), or correct the invoice\'s currency, then retry.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotSupported(String provider) {
+    return '$provider takes bills only in the company\'s own currency. Correct the currency, or enter the bill in $provider directly.';
+  }
+
+  @override
+  String erpRefusalForeignCurrencySupplier(String provider) {
+    return 'This supplier is set up for a foreign currency in $provider, which can\'t be posted to from here. Enter the bill in $provider directly.';
+  }
+
+  @override
+  String erpRefusalCorrelationTotalMismatch(String provider) {
+    return '$provider already holds a bill from an earlier attempt with a different total. Check that bill in $provider before you retry.';
+  }
+
+  @override
+  String erpRefusalTaxTypeNotResolved(String provider) {
+    return 'An account\'s tax type in $provider isn\'t a fixed rate, so the tax can\'t be split out. Give the account a tax type in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalTaxMismatch(String provider) {
+    return 'The tax $provider would book differs from the tax on the invoice. Check the accounts\' tax types in $provider, or correct the tax, then retry.';
+  }
+
+  @override
+  String erpRefusalTaxNotStated(String provider) {
+    return 'The invoice states no tax, but its accounts carry tax in $provider. Enter the invoice\'s tax, then retry.';
+  }
+
+  @override
+  String erpRefusalSubscriptionKeyMissing(String provider) {
+    return 'The $provider subscription key is missing. An administrator can add it under Organization, then retry.';
+  }
+
+  @override
+  String erpRefusalApAccountNotConfigured(String provider) {
+    return 'No accounts-payable account is set for $provider. An administrator can set it under Organization, then retry.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotConfigured(String provider) {
+    return 'No ledger currency is set for $provider. An administrator can set it under Organization, then retry.';
+  }
+
+  @override
+  String erpRefusalCurrencyMismatch(String provider) {
+    return 'The invoice\'s currency isn\'t the $provider ledger currency. Correct the currency, then retry.';
+  }
+
+  @override
+  String erpRefusalInvoiceDateMissing(String provider) {
+    return '$provider needs an invoice date. Add it, then retry.';
+  }
+
+  @override
+  String erpRefusalDueDateMissing(String provider) {
+    return '$provider needs a due date. Add it, then retry.';
+  }
+
+  @override
+  String erpRefusalAmountNotPositive(String provider) {
+    return '$provider takes only invoices for more than zero. Correct the amount, or record a credit memo instead.';
+  }
+
+  @override
+  String erpRefusalJobUnconfirmed(String provider) {
+    return '$provider accepted the invoice but hasn\'t confirmed it was created. Retry to check again — it won\'t be sent twice.';
+  }
+
+  @override
+  String erpRefusalJobFailed(String provider) {
+    return '$provider accepted the invoice, but its background job failed and created nothing. Check the vendor, accounts, transaction codes and posting period in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalCallBudgetTenant(String provider) {
+    return 'This workspace has used its share of today\'s $provider API calls, so FeohLedger made no call. The allowance resets at midnight UTC — retry then.';
+  }
+
+  @override
+  String erpRefusalCallBudgetQuota(String provider) {
+    return '$provider has paused API calls for the subscription FeohLedger uses (its daily quota is used), so FeohLedger made no call. It resets at midnight UTC — retry then.';
+  }
+
+  @override
+  String erpRefusalCallBudgetRateLimited(String provider) {
+    return '$provider asked FeohLedger to slow down, so no call was made. Retry in a minute.';
+  }
+
+  @override
+  String erpRefusalBillLeftUnposted(String provider) {
+    return '$provider holds this bill as a draft or awaiting approval, not posted, so nothing is in accounts payable there yet. Post or approve it in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalMergeSyncPending(String provider) {
+    return '$provider has not finished syncing invoices since an earlier attempt to send this bill, whose outcome is unknown, so it may already hold the bill. Nothing was sent. Retry after $provider\'s next invoice sync: if the bill is there by then, the retry links to it instead of creating a second one.';
+  }
+
+  @override
+  String get erpRefusalCredentialsUnavailable =>
+      'The ERP credentials couldn\'t be opened just now. Retry in a few minutes; if it keeps failing, tell an administrator.';
+
+  @override
+  String erpRefusalPeriodClosed(String provider) {
+    return '$provider refused this bill because its date is in a closed period (the books are closed). Change the invoice date or reopen the period in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalVendorInactive(String provider) {
+    return '$provider refused this bill because its vendor is inactive or deleted there. Make the vendor active in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalAccountInactive(String provider, String accounts) {
+    return '$provider refused this bill because $accounts is inactive or deleted there. Make the account active in $provider, or recode the invoice to an active account, then retry.';
+  }
+
+  @override
+  String erpRefusalReferenceInvalid(String provider, String code) {
+    return '$provider refused this bill because it refers to a vendor or account it doesn\'t accept (Intuit error $code). Check that the vendor and every account on the bill exist and are active in $provider, sync them again, then retry.';
+  }
+
+  @override
+  String erpRefusalCompanySubscriptionInactive(String provider) {
+    return '$provider refused this bill because the company\'s subscription has ended, was cancelled or has a billing problem. Resolve it in $provider, then retry.';
+  }
+
+  @override
+  String erpRefusalIntuitFault(String provider, String code) {
+    return '$provider refused this bill (Intuit error $code). Check the bill\'s details against $provider and correct them, then retry. If it keeps failing, give an administrator the error code.';
+  }
+
+  @override
+  String erpRefusalPaymentAccountNotMapped(String provider) {
+    return '$provider was not told about this payment: no account to record it from is set. Choose the bill-payment account under Organization → ERP integration, then retry the payment sync.';
+  }
+
+  @override
+  String erpRefusalBillNotInErp(String provider) {
+    return '$provider no longer has the bill this payment was for (it was deleted there), so the payment was not recorded there. Check the bill in $provider.';
+  }
+
+  @override
+  String erpRefusalPaymentExceedsBalance(String provider) {
+    return '$provider shows less still owed on this bill than this payment, so recording it would overpay the bill. Check what was already paid in $provider.';
+  }
+
+  @override
+  String erpRefusalBillPaymentVoided(String provider) {
+    return 'This payment was recorded in $provider and then voided there, so it is not recorded again. Decide in $provider whether the bill is paid.';
+  }
+
+  @override
+  String erpRefusalPaymentsScopeMissing(String provider) {
+    return '$provider was connected before FeohLedger asked for permission to record payments, so this payment isn\'t recorded there. Reconnect $provider in Organization settings to grant it, then record the payment in $provider or retry.';
+  }
+
+  @override
+  String erpRefusalExceptionBlocksExport(String type) {
+    return 'This invoice has an open $type exception. Resolve or dismiss it in Exceptions, then send it to the ERP.';
+  }
+
+  @override
+  String erpRefusalExceptionBlocksExportPossiblyPosted(String type) {
+    return 'This invoice has an open $type exception, and an earlier attempt may already have created the bill in the ERP. Check the ERP before anyone pays it, then resolve or dismiss the exception in Exceptions.';
+  }
+
+  @override
+  String get erpRefusalPaymentBlocksExport =>
+      'FeohLedger is already paying this invoice: it has a live payment. Cancel its payment run or void the payment before sending the invoice to the ERP.';
+
+  @override
+  String get erpRefusalPaymentBlocksExportPossiblyPosted =>
+      'FeohLedger is already paying this invoice, and an earlier attempt may already have created the bill in the ERP. Check the ERP and make sure nobody pays the bill there as well.';
+
+  @override
+  String get erpRefusalVendorBlocked =>
+      'This invoice\'s vendor is blocked from payment. Unblock the vendor before sending the invoice to the ERP.';
+
+  @override
+  String get erpRefusalVendorSanctionsMatch =>
+      'This invoice\'s vendor matched a sanctions list. Review the vendor\'s screening before sending the invoice to the ERP.';
+
+  @override
+  String get erpRefusalVendorSanctionsReview =>
+      'This invoice\'s vendor is held for sanctions screening review. Re-screen the vendor once the review is done, then send the invoice to the ERP.';
+
+  @override
+  String get erpRefusalVendorRejected =>
+      'This invoice\'s vendor has been rejected. Link the invoice to the correct vendor before sending it to the ERP.';
+
+  @override
+  String get erpRefusalVendorStatusUnknown =>
+      'This invoice\'s vendor has a status that cannot be sent to the ERP. Set the vendor to active before sending the invoice to the ERP.';
+
+  @override
+  String get erpRefusalVendorHoldPossiblyPosted =>
+      'An earlier attempt may already have created the bill in the ERP; check there before anyone pays it.';
+
+  @override
+  String get erpRefusalCardBlocksExport =>
+      'A virtual card has been issued to pay this invoice. Cancel the card before sending the invoice to the ERP.';
+
+  @override
+  String get erpRefusalCardBlocksExportPossiblyPosted =>
+      'A virtual card has been issued to pay this invoice, and an earlier attempt may already have created the bill in the ERP. Check the ERP and make sure nobody pays the bill there as well.';
+
+  @override
+  String get erpRefusalTypeDuplicate => 'Duplicate Invoice';
+
+  @override
+  String get erpRefusalTypeFraudFlag => 'Fraud Flag';
+
+  @override
+  String exceptionDetailErpPaymentTitle(String erp) {
+    return 'Payment reported by $erp';
+  }
+
+  @override
+  String exceptionDetailErpPaymentAmount(String erp) {
+    return 'Amount $erp reports paid';
+  }
+
+  @override
+  String get exceptionDetailErpPaymentPaidOn => 'Paid on';
+
+  @override
+  String get exceptionDetailErpPaymentReference => 'Reference';
+
+  @override
+  String erpRefusalUnknown(String erp) {
+    return 'This was refused in $erp for a reason this version of the app can\'t describe. Update the app, or check the record in $erp.';
+  }
+
+  @override
+  String get exceptionDetailErpPaymentNotStated => 'Not stated';
+
+  @override
+  String get exceptionDetailErpPaymentRecordOnWeb =>
+      'Record this payment from Exceptions in the web app: that resolves the exception and marks the invoice paid.';
 
   @override
   String get exceptionDetailYourErp => 'your ERP';

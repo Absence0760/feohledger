@@ -2,7 +2,6 @@
 
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -2179,6 +2178,376 @@ class AppLocalizationsPt extends AppLocalizations {
   String exceptionDetailPoRematchNoPo(String erp) {
     return 'O pedido de compra mudou no $erp e uma nova verificação agora confere. Revise para liberar a retenção.';
   }
+
+  @override
+  String erpRefusalVendorNotLinked(String provider) {
+    return 'Este fornecedor ainda não está no $provider. Sincronize os fornecedores do $provider ou cadastre o fornecedor lá e tente novamente.';
+  }
+
+  @override
+  String erpRefusalAccountNotLinked(String provider, String accounts) {
+    return 'Sem vínculo com uma conta no $provider: $accounts. Sincronize o plano de contas do $provider ou recodifique a fatura para uma conta vinculada e tente novamente.';
+  }
+
+  @override
+  String erpRefusalAccountNotLinkedUncoded(String provider) {
+    return 'Uma linha não tem conta contábil, e a fatura não tem nenhuma para usar no lugar. Codifique-a com uma conta vinculada ao $provider e tente novamente.';
+  }
+
+  @override
+  String get erpRefusalNotConnected =>
+      'O ERP não está conectado ou a conexão expirou. Um administrador pode reconectá-lo em Organização; depois, tente novamente.';
+
+  @override
+  String get erpRefusalInvoiceDueBeforeDate =>
+      'Esta fatura vence antes da data da fatura, o que o ERP recusa. Corrija as datas e tente novamente.';
+
+  @override
+  String erpRefusalAmountMismatch(String provider) {
+    return 'Os valores das linhas não somam o valor aprovado, então a conta não foi enviada ao $provider. Corrija as linhas ou o imposto e tente novamente.';
+  }
+
+  @override
+  String get erpRefusalLineAmountMissing =>
+      'Uma linha não tem valor: nem total, nem quantidade e preço unitário para calculá-lo. Preencha e tente novamente.';
+
+  @override
+  String erpRefusalPostedTotalMismatch(String provider) {
+    return 'O $provider calculou um total diferente do valor aprovado (geralmente por um código de imposto padrão), então a conta não foi mantida. Verifique as configurações de imposto do fornecedor e das contas no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalPostedTotalUnconfirmed(String provider) {
+    return 'A conta foi criada no $provider, mas o $provider não informou o total, então ela não pode ser confirmada. Verifique a conta no $provider antes de tentar novamente.';
+  }
+
+  @override
+  String erpRefusalPreviousBillRemoved(String provider) {
+    return 'Todas as contas enviadas para esta fatura foram excluídas ou anuladas no $provider, então ela não será reenviada automaticamente. Verifique o $provider e pergunte a um administrador como proceder.';
+  }
+
+  @override
+  String erpRefusalTaxNotItemised(String provider) {
+    return 'O $provider precisa do imposto de cada linha, mas esta fatura informa apenas o total. Informe o imposto por linha e tente novamente.';
+  }
+
+  @override
+  String erpRefusalTaxRateUnresolved(String provider) {
+    return 'O $provider não tem alíquota que corresponda ao imposto desta fatura. Configure a alíquota no $provider ou corrija o imposto e tente novamente.';
+  }
+
+  @override
+  String erpRefusalMissingDates(String provider) {
+    return 'O $provider precisa da data da fatura e da data de vencimento. Adicione-as e tente novamente.';
+  }
+
+  @override
+  String erpRefusalBillRefused(String provider) {
+    return 'O $provider recusou esta fatura e não a criou. Confira o fornecedor, as contas, as datas e os valores da fatura no $provider, corrija-os e tente novamente.';
+  }
+
+  @override
+  String erpRefusalDuplicateNumber(String provider) {
+    return 'O $provider já tem uma conta com este número de fatura. Procure uma duplicata no $provider antes de tentar novamente.';
+  }
+
+  @override
+  String erpRefusalDocNumberTooLong(String provider) {
+    return 'O número da fatura é mais longo do que o $provider permite. Encurte-o e tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyUnknown(String provider) {
+    return 'O $provider não informa moeda principal, então a moeda da conta não pode ser verificada. Defina a moeda principal no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotEnabled(String provider) {
+    return 'Esta fatura não está na moeda principal do $provider, e a multimoeda está desativada lá. Ative a multimoeda no $provider ou corrija a moeda e tente novamente.';
+  }
+
+  @override
+  String erpRefusalIdempotencyLookupIncomplete(String provider) {
+    return 'O $provider não conseguiu confirmar se esta fatura já tinha sido enviada, então ela não foi reenviada. Tente novamente em alguns minutos.';
+  }
+
+  @override
+  String erpRefusalPurchasesNotPermitted(String provider) {
+    return 'O $provider não permitiu criar esta fatura. O plano Accounting Start não cria faturas de compra, ou o usuário do Sage conectado não tem acesso a Compras. Mude o plano ou dê a esse usuário acesso a Compras no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalExistingInvoiceNotOpen(String provider) {
+    return 'O $provider já tem esta fatura e ela não é mais um rascunho, então não pode ser alterada daqui. Revise-a no $provider.';
+  }
+
+  @override
+  String erpRefusalLineAmountPrecision(String provider) {
+    return 'O valor de uma linha tem mais casas decimais do que esta moeda permite no $provider. Arredonde-o e tente novamente.';
+  }
+
+  @override
+  String erpRefusalPayToVendorDiffers(String provider) {
+    return 'No $provider, esta fatura está definida para pagar um fornecedor diferente do aprovado (fornecedor de pagamento), então ela não foi lançada como esta fatura. Verifique o fornecedor de pagamento na fatura e na ficha do fornecedor no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalBillNotPosted(String provider) {
+    return 'O $provider tem esta fatura, mas ainda não a mostra como lançada, geralmente porque ela está aguardando aprovação lá. Aprove-a no $provider e tente novamente. Ela não será criada duas vezes.';
+  }
+
+  @override
+  String erpRefusalBillRejected(String provider) {
+    return 'O $provider tem esta fatura, mas ela foi rejeitada ou cancelada lá e por isso nunca será lançada. Exclua-a ou lance-a novamente no $provider antes de tentar de novo, e não marque esta fatura como concluída: ninguém a pagaria.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotSetUp(String provider) {
+    return 'O $provider não tem nenhuma moeda ativa com o código de moeda desta fatura. Adicione ou reative essa moeda no $provider (uma moeda estrangeira exige ativar várias moedas) ou corrija a moeda da fatura e tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotSupported(String provider) {
+    return 'O $provider aceita contas apenas na moeda da própria empresa. Corrija a moeda ou lance a conta diretamente no $provider.';
+  }
+
+  @override
+  String erpRefusalForeignCurrencySupplier(String provider) {
+    return 'Este fornecedor está configurado em moeda estrangeira no $provider, e não é possível lançar daqui. Lance a conta diretamente no $provider.';
+  }
+
+  @override
+  String erpRefusalCorrelationTotalMismatch(String provider) {
+    return 'O $provider já tem uma conta de uma tentativa anterior com total diferente. Verifique essa conta no $provider antes de tentar novamente.';
+  }
+
+  @override
+  String erpRefusalTaxTypeNotResolved(String provider) {
+    return 'O tipo de imposto de uma conta no $provider não é uma alíquota fixa, então o imposto não pode ser separado. Defina um tipo de imposto para a conta no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalTaxMismatch(String provider) {
+    return 'O imposto que o $provider lançaria difere do imposto da fatura. Verifique os tipos de imposto das contas no $provider ou corrija o imposto e tente novamente.';
+  }
+
+  @override
+  String erpRefusalTaxNotStated(String provider) {
+    return 'A fatura não informa imposto, mas as contas dela têm imposto no $provider. Informe o imposto da fatura e tente novamente.';
+  }
+
+  @override
+  String erpRefusalSubscriptionKeyMissing(String provider) {
+    return 'A chave de assinatura do $provider está faltando. Um administrador pode adicioná-la em Organização; depois, tente novamente.';
+  }
+
+  @override
+  String erpRefusalApAccountNotConfigured(String provider) {
+    return 'Nenhuma conta de fornecedores está definida para o $provider. Um administrador pode defini-la em Organização; depois, tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotConfigured(String provider) {
+    return 'Nenhuma moeda contábil está definida para o $provider. Um administrador pode defini-la em Organização; depois, tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyMismatch(String provider) {
+    return 'A moeda da fatura não é a moeda contábil do $provider. Corrija a moeda e tente novamente.';
+  }
+
+  @override
+  String erpRefusalInvoiceDateMissing(String provider) {
+    return 'O $provider precisa da data da fatura. Adicione-a e tente novamente.';
+  }
+
+  @override
+  String erpRefusalDueDateMissing(String provider) {
+    return 'O $provider precisa da data de vencimento. Adicione-a e tente novamente.';
+  }
+
+  @override
+  String erpRefusalAmountNotPositive(String provider) {
+    return 'O $provider aceita apenas faturas com valor acima de zero. Corrija o valor ou registre uma nota de crédito.';
+  }
+
+  @override
+  String erpRefusalJobUnconfirmed(String provider) {
+    return 'O $provider aceitou a fatura, mas não confirmou que ela foi criada. Tente novamente para verificar; ela não será enviada duas vezes.';
+  }
+
+  @override
+  String erpRefusalJobFailed(String provider) {
+    return 'O $provider aceitou a fatura, mas a tarefa em segundo plano falhou e não criou nada. Verifique o fornecedor, as contas, os códigos de transação e o período contábil no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalCallBudgetTenant(String provider) {
+    return 'Este espaço de trabalho usou sua parte das chamadas à API do $provider de hoje, então o FeohLedger não fez nenhuma chamada. A cota é redefinida à meia-noite UTC; tente novamente depois disso.';
+  }
+
+  @override
+  String erpRefusalCallBudgetQuota(String provider) {
+    return 'O $provider pausou as chamadas à API da assinatura que o FeohLedger usa (a cota diária foi esgotada), então o FeohLedger não fez nenhuma chamada. Ela é redefinida à meia-noite UTC; tente novamente depois disso.';
+  }
+
+  @override
+  String erpRefusalCallBudgetRateLimited(String provider) {
+    return 'O $provider pediu ao FeohLedger que reduzisse o ritmo, então nenhuma chamada foi feita. Tente novamente em um minuto.';
+  }
+
+  @override
+  String erpRefusalBillLeftUnposted(String provider) {
+    return 'O $provider mantém esta fatura como rascunho ou aguardando aprovação, sem lançamento, então ainda não há nada em contas a pagar. Lance ou aprove a fatura no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalMergeSyncPending(String provider) {
+    return 'O $provider ainda não sincronizou as faturas desde uma tentativa de envio anterior cujo resultado é desconhecido, então ele pode já ter esta fatura. Nada foi enviado. Tente novamente após a próxima sincronização de faturas do $provider: se a fatura já estiver lá, ela será vinculada em vez de criada uma segunda vez.';
+  }
+
+  @override
+  String get erpRefusalCredentialsUnavailable =>
+      'Não foi possível abrir as credenciais do ERP agora. Tente novamente em alguns minutos; se continuar falhando, avise um administrador.';
+
+  @override
+  String erpRefusalPeriodClosed(String provider) {
+    return 'O $provider recusou esta conta porque a data dela está em um período fechado (os livros estão fechados). Altere a data da fatura ou reabra o período no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalVendorInactive(String provider) {
+    return 'O $provider recusou esta conta porque o fornecedor está inativo ou excluído lá. Ative o fornecedor no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalAccountInactive(String provider, String accounts) {
+    return 'O $provider recusou esta conta porque $accounts está inativa ou excluída lá. Ative a conta no $provider ou reclassifique a fatura para uma conta ativa e tente novamente.';
+  }
+
+  @override
+  String erpRefusalReferenceInvalid(String provider, String code) {
+    return 'O $provider recusou esta conta porque ela se refere a um fornecedor ou a uma conta que ele não aceita (erro Intuit $code). Verifique se o fornecedor e todas as contas da fatura existem e estão ativos no $provider, sincronize-os novamente e tente outra vez.';
+  }
+
+  @override
+  String erpRefusalCompanySubscriptionInactive(String provider) {
+    return 'O $provider recusou esta conta porque a assinatura da empresa terminou, foi cancelada ou tem um problema de cobrança. Resolva isso no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalIntuitFault(String provider, String code) {
+    return 'O $provider recusou esta conta (erro Intuit $code). Confira os dados da conta no $provider, corrija-os e tente novamente. Se continuar falhando, informe o código de erro a um administrador.';
+  }
+
+  @override
+  String erpRefusalPaymentAccountNotMapped(String provider) {
+    return 'O $provider não foi informado deste pagamento: nenhuma conta de lançamento está definida. Escolha a conta de pagamentos de contas em Organização → Integração com ERP e sincronize os pagamentos novamente.';
+  }
+
+  @override
+  String erpRefusalBillNotInErp(String provider) {
+    return 'A conta a que este pagamento se referia não existe mais no $provider (foi excluída lá), então o pagamento não foi lançado. Verifique a conta no $provider.';
+  }
+
+  @override
+  String erpRefusalPaymentExceedsBalance(String provider) {
+    return 'O $provider mostra um saldo em aberto menor que este pagamento; lançá-lo pagaria a conta a mais. Confira o que já foi pago no $provider.';
+  }
+
+  @override
+  String erpRefusalBillPaymentVoided(String provider) {
+    return 'Este pagamento foi lançado no $provider e depois anulado lá, então não é lançado de novo. Decida no $provider se a conta está paga.';
+  }
+
+  @override
+  String erpRefusalPaymentsScopeMissing(String provider) {
+    return 'O $provider foi conectado antes de o FeohLedger pedir permissão para lançar pagamentos, então este pagamento não é lançado lá. Reconecte o $provider nas configurações da organização para concedê-la e depois lance o pagamento no $provider ou tente de novo.';
+  }
+
+  @override
+  String erpRefusalExceptionBlocksExport(String type) {
+    return 'Esta fatura tem uma exceção aberta ($type). Resolva-a ou descarte-a em Exceções e, depois, envie a fatura ao ERP.';
+  }
+
+  @override
+  String erpRefusalExceptionBlocksExportPossiblyPosted(String type) {
+    return 'Esta fatura tem uma exceção aberta ($type), e uma tentativa anterior pode já ter criado a fatura no ERP. Verifique o ERP antes que alguém a pague e, depois, resolva ou descarte a exceção em Exceções.';
+  }
+
+  @override
+  String get erpRefusalPaymentBlocksExport =>
+      'O FeohLedger já está pagando esta fatura: ela tem um pagamento ativo. Cancele o lote de pagamento dele ou anule o pagamento antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalPaymentBlocksExportPossiblyPosted =>
+      'O FeohLedger já está pagando esta fatura, e uma tentativa anterior pode já ter criado a fatura no ERP. Verifique o ERP e garanta que ninguém a pague também lá.';
+
+  @override
+  String get erpRefusalVendorBlocked =>
+      'O fornecedor desta fatura está com pagamentos bloqueados. Desbloqueie o fornecedor antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalVendorSanctionsMatch =>
+      'O fornecedor desta fatura corresponde a uma lista de sanções. Revise a triagem do fornecedor antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalVendorSanctionsReview =>
+      'O fornecedor desta fatura está retido em revisão da triagem de sanções. Refaça a triagem do fornecedor quando a revisão terminar e então envie a fatura ao ERP.';
+
+  @override
+  String get erpRefusalVendorRejected =>
+      'O fornecedor desta fatura foi rejeitado. Vincule a fatura ao fornecedor correto antes de enviá-la ao ERP.';
+
+  @override
+  String get erpRefusalVendorStatusUnknown =>
+      'O fornecedor desta fatura tem um status que não permite enviá-la ao ERP. Defina o fornecedor como ativo antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalVendorHoldPossiblyPosted =>
+      'Uma tentativa anterior pode já ter criado a fatura no ERP; verifique lá antes que alguém a pague.';
+
+  @override
+  String get erpRefusalCardBlocksExport =>
+      'Um cartão virtual foi emitido para pagar esta fatura. Cancele o cartão antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalCardBlocksExportPossiblyPosted =>
+      'Um cartão virtual foi emitido para pagar esta fatura, e uma tentativa anterior pode já ter criado a fatura no ERP. Verifique o ERP e garanta que ninguém a pague também lá.';
+
+  @override
+  String get erpRefusalTypeDuplicate => 'Nota fiscal duplicada';
+
+  @override
+  String get erpRefusalTypeFraudFlag => 'Indício de fraude';
+
+  @override
+  String exceptionDetailErpPaymentTitle(String erp) {
+    return 'Pagamento informado por $erp';
+  }
+
+  @override
+  String exceptionDetailErpPaymentAmount(String erp) {
+    return 'Valor pago segundo $erp';
+  }
+
+  @override
+  String get exceptionDetailErpPaymentPaidOn => 'Pago em';
+
+  @override
+  String get exceptionDetailErpPaymentReference => 'Referência';
+
+  @override
+  String erpRefusalUnknown(String erp) {
+    return 'Isso foi recusado no $erp por um motivo que esta versão do app não consegue descrever. Atualize o app ou verifique o registro no $erp.';
+  }
+
+  @override
+  String get exceptionDetailErpPaymentNotStated => 'Não informado';
+
+  @override
+  String get exceptionDetailErpPaymentRecordOnWeb =>
+      'Registre este pagamento em Exceções no aplicativo web: isso resolve a exceção e marca a fatura como paga.';
 
   @override
   String get exceptionDetailYourErp => 'seu ERP';
@@ -5787,6 +6156,376 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String exceptionDetailPoRematchNoPo(String erp) {
     return 'O pedido de compra mudou no $erp e uma nova verificação agora confere. Revise para liberar a retenção.';
   }
+
+  @override
+  String erpRefusalVendorNotLinked(String provider) {
+    return 'Este fornecedor ainda não está no $provider. Sincronize os fornecedores do $provider ou cadastre o fornecedor lá e tente novamente.';
+  }
+
+  @override
+  String erpRefusalAccountNotLinked(String provider, String accounts) {
+    return 'Sem vínculo com uma conta no $provider: $accounts. Sincronize o plano de contas do $provider ou recodifique a fatura para uma conta vinculada e tente novamente.';
+  }
+
+  @override
+  String erpRefusalAccountNotLinkedUncoded(String provider) {
+    return 'Uma linha não tem conta contábil, e a fatura não tem nenhuma para usar no lugar. Codifique-a com uma conta vinculada ao $provider e tente novamente.';
+  }
+
+  @override
+  String get erpRefusalNotConnected =>
+      'O ERP não está conectado ou a conexão expirou. Um administrador pode reconectá-lo em Organização; depois, tente novamente.';
+
+  @override
+  String get erpRefusalInvoiceDueBeforeDate =>
+      'Esta fatura vence antes da data da fatura, o que o ERP recusa. Corrija as datas e tente novamente.';
+
+  @override
+  String erpRefusalAmountMismatch(String provider) {
+    return 'Os valores das linhas não somam o valor aprovado, então a conta não foi enviada ao $provider. Corrija as linhas ou o imposto e tente novamente.';
+  }
+
+  @override
+  String get erpRefusalLineAmountMissing =>
+      'Uma linha não tem valor: nem total, nem quantidade e preço unitário para calculá-lo. Preencha e tente novamente.';
+
+  @override
+  String erpRefusalPostedTotalMismatch(String provider) {
+    return 'O $provider calculou um total diferente do valor aprovado (geralmente por um código de imposto padrão), então a conta não foi mantida. Verifique as configurações de imposto do fornecedor e das contas no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalPostedTotalUnconfirmed(String provider) {
+    return 'A conta foi criada no $provider, mas o $provider não informou o total, então ela não pode ser confirmada. Verifique a conta no $provider antes de tentar novamente.';
+  }
+
+  @override
+  String erpRefusalPreviousBillRemoved(String provider) {
+    return 'Todas as contas enviadas para esta fatura foram excluídas ou anuladas no $provider, então ela não será reenviada automaticamente. Verifique o $provider e pergunte a um administrador como proceder.';
+  }
+
+  @override
+  String erpRefusalTaxNotItemised(String provider) {
+    return 'O $provider precisa do imposto de cada linha, mas esta fatura informa apenas o total. Informe o imposto por linha e tente novamente.';
+  }
+
+  @override
+  String erpRefusalTaxRateUnresolved(String provider) {
+    return 'O $provider não tem alíquota que corresponda ao imposto desta fatura. Configure a alíquota no $provider ou corrija o imposto e tente novamente.';
+  }
+
+  @override
+  String erpRefusalMissingDates(String provider) {
+    return 'O $provider precisa da data da fatura e da data de vencimento. Adicione-as e tente novamente.';
+  }
+
+  @override
+  String erpRefusalBillRefused(String provider) {
+    return 'O $provider recusou esta fatura e não a criou. Confira o fornecedor, as contas, as datas e os valores da fatura no $provider, corrija-os e tente novamente.';
+  }
+
+  @override
+  String erpRefusalDuplicateNumber(String provider) {
+    return 'O $provider já tem uma conta com este número de fatura. Procure uma duplicata no $provider antes de tentar novamente.';
+  }
+
+  @override
+  String erpRefusalDocNumberTooLong(String provider) {
+    return 'O número da fatura é mais longo do que o $provider permite. Encurte-o e tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyUnknown(String provider) {
+    return 'O $provider não informa moeda principal, então a moeda da conta não pode ser verificada. Defina a moeda principal no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotEnabled(String provider) {
+    return 'Esta fatura não está na moeda principal do $provider, e a multimoeda está desativada lá. Ative a multimoeda no $provider ou corrija a moeda e tente novamente.';
+  }
+
+  @override
+  String erpRefusalIdempotencyLookupIncomplete(String provider) {
+    return 'O $provider não conseguiu confirmar se esta fatura já tinha sido enviada, então ela não foi reenviada. Tente novamente em alguns minutos.';
+  }
+
+  @override
+  String erpRefusalPurchasesNotPermitted(String provider) {
+    return 'O $provider não permitiu criar esta fatura. O plano Accounting Start não cria faturas de compra, ou o usuário do Sage conectado não tem acesso a Compras. Mude o plano ou dê a esse usuário acesso a Compras no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalExistingInvoiceNotOpen(String provider) {
+    return 'O $provider já tem esta fatura e ela não é mais um rascunho, então não pode ser alterada daqui. Revise-a no $provider.';
+  }
+
+  @override
+  String erpRefusalLineAmountPrecision(String provider) {
+    return 'O valor de uma linha tem mais casas decimais do que esta moeda permite no $provider. Arredonde-o e tente novamente.';
+  }
+
+  @override
+  String erpRefusalPayToVendorDiffers(String provider) {
+    return 'No $provider, esta fatura está definida para pagar um fornecedor diferente do aprovado (fornecedor de pagamento), então ela não foi lançada como esta fatura. Verifique o fornecedor de pagamento na fatura e na ficha do fornecedor no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalBillNotPosted(String provider) {
+    return 'O $provider tem esta fatura, mas ainda não a mostra como lançada, geralmente porque ela está aguardando aprovação lá. Aprove-a no $provider e tente novamente. Ela não será criada duas vezes.';
+  }
+
+  @override
+  String erpRefusalBillRejected(String provider) {
+    return 'O $provider tem esta fatura, mas ela foi rejeitada ou cancelada lá e por isso nunca será lançada. Exclua-a ou lance-a novamente no $provider antes de tentar de novo, e não marque esta fatura como concluída: ninguém a pagaria.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotSetUp(String provider) {
+    return 'O $provider não tem nenhuma moeda ativa com o código de moeda desta fatura. Adicione ou reative essa moeda no $provider (uma moeda estrangeira exige ativar várias moedas) ou corrija a moeda da fatura e tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotSupported(String provider) {
+    return 'O $provider aceita contas apenas na moeda da própria empresa. Corrija a moeda ou lance a conta diretamente no $provider.';
+  }
+
+  @override
+  String erpRefusalForeignCurrencySupplier(String provider) {
+    return 'Este fornecedor está configurado em moeda estrangeira no $provider, e não é possível lançar daqui. Lance a conta diretamente no $provider.';
+  }
+
+  @override
+  String erpRefusalCorrelationTotalMismatch(String provider) {
+    return 'O $provider já tem uma conta de uma tentativa anterior com total diferente. Verifique essa conta no $provider antes de tentar novamente.';
+  }
+
+  @override
+  String erpRefusalTaxTypeNotResolved(String provider) {
+    return 'O tipo de imposto de uma conta no $provider não é uma alíquota fixa, então o imposto não pode ser separado. Defina um tipo de imposto para a conta no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalTaxMismatch(String provider) {
+    return 'O imposto que o $provider lançaria difere do imposto da fatura. Verifique os tipos de imposto das contas no $provider ou corrija o imposto e tente novamente.';
+  }
+
+  @override
+  String erpRefusalTaxNotStated(String provider) {
+    return 'A fatura não informa imposto, mas as contas dela têm imposto no $provider. Informe o imposto da fatura e tente novamente.';
+  }
+
+  @override
+  String erpRefusalSubscriptionKeyMissing(String provider) {
+    return 'A chave de assinatura do $provider está faltando. Um administrador pode adicioná-la em Organização; depois, tente novamente.';
+  }
+
+  @override
+  String erpRefusalApAccountNotConfigured(String provider) {
+    return 'Nenhuma conta de fornecedores está definida para o $provider. Um administrador pode defini-la em Organização; depois, tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyNotConfigured(String provider) {
+    return 'Nenhuma moeda contábil está definida para o $provider. Um administrador pode defini-la em Organização; depois, tente novamente.';
+  }
+
+  @override
+  String erpRefusalCurrencyMismatch(String provider) {
+    return 'A moeda da fatura não é a moeda contábil do $provider. Corrija a moeda e tente novamente.';
+  }
+
+  @override
+  String erpRefusalInvoiceDateMissing(String provider) {
+    return 'O $provider precisa da data da fatura. Adicione-a e tente novamente.';
+  }
+
+  @override
+  String erpRefusalDueDateMissing(String provider) {
+    return 'O $provider precisa da data de vencimento. Adicione-a e tente novamente.';
+  }
+
+  @override
+  String erpRefusalAmountNotPositive(String provider) {
+    return 'O $provider aceita apenas faturas com valor acima de zero. Corrija o valor ou registre uma nota de crédito.';
+  }
+
+  @override
+  String erpRefusalJobUnconfirmed(String provider) {
+    return 'O $provider aceitou a fatura, mas não confirmou que ela foi criada. Tente novamente para verificar; ela não será enviada duas vezes.';
+  }
+
+  @override
+  String erpRefusalJobFailed(String provider) {
+    return 'O $provider aceitou a fatura, mas a tarefa em segundo plano falhou e não criou nada. Verifique o fornecedor, as contas, os códigos de transação e o período contábil no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalCallBudgetTenant(String provider) {
+    return 'Este espaço de trabalho usou sua parte das chamadas à API do $provider de hoje, então o FeohLedger não fez nenhuma chamada. A cota é redefinida à meia-noite UTC; tente novamente depois disso.';
+  }
+
+  @override
+  String erpRefusalCallBudgetQuota(String provider) {
+    return 'O $provider pausou as chamadas à API da assinatura que o FeohLedger usa (a cota diária foi esgotada), então o FeohLedger não fez nenhuma chamada. Ela é redefinida à meia-noite UTC; tente novamente depois disso.';
+  }
+
+  @override
+  String erpRefusalCallBudgetRateLimited(String provider) {
+    return 'O $provider pediu ao FeohLedger que reduzisse o ritmo, então nenhuma chamada foi feita. Tente novamente em um minuto.';
+  }
+
+  @override
+  String erpRefusalBillLeftUnposted(String provider) {
+    return 'O $provider mantém esta fatura como rascunho ou aguardando aprovação, sem lançamento, então ainda não há nada em contas a pagar. Lance ou aprove a fatura no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalMergeSyncPending(String provider) {
+    return 'O $provider ainda não sincronizou as faturas desde uma tentativa de envio anterior cujo resultado é desconhecido, então ele pode já ter esta fatura. Nada foi enviado. Tente novamente após a próxima sincronização de faturas do $provider: se a fatura já estiver lá, ela será vinculada em vez de criada uma segunda vez.';
+  }
+
+  @override
+  String get erpRefusalCredentialsUnavailable =>
+      'Não foi possível abrir as credenciais do ERP agora. Tente novamente em alguns minutos; se continuar falhando, avise um administrador.';
+
+  @override
+  String erpRefusalPeriodClosed(String provider) {
+    return 'O $provider recusou esta conta porque a data dela está em um período fechado (os livros estão fechados). Altere a data da fatura ou reabra o período no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalVendorInactive(String provider) {
+    return 'O $provider recusou esta conta porque o fornecedor está inativo ou excluído lá. Ative o fornecedor no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalAccountInactive(String provider, String accounts) {
+    return 'O $provider recusou esta conta porque $accounts está inativa ou excluída lá. Ative a conta no $provider ou reclassifique a fatura para uma conta ativa e tente novamente.';
+  }
+
+  @override
+  String erpRefusalReferenceInvalid(String provider, String code) {
+    return 'O $provider recusou esta conta porque ela se refere a um fornecedor ou a uma conta que ele não aceita (erro Intuit $code). Verifique se o fornecedor e todas as contas da fatura existem e estão ativos no $provider, sincronize-os novamente e tente outra vez.';
+  }
+
+  @override
+  String erpRefusalCompanySubscriptionInactive(String provider) {
+    return 'O $provider recusou esta conta porque a assinatura da empresa terminou, foi cancelada ou tem um problema de cobrança. Resolva isso no $provider e tente novamente.';
+  }
+
+  @override
+  String erpRefusalIntuitFault(String provider, String code) {
+    return 'O $provider recusou esta conta (erro Intuit $code). Confira os dados da conta no $provider, corrija-os e tente novamente. Se continuar falhando, informe o código de erro a um administrador.';
+  }
+
+  @override
+  String erpRefusalPaymentAccountNotMapped(String provider) {
+    return 'O $provider não foi informado deste pagamento: nenhuma conta de lançamento está definida. Escolha a conta de pagamentos de contas em Organização → Integração com ERP e sincronize os pagamentos novamente.';
+  }
+
+  @override
+  String erpRefusalBillNotInErp(String provider) {
+    return 'A conta a que este pagamento se referia não existe mais no $provider (foi excluída lá), então o pagamento não foi lançado. Verifique a conta no $provider.';
+  }
+
+  @override
+  String erpRefusalPaymentExceedsBalance(String provider) {
+    return 'O $provider mostra um saldo em aberto menor que este pagamento; lançá-lo pagaria a conta a mais. Confira o que já foi pago no $provider.';
+  }
+
+  @override
+  String erpRefusalBillPaymentVoided(String provider) {
+    return 'Este pagamento foi lançado no $provider e depois anulado lá, então não é lançado de novo. Decida no $provider se a conta está paga.';
+  }
+
+  @override
+  String erpRefusalPaymentsScopeMissing(String provider) {
+    return 'O $provider foi conectado antes de o FeohLedger pedir permissão para lançar pagamentos, então este pagamento não é lançado lá. Reconecte o $provider nas configurações da organização para concedê-la e depois lance o pagamento no $provider ou tente de novo.';
+  }
+
+  @override
+  String erpRefusalExceptionBlocksExport(String type) {
+    return 'Esta fatura tem uma exceção aberta ($type). Resolva-a ou descarte-a em Exceções e, depois, envie a fatura ao ERP.';
+  }
+
+  @override
+  String erpRefusalExceptionBlocksExportPossiblyPosted(String type) {
+    return 'Esta fatura tem uma exceção aberta ($type), e uma tentativa anterior pode já ter criado a fatura no ERP. Verifique o ERP antes que alguém a pague e, depois, resolva ou descarte a exceção em Exceções.';
+  }
+
+  @override
+  String get erpRefusalPaymentBlocksExport =>
+      'O FeohLedger já está pagando esta fatura: ela tem um pagamento ativo. Cancele o lote de pagamento dele ou anule o pagamento antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalPaymentBlocksExportPossiblyPosted =>
+      'O FeohLedger já está pagando esta fatura, e uma tentativa anterior pode já ter criado a fatura no ERP. Verifique o ERP e garanta que ninguém a pague também lá.';
+
+  @override
+  String get erpRefusalVendorBlocked =>
+      'O fornecedor desta fatura está com pagamentos bloqueados. Desbloqueie o fornecedor antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalVendorSanctionsMatch =>
+      'O fornecedor desta fatura corresponde a uma lista de sanções. Revise a triagem do fornecedor antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalVendorSanctionsReview =>
+      'O fornecedor desta fatura está retido em revisão da triagem de sanções. Refaça a triagem do fornecedor quando a revisão terminar e então envie a fatura ao ERP.';
+
+  @override
+  String get erpRefusalVendorRejected =>
+      'O fornecedor desta fatura foi rejeitado. Vincule a fatura ao fornecedor correto antes de enviá-la ao ERP.';
+
+  @override
+  String get erpRefusalVendorStatusUnknown =>
+      'O fornecedor desta fatura tem um status que não permite enviá-la ao ERP. Defina o fornecedor como ativo antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalVendorHoldPossiblyPosted =>
+      'Uma tentativa anterior pode já ter criado a fatura no ERP; verifique lá antes que alguém a pague.';
+
+  @override
+  String get erpRefusalCardBlocksExport =>
+      'Um cartão virtual foi emitido para pagar esta fatura. Cancele o cartão antes de enviar a fatura ao ERP.';
+
+  @override
+  String get erpRefusalCardBlocksExportPossiblyPosted =>
+      'Um cartão virtual foi emitido para pagar esta fatura, e uma tentativa anterior pode já ter criado a fatura no ERP. Verifique o ERP e garanta que ninguém a pague também lá.';
+
+  @override
+  String get erpRefusalTypeDuplicate => 'Nota fiscal duplicada';
+
+  @override
+  String get erpRefusalTypeFraudFlag => 'Indício de fraude';
+
+  @override
+  String exceptionDetailErpPaymentTitle(String erp) {
+    return 'Pagamento informado por $erp';
+  }
+
+  @override
+  String exceptionDetailErpPaymentAmount(String erp) {
+    return 'Valor pago segundo $erp';
+  }
+
+  @override
+  String get exceptionDetailErpPaymentPaidOn => 'Pago em';
+
+  @override
+  String get exceptionDetailErpPaymentReference => 'Referência';
+
+  @override
+  String erpRefusalUnknown(String erp) {
+    return 'Isso foi recusado no $erp por um motivo que esta versão do app não consegue descrever. Atualize o app ou verifique o registro no $erp.';
+  }
+
+  @override
+  String get exceptionDetailErpPaymentNotStated => 'Não informado';
+
+  @override
+  String get exceptionDetailErpPaymentRecordOnWeb =>
+      'Registre este pagamento em Exceções no aplicativo web: isso resolve a exceção e marca a fatura como paga.';
 
   @override
   String get exceptionDetailYourErp => 'seu ERP';
