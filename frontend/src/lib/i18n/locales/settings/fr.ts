@@ -428,6 +428,8 @@ export const messages = {
 	'org.erp.oauth.needsReconnect': 'La connexion à {erp} a expiré. Reconnectez-vous pour continuer à envoyer les factures.',
 	'org.erp.oauth.reconnect': 'Se reconnecter à {erp}',
 	'org.erp.oauth.expiresSoon': "La connexion à {erp} expire le {date}. Reconnectez-la avant cette date pour continuer à envoyer les factures et à synchroniser les paiements.",
+	'org.erp.oauth.scopeGapPayments': "Cette connexion à {erp} a été établie avant que FeohLedger ne demande l'autorisation de lire et d'enregistrer les paiements. Tant que vous ne l'aurez pas reconnectée pour l'accorder, les paiements effectués dans {erp} ne sont détectés que lorsque la facture elle-même change, et les paiements effectués via FeohLedger ne sont pas enregistrés dans {erp}.",
+	'org.erp.oauth.scopeGap': "Il manque à cette connexion à {erp} une autorisation que FeohLedger demande désormais. Reconnectez-la pour l'accorder.",
 	'org.erp.usage.ofShare': "Appels à l'API {erp} aujourd'hui : {used} sur votre part quotidienne de {limit}. Le compteur est remis à zéro à {reset}.",
 	'org.erp.usage.ofQuota': "Appels à l'API {erp} aujourd'hui : {used} sur les {limit} quotidiens de votre clé d'abonnement. Le compteur est remis à zéro à {reset}.",
 	'org.erp.usage.noLimit': "Appels à l'API {erp} aujourd'hui : {used}. Le compteur est remis à zéro à {reset}.",

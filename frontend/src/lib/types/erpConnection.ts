@@ -122,6 +122,9 @@ export interface ErpOAuthStatus {
 	/** Why not, as the POST's 409 code (`status_sync_off` /
 	 *  `status_sync_unsupported` / `status_sync_needs_reconnect`). */
 	status_sync_refusal?: string | null;
+	/** Permissions the consent was found not to cover, coded (decisions §415):
+	 *  `payments_scope_missing`. Reconnecting grants them; see `oauthScopeGapKeys`. */
+	scope_gaps?: string[];
 	/** What a bring-your-own app must register as its redirect URI. */
 	redirect_uri: string;
 	providers: ErpOAuthProviderStatus[];
@@ -408,6 +411,30 @@ export function oauthAttentionKey(
 		return 'org.erp.oauth.expiresSoon';
 	}
 	return null;
+}
+
+/** The sentence for each coded scope gap (decisions §415). */
+const SCOPE_GAP_KEYS: Record<string, MessageKey> = {
+	payments_scope_missing: 'org.erp.oauth.scopeGapPayments'
+};
+
+/**
+ * The sentences for a connected ERP whose consent lacks a permission
+ * FeohLedger now asks for (`scope_gaps`, decisions §415), one per gap: what
+ * is limited until the admin reconnects. A code this build does not know
+ * reads as the generic "missing a permission" sentence; repeats collapse.
+ * Empty unless connected (a connection that needs reconnecting says so
+ * already).
+ */
+export function oauthScopeGapKeys(
+	providerKey: string,
+	status: ErpOAuthStatus | null
+): MessageKey[] {
+	if (oauthConnectionState(providerKey, status) !== 'connected') return [];
+	const keys = (status?.scope_gaps ?? []).map(
+		(code) => SCOPE_GAP_KEYS[code] ?? ('org.erp.oauth.scopeGap' as MessageKey)
+	);
+	return [...new Set(keys)];
 }
 
 /** The `?erp_connected=` / `?erp_error=` / `?erp_choose_company=` return

@@ -1483,3 +1483,30 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 		expect(localizeApiDetail(row, deT)).toBe(de['refusal.invoiceStillExtracting']);
 	});
 });
+
+describe('the hand-made vendor ERP link refusals (`services/vendor_erp_manual_link.py`, decisions §415)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+	const CODES = [
+		['vendor_erp_search_unavailable', 'refusal.vendorErpSearchUnavailable'],
+		['vendor_erp_link_exists', 'refusal.vendorErpLinkExists'],
+		['erp_vendor_already_linked', 'refusal.erpVendorAlreadyLinked'],
+		['erp_vendor_not_found', 'refusal.erpVendorNotFound'],
+		['erp_vendor_inactive', 'refusal.erpVendorInactive']
+	] as const;
+
+	it.each(CODES)('states %s as a fixed sentence in every shipped locale', (code, key) => {
+		expect(CODED_REFUSAL_CODES).toContain(code);
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, locale).toBe(messages[key]);
+			expect(text, locale).toBeTruthy();
+		}
+	});
+});

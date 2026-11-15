@@ -12,6 +12,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import ScreeningBadge from '#lib/components/ui/ScreeningBadge.svelte';
+	import VendorErpLinkSearch from '#lib/components/modals/VendorErpLinkSearch.svelte';
 	import {
 		screenVendor,
 		getScreeningHistory,
@@ -31,6 +32,7 @@
 		type SanctionsCheck,
 		type ScreeningStatus,
 		type VendorErpLink,
+		type VendorErpLinkResponse,
 		type EnrichmentFieldSuggestion
 	} from '#lib/types/vendor.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -234,6 +236,8 @@
 	let erpLinks = $state<VendorErpLink[]>([]);
 	let loadingErpLinks = $state(true);
 	let erpLinksError = $state(false);
+	// The connected ERP can be searched for a record to link by hand (§415).
+	let erpSearchAvailable = $state(false);
 	/** The realm whose Unlink is armed (`''` stands for the unnamed row link),
 	 *  or null. A realm is never the empty string. */
 	let unlinkArmed = $state<string | null>(null);
@@ -249,9 +253,11 @@
 		getVendorErpLinks(id)
 			.then((res) => {
 				erpLinks = res.links;
+				erpSearchAvailable = res.search_available === true;
 			})
 			.catch(() => {
 				erpLinks = [];
+				erpSearchAvailable = false;
 				erpLinksError = true;
 			})
 			.finally(() => {
@@ -289,6 +295,11 @@
 			unlinking = null;
 			busy = '';
 		}
+	}
+
+	function erpLinked(res: VendorErpLinkResponse) {
+		erpLinks = res.links;
+		onupdated(res.vendor);
 	}
 
 	// --- External enrichment (advisory firmographics + steward apply) ---------
@@ -508,6 +519,18 @@
 					</tbody>
 				</table>
 			</div>
+		{/if}
+		{#if canUnlinkErp && erpSearchAvailable && !loadingErpLinks && !erpLinksError}
+			<!-- Keyed by vendor: a fresh search per vendor, so no answer for one
+			     can be shown under, or linked to, another (decisions §415). -->
+			{#key vendor.id}
+			<VendorErpLinkSearch
+				vendorId={vendor.id}
+				vendorName={vendor.name}
+				disabled={busy !== ''}
+				onlinked={erpLinked}
+			/>
+			{/key}
 		{/if}
 	</section>
 

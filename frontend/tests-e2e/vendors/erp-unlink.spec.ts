@@ -18,8 +18,9 @@ import {
  * two-click **Unlink** (`POST /api/vendors/{id}/erp-links/unlink`) — the way
  * through a merge refused `vendor_merge_erp_link_conflict` (§373).
  *
- * The links are written straight into the tenant DB: no API sets an ERP link
- * by hand (a sync is the only door that creates one), and that is the point.
+ * The links are written straight into the tenant DB here. The one API that
+ * sets a link by hand, "Find this vendor in the ERP" (decisions §415), needs a
+ * searchable ERP connected; its spec below stubs the ERP side.
  */
 
 const VENDOR_MARKER = 'ERP-UNLINK-';
@@ -173,6 +174,93 @@ test.describe('/vendors ERP links panel (admin)', () => {
 				() => document.documentElement.scrollWidth - document.documentElement.clientWidth
 			);
 			expect(pageOverflow, 'the page scrolls sideways at 320px').toBeLessThanOrEqual(1);
+			await expectNoA11yViolations(page);
+		} finally {
+			try {
+				deleteVendorsWhere(`id='${vendor.id}'`);
+			} catch {
+				/* best-effort */
+			}
+		}
+	});
+
+	test('finds a customer in the ERP and links it with a confirmed second click', async ({
+		page
+	}) => {
+		// decisions §415. The ERP is stubbed at the API boundary (no searchable
+		// ERP runs in this suite): the search answers one Xero customer, the
+		// link answers the vendor linked. The server-side rules are pinned in
+		// backend/tests/test_vendor_erp_manual_link.py.
+		await page.goto('/vendors');
+		const stamp = Date.now();
+		const vendor = await createVendor(page, `${VENDOR_MARKER}FIND-${stamp}`);
+		const realm = `xero:e2e-${stamp}`;
+		const record = 'c0ffee00-0000-4000-8000-0000000e2e01';
+		const searches: unknown[] = [];
+		const links: unknown[] = [];
+		await page.route(`**/api/vendors/${vendor.id}/erp-links`, (route) =>
+			route.fulfill({ json: { vendor_id: vendor.id, links: [], search_available: true } })
+		);
+		await page.route(`**/api/vendors/${vendor.id}/erp-links/search`, (route) => {
+			searches.push(route.request().postDataJSON());
+			return route.fulfill({
+				json: {
+					realm,
+					truncated: false,
+					candidates: [
+						{
+							erp_vendor_id: record,
+							name: 'Bloom Florists Ltd',
+							email: 'accounts@bloom.example',
+							active: true,
+							tax_id_matches: true,
+							linked_elsewhere: false
+						}
+					]
+				}
+			});
+		});
+		await page.route(`**/api/vendors/${vendor.id}/erp-links/link`, (route) => {
+			links.push(route.request().postDataJSON());
+			return route.fulfill({
+				json: {
+					realm,
+					erp_vendor_id: record,
+					vendor: { ...vendor, erp_vendor_id: record },
+					links: [{ realm, erp_vendor_id: record, placement: 'row' }]
+				}
+			});
+		});
+		try {
+			const searchBox = page.getByPlaceholder('Search vendors...');
+			await searchBox.fill(vendor.name);
+			await page.waitForResponse((r) => isVendorListResponse(r.url(), 'search='));
+			const row = page.locator('table tbody tr').first();
+			await expect(row).toContainText(vendor.name);
+			await row.locator('td.vendor-name .row-link').click();
+			const modal = page.getByRole('dialog', { name: 'Vendor screening and risk' });
+			const find = modal.getByTestId('vendor-erp-find');
+			await expect(find.getByRole('heading', { name: 'Find this vendor in the ERP' })).toBeVisible();
+
+			// Prefilled with the vendor's name; the server reads its tax number itself.
+			const query = find.getByLabel('Name to search for');
+			await expect(query).toHaveValue(vendor.name);
+			await query.fill('Bloom');
+			await find.getByRole('button', { name: 'Search' }).click();
+			const candidate = find.getByTestId('vendor-erp-candidate');
+			await expect(candidate).toContainText('Bloom Florists Ltd');
+			await expect(candidate).toContainText('Tax number matches');
+			expect(searches).toEqual([{ query: 'Bloom' }]);
+
+			const link = find.getByRole('button', { name: 'Link this vendor to Bloom Florists Ltd' });
+			await link.click();
+			await expect(link).toHaveText('Confirm link');
+			expect(links).toEqual([]);
+			await link.click();
+			await expect.poll(() => links).toEqual([{ erp_vendor_id: record }]);
+			const linked = modal.locator('[data-testid="vendor-erp-link"]');
+			await expect(linked).toHaveCount(1);
+			await expect(linked).toContainText(realm);
 			await expectNoA11yViolations(page);
 		} finally {
 			try {

@@ -7,7 +7,9 @@ import { triggerDownload } from '#lib/utils/download.ts';
 import type {
 	Vendor,
 	VendorCardRevocation,
+	VendorErpLinkResponse,
 	VendorErpLinksResponse,
+	VendorErpSearchResponse,
 	VendorErpUnlinkResponse,
 	SanctionsCheck,
 	ScreeningReviewQueueResponse,
@@ -236,6 +238,27 @@ export function unlinkVendorErpLink(
 	realm: string | null
 ): Promise<VendorErpUnlinkResponse> {
 	return api.post<VendorErpUnlinkResponse>(`/api/vendors/${id}/erp-links/unlink`, { realm });
+}
+
+// Search the connected ERP's whole contact list for this vendor's record, by
+// `query` (blank: the vendor's name) and by its stored tax number, which the
+// server reads itself (`vendor.manage`, decisions §415). Links nothing.
+export function searchVendorErpRecords(
+	id: string,
+	query: string | null
+): Promise<VendorErpSearchResponse> {
+	return api.post<VendorErpSearchResponse>(`/api/vendors/${id}/erp-links/search`, { query });
+}
+
+// Link the vendor to one ERP record in the connected company (`vendor.manage`,
+// decisions §415). The server re-reads the record before linking.
+export function linkVendorErpRecord(
+	id: string,
+	erpVendorId: string
+): Promise<VendorErpLinkResponse> {
+	return api.post<VendorErpLinkResponse>(`/api/vendors/${id}/erp-links/link`, {
+		erp_vendor_id: erpVendorId
+	});
 }
 
 // Vendor risk detail + recompute. recompute is admin / ap_manager.

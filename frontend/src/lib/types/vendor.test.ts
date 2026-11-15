@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	ENRICHABLE_FIELD_LABEL_KEYS,
+	erpCandidateLinkable,
 	RISK_LEVEL_LABEL_KEYS,
 	SANCTIONS_RESULTS,
 	SANCTIONS_RESULT_LABEL_KEYS,
@@ -249,5 +250,22 @@ describe('ENRICHABLE_FIELD_LABEL_KEYS', () => {
 		for (const key of Object.values(ENRICHABLE_FIELD_LABEL_KEYS)) {
 			expect(Object.keys(EN_ALL), `"${key}" is not in the catalogue`).toContain(key);
 		}
+	});
+});
+
+describe('erpCandidateLinkable (decisions §415)', () => {
+	const base = {
+		erp_vendor_id: 'c-1',
+		name: 'Acme Ltd',
+		email: null,
+		active: true,
+		tax_id_matches: false,
+		linked_elsewhere: false
+	};
+
+	it('offers Link only for an active record no other vendor holds', () => {
+		expect(erpCandidateLinkable(base)).toBe(true);
+		expect(erpCandidateLinkable({ ...base, active: false })).toBe(false);
+		expect(erpCandidateLinkable({ ...base, linked_elsewhere: true })).toBe(false);
 	});
 });
