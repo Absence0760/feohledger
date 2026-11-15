@@ -16,6 +16,7 @@ from app.services.webhooks.delivery import deliver_due, process_delivery, run_we
 from app.services.webhooks.dispatch import (
     emit_event,
     emit_exception_raised,
+    emit_invoice_approval_recalled,
     emit_invoice_approved,
     emit_payment_settled,
 )
@@ -29,6 +30,7 @@ from app.services.webhooks.signing import (
 __all__ = [
     "emit_event",
     "emit_invoice_approved",
+    "emit_invoice_approval_recalled",
     "emit_payment_settled",
     "emit_exception_raised",
     "process_delivery",

@@ -862,14 +862,26 @@ or is a sibling of a fix that needs its own pass.
 
 ### Surfaced by the approval recall (2026-11-13, decisions §374)
 
-- [ ] **(c) Nothing outside FeohLedger hears that an approval was recalled.**
-      `transition_invoice` emits `invoice.approved` to webhook subscribers
-      (`workflow_engine._maybe_emit_webhook`) but there is no event for the
-      recall, so an integrator that acted on the approval never learns it was
-      withdrawn. **Durable fix:** an `invoice.approval_recalled` event in the
-      outbound catalogue and the published OpenAPI, emitted from the same hook
-      on `RECALL_ACTION`. **Trigger:** the first integrator subscribing to
-      `invoice.approved`, or the next change to the webhook catalogue.
+- [ ] **(c) The invoice webhooks are queued before the transaction that
+      produced them commits.** `transition_invoice` calls
+      `_maybe_emit_webhook` inline, and `emit_event` commits the
+      `WebhookDelivery` row in its own control-plane session, so the delivery
+      is durable while the tenant transaction that changed the status is still
+      open. If that transaction then rolls back (the recall's
+      `advance_workflow`, an approval's chain bookkeeping, a failed commit),
+      the receiver is told of an `invoice.approved` /
+      `invoice.approval_recalled` / `payment.settled` that never happened.
+      Found closing the recall event (decisions §414), which kept the hook's
+      existing timing rather than diverge from its siblings. **Durable fix:**
+      queue the emit with `post_commit.enqueue_post_commit(db, …,
+      name="webhook")` in `transition_invoice`, as the email / chat legs
+      already are, so a rolled-back transition queues nothing; the unit tests
+      that drive the engine with a `MagicMock` session
+      (`test_outbound_webhooks.py::test_transition_mints_a_new_occurrence_per_transition`,
+      `test_webhook_event_catalogue.py`) then need a real session or a drained
+      queue. **Trigger:** the next change to `transition_invoice`'s hooks, or
+      the first integrator reporting an event for a status change that is not
+      there.
 - [ ] **(c) A recalled invoice's PEPPOL transmission and inter-company mirror
       keep the recalled figures.** `recall_refusal` does not ask whether the
       approved invoice was already sent over PEPPOL (`POST {id}/peppol-send`)

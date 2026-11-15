@@ -805,7 +805,7 @@ export const messages = {
 	'admin.webhooks.title': 'Webhook',
 	'admin.webhooks.createWebhook': '+ Webhook を作成',
 	'admin.webhooks.hintPre':
-		'送信 Webhook は、プラットフォームのイベント（請求書の承認、支払いの決済、例外の発生）を署名付き JSON としてエンドポイントにプッシュします。各サブスクリプションの HMAC 署名シークレットは作成時に一度だけ表示されます — 安全な場所に保管し、',
+		'送信 Webhook は、プラットフォームのイベント（請求書の承認、承認の取り消し、支払いの決済、例外の発生）を署名付き JSON としてエンドポイントにプッシュします。各サブスクリプションの HMAC 署名シークレットは作成時に一度だけ表示されます — 安全な場所に保管し、',
 	'admin.webhooks.hintPost': 'ヘッダーの検証に使用してください。',
 	'admin.webhooks.subscriptions': 'サブスクリプション',
 	'admin.webhooks.loadingSubs': 'Webhook を読み込み中…',
