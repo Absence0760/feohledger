@@ -1643,6 +1643,7 @@ the ones that tripped. See [decisions.md](decisions.md) §169.
 **The approval path's refusals carry a code.** `check_segregation`'s 403 is
 `coded_refusal("approval_segregation", …)`; its siblings are
 `approval_segregation_receiver` (receiving ≠ approving, below),
+`approval_segregation_inspector` (inspecting ≠ approving, below),
 `approval_not_named_approver` (`check_level_approver`), `approval_level_reuse`
 (one approver on two chain levels), and the money gates in
 `services/review._enforce_approval_thresholds` — `approval_cfo_required`,
@@ -1672,6 +1673,21 @@ in `implicated_actors`: that set is also what `receipts_clear_hold` measures a
 receipt's recorder against, so folding them in would make every typed receipt
 implicate its own recorder. They are not refused clearing exceptions either.
 See [decisions.md](decisions.md) §267.
+
+**Inspecting ≠ approving.** The fourth leg's copy of the same rule: whoever
+hand-recorded a quality inspection of the goods the invoice is billed against
+cannot approve it. `approval_chain.inspection_recorders` reads the same POs as
+`receipt_recorders` and, on them, every `source = manual` inspection with a
+named recorder in the invoice's own entity that the 4-way leg could read — a
+PO-level row (no `gr_id`) or one on a live receipt of those POs, whatever its
+verdict. `check_inspection_segregation` refuses with 403
+`approval_segregation_inspector`, after any corrections, on every door; bulk
+approve resolves it for the batch up front, the `/complete` amount floor lands
+such an invoice at review, the escalation sweep never targets an inspector,
+and `require_segregation: false` lifts it. Like receivers, inspectors are not
+in `implicated_actors`. The other order (an approver's later `pass` does not
+lift the hold) is `invoice_warnings._inspection_clears_hold`. See
+[decisions.md](decisions.md) §401, §404.
 
 **The reverse order: approving first, receiving second.** The same person may
 not approve an invoice and then hand-record the receipt that lifts its "billed

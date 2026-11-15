@@ -20493,3 +20493,67 @@ the record's own `vendorId`, which is refused even with a blank pay-to;
 `tests/test_erp_refusal_codes.py` and `frontend/src/lib/api/erpRefusals.test.ts`
 (the code catalogued and stated). fake-erp's BC create now states
 `payToVendorId` (the vendor card's, else the vendor's own).
+
+## 404. Whoever recorded the invoice's quality inspection may not approve it (§401 follow-up, 2026-11-15)
+
+**The gap.** §401 stopped an approver's later `pass` from lifting their own
+invoice's `quality_hold`, §389's order applied to the fourth leg. The other
+order was open: a manager records the `pass` that lifts the hold (they are not
+yet an approver, so `_inspection_clears_hold` allows it), then approves the
+invoice, and the payment run pays it. For receipts §267 refuses that second
+step at the approval door; no door refused an inspector.
+
+**Decision.** Inspecting and approving are different duties, as receiving and
+approving are. The approval door refuses the inspector with its own code.
+
+- **The set.** `approval_chain.inspection_recorders_by_invoice`: on the POs
+  the receipt rule reads (`_invoice_po_ids`, now shared by both, so the two
+  sets name the same goods), every inspection the 4-way leg could read — a
+  PO-level row (`po_id` on one of them, no `gr_id`) or a receipt's own row
+  (`gr_id` a live receipt of one of them) — that is `source = manual`, names
+  its recorder, and is booked in the invoice's own entity. An inspection on a
+  cancelled receipt is never read by the matcher and vouches for nothing, as a
+  cancelled receipt's recorder does not. A QMS verdict was typed by nobody
+  here; a row predating migration 0105 names nobody to refuse.
+- **Every verdict counts**, not only `pass`. The rule is about the duty, not
+  the outcome — a receipt's recorder is refused whatever quantity they
+  counted — and a `fail` recorder who approves is still the person who judged
+  the goods signing off the bill for them.
+- **Its own code, `approval_segregation_inspector`**, for §267's reason: the
+  refusal must name the duty that collides, or the reader cannot tell who
+  should approve instead. Catalogued for web (`codedRefusals.ts`, six
+  locales) and mobile (`coded_refusal_messages.dart`, the ARBs).
+- **The receiver's doors, all of them.** `review._figure_gates` checks it
+  after the receiving check, after any correction (a `po_number` correction
+  cannot re-point the invoice at a PO the approver inspected); bulk approve
+  resolves the batch up front (three queries whatever its size); the
+  `/complete` amount floor lands such an invoice at review; the escalation
+  sweep's `escalation_ineligible` excludes inspectors; `review_refusals`, which
+  runs the same gates, states it before the click. The approval step's
+  `require_segregation: false` lifts it, as it lifts every segregation check.
+- **Not in `implicated_actors`**, for the reason receivers are not: that set
+  is what `_inspection_clears_hold` measures an inspection's recorder against,
+  so folding inspectors in would make every typed inspection implicate its
+  own recorder and no `pass` could ever lift a hold.
+
+**Rejected:**
+- *Reusing `approval_segregation_receiver`.* Its sentence names a goods
+  receipt the approver did not record.
+- *Counting only the inspection the matcher currently reads.* Which row is
+  "latest" changes as rows arrive; the approval door would refuse or allow the
+  same person depending on someone else's later entry. Every readable row is
+  coarser and the safe error, as §267 counts every same-numbered PO.
+- *A status filter on inspections.* Nothing cancels an inspection (the QMS
+  sync and the door both write `completed`), so a filter would have nothing
+  to read; liveness comes from the receipt the row is tied to.
+
+Tests: `backend/tests/test_approval_receiver_segregation.py` (§ Inspecting ≠
+approving: the single door, bulk skip with the code, the shared
+`approve_invoice`, a correction re-pointing at an inspected PO, a receipt's
+own inspection counting and a cancelled receipt's not, every verdict counting,
+QMS / sibling-entity / unnamed / sourceless rows not counting, the opt-out,
+the batch lookup's three statements, the predicate and `escalation_ineligible`,
+the `/complete` floor); `tests/test_approval_escalation.py` (the sweep never
+targets an inspector); `tests/test_review_actions_parity.py` (the verdict
+matches the POST); `frontend/src/lib/api/codedRefusals.test.ts` and
+`mobile/test/l10n/coded_refusal_messages_test.dart` (the code stated).

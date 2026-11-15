@@ -1629,27 +1629,6 @@ scope (§260) — do not fold them into any of these.
       for an invoice we show as failed, or the next change to the ERP void
       path.
 
-### Surfaced by re-matching a hand-entered inspection (2026-11-15, decisions §401)
-
-- [ ] **(c) Whoever typed in a passing inspection may still approve the
-      invoice afterwards.** §401 stops an approver's later `pass` from lifting
-      their own invoice's `quality_hold` (§389's order). The other order is
-      open: a manager records the `pass` that lifts the hold (they are not yet
-      an approver, so `_inspection_clears_hold` allows it), then approves the
-      invoice, and the payment run pays it. For receipts §267 refuses that
-      second step at the approval door (`approval_segregation_receiver`); no
-      door refuses an inspector. **Durable fix:** an
-      `approval_chain.inspection_recorders_by_invoice` set (live `manual`
-      inspections with a named recorder on every PO the invoice names, and on
-      those POs' receipts, in the invoice's entity), checked by
-      `review.approve_invoice` beside `check_receiving_segregation` with its
-      own code (`approval_segregation_inspector`), batch-resolved in bulk
-      approve, honoured by `escalation_ineligible` and the `/complete` floor,
-      lifted by the approval step's `require_segregation: false`, and the
-      refusal catalogued for web and mobile. **Trigger:** the next change to
-      the approval door's segregation checks, or a report of an invoice
-      approved by the person who passed its goods.
-
 ### Surfaced by reviewing the QuickBooks live-test fixes (2026-10-19, decisions §284–§287)
 
 - [ ] **(c) A chart or vendor listing over `SYNC_LISTING_MAX_ROWS` cannot sync
