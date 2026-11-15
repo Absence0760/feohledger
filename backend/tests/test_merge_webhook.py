@@ -39,6 +39,11 @@ from app.services.erp_adapters.base import ErpBillState, ErpInvoiceStatus
 from app.services.erp_adapters.merge_dev import map_invoice_status, merge_bill_report
 from app.services.webhook_security import verify_hmac_sha256_base64url
 
+# A mock-DB test's fake org carries its secrets inline in `settings`, standing
+# in for the sealed store (and for its names-only read, which the route checks
+# before it unseals — decisions §408). A realdb test seals for real.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 KEY = "merge-signature-key-a"
 BILL = "6c4f1f0e-0d36-4d3b-9b0f-4f3e2b1a0c77"
 MERGE_ERP = {"integration_method": "merge_dev", "webhook_signing_secret": KEY}
@@ -97,7 +102,13 @@ def _ctrl(org):
     return factory
 
 
-_ORG = SimpleNamespace(id=uuid.uuid4(), slug="acme", db_name="feoh_acme", settings={})
+_ORG = SimpleNamespace(
+    id=uuid.uuid4(), slug="acme", db_name="feoh_acme", settings={"erp": MERGE_ERP}
+)
+
+
+def _org_with(erp: dict) -> SimpleNamespace:
+    return SimpleNamespace(id=_ORG.id, slug="acme", db_name="feoh_acme", settings={"erp": erp})
 
 
 async def _post(
@@ -114,6 +125,8 @@ async def _post(
     claim = AsyncMock(return_value=claimed)
     release = AsyncMock()
     apply = apply or AsyncMock(return_value="unchanged")
+    if erp is not None and org is _ORG:
+        org = _org_with(erp)  # the stored key names follow the block under test
     with (
         patch("app.api.erp_webhook.control_session_factory", _ctrl(org)),
         patch(
@@ -292,7 +305,13 @@ async def test_a_failed_apply_releases_the_claim_and_asks_for_redelivery():
     assert release.await_args.args[0] == "erp:merge_dev"
 
 
-async def test_credentials_that_cannot_be_opened_ask_for_redelivery():
+async def test_credentials_that_cannot_be_opened_are_the_same_silent_204(caplog):
+    """The key that could not be opened is the key the signature needed, so
+    the delivery is unverified: a 503 here would answer a configured tenant's
+    slug differently from every other before anything was proven (§408). It
+    is logged as an error for the operator instead, with no secret in it."""
+    import logging
+
     from app.api.erp_webhook import merge_webhook
     from app.services.credential_crypto import CredentialCryptoError
 
@@ -303,11 +322,100 @@ async def test_credentials_that_cannot_be_opened_ask_for_redelivery():
             "app.api.erp_webhook.provider_config",
             AsyncMock(side_effect=CredentialCryptoError("kms")),
         ),
+        patch("app.api.erp_webhook.is_event_already_processed", AsyncMock()) as claim,
+        caplog.at_level(logging.ERROR, logger="app.api.erp_webhook"),
     ):
         response = await merge_webhook(
             "acme", _request(body, {"X-Merge-Webhook-Signature": _sign(body)})
         )
-    assert response.status_code == 503
+    assert response is None
+    claim.assert_not_awaited()
+    assert any("could not be opened" in r.getMessage() for r in caplog.records)
+    assert not any(KEY in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# nothing is unsealed before the checks that need no secret (decisions §408)
+# ---------------------------------------------------------------------------
+
+
+async def _post_counting_unseals(body: bytes, headers: dict, *, org, slug="acme"):
+    """Deliver through the handler with ``provider_config`` — the one opening
+    of the sealed block — as a spy. Returns (response, opened, ctrl factory)."""
+    from app.api.erp_webhook import merge_webhook
+
+    opened = AsyncMock(return_value=MERGE_ERP)
+    ctrl = _ctrl(org)
+    with (
+        patch("app.api.erp_webhook.control_session_factory", ctrl),
+        patch("app.api.erp_webhook.provider_config", opened),
+        patch("app.api.erp_webhook.is_event_already_processed", AsyncMock(return_value=False)),
+        patch.object(erp_merge_webhook, "apply_merge_event", AsyncMock()),
+    ):
+        response = await merge_webhook(slug, _request(body, headers))
+    return response, opened, ctrl
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [None, "", "not base64url !!", hmac.new(KEY.encode(), b"{}", hashlib.sha256).hexdigest()],
+    ids=["absent", "empty", "bad-alphabet", "hex-not-base64url"],
+)
+async def test_a_signature_that_could_never_verify_looks_nothing_up(signature):
+    body = _delivery()
+    headers = {} if signature is None else {"X-Merge-Webhook-Signature": signature}
+    response, opened, ctrl = await _post_counting_unseals(body, headers, org=_ORG)
+    assert response is None
+    ctrl.assert_not_called()  # not even the slug lookup
+    opened.assert_not_awaited()
+
+
+def test_a_signature_must_decode_to_a_whole_sha256_digest():
+    from app.services.webhook_security import well_formed_base64url_sha256
+
+    assert well_formed_base64url_sha256(_sign(b"x"))
+    assert well_formed_base64url_sha256(_sign(b"x").rstrip("="))
+    short = base64.urlsafe_b64encode(b"\x01" * 31).decode()
+    assert not well_formed_base64url_sha256(short)
+    assert not well_formed_base64url_sha256(None)
+
+
+@pytest.mark.parametrize(
+    "org",
+    [
+        None,  # unknown slug
+        _org_with(
+            {"type": "netsuite", "integration_method": "direct", "webhook_signing_secret": KEY}
+        ),
+        _org_with({"integration_method": "merge_dev"}),  # on Merge, no key stored
+        _org_with({}),
+    ],
+    ids=["unknown-slug", "another-erp", "no-key-stored", "no-erp"],
+)
+async def test_nothing_is_unsealed_for_a_tenant_whose_key_could_not_verify(org):
+    """Unknown slug, a tenant on another ERP, or one with no key stored: each
+    is decided from the slug lookup, the public configuration and the sealed
+    row's path NAMES, and none of them opens the sealed block."""
+    body = _delivery()
+    response, opened, _ctrl_factory = await _post_counting_unseals(
+        body, {"X-Merge-Webhook-Signature": _sign(body, "anyone")}, org=org
+    )
+    assert response is None
+    opened.assert_not_awaited()
+
+
+async def test_an_unknown_slug_answers_exactly_as_a_bad_signature_does():
+    """The two answers an outsider can compare: nothing in the response tells
+    an unknown slug from a configured tenant refusing the signature."""
+    body = _delivery()
+    headers = {"X-Merge-Webhook-Signature": _sign(body, "not-the-tenants-key")}
+    unknown, opened_unknown, _ = await _post_counting_unseals(body, headers, org=None)
+    refused, opened_real, _ = await _post_counting_unseals(body, headers, org=_ORG)
+    assert unknown is None and refused is None
+    # The one difference left is the work: the configured tenant's key is
+    # opened to check the signature (decisions §408 records this residual).
+    opened_unknown.assert_not_awaited()
+    opened_real.assert_awaited_once()
 
 
 async def test_the_generic_route_no_longer_reads_merges_shape():
@@ -676,3 +784,69 @@ async def test_the_route_is_mounted_public_and_verifies_before_it_applies(
         assert fake._store == {}  # no dedup claim either
         assert await _exceptions(realdb, inv_id) == []
     assert await _status(realdb, inv_id) == InvoiceStatus.done
+
+
+async def test_the_sealed_key_is_opened_only_for_a_plausible_delivery_to_a_configured_tenant(
+    realdb, monkeypatch
+):
+    """Against the real store, through the ASGI app (decisions §408): an
+    unknown slug, a tenant with no Merge key stored and a signature that could
+    never verify are each the same empty 204 with nothing opened; only a
+    well-formed signature at a configured tenant opens that tenant's row, once,
+    and a wrong one is still the same 204."""
+    from app.api import erp_webhook
+    from app.services import credential_crypto
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    inv_id = await _merge_tenant_with_a_pushed_bill(realdb)
+    read = AsyncMock()
+    monkeypatch.setattr(MergeDevAdapter, "bill_report", read)
+    fake = _DedupRedis()
+
+    async def _get_redis():
+        return fake
+
+    monkeypatch.setattr("app.services.webhook_security.get_redis", _get_redis)
+    monkeypatch.setattr(erp_webhook, "control_session_factory", realdb.control_sessionmaker())
+    opened: list[str] = []
+    real_open = credential_crypto.open_envelope
+
+    async def _spy(envelope, context):
+        opened.append(context["organization_id"])
+        return await real_open(envelope, context)
+
+    monkeypatch.setattr(credential_crypto, "open_envelope", _spy)
+
+    body = _delivery(status="VOID")
+    a, b = realdb.info("a"), realdb.info("b")
+    attempts = [
+        ("no-such-tenant-408", _sign(body, "guess")),  # unknown slug
+        (b.slug, _sign(body, "guess")),  # a real tenant with no Merge key
+        (a.slug, "not base64url !!"),  # a signature that could never verify
+    ]
+    async with realdb.client(key="a", role=None) as c:
+        for slug, signature in attempts:
+            resp = await c.post(
+                f"/api/erp/webhook/merge_dev/{slug}",
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Merge-Webhook-Signature": signature,
+                },
+            )
+            assert (resp.status_code, resp.content) == (204, b""), slug
+        assert opened == []
+
+        resp = await c.post(
+            f"/api/erp/webhook/merge_dev/{a.slug}",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Merge-Webhook-Signature": _sign(body, "a-plausible-wrong-key"),
+            },
+        )
+    assert (resp.status_code, resp.content) == (204, b"")
+    assert opened == [str(a.org_id)]
+    read.assert_not_awaited()
+    assert fake._store == {}
+    assert await _exceptions(realdb, inv_id) == []
