@@ -72,6 +72,11 @@ the uploader, or a person who recalled the invoice's approval) no longer keeps
 their own clearance live, and the finding is raised again for someone else;
 a clearance by anyone the invoice does not implicate still holds. A
 payment-blocking row with no recorded decider never suppresses (decisions §367).
+An approval does not wait for the next refresh: every site that stamps an
+approver re-judges the invoice's closed `po_mismatch` / `quality_hold` rows in
+the same transaction (`invoice_warnings.reraise_holds_cleared_by_an_approver`),
+so a hold its new approver cleared first is open again before a payment run can
+stage the invoice (decisions §422).
 The decision writes its
 `exception.resolved` / `exception.dismissed` row as always; a suppressed
 refresh writes nothing, because nothing was raised. A row closed before its type

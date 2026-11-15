@@ -21863,3 +21863,74 @@ integrator wanting to notify the recaller, but no integrator has asked, and
 adding a field later is non-breaking while removing one is breaking.
 `test_webhook_event_catalogue.py` now asserts no `user` field in the recall
 payload.
+
+## 422. An approval re-judges the holds its approver cleared first, in the same transaction (amends §420, round-12 money-path review, 2026-11-15)
+
+**The gap.** §420 refuses an invoice's approvers clearing its `po_mismatch` /
+`quality_hold`, but only in one order. In the other, X resolves the open hold
+while X is not yet an approver (allowed), then X approves. Approval gates on no
+blocking exception, `review.approve_invoice` refreshes warnings only when
+corrections are sent, and the payment run reads only open and escalated rows
+(`payment_runs.blocking_exception_types`), so the invoice entered a run and was
+paid on X's word alone. §420's **Cost** paragraph says such a hold "comes back
+at the next refresh after they approve". That is wrong: no refresh is
+guaranteed between the approval and a run. This entry corrects it; §420's body
+is left as written.
+
+**Decision.** Every site that stamps an approver re-judges the invoice's closed
+`po_mismatch` / `quality_hold` rows in the same transaction, right after the
+stamp: `review.approve_invoice` after `advance_approval_chain` (each chain
+level) and after `record_final_approval` (the single and bulk approve, the
+email / Slack / Teams / mobile doors and the exception agents all go through
+it; bulk since §418), `/complete`'s amount floor, and extraction's
+auto-approve. The helper is `invoice_warnings.reraise_holds_cleared_by_an_approver`.
+A closed row is a candidate only when a person decided it and its stamp still
+equals the invoice's current fingerprint, and `_ensure_exception` raises it
+again with the row's own finding. That is the question the detector's
+suppression already asks (§366 / §367): `_ensure_exception` raises nothing
+while an open row of the type holds the invoice, and nothing while some
+clearance of that finding still stands (`exception_lifecycle.clearance_stands`,
+which reads the approver axis since §420). A colleague's clearance therefore
+survives the approval, and only the new approver's own clearance is undone.
+`backend/tests/test_exception_resolve_segregation.py` pins each stamping site
+by AST, so a new one cannot skip the re-judge.
+
+**Why not run `refresh_warnings` inside the approval.** It would work for the
+plain case, but it re-runs every detector in the middle of an approval, and the
+PO match is the one that matters here. The multi-PO split resolver writes its
+`po_match` by hand and then approves. A re-match there reads its combined
+reference as an unknown PO and marks the row the agent is deciding `refound`,
+so the coordinator escalates a resolve it had judged correctly against the
+approvers from before its run (§420). The re-judge runs no detector. A
+stale-stamped clearance suppresses nothing, so the next refresh judges the new
+facts with no help from it. A row an agent or a detector closed has no stamp
+(`_bind_fingerprint_to_decision`), so the re-judge never touches one.
+
+**The agent's own resolve stands.** An agent's apply approves while the row it
+is deciding is still open, so the re-judge raises nothing beside it, even when
+the triggering human holds an older clearance stamped as the invoice hashes
+now. The coordinator then resolves that row, judged against the approvers from
+before the run (§420), and the resolve is not undone.
+
+**Rejected.**
+
+- *Refusing the approval* to someone who cleared the hold. §420 rejected this
+  already: refusing the approval would leave the clearance standing, and it
+  would release the payment as soon as anyone else approved.
+- *Re-checking at the payment run.* The run would have to re-ask
+  `clearance_stands` of every closed row, for every invoice, on every build,
+  and the queue would show the hold as clear until someone built a run. Raising
+  the hold at the approval keeps "an open row blocks" as the one rule the queue
+  and the builder share (§319).
+
+**Cost.** None beyond §420's: a manager who cleared a hold and then approved
+the invoice finds the hold open again at once, for a colleague to clear or for
+independent evidence to lift. On `/complete`'s floor the re-judge rarely finds
+a candidate: the floor approves a `new` invoice, and the refresh on `new`
+clears `po_match`, so an earlier clearance's stamp no longer matches.
+
+Tests: `backend/tests/test_exception_resolve_segregation.py` (clear then
+approve: the hold is back and the run builder 409s on it, for both types; a
+colleague's clearance survives the approval; a chain level approver re-raises;
+an agent run that approves still resolves its own row with no second hold; the
+AST pin on every stamping site).
