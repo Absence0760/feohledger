@@ -186,6 +186,125 @@ void main() {
     expect(find.byKey(const Key('exception-rematch-note')), findsNothing);
   });
 
+  group('the ERP report behind a reconciliation row', () {
+    Future<void> pumpReport(
+      WidgetTester tester,
+      Map<String, dynamic> report, {
+      String? erpName = 'Xero',
+      Locale? locale,
+    }) async {
+      setTallSurface(tester);
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async =>
+              _json(_detailJson(erpName: erpName, erpReport: report)),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: appLocalizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          locale: locale,
+          home: const ExceptionDetailScreen(exceptionId: '1'),
+        ),
+      );
+      await _pumpUntil(tester, find.text('PO Mismatch'));
+    }
+
+    testWidgets('a write-back refusal states why, in the reader\'s language',
+        (tester) async {
+      await pumpReport(tester, {
+        'kind': 'payment_writeback_failed',
+        'erp_type': 'xero',
+        'refusal': {
+          'code': 'payments_scope_missing',
+          'params': {'provider': 'Xero'},
+        },
+      }, locale: const Locale('de'));
+
+      final note = find.byKey(const Key('exception-erp-refusal'));
+      expect(note, findsOneWidget);
+      final de = lookupAppLocalizations(const Locale('de'));
+      expect(
+        tester.widget<Text>(note).data,
+        de.erpRefusalPaymentsScopeMissing('Xero'),
+      );
+    });
+
+    testWidgets('a code this build cannot state reads as the generic line',
+        (tester) async {
+      await pumpReport(tester, {
+        'kind': 'payment_void_writeback_failed',
+        'refusal': {
+          'code': 'some_newer_code',
+          'params': {'provider': 'Xero'},
+        },
+      }, erpName: null);
+
+      final note = find.byKey(const Key('exception-erp-refusal'));
+      expect(tester.widget<Text>(note).data,
+          lookupAppLocalizations(const Locale('en')).erpRefusalUnknown('your ERP'));
+      expect(find.textContaining('some_newer_code'), findsNothing);
+    });
+
+    testWidgets('a write-back the ERP gave no code for adds no line',
+        (tester) async {
+      await pumpReport(tester, {
+        'kind': 'payment_writeback_failed',
+        'refusal': null,
+      });
+      expect(find.byKey(const Key('exception-erp-refusal')), findsNothing);
+      expect(find.byKey(const Key('exception-erp-payment')), findsNothing);
+    });
+
+    testWidgets('a reported payment shows the ERP\'s figure in its currency',
+        (tester) async {
+      await pumpReport(tester, {
+        'kind': 'paid_not_recorded',
+        'erp_type': 'xero',
+        'amount': '240.50',
+        'amount_currency': 'EUR',
+        'reference': 'xero:bill-9',
+        'paid_on': '2026-10-30',
+        'paid_on_reported': true,
+      });
+
+      final panel = find.byKey(const Key('exception-erp-payment'));
+      expect(panel, findsOneWidget);
+      Finder inPanel(String text) =>
+          find.descendant(of: panel, matching: find.text(text));
+      expect(inPanel('Payment reported by Xero'), findsOneWidget);
+      expect(inPanel('Amount Xero reports paid'), findsOneWidget);
+      expect(inPanel('€240.50'), findsOneWidget);
+      expect(inPanel('Oct 30, 2026'), findsOneWidget);
+      expect(inPanel('xero:bill-9'), findsOneWidget);
+      // The invoice's own figure stays in its own panel, never replaced.
+      expect(find.text(r'$250.00'), findsOneWidget);
+      // No refusal line on this kind.
+      expect(find.byKey(const Key('exception-erp-refusal')), findsNothing);
+    });
+
+    testWidgets('no stated figure says so; an unreported date is left out',
+        (tester) async {
+      await pumpReport(tester, {
+        'kind': 'paid_not_recorded',
+        'amount': null,
+        'amount_currency': null,
+        'reference': 'qbo:1',
+        'paid_on': '2026-10-30',
+        'paid_on_reported': false,
+      });
+
+      final panel = find.byKey(const Key('exception-erp-payment'));
+      expect(
+        find.descendant(of: panel, matching: find.text('Not stated')),
+        findsOneWidget,
+      );
+      expect(find.text('Oct 30, 2026'), findsNothing);
+      expect(find.text('Paid on'), findsNothing);
+    });
+  });
+
   testWidgets('a coded composite description lists its localized findings',
       (tester) async {
     setTallSurface(tester);

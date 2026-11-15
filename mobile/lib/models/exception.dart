@@ -126,6 +126,18 @@ class ApException {
   /// reviewer the PO changed and they may now clear it.
   final PoRematchClears? poRematch;
 
+  /// `erp_report.kind`, or null when the row carries no ERP report.
+  final String? erpReportKind;
+
+  /// `erp_report.refusal`: on the payment write-back rows, the ERP's coded
+  /// refusal as `{code, params}`, kept raw for `erpRefusalNote`
+  /// (`lib/l10n/erp_refusal_messages.dart`). Null otherwise.
+  final Map<String, dynamic>? erpRefusal;
+
+  /// The payment the ERP reported and FeohLedger could not record
+  /// (`erp_report.kind == "paid_not_recorded"`, decisions §319). Null otherwise.
+  final ErpReportedPayment? erpPayment;
+
   ApException({
     required this.id,
     this.invoiceId,
@@ -152,6 +164,9 @@ class ApException {
     this.timeToResolutionHours,
     this.erpName,
     this.poRematch,
+    this.erpReportKind,
+    this.erpRefusal,
+    this.erpPayment,
   });
 
   static DateTime? _parseDate(Object? raw) {
@@ -193,6 +208,81 @@ class ApException {
           (json['time_to_resolution_hours'] as num?)?.toDouble(),
       erpName: json['erp_name'] as String?,
       poRematch: PoRematchClears.fromErpReport(json['erp_report']),
+      erpReportKind: _erpReportKind(json['erp_report']),
+      erpRefusal: _erpRefusal(json['erp_report']),
+      erpPayment: ErpReportedPayment.fromErpReport(json['erp_report']),
+    );
+  }
+
+  static String? _erpReportKind(Object? report) {
+    if (report is! Map) return null;
+    final kind = report['kind'];
+    return kind is String ? kind : null;
+  }
+
+  static Map<String, dynamic>? _erpRefusal(Object? report) {
+    if (report is! Map) return null;
+    final refusal = report['refusal'];
+    return refusal is Map ? Map<String, dynamic>.from(refusal) : null;
+  }
+}
+
+/// `erp_report` with `kind == "paid_not_recorded"`: what the ERP said was paid
+/// on a bill FeohLedger could not record the payment for (decisions §319).
+/// Display only — the record itself is web-only. Every field may be absent.
+class ErpReportedPayment {
+  static const kind = 'paid_not_recorded';
+
+  /// The cash the ERP states was paid, as the exact decimal string the server
+  /// keeps (never parsed through a double), and the ISO 4217 code it stated it
+  /// in (decisions §386, §413). Null when the ERP stated no figure.
+  final String? amount;
+  final String? amountCurrency;
+
+  /// The reference the payment would be recorded under.
+  final String? reference;
+
+  /// The ERP's own payment date — a calendar day. Null when the ERP stated
+  /// none (`paid_on_reported` false: the stored day is when the report
+  /// arrived, which is not a fact the ERP gave).
+  final DateTime? paidOn;
+
+  const ErpReportedPayment({
+    this.amount,
+    this.amountCurrency,
+    this.reference,
+    this.paidOn,
+  });
+
+  static final _isoDay = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+  static final _exactDecimal = RegExp(r'^-?\d+(\.\d+)?$');
+  static final _currencyCode = RegExp(r'^[A-Za-z]{3}$');
+
+  /// Null for any other report, or none.
+  static ErpReportedPayment? fromErpReport(Object? raw) {
+    if (raw is! Map || raw['kind'] != kind) return null;
+    final rawAmount = raw['amount'];
+    final currency = raw['amount_currency'];
+    final reference = raw['reference'];
+    final day = raw['paid_on'];
+    final trimmed = rawAmount is String ? rawAmount.trim() : '';
+    final amount = _exactDecimal.hasMatch(trimmed) ? trimmed : null;
+    return ErpReportedPayment(
+      amount: amount,
+      // A currency belongs to its figure: never shown without one.
+      amountCurrency: amount != null &&
+              currency is String &&
+              _currencyCode.hasMatch(currency)
+          ? currency.toUpperCase()
+          : null,
+      reference: reference is String && reference.trim().isNotEmpty
+          ? reference.trim()
+          : null,
+      paidOn: raw['paid_on_reported'] == true &&
+              day is String &&
+              _isoDay.hasMatch(day)
+          ? DateTime.tryParse(day)
+          : null,
     );
   }
 }

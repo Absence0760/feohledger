@@ -1919,12 +1919,6 @@ user-visible halves still open.
       result) that later screens and both gates respect, under a permission a
       preparer cannot hold. **Trigger:** the first live sanctions provider, or a
       customer report of a stuck vendor.
-- [ ] **(c) Mobile does not show the ERP refusal behind a reconciliation row.**
-      The web resolve dialog states `erp_report.refusal` through `erpRefusal.*`
-      (§332); the mobile exception detail shows only the catalogued sentence.
-      **Durable fix:** a mobile ERP refusal-code map with ARB strings, read on
-      the exception detail. **Trigger:** the next change to the mobile
-      exception detail.
 ### Surfaced by the 2026-10-31 follow-ups batch, round 4 (decisions §345–§348)
 
 - [ ] **(c) Mobile's invoice approve still restates its rule.**
