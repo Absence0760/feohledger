@@ -39,9 +39,23 @@ test.describe('/vendors create + portal invite (acme admin)', () => {
 			vendorId = (await (await createResp).json()).id as string;
 			expect(vendorId).toBeTruthy();
 
-			// Find it by name. The list is name-ordered and paged, so on a tenant
-			// with more than a page of vendors a new one can sort past page one
-			// (tracked in docs/followups.md); this spec is about the invite.
+			// A create ends on the new vendor's detail (decisions §416): the list
+			// is name-ordered and paged, so on a well-used tenant the new row can
+			// sort past page one and the detail is the proof it was saved.
+			await expect(createModal).toHaveCount(0);
+			const detail = page.getByRole('dialog', { name: 'Vendor screening and risk' });
+			await expect(detail).toBeVisible();
+			await expect(detail.getByRole('heading', { name: vendorName, exact: true })).toBeVisible();
+			// Focus moved into the detail, and closing it hands focus back to the
+			// "+ New Vendor" trigger, not to <body> (WCAG 2.4.3).
+			await expect
+				.poll(() => detail.evaluate((el) => el.contains(document.activeElement)))
+				.toBe(true);
+			await page.keyboard.press('Escape');
+			await expect(detail).toHaveCount(0);
+			await expect(page.getByRole('button', { name: 'New Vendor' })).toBeFocused();
+
+			// Find its row by name for the invite (it may sit past page one).
 			await page.goto(`/vendors?search=${encodeURIComponent(vendorName)}`);
 			const row = page.locator('table tbody tr', { hasText: vendorName });
 			await expect(row).toHaveCount(1, { timeout: 10_000 });

@@ -20983,3 +20983,43 @@ exact-state helper checks the final flag; Merge's 429 sent once);
 the margin on both paths; the margin's floor; a 429 possibly posted and not
 retried). The #654 sandbox entry in `docs/followups.md` now names the margin
 and the 429 as what that pass settles.
+
+## 416. A vendor create ends on the new vendor's detail, over the unchanged list (closes a `docs/followups.md` entry, round 12, 2026-11-14)
+
+**Context.** `/vendors` is ordered by name and pages 25 at a time, and
+`CreateVendorModal`'s `onsaved` only refetched page one. On a tenant with more
+than a page of vendors, a new vendor whose name sorted past page one did not
+appear after it was created, and nothing but the closed dialog said it had
+been saved. `tests-e2e/vendors/create-invite.spec.ts` hit it on a well-used
+e2e tenant.
+
+**Decision.** After `CreateVendorModal` saves, the page closes it and opens the
+new vendor's `VendorModal` (`routes/vendors/+page.svelte::openCreatedVendor`),
+then refetches the list behind it. The detail is a dialog over the list, so
+the list's URL-backed `?search=&status=&sort=&order=` is untouched and closing
+the detail returns the user to exactly the view they created from. The page
+waits for the create dialog to unmount (`await tick()`) before opening the
+detail, so the create dialog's focus restore lands on **+ New Vendor** first
+and the detail records that as its trigger: focus moves into the detail on
+open and returns to **+ New Vendor** on close (WCAG 2.4.3), never to a control
+inside a dialog that has already gone. `CreateVendorModal`'s contract is
+unchanged (`onsaved(vendor)` still hands the created vendor back), and
+`/vendors` is its only caller.
+
+**Rejected.**
+
+- *Pinning the new vendor at the top of the list until the next reload.* A row
+  out of sort order is a second ordering rule the table has to explain, and it
+  disagrees with the count, the chips and Load more until it disappears.
+- *Filtering the list to the new vendor.* It rewrites the user's own
+  search / status in the URL, so Back and a shared link no longer show the
+  view they were working in.
+
+**Cost.** A user creating several vendors in a row closes each detail before
+the next **+ New Vendor**. That is one Esc, and the detail is where the next
+step for a new vendor (screening, bank details, invite) starts anyway.
+
+Tests: `tests-e2e/vendors/create-invite.spec.ts` (the create dialog closes, the
+detail opens on the new vendor's name with focus inside it, and Esc returns
+focus to **+ New Vendor**). No vitest: the change is a dialog hand-off with no
+logic separable from the DOM.

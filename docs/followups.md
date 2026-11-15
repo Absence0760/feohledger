@@ -889,22 +889,6 @@ or is a sibling of a fix that needs its own pass.
       fixtures that call it on other statuses. **Trigger:** the next change to
       `services/erp.py` or either dispatcher.
 
-### Surfaced by the vendors table column fix (2026-10-06)
-
-- [ ] **(c) A vendor you've just created can be invisible in the list.**
-      `/vendors` is ordered by name (`api/vendors.py`, `default=[Vendor.name.asc(),
-      …]`) and pages 25 at a time, and `CreateVendorModal`'s `onsaved` only
-      refetches page one. On a tenant with more than a page of vendors, a new
-      vendor whose name sorts past page one doesn't appear after you create it,
-      with no sign it was saved except the closed modal.
-      `tests-e2e/vendors/create-invite.spec.ts` hit this on a well-used e2e
-      tenant. It now searches for its vendor, since its subject is the invite,
-      not list placement. **Durable fix:** a product call between opening the
-      new vendor's detail view after save, pinning it at the top of the list
-      until the next reload, or filtering the list to it. Opening the detail is
-      the smallest change, and matches how a create usually ends. **Trigger:**
-      the next change to the vendors list or `CreateVendorModal`.
-
 ### Surfaced by the expense-management bug hunt (2026-10-05, round 2)
 
 - [ ] **(c) An approved pre-approval is never consumed, so one estimate covers
