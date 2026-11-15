@@ -703,3 +703,203 @@ def test_lines_stated_in_credit_sign_are_read_in_the_uis_sign():
         Decimal(100),
         Decimal(-10),
     ]
+
+
+# ---------------------------------------------------------------------------
+# The pinned client (decisions §334, §406)
+# ---------------------------------------------------------------------------
+
+
+def test_the_account_host_is_dialled_through_the_pinned_client(monkeypatch):
+    """Every NetSuite call is pinned to an address the resolver vetted; the
+    trusted operator override (fake-erp on localhost) stays plain, as SYSPRO's
+    does."""
+    from app.utils.url_safety import PinnedAsyncTransport
+
+    monkeypatch.setattr(settings, "erp_netsuite_api_base", "")
+    pinned = _adapter()._client(timeout=5)
+    assert isinstance(pinned._transport, PinnedAsyncTransport)
+    assert pinned._trust_env is False
+
+    monkeypatch.setattr(settings, "erp_netsuite_api_base", API_BASE)
+    plain = _adapter()._client(timeout=5)
+    assert not isinstance(plain._transport, PinnedAsyncTransport)
+    asyncio.run(pinned.aclose())
+    asyncio.run(plain.aclose())
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "169.254.169.254", "10.0.0.7", "::1"])
+def test_an_account_host_resolving_inward_is_a_failed_connect_never_dialled(monkeypatch, address):
+    """A record for ``<account>.suitetalk.api.netsuite.com`` that answers with
+    an internal address is refused at connect, before the signed request is
+    sent, and surfaces as ``httpx.ConnectError`` — the network failure every
+    caller already handles — not a ValueError none of them expects."""
+    from app.utils import url_safety
+
+    monkeypatch.setattr(settings, "erp_netsuite_api_base", "")
+    looked_up: list[str] = []
+
+    async def _lookup(host: str, port: int) -> list[str]:
+        looked_up.append(host)
+        return [address]
+
+    monkeypatch.setattr(url_safety, "_lookup_async", _lookup)
+    adapter = _adapter()
+
+    async def _get() -> None:
+        async with adapter._client(timeout=5) as client:
+            await client.get(f"{adapter._base_url()}/vendor?limit=1")
+
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(_get())
+    assert looked_up == ["1234567.suitetalk.api.netsuite.com"]
+    # The callers' own handling: a listing reads it as an incomplete fetch,
+    # the connection test as a plain False.
+    with pytest.raises(ErpListingIncomplete):
+        asyncio.run(adapter.list_vendors())
+    assert asyncio.run(adapter.test_connection()) is False
+
+
+# ---------------------------------------------------------------------------
+# Tenant deletion (decisions §400, §406)
+# ---------------------------------------------------------------------------
+
+
+def _m2m_adapter(**overrides) -> NetSuiteAdapter:
+    return NetSuiteAdapter(
+        {
+            "account_id": "1234567",
+            "auth_method": "oauth2_m2m",
+            "client_id": "cid",
+            "certificate_id": "cert",
+            "private_key": "unused",
+            **overrides,
+        }
+    )
+
+
+def test_a_tba_token_is_revoked_and_proved_dead_by_its_next_call(fake):
+    """Oracle's ``revoketoken`` with the token's own signature; the token is
+    then refused everywhere, which is what makes the outcome ``revoked``."""
+    from app.services.erp_oauth import REVOKED
+
+    adapter = _adapter()
+    assert adapter.revokes_stored_access is True
+    assert asyncio.run(adapter.test_connection()) is True
+
+    assert asyncio.run(adapter.revoke_stored_access()) == REVOKED
+
+    assert fake.STATE["netsuite_tba_revoked"] == {"ti": True}
+    assert asyncio.run(adapter.test_connection()) is False
+
+
+def test_the_revoke_url_is_the_accounts_restlet_domain(monkeypatch):
+    """Oracle names the RESTlet domain and both GET parameters; the sandbox
+    suffix is spelled as in every other NetSuite hostname."""
+    monkeypatch.setattr(settings, "erp_netsuite_api_base", "")
+    adapter = NetSuiteAdapter(
+        {**_adapter().config, "account_id": "1234567_SB1", "token_id": "t i/1"}
+    )
+    assert adapter._revoke_token_url() == (
+        "https://1234567-sb1.restlets.api.netsuite.com/rest/revoketoken"
+        "?consumerKey=ck&token=t%20i%2F1"
+    )
+    monkeypatch.setattr(settings, "erp_netsuite_api_base", API_BASE)
+    assert adapter._revoke_token_url() == (
+        "http://fake-erp.test/netsuite/rest/revoketoken?consumerKey=ck&token=t%20i%2F1"
+    )
+
+
+def _scripted(monkeypatch, handler) -> list[httpx.Request]:
+    seen: list[httpx.Request] = []
+
+    def _record(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return handler(request)
+
+    monkeypatch.setattr(settings, "erp_netsuite_api_base", API_BASE)
+    transport = httpx.MockTransport(_record)
+
+    def client(*args, **kwargs):
+        kwargs.setdefault("transport", transport)
+        return _REAL_ASYNC_CLIENT(*args, **kwargs)
+
+    monkeypatch.setattr(netsuite.httpx, "AsyncClient", client)
+    return seen
+
+
+def _answer(revoke: int | Exception, probe: int):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/rest/revoketoken"):
+            if isinstance(revoke, Exception):
+                raise revoke
+            return httpx.Response(revoke, json={})
+        return httpx.Response(probe, json={"items": []})
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    ("revoke", "probe", "probed"),
+    [
+        (200, 200, True),  # NetSuite answered, but the token still signs in
+        (403, 401, False),  # refused (another user's token, a missing permission)
+        (503, 401, False),
+        (httpx.ConnectError("down"), 401, False),
+    ],
+)
+def test_a_revoke_not_proved_is_failed_and_never_logs_a_secret(
+    monkeypatch, caplog, revoke, probe, probed
+):
+    from app.services.erp_oauth import REVOKE_FAILED
+
+    seen = _scripted(monkeypatch, _answer(revoke, probe))
+    caplog.set_level("DEBUG")
+
+    assert asyncio.run(_adapter().revoke_stored_access()) == REVOKE_FAILED
+
+    assert [r.url.path.endswith("/vendor") for r in seen] == [False, True][: 1 + probed]
+    assert seen[0].headers["authorization"].startswith('OAuth realm="1234567"')
+    for secret in ("cs", "ts"):
+        assert f'"{secret}"' not in caplog.text and f"={secret}" not in caplog.text
+    assert "NetSuite token revocation" in caplog.text
+
+
+def test_client_credentials_are_unsupported_and_name_the_certificate(monkeypatch):
+    """Oracle's OAuth 2.0 revoke takes a refresh token, which this grant never
+    issues; the certificate mapping is the customer's to revoke."""
+    from app.services.erp_oauth import REVOKE_UNSUPPORTED
+
+    seen = _scripted(monkeypatch, _answer(200, 401))
+    adapter = _m2m_adapter()
+
+    assert adapter.revokes_stored_access is False
+    assert asyncio.run(adapter.revoke_stored_access()) == REVOKE_UNSUPPORTED
+    assert seen == []
+    assert "OAuth 2.0 Client Credentials (M2M) Setup" in adapter.provider_side_disconnect
+    assert "Access Tokens" not in adapter.provider_side_disconnect
+
+
+def test_each_method_names_its_own_step_and_an_unreadable_one_names_both(monkeypatch):
+    from app.services.erp_oauth import REVOKE_FAILED
+
+    seen = _scripted(monkeypatch, _answer(200, 401))
+    tba = _adapter().provider_side_disconnect
+    assert "Setup > Users/Roles > User Management > Access Tokens" in tba
+    assert "Certificate" not in tba
+
+    broken = _m2m_adapter(auth_method="saml")
+    assert broken.revokes_stored_access is False
+    assert "Access Tokens" in broken.provider_side_disconnect
+    assert "(M2M) Setup" in broken.provider_side_disconnect
+    assert asyncio.run(broken.revoke_stored_access()) == REVOKE_FAILED
+    assert seen == []
+
+
+def test_a_tba_block_missing_a_secret_fails_the_revoke_without_a_request(monkeypatch):
+    from app.services.erp_oauth import REVOKE_FAILED
+
+    seen = _scripted(monkeypatch, _answer(200, 401))
+    adapter = NetSuiteAdapter({**_adapter().config, "token_secret": ""})
+    assert asyncio.run(adapter.revoke_stored_access()) == REVOKE_FAILED
+    assert seen == []

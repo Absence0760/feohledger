@@ -1787,14 +1787,14 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by the ERP revoke work (#655, decisions §400)
 
-- [ ] **(c) Two stored-credential ERPs say nothing at tenant deletion.**
-      Tenant deletion now revokes Sage Intacct's tokens and names the step the
-      customer takes for Intacct, Sage Accounting (ZA), Business Central and
-      SYSPRO (§407), keyed on the adapter's `provider_side_disconnect`.
-      Merge.dev and NetSuite state none, so a deleted tenant's confirmation is
-      silent about access that outlives our sealed copy: the Merge.dev linked
-      account (Merge documents a delete-account endpoint that ends it) and
-      NetSuite's token-based-auth token. **Durable fix:** per adapter, read the provider's
+- [ ] **(c) Merge.dev says nothing at tenant deletion.**
+      Tenant deletion now revokes Sage Intacct's tokens and NetSuite's TBA
+      token (§406) and names the step the customer takes for Intacct, NetSuite,
+      Sage Accounting (ZA), Business Central and SYSPRO (§407), keyed on the
+      adapter's `provider_side_disconnect`. Merge.dev states none, so a deleted
+      tenant's confirmation is silent about access that outlives our sealed
+      copy: the Merge.dev linked account (Merge documents a delete-account
+      endpoint that ends it). **Durable fix:** per adapter, read the provider's
       documentation (URL + date in the docs), set `provider_side_disconnect`,
       and override `revoke_stored_access` where a revoke or delete endpoint is
       documented (`revokes_stored_access = True`), with a test in

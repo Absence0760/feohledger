@@ -11,6 +11,7 @@ surfaces:
 | `/merge/api/accounting/v1` | Merge.dev unified accounting API | `merge_dev.py` |
 | `/netsuite/services/rest/record/v1` | NetSuite SuiteTalk REST (OAuth 1.0 TBA, or an OAuth 2.0 bearer) | `netsuite.py` |
 | `/netsuite/services/rest/auth/oauth2/v1/token` | NetSuite OAuth 2.0 client credentials (M2M) | `netsuite.py` |
+| `/netsuite/rest/revoketoken` | NetSuite TBA token revocation (the RESTlet domain's `revoketoken`) | `netsuite.py` |
 | `/d365` | Dynamics 365 Business Central OData v4 | `dynamics_365_bc.py` |
 
 ## Auth (fails 401 in each provider's error shape)
@@ -20,7 +21,11 @@ surfaces:
 - **NetSuite**: either sign-in NetSuite accepts.
   - TBA: an `Authorization: OAuth …` header containing `oauth_consumer_key`,
     `oauth_token` and `oauth_signature` params. The HMAC signature is **not**
-    verified — shape only.
+    verified — shape only. `GET /netsuite/rest/revoketoken?consumerKey=…&token=…`
+    revokes the token signing the request (a mismatched `consumerKey` / `token`
+    is a 403, as NetSuite refuses revoking another user's token) and answers
+    `{"status": "ok"}`; every later call signed with that token is a 401
+    `INVALID_LOGIN`. Revocations do not survive `/__reset`.
   - OAuth 2.0 client credentials (M2M): `Authorization: Bearer <token>` from
     `POST /netsuite/services/rest/auth/oauth2/v1/token`, unexpired. That
     endpoint **does** verify the JWT client assertion as NetSuite documents it
