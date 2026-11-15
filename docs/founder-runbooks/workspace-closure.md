@@ -104,8 +104,14 @@ admin center; tokens already issued lapse within 60–90 minutes. For SYSPRO,
 e.net's `Logoff` ends a session, not the operator, and we log off after every
 call: tell the customer to set Operator locked out (or Usage for e.net business
 objects to No access) on the operator we logged on as in Operator Maintenance,
-or change its password. The operator's written confirmation names the step in
-every case.
+or change its password. For Merge.dev
+a `revoked` outcome means Merge deleted the linked account (§405); a `failed`
+one means the customer must delete it. Either way the API key and the webhook
+are the customer's own Merge organisation's: tell them to delete the webhook
+that points at FeohLedger, regenerate the webhook signature key, and regenerate
+or delete the API key FeohLedger held. Until they do, the webhook keeps calling
+the deleted slug's URL, and those deliveries are dropped. The operator's
+written confirmation names the step in each case.
 
 ## What stays, on purpose
 

@@ -793,6 +793,42 @@ async def merge_list_invoices(
     return {"next": None, "previous": None, "results": _merge_jsonable(rows)}
 
 
+@merge.get("/sync-status")
+async def merge_sync_status(request: Request) -> dict:
+    """Merge's `PaginatedSyncStatusList` (one page). The fake writes straight
+    into the listing `GET /invoices` reads, so its `Invoice` model is always
+    fresh: `data_fresh_as_of` is now, and a push's wait for a sync after an
+    attempt whose outcome was unknown (decisions §405) passes at once."""
+    _require_merge_auth(request)
+    now = _merge_now()
+    rows = [
+        {
+            "model_name": model,
+            "model_id": f"accounting.{model}",
+            "last_sync_start": now,
+            "next_sync_start": None,
+            "last_sync_result": "DONE",
+            "last_sync_finished": now,
+            "data_fresh_as_of": now,
+            "historical_data_since": "1900-01-01T00:00:00Z",
+            "status": "DONE",
+            "sync_status_reason": None,
+            "is_initial_sync": False,
+            "selective_sync_configurations_usage": "NOT_IN_USE",
+        }
+        for model in ("Account", "Contact", "Invoice", "PurchaseOrder")
+    ]
+    return {"next": None, "previous": None, "results": rows}
+
+
+@merge.post("/delete-account")
+async def merge_delete_account(request: Request) -> Response:
+    """Merge deletes the linked account and answers 200 with no body. The fake
+    keeps serving the token afterwards, since parallel e2e workers share it."""
+    _require_merge_auth(request)
+    return Response(status_code=200)
+
+
 @merge.get("/invoices/{invoice_id}")
 async def merge_get_invoice(request: Request, invoice_id: str) -> dict:
     _require_merge_auth(request)

@@ -20558,6 +20558,123 @@ targets an inspector); `tests/test_review_actions_parity.py` (the verdict
 matches the POST); `frontend/src/lib/api/codedRefusals.test.ts` and
 `mobile/test/l10n/coded_refusal_messages_test.dart` (the code stated).
 
+## 405. A Merge.dev retry after an unknown outcome waits for Merge's invoice sync, and tenant deletion deletes the Merge linked account (§399 / §400 follow-ups, 2026-11-14)
+
+**Context.** Two `docs/followups.md` (c) entries named `merge_dev.py`. **§399's
+residual:** the pre-create lookup reads `GET /invoices`, which is Merge's synced
+copy of the ERP, and the `Idempotency-Key` beta may be off for a tenant's Merge
+organisation. So a person's `retry-erp` after a create whose response was lost
+could find nothing and post a second bill. **§400's Merge share:** a deleted
+Merge tenant's confirmation said nothing about the linked account, nor about
+the webhook signature key §399 stores as `webhook_signing_secret`, which is the
+customer's own Merge organisation's.
+
+Read 2026-11-14 in Merge's Accounting OpenAPI spec
+(<https://docs.merge.dev/openapi/accounting.json>) and its pages:
+
+- `GET /sync-status`
+  (<https://docs.merge.dev/merge-unified/accounting/data-management/sync-status/list>)
+  is a cursor-paginated list of `SyncStatus` rows: `model_name`, `status` and
+  `last_sync_result` (`SYNCING, DONE, FAILED, DISABLED, PAUSED,
+  PARTIALLY_SYNCED`), `last_sync_start`, `last_sync_finished`, and
+  `data_fresh_as_of`, "the start time of the most recent sync that completed
+  successfully for the model", null until one has. Merge warns that
+  `last_sync_start` and `last_sync_finished` may belong to different syncs.
+- `POST /delete-account`
+  (<https://docs.merge.dev/merge-unified/accounting/linked-account/delete-account/delete>)
+  takes `X-Account-Token` and answers 200 with no body. Merge's help centre
+  (<https://help.merge.dev/en/articles/5388451-deleting-a-linked-account>) says
+  deletion removes the account at once and its logs later. Neither page says
+  what happens to the credentials Merge holds for the ERP behind the link.
+- The webhook guide
+  (<https://docs.merge.dev/merge-unified/reading-data/webhooks/merge-webhooks>)
+  says the signature key is per organisation and "can be regenerated".
+
+**Decision.**
+
+- **`services/erp` records when the outcome became unknown.**
+  `erp_outcome_unknown_at` sits beside `erp_outcome_unknown`. It is stamped
+  before the call, so a worker that dies mid-call leaves the attempt's start.
+  It moves to the attempt's end when the attempt comes back unknown or the
+  adapter raises. An attempt
+  that sent nothing (`not_posted`) keeps the earlier stamp, so a refusal made
+  while waiting never pushes the wait further out. A success drops it. It
+  reaches the adapter as `InvoicePayload.outcome_unknown_since`. A row flagged
+  unknown before the key existed is stamped when next read and pinned there.
+  That time is after the attempt too, so the wait it sets is safe, only longer.
+- **Merge's push asks `GET /sync-status` first, and only after an unknown
+  outcome.** The `Invoice` row must be fresh as of a time strictly after the
+  stamp. That means `data_fresh_as_of` when Merge reports it. Without that
+  field, it means a link at rest (not `SYNCING`) whose last result is `DONE`
+  and whose last sync started after the stamp. The sync status is read
+  **before** the lookup, so the listing the lookup reads is at least that
+  fresh. A bill the lookup finds is our own, and the push succeeds whatever the
+  sync says. If the lookup finds nothing and the sync is not yet past the
+  stamp, or `Invoice` is not listed, the push is refused `merge_sync_pending`.
+  That refusal is coded and not posted. It is catalogued on the web (six
+  locales); mobile has no ERP-refusal catalogue, as for every other adapter
+  code. An unreadable sync status is the retryable `sync_status_unavailable`
+  with nothing sent, the same shape as an unreadable lookup. A 401 is
+  `not_connected`. A first attempt never asks.
+- **`merge_sync_pending` is not retried automatically.** "Retryable" here means
+  that a person's retry after Merge's next sync goes through. `services/erp`'s
+  backoff retries 2 and 4 seconds later, which would meet the same sync and
+  only spend calls.
+- **A 429 and a connection never made are now `not_posted`.** Both were
+  already retried automatically on §399's reasoning that nothing reached the
+  ERP. Left counted as unknown, their own automatic retry would now wait for a
+  sync and fail the push.
+- **Tenant deletion deletes the linked account.** `revoke_stored_access` sends
+  `POST /delete-account` with the tenant's tokens (`revokes_stored_access`, so
+  a closure sends it after its commit, as for Intacct). It reads `revoked` only
+  on 200. Anything else, an outage, or a missing credential is `failed`.
+  `provider_side_disconnect` names what only the customer can end in the Merge
+  dashboard: the webhook that points at FeohLedger, the webhook signature key
+  (regenerate), the API key FeohLedger held (regenerate or delete), and the
+  linked account if it is still listed. Every outcome line names that step,
+  including `revoked`. Until the customer acts, the webhook keeps calling the
+  deleted slug's URL. A later tenant on that slug verifies under its own key,
+  so those deliveries are dropped.
+- **fake-erp** serves `GET /sync-status` with `Invoice` fresh as of now,
+  because its listing shows a write at once. It also serves
+  `POST /delete-account` (200, no body), and keeps the token working, since
+  parallel e2e workers share the fake.
+
+**Rejected.**
+
+- *Waiting on `last_sync_finished` alone.* Merge says it can belong to a
+  different sync from `last_sync_start`. A sync that started before the lost
+  create and finished after it would pass without having seen the bill.
+- *Asking for the sync status after the lookup.* A sync that finished between
+  the two reads would vouch for a listing older than itself.
+- *Forcing a resync (`POST /sync-status/resync`).* It is an organisation-wide
+  action that Merge rate-limits. It would also not change the rule: the push
+  would still have to wait for that sync to finish.
+- *Mentioning the webhook only when a signing key is stored.* A tenant can
+  register the webhook without storing the key. The step costs nothing to
+  state when there is no webhook.
+
+**Unverified (#654 sandbox).** Whether `GET /invoices` lags a write through
+Merge at all, which is the premise of the wait. The `model_name` spelling
+Merge uses for invoices: the example reads `Invoice`, matched
+case-insensitively. Whether Merge can finish a create after our client gave up
+on it (the stamp is the attempt's end, not Merge's). Whether a 429 is ever
+answered after the write reached the integration. What deleting the linked
+account does to the ERP credentials Merge holds.
+
+Tests: `tests/test_merge_dev_adapter.py` (each sync-status answer:
+`invoice_sync_covers` per field shape; covered, not yet, found anyway, not
+listed, a later page, unreadable, 401, never asked on a first attempt; a
+connection never made is not posted; the delete-account call, its failures, the
+step's wording); `tests/test_erp_push_flow.py` (the stamp: set at an unknown
+attempt's end and handed on, kept by an attempt that sent nothing, pinned for a
+legacy row, absent without an unknown outcome, moved to the end of an
+attempt that raised; the three exact-state asserts
+now strip and check it); `tests/test_tenant_deletion.py` (Merge revoked and
+named, a failed deletion never stopping the tenant's, a closure calling Merge
+only after its commit); `frontend/src/lib/api/erpRefusals.test.ts` (the code
+catalogued and stated in every locale).
+
 ## 406. NetSuite connects through the pinned client, revokes its TBA token at tenant deletion, and names the certificate otherwise (§334 / §400 follow-up, issue #655, 2026-11-14)
 
 **Context.** NetSuite built six plain `httpx.AsyncClient`s and sat on
