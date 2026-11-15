@@ -5173,6 +5173,13 @@ export const messages = {
 	'org.payments.nachaField.companyId': "Firmen-ID",
 	'org.payments.nachaField.odfiRouting': "Routing-Nummer Ihrer Bank",
 	'org.payments.nachaField.bankName': "Name der Bank",
+	'org.payments.nachaField.offsetRouting': "Routing-Nummer des Gegenkontos",
+	'org.payments.nachaField.offsetAccount': "Nummer des Gegenkontos",
+	'org.payments.nachaField.offsetAccountType': "Art des Gegenkontos",
+	'org.payments.nachaOffsetHint': "Nur wenn Ihre Bank eine ausgeglichene Datei verlangt: Ihr eigenes Konto, das die Datei mit der Stapelsumme belastet. Füllen Sie alle drei Felder aus oder lassen Sie sie für eine reine Gutschriftsdatei leer. Die Kontonummer wird maskiert angezeigt; lassen Sie sie leer, um die hinterlegte zu behalten.",
+	'org.payments.nachaOffsetTypeNone': "Nicht festgelegt",
+	'org.payments.nachaOffsetType.checking': "Girokonto",
+	'org.payments.nachaOffsetType.savings': "Sparkonto",
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "Exportiert",
 	'refusal.externalPaymentAmountChanged': "Der offene Betrag dieser Rechnung hat sich seit dem Anlegen des Laufs geändert ({staged} im Lauf, jetzt {amount} offen), wegen einer Gutschrift oder eines Skontos. Klären Sie die Differenz mit dem Lieferanten und erfassen Sie die Rechnung dann einzeln.",

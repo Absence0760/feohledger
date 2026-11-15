@@ -5354,6 +5354,13 @@ export const en = {
 	'org.payments.nachaField.companyId': "Company ID",
 	'org.payments.nachaField.odfiRouting': "Your bank's routing number",
 	'org.payments.nachaField.bankName': "Bank name",
+	'org.payments.nachaField.offsetRouting': "Offset account routing number",
+	'org.payments.nachaField.offsetAccount': "Offset account number",
+	'org.payments.nachaField.offsetAccountType': "Offset account type",
+	'org.payments.nachaOffsetHint': "Only if your bank requires a balanced file: your own account that the file debits for the batch total. Fill all three, or leave them blank for a credits-only file. The account number is shown masked; leave it blank to keep the one on file.",
+	'org.payments.nachaOffsetTypeNone': "Not set",
+	'org.payments.nachaOffsetType.checking': "Checking",
+	'org.payments.nachaOffsetType.savings': "Savings",
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "Exported",
 	'refusal.externalPaymentAmountChanged': "What this invoice owes has changed since the run was staged ({staged} staged, {amount} owed now) because of a credit memo or an early-payment discount. Resolve the difference with the supplier, then record the invoice on its own.",

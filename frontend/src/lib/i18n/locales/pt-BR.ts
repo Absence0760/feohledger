@@ -5166,6 +5166,13 @@ export const messages = {
 	'org.payments.nachaField.companyId': "ID da empresa",
 	'org.payments.nachaField.odfiRouting': "Número de roteamento do seu banco",
 	'org.payments.nachaField.bankName': "Nome do banco",
+	'org.payments.nachaField.offsetRouting': "Número de roteamento da conta de compensação",
+	'org.payments.nachaField.offsetAccount': "Número da conta de compensação",
+	'org.payments.nachaField.offsetAccountType': "Tipo da conta de compensação",
+	'org.payments.nachaOffsetHint': "Somente se o seu banco exigir um arquivo balanceado: a sua própria conta, que o arquivo debita pelo total do lote. Preencha os três campos ou deixe-os em branco para um arquivo só de créditos. O número da conta aparece mascarado; deixe-o em branco para manter o cadastrado.",
+	'org.payments.nachaOffsetTypeNone': "Não definido",
+	'org.payments.nachaOffsetType.checking': "Corrente",
+	'org.payments.nachaOffsetType.savings': "Poupança",
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "Exportado",
 	'refusal.externalPaymentAmountChanged': "O valor devido desta fatura mudou desde que o lote foi preparado ({staged} no lote, {amount} devido agora) por causa de uma nota de crédito ou de um desconto por pagamento antecipado. Resolva a diferença com o fornecedor e depois registre a fatura separadamente.",

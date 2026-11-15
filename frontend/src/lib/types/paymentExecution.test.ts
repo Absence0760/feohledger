@@ -5,6 +5,7 @@ import {
 	EXTERNAL_PAYMENT_METHODS,
 	NACHA_FIELDS,
 	NACHA_FIELD_LABEL_KEYS,
+	NACHA_OFFSET_ACCOUNT_TYPES,
 	NACHA_SEC_CODES,
 	canDispatchPayments,
 	isBusinessDay,
@@ -145,6 +146,66 @@ describe('NACHA settings', () => {
 		expect(nachaProblems({ ...good, odfi_routing: '123456789' })).toEqual(['odfi_routing']);
 		expect(nachaProblems({ ...good, bank_name: 'B'.repeat(24) })).toEqual(['bank_name']);
 		expect(nachaProblems({})).toEqual(['company_name', 'company_id', 'odfi_routing']);
+	});
+
+	it('uses the offset account types the backend accepts', () => {
+		const py = source('services/nacha.py');
+		const m = /^OFFSET_ACCOUNT_TYPES: tuple\[str, \.\.\.\] = \(([^)]*)\)$/m.exec(py);
+		expect(m, 'OFFSET_ACCOUNT_TYPES not found in services/nacha.py').not.toBeNull();
+		const types = [...m![1].matchAll(/"([a-z]+)"/g)].map((x) => x[1]);
+		expect([...NACHA_OFFSET_ACCOUNT_TYPES]).toEqual(types);
+	});
+
+	it('mirrors the all-or-none offset account rule', () => {
+		const good = { company_name: 'ACME CORP', company_id: '1123456789', odfi_routing: '021000021' };
+		const offset = {
+			offset_routing: '011000015',
+			offset_account: '98-7654 3210',
+			offset_account_type: 'checking'
+		};
+		expect(nachaProblems({ ...good, ...offset })).toEqual([]);
+		expect(nachaProblems({ ...good, ...offset, offset_account_type: 'savings' })).toEqual([]);
+		// Blank offset keys are no offset at all.
+		expect(
+			nachaProblems({ ...good, offset_routing: '', offset_account: '', offset_account_type: '' })
+		).toEqual([]);
+		// Any one of them asks for a balanced file, and the others become required.
+		expect(nachaProblems({ ...good, offset_routing: '011000015' })).toEqual([
+			'offset_account',
+			'offset_account_type'
+		]);
+		expect(
+			nachaProblems({
+				...good,
+				offset_routing: '011000016',
+				offset_account: 'X'.repeat(18),
+				offset_account_type: 'money_market'
+			})
+		).toEqual(['offset_routing', 'offset_account', 'offset_account_type']);
+		// A blank account is "keep the one on file" only when one is on file.
+		const keep = { ...good, ...offset, offset_account: '' };
+		expect(nachaProblems(keep)).toEqual(['offset_account']);
+		expect(nachaProblems(keep, { offsetAccountOnFile: true })).toEqual([]);
+	});
+
+	it('sends the offset keys only when one is filled', () => {
+		const base = { company_name: 'ACME', company_id: '1123456789', odfi_routing: '021000021' };
+		expect(
+			nachaForSave({ ...base, offset_routing: ' ', offset_account: '', offset_account_type: '' })
+		).toEqual(base);
+		expect(
+			nachaForSave({
+				...base,
+				offset_routing: '0110 00015',
+				offset_account: '',
+				offset_account_type: 'savings'
+			})
+		).toEqual({
+			...base,
+			offset_routing: '011000015',
+			offset_account: '',
+			offset_account_type: 'savings'
+		});
 	});
 
 	it('saves a blank form as no bank file, and trims what it keeps', () => {

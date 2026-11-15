@@ -5165,6 +5165,13 @@ export const messages = {
 	'org.payments.nachaField.companyId': "ID de la empresa",
 	'org.payments.nachaField.odfiRouting': "Número de ruta de su banco",
 	'org.payments.nachaField.bankName': "Nombre del banco",
+	'org.payments.nachaField.offsetRouting': "Número de ruta de la cuenta de compensación",
+	'org.payments.nachaField.offsetAccount': "Número de la cuenta de compensación",
+	'org.payments.nachaField.offsetAccountType': "Tipo de la cuenta de compensación",
+	'org.payments.nachaOffsetHint': "Solo si su banco exige un archivo cuadrado: su propia cuenta, a la que el archivo carga el total del lote. Rellene los tres campos o déjelos en blanco para un archivo solo de abonos. El número de cuenta se muestra enmascarado; déjelo en blanco para conservar el registrado.",
+	'org.payments.nachaOffsetTypeNone': "Sin definir",
+	'org.payments.nachaOffsetType.checking': "Corriente",
+	'org.payments.nachaOffsetType.savings': "Ahorros",
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "Exportado",
 	'refusal.externalPaymentAmountChanged': "Lo que adeuda esta factura ha cambiado desde que se preparó el lote ({staged} en el lote, {amount} adeudado ahora) por una nota de crédito o un descuento por pronto pago. Resuelva la diferencia con el proveedor y luego registre la factura por separado.",
