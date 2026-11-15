@@ -604,9 +604,10 @@ async def _stored_access_grant(
     None with no live ERP config or an adapter with nothing to say. ``outcome``
     is the read's own verdict when the sealed store could not be read (the
     config then carries no secrets, and no call is made). Otherwise an adapter
-    that calls no provider (Sage Accounting ZA, Business Central, SYSPRO) is decided here, so nothing
-    waits for a closure's commit; one that does (Sage Intacct, Merge.dev, NetSuite TBA) is revoked by
-    the caller, after the commit on a closure's session. Calls no provider and
+    that calls no provider (Sage Accounting ZA, Business Central, SYSPRO) is
+    decided here, so nothing waits for a closure's commit; one that does (Sage
+    Intacct, Merge.dev, NetSuite TBA) is revoked by the caller, after the
+    commit on a closure's session. Calls no provider and
     never raises: the deletion is never stopped by its courtesy call.
     """
     from app.services import erp_oauth
