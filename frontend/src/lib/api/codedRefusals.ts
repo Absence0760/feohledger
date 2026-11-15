@@ -506,6 +506,7 @@ const BUILDERS: Record<string, Builder> = {
 	// reports per skipped row, so the two doors agree on the names.
 	segregation_raiser: fixed('refusal.exceptionSegregationRaiser'),
 	segregation_implicated: fixed('refusal.exceptionSegregationImplicated'),
+	segregation_approver: fixed('refusal.exceptionSegregationApprover'),
 	// `api/credit_memos.py`
 	credit_memo_vendor_mismatch: fixed('refusal.creditMemoVendorMismatch'),
 	credit_memo_vendor_unresolved: fixed('refusal.creditMemoVendorUnresolved'),
