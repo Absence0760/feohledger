@@ -52,6 +52,11 @@ The classification is enforced by discovery, not by review: any module under
 `_ORG_HOST_BESPOKE` or `_PLAIN_CLIENT_ALLOWED`), so a new adapter that reads
 `cfg["base_url"]` into a plain client fails CI. The four no-emulator
 `org_host_client` adopters are also pinned to a literal `allow_private=False`.
+In a module that imports `url_safety`, every spelling of a plain httpx client
+counts against `_PLAIN_CLIENT_ALLOWED` (`import httpx as h`, `from httpx import
+AsyncClient as X`, sync `Client`, `httpx.get(...)`), and each `org_host_client`
+adopter is listed with its per-org config key: the URL the factory checks must
+trace back to that key, not to a constant or a `FEOH_*` setting (decisions §419).
 
 `stripe_treasury` used to accept a per-org `api_base`; it is now
 `FEOH_STRIPE_API_BASE` only (`payments.md` § Local testing). Operator overrides

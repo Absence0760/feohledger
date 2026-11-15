@@ -20983,3 +20983,63 @@ exact-state helper checks the final flag; Merge's 429 sent once);
 the margin on both paths; the margin's floor; a 429 possibly posted and not
 retried). The #654 sandbox entry in `docs/followups.md` now names the margin
 and the 429 as what that pass settles.
+
+## 419. The outbound-host guard resolves httpx through imports, and an `org_host_client` adopter's checked URL must trace to its per-org key (§334 / §339 / §345 follow-up, 2026-11-14)
+
+**Context.** Two gaps in `tests/test_url_safety.py`, recorded in
+`docs/followups.md` and triggered by §406's change to that file.
+`_plain_client_calls` counted only the literal `httpx.AsyncClient(...)` /
+`httpx.Client(...)` spelling, so `import httpx as h`, `from httpx import
+AsyncClient [as X]`, `from httpx import Client` and the module-level helpers
+(`httpx.get`, `httpx.post`, `httpx.stream`, each of which opens a plain
+`httpx.Client`) built an unpinned client in a guarded module without moving the
+count. And the `org_host_client` adopter check passed as long as the factory was
+called, whatever URL it was handed: `org_host_client(_BASE_URL, ...)` followed
+by a request to the per-org `base_url` would have vetted a constant and passed.
+
+**Decision.**
+
+- **Every spelling counts.** `_module_bindings` reads a module's imports
+  (module-wide, including those inside functions) to find each local name bound
+  to `httpx` or to one of its attributes, and `_plain_client_calls` counts any
+  call that resolves to `AsyncClient`, `Client`, `request`, `stream` or a verb
+  helper. The same resolution names `url_safety`'s factories, so the adopter
+  checks and the "no blocking `pinned_client` in a coroutine" guard also see
+  `url_safety.pinned_client(...)` and aliased imports, not only the bare name.
+- **The checked URL traces to the per-org key.** `_ORG_HOST_MODULES` now maps
+  each module to the config key its host is read from (`gateway_url`,
+  `base_url`, `webhook_url`). `_config_keys` follows the URL argument of every
+  `org_host_client` call through locals, `self` attributes assigned anywhere in
+  the class, `self` helper methods' returns, `or` fallbacks, f-strings, `str()`
+  and string methods, down to `config.get("<key>")` / `cfg[...]` /
+  `self.config.get(...)`. The key must be among what it reaches; a constant, a
+  `settings.*` value, or a `.get` on anything but the adapter's config reaches
+  nothing.
+- **Bespoke adopters stay in the guarded set.** `pinned_async_client` takes no
+  URL: it vets whatever it is asked to dial. So for `_ORG_HOST_BESPOKE` the
+  check is that each module still imports `url_safety` (which keeps it under
+  the plain-client count) and still calls a pinned factory.
+
+The stricter guard found no unguarded client in `backend/app`: no module
+spells httpx any other way today. Each new form was proved by a scratch module
+under `app/services/` (the count test fails on it) and by rewriting the
+Clearbit and PEPPOL adopters to vet `_BASE_URL` / `settings.peppol_gateway_url`
+(the trace test fails on each); both were reverted. The resolver and the
+tracer have their own table tests
+(`test_plain_client_count_resolves_every_import_spelling`,
+`test_config_key_tracer_follows_only_the_per_org_value`).
+
+**Rejected.**
+
+- *Tracing the request URL as well as the factory's.* The client is pinned, so
+  a request to any host is vetted at connect anyway; the up-front check exists
+  for a clean refusal, and the factory's argument is the thing that can be
+  pointed at the wrong value.
+- *A data-flow library (or running the code) instead of an AST walk.* The
+  adopters use a handful of shapes and the guard has to run in a unit test with
+  no I/O. A shape the tracer cannot follow fails closed (the key is not
+  reached), so an unusual adopter gets a failing test, not a silent pass.
+- *Counting bare references to `httpx.AsyncClient` (a factory passed around
+  uncalled).* Type annotations use the same name throughout the adapters;
+  counting them would bury the signal. Nothing in `app/` passes the class as a
+  value today.
