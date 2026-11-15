@@ -5,7 +5,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
@@ -13,6 +13,7 @@ from app.database import control_session_factory, get_tenant_engine
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment
+from app.models.workflow import WorkflowInstance
 from app.services import provider_credentials
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.erp_adapters.dispatcher import MERGE_DEV_ADAPTER_KEY, resolve_adapter_key
@@ -460,6 +461,11 @@ async def erp_webhook(
     an invalid or absent value falls back to the arrival date / NULL rather
     than refusing the report.
 
+    A body with no ``correlation_id`` names its invoice by ``erp_document_id``,
+    matched after the signature verifies and only when exactly one invoice in
+    the push's recorded realm carries it (decisions §417,
+    :func:`_invoice_id_by_document`).
+
     Merge.dev's own webhooks arrive on :func:`merge_webhook` instead.
     """
     # Bound the body BEFORE buffering it. A POST would otherwise be read fully
@@ -574,16 +580,23 @@ async def erp_webhook(
     target_status = ERP_STATUS_MAP.get(erp_status)
     if not target_status:
         return  # unknown status — silent ack
-    if not correlation_id:
-        return  # erp_document_id-only path not supported yet
     # A correlation id that is not a UUID names no invoice of ours: a decision
     # about the event (silent ack), not our failure. Parsed here, before the
     # tenant DB, because inside the handler's try it raised into the 503 path
-    # and the ERP would redeliver the same unparseable body forever.
-    try:
-        correlation_uuid = uuid.UUID(str(correlation_id))
-    except ValueError:
-        return
+    # and the ERP would redeliver the same unparseable body forever. With no
+    # correlation id the ERP's own document id names the invoice instead
+    # (decisions §417), normalised here for the same reason.
+    correlation_uuid: uuid.UUID | None = None
+    document_ref: str | None = None
+    if correlation_id:
+        try:
+            correlation_uuid = uuid.UUID(str(correlation_id))
+        except ValueError:
+            return
+    else:
+        document_ref = _document_ref(erp_document_id)
+        if document_ref is None:
+            return
 
     # Open tenant DB and find the invoice
     engine = get_tenant_engine(org.db_name)
@@ -598,13 +611,20 @@ async def erp_webhook(
             # Without the lock, a concurrent human approval racing this
             # webhook can silently overwrite the other, corrupting the audit
             # trail's from/to narrative.
-            id_result = await db.execute(
-                select(Invoice.id).where(Invoice.correlation_id == correlation_uuid)
-            )
-            invoice_id = id_result.scalar_one_or_none()
+            if correlation_uuid is not None:
+                id_result = await db.execute(
+                    select(Invoice.id).where(Invoice.correlation_id == correlation_uuid)
+                )
+                invoice_id = id_result.scalar_one_or_none()
+            else:
+                invoice_id = await _invoice_id_by_document(db, document_ref, erp_config)
             if not invoice_id:
                 return  # no matching invoice → silent ack
             invoice = await get_invoice_for_update(db, invoice_id)
+            if document_ref is not None and invoice.erp_document_id != document_ref:
+                # A confirmed re-push replaced the bill between the lookup and
+                # the lock: the id no longer names this invoice.
+                return
 
             # Only transition if the AUTHORITATIVE state machine permits it.
             # We deliberately do NOT keep a second local transition map here: a
@@ -781,6 +801,56 @@ async def erp_webhook(
             # redeliver. Bodyless — no diagnostic detail in the response.
             logger.exception("ERP webhook: processing failed for erp_type=%s", erp_type)
             return _retry_please()
+
+
+def _document_ref(value: object) -> str | None:
+    """The ERP document id a generic delivery names, or ``None`` for one that
+    can name no invoice (absent, blank, not a string or integer, or longer
+    than ``invoices.erp_document_id`` holds)."""
+    if isinstance(value, bool) or not isinstance(value, str | int):
+        return None
+    ref = str(value).strip()
+    if not ref or len(ref) > 255:
+        return None
+    return ref
+
+
+async def _invoice_id_by_document(
+    db: AsyncSession, document_ref: str, erp_config: dict
+) -> uuid.UUID | None:
+    """The one invoice whose confirmed push recorded ``document_ref`` as its
+    bill of record (``invoices.erp_document_id``), or ``None`` (decisions §417).
+
+    Called only after the delivery's signature verified, inside the tenant's
+    own database. An invoice whose push recorded a connection realm
+    (``state_data["erp_realm"]``) counts only when it is the realm the tenant
+    is connected to now, so a document id issued by another ERP, or another
+    company of the same ERP, matches nothing; an invoice pushed before realms
+    were recorded has none and is judged by the id alone. Two or more
+    candidates are refused, never guessed between: the caller answers the same
+    silent 204 as for no match.
+    """
+    from app.services.erp_link_realm import connection_realm
+
+    realm = connection_realm(erp_config)
+    recorded = WorkflowInstance.state_data["erp_realm"].astext
+    realm_clause = recorded.is_(None)
+    if realm is not None:
+        realm_clause = or_(realm_clause, recorded == realm)
+    rows = (
+        await db.execute(
+            select(Invoice.id)
+            .join(WorkflowInstance, WorkflowInstance.invoice_id == Invoice.id, isouter=True)
+            .where(Invoice.erp_document_id == document_ref, realm_clause)
+            .distinct()
+            .limit(2)
+        )
+    ).all()
+    if len(rows) != 1:
+        if rows:
+            logger.warning("ERP webhook: a document id names more than one invoice; not applied")
+        return None
+    return rows[0][0]
 
 
 async def _raise_erp_reconciliation_exception(
