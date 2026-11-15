@@ -185,7 +185,23 @@ describe('NACHA settings', () => {
 		// A blank account is "keep the one on file" only when one is on file.
 		const keep = { ...good, ...offset, offset_account: '' };
 		expect(nachaProblems(keep)).toEqual(['offset_account']);
-		expect(nachaProblems(keep, { offsetAccountOnFile: true })).toEqual([]);
+		const onFile = {
+			offset_routing: offset.offset_routing,
+			offset_account_type: offset.offset_account_type
+		};
+		expect(nachaProblems(keep, { onFile })).toEqual([]);
+		// ...and only at the same bank: a moved routing number or type must
+		// enter the number again, as the server refuses (§432 amendment).
+		expect(
+			nachaProblems({ ...keep, offset_routing: '021000021' }, { onFile })
+		).toEqual(['offset_account']);
+		const otherType = onFile.offset_account_type === 'checking' ? 'savings' : 'checking';
+		expect(
+			nachaProblems({ ...keep, offset_account_type: otherType }, { onFile })
+		).toEqual(['offset_account']);
+		expect(
+			nachaProblems({ ...keep, offset_routing: ` ${offset.offset_routing} ` }, { onFile })
+		).toEqual([]);
 	});
 
 	it('sends the offset keys only when one is filled', () => {

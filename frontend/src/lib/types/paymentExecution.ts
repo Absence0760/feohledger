@@ -179,12 +179,17 @@ export function nachaHasOffset(cfg: Partial<NachaSettings>): boolean {
  * `services/nacha.originator_problems` so the admin is told before the save
  * rather than by a 422. Field names only — never the values.
  *
- * `offsetAccountOnFile`: the server already holds an offset account number, so
- * a blank one in the form means "keep it" (`nacha.carry_offset_account`).
+ * `onFile`: the stored offset block when the server already holds an offset
+ * account number. A blank account in the form means "keep it" only while the
+ * routing number (whitespace aside) and the account type are the stored ones:
+ * a number belongs to its bank, so a save that moves the offset elsewhere must
+ * enter it again (`nacha.carry_offset_account`, decisions §432 amendment).
  */
 export function nachaProblems(
 	cfg: Partial<NachaSettings>,
-	{ offsetAccountOnFile = false }: { offsetAccountOnFile?: boolean } = {}
+	{
+		onFile = null
+	}: { onFile?: { offset_routing: string; offset_account_type: string } | null } = {}
 ): NachaField[] {
 	const problems: NachaField[] = [];
 	const name = (cfg.company_name ?? '').trim();
@@ -197,7 +202,12 @@ export function nachaProblems(
 	if (nachaHasOffset(cfg)) {
 		if (!isValidAbaRouting(cfg.offset_routing ?? '')) problems.push('offset_routing');
 		const account = (cfg.offset_account ?? '').replace(/[\s-]/g, '').toUpperCase();
-		const keep = account === '' && offsetAccountOnFile;
+		const routingKey = (v: string | undefined) => (v ?? '').replace(/\s/g, '');
+		const sameBank =
+			onFile !== null &&
+			routingKey(cfg.offset_routing) === routingKey(onFile.offset_routing) &&
+			(cfg.offset_account_type ?? '') === onFile.offset_account_type;
+		const keep = account === '' && sameBank;
 		if (!keep && !/^[A-Z0-9]{1,17}$/.test(account)) problems.push('offset_account');
 		const type = cfg.offset_account_type ?? '';
 		if (!(NACHA_OFFSET_ACCOUNT_TYPES as readonly string[]).includes(type)) {

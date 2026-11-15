@@ -677,6 +677,21 @@
 	let nachaOffsetRouting = $state('');
 	let nachaOffsetAccount = $state('');
 	let nachaOffsetAccountMask = $state('');
+	// The stored offset's bank, while an account number is on file: a blank
+	// account is "keep it" only at that same bank (`nachaProblems`).
+	let nachaOffsetOnFile = $state<{ offset_routing: string; offset_account_type: string } | null>(
+		null
+	);
+	function rememberNachaOnFile(block: Record<string, unknown> | null | undefined): void {
+		nachaOffsetOnFile =
+			typeof block?.offset_account === 'string' && block.offset_account !== ''
+				? {
+						offset_routing: typeof block.offset_routing === 'string' ? block.offset_routing : '',
+						offset_account_type:
+							typeof block.offset_account_type === 'string' ? block.offset_account_type : ''
+					}
+				: null;
+	}
 	let nachaOffsetAccountType = $state('');
 	// Every OTHER key of the stored `settings.payments` block. The save is a
 	// shallow replace of the whole block, so a key this form does not manage —
@@ -714,6 +729,7 @@
 		nachaOffsetAccount = '';
 		nachaOffsetAccountMask =
 			typeof nacha.offset_account === 'string' ? nacha.offset_account : '';
+		rememberNachaOnFile(nacha);
 		nachaOffsetAccountType =
 			typeof nacha.offset_account_type === 'string' ? nacha.offset_account_type : '';
 	}
@@ -909,7 +925,7 @@
 			// The server 422s the same fields (`services/nacha.originator_problems`);
 			// naming them here keeps the admin on the form with the reason.
 			const problems = nachaProblems(nacha, {
-				offsetAccountOnFile: nachaOffsetAccountMask !== ''
+				onFile: nachaOffsetOnFile
 			});
 			if (problems.length > 0) {
 				toast(
@@ -948,6 +964,7 @@
 			)?.nacha as Record<string, unknown> | null | undefined;
 			nachaOffsetAccountMask =
 				typeof savedNacha?.offset_account === 'string' ? savedNacha.offset_account : '';
+			rememberNachaOnFile(savedNacha);
 			nachaOffsetAccount = '';
 			await saveSecrets('payments', {
 				api_key: paymentsApiKey,
