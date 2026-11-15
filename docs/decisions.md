@@ -22142,6 +22142,27 @@ through the row, the 1099 reports the cheque part only; the run-level refusal),
 shows the split and books it through the row with no rail sent; a refused
 record links to the exception).
 
+**Amendment (round-13 gate).** The two refusals met in a dead end. An invoice
+in a draft run that also holds a `paid_not_recorded` row whose split stands was
+refused by the run-level record (`external_payment_erp_split`, since only the
+row books the split) and by the row's one-click (`external_payment_in_run`,
+since a run holds it), and neither sentence said how out. A draft run gives up
+an invoice only by being cancelled, so both refusals now say to cancel the run
+first, then record the invoice from its exception, in one shared sentence
+(`external_payment.SPLIT_IN_RUN_MESSAGE`, `refusal.externalPaymentErpSplitInRun`
+in every locale), and both carry `params.payment_run_id` and
+`params.exception_id`. The run-level refusal adds the run
+(`run_payment_refusal` passes it to `erp_split_refusal`); the in-run refusal
+adds the row only for a person's record (`source="user"`) over a split that
+stands, so the ERP-sync path and an in-run refusal with no such row are
+unchanged. Neither refusal moves: the run still holds the invoice until a
+person cancels it, which is the decision the sentence hands them. Tests:
+`backend/tests/test_erp_status_sync.py` (both doors refused with the hint,
+nothing written; cancel, then the row books the split; an in-run refusal with no
+standing split keeps its own params; `erp_split_refusal` exempts only the row it
+answers; `source="erp"` is not held by it) and
+`frontend/src/lib/api/codedRefusals.test.ts`.
+
 ## 427. An outbound webhook event is sent after the change it announces commits, and the emitter takes the session (closes a `docs/followups.md` entry, §414 / §421 follow-up, round 13, 2026-11-15)
 
 **The gap.** `transition_invoice` called the webhook emitters inline, and
@@ -22276,6 +22297,45 @@ same-connection save, restamped on a destination, ERP or realm change), and
 `frontend/src/lib/api/erpRefusals.test.ts` (both codes in every locale, with
 the possibly-posted note).
 
+**Amendment (round-13 gate).** Two corrections to the stranded-push pass.
+
+*An attempt is read from a signal a clean failure cannot erase.* The pass took
+`erp.OUTCOME_UNKNOWN_AT_KEY` as proof that an attempt began, but `_call_erp`
+drops that key when an attempt ends `not_posted` and nothing earlier was
+unknown. During the 2 s / 4 s backoff between attempts the push therefore read
+as never attempted, and once its entry was older than the delay the sweep
+re-drove it beside its own sleeping job: two `send_to_erp_internal` loops, both
+able to post. `_call_erp` now commits a dedicated `erp.ATTEMPT_STARTED_AT_KEY`
+with its pre-call write and never clears it, and the sweep also counts
+`erp_retries` other than 0 as an attempt of this push (every new push resets it
+to 0 in the transaction that enters `sending_to_erp`, and only a finished
+attempt raises it). With no stamp to date it (a row from before the key), such
+an attempt is dated at the push's entry, its earliest possible moment, so the
+lookback still releases it. The cost: a local job that dies mid-backoff is no
+longer re-driven; it is left until the lookback and then failed
+`erp_push_interrupted` (possibly-posted when the state says so) for a person,
+which is the fail-closed side. The module docstring's "nothing new can post a
+bill twice" was also too strong for local mode, where the re-drive infers from
+the missing stamp that the original task died; it now says that is an
+inference and names the correlation-id idempotency lookup as what stops a
+second bill if the task was only slow.
+
+*A push with no entry row fails closed.* `_stranded_query` used to drop an
+invoice at `sending_to_erp` with no audit row recording that entry (a
+Lambda-shipped audit row that never landed, a database restored without it), because its start was
+NULL, so the sweep never saw it. There is no timestamp that provably is the
+transition time (`invoices.updated_at` is only an upper bound), so such a push
+is never re-driven: its attempts cannot be told from an earlier push's. It is
+selected once the invoice row has been untouched for the delay (so a push whose
+audit row is merely still in flight is not taken), left while the attempt
+stamp is inside the lookback, and otherwise failed `erp_push_interrupted` for
+a person, through the same `fail_interrupted_erp_send`. Rejected: falling back
+to `updated_at` as the start, which would re-drive pushes whose real start was
+outside the window. Tests: `tests/test_erp_auto_send_sweep.py` (the sweep run
+inside a real backoff after a `not_posted` attempt leaves the push and the job
+lands it once; `erp_retries` alone counts; a push with no entry row fails
+closed, and is left while its row is fresh or its attempt stamp is recent).
+
 ## 429. Mobile offers Approve / Reject from the per-invoice verdict, on the detail screen and per row of the approvals queue; the Approvals tab stays on the permission (closes two `docs/followups.md` entries, round 13, 2026-11-15)
 
 **Context.** The mobile detail screen and the approvals swipe offered Approve /
@@ -22386,6 +22446,23 @@ the split debit; the all-or-none rule; the masked read, the blank re-save that
 keeps the number and the audit row; the 422 that echoes no value; a balanced
 export end to end) and `frontend/src/lib/types/paymentExecution.test.ts` (the
 form's mirror of the rule and the account types).
+
+**Amendment (round-13 gate).** `carry_offset_account` kept the stored number
+whenever a save sent it blank or masked, even when the same save changed
+`offset_routing` or `offset_account_type`; the next balanced file then debited
+the old number at the new bank. An account number belongs to its bank and
+type, so it is now carried only when the save names the same routing number
+(whitespace aside) and the same type. Otherwise the save is refused 422,
+`payments.nacha.offset_account must be re-entered: offset_routing or
+offset_account_type changed.`, naming the field and never the number, and
+nothing is written (`nacha.OffsetAccountReentryRequired`, raised by the carry
+and answered in `PATCH /api/organization`). Rejected: clearing the number
+and letting the half-filled-offset 422 answer, whose sentence would not say
+why a field the admin never touched is suddenly invalid. Tests:
+`backend/tests/test_nacha.py` (a new routing, a new type or both, with the
+number blank, absent or masked, refused; a re-entered number saved; the same
+routing spaced differently still carried; the PATCH refused, unechoed and
+unwritten).
 
 ## 433. A multi-PO split's POs live in their own column, `invoices.split_po_ids`, which no warning refresh rewrites (closes a §267 / §404 follow-up, round 13, 2026-11-15)
 
