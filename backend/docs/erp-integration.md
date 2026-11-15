@@ -280,6 +280,33 @@ switch to another ERP drops every sealed secret, the webhook key included
 (`catalog.secrets_to_drop`), so a key stored for one ERP never verifies another
 (decisions §399, amendment).
 
+**Per-tenant webhooks: nothing unsealed before the cheap checks (decisions
+§408).** The generic route and `/webhook/merge_dev/{tenant_slug}` verify
+against a key sealed in the tenant's ERP credentials, so an unauthenticated
+caller could once make us open a tenant's sealed block on demand, and the
+answer differed by slug (a 503 when the credentials could not be opened, before
+the signature was checked). Both now run every check that needs no secret
+first, in this order, each refusal the same silent 204: the body size; the
+route's ERP (`merge_dev` refused on the generic route); a signature header of
+the route's digest shape (`webhook_security.well_formed_hex_sha256` — 64
+lower-case hex digits — or `well_formed_base64url_sha256` — strict base64url of
+32 bytes), since anything else can never verify; on the generic route the
+body's shape and a string `tenant_slug`; the slug naming a tenant; its PUBLIC
+ERP configuration resolving to the route's adapter; and a webhook key being
+stored at all, read from the sealed row's path NAMES without decrypting
+(`provider_credentials.stored_secret_paths`). Only then is the block opened
+(`api/erp_webhook._tenant_webhook_config`), once. A block that cannot be opened
+is the same 204, logged as an error. What remains: the block is one envelope, so
+opening it decrypts its other secrets with the key (nothing reads them before
+the signature verifies); a well-formed signature at a configured tenant still
+costs one unseal (a KMS `Decrypt` at most once per data key per process per
+five minutes, then the in-process cache), so the response TIME of a configured
+tenant can differ from an unknown slug's — the response itself never does; and
+a genuine delivery that arrives while the credential store is down is not
+redelivered (`docs/followups.md`). The QuickBooks and Xero routes verify against
+one platform key from the environment, never a tenant's sealed one, so none of
+this applies to them.
+
 The webhook handler:
 1. Validates the request (signature, API key, or IP whitelist)
 2. Dedupes by `event_id` (`services/webhook_security.is_event_already_processed`)
@@ -697,8 +724,11 @@ webhooks, older spelling `webhook_secret`) — are **not** in
   `connection_id`, expiry, company id) and reads as `{"connected": bool}`.
 - **Fail closed.** A store that cannot be opened (KMS unreachable, a bad
   envelope) is never "no ERP": an ERP send lands `failed`
-  (`erp_credentials_unavailable`, retryable), the ERP webhook answers a bodyless
-  503 so the ERP retries, the vendor / GL / PO syncs answer 503, an OAuth refresh
+  (`erp_credentials_unavailable`, retryable), the per-tenant ERP webhooks
+  (generic and Merge.dev) refuse the delivery with the same silent 204 as a bad
+  signature and log an error — the key they could not open is the key the
+  signature needed, so a 503 there would answer a configured slug differently
+  before anything was verified (decisions §408) — the vendor / GL / PO syncs answer 503, an OAuth refresh
   raises `ErpCredentialUnreadableError` (a failed push, never a reconnect mark),
   and a payment-sync leg fails into `erp_reconciliation`.
 - **A configuration change is audited too** (`organization.provider_config_updated`,
@@ -2407,10 +2437,11 @@ write-error guides (read 2026-11-13). Reasoning: `docs/decisions.md` §399.
   `erp_reconciliation` exception, and a payment there changes nothing. Every
   decision (unknown tenant, a tenant not on Merge or with no key, a bad
   signature, another event, a duplicate, a bill nobody pushed) is a silent 204;
-  our own failure (dedup store, the bill read, tenant DB) is a bodyless 503 with
-  the claim released. Credentials that cannot be opened are a 503 too, before
-  the signature can be checked (the key is what failed), as on the generic
-  route. Unlike the QuickBooks and Xero webhooks it is not gated on
+  our own failure after the signature verifies (dedup store, the bill read,
+  tenant DB) is a bodyless 503 with the claim released. Nothing before it is:
+  the tenant's key is opened only after the checks that need no secret (§
+  Per-tenant webhooks: nothing unsealed before the cheap checks), and a key
+  that cannot be opened is the same silent 204. Unlike the QuickBooks and Xero webhooks it is not gated on
   `FEOH_ERP_STATUS_SYNC_ENABLED`: that switch decides whether a push stays
   payable, which never applies to Merge; storing the key is the tenant's
   opt-in. The generic `/webhook/{erp_type}` route no longer reads

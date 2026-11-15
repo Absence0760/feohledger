@@ -13,6 +13,7 @@ from app.database import control_session_factory, get_tenant_engine
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment
+from app.services import provider_credentials
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.erp_adapters.dispatcher import MERGE_DEV_ADAPTER_KEY, resolve_adapter_key
 from app.services.erp_status_sync import (
@@ -39,6 +40,8 @@ from app.services.webhook_security import (
     is_event_already_processed,
     release_event_claim,
     verify_hmac_sha256,
+    well_formed_base64url_sha256,
+    well_formed_hex_sha256,
 )
 from app.services.workflow_engine import (
     VALID_TRANSITIONS,
@@ -84,6 +87,77 @@ def _retry_please() -> Response:
     Bodyless, so the response still carries no diagnostic detail.
     """
     return Response(status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+# The ERP block's sealed path that holds a tenant's inbound webhook key, on the
+# generic route and the Merge route alike.
+_WEBHOOK_KEY_PATH = "webhook_signing_secret"
+
+
+async def _tenant_webhook_config(tenant_slug: object, adapter_key: str):
+    """``(org, erp_config)`` for a tenant whose webhook key may verify a
+    delivery on ``adapter_key``'s route, else ``None`` (decisions §408).
+
+    The two per-tenant routes (generic and Merge.dev) verify against a key
+    sealed in the tenant's ERP credentials, which an unauthenticated caller
+    could otherwise make us open on demand. So the opening is the LAST step,
+    after every check that needs no secret, and each refusal before it is the
+    same ``None`` (the caller's silent 204):
+
+    1. the slug names an organisation (``None`` for an unknown one);
+    2. its public ERP configuration resolves to ``adapter_key`` (integration
+       method and type are configuration, never sealed);
+    3. a webhook key is stored at all — the row's path NAMES, no decrypt
+       (``provider_credentials.stored_secret_paths``);
+    4. only then the block is opened (``provider_config``).
+
+    The caller has already refused a request whose signature header could
+    never verify (absent, or not the route's digest shape), so a request
+    reaches step 4 only for a configured tenant with a plausibly shaped
+    signature. The sealed envelope is per block, so the opening decrypts the
+    block's other secrets with the key; nothing reads them before the
+    signature verifies.
+
+    A credential store that cannot be opened is ``None`` too, not a 503: the
+    signature cannot be checked without the key, and a 503 before it verifies
+    would answer differently for a configured slug than for any other. The
+    cost is that a genuine delivery arriving while the store is down is not
+    redelivered; it is logged as an error for the operator
+    (``docs/followups.md``).
+    """
+    if not isinstance(tenant_slug, str) or not tenant_slug:
+        return None
+    async with control_session_factory() as ctrl_db:
+        org = (
+            await ctrl_db.execute(select(Organization).where(Organization.slug == tenant_slug))
+        ).scalar_one_or_none()
+        if org is None:
+            return None
+        public = (org.settings or {}).get("erp")
+        if resolve_adapter_key(public if isinstance(public, dict) else {}) != adapter_key:
+            return None
+        stored = await provider_credentials.stored_secret_paths(org, "erp", db=ctrl_db)
+        if _WEBHOOK_KEY_PATH not in stored:
+            # Fail closed (no key = no delivery verifies), but say so: a
+            # PII-free config warning, so an operator learns the integration
+            # is unconfigured rather than every event vanishing. The slug and
+            # adapter are non-PII identifiers; no secret is ever logged.
+            logger.warning(
+                "ERP webhook dropped: no webhook_signing_secret configured for tenant '%s' (%s)",
+                tenant_slug,
+                adapter_key,
+            )
+            return None
+        try:
+            erp_config = await provider_config(org, "erp", db=ctrl_db) or {}
+        except CredentialCryptoError:
+            logger.error(
+                "ERP webhook dropped: the ERP credentials of tenant '%s' could not be opened (%s)",
+                tenant_slug,
+                adapter_key,
+            )
+            return None
+    return org, erp_config
 
 
 # Map ERP status strings to our internal status transitions
@@ -286,11 +360,12 @@ async def merge_webhook(tenant_slug: str, request: Request):
     (``erp_merge_webhook.apply_merge_event``). Every decision — unknown tenant,
     a tenant not on Merge, no key, a bad signature, a malformed body, another
     event, a duplicate, a bill no invoice was pushed as — is a silent 204.
-    Our own failure (the credential store, the dedup store, the bill read or
-    the tenant DB) is a bodyless 503 with the claim released, so Merge's
-    redelivery is applied. The credential-store 503 comes before the
-    signature can be checked (the key is what it could not open), as on the
-    generic route; it says only that a slug's credentials are unreadable.
+    Our own failure AFTER the signature verifies (the dedup store, the bill
+    read or the tenant DB) is a bodyless 503 with the claim released, so
+    Merge's redelivery is applied. Nothing before the signature is ever a 503:
+    the tenant's key is opened only after the checks that need no secret, and
+    a key that cannot be opened is the same silent 204 (decisions §408,
+    :func:`_tenant_webhook_config`).
 
     Not gated on ``FEOH_ERP_STATUS_SYNC_ENABLED``, unlike the QuickBooks and
     Xero webhooks (§392): that switch decides whether a push leaves the
@@ -311,29 +386,17 @@ async def merge_webhook(tenant_slug: str, request: Request):
     raw_body = await request.body()
     if len(raw_body) > max_bytes:
         return
-
-    async with control_session_factory() as ctrl_db:
-        org = (
-            await ctrl_db.execute(select(Organization).where(Organization.slug == tenant_slug))
-        ).scalar_one_or_none()
-        if org is None:
-            return
-        try:
-            erp_config = await provider_config(org, "erp", db=ctrl_db) or {}
-        except CredentialCryptoError:
-            logger.error("Merge webhook: the tenant's ERP credentials could not be opened")
-            return _retry_please()
-
-    if not erp_config or resolve_adapter_key(erp_config) != merge_events.MERGE_PROVIDER:
-        return  # this tenant is not connected through Merge
-    signing_secret = erp_config.get("webhook_signing_secret") or ""
-    if not signing_secret:
-        logger.warning(
-            "Merge webhook dropped: no webhook_signing_secret configured for tenant '%s'",
-            tenant_slug,
-        )
-        return
+    # A signature that could never verify is refused before anything is
+    # looked up, let alone unsealed (decisions §408).
     signature = extract_signature_header(dict(request.headers), "X-Merge-Webhook-Signature")
+    if not well_formed_base64url_sha256(signature):
+        return
+
+    resolved = await _tenant_webhook_config(tenant_slug, merge_events.MERGE_PROVIDER)
+    if resolved is None:
+        return  # unknown, not on Merge, no key, or a key that cannot be opened
+    org, erp_config = resolved
+    signing_secret = erp_config.get(_WEBHOOK_KEY_PATH) or ""
     if not verify_hmac_sha256_base64url(signing_secret, raw_body, signature):
         return
 
@@ -385,6 +448,12 @@ async def erp_webhook(
         "details": { ... }  // optional extra data
     }
 
+    The order is the cheap checks first (size, the route's ERP, a signature
+    header of the right shape, the body's shape, the tenant and its public
+    configuration, a key stored), the tenant's sealed key opened only after
+    them, and everything before the signature verifies the same silent 204
+    (decisions §408, :func:`_tenant_webhook_config`).
+
     ``paid_on`` / ``payment_method`` date and classify a payment the ERP
     made (decisions §295): validated like the user's own record (a real
     date not in the future; a recordable rail, never ``virtual_card``), and
@@ -415,6 +484,27 @@ async def erp_webhook(
         logger.warning("ERP webhook rejected: body exceeds size cap")
         return
 
+    # This route takes the tenant from the BODY, so the only thing standing
+    # between a body and a tenant's books is the HMAC key that tenant's OWN
+    # ERP integration signs with. It therefore answers only for the ERP the
+    # tenant is actually connected to (`erp_type` must be the adapter its
+    # config resolves to, checked in `_tenant_webhook_config`) and never for
+    # Merge.dev: a Merge tenant's `webhook_signing_secret` is Merge's
+    # signature key, held by a third party, and Merge's deliveries go to the
+    # per-tenant `/webhook/merge_dev/{tenant_slug}` (`merge_webhook`,
+    # decisions §399), which reads the bill back before believing it.
+    if erp_type == MERGE_DEV_ADAPTER_KEY:
+        return
+    # A signature that could never verify is refused before the tenant is
+    # looked up, let alone its key unsealed (decisions §408).
+    provided_sig = extract_signature_header(
+        dict(request.headers),
+        "X-Webhook-Signature",
+        "X-Hub-Signature-256",
+    )
+    if not well_formed_hex_sha256(provided_sig):
+        return
+
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -422,17 +512,6 @@ async def erp_webhook(
 
     if not isinstance(body, dict):
         return  # not the generic shape → silent 204
-    # This route takes the tenant from the BODY, so the only thing standing
-    # between a body and a tenant's books is the HMAC key that tenant's OWN
-    # ERP integration signs with. It therefore answers only for the ERP the
-    # tenant is actually connected to (`erp_type` must be the adapter its
-    # config resolves to, checked below) and never for Merge.dev: a Merge
-    # tenant's `webhook_signing_secret` is Merge's signature key, held by a
-    # third party, and Merge's deliveries go to the per-tenant
-    # `/webhook/merge_dev/{tenant_slug}` (`merge_webhook`, decisions §399),
-    # which reads the bill back before believing it.
-    if erp_type == MERGE_DEV_ADAPTER_KEY:
-        return
 
     tenant_slug = body.get("tenant_slug")
     correlation_id = body.get("correlation_id")
@@ -456,59 +535,37 @@ async def erp_webhook(
     if not correlation_id and not erp_document_id:
         return  # silent — nothing to look up
 
-    # Look up the org. A missing slug → silent 204 (no enumeration).
-    async with control_session_factory() as ctrl_db:
-        result = await ctrl_db.execute(select(Organization).where(Organization.slug == tenant_slug))
-        org = result.scalar_one_or_none()
-        if not org:
-            return
-        # The signing secret is sealed (`services/provider_credentials`). Not
-        # being able to open it is OUR failure, not a decision about this
-        # event, so the ERP is asked to retry rather than have it dropped.
-        try:
-            erp_config = await provider_config(org, "erp", db=ctrl_db) or {}
-        except CredentialCryptoError:
-            logger.error("ERP webhook: the tenant's ERP credentials could not be opened")
-            return _retry_please()
-
-    # Only the tenant's own adapter may report here (above). An empty block,
-    # or one with no `integration_method`, resolves to Merge.dev and so is
-    # refused too. A switch to another ERP drops every sealed secret, the
-    # webhook key included (`erp_adapters/catalog.secrets_to_drop`), so a key
-    # stored for one ERP never verifies another's route.
-    if resolve_adapter_key(erp_config) != erp_type:
+    # Unknown slug, another ERP's tenant (an empty block, or one with no
+    # `integration_method`, resolves to Merge.dev and so is refused too), no
+    # key stored, or a key that cannot be opened: all the same silent 204. A
+    # switch to another ERP drops every sealed secret, the webhook key
+    # included (`erp_adapters/catalog.secrets_to_drop`), so a key stored for
+    # one ERP never verifies another's route.
+    resolved = await _tenant_webhook_config(tenant_slug, erp_type)
+    if resolved is None:
         return
+    org, erp_config = resolved
 
     # Verify HMAC against the tenant's configured signing secret.
-    signing_secret = erp_config.get("webhook_signing_secret", "")
-    if not signing_secret:
-        # Fail closed (verify_hmac_sha256 would 204 on an empty secret anyway),
-        # but surface a PII-free config error so an operator learns the ERP
-        # integration is unconfigured rather than silently dropping every event.
-        # tenant_slug / erp_type are non-PII identifiers; the secret is never logged.
-        logger.warning(
-            "ERP webhook dropped: no webhook_signing_secret configured for tenant '%s' (%s)",
-            tenant_slug,
-            erp_type,
-        )
-        return  # silent 204 to the caller (no enumeration)
-    provided_sig = extract_signature_header(
-        dict(request.headers),
-        "X-Webhook-Signature",
-        "X-Hub-Signature-256",
-    )
+    signing_secret = erp_config.get(_WEBHOOK_KEY_PATH) or ""
     if not verify_hmac_sha256(signing_secret, raw_body, provided_sig):
         return  # silent 204 on bad / missing signature
 
     # Dedup by event id. Cross-tenant key because event ids should be
     # unique per provider; a duplicate within the TTL window is a
-    # replay regardless of tenant.
-    if await is_event_already_processed(f"erp:{erp_type}", str(event_id or "")):
-        return
+    # replay regardless of tenant. A dedup store we cannot reach is our
+    # failure on a verified delivery: a bodyless 503 so the ERP redelivers,
+    # as on the other ERP routes (it used to escape as a 500).
+    try:
+        if await is_event_already_processed(f"erp:{erp_type}", str(event_id or "")):
+            return
+    except Exception as exc:  # noqa: BLE001 — Redis unreachable
+        logger.warning("ERP webhook: dedup unavailable (%s)", exc.__class__.__name__)
+        return _retry_please()
     # Track the claim so it can be released if the transition below rolls
     # back — the Redis claim is durable the instant it's written, but the
     # side effect it guards isn't durable until the DB commit. Without this,
-    # a transient failure (bad correlation_id, DB hiccup) permanently drops
+    # a transient failure (a DB hiccup, a lost race) permanently drops
     # the ERP's retry for the full dedup TTL window (mirrors cards.py /
     # billing_webhook.py / email_intake.py, which all release on failure).
     claimed_event = str(event_id) if event_id else None
@@ -517,6 +574,16 @@ async def erp_webhook(
     target_status = ERP_STATUS_MAP.get(erp_status)
     if not target_status:
         return  # unknown status — silent ack
+    if not correlation_id:
+        return  # erp_document_id-only path not supported yet
+    # A correlation id that is not a UUID names no invoice of ours: a decision
+    # about the event (silent ack), not our failure. Parsed here, before the
+    # tenant DB, because inside the handler's try it raised into the 503 path
+    # and the ERP would redeliver the same unparseable body forever.
+    try:
+        correlation_uuid = uuid.UUID(str(correlation_id))
+    except ValueError:
+        return
 
     # Open tenant DB and find the invoice
     engine = get_tenant_engine(org.db_name)
@@ -524,9 +591,6 @@ async def erp_webhook(
 
     async with factory() as db:
         try:
-            if not correlation_id:
-                return  # erp_document_id-only path not supported yet
-
             # Resolve the invoice id by correlation_id first (not unique
             # enough to lock on directly), then re-fetch WITH a row lock
             # before evaluating/applying the transition — the documented
@@ -535,7 +599,7 @@ async def erp_webhook(
             # webhook can silently overwrite the other, corrupting the audit
             # trail's from/to narrative.
             id_result = await db.execute(
-                select(Invoice.id).where(Invoice.correlation_id == uuid.UUID(correlation_id))
+                select(Invoice.id).where(Invoice.correlation_id == correlation_uuid)
             )
             invoice_id = id_result.scalar_one_or_none()
             if not invoice_id:

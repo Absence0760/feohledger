@@ -2160,6 +2160,31 @@ user-visible halves still open.
       **Trigger:** `curl -s https://pypi.org/pypi/onnxruntime/json` lists a
       `cp315` wheel for the latest release.
 
+### Surfaced by ordering the per-tenant ERP webhooks' unseal (2026-11-15, decisions §408)
+
+- [ ] **(c) A per-tenant ERP webhook delivery that arrives while the tenant's
+      credentials cannot be opened is acknowledged and lost.** The generic
+      `/api/erp/webhook/{erp_type}` and `/api/erp/webhook/merge_dev/{slug}`
+      routes now answer a `CredentialCryptoError` with the same silent 204 as
+      a bad signature (logged as an error), because the key that failed to
+      open is the key the signature needed and a 503 before verifying is a
+      slug oracle. A KMS outage beyond the five-minute DEK cache, or a
+      corrupted `provider_credentials` row, therefore drops genuine status
+      events: for the generic route a transition never applied (it has no
+      polling backstop), for Merge a void / deletion never flagged. Separately,
+      a caller cycling well-formed signatures across more than 512 configured
+      tenants can evict the DEK cache and force a KMS `Decrypt` per request;
+      only KMS's own quota bounds it. **Durable fix:** a per-route limiter on
+      unseals for unverified deliveries (per source and per tenant, in Redis)
+      and a recovery path for the dropped events — the generic status polling
+      sweep (`backend/docs/erp-integration.md` § Polling job — not built) for
+      the generic route, and a Merge bill read-back sweep over pushed bills for
+      Merge — rather than any response that differs before verification.
+      **Trigger:** the first `ERP webhook dropped: the ERP credentials of
+      tenant … could not be opened` error in production, a KMS throttling
+      alarm on the credential key, or the first customer relying on the
+      generic route.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are

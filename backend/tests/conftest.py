@@ -1356,7 +1356,14 @@ def provider_store_from_settings(monkeypatch, request):
     async def _from_settings(org_id, settings, block, *, db=None):  # noqa: ARG001
         return (settings or {}).get(block)
 
+    # The names-only read the ERP webhooks gate on before they unseal (§408):
+    # the secrets inline in the fake org's settings are what "is stored".
+    async def _paths_from_settings(org, block, *, db=None):  # noqa: ARG001
+        cfg = (getattr(org, "settings", None) or {}).get(block)
+        return frozenset(provider_credentials.extract_secrets(block, cfg))
+
     monkeypatch.setattr(provider_credentials, "resolve_block", _from_settings)
+    monkeypatch.setattr(provider_credentials, "stored_secret_paths", _paths_from_settings)
 
 
 @pytest.fixture

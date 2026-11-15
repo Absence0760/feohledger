@@ -75,6 +75,42 @@ def verify_hmac_sha256_base64(secret: str, raw_body: bytes, provided_b64: str | 
 
 
 _BASE64URL = re.compile(r"[A-Za-z0-9_-]+={0,2}")
+_HEX_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _decode_base64url(provided: str) -> bytes | None:
+    """The bytes a strict base64url signature encodes, or None.
+
+    Only the URL-safe alphabet (a standard-base64 ``+`` / ``/`` is refused),
+    padding optional."""
+    text = provided.strip()
+    if not _BASE64URL.fullmatch(text):
+        return None
+    bare = text.rstrip("=")
+    try:
+        return base64.urlsafe_b64decode(bare + "=" * (-len(bare) % 4))
+    except (binascii.Error, ValueError):
+        return None
+
+
+def well_formed_hex_sha256(provided: str | None) -> bool:
+    """Could ``provided`` be a :func:`verify_hmac_sha256` signature at all?
+
+    A shape check, no secret involved: 64 lower-case hex digits, the only form
+    that verifier can ever accept (it compares against ``hexdigest()``
+    exactly). A per-tenant webhook route asks this BEFORE it opens the tenant's
+    sealed key, so a request that could never verify costs no unseal
+    (decisions §408)."""
+    return bool(provided) and _HEX_SHA256.fullmatch(provided) is not None
+
+
+def well_formed_base64url_sha256(provided: str | None) -> bool:
+    """:func:`well_formed_hex_sha256` for :func:`verify_hmac_sha256_base64url`:
+    strict base64url that decodes to exactly a SHA-256 digest (32 bytes)."""
+    if not provided:
+        return False
+    decoded = _decode_base64url(provided)
+    return decoded is not None and len(decoded) == hashlib.sha256().digest_size
 
 
 def verify_hmac_sha256_base64url(secret: str, raw_body: bytes, provided_b64url: str | None) -> bool:
@@ -89,13 +125,8 @@ def verify_hmac_sha256_base64url(secret: str, raw_body: bytes, provided_b64url: 
     """
     if not secret or not provided_b64url:
         return False
-    text = provided_b64url.strip()
-    if not _BASE64URL.fullmatch(text):
-        return False
-    bare = text.rstrip("=")
-    try:
-        provided = base64.urlsafe_b64decode(bare + "=" * (-len(bare) % 4))
-    except (binascii.Error, ValueError):
+    provided = _decode_base64url(provided_b64url)
+    if provided is None:
         return False
     expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
     return hmac.compare_digest(expected, provided)

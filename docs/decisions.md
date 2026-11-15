@@ -20561,3 +20561,94 @@ is accurate for both: neither documents a revocation for what we hold.
 secret in the log or confirmation) and `tests/test_erp_syspro_adapter.py`
 (`test_revoke_is_unsupported_and_calls_no_one`: no `Logon` or `Logoff`). Business
 Central has no adapter-specific suite; its case is the deletion test.
+
+## 408. The per-tenant ERP webhooks open a tenant's sealed key only after the checks that need no secret, and answer every unverified delivery the same (§399 follow-up, issue #655, 2026-11-15)
+
+**Context.** The generic `POST /api/erp/webhook/{erp_type}` and the per-tenant
+`POST /api/erp/webhook/merge_dev/{tenant_slug}` (§399) verify a delivery
+against a key sealed in the tenant's ERP credentials. Both looked the slug up
+and opened the whole sealed ERP block (`provider_config`) before they looked at
+the signature, so an unauthenticated caller could make us unseal any tenant's
+credentials on demand, without even sending a signature header. And a block
+that could not be opened (`CredentialCryptoError`) answered a bodyless 503 —
+before the signature was checked — while an unknown slug answered 204: the
+response told a slug with unreadable credentials from every other one. The
+webhook invariant is that every rejection path is the same silent 204 and only
+our own failure on a verified delivery asks for a retry. The QuickBooks and
+Xero routes verify against one platform key from the environment
+(`FEOH_ERP_QBO_WEBHOOK_VERIFIER_TOKEN`, `FEOH_ERP_XERO_WEBHOOK_KEY`) and open no
+tenant secret, so they had neither problem; their 503 already follows the
+signature.
+
+**Decision.**
+
+- **Cheap checks first, the unseal last, every refusal the same 204.** Both
+  routes now refuse, in order and without any secret: a body over the cap; on
+  the generic route, `erp_type == merge_dev`; a signature header that could
+  never verify (`webhook_security.well_formed_hex_sha256`: 64 lower-case hex
+  digits, the only thing `hexdigest()` can equal;
+  `well_formed_base64url_sha256`: strict base64url decoding to 32 bytes); on the
+  generic route, a body that is not a JSON object or a `tenant_slug` that is not
+  a string (it reached the query as a non-string bind, a 500). Then one helper,
+  `api/erp_webhook._tenant_webhook_config`, shared by both routes: the slug
+  names an organisation; its PUBLIC ERP configuration resolves to the route's
+  adapter (`integration_method` / `type` are configuration, never sealed); a
+  webhook key is stored at all, read from the sealed row's path NAMES with no
+  decrypt (`provider_credentials.stored_secret_paths`, the names-only sibling
+  of `credential_status`); and only then `provider_config` opens the block,
+  once. The signature is verified against the key it returns.
+- **A key that cannot be opened is the 204 too, not a 503.** The task allowed
+  a 503 for a real tenant's transient failure only after the signature had
+  verified, and here it cannot: the key that failed to open is the key the
+  signature needs. A 503 before verification answers a configured slug
+  differently from every other. It is logged as an error naming the slug and
+  adapter (no value), so an operator sees it. The cost is real: a genuine
+  delivery that arrives while the credential store is down is acknowledged and
+  not redelivered. With the DEK cache (`credential_crypto`, five minutes per
+  data key per process) a KMS blip mostly misses tenants that received a
+  delivery recently; a corrupted row loses every delivery until it is
+  re-saved. Tracked in `docs/followups.md`.
+- **Two small paths on the generic route corrected while there.** The dedup
+  store unreachable after the signature verifies escaped as a 500; it is now
+  the bodyless 503 the other ERP routes give. A verified body whose
+  `correlation_id` is not a UUID raised inside the handler's `try` into the 503
+  path, so the ERP redelivered the same unparseable body for ever; it is parsed
+  before the tenant DB is opened and is a silent 204 (a decision: it names no
+  invoice of ours).
+
+**What remains, stated plainly.**
+
+- The sealed block is ONE envelope per (organisation, block), so opening it
+  decrypts the block's other secrets with the webhook key. Nothing reads them
+  before the signature verifies (the Merge route needs the API key afterwards
+  to read the bill back). Sealing the webhook key on its own would need a
+  second envelope per tenant and a migration; not worth it for what it buys
+  while the plaintext lives only in this request's memory.
+- A configured tenant with a well-formed but wrong signature still costs one
+  unseal: verification needs the key. The KMS `Decrypt` behind it happens at
+  most once per data key per process per five minutes; after that it is one
+  AES-GCM operation. So the response TIME of a configured tenant can differ
+  measurably from an unknown slug's (a second control-plane query and an
+  unseal) even though the response never does. Tenant slugs are the app's
+  public subdomains, so what timing can still reveal is "this tenant has a
+  webhook key stored", not that the tenant exists.
+- The DEK cache holds at most 512 keys and clears when full, so a caller
+  cycling well-formed signatures across more configured tenants than that
+  could force a KMS call per request. Only KMS's own request quota bounds
+  that today; no limiter was added on these routes (`docs/followups.md`).
+
+*Rejected:* keeping the 503 on a credential-store failure for the provider's
+retry. It is the oracle the change removes, and it fires before anything is
+proven about the sender. *Rejected:* equalising the timing by opening a dummy
+envelope for unknown slugs — it would spend a KMS call on exactly the requests
+we want to be cheap, which is the amplification the change removes.
+
+**Tests.** `tests/test_merge_webhook.py`: a signature that could never verify
+looks nothing up; unknown slug, a tenant on another ERP, no key stored and no
+ERP open nothing; an unknown slug and a bad signature answer the same; a key
+that cannot be opened is a silent 204 logged without the key; and, against the
+real store through the ASGI app, `credential_crypto.open_envelope` is called
+zero times for an unknown slug, a keyless tenant and a malformed signature, and
+once for a well-formed wrong one. `tests/test_webhook_security.py`: the same
+for the generic route, plus the non-string slug, the non-UUID correlation id
+and the dedup store down after verifying.
