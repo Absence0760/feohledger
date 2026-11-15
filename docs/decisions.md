@@ -21047,6 +21047,123 @@ logged; the gate asked again after a backoff; on a real tenant, a stale
 real `sending_to_erp` push still lands. The mock-session tests point the gate
 at the fixture invoice's own status through an autouse fixture.
 
+## 411. A skipped auto-send is recovered by a sweep, inside a window, and a refusal is recorded once per approval (§304 follow-up, 2026-11-14)
+
+**The gap.** §304 runs the "send to the ERP on approval" push as post-commit
+work, in its own transaction after the approval commits. A process that dies
+in between (a deploy, an OOM) leaves the invoice `approved` with neither an
+`invoice.erp_submitted` nor an `invoice.erp_auto_send_refused` row. Nothing is
+lost, since the invoice is payable and sendable by hand, but the automation the
+workflow promised was skipped and nothing said so.
+
+**The fix.** `services/erp_auto_send_sweep` (sweep `erp-auto-send`, off by
+default, `FEOH_ERP_AUTO_SEND_SWEEP_*`) finds such approvals and runs each
+through `erp_send.send_after_approval`, the approval's own path. It does not
+re-implement any gate: the live-ERP check, the snapshot predicate
+(`auto_send_configured`), the row lock that acts only on `approved`, the plan
+and export gates, and the refusal row are all the ones an on-time auto-send
+meets. `send_after_approval` now returns what it did (`AUTO_SEND_SENT` /
+`_REFUSED` / `_SKIPPED` / `_FAILED`) so the sweep can count; the approval doors
+ignore the value. A recovered push or refusal carries `details.recovered: true`
+beside the usual `trigger`, and a NULL actor, because no person started it.
+
+**What counts as missed.** `approved` now; a snapshot with a not-disabled
+`erp_export` step carrying `auto_send_on_approval: true` (a JSONB containment
+pre-filter, exact for any workflow the builder can save, with the Python
+predicate re-applied inside `send_after_approval`); a latest approval, by its
+audit row (`invoice.approved` or `invoice.auto_approved`, the only two
+transitions that queue an auto-send), inside the window; and nothing since that
+approval answering it.
+
+- **Since that approval, not ever.** A refusal of an earlier approval does not
+  answer a re-approval after a recall: the second approval's job is the one
+  that never ran.
+- **A void is not an approval.** `POST /api/payments/{id}/void` returns an
+  invoice to `approved`, and it may already hold a bill in the ERP. A later
+  entry into `approved` by any action other than the two approval actions
+  answers the approval, so a voided invoice is never auto-pushed. Rejected:
+  keying on the latest entry into `approved` of any kind; that would have
+  re-posted voided invoices whose bill is already in the ERP.
+- **Keyed by audit row, not `approval_date`.** `approval_date` is a `Date`,
+  which cannot tell "two minutes ago" from "this morning", and it survives a
+  recall. The audit rows are joined on `correlation_id` (indexed) as well as
+  `entity_id` (not indexed on `audit_log`).
+
+**The window.** At least `FEOH_ERP_AUTO_SEND_SWEEP_DELAY_SECONDS` (5 min, floor
+60) after the approval, so the approval's own job has had its chance (neither
+the push nor a refusal can double, below, so the delay saves redundant work
+rather than guarding correctness). At most `FEOH_ERP_AUTO_SEND_SWEEP_LOOKBACK_HOURS` (24 h). The
+lookback is a fence: §304 left stored `true` flags in place, so a tenant can
+hold approved invoices from before auto-send existed whose snapshot says
+"send". Without a lookback, turning the sweep on would push every one of them,
+out of the payment queue, without anyone having chosen that. With it, only
+approvals recent enough that the automation plainly should have run are taken.
+The cost: an approval missed while the sweep itself was off for longer than the
+lookback stays unsent, as it would have without the sweep. It is still
+sendable by hand.
+
+**A cap, not a page.** `backend/CLAUDE.md` says batch size is a page, because a
+bare `LIMIT` starves the tail when the work does not change the state the sweep
+filters on. This work does: a recovery is sent (no longer `approved`) or
+refused (a refusal row now answers the approval). So each tenant takes at most
+`FEOH_ERP_AUTO_SEND_SWEEP_BATCH_SIZE` (100) a tick, oldest approval first, by
+`(approved_at, id)`, a total order. The one case that stays a candidate is a
+send that raised unexpectedly and wrote nothing. It is counted in
+`invoice_failures`, so `GET /api/health/sweeps` reports the tick `partial` and
+the streak alert fires if it persists, and the lookback releases the row after
+at most that window, so no row holds the tail for ever.
+
+**An approval made before the ERP was live is not a missed one.** The
+approval's job returns without writing anything when the tenant has no live
+ERP (the mock, or none), so that trail looks exactly like a crash's, and a
+tenant that approves on the mock and then connects a real ERP would otherwise
+have its last day's flagged approvals pushed as "recovered". For an OAuth ERP
+(QuickBooks, Xero, Sage) the connection's `settings.erp.oauth.connected_at` is
+a second floor under the lookback: an approval before it is never taken. A
+reconnect moves that stamp forward too, which only ever excludes more. A
+directly configured ERP (NetSuite, Business Central, Intacct, SYSPRO) records
+no such moment, so for those the residual stands, bounded by the lookback: an
+approval made on the mock up to 24 hours before the live ERP was saved can be
+pushed once. Rejected: writing an `invoice.erp_auto_send_skipped` row whenever
+the job finds no live ERP. That would put a new action on every approval in
+every mock tenant with the flag on (all the dev and e2e ones), and need its
+own label on three clients, to close a narrow window the lookback already
+bounds.
+
+**A refusal is recorded once per approval, under the row lock.** The push
+could never double: `start_erp_send`'s `approved → sending_to_erp` transition
+under the invoice row lock is its guard. A refusal could, and not only between
+two sweep replicas. `audit_log.created_at` is its transaction's start, so a bulk
+approve's rows all carry the batch's start while its one post-commit job works
+through the invoices in turn; a batch whose job outruns the delay can meet the
+sweep on the same approval. `erp_send` now asks, under the invoice's row lock,
+whether a refusal of the latest approval is already on the trail, and writes
+nothing if so (`_refusal_already_recorded`). Two runs on one approval
+serialise on that lock, and the second sees the first's committed row. This
+makes the refusal idempotent in itself, for the approval doors too, so no
+cross-request lock is needed. Rejected: a per-tenant session-level advisory
+lock held for the pass. It was the first draft, and review found it a
+liability. It did not cover the bulk-job case. It held a pooled connection idle
+for up to a hundred sends. A cancellation during the unlock could return the
+connection to the pool still holding the lock. And session-level advisory
+locks break silently behind a transaction-pooling proxy. In
+`FEOH_AUDIT_MODE=lambda` the refusal row lands later through SQS, so the check
+cannot see it there; the delay is what covers that mode, and the push still
+cannot double.
+
+**Production.** Off by default, like every sweep that calls out. Turning it on
+is a (b) entry in `docs/followups.md`, ordered after the §304 check of stored
+flags.
+
+Tests: `backend/tests/test_erp_auto_send_sweep.py` (sent once and marked; a
+refusal recorded once; both edges of the window; a re-approval after an earlier
+refusal; a void back to `approved`; snapshots that do not say so; a mock-ERP
+tenant; two sweeps at once recording one refusal; a refusal already on the
+trail not recorded again; an approval before and after an OAuth connection;
+a raising send counted as a failure the health report sees; the cap taking the
+oldest first; off by default and registered). `tests/test_sweep_health.py`
+pins the name, the flag and the lifespan start.
+
 ## 412. A Sage Intacct entity is its own ERP realm; migration 0131 stamps a located connection's links with its current location (§395 follow-up, 2026-11-14)
 
 **The gap.** `services/erp_link_realm` keyed Sage Intacct by `company_id`
