@@ -1386,7 +1386,10 @@ reasoning).
   QuickBooks also sets it for any refusal before its bill create is sent and
   when Intuit refused the create itself with a 4xx, e.g. closed books), and
   even then an earlier attempt's unknown outcome is kept. A refusal after a
-  lookup stays unknown: the lookup may have found our own earlier bill. `erp.possibly_posted` reads that flag,
+  lookup stays unknown: the lookup may have found our own earlier bill. Beside the
+  flag, `erp_outcome_unknown_at` keeps when that attempt ended, handed to the
+  adapter as `InvoicePayload.outcome_unknown_since` (Merge.dev waits on it, §405,
+  § Merge.dev below). `erp.possibly_posted` reads that flag,
   an unconfirmed ERP job, an orphan document or an `erp_reference`. When it is
   true, the refusal's params, the 409 and the `invoice.erp_failed` row carry
   `possibly_posted: true`, and the browser says to check the ERP before anyone
