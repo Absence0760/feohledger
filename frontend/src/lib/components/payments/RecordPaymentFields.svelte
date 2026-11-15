@@ -9,6 +9,11 @@
 	 * `method` may be `''`: the form was pre-filled from an ERP report that
 	 * named no recordable rail, and the person must choose one — the select then
 	 * opens on a "Choose…" placeholder and is `required`.
+	 *
+	 * `methodFixed`, when set, replaces the select with that sentence, read
+	 * only: the ERP's breakdown over several rails is the record whatever one
+	 * rail a person would pick (decisions §396, §413), so no picker is offered
+	 * and `method` is not sent.
 	 */
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { paymentMethodLabelKey, type PaymentMethod } from '#lib/types/payment.ts';
@@ -24,6 +29,8 @@
 		idPrefix: string;
 		/** `data-testid` prefix; the payment queue's specs read `record-*`. */
 		testid?: string;
+		/** Shown, read only, in place of the rail picker. */
+		methodFixed?: string | null;
 	};
 
 	let {
@@ -32,7 +39,8 @@
 		paidOn = $bindable(),
 		maxDate,
 		idPrefix,
-		testid = 'record'
+		testid = 'record',
+		methodFixed = null
 	}: Props = $props();
 
 	function methodLabel(value: string): string {
@@ -41,17 +49,26 @@
 	}
 </script>
 
-<label>
-	<span>{m('payments.recordOutside.method')}</span>
-	<select bind:value={method} required data-testid="{testid}-method">
-		{#if method === ''}
-			<option value="" disabled>{m('payments.recordOutside.methodChoose')}</option>
-		{/if}
-		{#each EXTERNAL_PAYMENT_METHODS as option (option)}
-			<option value={option}>{methodLabel(option)}</option>
-		{/each}
-	</select>
-</label>
+{#if methodFixed}
+	<!-- Read only: text, not a disabled select, so it stays readable and is
+	     announced as a fact rather than an unavailable control. -->
+	<div class="fixed-field" role="group" aria-labelledby="{idPrefix}-method-label">
+		<span class="fixed-label" id="{idPrefix}-method-label">{m('payments.recordOutside.method')}</span>
+		<span class="fixed-value" data-testid="{testid}-method-fixed">{methodFixed}</span>
+	</div>
+{:else}
+	<label>
+		<span>{m('payments.recordOutside.method')}</span>
+		<select bind:value={method} required data-testid="{testid}-method">
+			{#if method === ''}
+				<option value="" disabled>{m('payments.recordOutside.methodChoose')}</option>
+			{/if}
+			{#each EXTERNAL_PAYMENT_METHODS as option (option)}
+				<option value={option}>{methodLabel(option)}</option>
+			{/each}
+		</select>
+	</label>
+{/if}
 <label>
 	<span>{m('payments.recordOutside.reference')}</span>
 	<input
@@ -70,6 +87,26 @@
 </label>
 
 <style>
+	.fixed-field {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	/* The modal's own label recipe (`app.css` `.modal label > span`). */
+	.fixed-label {
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.fixed-value {
+		font-size: 0.85rem;
+		color: var(--text);
+	}
+
 	.field-hint {
 		margin: -8px 0 0;
 		font-size: 0.75rem;

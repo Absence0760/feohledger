@@ -20,7 +20,10 @@ import {
  *  - dismissing the stale blocker from that dialog records the ERP's payment
  *    on its own — the invoice is paid with nothing typed;
  *  - an ERP row that is itself blocking is recorded in one click from its
- *    dialog, pre-filled with the rail, reference and date the ERP reported;
+ *    dialog, pre-filled with the rail, reference and date the ERP reported,
+ *    beside the figure the ERP states and the invoice's own (§386);
+ *  - a payment the ERP split across two rails shows the split, offers no rail
+ *    picker, and is booked with that split and no rail named (§396, §413);
  *  - "Record as paid" opens pre-filled from the ERP's report (a cheque stays a
  *    cheque, not the old ACH default).
  *
@@ -191,6 +194,11 @@ test.describe('/payments + /exceptions — the ERP-reported payment', () => {
 			await expect(panel.getByTestId('erp-payment-method')).toHaveValue('check');
 			await expect(panel.getByTestId('erp-payment-reference')).toHaveValue(`BILL-${tag}`);
 			await expect(panel.getByTestId('erp-payment-paid-on')).toHaveValue(PAID_ON);
+			// The figure the record books, beside what the invoice is for (§386).
+			await expect(panel.getByTestId('erp-payment-reported-amount')).toHaveText('$150.00');
+			await expect(panel.getByTestId('erp-payment-invoice-amount')).toHaveText('$150.00');
+			// One rail: no split is shown and the rail stays a choice.
+			await expect(panel.getByTestId('erp-payment-split')).toHaveCount(0);
 
 			const recorded = page.waitForResponse(
 				(r) =>
@@ -204,6 +212,62 @@ test.describe('/payments + /exceptions — the ERP-reported payment', () => {
 			expect(tenantPsql(`SELECT status FROM exceptions WHERE id='${erpId}'`).trim()).toBe(
 				'resolved'
 			);
+		} finally {
+			deleteVendorsWhere(`name='${tag} Supplier'`);
+		}
+	});
+
+	test('a payment the ERP split across two rails shows the split and books it with no rail picked', async ({
+		page
+	}) => {
+		const tag = `E396S-${Date.now().toString(36)}`;
+		try {
+			const invoiceId = await payableInvoice(page, tag, { uploadedBy: false });
+			const erpId = openException(invoiceId, 'payment_reconciliation', {
+				...chequeReport(tag),
+				method: null,
+				payment_parts: [
+					{ method: 'check', amount: '100.00' },
+					{ method: 'card', amount: '50.00' }
+				],
+				refusal_code: 'external_payment_in_run'
+			});
+
+			await page.goto(`/exceptions?id=${erpId}`);
+			const panel = page.getByTestId('erp-payment-panel');
+			await expect(panel).toBeVisible();
+			const parts = panel.getByTestId('erp-payment-split-part');
+			await expect(parts).toHaveCount(2);
+			await expect(parts.nth(0)).toContainText('Check');
+			await expect(parts.nth(0)).toContainText('$100.00');
+			await expect(parts.nth(1)).toContainText('$50.00');
+			await expect(panel.getByTestId('erp-payment-split-note')).toContainText(
+				'recorded with this split'
+			);
+			// The split is the record whatever rail is named, so there is no picker.
+			await expect(panel.getByTestId('erp-payment-method')).toHaveCount(0);
+			await expect(panel.getByTestId('erp-payment-method-fixed')).toBeVisible();
+
+			const recorded = page.waitForResponse(
+				(r) =>
+					new URL(r.url()).pathname === `/api/exceptions/${erpId}/record-erp-payment` &&
+					r.request().method() === 'POST'
+			);
+			await panel.getByTestId('erp-payment-submit').click();
+			const response = await recorded;
+			expect(response.status()).toBe(201);
+			expect(response.request().postDataJSON()).not.toHaveProperty('method');
+			const payment = (await response.json()) as {
+				method: string | null;
+				rail_breakdown: { method: string | null; amount: number }[] | null;
+			};
+			expect(payment.method).toBeNull();
+			expect(payment.rail_breakdown).toEqual([
+				{ method: 'check', amount: 100 },
+				{ method: 'card', amount: 50 }
+			]);
+			await expect(panel).toBeHidden();
+			expect(await getInvoiceStatus(page, invoiceId)).toBe('paid');
 		} finally {
 			deleteVendorsWhere(`name='${tag} Supplier'`);
 		}
