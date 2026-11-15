@@ -106,6 +106,17 @@ OUTCOME_UNKNOWN_AT_KEY = "erp_outcome_unknown_at"
 #: after the dead attempt, and pinned final.
 OUTCOME_UNKNOWN_AT_FINAL_KEY = "erp_outcome_unknown_at_final"
 
+#: ``WorkflowInstance.state_data`` key: an ISO time, the start of the latest
+#: attempt that reached the point of calling the ERP adapter. Committed with
+#: the pre-call write in :func:`_call_erp` and NEVER cleared, unlike
+#: :data:`OUTCOME_UNKNOWN_AT_KEY`, which a clean ``not_posted`` failure drops.
+#: The recovery sweep reads it to tell a push mid-backoff (an attempt began,
+#: its job is sleeping before the next) from one whose job never ran; reading
+#: the outcome stamp instead made a push between two attempts look stranded
+#: with none made, and re-driving it ran a second send loop beside the first
+#: (decisions §428, round-13 amendment).
+ATTEMPT_STARTED_AT_KEY = "erp_attempt_started_at"
+
 #: The push refusal for an invoice due before it is dated (`api/refusals`).
 INVOICE_DUE_BEFORE_DATE = "invoice_due_before_date"
 
@@ -967,11 +978,13 @@ async def _call_erp(
     if instance is not None:
         # The attempt's start, NOT final: if this attempt dies before its end
         # is committed, the next read restamps it (§409).
+        attempt_started = datetime.now(UTC).isoformat()
         instance.state_data = {
             **state,
             OUTCOME_UNKNOWN_KEY: True,
-            OUTCOME_UNKNOWN_AT_KEY: datetime.now(UTC).isoformat(),
+            OUTCOME_UNKNOWN_AT_KEY: attempt_started,
             OUTCOME_UNKNOWN_AT_FINAL_KEY: False,
+            ATTEMPT_STARTED_AT_KEY: attempt_started,
         }
         await db.commit()
     try:
@@ -1003,6 +1016,8 @@ async def _call_erp(
 
     if instance is not None:
         new_state = dict(state)
+        # `state` is from before the pre-call write: carry this attempt's start.
+        new_state[ATTEMPT_STARTED_AT_KEY] = attempt_started
         # A refusal the ERP answered outright adds no uncertainty of its own,
         # but cannot clear an earlier attempt's: that one may have posted.
         new_state[OUTCOME_UNKNOWN_KEY] = not result.success and (

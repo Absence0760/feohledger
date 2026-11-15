@@ -1475,21 +1475,31 @@ reasoning).
 - **A push stranded at `sending_to_erp` is re-driven or failed** (decisions
   §428). The same sweep's second pass takes an invoice at `sending_to_erp`
   whose latest entry into that status is older than the delay, with no
-  `invoice.erp_*` row after it, and decides under its row lock from the
-  instance's attempt stamp (`erp_outcome_unknown_at`, committed before every
-  adapter call): no attempt since the transition and inside the window (the
+  `invoice.erp_*` row after it, and decides under its row lock whether an
+  attempt of this push began, from signals a clean failure cannot erase: the
+  never-cleared `erp_attempt_started_at` committed before every adapter call
+  (or the outcome stamp) at or after the transition, or an `erp_retries` other
+  than 0, which every new push resets and only a finished attempt raises
+  (`erp_outcome_unknown_at` alone is not one: an attempt that ends
+  `not_posted` drops it, and a push sleeping in its backoff used to be
+  re-driven beside its own job; round-13 amendment). No attempt since the
+  transition and inside the window (the
   lookback, and the `configured_at` / `connected_at` floor) → re-dispatched
   through `dispatch_erp(inline=True)` into `send_to_erp_internal`, with the
   same status gate, idempotency key and possibly-posted state, actor NULL. No
   attempt and outside the window → `failed`, coded `erp_push_interrupted`
   (`erp.fail_interrupted_erp_send`), for a person to retry. An attempt began
   and nothing ended it → left while it is inside the lookback (it may still be
-  running, or be redelivered by SQS), then failed the same way, possibly
-  posted. The re-drive cannot post a bill twice: in Lambda mode the FIFO
-  queue's per-invoice group runs it after any original message, which then
-  finds the invoice moved (§410); in local mode the original job is a task
-  started at the commit, and one that stamped no attempt in the delay died
-  with its process. Counters `pushes_redriven` / `pushes_interrupted`.
+  running, sleeping between attempts, or be redelivered by SQS), then failed
+  the same way, possibly posted. No audit row records the entry at all (a
+  Lambda-shipped row that never landed, a restored database) → never re-driven: selected once the invoice row has
+  been untouched for the delay, left while `erp_attempt_started_at` is inside
+  the lookback, otherwise failed the same way. In Lambda mode the FIFO
+  queue's per-invoice group runs a re-drive after any original message, which
+  then finds the invoice moved (§410); in local mode the re-drive infers from
+  the missing attempt that the original task died with its process, and if it
+  was only slow the adapter's correlation-id idempotency lookup is what stops
+  a second bill. Counters `pushes_redriven` / `pushes_interrupted`.
 - **A hand-off that raises lands at `failed`.** When `dispatch_erp` raises after
   the `sending_to_erp` commit (an SQS send), `start_erp_send` moves the invoice
   to `failed` with an `invoice.erp_failed` row (`error: "ERP send could not be

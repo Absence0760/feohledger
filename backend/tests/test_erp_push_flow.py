@@ -50,7 +50,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.models.invoice import InvoiceStatus
-from app.services.erp import ErpPostRefusedError, retry_erp, send_to_erp_internal
+from app.services.erp import (
+    ATTEMPT_STARTED_AT_KEY,
+    ErpPostRefusedError,
+    retry_erp,
+    send_to_erp_internal,
+)
 
 _UNSET = object()
 
@@ -107,14 +112,20 @@ def _invoice(
 
 def _unstamped(state: dict) -> dict:
     """``state`` without its outcome-unknown stamp, which must be an aware ISO
-    time whenever the outcome is unknown (§405), and absent otherwise."""
+    time whenever the outcome is unknown (§405), and absent otherwise; and
+    without the attempt-start stamp, which, when present, must be an aware ISO
+    time too (it is never cleared, §428 round-13 amendment)."""
     from app.services.erp import (
+        ATTEMPT_STARTED_AT_KEY,
         OUTCOME_UNKNOWN_AT_FINAL_KEY,
         OUTCOME_UNKNOWN_AT_KEY,
         OUTCOME_UNKNOWN_KEY,
     )
 
     out = dict(state)
+    attempt = out.pop(ATTEMPT_STARTED_AT_KEY, None)
+    if attempt is not None:
+        assert datetime.fromisoformat(attempt).tzinfo is not None
     stamp = out.pop(OUTCOME_UNKNOWN_AT_KEY, None)
     final = out.pop(OUTCOME_UNKNOWN_AT_FINAL_KEY, None)
     if out.get(OUTCOME_UNKNOWN_KEY):
@@ -594,7 +605,8 @@ async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
 
     assert ref == "FE-9"
     assert seen == [None, "job-41"]
-    assert inst.state_data == {
+    assert ATTEMPT_STARTED_AT_KEY in inst.state_data
+    assert _unstamped(inst.state_data) == {
         "erp_retries": 0,
         PENDING_JOB_KEY: None,
         OUTCOME_UNKNOWN_KEY: False,
@@ -1311,7 +1323,8 @@ async def test_call_erp_success_clears_an_earlier_orphan():
     with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
         ref = await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
     assert ref == "XERO-BILL-7"
-    assert inst.state_data == {
+    assert ATTEMPT_STARTED_AT_KEY in inst.state_data
+    assert _unstamped(inst.state_data) == {
         "erp_retries": 0,
         OUTCOME_UNKNOWN_KEY: False,
         "erp_reference": "XERO-BILL-7",
