@@ -7,7 +7,10 @@
 	// vendor's own when blank) and by the vendor's stored tax number, which it
 	// reads itself; a result says only whether the tax number matches. Link is
 	// an armed two-click, like Unlink beside it, because it decides which ERP
-	// record this vendor's bills post to.
+	// record this vendor's bills post to. The parent mounts it only while the
+	// server's `search_refusal` for this vendor is null, and keys it by vendor
+	// id, so one instance only ever serves one vendor.
+	import { untrack } from 'svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -34,7 +37,9 @@
 	} = $props();
 
 	const uid = $props.id();
-	let query = $state('');
+	// Prefilled with the vendor's name once; never reset under the reader's
+	// typing when the vendor row refreshes (a new vendor remounts this).
+	let query = $state(untrack(() => vendorName));
 	let searching = $state(false);
 	let failed = $state<string | null>(null);
 	let candidates = $state<VendorErpCandidate[] | null>(null);
@@ -42,14 +47,14 @@
 	let armed = $state<string | null>(null);
 	let linking = $state<string | null>(null);
 
-	// A different vendor starts a fresh search, prefilled with its name.
-	$effect(() => {
-		query = vendorName;
-		void vendorId;
-		candidates = null;
-		failed = null;
-		armed = null;
-	});
+	// Outside-click un-arms (ui-patterns § Per-row actions): a click on a Link
+	// in these results is left to `link`, which arms or confirms it; any other
+	// click clears it, so a "Confirm link" is never left for a later stray click.
+	function disarmOnOutsideClick(e: MouseEvent) {
+		if (armed === null) return;
+		const target = e.target as Element | null;
+		if (!target?.closest('[data-testid="vendor-erp-find"] .row-action')) armed = null;
+	}
 
 	async function search(e: SubmitEvent) {
 		e.preventDefault();
@@ -93,22 +98,26 @@
 	}
 </script>
 
+<svelte:window onclick={disarmOnOutsideClick} />
+
 <div class="erp-find" data-testid="vendor-erp-find">
 	<h4 id="{uid}-heading">{m('vendors.modal.erp.find.heading')}</h4>
 	<p class="hint muted" id="{uid}-hint">{m('vendors.modal.erp.find.hint')}</p>
-	<form class="find-row" onsubmit={search}>
-		<label class="visually-hidden" for="{uid}-query">{m('vendors.modal.erp.find.label')}</label>
-		<input
-			id="{uid}-query"
-			type="search"
-			maxlength="100"
-			bind:value={query}
-			aria-describedby="{uid}-hint"
-			data-testid="vendor-erp-find-query"
-		/>
-		<RowAction type="submit" disabled={searching || disabled}>
-			{searching ? m('vendors.modal.erp.find.searching') : m('vendors.modal.erp.find.search')}
-		</RowAction>
+	<form onsubmit={search}>
+		<label class="field-label" for="{uid}-query">{m('vendors.modal.erp.find.label')}</label>
+		<div class="find-row">
+			<input
+				id="{uid}-query"
+				type="search"
+				maxlength="100"
+				bind:value={query}
+				aria-describedby="{uid}-hint"
+				data-testid="vendor-erp-find-query"
+			/>
+			<RowAction type="submit" disabled={searching || disabled}>
+				{searching ? m('vendors.modal.erp.find.searching') : m('vendors.modal.erp.find.search')}
+			</RowAction>
+		</div>
 	</form>
 
 	<div role="status" data-testid="vendor-erp-find-status">
@@ -160,7 +169,9 @@
 										variant="accent"
 										armed={armed === c.erp_vendor_id}
 										disabled={linking !== null || disabled}
-										ariaLabel={m('vendors.modal.erp.find.linkAria', { name: c.name })}
+										ariaLabel={armed === c.erp_vendor_id
+											? m('vendors.modal.erp.find.confirmLinkAria', { name: c.name })
+											: m('vendors.modal.erp.find.linkAria', { name: c.name })}
 										onclick={() => link(c)}
 									>
 										{#if linking === c.erp_vendor_id}
@@ -200,6 +211,12 @@
 	}
 	.failure-text {
 		color: var(--danger);
+	}
+	.field-label {
+		display: block;
+		font-size: 0.8rem;
+		font-weight: 500;
+		margin: 0 0 4px;
 	}
 	.find-row {
 		display: flex;

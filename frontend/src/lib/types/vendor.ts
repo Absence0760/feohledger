@@ -89,9 +89,12 @@ export interface VendorErpLink {
 export interface VendorErpLinksResponse {
 	vendor_id: string;
 	links: VendorErpLink[];
-	/** The connected ERP can be searched for a record to link by hand
-	 *  (decisions §415). Absent from an older server: read as false. */
-	search_available?: boolean;
+	/** The verdict on searching the connected ERP for a record and linking
+	 *  this vendor to it by hand (decisions §415; ui-patterns § Whether to
+	 *  offer an action): `null` when both doors would accept, else their coded
+	 *  refusal — `vendor_erp_search_unavailable` or `vendor_erp_link_exists`.
+	 *  Absent (an older server) is a refusal: offer nothing. */
+	search_refusal?: ActionRefusal;
 }
 
 // One ERP record `POST /api/vendors/{id}/erp-links/search` found (decisions
@@ -119,6 +122,8 @@ export interface VendorErpLinkResponse {
 	erp_vendor_id: string;
 	vendor: Vendor;
 	links: VendorErpLink[];
+	/** The vendor's `search_refusal` after the change. */
+	search_refusal?: ActionRefusal;
 }
 
 /** Can this candidate be linked to the vendor? Not when archived in the ERP
@@ -133,6 +138,8 @@ export interface VendorErpUnlinkResponse {
 	cleared: { placement: 'row' | 'kept'; erp_vendor_id: string }[];
 	vendor: Vendor;
 	links: VendorErpLink[];
+	/** The vendor's `search_refusal` after the change. */
+	search_refusal?: ActionRefusal;
 }
 
 // One card a vendor-ineligibility write could not close (PII-free).
