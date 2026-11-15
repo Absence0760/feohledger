@@ -21305,6 +21305,70 @@ detail opens on the new vendor's name with focus inside it, and Esc returns
 focus to **+ New Vendor**). No vitest: the change is a dialog hand-off with no
 logic separable from the DOM.
 
+## 417. The generic ERP webhook matches a delivery with no correlation id by the ERP's document id, to exactly one invoice in the push's realm (§302 follow-up, round 12, 2026-11-14)
+
+**Context.** `POST /api/erp/webhook/{erp_type}` resolved an invoice only by
+`correlation_id` and returned early without one ("not supported yet"). A
+provider whose webhook names its own bill but does not echo our correlation id
+therefore had every status change dropped. Since §302 the bill id a confirmed
+push returned is on `invoices.erp_document_id`, so there is a column to look
+it up by; the followup (`docs/followups.md`, "Surfaced by storing the ERP
+document id on the invoice") asked for that lookup, acting only on exactly one
+match. QuickBooks, Xero and Merge.dev have their own routes, which already
+match a bill by `erp_reference` within the push's realm (§392, §399), so this
+is for direct integrations on the generic route.
+
+**Decision.**
+
+- **The lookup sits after the signature, inside the tenant's own database.**
+  §408's order is unchanged: every secret-free check, then the unseal, then
+  the HMAC, then dedup and the status map. A document id that can name no
+  invoice (not a string or integer, blank, or longer than the column's 255) is
+  refused with the body's other shape checks, before the tenant database is
+  opened. A correlation id that is present still decides alone, unparseable
+  ones included.
+- **Exactly one candidate, or nothing.** `api/erp_webhook._invoice_id_by_document`
+  selects distinct invoice ids carrying the id (limit 2). Two or more is the
+  same silent 204 as none, logged as a warning without the id: an ambiguous
+  id is never resolved by picking one, because the wrong invoice moving to
+  `paid` or `failed` is worse than a status a person can still see in the ERP.
+- **Scoped to the realm the push recorded.** An invoice whose push stamped
+  `state_data["erp_realm"]` counts only when it equals the realm the tenant's
+  connection names now (`erp_link_realm.connection_realm`), so an id issued by
+  another ERP, or another company of the same ERP after a reconnect, matches
+  nothing. A push from before realms were recorded has none and is judged by
+  the id alone, as §392's correlation path judges it; a connection that names
+  no realm (`mock`) matches only those.
+- **Same row lock, re-checked under it.** The id found is locked through
+  `get_invoice_for_update`, like the correlation path, and the handler stops if
+  the locked row no longer carries the document id: a confirmed re-push can
+  replace the bill between the lookup and the lock.
+- **Indexed, not unique.** Migration 0132 adds `ix_invoices_erp_document_id`
+  (tenant DBs; declared `index=True` on the model for `create_all`). A unique
+  index was rejected: a provider repeating an id would then make the second
+  confirmed push fail to save, where today the webhook refuses the ambiguous
+  id and the push still records what the ERP returned.
+
+**Rejected.**
+
+- *Matching `state_data["erp_reference"]` instead.* It falls back to the
+  `"UNKNOWN"` placeholder and is unindexed JSON; the column holds only the
+  ERP's real id (§302).
+- *Taking the newest of several matches.* Recency says nothing about which
+  invoice the ERP meant.
+
+**Cost.** A provider that reports a bill under an id no confirmed push
+recorded (or two invoices sharing one) still has those events dropped
+silently; they are visible only in the ERP. That is the same outcome as before
+for them, and correct for everyone else.
+
+Tests: `tests/test_erp_webhook_transitions.py` (an unusable id never opens the
+tenant DB, signed or not; a forged delivery never reaches the lookup; over a
+real DB, one match moves with and without a recorded realm, two invoices
+carrying the id are both left alone, an id pushed to another realm matches
+nothing, and a forged delivery moves nothing). Migration 0132 is held by
+`tests/test_migration_model_index_parity.py` and `tests/test_alembic_revision_ids.py`.
+
 ## 419. The outbound-host guard resolves httpx through imports, and an `org_host_client` adopter's checked URL must trace to its per-org key (§334 / §339 / §345 follow-up, 2026-11-14)
 
 **Context.** Two gaps in `tests/test_url_safety.py`, recorded in

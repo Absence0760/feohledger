@@ -310,10 +310,25 @@ this applies to them.
 The webhook handler:
 1. Validates the request (signature, API key, or IP whitelist)
 2. Dedupes by `event_id` (`services/webhook_security.is_event_already_processed`)
-3. Looks up the invoice by `correlation_id` or `erp_document_id`
+3. Looks up the invoice by `correlation_id`, or, when the delivery carries
+   none, by `erp_document_id` (see below)
 4. Maps the ERP status to our internal status
 5. Transitions the invoice (e.g., `sent_to_erp` → `posted_in_erp`)
 6. Writes an audit log entry
+
+**A delivery with no `correlation_id` is matched by the ERP's document id,
+and only to one invoice** (decisions §417). The generic route then looks for
+the invoice whose confirmed push stored that id on `invoices.erp_document_id`
+(indexed, migration 0132), inside the tenant's own database and only after the
+signature verifies. An invoice whose push recorded a connection realm
+(`state_data["erp_realm"]`) counts only while the tenant is connected to that
+same realm, so an id from another ERP or another company of the same ERP
+matches nothing; an invoice pushed before realms were recorded is judged by the
+id alone. Two or more candidates are refused rather than guessed between, a
+silent 204 like no match at all. The match is re-checked under the
+`get_invoice_for_update` row lock, so a confirmed re-push that replaced the bill
+in between is not acted on. A correlation id that is present still decides
+alone, as before.
 
 **The ERP paying an invoice FeohLedger never paid is recorded, not dropped.**
 `posted_in_erp → paid` is not a state-machine edge (a `paid` invoice needs a

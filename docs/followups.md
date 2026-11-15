@@ -1779,22 +1779,6 @@ scope (§260) — do not fold them into any of these.
       relies on auto-send in production, or the first report of an approved
       invoice that did not reach the ERP.
 
-### Surfaced by storing the ERP document id on the invoice (2026-10-20, decisions §302)
-
-- [ ] **(c) The ERP status webhook still ignores an event that carries only
-      `erp_document_id`.** `api/erp_webhook.py` resolves the invoice by
-      `correlation_id` and returns early without one ("not supported yet"). The
-      bill id is now on `invoices.erp_document_id`, so the lookup has a column
-      to use. **Durable fix:** with no `correlation_id`, resolve the invoice by
-      `erp_document_id` (indexed, scoped to the tenant, acting only on exactly
-      one match and taking the same `get_invoice_for_update` row lock), with a
-      realdb test that a second invoice carrying the same id is refused rather
-      than guessed. **Trigger:** wiring a provider whose webhook does not echo
-      our correlation id through this generic route. (QuickBooks, Xero and
-      Merge.dev each have their own route instead, which matches a bill by its
-      `erp_reference` within the push's realm in `apply_bill_report`; decisions
-      §392, §399.)
-
 ### Surfaced by the UI action-verdict pass (2026-10-21, issue #575 § One rule, one place, decisions §305)
 
 - [ ] **(c) The invoice modal still hides Approve / Reject from a reviewer the
