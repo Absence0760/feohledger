@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1322,11 +1323,26 @@ void main() {
     expect(find.text('Reject'), findsNothing);
   });
 
-  testWidgets('a failed verdict read offers nothing', (tester) async {
+  testWidgets('a failed verdict read offers nothing, says it could not check, '
+      'and a pull-to-refresh asks again', (tester) async {
     final base = _detailClient(_invoiceJson('1', status: 'ready_for_review'));
+    var verdictReads = 0;
+    final announced = <String>[];
+    tester.binding.defaultBinaryMessenger
+        .setMockDecodedMessageHandler<dynamic>(SystemChannels.accessibility,
+            (message) async {
+      final m = message as Map;
+      if (m['type'] == 'announce') {
+        announced.add((m['data'] as Map)['message'] as String);
+      }
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockDecodedMessageHandler<dynamic>(
+            SystemChannels.accessibility, null));
     ApiClient().debugConfigure(
       client: MockClient((req) async {
-        if (req.url.path.endsWith('/review-actions')) {
+        if (req.url.path.endsWith('/review-actions') && verdictReads++ == 0) {
           return http.Response('boom', 500);
         }
         return base.send(req).then(http.Response.fromStream);
@@ -1334,10 +1350,88 @@ void main() {
     );
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
     await tester.pumpWidget(_localized());
-    await _pumpUntil(tester, find.text('Acme Corp'));
-    await tester.pump(const Duration(milliseconds: 100));
+    await _pumpUntil(
+        tester, find.byKey(const ValueKey('review-verdicts-unavailable')));
     expect(find.text('Approve'), findsNothing);
     expect(find.text('Reject'), findsNothing);
+    expect(find.text("Couldn't check what you can do here — pull to retry"),
+        findsOneWidget);
+    expect(announced,
+        contains("Couldn't check what you can do here — pull to retry"));
+
+    final refresh = tester.state<RefreshIndicatorState>(
+        find.byType(RefreshIndicator));
+    unawaited(refresh.show());
+    await _pumpUntil(tester, find.text('Approve'));
+    expect(find.text('Approve'), findsOneWidget);
+    expect(find.byKey(const ValueKey('review-verdicts-unavailable')),
+        findsNothing);
+  });
+
+  testWidgets('the action bar holds a placeholder while the verdict loads',
+      (tester) async {
+    final base = _detailClient(_invoiceJson('1', status: 'ready_for_review'));
+    final gate = Completer<void>();
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.url.path.endsWith('/review-actions')) await gate.future;
+        return base.send(req).then(http.Response.fromStream);
+      }),
+    );
+    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(
+        tester, find.byKey(const ValueKey('review-verdicts-loading')));
+    expect(find.text('Checking what you can do here…'), findsOneWidget);
+    expect(find.text('Approve'), findsNothing);
+    expect(find.byKey(const ValueKey('review-verdicts-unavailable')),
+        findsNothing);
+
+    gate.complete();
+    await _pumpUntil(tester, find.text('Approve'));
+    expect(find.byKey(const ValueKey('review-verdicts-loading')), findsNothing);
+  });
+
+  testWidgets('Approve renders on an AA-contrast green; a refused Reject '
+      'takes the disabled colours instead of the destructive red',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'ready_for_review'),
+      reviewActions: {
+        'approve': null,
+        'reject': refusal('approval_refused_by_something_new'),
+      },
+    ));
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byKey(const ValueKey('review-reject')));
+
+    final approve = tester
+        .widget<FilledButton>(find.byKey(const ValueKey('review-approve')));
+    expect(approve.style!.backgroundColor!.resolve({}), Colors.green.shade800);
+    expect(approve.style!.foregroundColor!.resolve({}), Colors.white);
+
+    final reject = tester
+        .widget<OutlinedButton>(find.byKey(const ValueKey('review-reject')));
+    expect(reject.onPressed, isNull);
+    final style = reject.style!;
+    expect(style.foregroundColor!.resolve({}), Colors.red.shade700);
+    expect(style.foregroundColor!.resolve({WidgetState.disabled}),
+        isNot(Colors.red.shade700));
+    expect(style.iconColor!.resolve({WidgetState.disabled}),
+        isNot(Colors.red.shade700));
+    expect(style.side!.resolve({WidgetState.disabled})!.color,
+        isNot(Colors.red.shade700));
+    // No colour pinned on the label or icon themselves, which would override
+    // the disabled state.
+    expect(tester.widget<Text>(find.text('Reject')).style, isNull);
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+              of: find.byKey(const ValueKey('review-reject')),
+              matching: find.byIcon(Icons.close)))
+          .color,
+      isNull,
+    );
   });
 
   // ── Recall approval (backend decisions §374) ────────────────────────────

@@ -334,8 +334,19 @@ def _priors_summary(inv) -> dict | None:
     return {"cache": cache, "rag": rag}
 
 
+class InvoiceListItem(InvoiceResponse):
+    """A row of ``GET /api/invoices``: the invoice, plus — only when the caller
+    asked with ``?include=review_actions`` — the caller's ``approve`` /
+    ``reject`` verdicts on it, exactly the two keys
+    ``GET /api/invoices/{id}/review-actions`` answers (``review.review_refusals``,
+    each ``null`` or the coded refusal). ``null`` when not asked for, so the
+    main list pays nothing for it."""
+
+    review_actions: dict[str, dict | None] | None = None
+
+
 class InvoiceListResponse(BaseModel):
-    items: list[InvoiceResponse]
+    items: list[InvoiceListItem]
     total: int
     page: int
     page_size: int

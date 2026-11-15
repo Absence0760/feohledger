@@ -48,6 +48,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   ActionVerdict _rejectVerdict = ActionVerdict.unanswered;
   ActionVerdict _recall = ActionVerdict.unanswered;
 
+  // Where the verdict read stands. A loading or failed read leaves every
+  // verdict unanswered, exactly like a role that may do nothing — so the
+  // action bar says which it is (a placeholder, or "couldn't check") instead
+  // of showing the same empty bar for all three.
+  _VerdictRead _verdictRead = _VerdictRead.idle;
+
   // Activity timeline (audit log) state — loaded independently of the invoice
   // body so a slow / failed trail never blocks the detail view.
   List<AuditEntry> _activity = [];
@@ -102,6 +108,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         _approveVerdict = ActionVerdict.unanswered;
         _rejectVerdict = ActionVerdict.unanswered;
         _recall = ActionVerdict.unanswered;
+        _verdictRead = asks ? _VerdictRead.loading : _VerdictRead.idle;
       });
     }
     if (!asks) return;
@@ -109,10 +116,19 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     try {
       verdicts = await InvoiceApi.reviewActions(invoice.id);
     } catch (_) {
+      if (!mounted) return;
+      setState(() => _verdictRead = _VerdictRead.failed);
+      // Said aloud too: an action bar that silently stays empty reads as
+      // "you may not act here", which is not what happened (WCAG 4.1.3).
+      A11y.announce(
+        context,
+        AppLocalizations.of(context).reviewVerdictsUnavailable,
+      );
       return;
     }
     if (!mounted) return;
     setState(() {
+      _verdictRead = _VerdictRead.loaded;
       _approveVerdict = ActionVerdict.fromVerdicts(verdicts, 'approve');
       _rejectVerdict = ActionVerdict.fromVerdicts(verdicts, 'reject');
       _recall = ActionVerdict.fromVerdicts(verdicts, 'recall_approval');
@@ -620,6 +636,87 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     );
   }
 
+  /// The destructive outline for Reject: red (shade700, AA on the surface)
+  /// while it can be pressed, the theme's disabled colours when a refused
+  /// verdict or an in-flight submit disables it — a hard-coded red read as
+  /// active either way.
+  static ButtonStyle _rejectStyle(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final disabled = scheme.onSurface.withValues(alpha: 0.38);
+    final red = Colors.red.shade700;
+    return OutlinedButton.styleFrom(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+    ).copyWith(
+      foregroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.disabled) ? disabled : red,
+      ),
+      iconColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.disabled) ? disabled : red,
+      ),
+      side: WidgetStateProperty.resolveWith(
+        (states) => BorderSide(
+          color: states.contains(WidgetState.disabled)
+              ? scheme.onSurface.withValues(alpha: 0.12)
+              : red,
+        ),
+      ),
+    );
+  }
+
+  /// The action bar while the verdict is being read: the bar's height held,
+  /// with a progress line and a label a screen reader reads, so the buttons
+  /// appearing a moment later do not look like a change of mind.
+  Widget _buildVerdictPlaceholder() {
+    final l = AppLocalizations.of(context);
+    return SafeArea(
+      child: Padding(
+        key: const ValueKey('review-verdicts-loading'),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const LinearProgressIndicator(),
+            const SizedBox(height: 8),
+            Text(
+              l.reviewVerdictsChecking,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The action bar when the verdict could not be read (offline, a failed
+  /// request): one line saying so, which a pull-to-refresh re-asks.
+  Widget _buildVerdictUnavailable() {
+    final l = AppLocalizations.of(context);
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            ExcludeSemantics(
+              child: Icon(Icons.cloud_off, size: 18, color: muted),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                l.reviewVerdictsUnavailable,
+                key: const ValueKey('review-verdicts-unavailable'),
+                style: TextStyle(color: muted),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Approve / Reject on an invoice in review, each offered from the
   /// server's verdict alone (`frontend/docs/ui-patterns.md` § Whether to offer
   /// an action): hidden for a role that cannot review and for a status the
@@ -629,6 +726,15 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   Widget? _buildActions() {
     final inv = _invoice;
     if (inv == null) return null;
+    switch (_verdictRead) {
+      case _VerdictRead.loading:
+        return _buildVerdictPlaceholder();
+      case _VerdictRead.failed:
+        return _buildVerdictUnavailable();
+      case _VerdictRead.idle:
+      case _VerdictRead.loaded:
+        break;
+    }
     if (!inv.status.isActionable) return _buildRecallAction();
     const hidden = {'invoice_not_in_review'};
     final approveOffered = _approveVerdict.isOffered(hiddenCodes: hidden);
@@ -662,33 +768,33 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 if (rejectOffered)
                   Expanded(
                     child: OutlinedButton.icon(
+                      key: const ValueKey('review-reject'),
                       onPressed:
                           _submitting || !_rejectVerdict.allowed ? null : _reject,
-                      icon: Icon(Icons.close, color: Colors.red.shade700),
-                      label: Text(
-                        l.invoiceDetailReject,
-                        // shade700 keeps the destructive label at AA contrast.
-                        style: TextStyle(color: Colors.red.shade700),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: Colors.red.shade700),
-                      ),
+                      icon: const Icon(Icons.close),
+                      label: Text(l.invoiceDetailReject),
+                      style: _rejectStyle(context),
                     ),
                   ),
                 if (rejectOffered && approveOffered) const SizedBox(width: 16),
                 if (approveOffered)
                   Expanded(
                     child: FilledButton.icon(
+                      key: const ValueKey('review-approve'),
                       onPressed:
                           _submitting || !_approveVerdict.allowed
                           ? null
                           : _approve,
                       icon: const Icon(Icons.check),
                       label: Text(l.invoiceDetailApprove),
+                      // green.shade800 under a white label is ~5.1:1; the
+                      // full-saturation green was 2.78:1 (WCAG 1.4.3). Set
+                      // for the enabled state only, so a refused verdict
+                      // keeps the theme's disabled look.
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: Colors.green,
+                        backgroundColor: Colors.green.shade800,
+                        foregroundColor: Colors.white,
                       ),
                     ),
                   ),
@@ -700,3 +806,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     );
   }
 }
+
+/// Where [_InvoiceDetailScreenState]'s verdict read stands: not asked (a
+/// status with no review action), in flight, failed, or answered.
+enum _VerdictRead { idle, loading, failed, loaded }

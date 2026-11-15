@@ -1129,5 +1129,8 @@
   "codedRefusalInvoiceTransitionInvalid": "この請求書は{from}から{to}に移行できません。",
   "codedRefusalInvoiceTransitionRecallOnly": "この請求書を{from}から{to}に移行するには、請求書ごとに承認を取り消す必要があります。請求書の「承認を取り消す」を使用してください。",
   "codedRefusalInvoiceOnceApprovedNotReread": "この請求書はすでに承認されているため、書類を再読み取りできません。代わりに承認を取り消して修正してください。",
-  "invoicesBulkSkipNoReason": "理由は示されていません"
+  "invoicesBulkSkipNoReason": "理由は示されていません",
+  "invoicesBulkSkipNoNumber": "請求書（番号なし）",
+  "reviewVerdictsUnavailable": "ここで実行できる操作を確認できませんでした。下に引いて再試行してください",
+  "reviewVerdictsChecking": "ここで実行できる操作を確認しています…"
 }

@@ -38,12 +38,13 @@ async def _invoice(
     uploaded_by=None,
     amount="500.00",
     approval_config=None,
+    vendor_name="Parity Vendor",
 ) -> uuid.UUID:
     async with realdb.sessionmaker(TENANT)() as s:
         entity_id = (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
         inv = Invoice(
             invoice_number=f"RA-{uuid.uuid4().hex[:8]}",
-            vendor_name="Parity Vendor",
+            vendor_name=vendor_name,
             amount=Decimal(amount),
             currency="USD",
             status=status,
@@ -786,3 +787,73 @@ async def test_resubmit_refuses_a_non_rejected_invoice_with_a_code(realdb):
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "invoice_not_resubmittable"
     assert resp.json()["detail"]["params"] == {"status": "new"}
+
+
+# ── The list's per-row verdicts (`GET /api/invoices?include=review_actions`) ──
+#
+# The mobile approvals queue offers its swipe actions from these instead of one
+# `review-actions` read per row. They are `review.review_refusals` run over the
+# page with its lookups batched, so each row must say exactly what the per-row
+# endpoint says — and the plain list must not run the gates at all.
+
+
+async def _listed_verdicts(realdb, role, tag: str, include: str | None = "review_actions"):
+    params = {"search": tag, "page_size": 100}
+    if include is not None:
+        params["include"] = include
+    async with realdb.client(key=TENANT, role=role) as c:
+        resp = await c.get("/api/invoices", params=params)
+    assert resp.status_code == 200, resp.text
+    return {row["id"]: row["review_actions"] for row in resp.json()["items"]}
+
+
+@pytest.mark.parametrize("role", ROLES)
+async def test_the_listed_verdicts_match_review_actions(realdb, role):
+    """Allowed, SoD-refused, gate-refused and not-in-review rows on one page:
+    each row's `review_actions` is the per-row endpoint's `approve` / `reject`."""
+    from tests.test_approval_receiver_segregation import _po, _receive
+
+    tag = f"ListVerdict-{uuid.uuid4().hex[:8]}"
+    ids = [
+        await _invoice(realdb, vendor_name=tag, **kwargs)
+        for kwargs in _scenarios(realdb, role).values()
+    ]
+    # A receiving-SoD row too, so the batched recorder lookup is exercised.
+    # A cfo may not record a receipt, so another user receives for that role.
+    recorder = role if role != "cfo" else "admin"
+    po_id, po_number, line_id = await _po(realdb)
+    await _receive(realdb, recorder, po_id, line_id)
+    received = await _invoice(realdb, vendor_name=tag)
+    async with realdb.sessionmaker(TENANT)() as s:
+        (await s.get(Invoice, received)).po_number = po_number
+        await s.commit()
+    ids.append(received)
+
+    listed = await _listed_verdicts(realdb, role, tag)
+    assert set(listed) == {str(i) for i in ids}
+    codes = set()
+    for invoice_id in ids:
+        verdict = await _verdict(realdb, role, invoice_id)
+        expected = {"approve": verdict["approve"], "reject": verdict["reject"]}
+        assert listed[str(invoice_id)] == expected, (role, invoice_id)
+        codes.add(verdict["approve"] and verdict["approve"]["code"])
+    if role in ("admin", "ap_manager"):
+        # The page really mixed the cases the queue has to tell apart.
+        assert {
+            None,
+            "invoice_not_in_review",
+            "approval_segregation",
+            "approval_segregation_receiver",
+        } <= codes, codes
+
+
+async def test_the_plain_list_carries_no_verdicts(realdb):
+    tag = f"ListPlain-{uuid.uuid4().hex[:8]}"
+    invoice_id = await _invoice(realdb, vendor_name=tag)
+    assert await _listed_verdicts(realdb, "admin", tag, include=None) == {str(invoice_id): None}
+
+
+async def test_an_unknown_include_is_refused(realdb):
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.get("/api/invoices", params={"include": "everything"})
+    assert resp.status_code == 422, resp.text

@@ -93,10 +93,11 @@ Map<String, dynamic> _invoiceJson(
   String id, {
   String status = 'pending',
   String vendor = 'Acme Corp',
+  String? number,
 }) =>
     {
       'id': id,
-      'invoice_number': 'INV-$id',
+      'invoice_number': number ?? 'INV-$id',
       'vendor_name': vendor,
       'amount': 100,
       'currency': 'USD',
@@ -800,6 +801,30 @@ void main() {
             matching: find.text('something this build cannot state')),
         findsOneWidget,
       );
+    });
+
+    testWidgets('a skipped row with no invoice number is named, not shown '
+        'by its id', (tester) async {
+      const id = '6f1c2e9a-0b7d-4c55-9a1e-3d2f4b5c6d7e';
+      ApiClient().debugConfigure(
+        client: listClient(
+          [_invoiceJson(id, status: 'ready_for_review', number: '')],
+          skipped: [
+            {'id': id, 'reason': 'skipped'},
+          ],
+        ),
+      );
+      await openPicker(tester, [id]);
+      await tester.tap(find.widgetWithText(ListTile, 'Approved'));
+      await _pumpUntil(tester, find.byType(AlertDialog));
+      await tester.pumpAndSettle();
+
+      final row = find.byKey(const ValueKey('bulk-skip-$id'));
+      expect(
+        find.descendant(of: row, matching: find.text('Invoice (no number)')),
+        findsOneWidget,
+      );
+      expect(find.textContaining(id), findsNothing);
     });
 
     testWidgets('a batch with no skips just confirms', (tester) async {

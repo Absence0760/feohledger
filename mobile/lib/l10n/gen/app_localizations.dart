@@ -5904,6 +5904,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No reason given'**
   String get invoicesBulkSkipNoReason;
+
+  /// Names a skipped invoice that has no invoice number in the bulk status result dialog, instead of its internal id.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice (no number)'**
+  String get invoicesBulkSkipNoNumber;
+
+  /// One line shown (and announced) when the server's verdict on which review actions the user may take could not be read — offline, a cached approvals queue, or a failed request. Approve / Reject stay unavailable until a pull-to-refresh reads it.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t check what you can do here — pull to retry'**
+  String get reviewVerdictsUnavailable;
+
+  /// Placeholder in the invoice detail action bar while the server's verdict on Approve / Reject is loading.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking what you can do here…'**
+  String get reviewVerdictsChecking;
 }
 
 class _AppLocalizationsDelegate

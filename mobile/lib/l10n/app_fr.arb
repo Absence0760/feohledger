@@ -963,5 +963,8 @@
   "codedRefusalInvoiceTransitionInvalid": "Cette facture ne peut pas passer de {from} à {to}.",
   "codedRefusalInvoiceTransitionRecallOnly": "Cette facture ne peut passer de {from} à {to} qu'en retirant son approbation, une facture à la fois : utilisez « Retirer l'approbation » sur la facture.",
   "codedRefusalInvoiceOnceApprovedNotReread": "Cette facture a déjà été approuvée : son document ne peut donc pas être relu. Retirez plutôt son approbation et corrigez-la.",
-  "invoicesBulkSkipNoReason": "Aucun motif indiqué"
+  "invoicesBulkSkipNoReason": "Aucun motif indiqué",
+  "invoicesBulkSkipNoNumber": "Facture (sans numéro)",
+  "reviewVerdictsUnavailable": "Impossible de vérifier ce que vous pouvez faire ici — tirez pour réessayer",
+  "reviewVerdictsChecking": "Vérification de ce que vous pouvez faire ici…"
 }

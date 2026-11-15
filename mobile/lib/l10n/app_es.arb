@@ -963,5 +963,8 @@
   "codedRefusalInvoiceTransitionInvalid": "Esta factura no puede pasar de {from} a {to}.",
   "codedRefusalInvoiceTransitionRecallOnly": "Esta factura solo puede pasar de {from} a {to} retirando su aprobación, una factura cada vez: use Retirar aprobación en la factura.",
   "codedRefusalInvoiceOnceApprovedNotReread": "Esta factura ya se aprobó, así que su documento no puede volver a leerse. Retire su aprobación y corríjala en su lugar.",
-  "invoicesBulkSkipNoReason": "No se indicó ningún motivo"
+  "invoicesBulkSkipNoReason": "No se indicó ningún motivo",
+  "invoicesBulkSkipNoNumber": "Factura (sin número)",
+  "reviewVerdictsUnavailable": "No se pudo comprobar qué puede hacer aquí; deslice hacia abajo para reintentar",
+  "reviewVerdictsChecking": "Comprobando qué puede hacer aquí…"
 }

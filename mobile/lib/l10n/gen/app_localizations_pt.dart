@@ -4029,6 +4029,17 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get invoicesBulkSkipNoReason => 'Nenhum motivo informado';
+
+  @override
+  String get invoicesBulkSkipNoNumber => 'Fatura (sem número)';
+
+  @override
+  String get reviewVerdictsUnavailable =>
+      'Não foi possível verificar o que você pode fazer aqui — puxe para tentar novamente';
+
+  @override
+  String get reviewVerdictsChecking =>
+      'Verificando o que você pode fazer aqui…';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -8054,4 +8065,15 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get invoicesBulkSkipNoReason => 'Nenhum motivo informado';
+
+  @override
+  String get invoicesBulkSkipNoNumber => 'Fatura (sem número)';
+
+  @override
+  String get reviewVerdictsUnavailable =>
+      'Não foi possível verificar o que você pode fazer aqui — puxe para tentar novamente';
+
+  @override
+  String get reviewVerdictsChecking =>
+      'Verificando o que você pode fazer aqui…';
 }

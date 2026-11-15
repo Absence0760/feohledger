@@ -4038,4 +4038,15 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get invoicesBulkSkipNoReason => 'Aucun motif indiqué';
+
+  @override
+  String get invoicesBulkSkipNoNumber => 'Facture (sans numéro)';
+
+  @override
+  String get reviewVerdictsUnavailable =>
+      'Impossible de vérifier ce que vous pouvez faire ici — tirez pour réessayer';
+
+  @override
+  String get reviewVerdictsChecking =>
+      'Vérification de ce que vous pouvez faire ici…';
 }
