@@ -289,7 +289,7 @@ async def test_0131_stamps_the_current_company_with_its_location_and_reverts(rea
         {**EAST_CFG, "location_id": ""},  # top level: its realm did not change
         {**EAST_CFG, "company_id": "INITECH"},  # the stamps name other companies
         {"type": "netsuite", "integration_method": "direct", "account_id": "X"},
-        None,  # no organization names this database
+        None,  # the organization has no ERP block
     ],
 )
 async def test_0131_leaves_every_other_connection_alone(realdb, erp):
@@ -309,6 +309,33 @@ async def test_0131_refuses_to_guess_without_the_organizations_settings(realdb):
     await _seed(realdb)
     with pytest.raises((RuntimeError, DBAPIError), match="FEOH_MIGRATE_TENANT"):
         await _run(tenant, _load().upgrade)
+
+
+def _orphaned(mig):
+    """Run the revision as env.py would on a tenant no organization names."""
+
+    def lookup():
+        raise LookupError("no organization names the database 'feoh_gone'")
+
+    mig._tenant_erp_lookup = lambda: lookup
+    return mig
+
+
+async def test_0131_refuses_an_orphaned_tenant_holding_intacct_stamps(realdb):
+    """No organization row names the database: nothing says which entity its
+    stamps were made under, the same unknown as having no lookup at all — not
+    "no ERP connection", which would silently skip the rewrite."""
+    from sqlalchemy.exc import DBAPIError
+
+    tenant = _tenant_engine(realdb)
+    await _run(tenant, _orphaned(_load()).upgrade)  # no Intacct stamp: no-op
+    ids = await _seed(realdb)
+    before = await _stamps(realdb, ids)
+    with pytest.raises((RuntimeError, DBAPIError), match="no organization on the control plane"):
+        await _run(tenant, _orphaned(_load()).upgrade)
+    with pytest.raises((RuntimeError, DBAPIError), match="no organization on the control plane"):
+        await _run(tenant, _orphaned(_load()).downgrade)
+    assert await _stamps(realdb, ids) == before
 
 
 async def _control_erp(engine, org_id) -> dict:
@@ -411,4 +438,56 @@ async def test_0131_reads_the_organization_through_env_py_in_a_real_tenant_run(r
         async with tenant.begin() as conn:
             await conn.execute(text("UPDATE alembic_version SET version_num = :v"), {"v": version})
         await _restore_settings(control, info.org_id, saved)
+        await control.dispose()
+
+
+async def test_0131_refuses_an_orphaned_tenant_in_a_real_tenant_run(realdb):
+    """env.py's lookup tells "no organization names this database" apart from
+    "no ERP block": with Intacct stamps present the run fails, and leaves the
+    tenant at 0130 with its stamps as they were."""
+    ids = await _seed(realdb)
+    before = await _stamps(realdb, ids)
+    info = realdb.info(TENANT)
+    control = create_async_engine(realdb.control_db_url())
+    tenant = _tenant_engine(realdb)
+    async with tenant.connect() as conn:
+        version = (await conn.execute(text("SELECT version_num FROM alembic_version"))).scalar()
+    try:
+        async with control.begin() as conn:
+            await conn.execute(
+                text("UPDATE organizations SET db_name = :gone WHERE id = :id"),
+                {"gone": f"{info.db_name}_orphaned", "id": info.org_id},
+            )
+        async with tenant.begin() as conn:
+            await conn.execute(
+                text("UPDATE alembic_version SET version_num = :v"),
+                {"v": "0130_payment_rail_breakdown"},
+            )
+        run = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "0131_intacct_location_realm"],
+            cwd=BACKEND,
+            env={
+                **os.environ,
+                "FEOH_DATABASE_URL": realdb.control_db_url(),
+                "FEOH_MIGRATE_TENANT": info.db_name,
+            },
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert run.returncode != 0
+        assert "no organization on the control plane names it" in run.stderr
+        async with tenant.connect() as conn:
+            assert (
+                await conn.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar() == "0130_payment_rail_breakdown"
+        assert await _stamps(realdb, ids) == before
+    finally:
+        async with tenant.begin() as conn:
+            await conn.execute(text("UPDATE alembic_version SET version_num = :v"), {"v": version})
+        async with control.begin() as conn:
+            await conn.execute(
+                text("UPDATE organizations SET db_name = :d WHERE id = :id"),
+                {"d": info.db_name, "id": info.org_id},
+            )
         await control.dispose()

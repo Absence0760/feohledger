@@ -42,7 +42,10 @@ is read from the control plane through the lookup ``alembic/env.py`` puts in
 ``config.attributes`` on a ``FEOH_MIGRATE_TENANT`` run. Without that lookup the
 revision cannot tell which stamps to rewrite: it raises if the database holds
 any Intacct stamp at all, and is a no-op otherwise (a database with no Intacct
-link has nothing to decide).
+link has nothing to decide). The same holds when the lookup runs but no
+organization names the database (it raises ``LookupError``): an orphaned tenant
+has no connection to read a location from, which is not the same as an org with
+no ERP connection.
 
 Control plane
 -------------
@@ -269,7 +272,20 @@ def _tenant_step(*, down: bool) -> None:
                 "(or scripts/migrate_all_tenants.py)."
             )
         return
-    pair = _restamp(lookup())
+    try:
+        erp = lookup()
+    except LookupError:
+        # An orphaned tenant: no organization's connection says which entity
+        # its stamps were made under, the same unknown as having no lookup.
+        if _holds_intacct_stamps(bind):
+            raise RuntimeError(
+                "0131_intacct_location_realm: this database holds Sage Intacct link "
+                "stamps, and no organization on the control plane names it, so "
+                "which entity they were made under cannot be read. Restore its "
+                "organizations row (db_name) before migrating it."
+            ) from None
+        return
+    pair = _restamp(erp)
     if pair is None:
         return
     company_only, located = pair

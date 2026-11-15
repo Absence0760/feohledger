@@ -50,8 +50,10 @@ def _tenant_organization_erp(db_name: str):
     Called from inside a revision, which Alembic runs synchronously on the
     tenant connection's greenlet, so the control-plane read is awaited with
     ``await_only``. Through the app's engine factory, so it authenticates the
-    way the migration itself does. None: no organization names this database,
-    or it has no ERP block. A read that fails raises, and fails the run."""
+    way the migration itself does. None: the organization has no ERP block.
+    ``LookupError``: no organization names this database (an orphaned tenant),
+    which a revision must not read as "no ERP connection". A read that fails
+    raises, and fails the run."""
     cached: list = []
 
     def lookup():
@@ -65,12 +67,15 @@ def _tenant_organization_erp(db_name: str):
                     async with engine.connect() as conn:
                         sql = "SELECT settings->'erp' FROM organizations WHERE db_name = :d"
                         result = await conn.execute(text(sql), {"d": db_name})
-                        return result.scalar_one_or_none()
+                        return result.first()
                 finally:
                     await engine.dispose()
 
             cached.append(await_only(fetch()))
-        return cached[0]
+        row = cached[0]
+        if row is None:
+            raise LookupError(f"no organization names the database {db_name!r}")
+        return row[0]
 
     return lookup
 
