@@ -12,13 +12,12 @@ ambiguous id rather than guessing — a unique constraint would instead make the
 second confirmed push fail to save.
 
 Revision ID: 0132_invoice_erp_doc_id_idx
-Revises: 0130_payment_rail_breakdown
+Revises: 0131_intacct_location_realm
 Create Date: 2026-11-14
 
 27 characters (``alembic_version.version_num`` is ``VARCHAR(32)``); the filename
-matches the id. Round 12 lane C owns revision 0131; when both land, this
-revision's ``down_revision`` is re-pointed at 0131's id so the chain stays
-linear.
+matches the id. Written beside 0131 (round 12) and chained after it so the
+history stays linear.
 
 TENANT DB ONLY: gated on ``invoices`` existing, so a no-op on the control
 plane; fanned out by ``scripts/migrate_all_tenants.py``. Declared
@@ -33,7 +32,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision = "0132_invoice_erp_doc_id_idx"
-down_revision = "0130_payment_rail_breakdown"
+down_revision = "0131_intacct_location_realm"
 branch_labels = None
 depends_on = None
 
