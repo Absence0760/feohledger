@@ -679,6 +679,10 @@ const BUILDERS: Record<string, Builder> = {
 			? null
 			: t('refusal.externalPaymentAmountChanged', { staged, amount });
 	}),
+	// A live `paid_not_recorded` row keeps a split over several rails that one
+	// rail cannot describe (decisions §426); `params.exception_id` is the row
+	// whose one-click books it, which the queue's dialog links to.
+	external_payment_erp_split: forInvoice(fixed('refusal.externalPaymentErpSplit')),
 	external_payment_paid_on_future: fixed('refusal.externalPaymentPaidOnFuture'),
 	// `api/exceptions.py::record_erp_payment` — a kept ERP payment stating no
 	// cash figure whose bill could not be read back to confirm one (§393)

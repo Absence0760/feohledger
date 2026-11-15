@@ -31,7 +31,11 @@ import { expectNoA11yViolations } from '../a11y/axe-helper';
  *  - a blocked row says WHICH duty stops this reader clearing it: creator,
  *    raiser, or the invoice's approver (§169, §420);
  *  - "Record as paid" opens pre-filled from the ERP's report (a cheque stays a
- *    cheque, not the old ACH default).
+ *    cheque, not the old ACH default);
+ *  - over a two-rail split, "Record as paid" on the payment queue shows the
+ *    split as `/exceptions` does and books it through the row's one-click,
+ *    never one rail through `record-outside`, which refuses it and points at
+ *    the row (§426).
  *
  * Each test builds its own vendor, invoice and exceptions with a unique tag and
  * deletes them (vendor → invoices → payments → exceptions) afterwards.
@@ -460,6 +464,125 @@ test.describe('/payments + /exceptions — the ERP-reported payment', () => {
 			await expect(dialog.getByTestId('record-paid-on')).toHaveValue(PAID_ON);
 			await dialog.getByRole('button', { name: 'Cancel' }).click();
 			await expect(dialog).toBeHidden();
+		} finally {
+			deleteVendorsWhere(`name='${tag} Supplier'`);
+		}
+	});
+
+	test('Record as paid over a two-rail split shows it and books it through the row', async ({
+		page
+	}) => {
+		const tag = `E426Q-${Date.now().toString(36)}`;
+		try {
+			const invoiceId = await payableInvoice(page, tag, { uploadedBy: false });
+			const erpId = openException(invoiceId, 'erp_reconciliation', {
+				...chequeReport(tag),
+				method: null,
+				payment_parts: [
+					{ method: 'check', amount: '100.00' },
+					{ method: 'card', amount: '50.00' }
+				]
+			});
+
+			await page.goto('/payments');
+			const row = queueRow(page, tag);
+			await loadMoreUntilRow(page, row);
+			await row.getByRole('button', { name: `Record as paid — invoice ${tag}` }).click();
+			const dialog = page.getByRole('dialog', {
+				name: 'Record a payment made outside FeohLedger'
+			});
+			await expect(dialog).toBeVisible();
+			await expect(dialog.getByTestId('record-erp-amount')).toHaveText('$150.00');
+			const parts = dialog.getByTestId('record-split-part');
+			await expect(parts).toHaveCount(2);
+			await expect(parts.nth(0)).toContainText('Check');
+			await expect(parts.nth(0)).toContainText('$100.00');
+			await expect(parts.nth(1)).toContainText('$50.00');
+			await expect(dialog.getByTestId('record-split-note')).toContainText(
+				'recorded with this split'
+			);
+			// One rail cannot describe it: no picker, as on `/exceptions`.
+			await expect(dialog.getByTestId('record-method')).toHaveCount(0);
+			await expect(dialog.getByTestId('record-method-fixed')).toBeVisible();
+			await expectNoA11yViolations(page);
+			await page.setViewportSize(PHONE);
+			await expect(dialog.getByTestId('record-split')).toBeVisible();
+			await expectNoA11yViolations(page);
+			await page.setViewportSize(DESKTOP);
+
+			const recorded = page.waitForResponse(
+				(r) =>
+					new URL(r.url()).pathname === `/api/exceptions/${erpId}/record-erp-payment` &&
+					r.request().method() === 'POST'
+			);
+			await dialog.getByTestId('record-confirm').click();
+			const response = await recorded;
+			expect(response.status(), await response.text()).toBe(201);
+			expect(response.request().postDataJSON()).not.toHaveProperty('method');
+			const payment = (await response.json()) as {
+				method: string | null;
+				rail_breakdown: { method: string | null; amount: number }[] | null;
+			};
+			expect(payment.method).toBeNull();
+			expect(payment.rail_breakdown).toEqual([
+				{ method: 'check', amount: 100 },
+				{ method: 'card', amount: 50 }
+			]);
+			await expect(dialog).toBeHidden();
+			expect(await getInvoiceStatus(page, invoiceId)).toBe('paid');
+		} finally {
+			deleteVendorsWhere(`name='${tag} Supplier'`);
+		}
+	});
+
+	test('a record-outside the server refuses over a kept split links to its exception', async ({
+		page
+	}) => {
+		const tag = `E426R-${Date.now().toString(36)}`;
+		try {
+			const invoiceId = await payableInvoice(page, tag, { uploadedBy: false });
+			const erpId = openException(invoiceId, 'erp_reconciliation', {
+				...chequeReport(tag),
+				payment_parts: [
+					{ method: 'check', amount: '100.00' },
+					{ method: 'card', amount: '50.00' }
+				]
+			});
+			// A queue read from before the ERP's split was kept: the row carries
+			// no breakdown, so the dialog keeps its picker and posts
+			// `record-outside`, which the server refuses on the row it now holds.
+			await page.route('**/api/payments/queue**', async (route) => {
+				if (route.request().method() !== 'GET') return route.continue();
+				const res = await route.fetch();
+				const body = (await res.json()) as {
+					items: { invoice_number: string; erp_reported_payment: Record<string, unknown> | null }[];
+				};
+				for (const item of body.items) {
+					if (item.invoice_number === tag && item.erp_reported_payment) {
+						item.erp_reported_payment.payment_parts = null;
+						item.erp_reported_payment.split_stands = null;
+					}
+				}
+				await route.fulfill({ response: res, json: body });
+			});
+
+			await page.goto('/payments');
+			const row = queueRow(page, tag);
+			await loadMoreUntilRow(page, row);
+			await row.getByRole('button', { name: `Record as paid — invoice ${tag}` }).click();
+			const dialog = page.getByRole('dialog', {
+				name: 'Record a payment made outside FeohLedger'
+			});
+			await expect(dialog.getByTestId('record-method')).toHaveValue('check');
+			await dialog.getByTestId('record-confirm').click();
+			await expect(dialog.getByTestId('record-error')).toContainText(
+				'paid with more than one payment method'
+			);
+			await expect(dialog.getByTestId('record-error-exception')).toHaveAttribute(
+				'href',
+				`/exceptions?id=${erpId}`
+			);
+			expect(await getInvoiceStatus(page, invoiceId)).toBe('approved');
 		} finally {
 			deleteVendorsWhere(`name='${tag} Supplier'`);
 		}

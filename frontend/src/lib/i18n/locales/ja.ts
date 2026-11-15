@@ -5050,6 +5050,7 @@ export const messages = {
 	'payments.recordOutside.failed': "支払いを記録できませんでした",
 	'payments.recordOutside.methodChoose': "支払方法を選択",
 	'payments.recordOutside.prefilledFromErp': "{erp} が報告した支払いの内容を入力済みです。記録する前に内容を確認してください。",
+	'payments.recordOutside.openException': "例外を開いて、内訳どおりに記録してください。",
 	'payments.recordOutside.yourErp': "ご利用の ERP",
 	'payments.recordOutside.unavailable': "この請求書はまだ支払済みとして記録できません。",
 	'payments.queue.openException': "例外を開く",
@@ -5085,6 +5086,7 @@ export const messages = {
 	// No-rail pilot (issue #517): the NACHA export claim, regenerate and bank rejection
 	'paymentRuns.status.exported': "エクスポート済み",
 	'refusal.externalPaymentAmountChanged': "クレジットメモまたは早期支払割引により、バッチ作成後にこの請求書の支払額が変わりました（バッチ上 {staged}、現在の支払額 {amount}）。仕入先と差額を解消してから、請求書を個別に記録してください。",
+	'refusal.externalPaymentErpSplit': "ERP によると、この請求書は複数の支払方法で支払われています。支払いの内訳を保持する例外から記録してください。",
 	'refusal.nachaPaymentNotPayable': "請求書 {invoice} の支払いは、作成時の内容のままでは送金できなくなりました。バッチをキャンセルして作成し直してください。",
 	'refusal.nachaAlreadyExported': "このバッチの銀行ファイルはすでにエクスポートされています。2 つ目のファイルをアップロードすると、仕入先に二重に支払われます。最初のファイルを銀行が受け付けなかった場合にのみ再生成してください。",
 	'refusal.paymentRunSegregationExport': "職務分掌: この支払いランを作成したユーザーは、その銀行ファイルをエクスポートすることはできません。別のユーザーが行う必要があります。",
