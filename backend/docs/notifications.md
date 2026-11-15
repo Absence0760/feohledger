@@ -30,7 +30,9 @@ commits**, not inside it. `notify_event` and
 `vendor_notifications.notify_vendor_of_invoice_event` do their DB work
 (recipient load, preference gating, the in-app `Notification` rows) inline and
 then hand a closure to `services/post_commit.enqueue_post_commit`, which fires
-it from SQLAlchemy's `after_commit` event.
+it from SQLAlchemy's `after_commit` event. The outbound webhook emits from the
+same transition ride the same queue (`backend/docs/public-api.md` § Dispatch,
+`docs/decisions.md` §427), as does the ERP auto-send.
 
 **Savepoints are not commits.** SQLAlchemy fires `after_commit` when a SAVEPOINT
 is released and `after_rollback` when one rolls back. The queue ignores a

@@ -126,7 +126,10 @@ async def create_exception(
     try:
         from app.services.webhooks import emit_exception_raised
 
+        # Sent once the caller's transaction commits, and dropped if it rolls
+        # back with this row (decisions §427).
         await emit_exception_raised(
+            db=db,
             organization_id=organization_id,
             exception_id=exc.id,
             exception_type=exception_type,
