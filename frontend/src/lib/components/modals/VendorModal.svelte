@@ -117,8 +117,16 @@
 		return key ? m(key) : name;
 	}
 
+	// The per-vendor reads below key on the id, not the object: every mutation
+	// hands the parent a fresh `vendor` (`onupdated`), and an effect reading
+	// `vendor.id` straight off the prop re-runs on that new object, refetching
+	// the same vendor's panels mid-action — which blanked a link just made and
+	// dropped focus off the note that replaced its button (decisions §415). A
+	// derived primitive only changes when a different vendor opens.
+	const vendorId = $derived(vendor.id);
+
 	$effect(() => {
-		const id = vendor.id;
+		const id = vendorId;
 		if (!canSeeScore) return;
 		loadingScore = true;
 		scoreError = false;
@@ -137,7 +145,7 @@
 
 	// Load history whenever the open vendor changes.
 	$effect(() => {
-		const id = vendor.id;
+		const id = vendorId;
 		loadingHistory = true;
 		getScreeningHistory(id)
 			.then((rows) => {
@@ -254,7 +262,7 @@
 	const realmKey = (realm: string | null) => realm ?? '';
 
 	$effect(() => {
-		const id = vendor.id;
+		const id = vendorId;
 		loadingErpLinks = true;
 		erpLinksError = false;
 		unlinkArmed = null;

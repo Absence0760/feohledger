@@ -23,9 +23,12 @@ test.describe('/vendors create + portal invite (acme admin)', () => {
 
 		try {
 			await page.goto('/vendors');
+			// Exact: the vendor this test creates is named "E2E New Vendor …", so
+			// its row's "Open vendor …" button also contains "New Vendor".
+			const newVendor = page.getByRole('button', { name: '+ New Vendor', exact: true });
 
 			// --- Create ---
-			await page.getByRole('button', { name: 'New Vendor' }).click();
+			await newVendor.click();
 			const createModal = page.getByRole('dialog', { name: 'Create vendor' });
 			await expect(createModal).toBeVisible();
 			// Labels carry a trailing " *" for required fields, so match non-exact.
@@ -53,7 +56,7 @@ test.describe('/vendors create + portal invite (acme admin)', () => {
 				.toBe(true);
 			await page.keyboard.press('Escape');
 			await expect(detail).toHaveCount(0);
-			await expect(page.getByRole('button', { name: 'New Vendor' })).toBeFocused();
+			await expect(newVendor).toBeFocused();
 
 			// Find its row by name for the invite (it may sit past page one).
 			await page.goto(`/vendors?search=${encodeURIComponent(vendorName)}`);
