@@ -410,6 +410,10 @@
   "@codedRefusalExceptionSegregationImplicated": {
     "description": "Coded refusal `segregation_implicated` on resolving an exception."
   },
+  "codedRefusalExceptionSegregationApprover": "Segregation of duties: a user who approved this invoice cannot also clear its receipt or inspection hold. Escalate it, or ask a different user to decide.",
+  "@codedRefusalExceptionSegregationApprover": {
+    "description": "Coded refusal `segregation_approver` on resolving an exception (backend decisions §420)."
+  },
   "invoiceDetailApproved": "Invoice approved",
   "invoiceDetailApproveFailed": "Could not approve invoice — please try again",
   "invoiceDetailRejected": "Invoice rejected",

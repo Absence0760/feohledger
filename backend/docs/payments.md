@@ -2961,7 +2961,7 @@ and clear.
 | `blocked_reason` | the stable, PII-free reason code — set for a `required_method` row too, so the UI can say WHY the rail is pinned |
 | `required_method` | the one rail this invoice is still payable on, or `null` |
 | `record_outside_refusal` | a different question: the code `POST /api/payments/record-outside` would refuse this row with, or `null` — see § Recording a payment made outside FeohLedger |
-| `blocking_exception` | `{id, exception_type, clear_refusal}` of the open payment-blocking exception behind the row (the type `blocked_reason` names), or `null`. `clear_refusal` is `exception_lifecycle.segregation_refusal` for THIS caller resolving it (`segregation_implicated` / `segregation_raiser`), so the page can say someone else must clear it (decisions §319) |
+| `blocking_exception` | `{id, exception_type, clear_refusal}` of the open payment-blocking exception behind the row (the type `blocked_reason` names), or `null`. `clear_refusal` is `exception_lifecycle.segregation_refusal` for THIS caller resolving it (`segregation_implicated` / `segregation_raiser` / `segregation_approver`, decisions §420), so the page can say someone else must clear it (decisions §319) |
 | `erp_reported_payment` | `{exception_id, erp_name, method, reference, paid_on}` from the newest live `paid_not_recorded` exception on the invoice, or `null` — what "Record as paid" pre-fills |
 | `selectable_total` | rows "select all N matching" resolves (`/queue/ids`) — excludes blocked AND rail-pinned rows |
 | `blocked_total` | rows whose checkbox is disabled, i.e. exactly the `blocked` ones |

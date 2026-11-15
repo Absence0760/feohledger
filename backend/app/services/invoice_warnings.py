@@ -2138,13 +2138,14 @@ async def _finding_cleared_by_a_person(
     decider TODAY (``exception_lifecycle.clearance_stands``, the same
     ``segregation_refusal`` the decision met). Someone implicated after they
     decided, an uploader migration 0126 named (§367) or an approval's
-    recaller (§374), no longer keeps their own clearance live; the finding is
-    raised again for someone independent. A clearance by anyone the invoice
-    does not implicate still suppresses. ``org_settings`` carries the queue's
+    recaller (§374), or the approver of a ``po_mismatch`` / ``quality_hold``
+    they had cleared (§420), no longer keeps their own clearance live; the
+    finding is raised again for someone independent. A clearance by anyone
+    the invoice does not implicate still suppresses. ``org_settings`` carries the queue's
     opt-out; omitted, segregation is enforced, so the error is an extra
     review, never a bypass.
     """
-    from app.services.exception_lifecycle import clearance_stands
+    from app.services.exception_lifecycle import clearance_stands, workflow_instance_for
 
     rows = (
         (
@@ -2160,7 +2161,14 @@ async def _finding_cleared_by_a_person(
         .scalars()
         .all()
     )
-    return any(clearance_stands(row, invoice, org_settings=org_settings) for row in rows)
+    if not rows:
+        return False
+    # The approver axis (decisions §420) reads the chain's level approvers on a
+    # `po_mismatch` / `quality_hold`; one query, only when such a row is closed.
+    instance = await workflow_instance_for(db, rows[0], invoice)
+    return any(
+        clearance_stands(row, invoice, org_settings=org_settings, instance=instance) for row in rows
+    )
 
 
 async def _ensure_exception(

@@ -1501,8 +1501,8 @@ still receives the email. The approval refusal is what closes the chain.
 
 Clearing a payment-**blocking** exception is a money-path authorisation, not
 queue hygiene. `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES` — `duplicate`,
-`fraud_flag`, `line_total_mismatch`, `payment_reconciliation` — stops a payment
-run while the row is `open` **or** `escalated`, and invoice approval gates on
+`fraud_flag`, `line_total_mismatch`, `payment_reconciliation`, `quality_hold`,
+`po_mismatch` — stops a payment run while the row is `open` **or** `escalated`, and invoice approval gates on
 none of them. So resolving or dismissing one is the human sign-off that lets a
 flagged payable be paid, and `POST /api/exceptions/{id}/resolve` and
 `/bulk/resolve` used to gate on `require_roles(ADMIN, AP_MANAGER)` and nothing
@@ -1511,12 +1511,27 @@ else.
 The check lives in `services/exception_lifecycle.segregation_refusal`, enforced
 by `record_decision` — the one chokepoint the single-row route, `/bulk/resolve`
 **and** the agent coordinator all pass through, so the three doors cannot drift.
-It refuses on **two** axes, either of which is enough:
+It refuses on **three** axes, any of which is enough:
 
 | Axis | Read from | Refuses |
 |---|---|---|
 | the payable's implicated actors | `Invoice.uploaded_by_id` ∪ `Invoice.segregation_actor_ids`, through `approval_chain.violates_segregation` | anyone the same invoice's **approval** already refuses |
 | the raiser | `exceptions.raised_by_user_id` (migration `0098`, tenant DBs) | the actor whose own act the flag exists to have a second person review |
+| the invoice's approvers — **`po_mismatch` and `quality_hold` only** | `approval_chain.approver_ids`: `Invoice.approved_by_user_id` (the approval of record, migration `0129`) ∪ every level approval on the invoice's workflow chain | anyone who approved the invoice the hold is on |
+
+The third axis widens the original two at the operator's call
+([decisions.md](decisions.md) §420). Those two holds wait for independent
+evidence — a goods receipt, a quality inspection — and since §389 / §401 an
+approver's own receipt or passing inspection does not lift them. Resolving the
+held row by hand in the queue would be the approver's own word standing in for
+that evidence, so the queue refuses it too. It is scoped to those two types
+(`exception_lifecycle.APPROVER_SEGREGATED_TYPES`): a `duplicate` or
+`fraud_flag` is not lifted by a receipt or an inspection, so approving such an
+invoice is not the conflict the axis exists for. The approval of record is on
+the invoice row, so the pure predicate reads it with no I/O; the chain's level
+approvers come from the invoice's `WorkflowInstance`, which every door loads
+(batched for the list, bulk resolve and the payments queue; `record_decision`
+loads it itself when a caller did not pass one).
 
 The first axis is the one that binds in volume, and it is the one the
 [followups](followups.md) entry did not anticipate. A flag is a *detector's*
@@ -1554,15 +1569,15 @@ its reason — the same enforcement, for the same reason, as the uploader stamp.
   the control wants. Refusing it would trap the row with no way out but a role
   change. Only `resolve` and `dismiss` are in scope
   (`exception_lifecycle.CLEARING_ACTIONS`).
-- **Non-blocking types.** Clearing a `po_mismatch`, `missing_data`,
-  `quality_hold`, `price_variance`, `contract_noncompliant`,
+- **Non-blocking types.** Clearing a `missing_data`,
+  `price_variance`, `contract_noncompliant`,
   `payment_compliance_hold`, `erp_reconciliation`, `review_rejected`,
   `unverified_vendor` or `extraction_failed` releases nothing, so a refusal
   there would be friction with no control behind it. Scope is
   `is_payment_blocking`, which reads the payment-run gate's own tuple — so
   adding a type to that tuple extends this control automatically and there is no
   second classification to keep in step.
-- **A NULL actor on both axes.** This reads as "no employee is implicated", and
+- **A NULL actor on every axis.** This reads as "no employee is implicated", and
   it is fail-open for the same reason [the NULL uploader](#the-other-way-sod-can-be-silently-off-a-null-uploader)
   is: failing closed would make every sweep-raised and system-ingested exception
   permanently unclearable — an outage on the queue, not a control. Nothing
@@ -1606,17 +1621,29 @@ escalate-only stubs and the other two blocking types have no resolver — which 
 exactly why it is tested with one registered
 (`backend/tests/test_exception_agent_queue_segregation.py`).
 
+`po_mismatch` does have auto-resolving resolvers (amount, missing PO, multi-PO
+split), and each approves the invoice on the triggering human's behalf before
+the row is resolved. The approver axis is therefore judged against who had
+approved **before** the run: the coordinator reads `approver_ids` ahead of the
+apply and hands the same set to `record_decision`. A human who had already
+approved the invoice escalates; the approval the run itself gives does not
+refuse its own resolve, because that resolve rests on the re-match no longer
+finding the mismatch and on no implicated receipt lifting the hold
+(`_receipts_implicated`, §389), not on the human's word (§420).
+
 #### What the refusal says, and what is audited
 
-Both messages are about the **caller**, so neither leaks a third party: an
+Every message is about the **caller**, so none leaks a third party: an
 implicated actor already learns they are in the set from the identical refusal
-on the approval path, and a raiser is being told about their own act. Neither
-names the other actors, the uploader, the vendor, or the amount.
+on the approval path, a raiser is being told about their own act, and an
+approver about their own approval. None names the other actors, the uploader,
+the vendor, or the amount.
 
 | Axis | Single-row 403 `detail.message` | `detail.code` = `/bulk/resolve` per-row `reason` |
 |---|---|---|
 | raiser | "Segregation of duties: the user whose action raised this exception cannot also clear it. Escalate it, or ask a different user to decide." | `segregation_raiser` |
 | implicated | "Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide." | `segregation_implicated` |
+| approver | "Segregation of duties: a user who approved this invoice cannot also clear its receipt or inspection hold. Escalate it, or ask a different user to decide." | `segregation_approver` |
 
 The single-row 403 is a coded refusal (`api/refusals.coded_refusal`,
 `{code, message, params}`) whose `code` is the SAME string the bulk route reports
@@ -1636,7 +1663,7 @@ an auditor needs is stronger than a refusal row anyway: every **successful**
 `exception.resolved` / `exception.dismissed` row names its `actor_id` and its
 `invoice_id`, and the invoice carries the implicated set, so the control's
 *outcome* can be re-derived for every historical decision rather than only for
-the ones that tripped. See [decisions.md](decisions.md) §169.
+the ones that tripped. See [decisions.md](decisions.md) §169 and §420.
 
 ### Segregation of duties on a workflow's approval step
 

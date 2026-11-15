@@ -1230,6 +1230,12 @@ abstract class AppLocalizations {
   /// **'Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide.'**
   String get codedRefusalExceptionSegregationImplicated;
 
+  /// Coded refusal `segregation_approver` on resolving an exception (backend decisions §420).
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: a user who approved this invoice cannot also clear its receipt or inspection hold. Escalate it, or ask a different user to decide.'**
+  String get codedRefusalExceptionSegregationApprover;
+
   /// No description provided for @invoiceDetailApproved.
   ///
   /// In en, this message translates to:

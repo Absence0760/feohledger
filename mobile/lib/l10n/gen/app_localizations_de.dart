@@ -748,6 +748,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf keine Ausnahme auflösen, die ihre Zahlung blockiert. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.';
 
   @override
+  String get codedRefusalExceptionSegregationApprover =>
+      'Funktionstrennung: Wer diese Rechnung genehmigt hat, darf ihre Wareneingangs- oder Prüfsperre nicht auch auflösen. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.';
+
+  @override
   String get invoiceDetailApproved => 'Rechnung freigegeben';
 
   @override

@@ -103,6 +103,10 @@ void main() {
       de.codedRefusalExceptionSegregationImplicated,
     );
     expect(
+      localizeCodedRefusal(de, refusal('segregation_approver')),
+      de.codedRefusalExceptionSegregationApprover,
+    );
+    expect(
       localizeCodedRefusal(de, refusal('invoice_stale_approval')),
       de.codedRefusalInvoiceStaleApproval,
     );

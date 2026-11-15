@@ -84,6 +84,7 @@ describe('the registry pins the backend', () => {
 	it('the exception codes are the ones /bulk/resolve reports per row', () => {
 		expect(CODED_REFUSAL_CODES).toContain('segregation_raiser');
 		expect(CODED_REFUSAL_CODES).toContain('segregation_implicated');
+		expect(CODED_REFUSAL_CODES).toContain('segregation_approver');
 	});
 });
 
@@ -97,6 +98,7 @@ describe('codedRefusalText', () => {
 		['approval_max_amount_misconfigured', 'refusal.approvalMaxMisconfigured'],
 		['segregation_raiser', 'refusal.exceptionSegregationRaiser'],
 		['segregation_implicated', 'refusal.exceptionSegregationImplicated'],
+		['segregation_approver', 'refusal.exceptionSegregationApprover'],
 		['credit_memo_vendor_mismatch', 'refusal.creditMemoVendorMismatch'],
 		['credit_memo_vendor_unresolved', 'refusal.creditMemoVendorUnresolved'],
 		['credit_memo_entity_mismatch', 'refusal.creditMemoEntityMismatch'],

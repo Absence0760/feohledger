@@ -31,6 +31,7 @@ from app.services.exception_lifecycle import (
     record_decision,
     refusal_message,
     segregation_refusal,
+    workflow_instance_for,
 )
 from app.utils.http import detail_text
 
@@ -216,9 +217,30 @@ async def run_agent(
     # the invoice's uploader triggers escalates here. `duplicate` and
     # `fraud_flag` are escalate-only stubs, and the other blocking types have no
     # resolver at all.
+    #
+    # On a `po_mismatch` the invoice's approvers are refused too (decisions
+    # §420), so a run triggered by someone who already approved the invoice
+    # escalates here. Who had approved is read NOW, before the apply, and the
+    # same set is handed to `record_decision` below: a po_mismatch resolver
+    # approves the invoice on the triggering human's behalf, and judging the
+    # resolve against the row after that would refuse every auto-resolution
+    # with a bare 403. That approval is not the human's word standing in for a
+    # receipt: the row is resolved only when the re-match no longer finds the
+    # mismatch (`decision.refound`) and no receipt that lifts the hold is
+    # implicated, approvers included (`_receipts_implicated`, §389).
+    approvers = None
+    if can_resolve:
+        from app.services.approval_chain import approver_ids
+
+        approvers = approver_ids(invoice, await workflow_instance_for(db, exception, invoice))
     refusal = (
         segregation_refusal(
-            exception, invoice, actor_id, action="resolve", org_settings=org_settings
+            exception,
+            invoice,
+            actor_id,
+            action="resolve",
+            org_settings=org_settings,
+            approvers=approvers,
         )
         if can_resolve
         else None
@@ -381,6 +403,7 @@ async def run_agent(
             invoice=invoice,
             via="agent",
             org_settings=org_settings,
+            approvers=approvers,
         )
         action = ACTION_AUTO_RESOLVED
     else:

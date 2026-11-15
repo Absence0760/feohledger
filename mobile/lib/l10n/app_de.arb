@@ -200,6 +200,7 @@
   "codedRefusalGateMeasured": "Gemessen als {measured} – das Limit ist in {currency} festgelegt.",
   "codedRefusalExceptionSegregationRaiser": "Funktionstrennung: Wer diese Ausnahme durch die eigene Aktion ausgelöst hat, darf sie nicht auch auflösen. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.",
   "codedRefusalExceptionSegregationImplicated": "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf keine Ausnahme auflösen, die ihre Zahlung blockiert. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.",
+  "codedRefusalExceptionSegregationApprover": "Funktionstrennung: Wer diese Rechnung genehmigt hat, darf ihre Wareneingangs- oder Prüfsperre nicht auch auflösen. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.",
   "invoiceDetailApproved": "Rechnung freigegeben",
   "invoiceDetailApproveFailed": "Rechnung konnte nicht freigegeben werden — bitte erneut versuchen",
   "invoiceDetailRejected": "Rechnung abgelehnt",
