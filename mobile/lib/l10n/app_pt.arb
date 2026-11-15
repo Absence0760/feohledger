@@ -797,6 +797,8 @@
   "erpRefusalVendorRejected": "O fornecedor desta fatura foi rejeitado. Vincule a fatura ao fornecedor correto antes de enviá-la ao ERP.",
   "erpRefusalVendorStatusUnknown": "O fornecedor desta fatura tem um status que não permite enviá-la ao ERP. Defina o fornecedor como ativo antes de enviar a fatura ao ERP.",
   "erpRefusalVendorHoldPossiblyPosted": "Uma tentativa anterior pode já ter criado a fatura no ERP; verifique lá antes que alguém a pague.",
+  "erpRefusalRetriesExhausted": "Este envio não tinha mais tentativas, então nenhuma tentativa foi feita desta vez. Tente novamente para enviá-lo com novas tentativas.",
+  "erpRefusalPushInterrupted": "Este envio foi interrompido e nunca terminou. É antigo demais (ou anterior à conexão atual com o ERP) para ser reenviado sem verificação. Confirme que a fatura ainda não está no ERP e tente novamente.",
   "erpRefusalCardBlocksExport": "Um cartão virtual foi emitido para pagar esta fatura. Cancele o cartão antes de enviar a fatura ao ERP.",
   "erpRefusalCardBlocksExportPossiblyPosted": "Um cartão virtual foi emitido para pagar esta fatura, e uma tentativa anterior pode já ter criado a fatura no ERP. Verifique o ERP e garanta que ninguém a pague também lá.",
   "erpRefusalTypeDuplicate": "Nota fiscal duplicada",

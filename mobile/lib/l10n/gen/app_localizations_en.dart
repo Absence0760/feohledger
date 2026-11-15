@@ -2488,6 +2488,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'An earlier attempt may already have created the bill in the ERP; check there before anyone pays it.';
 
   @override
+  String get erpRefusalRetriesExhausted =>
+      'This push had no attempts left, so no attempt was made this time. Retry to send it with a fresh set of attempts.';
+
+  @override
+  String get erpRefusalPushInterrupted =>
+      'This push was interrupted and never finished. It is too old (or older than the current ERP connection) to send again without someone checking. Make sure the bill isn\'t already in the ERP, then retry.';
+
+  @override
   String get erpRefusalCardBlocksExport =>
       'A virtual card has been issued to pay this invoice. Cancel the card before sending the invoice to the ERP.';
 

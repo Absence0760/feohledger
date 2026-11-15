@@ -2508,6 +2508,14 @@ class AppLocalizationsPt extends AppLocalizations {
       'Uma tentativa anterior pode já ter criado a fatura no ERP; verifique lá antes que alguém a pague.';
 
   @override
+  String get erpRefusalRetriesExhausted =>
+      'Este envio não tinha mais tentativas, então nenhuma tentativa foi feita desta vez. Tente novamente para enviá-lo com novas tentativas.';
+
+  @override
+  String get erpRefusalPushInterrupted =>
+      'Este envio foi interrompido e nunca terminou. É antigo demais (ou anterior à conexão atual com o ERP) para ser reenviado sem verificação. Confirme que a fatura ainda não está no ERP e tente novamente.';
+
+  @override
   String get erpRefusalCardBlocksExport =>
       'Um cartão virtual foi emitido para pagar esta fatura. Cancele o cartão antes de enviar a fatura ao ERP.';
 
@@ -6523,6 +6531,14 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get erpRefusalVendorHoldPossiblyPosted =>
       'Uma tentativa anterior pode já ter criado a fatura no ERP; verifique lá antes que alguém a pague.';
+
+  @override
+  String get erpRefusalRetriesExhausted =>
+      'Este envio não tinha mais tentativas, então nenhuma tentativa foi feita desta vez. Tente novamente para enviá-lo com novas tentativas.';
+
+  @override
+  String get erpRefusalPushInterrupted =>
+      'Este envio foi interrompido e nunca terminou. É antigo demais (ou anterior à conexão atual com o ERP) para ser reenviado sem verificação. Confirme que a fatura ainda não está no ERP e tente novamente.';
 
   @override
   String get erpRefusalCardBlocksExport =>

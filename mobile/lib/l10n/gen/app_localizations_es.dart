@@ -2508,6 +2508,14 @@ class AppLocalizationsEs extends AppLocalizations {
       'Es posible que un intento anterior ya haya creado la factura en el ERP; compruébelo allí antes de que alguien la pague.';
 
   @override
+  String get erpRefusalRetriesExhausted =>
+      'A este envío no le quedaban intentos, así que esta vez no se intentó. Vuelva a intentarlo para enviarlo con intentos nuevos.';
+
+  @override
+  String get erpRefusalPushInterrupted =>
+      'Este envío se interrumpió y nunca terminó. Es demasiado antiguo (o anterior a la conexión actual con el ERP) para volver a enviarlo sin que nadie lo revise. Compruebe que la factura no esté ya en el ERP y vuelva a intentarlo.';
+
+  @override
   String get erpRefusalCardBlocksExport =>
       'Se ha emitido una tarjeta virtual para pagar esta factura. Cancele la tarjeta antes de enviar la factura al ERP.';
 

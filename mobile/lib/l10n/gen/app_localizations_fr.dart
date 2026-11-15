@@ -2509,6 +2509,14 @@ class AppLocalizationsFr extends AppLocalizations {
       'Une tentative précédente a peut-être déjà créé la facture dans l\'ERP ; vérifiez-y avant que quiconque la paie.';
 
   @override
+  String get erpRefusalRetriesExhausted =>
+      'Cet envoi n\'avait plus de tentatives, donc aucune tentative n\'a été faite cette fois. Réessayez pour l\'envoyer avec de nouvelles tentatives.';
+
+  @override
+  String get erpRefusalPushInterrupted =>
+      'Cet envoi a été interrompu et ne s\'est jamais terminé. Il est trop ancien (ou antérieur à la connexion ERP actuelle) pour être renvoyé sans vérification. Assurez-vous que la facture n\'est pas déjà dans l\'ERP, puis réessayez.';
+
+  @override
   String get erpRefusalCardBlocksExport =>
       'Une carte virtuelle a été émise pour payer cette facture. Annulez la carte avant d\'envoyer la facture à l\'ERP.';
 

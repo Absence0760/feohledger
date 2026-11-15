@@ -2367,6 +2367,14 @@ class AppLocalizationsJa extends AppLocalizations {
       '以前の送信で ERP に請求書が既に作成されている可能性があります。誰かが支払う前に ERP を確認してください。';
 
   @override
+  String get erpRefusalRetriesExhausted =>
+      'この送信には残りの試行回数がなかったため、今回は試行されませんでした。再試行すると、新しい試行回数で送信します。';
+
+  @override
+  String get erpRefusalPushInterrupted =>
+      'この送信は中断され、完了しませんでした。確認なしで再送信するには古すぎます（または現在の ERP 接続より前のものです）。請求書が ERP に既にないことを確認してから再試行してください。';
+
+  @override
   String get erpRefusalCardBlocksExport =>
       'この請求書の支払いにバーチャルカードが発行されています。ERP に送信する前に、カードを取り消してください。';
 

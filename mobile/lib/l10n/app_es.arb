@@ -652,6 +652,8 @@
   "erpRefusalVendorRejected": "El proveedor de esta factura fue rechazado. Vincule la factura al proveedor correcto antes de enviarla al ERP.",
   "erpRefusalVendorStatusUnknown": "El proveedor de esta factura tiene un estado que no permite enviarla al ERP. Marque al proveedor como activo antes de enviar la factura al ERP.",
   "erpRefusalVendorHoldPossiblyPosted": "Es posible que un intento anterior ya haya creado la factura en el ERP; compruébelo allí antes de que alguien la pague.",
+  "erpRefusalRetriesExhausted": "A este envío no le quedaban intentos, así que esta vez no se intentó. Vuelva a intentarlo para enviarlo con intentos nuevos.",
+  "erpRefusalPushInterrupted": "Este envío se interrumpió y nunca terminó. Es demasiado antiguo (o anterior a la conexión actual con el ERP) para volver a enviarlo sin que nadie lo revise. Compruebe que la factura no esté ya en el ERP y vuelva a intentarlo.",
   "erpRefusalCardBlocksExport": "Se ha emitido una tarjeta virtual para pagar esta factura. Cancele la tarjeta antes de enviar la factura al ERP.",
   "erpRefusalCardBlocksExportPossiblyPosted": "Se ha emitido una tarjeta virtual para pagar esta factura y es posible que un intento anterior ya haya creado la factura en el ERP. Compruebe el ERP y asegúrese de que nadie la pague también allí.",
   "erpRefusalTypeDuplicate": "Factura duplicada",

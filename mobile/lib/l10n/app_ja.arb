@@ -797,6 +797,8 @@
   "erpRefusalVendorRejected": "この請求書の仕入先は却下されています。ERP に送信する前に、請求書を正しい仕入先に紐付けてください。",
   "erpRefusalVendorStatusUnknown": "この請求書の仕入先のステータスでは ERP に送信できません。ERP に送信する前に、仕入先を有効にしてください。",
   "erpRefusalVendorHoldPossiblyPosted": "以前の送信で ERP に請求書が既に作成されている可能性があります。誰かが支払う前に ERP を確認してください。",
+  "erpRefusalRetriesExhausted": "この送信には残りの試行回数がなかったため、今回は試行されませんでした。再試行すると、新しい試行回数で送信します。",
+  "erpRefusalPushInterrupted": "この送信は中断され、完了しませんでした。確認なしで再送信するには古すぎます（または現在の ERP 接続より前のものです）。請求書が ERP に既にないことを確認してから再試行してください。",
   "erpRefusalCardBlocksExport": "この請求書の支払いにバーチャルカードが発行されています。ERP に送信する前に、カードを取り消してください。",
   "erpRefusalCardBlocksExportPossiblyPosted": "この請求書の支払いにバーチャルカードが発行されており、以前の送信で ERP に請求書が既に作成されている可能性があります。ERP を確認し、そちらでも支払われないようにしてください。",
   "erpRefusalTypeDuplicate": "請求書の重複",

@@ -652,6 +652,8 @@
   "erpRefusalVendorRejected": "Le fournisseur de cette facture a été rejeté. Rattachez la facture au bon fournisseur avant de l'envoyer à l'ERP.",
   "erpRefusalVendorStatusUnknown": "Le fournisseur de cette facture a un statut qui ne permet pas de l'envoyer à l'ERP. Passez le fournisseur à actif avant d'envoyer la facture à l'ERP.",
   "erpRefusalVendorHoldPossiblyPosted": "Une tentative précédente a peut-être déjà créé la facture dans l'ERP ; vérifiez-y avant que quiconque la paie.",
+  "erpRefusalRetriesExhausted": "Cet envoi n'avait plus de tentatives, donc aucune tentative n'a été faite cette fois. Réessayez pour l'envoyer avec de nouvelles tentatives.",
+  "erpRefusalPushInterrupted": "Cet envoi a été interrompu et ne s'est jamais terminé. Il est trop ancien (ou antérieur à la connexion ERP actuelle) pour être renvoyé sans vérification. Assurez-vous que la facture n'est pas déjà dans l'ERP, puis réessayez.",
   "erpRefusalCardBlocksExport": "Une carte virtuelle a été émise pour payer cette facture. Annulez la carte avant d'envoyer la facture à l'ERP.",
   "erpRefusalCardBlocksExportPossiblyPosted": "Une carte virtuelle a été émise pour payer cette facture, et une tentative précédente a peut-être déjà créé la facture dans l'ERP. Vérifiez l'ERP et assurez-vous que personne ne la paie aussi là-bas.",
   "erpRefusalTypeDuplicate": "Facture en doublon",

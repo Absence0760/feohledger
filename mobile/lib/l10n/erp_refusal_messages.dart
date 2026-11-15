@@ -92,7 +92,8 @@ final Map<String, _Sentence> _providerSentences = {
   'job_failed': (l, p) => l.erpRefusalJobFailed(p),
   'bill_left_unposted': (l, p) => l.erpRefusalBillLeftUnposted(p),
   'merge_sync_pending': (l, p) => l.erpRefusalMergeSyncPending(p),
-  'payment_account_not_mapped': (l, p) => l.erpRefusalPaymentAccountNotMapped(p),
+  'payment_account_not_mapped': (l, p) =>
+      l.erpRefusalPaymentAccountNotMapped(p),
   'bill_not_in_erp': (l, p) => l.erpRefusalBillNotInErp(p),
   'payment_exceeds_balance': (l, p) => l.erpRefusalPaymentExceedsBalance(p),
   'bill_payment_voided': (l, p) => l.erpRefusalBillPaymentVoided(p),
@@ -116,6 +117,8 @@ const _special = {
   exceptionBlocksErpExport,
   paymentBlocksErpExport,
   vendorBlocksErpExport,
+  'erp_retries_exhausted',
+  'erp_push_interrupted',
 };
 
 /// Every code this build states. Pinned against the web registry.
@@ -158,6 +161,15 @@ String? erpRefusalText(AppLocalizations l, Object? refusal) {
   if (_providerless[code] case final sentence?) return sentence(l);
 
   switch (code) {
+    // A push that made no attempt (decisions §428): no provider is named, and
+    // a possibly-posted one adds where to look first.
+    case 'erp_retries_exhausted' || 'erp_push_interrupted':
+      final plain = code == 'erp_retries_exhausted'
+          ? l.erpRefusalRetriesExhausted
+          : l.erpRefusalPushInterrupted;
+      return possiblyPosted
+          ? '$plain ${l.erpRefusalVendorHoldPossiblyPosted}'
+          : plain;
     case exceptionBlocksErpExport:
       final type = _exceptionTypeLabel(l, params['exception_type']);
       if (type == null) return null;
@@ -168,12 +180,14 @@ String? erpRefusalText(AppLocalizations l, Object? refusal) {
           : l.erpRefusalExceptionBlocksExport(type);
     case paymentBlocksErpExport:
       return switch (params['claim']) {
-        'payment' => possiblyPosted
-            ? l.erpRefusalPaymentBlocksExportPossiblyPosted
-            : l.erpRefusalPaymentBlocksExport,
-        'virtual_card' => possiblyPosted
-            ? l.erpRefusalCardBlocksExportPossiblyPosted
-            : l.erpRefusalCardBlocksExport,
+        'payment' =>
+          possiblyPosted
+              ? l.erpRefusalPaymentBlocksExportPossiblyPosted
+              : l.erpRefusalPaymentBlocksExport,
+        'virtual_card' =>
+          possiblyPosted
+              ? l.erpRefusalCardBlocksExportPossiblyPosted
+              : l.erpRefusalCardBlocksExport,
         _ => null,
       };
     case vendorBlocksErpExport:
@@ -201,7 +215,8 @@ String? erpRefusalText(AppLocalizations l, Object? refusal) {
     case 'account_not_linked':
       final accounts = _accounts(params['accounts']);
       if (accounts == null) return null;
-      if (accounts.isEmpty) return l.erpRefusalAccountNotLinkedUncoded(provider);
+      if (accounts.isEmpty)
+        return l.erpRefusalAccountNotLinkedUncoded(provider);
       return l.erpRefusalAccountNotLinked(provider, accounts.join(', '));
     case 'account_inactive':
       final accounts = _accounts(params['accounts']);

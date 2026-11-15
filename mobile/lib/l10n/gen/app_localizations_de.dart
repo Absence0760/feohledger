@@ -2502,6 +2502,14 @@ class AppLocalizationsDe extends AppLocalizations {
       'Ein früherer Versuch hat die Rechnung möglicherweise bereits im ERP angelegt; prüfen Sie dort, bevor jemand sie bezahlt.';
 
   @override
+  String get erpRefusalRetriesExhausted =>
+      'Für diese Übertragung waren keine Versuche mehr übrig, daher wurde diesmal kein Versuch unternommen. Versuchen Sie es erneut, um sie mit neuen Versuchen zu senden.';
+
+  @override
+  String get erpRefusalPushInterrupted =>
+      'Diese Übertragung wurde unterbrochen und nie abgeschlossen. Sie ist zu alt (oder älter als die aktuelle ERP-Verbindung), um sie ungeprüft erneut zu senden. Stellen Sie sicher, dass die Rechnung nicht schon im ERP ist, und versuchen Sie es dann erneut.';
+
+  @override
   String get erpRefusalCardBlocksExport =>
       'Für die Zahlung dieser Rechnung wurde eine virtuelle Karte ausgestellt. Stornieren Sie die Karte, bevor Sie die Rechnung an das ERP senden.';
 

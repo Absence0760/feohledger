@@ -1682,6 +1682,8 @@
   "erpRefusalVendorRejected": "This invoice's vendor has been rejected. Link the invoice to the correct vendor before sending it to the ERP.",
   "erpRefusalVendorStatusUnknown": "This invoice's vendor has a status that cannot be sent to the ERP. Set the vendor to active before sending the invoice to the ERP.",
   "erpRefusalVendorHoldPossiblyPosted": "An earlier attempt may already have created the bill in the ERP; check there before anyone pays it.",
+  "erpRefusalRetriesExhausted": "This push had no attempts left, so no attempt was made this time. Retry to send it with a fresh set of attempts.",
+  "erpRefusalPushInterrupted": "This push was interrupted and never finished. It is too old (or older than the current ERP connection) to send again without someone checking. Make sure the bill isn't already in the ERP, then retry.",
   "erpRefusalCardBlocksExport": "A virtual card has been issued to pay this invoice. Cancel the card before sending the invoice to the ERP.",
   "erpRefusalCardBlocksExportPossiblyPosted": "A virtual card has been issued to pay this invoice, and an earlier attempt may already have created the bill in the ERP. Check the ERP and make sure nobody pays the bill there as well.",
   "erpRefusalTypeDuplicate": "Duplicate Invoice",

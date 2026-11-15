@@ -184,6 +184,27 @@ void main() {
       );
     });
 
+    test('an unattempted push names no provider; possibly-posted adds where to look', () {
+      expect(
+        erpRefusalText(en, refusal('erp_retries_exhausted')),
+        en.erpRefusalRetriesExhausted,
+      );
+      expect(
+        erpRefusalText(
+          de,
+          refusal('erp_push_interrupted', {'possibly_posted': true}),
+        ),
+        '${de.erpRefusalPushInterrupted} ${de.erpRefusalVendorHoldPossiblyPosted}',
+      );
+      expect(
+        erpRefusalText(
+          en,
+          refusal('erp_push_interrupted', {'possibly_posted': 'yes'}),
+        ),
+        en.erpRefusalPushInterrupted,
+      );
+    });
+
     test('the export gates state their claim, hold and possibly-posted', () {
       expect(
         erpRefusalText(
