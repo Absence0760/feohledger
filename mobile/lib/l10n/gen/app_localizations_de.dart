@@ -4030,4 +4030,15 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get invoicesBulkSkipNoReason => 'Kein Grund angegeben';
+
+  @override
+  String get invoicesBulkSkipNoNumber => 'Rechnung (ohne Nummer)';
+
+  @override
+  String get reviewVerdictsUnavailable =>
+      'Es konnte nicht geprüft werden, was Sie hier tun dürfen – zum Wiederholen nach unten ziehen';
+
+  @override
+  String get reviewVerdictsChecking =>
+      'Es wird geprüft, was Sie hier tun dürfen …';
 }

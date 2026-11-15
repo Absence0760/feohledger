@@ -337,6 +337,15 @@ class Invoice {
   /// has no stable link. Rendered through [ExternalLink], https only.
   final String? erpDocumentUrl;
 
+  /// The caller's `approve` / `reject` verdicts on this row, as the list
+  /// carries them when asked with `?include=review_actions`
+  /// (`InvoiceListItem.review_actions` — the same two keys
+  /// `GET /api/invoices/{id}/review-actions` answers). `null` when the
+  /// response did not carry them: a list read without the include, an older
+  /// backend, or a row served from the offline cache, which never stores a
+  /// verdict. Read through [ActionVerdict.fromVerdicts], which fails closed.
+  final Map<String, dynamic>? reviewActions;
+
   Invoice({
     required this.id,
     this.invoiceNumber,
@@ -359,6 +368,7 @@ class Invoice {
     this.erpDocumentId,
     this.erpDocumentUrl,
     this.financiallyLocked = true,
+    this.reviewActions,
   });
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
@@ -397,6 +407,9 @@ class Invoice {
       erpDocumentId: json['erp_document_id'] as String?,
       erpDocumentUrl: json['erp_document_url'] as String?,
       financiallyLocked: json['financially_locked'] as bool? ?? true,
+      reviewActions: json['review_actions'] is Map
+          ? Map<String, dynamic>.from(json['review_actions'] as Map)
+          : null,
     );
   }
 

@@ -435,7 +435,14 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                   ListTile(
                     key: ValueKey('bulk-skip-${skip.id}'),
                     contentPadding: EdgeInsets.zero,
-                    title: Text(numbers[skip.id] ?? skip.id),
+                    // A row with no invoice number is named as such, never
+                    // by its internal id: a UUID tells the reader nothing.
+                    title: Text(
+                      switch (numbers[skip.id]) {
+                        final n? when n.isNotEmpty => n,
+                        _ => dl.invoicesBulkSkipNoNumber,
+                      },
+                    ),
                     subtitle: Text(
                       localizeCodedRefusal(dl, skip.refusal) ??
                           skip.reason ??

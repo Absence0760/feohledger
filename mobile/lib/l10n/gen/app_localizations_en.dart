@@ -4008,4 +4008,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get invoicesBulkSkipNoReason => 'No reason given';
+
+  @override
+  String get invoicesBulkSkipNoNumber => 'Invoice (no number)';
+
+  @override
+  String get reviewVerdictsUnavailable =>
+      'Couldn\'t check what you can do here — pull to retry';
+
+  @override
+  String get reviewVerdictsChecking => 'Checking what you can do here…';
 }

@@ -963,5 +963,8 @@
   "codedRefusalInvoiceTransitionInvalid": "Diese Rechnung kann nicht von {from} zu {to} wechseln.",
   "codedRefusalInvoiceTransitionRecallOnly": "Diese Rechnung kann nur durch Zurücknehmen ihrer Genehmigung von {from} zu {to} wechseln, eine Rechnung nach der anderen: Verwenden Sie „Genehmigung zurücknehmen“ an der Rechnung.",
   "codedRefusalInvoiceOnceApprovedNotReread": "Diese Rechnung wurde bereits genehmigt, daher kann ihr Beleg nicht erneut ausgelesen werden. Nehmen Sie stattdessen ihre Genehmigung zurück und korrigieren Sie sie.",
-  "invoicesBulkSkipNoReason": "Kein Grund angegeben"
+  "invoicesBulkSkipNoReason": "Kein Grund angegeben",
+  "invoicesBulkSkipNoNumber": "Rechnung (ohne Nummer)",
+  "reviewVerdictsUnavailable": "Es konnte nicht geprüft werden, was Sie hier tun dürfen – zum Wiederholen nach unten ziehen",
+  "reviewVerdictsChecking": "Es wird geprüft, was Sie hier tun dürfen …"
 }

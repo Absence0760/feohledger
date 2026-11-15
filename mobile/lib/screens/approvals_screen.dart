@@ -1,7 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
-import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/action_verdict.dart';
@@ -19,46 +18,20 @@ class ApprovalsScreen extends StatefulWidget {
 }
 
 class _ApprovalsScreenState extends State<ApprovalsScreen> {
-  // The server's `approve` / `reject` verdicts per queued row
-  // (`GET /api/invoices/{id}/review-actions`), keyed by id and the version
-  // they judged, so an edited row is asked again. Swipe-to-approve and the
-  // reject swipe are offered from these alone — the queue's own status filter
-  // says nothing about segregation of duties or the CFO / max-amount gates —
-  // and a row not yet answered (or whose read failed) offers neither.
-  final Map<String, ({ActionVerdict approve, ActionVerdict reject})>
-      _verdicts = {};
-  final Set<String> _asking = {};
+  // Swipe-to-approve and the reject swipe are offered from each row's own
+  // `approve` / `reject` verdict ([Invoice.reviewActions]), which the queue's
+  // list read carries (`GET /api/invoices?include=review_actions`) — the
+  // queue's own status filter says nothing about segregation of duties or the
+  // CFO / max-amount gates. A row without one (served from the offline cache,
+  // or by a backend that does not carry them) offers neither, and the screen
+  // says it could not check rather than looking like "you may not approve".
 
-  String _verdictKey(Invoice invoice) =>
-      '${invoice.id}@${invoice.updatedAt ?? ''}';
+  // Whether the "couldn't check" notice has been announced since it appeared,
+  // so a rebuild does not repeat it to a screen reader.
+  bool _announcedUnavailable = false;
 
-  /// Ask the server for every queued row's verdict not yet held or in flight.
-  void _askVerdicts(List<Invoice> pending) {
-    for (final invoice in pending) {
-      final key = _verdictKey(invoice);
-      if (_verdicts.containsKey(key) || !_asking.add(key)) continue;
-      InvoiceApi.reviewActions(invoice.id).then(
-        (v) => (
-          approve: ActionVerdict.fromVerdicts(v, 'approve'),
-          reject: ActionVerdict.fromVerdicts(v, 'reject'),
-        ),
-        onError: (Object _) => (
-          approve: ActionVerdict.unanswered,
-          reject: ActionVerdict.unanswered,
-        ),
-      ).then((verdict) {
-        _asking.remove(key);
-        if (!mounted) return;
-        setState(() => _verdicts[key] = verdict);
-      });
-    }
-  }
-
-  /// Refetch the queue and re-ask every verdict.
-  Future<void> _refresh() {
-    setState(_verdicts.clear);
-    return InvoiceStore.instance.fetchPending();
-  }
+  /// Refetch the queue, verdicts included.
+  Future<void> _refresh() => InvoiceStore.instance.fetchPending();
 
   @override
   void initState() {
@@ -130,7 +103,18 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
             );
           }
 
-          _askVerdicts(pending);
+          final verdictsUnavailable =
+              pending.any((invoice) => invoice.reviewActions == null);
+          if (!verdictsUnavailable) {
+            _announcedUnavailable = false;
+          } else if (!_announcedUnavailable) {
+            _announcedUnavailable = true;
+            // A cached or verdict-less queue must not read as "nothing you
+            // may do": say so, to a screen reader too (WCAG 4.1.3).
+            SchedulerBinding.instance.addPostFrameCallback((_) {
+              if (mounted) A11y.announce(context, l.reviewVerdictsUnavailable);
+            });
+          }
           return RefreshIndicator(
             onRefresh: _refresh,
             child: Column(
@@ -147,18 +131,47 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                     ),
                   ),
                 ),
+                if (verdictsUnavailable)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      children: [
+                        ExcludeSemantics(
+                          child: Icon(
+                            Icons.cloud_off,
+                            size: 18,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            l.reviewVerdictsUnavailable,
+                            key: const ValueKey('review-verdicts-unavailable'),
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
                   child: ListView.separated(
                     itemCount: pending.length,
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final invoice = pending[index];
-                      final verdict = _verdicts[_verdictKey(invoice)];
+                      final verdicts = invoice.reviewActions ?? const {};
                       const hidden = {'invoice_not_in_review'};
                       final approve =
-                          verdict?.approve ?? ActionVerdict.unanswered;
+                          ActionVerdict.fromVerdicts(verdicts, 'approve');
                       final reject =
-                          verdict?.reject ?? ActionVerdict.unanswered;
+                          ActionVerdict.fromVerdicts(verdicts, 'reject');
                       final canSwipeApprove = approve.allowed;
                       final canSwipeReject = reject.allowed;
                       // Why Approve is refused, beside the row, for a reason

@@ -4029,4 +4029,14 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get invoicesBulkSkipNoReason => 'No se indicó ningún motivo';
+
+  @override
+  String get invoicesBulkSkipNoNumber => 'Factura (sin número)';
+
+  @override
+  String get reviewVerdictsUnavailable =>
+      'No se pudo comprobar qué puede hacer aquí; deslice hacia abajo para reintentar';
+
+  @override
+  String get reviewVerdictsChecking => 'Comprobando qué puede hacer aquí…';
 }

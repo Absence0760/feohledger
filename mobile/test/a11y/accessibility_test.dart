@@ -616,6 +616,88 @@ void main() {
     }
   });
 
+  group('InvoiceDetailScreen review actions', () {
+    setUpAll(() async {
+      OfflineStore.instance.debugUseMemory();
+    });
+
+    setUp(() async {
+      InvoiceStore.instance.reset();
+      FlutterSecureStorage.setMockInitialValues({});
+      await OfflineStore.instance.clear();
+      ApiClient().debugConfigure();
+    });
+
+    http.Response json(Object body) => http.Response(jsonEncode(body), 200,
+        headers: {'content-type': 'application/json'});
+
+    // An invoice in review, Approve allowed (the filled green button with its
+    // white label) and Approve refused (disabled, its reason beside it, and
+    // Reject still offered). Both clear contrast: the full-saturation green
+    // was 2.78:1 under the white label.
+    for (final (name, approve) in [
+      ('allowed', null),
+      (
+        'refused with its reason',
+        {
+          'code': 'approval_segregation',
+          'message': 'server english',
+          'params': <String, dynamic>{},
+        },
+      ),
+    ]) {
+      testWidgets('meets tap-target, label and contrast guidelines ($name)',
+          (tester) async {
+        tester.view.physicalSize = const Size(1200, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final handle = tester.ensureSemantics();
+        ApiClient().debugConfigure(
+          client: MockClient((req) async {
+            final path = req.url.path;
+            if (path == '/api/auth/login') {
+              return json({'access_token': 'tok'});
+            }
+            if (path.endsWith('/auth/me')) {
+              return json({
+                'id': 'u1',
+                'email': 'demo@acme.com',
+                'full_name': 'Demo User',
+                'organization_id': 'org1',
+                'roles': ['ap_manager'],
+              });
+            }
+            if (path.endsWith('/review-actions')) {
+              return json({'approve': approve, 'reject': null});
+            }
+            if (path.endsWith('/audit-log')) return json(<Object>[]);
+            if (path == '/api/invoices/1') return json(_invoiceJson('1'));
+            return http.Response('not found', 404);
+          }),
+        );
+        await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+        await tester.pumpWidget(
+          _screenHost(const InvoiceDetailScreen(invoiceId: '1')),
+        );
+        await _pumpUntil(tester, find.text('Approve'));
+        expect(find.text('Approve'), findsOneWidget);
+        expect(find.text('Reject'), findsOneWidget);
+        if (approve != null) {
+          expect(find.byKey(const ValueKey('review-refusal')), findsOneWidget);
+        }
+
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        handle.dispose();
+      });
+    }
+  });
+
   group('AdvancedSearchSheet', () {
     testWidgets('meets tap-target, label and contrast guidelines',
         (tester) async {
@@ -737,15 +819,52 @@ void main() {
     testWidgets('approve/reject affordances meet tap-target + label guidelines',
         (tester) async {
       final handle = tester.ensureSemantics();
+      // One row the caller may approve, one refused with its reason beside
+      // it — the verdicts the queue's list read carries.
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _list([
+              {
+                ..._invoiceJson('1'),
+                'review_actions': {'approve': null, 'reject': null},
+              },
+              {
+                ..._invoiceJson('2'),
+                'review_actions': {
+                  'approve': {
+                    'code': 'approval_segregation',
+                    'message': 'server english',
+                    'params': <String, dynamic>{},
+                  },
+                  'reject': null,
+                },
+              },
+            ])),
+      );
+
+      await tester.pumpWidget(_screenHost(const ApprovalsScreen()));
+      await _pumpUntil(tester, find.byKey(const ValueKey('approve-refusal-2')));
+      expect(find.byKey(const ValueKey('approve-refusal-1')), findsNothing);
+
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+      handle.dispose();
+    });
+
+    testWidgets('the could-not-check notice clears contrast', (tester) async {
+      final handle = tester.ensureSemantics();
+      // No `review_actions`: what a cached queue looks like.
       ApiClient().debugConfigure(
         client: MockClient((req) async => _list([_invoiceJson('1')])),
       );
 
       await tester.pumpWidget(_screenHost(const ApprovalsScreen()));
-      await _pumpUntil(tester, find.byType(InvoiceListTile));
+      await _pumpUntil(
+          tester, find.byKey(const ValueKey('review-verdicts-unavailable')));
+      expect(find.byKey(const ValueKey('review-verdicts-unavailable')),
+          findsOneWidget);
 
-      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
-      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       await expectLater(tester, meetsGuideline(textContrastGuideline));
       handle.dispose();
@@ -890,6 +1009,73 @@ void main() {
       await expectLater(tester, meetsGuideline(textContrastGuideline));
       handle.dispose();
     });
+
+    // The ERP report panels: the payment the ERP reported and FeohLedger
+    // could not record (`paid_not_recorded`), and a write-back the ERP refused
+    // with a coded reason, each rendered under its own key.
+    for (final (name, report, key) in [
+      (
+        'an ERP-reported payment',
+        <String, dynamic>{
+          'kind': 'paid_not_recorded',
+          'erp_type': 'xero',
+          'amount': '240.50',
+          'amount_currency': 'EUR',
+          'reference': 'xero:bill-9',
+          'paid_on': '2026-10-30',
+          'paid_on_reported': true,
+        },
+        'exception-erp-payment',
+      ),
+      (
+        'a coded write-back refusal',
+        <String, dynamic>{
+          'kind': 'payment_writeback_failed',
+          'erp_type': 'xero',
+          'refusal': {
+            'code': 'payments_scope_missing',
+            'params': {'provider': 'Xero'},
+          },
+        },
+        'exception-erp-refusal',
+      ),
+    ]) {
+      testWidgets('$name meets tap-target + label + contrast',
+          (tester) async {
+        tester.view.physicalSize = const Size(1200, 2400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final handle = tester.ensureSemantics();
+        ApiClient().debugConfigure(
+          client: MockClient(
+            (req) async => http.Response(
+              jsonEncode({
+                ..._exceptionJson('1'),
+                'exception_type': 'payment_reconciliation',
+                'type_label': 'Payment Reconciliation',
+                'erp_name': 'Xero',
+                'erp_report': report,
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            ),
+          ),
+        );
+
+        await tester.pumpWidget(
+          _host(const ExceptionDetailScreen(exceptionId: '1')),
+        );
+        await _pumpUntil(tester, find.byKey(Key(key)));
+        expect(find.byKey(Key(key)), findsOneWidget);
+
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        handle.dispose();
+      });
+    }
   });
 
   group('NotificationListTile', () {

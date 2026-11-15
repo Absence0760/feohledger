@@ -3148,5 +3148,17 @@
   "invoicesBulkSkipNoReason": "No reason given",
   "@invoicesBulkSkipNoReason": {
     "description": "Shown under a skipped invoice in the bulk status result dialog when the server gave no reason."
+  },
+  "invoicesBulkSkipNoNumber": "Invoice (no number)",
+  "@invoicesBulkSkipNoNumber": {
+    "description": "Names a skipped invoice that has no invoice number in the bulk status result dialog, instead of its internal id."
+  },
+  "reviewVerdictsUnavailable": "Couldn't check what you can do here — pull to retry",
+  "@reviewVerdictsUnavailable": {
+    "description": "One line shown (and announced) when the server's verdict on which review actions the user may take could not be read \u2014 offline, a cached approvals queue, or a failed request. Approve / Reject stay unavailable until a pull-to-refresh reads it."
+  },
+  "reviewVerdictsChecking": "Checking what you can do here…",
+  "@reviewVerdictsChecking": {
+    "description": "Placeholder in the invoice detail action bar while the server's verdict on Approve / Reject is loading."
   }
 }

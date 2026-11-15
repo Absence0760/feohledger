@@ -91,6 +91,7 @@ class InvoiceApi {
     double? amountMax,
     DateTime? dueDateFrom,
     DateTime? dueDateTo,
+    bool includeReviewActions = false,
     int page = 1,
     int pageSize = 20,
   }) async {
@@ -116,6 +117,11 @@ class InvoiceApi {
       params['due_date_from'] = _isoDate(dueDateFrom);
     }
     if (dueDateTo != null) params['due_date_to'] = _isoDate(dueDateTo);
+    // Each row's `approve` / `reject` verdict, in this one response
+    // ([Invoice.reviewActions]) — the approvals queue's, instead of one
+    // `review-actions` read per row. Opt-in: the server runs the approval
+    // gates for the page only when asked.
+    if (includeReviewActions) params['include'] = 'review_actions';
 
     final items = await _api.getList('/invoices', params);
     return items

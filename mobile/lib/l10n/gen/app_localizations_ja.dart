@@ -3842,4 +3842,14 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get invoicesBulkSkipNoReason => '理由は示されていません';
+
+  @override
+  String get invoicesBulkSkipNoNumber => '請求書（番号なし）';
+
+  @override
+  String get reviewVerdictsUnavailable =>
+      'ここで実行できる操作を確認できませんでした。下に引いて再試行してください';
+
+  @override
+  String get reviewVerdictsChecking => 'ここで実行できる操作を確認しています…';
 }
