@@ -1140,6 +1140,12 @@ async def run_extraction(
             # The reader who asked for this read, or NULL for an unattended
             # channel (decisions §389).
             record_final_approval(invoice, approved_by="system (auto-approve)", actor_id=actor_id)
+            # The refresh above ran before the reader was the approver: a
+            # receipt or inspection hold they had cleared is re-judged now
+            # (decisions §422).
+            from app.services.invoice_warnings import reraise_holds_cleared_by_an_approver
+
+            await reraise_holds_cleared_by_an_approver(db, invoice, org_settings=org_settings)
 
         await transition_invoice(
             db,

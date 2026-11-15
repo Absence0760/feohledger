@@ -1533,6 +1533,17 @@ approvers come from the invoice's `WorkflowInstance`, which every door loads
 (batched for the list, bulk resolve and the payments queue; `record_decision`
 loads it itself when a caller did not pass one).
 
+The axis binds in both orders. A manager who resolves the hold before they
+approve is not refused at the queue, since they are not yet an approver, but
+their approval re-judges the invoice's cleared `po_mismatch` / `quality_hold`
+rows in the same transaction and raises again any whose clearance no longer
+stands (`invoice_warnings.reraise_holds_cleared_by_an_approver`). Every site
+that stamps an approver calls it: each chain level and the final approval in
+`review.approve_invoice`, `/complete`'s amount floor and extraction's
+auto-approve. The hold is therefore open before a payment run can stage the
+invoice. A colleague's clearance is independent and survives
+([decisions.md](decisions.md) §422).
+
 The first axis is the one that binds in volume, and it is the one the
 [followups](followups.md) entry did not anticipate. A flag is a *detector's*
 finding about an invoice's contents, so the person with a motive to clear it is

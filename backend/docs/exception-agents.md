@@ -205,7 +205,12 @@ passes the same set to `record_decision` (`approvers=`). The run's own approval
 does not refuse its own resolve, which rests on the re-match no longer finding
 the mismatch (`decision.refound`) and on no implicated receipt lifting the hold
 (`_receipts_implicated`), not on the human's word
-(`test_the_approval_an_agent_run_gives_does_not_refuse_its_own_resolve`). `duplicate`
+(`test_the_approval_an_agent_run_gives_does_not_refuse_its_own_resolve`). The
+approval's re-judge of cleared holds (decisions §422) does not undo it either:
+the row being decided is still open when `apply` approves, so nothing is
+re-raised beside it, and the re-judge runs no detector that could mark it
+`refound`
+(`test_the_re_judge_does_not_undo_an_agents_own_resolve`). `duplicate`
 and `fraud_flag` are escalate-only stubs (§ Deferred) and the remaining blocking
 types have no resolver at all. That is why
 `tests/test_exception_agent_queue_segregation.py` also registers a probe resolver

@@ -668,7 +668,8 @@ where somebody could:
   checking the delivery. That someone must not be an approver: the queue refuses
   the invoice's approvers resolving or dismissing its `po_mismatch`
   (`exception_lifecycle.segregation_refusal`, 403 `segregation_approver`,
-  decisions §420). The
+  decisions §420), and a hold someone cleared before they approved is raised
+  again by their approval, in the same transaction (decisions §422). The
   approval step's `require_segregation: false` lifts it, as it lifts §267, and
   so does `settings.exceptions.require_segregation: false`, which lifts every
   auto-close limit here. Receipt entry re-matches the PO's invoices under

@@ -2171,6 +2171,85 @@ async def _finding_cleared_by_a_person(
     )
 
 
+async def reraise_holds_cleared_by_an_approver(
+    db: AsyncSession, invoice: Invoice, *, org_settings: dict | None
+) -> None:
+    """Re-judge the invoice's cleared ``po_mismatch`` / ``quality_hold`` rows
+    now that an approval has been stamped, and raise again any whose clearance
+    no longer stands (decisions §422, amending §420).
+
+    §420 refuses an approver clearing those holds, but a person can clear one
+    first and approve second. Approval checks no blocking exception and the
+    payment run reads only open rows, so the cleared hold stayed cleared and
+    the invoice was paid on its approver's own word. Every site that stamps an
+    approver (``review.approve_invoice`` at each chain level and at the final
+    approval, ``/complete``'s amount floor, extraction's auto-approve) calls
+    this in the same transaction, after the stamp, so the hold is back before
+    anything can stage a payment.
+
+    The question is the one the detector's suppression already asks
+    (:func:`_finding_cleared_by_a_person`): does a person's clearance still
+    suppress this finding as the invoice stands now? So only a closed row whose
+    stamp still equals the invoice's current fingerprint is a candidate (a
+    stale stamp suppresses nothing, and the next refresh judges the new facts),
+    and :func:`_ensure_exception` re-raises it with the row's own finding. That
+    keeps both of its checks: an open row of the type already holds the
+    invoice, and a clearance by someone the invoice does not implicate, an
+    independent colleague, still stands.
+
+    No detector runs here. Re-matching inside an approval would re-run the PO
+    match against an agent resolver's own settled outcome (the multi-PO split
+    writes its match by hand) and mark the row it is deciding ``refound``,
+    undoing a resolve the coordinator legitimately judged against the
+    approvers from before its run (§420). A row an agent or a detector closed
+    carries no fingerprint, so it is never a candidate.
+    """
+    from app.services.exception_lifecycle import APPROVER_SEGREGATED_TYPES
+
+    if invoice.id is None:
+        return
+    rows = (
+        (
+            await db.execute(
+                select(APException)
+                .where(
+                    APException.invoice_id == invoice.id,
+                    APException.exception_type.in_(APPROVER_SEGREGATED_TYPES),
+                    APException.status.in_(["resolved", "dismissed"]),
+                    APException.finding_fingerprint.is_not(None),
+                )
+                .order_by(APException.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        key = (row.exception_type, row.finding_fingerprint)
+        if key in seen or not row.description_code:
+            continue
+        seen.add(key)
+        current = await current_finding_fingerprint(
+            db, invoice, row.exception_type, row.description_code, row.description_params
+        )
+        if current != row.finding_fingerprint:
+            continue
+        await _ensure_exception(
+            db,
+            invoice,
+            row.exception_type,
+            row.severity or "warning",
+            {
+                "code": row.description_code,
+                "params": row.description_params or {},
+                "message": row.description or "",
+            },
+            org_settings=org_settings,
+            fingerprint=current,
+        )
+
+
 async def _ensure_exception(
     db: AsyncSession,
     invoice: Invoice,

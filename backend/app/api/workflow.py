@@ -55,7 +55,7 @@ from app.schemas.workflow import (
 from app.services import review as review_svc
 from app.services.erp_send import schedule_auto_send, start_erp_send
 from app.services.extraction_dispatch import dispatch_extraction
-from app.services.invoice_warnings import refresh_warnings
+from app.services.invoice_warnings import refresh_warnings, reraise_holds_cleared_by_an_approver
 from app.services.storage import upload_invoice_file
 from app.services.workflow_engine import (
     advance_workflow,
@@ -1014,6 +1014,9 @@ async def complete_invoice(
             # The caller is the effective approver (§267), so their later
             # receipt cannot release this invoice either (§389).
             record_final_approval(invoice, approved_by="system (below threshold)", actor_id=user.id)
+            # The refresh above judged the caller's earlier clearances before
+            # they were the approver; re-judged now (decisions §422).
+            await reraise_holds_cleared_by_an_approver(db, invoice, org_settings=org.settings)
             await transition_invoice(
                 db,
                 invoice,
