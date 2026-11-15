@@ -5,7 +5,7 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Eight entries are open**: the run builder reading
+**Nine entries are open**: the `/complete` amount floor approving an invoice whose PO was never matched (found 2026-11-15), the run builder reading
 a missing invoice currency as USD (found 2026-10-21), the app rendering nothing when browser
 storage is blocked (found 2026-10-20), the remove-tenant backup deletion the
 VM's IAM role refuses (found 2026-10-18),
@@ -176,6 +176,28 @@ red for reasons unrelated to their diff. No production effect.
 `provider_store_from_settings` fixture (or a realdb seal) and give it one, then
 add a guard that a mock-DB test touching `provider_credentials` fails loudly
 instead of reaching the real engine.
+
+## The `/complete` amount floor approves an invoice whose PO was never matched
+
+**Found 2026-11-15**, by round 12's fix lane for decisions §422 (PR #716);
+reproduced with a throwaway test, since deleted. `POST /api/invoices/{id}/complete`
+auto-approves an invoice under the org's amount floor straight from `new`, and
+`invoice_warnings.refresh_warnings` skips the PO match while an invoice is
+`new`. So an invoice citing a PO that does not exist (`PO-DOES-NOT-EXIST-FX1` in
+the reproduction) came back `approved` with an empty `po_match` and no
+`po_mismatch` exception — payable, with no 2/3/4-way match ever run. It predates
+round 12 and is separate from §420 / §422, though it is why §422's re-judge
+almost never has anything to do on the floor.
+
+**Blast radius:** tenants with a `/complete` amount floor configured whose
+invoices cite a PO; below-floor invoices only.
+
+**Recommended fix (needs a policy call):** either run the PO match before the
+floor decides (an invoice whose match fails is held, not approved), or send any
+invoice that cites a PO to review rather than through the floor. The first keeps
+the floor's purpose for PO-less spend and is the recommended default. Test
+beside `tests/test_invoice_complete_auto_approve.py`: a below-floor invoice
+citing an unknown PO is not approved and carries `po_mismatch`.
 
 ## The run builder reads a missing invoice currency as USD
 
