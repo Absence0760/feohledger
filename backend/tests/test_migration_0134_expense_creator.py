@@ -34,9 +34,9 @@ def _load():
     return module
 
 
-def test_revision_chains_after_0132_and_fits_the_version_column():
+def test_revision_chains_after_0133_and_fits_the_version_column():
     mig = _load()
-    assert mig.down_revision == "0132_invoice_erp_doc_id_idx"
+    assert mig.down_revision == "0133_invoice_split_po_ids"
     assert len(mig.revision) <= 32
     assert REVISION.stem == mig.revision
 

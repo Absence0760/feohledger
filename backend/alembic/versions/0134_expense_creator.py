@@ -27,7 +27,7 @@ the SoD set nobody observed). Existing rows stay NULL, which the app reads as
 invoice uploader.
 
 Revision ID: 0134_expense_creator
-Revises: 0132_invoice_erp_doc_id_idx
+Revises: 0133_invoice_split_po_ids
 Create Date: 2026-11-15
 
 20 characters (``alembic_version.version_num`` is ``VARCHAR(32)``); the filename
@@ -45,7 +45,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision = "0134_expense_creator"
-down_revision = "0132_invoice_erp_doc_id_idx"
+down_revision = "0133_invoice_split_po_ids"
 branch_labels = None
 depends_on = None
 
