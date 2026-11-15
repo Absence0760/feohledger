@@ -54,12 +54,6 @@ class WebhookInvoiceApprovalRecalledData(WebhookInvoiceData):
             "(an approved invoice whose ERP push failed)."
         )
     )
-    recalled_by_user_id: str | None = Field(
-        description=(
-            "Id of the FeohLedger user who recalled the approval (an opaque id). "
-            "A recall is always a signed-in person's act, so this is set in practice."
-        )
-    )
 
 
 class WebhookExceptionData(BaseModel):

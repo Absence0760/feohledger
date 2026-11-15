@@ -88,11 +88,13 @@ def test_the_published_openapi_carries_every_event():
         assert op["security"] == []
 
 
-def test_the_published_recall_payload_names_the_prior_status_and_recaller():
+def test_the_published_recall_payload_names_the_prior_status_and_no_person():
     spec = build_public_openapi(app)
     props = spec["components"]["schemas"]["WebhookInvoiceApprovalRecalledData"]["properties"]
-    assert {"recalled_from", "recalled_by_user_id", "invoice_id", "status"} <= set(props)
-    assert "reason" not in props
+    assert {"recalled_from", "invoice_id", "status"} <= set(props)
+    # No person reference, like invoice.approved (decisions §421); no reason.
+    assert not {"reason", "recalled_by_user_id"} & set(props)
+    assert not any("user" in p for p in props)
     assert props["amount"]["anyOf"][0]["type"] == "string"
 
 
@@ -139,9 +141,7 @@ async def test_each_emitter_sends_exactly_its_models_fields(captured):
 
     inv = _invoice(InvoiceStatus.approved)
     await dispatch.emit_invoice_approved(inv, occurrence_id=uuid.uuid4())
-    await dispatch.emit_invoice_approval_recalled(
-        inv, recalled_from="approved", recalled_by_user_id=uuid.uuid4()
-    )
+    await dispatch.emit_invoice_approval_recalled(inv, recalled_from="approved")
     await dispatch.emit_payment_settled(inv, occurrence_id=uuid.uuid4())
     await dispatch.emit_exception_raised(
         organization_id=inv.organization_id,
@@ -162,9 +162,9 @@ async def test_the_recall_payload(captured):
     from app.services.webhooks import dispatch
 
     inv = _invoice()
-    recaller, occurrence = uuid.uuid4(), uuid.uuid4()
+    occurrence = uuid.uuid4()
     await dispatch.emit_invoice_approval_recalled(
-        inv, recalled_from="failed", recalled_by_user_id=recaller, occurrence_id=occurrence
+        inv, recalled_from="failed", occurrence_id=occurrence
     )
     (call,) = captured
     assert call["event_type"] == EVENT_INVOICE_APPROVAL_RECALLED
@@ -177,7 +177,6 @@ async def test_the_recall_payload(captured):
         "currency": "EUR",
         "status": "ready_for_review",
         "recalled_from": "failed",
-        "recalled_by_user_id": str(recaller),
     }
 
 
@@ -223,7 +222,7 @@ async def test_the_recall_transition_emits_the_recall_event(engine_emits, from_s
     ((name, kwargs),) = engine_emits
     assert name == "recalled"
     assert kwargs["recalled_from"] == from_status.value
-    assert kwargs["recalled_by_user_id"] == actor
+    assert "recalled_by_user_id" not in kwargs
     assert kwargs["occurrence_id"] is not None
     assert "reason" not in kwargs
 

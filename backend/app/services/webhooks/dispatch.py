@@ -298,16 +298,16 @@ async def emit_invoice_approved(invoice, *, occurrence_id=None) -> None:
 
 
 async def emit_invoice_approval_recalled(
-    invoice, *, recalled_from: str, recalled_by_user_id, occurrence_id=None
+    invoice, *, recalled_from: str, occurrence_id=None
 ) -> None:
     """Emit ``invoice.approval_recalled`` when an approval is taken back
     (``review.recall_approval``, decisions §374, §414).
 
     An integrator that acted on ``invoice.approved`` — queued the bill, told a
     supplier it would be paid — otherwise never learns the approval was
-    withdrawn. ``recalled_from`` is the prior status (``approved`` / ``failed``)
-    and ``recalled_by_user_id`` the recaller's opaque user id; the recall's
-    free-text reason is deliberately NOT sent (it stays in the audit row).
+    withdrawn. ``recalled_from`` is the prior status (``approved`` / ``failed``).
+    Who recalled and why are deliberately NOT sent: like ``invoice.approved``,
+    the payload names no person (decisions §421), and both stay in the audit row.
     ``occurrence_id`` identifies THIS recall: an invoice can be recalled,
     re-approved and recalled again.
     """
@@ -318,9 +318,6 @@ async def emit_invoice_approval_recalled(
         data=WebhookInvoiceApprovalRecalledData(
             **_invoice_fields(invoice),
             recalled_from=recalled_from,
-            recalled_by_user_id=(
-                str(recalled_by_user_id) if recalled_by_user_id is not None else None
-            ),
         ).model_dump(),
     )
 

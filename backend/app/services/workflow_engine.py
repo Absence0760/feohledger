@@ -385,7 +385,6 @@ async def transition_invoice(
             occurrence_id=occurrence_id,
             action_name=action_name,
             old_status=old_status,
-            actor_id=actor_id,
         )
     except Exception:  # noqa: BLE001 — a webhook emit must never break the transition
         _log.exception("webhook emit hook failed for invoice transition to %s", target_status.value)
@@ -399,7 +398,6 @@ async def _maybe_emit_webhook(
     occurrence_id: uuid.UUID | None = None,
     action_name: str | None = None,
     old_status: str | None = None,
-    actor_id: uuid.UUID | None = None,
 ) -> None:
     """Map an invoice status transition to an outbound webhook event + emit.
 
@@ -421,7 +419,6 @@ async def _maybe_emit_webhook(
         await emit_invoice_approval_recalled(
             invoice,
             recalled_from=old_status,
-            recalled_by_user_id=actor_id,
             occurrence_id=occurrence_id,
         )
     elif target_status is InvoiceStatus.approved:

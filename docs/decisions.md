@@ -21216,3 +21216,27 @@ Tests: `tests-e2e/vendors/create-invite.spec.ts` (the create dialog closes, the
 detail opens on the new vendor's name with focus inside it, and Esc returns
 focus to **+ New Vendor**). No vitest: the change is a dialog hand-off with no
 logic separable from the DOM.
+
+## 421. `invoice.approval_recalled` names no person, like `invoice.approved` (§414 amendment, round 12, 2026-11-15)
+
+**Context.** §414 added `invoice.approval_recalled` with a `recalled_by_user_id`
+field: the recaller's opaque control-plane id. No other outbound event names a
+person, and `backend/docs/public-api.md` promised PII-free payloads.
+
+**Decision.** The field is removed before the event ships. The payload is
+`invoice.approved`'s fields plus `recalled_from`; who recalled and why stay in
+the tenant's audit trail (`invoice.approval_recalled` audit row), where access
+is governed by RBAC and retention, not copied to every subscriber endpoint.
+
+**Why.** Data minimisation: an integrator that acted on an approval needs to
+know it was withdrawn and what state the invoice is in, not by whom. An opaque
+id is still personal data once a subscriber can map it (they can via
+`/api/v1` users), and a new person reference in a third-party-bound payload
+would need the ROPA and DPA flow-down reviewed. Parity with `invoice.approved`
+keeps the catalogue's rule simple: events describe documents, not people.
+
+**Rejected.** Keeping the id (§414's original choice): convenient for an
+integrator wanting to notify the recaller, but no integrator has asked, and
+adding a field later is non-breaking while removing one is breaking.
+`test_webhook_event_catalogue.py` now asserts no `user` field in the recall
+payload.

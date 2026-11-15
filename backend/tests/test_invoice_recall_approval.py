@@ -573,7 +573,7 @@ async def test_the_recall_is_delivered_to_webhook_subscribers(realdb, monkeypatc
         assert data["invoice_id"] == str(invoice_id)
         assert data["status"] == "ready_for_review"
         assert data["recalled_from"] == "approved"
-        assert data["recalled_by_user_id"] == str(realdb.info(TENANT).users["ap_manager"])
+        assert "recalled_by_user_id" not in data
         assert "Wrong payee" not in str(delivery.payload)
     finally:
         async with control_mk() as s:

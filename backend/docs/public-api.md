@@ -484,7 +484,7 @@ stays in the `invoice.approval_recalled` audit row:
   "created_at": "<iso8601>", "organization_id": "<org-id>",
   "data": { "invoice_id": "…", "invoice_number": "…", "vendor_name": "…",
             "amount": "123.45", "currency": "USD", "status": "ready_for_review",
-            "recalled_from": "approved", "recalled_by_user_id": "<user-id>" } }
+            "recalled_from": "approved" } }
 ```
 
 Like the approval it withdraws, its id is per occurrence: recalled, re-approved
@@ -509,8 +509,8 @@ exception (e.g. a Positive Pay never-issued cheque) carries `invoice_id` /
 
 `amount` is an **exact JSON string** (money-is-exact), not a float. Payloads are
 PII-free — invoice/exception metadata only, no bank/tax/PAN fields, no name or
-email. The one person reference is `invoice.approval_recalled`'s
-`recalled_by_user_id`, an opaque id.
+email, and no person reference: `invoice.approval_recalled` does not name who
+recalled (decisions §421); that is in the audit trail.
 
 ### Dispatch + retry + dead-letter
 
@@ -598,8 +598,8 @@ occurrence id that transition minted.
 transition's action (`workflow_engine.RECALL_ACTION`, the one action allowed to
 walk the recall edges) rather than its resulting status — `ready_for_review` is
 also where a resubmit or a fresh extraction lands, and those are not events.
-`transition_invoice` hands the hook the status it left and the actor, which
-become `recalled_from` and `recalled_by_user_id`.
+`transition_invoice` hands the hook the status it left, which
+becomes `recalled_from`; the actor is not sent (decisions §421).
 
 **`exception.raised`** is emitted from the shared exception-create chokepoint
 `services/exception_service.create_exception`. Every `Exception` row in the
