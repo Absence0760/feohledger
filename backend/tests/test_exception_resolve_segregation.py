@@ -19,6 +19,13 @@ because both are data-layer facts:
   above cannot reach (the approver is not the invoices' uploader) and the open
   end of the BEC chain ``docs/authentication.md`` recorded.
 
+A third axis applies to ``po_mismatch`` and ``quality_hold`` only (decisions
+§420): **the invoice's approvers** (``approval_chain.approver_ids`` — the
+approval of record ∪ every level approval on its chain). Those holds wait for
+independent evidence, and since §389 / §401 an approver's own receipt or
+inspection does not lift them, so the approver's own word in the queue must not
+either.
+
 Also pinned here, because each is a way the control could be wrong rather than
 merely absent: ``escalate`` stays open (it is the refused actor's exit, and an
 escalated row still blocks the run); non-blocking types are out of scope
@@ -38,6 +45,11 @@ from sqlalchemy import select, update
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
 from app.models.organization import Organization
+from app.services.exception_agents.base import (
+    ACTION_AUTO_RESOLVED,
+    AgentEvaluation,
+    ExceptionResolver,
+)
 
 TENANT = "a"
 
@@ -573,13 +585,14 @@ def test_every_refusal_code_has_a_message():
     the messages are what the single-row 403 says. A code with no message would
     fall back to the wrong sentence."""
     from app.services.exception_lifecycle import (
+        REFUSAL_APPROVER,
         REFUSAL_IMPLICATED,
         REFUSAL_MESSAGES,
         REFUSAL_RAISER,
         refusal_message,
     )
 
-    assert set(REFUSAL_MESSAGES) == {REFUSAL_RAISER, REFUSAL_IMPLICATED}
+    assert set(REFUSAL_MESSAGES) == {REFUSAL_RAISER, REFUSAL_IMPLICATED, REFUSAL_APPROVER}
     for code, message in REFUSAL_MESSAGES.items():
         assert refusal_message(code) == message
         assert message.startswith("Segregation of duties:")
@@ -711,3 +724,624 @@ async def test_the_uploader_cannot_clear_a_po_mismatch_or_quality_hold(realdb, e
         )
     assert cleared.status_code == 200, cleared.text
     assert await _status(mk, exc_id) == "resolved"
+
+
+# ---------------------------------------------------------------------------
+# The approver axis (decisions §420) — `po_mismatch` / `quality_hold` only.
+# ---------------------------------------------------------------------------
+
+
+HOLD_TYPES = ["po_mismatch", "quality_hold"]
+
+
+def _transient(*, approved_by=None, uploaded_by=None, exception_type="po_mismatch", **exc):
+    """An unsaved invoice + exception pair for the pure predicate."""
+    inv = Invoice(
+        id=uuid.uuid4(),
+        approved_by_user_id=approved_by,
+        uploaded_by_id=uploaded_by,
+        segregation_actor_ids=None,
+    )
+    row = APException(id=uuid.uuid4(), exception_type=exception_type, invoice_id=inv.id, **exc)
+    return row, inv
+
+
+def _chain(*user_ids):
+    """A workflow instance whose multi-level chain records these approvals."""
+    from app.models.workflow import WorkflowInstance
+
+    return WorkflowInstance(
+        state_data={
+            "approval_levels": {"levels": [{"approvals": [{"user_id": str(u)} for u in user_ids]}]}
+        }
+    )
+
+
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+@pytest.mark.parametrize("action", ["resolve", "dismiss"])
+def test_the_approver_of_record_may_not_clear_a_receipt_or_inspection_hold(exception_type, action):
+    """``approved_by_user_id`` is on the row, so the pure predicate reads the
+    approval of record with no I/O."""
+    from app.services.exception_lifecycle import REFUSAL_APPROVER, segregation_refusal
+
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me, exception_type=exception_type)
+    assert segregation_refusal(row, inv, me, action=action, org_settings=None) == REFUSAL_APPROVER
+    # Someone who did not approve it is not refused.
+    assert segregation_refusal(row, inv, uuid.uuid4(), action=action, org_settings=None) is None
+
+
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+def test_a_level_approver_on_the_chain_is_refused_too(exception_type):
+    """A level approver is in the approval chain whether or not the last level
+    has signed — the same set §389 measures a receipt's recorder against."""
+    from app.services.exception_lifecycle import REFUSAL_APPROVER, segregation_refusal
+
+    level_approver = uuid.uuid4()
+    row, inv = _transient(exception_type=exception_type)
+    instance = _chain(level_approver)
+
+    assert (
+        segregation_refusal(
+            row, inv, level_approver, action="resolve", org_settings=None, instance=instance
+        )
+        == REFUSAL_APPROVER
+    )
+    # Without the chain, only the approval of record is read.
+    assert (
+        segregation_refusal(row, inv, level_approver, action="resolve", org_settings=None) is None
+    )
+
+
+def test_escalate_stays_open_to_the_approver():
+    """An escalated hold still blocks the run; it is the refused actor's exit."""
+    from app.services.exception_lifecycle import segregation_refusal
+
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me)
+    assert segregation_refusal(row, inv, me, action="escalate", org_settings=None) is None
+
+
+@pytest.mark.parametrize("other_type", ["duplicate", "fraud_flag", "line_total_mismatch"])
+def test_the_approver_axis_is_only_for_receipt_and_inspection_holds(other_type):
+    """Approving an invoice with a duplicate or fraud flag on it is not a
+    conflict the approver axis was widened for: those holds are not lifted by a
+    receipt or an inspection. They keep §169's two axes only."""
+    from app.services.exception_lifecycle import (
+        APPROVER_SEGREGATED_TYPES,
+        segregation_refusal,
+    )
+
+    assert APPROVER_SEGREGATED_TYPES == {"po_mismatch", "quality_hold"}
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me, exception_type=other_type)
+    assert segregation_refusal(row, inv, me, action="resolve", org_settings=None) is None
+
+
+def test_the_org_opt_out_lifts_the_approver_axis():
+    from app.services.exception_lifecycle import segregation_refusal
+
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me)
+    opted_out = {"exceptions": {"require_segregation": False}}
+    assert segregation_refusal(row, inv, me, action="resolve", org_settings=opted_out) is None
+
+
+def test_the_implicated_axis_still_answers_first():
+    """An uploader who also approved is told the older, broader sentence."""
+    from app.services.exception_lifecycle import REFUSAL_IMPLICATED, segregation_refusal
+
+    me = uuid.uuid4()
+    row, inv = _transient(approved_by=me, uploaded_by=me)
+    assert (
+        segregation_refusal(row, inv, me, action="resolve", org_settings=None) == REFUSAL_IMPLICATED
+    )
+
+
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+def test_an_approvers_own_clearance_no_longer_stands(exception_type):
+    """``clearance_stands`` re-asks the same predicate of the recorded decider:
+    a hold its decider has since approved is raised again for someone
+    independent, as §367 / §374 do for a decider implicated later."""
+    from app.services.exception_lifecycle import clearance_stands
+
+    me = uuid.uuid4()
+    row, inv = _transient(
+        approved_by=me, exception_type=exception_type, status="resolved", decided_by_user_id=me
+    )
+    assert clearance_stands(row, inv, org_settings=None) is False
+
+    level = uuid.uuid4()
+    row.decided_by_user_id = level
+    inv.approved_by_user_id = None
+    assert clearance_stands(row, inv, org_settings=None, instance=_chain(level)) is False
+
+    row.decided_by_user_id = uuid.uuid4()
+    assert clearance_stands(row, inv, org_settings=None, instance=_chain(level)) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+async def test_the_approver_is_refused_at_the_queue_and_a_colleague_clears(realdb, exception_type):
+    """End to end over HTTP: the verdicts the detail offers, the single-row
+    403 with its own code, escalate as the exit, and a colleague's resolve."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv = await _make_invoice(mk, info.org_id, number=f"INV-SOD-APR-{exception_type}")
+    async with mk() as s:
+        await s.execute(
+            update(Invoice)
+            .where(Invoice.id == inv.id)
+            .values(status="approved", approved_by_user_id=info.users["admin"])
+        )
+        await s.commit()
+    exc_id = await _open_exception(mk, info.org_id, inv, exception_type=exception_type)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        detail = await c.get(f"/api/exceptions/{exc_id}")
+        refused = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "resolve", "resolution": "I approved it; the goods came."},
+        )
+        dismissed = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "dismiss", "resolution": "Not a real hold."},
+        )
+        escalated = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "escalate", "resolution": "Someone else must check delivery."},
+        )
+
+    verdicts = detail.json()["decision_refusals"]
+    assert verdicts["resolve"]["code"] == "segregation_approver"
+    assert verdicts["dismiss"]["code"] == "segregation_approver"
+    assert verdicts["escalate"] is None
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["detail"]["code"] == "segregation_approver"
+    assert dismissed.status_code == 403, dismissed.text
+    assert dismissed.json()["detail"]["code"] == "segregation_approver"
+    assert escalated.status_code == 200, escalated.text
+    assert await _status(mk, exc_id) == "escalated"
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c2:
+        cleared = await c2.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "resolve", "resolution": "Checked the delivery note."},
+        )
+    assert cleared.status_code == 200, cleared.text
+    assert await _status(mk, exc_id) == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_bulk_resolve_reports_the_approver_per_row_with_a_chain(realdb):
+    """The bulk door batches the workflow chains and refuses a level approver
+    per row, clearing the rest of the batch."""
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    signed = await _make_invoice(mk, info.org_id, number="INV-SOD-APR-BULK-1")
+    other = await _make_invoice(mk, info.org_id, number="INV-SOD-APR-BULK-2")
+    async with mk() as s:
+        definition = WorkflowDefinition(
+            id=uuid.uuid4(),
+            organization_id=info.org_id,
+            name=f"sod-approver-{uuid.uuid4().hex[:8]}",
+            steps_config=[],
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                id=uuid.uuid4(),
+                invoice_id=signed.id,
+                definition_id=definition.id,
+                steps_config_snapshot=[],
+                state_data={
+                    "approval_levels": {
+                        "levels": [{"approvals": [{"user_id": str(info.users["admin"])}]}]
+                    }
+                },
+            )
+        )
+        await s.commit()
+    exc_signed = await _open_exception(mk, info.org_id, signed, exception_type="po_mismatch")
+    exc_other = await _open_exception(mk, info.org_id, other, exception_type="po_mismatch")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(
+            "/api/exceptions/bulk/resolve",
+            json={
+                "ids": [str(exc_signed), str(exc_other)],
+                "action": "resolve",
+                "resolution": "Bulk sweep.",
+            },
+        )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["updated"] == 1
+    assert body["skipped"] == [{"id": str(exc_signed), "reason": "segregation_approver"}]
+    assert await _status(mk, exc_signed) == "open"
+    assert await _status(mk, exc_other) == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_the_payments_queue_names_the_approver_refusal(realdb):
+    """The payment queue's banner reads the same predicate, so the approver of
+    a held invoice is told a colleague must clear it rather than finding out
+    from a 403."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv = await _make_invoice(mk, info.org_id, number="INV-SOD-APR-QUEUE")
+    async with mk() as s:
+        await s.execute(
+            update(Invoice)
+            .where(Invoice.id == inv.id)
+            .values(status="approved", approved_by_user_id=info.users["admin"])
+        )
+        await s.commit()
+    exc_id = await _open_exception(mk, info.org_id, inv, exception_type="po_mismatch")
+
+    for role, expected in (("admin", "segregation_approver"), ("ap_manager", None)):
+        async with realdb.client(key=TENANT, role=role) as c:
+            res = await c.get("/api/payments/queue", params={"page_size": 100})
+        assert res.status_code == 200, res.text
+        [row] = [i for i in res.json()["items"] if i["id"] == str(inv.id)]
+        assert row["blocking_exception"] == {
+            "id": str(exc_id),
+            "exception_type": "po_mismatch",
+            "clear_refusal": expected,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Clear first, approve second (decisions §422, amending §420). The approval
+# re-judges the invoice's cleared holds in its own transaction.
+# ---------------------------------------------------------------------------
+
+
+async def _held_invoice(s, org_id, exception_type):
+    """A real detector-raised hold: +23.7 % over a fully received PO for
+    ``po_mismatch``, a failed QMS inspection for ``quality_hold``."""
+    from datetime import date
+
+    from app.models.entity import Entity
+    from app.models.procurement import GoodsReceipt, GRLineItem, POLineItem, PurchaseOrder
+    from app.models.quality_inspection import QualityInspection
+    from app.services.invoice_warnings import refresh_warnings
+
+    ent = (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
+    number = f"PO-422-{uuid.uuid4().hex[:6]}"
+    po_total = "1000.00" if exception_type == "po_mismatch" else "1037.00"
+    po = PurchaseOrder(
+        po_number=number,
+        total=Decimal(po_total),
+        currency="USD",
+        status="open",
+        organization_id=org_id,
+        entity_id=ent,
+    )
+    s.add(po)
+    await s.flush()
+    s.add(POLineItem(po_id=po.id, description="Widget", quantity=Decimal("10")))
+    gr = GoodsReceipt(
+        gr_number=f"GR-{uuid.uuid4().hex[:8]}",
+        po_id=po.id,
+        status="received",
+        organization_id=org_id,
+        entity_id=ent,
+    )
+    s.add(gr)
+    await s.flush()
+    s.add(GRLineItem(gr_id=gr.id, description="Widget", quantity_received=Decimal("10")))
+    if exception_type == "quality_hold":
+        s.add(
+            QualityInspection(
+                inspection_number=f"QI-{uuid.uuid4().hex[:6]}",
+                po_id=po.id,
+                gr_id=gr.id,
+                result="fail",
+                inspected_date=date(2026, 10, 1),
+                source="qms",
+                organization_id=org_id,
+                entity_id=ent,
+            )
+        )
+    inv = Invoice(
+        invoice_number=f"INV-422-{uuid.uuid4().hex[:8]}",
+        vendor_name="Globex Corporation",
+        amount=Decimal("1237.00" if exception_type == "po_mismatch" else "1037.00"),
+        currency="USD",
+        po_number=number,
+        status="ready_for_review",
+        organization_id=org_id,
+        entity_id=ent,
+    )
+    s.add(inv)
+    await s.flush()
+    await refresh_warnings(s, inv, org_settings={})
+    await s.commit()
+    (exc_id,) = (
+        (
+            await s.execute(
+                select(APException.id).where(
+                    APException.invoice_id == inv.id,
+                    APException.exception_type == exception_type,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return inv.id, exc_id
+
+
+async def _hold_statuses(mk, invoice_id, exception_type):
+    async with mk() as s:
+        return list(
+            (
+                await s.execute(
+                    select(APException.status)
+                    .where(
+                        APException.invoice_id == invoice_id,
+                        APException.exception_type == exception_type,
+                    )
+                    .order_by(APException.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+async def test_a_hold_its_approver_cleared_first_is_back_before_the_run(realdb, exception_type):
+    """The order §420 left open: X resolves the hold while not yet an approver
+    (allowed), then X approves. The approval re-raises the hold in its own
+    transaction, so the payment-run builder refuses the invoice with it rather
+    than paying it on X's word alone."""
+    from app.services.payment_runs import blocked_invoice_ids
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        inv_id, exc_id = await _held_invoice(s, info.org_id, exception_type)
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        cleared = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "resolve", "resolution": "Looks fine to me."},
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert await _hold_statuses(mk, inv_id, exception_type) == ["resolved"]
+
+        approved = await c.post(f"/api/invoices/{inv_id}/approve", json={})
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["status"] == "approved"
+
+    assert await _hold_statuses(mk, inv_id, exception_type) == ["resolved", "open"]
+    async with mk() as s:
+        assert await blocked_invoice_ids(s, [inv_id]) == {inv_id}
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        run = await c.post(
+            "/api/payments/runs",
+            json={"items": [{"invoice_id": str(inv_id), "method": "ach"}]},
+        )
+    assert run.status_code == 409, run.text
+    assert f"({exception_type})" in run.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exception_type", HOLD_TYPES)
+async def test_a_colleagues_clearance_survives_the_approval(realdb, exception_type):
+    """A clearance by someone who is not the approver is independent, so X's
+    approval leaves it cleared and the invoice payable."""
+    from app.services.payment_runs import blocked_invoice_ids
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        inv_id, exc_id = await _held_invoice(s, info.org_id, exception_type)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        cleared = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "resolve", "resolution": "Checked the delivery note."},
+        )
+    assert cleared.status_code == 200, cleared.text
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        approved = await c.post(f"/api/invoices/{inv_id}/approve", json={})
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"
+
+    assert await _hold_statuses(mk, inv_id, exception_type) == ["resolved"]
+    async with mk() as s:
+        assert await blocked_invoice_ids(s, [inv_id]) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_level_approver_on_the_chain_re_raises_too(realdb):
+    """The re-judge reads the chain, as §420's predicate does: a level approver
+    who cleared the hold before signing their level gets it back, though the
+    approval of record is still empty."""
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+    from app.services.exception_lifecycle import record_decision
+    from app.services.invoice_warnings import reraise_holds_cleared_by_an_approver
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    me = info.users["ap_manager"]
+    async with mk() as s:
+        inv_id, exc_id = await _held_invoice(s, info.org_id, "po_mismatch")
+        inv = await s.get(Invoice, inv_id)
+        await record_decision(
+            s,
+            exception=await s.get(APException, exc_id),
+            action="resolve",
+            resolution="Fine.",
+            actor_id=me,
+            actor_name="Manager",
+            invoice=inv,
+            org_settings={},
+        )
+        await s.commit()
+
+        # Nobody has approved yet: the clearance stands.
+        await reraise_holds_cleared_by_an_approver(s, inv, org_settings={})
+        await s.commit()
+        assert await _hold_statuses(mk, inv_id, "po_mismatch") == ["resolved"]
+
+        definition = WorkflowDefinition(
+            id=uuid.uuid4(),
+            organization_id=info.org_id,
+            name=f"sod-422-{uuid.uuid4().hex[:8]}",
+            steps_config=[],
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                id=uuid.uuid4(),
+                invoice_id=inv_id,
+                definition_id=definition.id,
+                steps_config_snapshot=[],
+                state_data={"approval_levels": {"levels": [{"approvals": [{"user_id": str(me)}]}]}},
+            )
+        )
+        await s.flush()
+        await reraise_holds_cleared_by_an_approver(s, inv, org_settings={})
+        await s.commit()
+    assert await _hold_statuses(mk, inv_id, "po_mismatch") == ["resolved", "open"]
+
+
+class _ApprovingHoldResolver(ExceptionResolver):
+    """A PO resolver's shape: its apply approves the invoice through the real
+    ``review.approve_invoice`` as the triggering human, then the coordinator
+    resolves the row it was deciding."""
+
+    agent_type = "fx1_422_probe_v0"
+    exception_type = "po_mismatch"
+
+    async def evaluate(self, db, *, exception, invoice, org_settings):
+        return AgentEvaluation(
+            recommended_action=ACTION_AUTO_RESOLVED,
+            confidence=Decimal("1"),
+            rationale="Probe: the re-match is clean.",
+            changes={},
+        )
+
+    async def apply(
+        self, db, *, exception, invoice, actor_id, actor_roles=None, org_settings=None, **_kw
+    ):
+        from app.services.review import approve_invoice
+
+        await approve_invoice(
+            db,
+            invoice,
+            actor_id=actor_id,
+            actor_name="AP Agent",
+            actor_roles=actor_roles,
+            org_settings=org_settings,
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_re_judge_does_not_undo_an_agents_own_resolve(realdb, monkeypatch):
+    """The agent's run approves on the triggering human's behalf, then resolves
+    the row it was deciding against the approvers from BEFORE the run (§420).
+    The re-judge inside that approval must not undo it: the row being decided
+    is still open, so nothing is re-raised beside it, even when the same human
+    holds an older clearance whose stamp matches the invoice now. The resolve
+    lands, and no second hold appears."""
+    from app.services.exception_agents import coordinator
+    from app.services.invoice_warnings import po_match_fingerprint
+    from app.services.payment_runs import blocked_invoice_ids
+
+    await _set_org_settings(realdb, {"exception_agents": {"autonomy_level": "aggressive"}})
+    monkeypatch.setattr(coordinator, "get_resolver", lambda _t: _ApprovingHoldResolver())
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        inv_id, open_id = await _held_invoice(s, info.org_id, "po_mismatch")
+        inv = await s.get(Invoice, inv_id)
+        # An older clearance by the triggering human, stamped as the invoice
+        # hashes now: the strongest case for a re-raise.
+        older = APException(
+            id=uuid.uuid4(),
+            organization_id=info.org_id,
+            invoice_id=inv_id,
+            exception_type="po_mismatch",
+            severity="warning",
+            description="older finding",
+            description_code="po_amount_variance",
+            description_params={},
+            status="resolved",
+            decided_by_user_id=info.users["admin"],
+            finding_fingerprint=po_match_fingerprint(inv, "po_mismatch"),
+        )
+        s.add(older)
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/exceptions/{open_id}/agent-resolve")
+
+    assert res.status_code == 200, res.text
+    assert res.json()["decision"]["action_taken"] == "auto_resolved", res.json()
+    async with mk() as s:
+        assert (await s.get(APException, open_id)).status == "resolved"
+        assert (await s.get(Invoice, inv_id)).status == "approved"
+        statuses = (
+            (
+                await s.execute(
+                    select(APException.status).where(
+                        APException.invoice_id == inv_id,
+                        APException.exception_type == "po_mismatch",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert sorted(statuses) == ["resolved", "resolved"]
+        assert await blocked_invoice_ids(s, [inv_id]) == set()
+
+
+def test_every_site_that_stamps_an_approver_re_judges_the_holds():
+    """Each call that stamps an approver — `record_final_approval` (single and
+    shared approve, `/complete`'s amount floor, extraction's auto-approve) and
+    the chain's `advance_approval_chain` — is followed, in the same function,
+    by `reraise_holds_cleared_by_an_approver`. A new stamping site without it
+    would reopen the clear-then-approve order (decisions §422)."""
+    import ast
+    from pathlib import Path
+
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    stampers = {"record_final_approval", "advance_approval_chain"}
+    # `review_refusals` advances a deep-copied scratch chain to compute a
+    # verdict and stamps nothing.
+    dry_runs = {("services/review.py", "review_refusals")}
+    missing = []
+    for path in app_root.rglob("*.py"):
+        if path.name == "approval_chain.py":
+            continue  # the definitions themselves
+        tree = ast.parse(path.read_text())
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if (str(path.relative_to(app_root)), fn.name) in dry_runs:
+                continue
+            calls = [
+                (n.lineno, n.func.id if isinstance(n.func, ast.Name) else n.func.attr)
+                for n in ast.walk(fn)
+                if isinstance(n, ast.Call) and isinstance(n.func, (ast.Name, ast.Attribute))
+            ]
+            for lineno, name in calls:
+                if name in stampers and not any(
+                    other == "reraise_holds_cleared_by_an_approver" and at > lineno
+                    for at, other in calls
+                ):
+                    missing.append(f"{path.relative_to(app_root)}:{lineno} {name}")
+    assert missing == [], missing

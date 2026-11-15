@@ -84,6 +84,7 @@ describe('the registry pins the backend', () => {
 	it('the exception codes are the ones /bulk/resolve reports per row', () => {
 		expect(CODED_REFUSAL_CODES).toContain('segregation_raiser');
 		expect(CODED_REFUSAL_CODES).toContain('segregation_implicated');
+		expect(CODED_REFUSAL_CODES).toContain('segregation_approver');
 	});
 });
 
@@ -97,6 +98,7 @@ describe('codedRefusalText', () => {
 		['approval_max_amount_misconfigured', 'refusal.approvalMaxMisconfigured'],
 		['segregation_raiser', 'refusal.exceptionSegregationRaiser'],
 		['segregation_implicated', 'refusal.exceptionSegregationImplicated'],
+		['segregation_approver', 'refusal.exceptionSegregationApprover'],
 		['credit_memo_vendor_mismatch', 'refusal.creditMemoVendorMismatch'],
 		['credit_memo_vendor_unresolved', 'refusal.creditMemoVendorUnresolved'],
 		['credit_memo_entity_mismatch', 'refusal.creditMemoEntityMismatch'],
@@ -367,6 +369,7 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 		['external_payment_nothing_to_pay', 'refusal.externalPaymentNothingToPay'],
 		['external_payment_paid_on_future', 'refusal.externalPaymentPaidOnFuture'],
 		['erp_paid_amount_unconfirmed', 'refusal.erpPaidAmountUnconfirmed'],
+		['erp_payment_method_required', 'refusal.erpPaymentMethodRequired'],
 		['nacha_requires_record_only', 'refusal.nachaRequiresRecordOnly'],
 		['nacha_already_exported', 'refusal.nachaAlreadyExported'],
 		['nacha_run_not_exportable', 'refusal.nachaRunNotExportable'],
@@ -1436,6 +1439,8 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 		// The skips that reuse a code stated elsewhere still need theirs here.
 		for (const code of [
 			'invoice_entry_window_closed',
+			// A bulk approve of a row not in review (decisions §418).
+			'invoice_not_in_review',
 			INVOICE_STALE_APPROVAL,
 			INVOICE_REQUIRED_FIELDS_MISSING
 		]) {
@@ -1481,5 +1486,48 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 			params: {}
 		};
 		expect(localizeApiDetail(row, deT)).toBe(de['refusal.invoiceStillExtracting']);
+	});
+
+	it('a bulk approve of a draft states the review doors’ own refusal, in every locale', () => {
+		// `POST /bulk/status → approved` skips a row not in `ready_for_review`
+		// with the code the four single review doors refuse with (§418).
+		const row = {
+			id: 'x',
+			reason: 'This invoice is not awaiting review, so it cannot be approved or rejected.',
+			code: 'invoice_not_in_review',
+			params: {}
+		};
+		for (const [locale, messages] of LOCALES) {
+			const text = localizeApiDetail(row, translator(messages, locale));
+			expect(text, locale).toBe((messages as Record<string, string>)['refusal.invoiceNotInReview']);
+			expect(text, locale).toBeTruthy();
+		}
+	});
+});
+
+describe('the hand-made vendor ERP link refusals (`services/vendor_erp_manual_link.py`, decisions §415)', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+	const CODES = [
+		['vendor_erp_search_unavailable', 'refusal.vendorErpSearchUnavailable'],
+		['vendor_erp_link_exists', 'refusal.vendorErpLinkExists'],
+		['erp_vendor_already_linked', 'refusal.erpVendorAlreadyLinked'],
+		['erp_vendor_not_found', 'refusal.erpVendorNotFound'],
+		['erp_vendor_inactive', 'refusal.erpVendorInactive']
+	] as const;
+
+	it.each(CODES)('states %s as a fixed sentence in every shipped locale', (code, key) => {
+		expect(CODED_REFUSAL_CODES).toContain(code);
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(code, {}, translator(messages, locale));
+			expect(text, locale).toBe(messages[key]);
+			expect(text, locale).toBeTruthy();
+		}
 	});
 });

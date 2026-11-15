@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.api.pagination import PageMeta
+from app.schemas.action_verdict import CodedRefusal
 from app.schemas.sanctions import ScreeningReviewItem
 from app.services.vendor_consolidation import mask_tax_id
 from app.utils.banking import (
@@ -511,6 +512,60 @@ class VendorErpLinksResponse(BaseModel):
 
     vendor_id: str
     links: list[VendorErpLinkItem] = Field(default_factory=list)
+    #: The verdict on searching the connected ERP for a supplier record and
+    #: linking this vendor to it by hand (`POST …/erp-links/search` / `…/link`,
+    #: decisions §415): `None` when both would accept, else the coded refusal
+    #: they answer with — `vendor_erp_search_unavailable` (no adapter that can
+    #: search, or no named company) or `vendor_erp_link_exists` (this vendor is
+    #: already linked in the connected company; unlink first).
+    search_refusal: CodedRefusal | None = None
+
+
+class VendorErpSearchRequest(BaseModel):
+    """`POST /api/vendors/{id}/erp-links/search`. `query` is a name to search
+    for; blank searches for the vendor's own name. The vendor's tax number is
+    always searched for too, read from its row — never sent in a request."""
+
+    query: str | None = Field(default=None, max_length=100)
+
+
+class VendorErpCandidate(BaseModel):
+    """One ERP record the search found. No tax number: only whether it matches
+    the vendor's. `linked_elsewhere`: another vendor already holds it here, so
+    it cannot be linked to this one (a flag, not the holder's id: the holder
+    may sit in an entity the caller cannot see)."""
+
+    erp_vendor_id: str
+    name: str
+    email: str | None = None
+    active: bool
+    tax_id_matches: bool
+    linked_elsewhere: bool = False
+
+
+class VendorErpSearchResponse(BaseModel):
+    realm: str
+    candidates: list[VendorErpCandidate] = Field(default_factory=list)
+    #: The ERP had more matches than one search reads: narrow the search.
+    truncated: bool = False
+
+
+class VendorErpLinkRequest(BaseModel):
+    """`POST /api/vendors/{id}/erp-links/link` — the ERP record to link, as a
+    search returned it. Re-read from the ERP by this id before linking."""
+
+    erp_vendor_id: str = Field(min_length=1, max_length=128)
+
+
+class VendorErpLinkResponse(BaseModel):
+    """The link made, the vendor as it now stands, and its links."""
+
+    realm: str
+    erp_vendor_id: str
+    vendor: VendorResponse
+    links: list[VendorErpLinkItem] = Field(default_factory=list)
+    #: The vendor's `search_refusal` after the change (`VendorErpLinksResponse`).
+    search_refusal: CodedRefusal | None = None
 
 
 class VendorErpUnlinkRequest(BaseModel):
@@ -529,6 +584,8 @@ class VendorErpUnlinkResponse(BaseModel):
     cleared: list[dict]
     vendor: VendorResponse
     links: list[VendorErpLinkItem] = Field(default_factory=list)
+    #: The vendor's `search_refusal` after the change (`VendorErpLinksResponse`).
+    search_refusal: CodedRefusal | None = None
 
 
 class VendorStatusCounts(BaseModel):

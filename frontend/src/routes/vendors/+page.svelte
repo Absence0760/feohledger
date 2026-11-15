@@ -6,7 +6,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	// Aliased: this page already has a local `page` variable for the loaded
 	// vendor-list page number (below) — `$app/state`'s page is the URL/route
 	// store, unrelated, and the two names would otherwise collide.
@@ -172,6 +172,24 @@
 		);
 		if (detailVendor && detailVendor.id === updated.id) detailVendor = updated;
 	}
+	// A create ends on the new vendor's detail (decisions §416). The list is
+	// name-ordered and paged, so a new vendor whose name sorts past the loaded
+	// page would otherwise vanish with no sign it was saved. The detail is a
+	// dialog over the list, so the list's URL-backed search / status / sort
+	// stay exactly as they were for when it closes.
+	//
+	// The create dialog is closed and allowed to finish unmounting first (its
+	// focus restore runs in a microtask queued during that flush, which settles
+	// before `tick()` resolves). Only then does the detail open, so it records
+	// the "+ New Vendor" trigger as where focus returns on close, rather than a
+	// control inside a dialog that is about to be removed (WCAG 2.4.3).
+	async function openCreatedVendor(created: Vendor) {
+		showCreateVendor = false;
+		await tick();
+		detailVendor = created;
+		fetchVendors();
+	}
+
 	// Search + status filter are URL-backed (`?search=&status=`) alongside sort
 	// (below) so a reload / back-button / shared link reproduces the same view —
 	// mirrors `/contracts` + `/expenses`. See `syncUrl()`.
@@ -909,7 +927,7 @@
 {#if showCreateVendor}
 	<CreateVendorModal
 		onclose={() => (showCreateVendor = false)}
-		onsaved={() => fetchVendors()}
+		onsaved={openCreatedVendor}
 	/>
 {/if}
 

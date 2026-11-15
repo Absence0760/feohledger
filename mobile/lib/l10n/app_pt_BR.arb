@@ -187,6 +187,7 @@
   "codedRefusalGateMeasured": "Medido como {measured} — o limite está definido em {currency}.",
   "codedRefusalExceptionSegregationRaiser": "Segregação de funções: o usuário cuja ação gerou esta exceção não pode também resolvê-la. Escale-a ou peça a outro usuário para decidir.",
   "codedRefusalExceptionSegregationImplicated": "Segregação de funções: um usuário envolvido na criação desta fatura não pode resolver uma exceção que bloqueia o pagamento dela. Escale-a ou peça a outro usuário para decidir.",
+  "codedRefusalExceptionSegregationApprover": "Segregação de funções: um usuário que aprovou esta fatura não pode também resolver a retenção de recebimento ou inspeção dela. Escale-a ou peça a outro usuário para decidir.",
   "invoiceDetailApproved": "Fatura aprovada",
   "invoiceDetailApproveFailed": "Não foi possível aprovar a fatura — tente novamente",
   "invoiceDetailRejected": "Fatura rejeitada",

@@ -53,6 +53,8 @@ export const REAL = {
 	poNumber: TAX.po_number,
 	managerName: SHARED.manager.name,
 	managerEmail: SHARED.manager.email,
+	controllerName: SHARED.controller.name,
+	controllerEmail: SHARED.controller.email,
 	subtotal: TAX.subtotal,
 	taxAmount: TAX.tax_amount,
 	taxRate: TAX.tax_rate,

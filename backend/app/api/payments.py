@@ -259,7 +259,9 @@ SCHEDULABLE_INVOICE_STATUSES = tuple(
 # Resolving/dismissing the exception is the human sign-off that clears it. The
 # same tuple also scopes segregation of duties on that sign-off
 # (`services/exception_lifecycle.segregation_refusal`): someone implicated in
-# creating the invoice may not clear a flag that blocks its payment.
+# creating the invoice may not clear a flag that blocks its payment, and on a
+# `po_mismatch` / `quality_hold` the invoice's approvers may not either
+# (decisions §420).
 #
 # Order is the precedence a row's `blocked_reason` reports when an invoice
 # carries several (`services/payment_runs.blocking_exception_types`).
@@ -935,7 +937,11 @@ async def _queue_blocking_exceptions(
     so the banner can say a colleague must clear it instead of leaving the
     uploader to find that out from a 403. PII-free: ids, a type, a code.
     """
-    from app.services.exception_lifecycle import segregation_refusal
+    from app.services.exception_lifecycle import (
+        needs_approval_chain,
+        segregation_refusal,
+        workflow_instances_for,
+    )
 
     by_id = {inv.id: inv for inv in invoices}
     if not by_id:
@@ -961,12 +967,23 @@ async def _queue_blocking_exceptions(
         best = chosen.get(exc.invoice_id)
         if best is None or rank[exc.exception_type] < rank[best.exception_type]:
             chosen[exc.invoice_id] = exc
+    # The approver axis reads each held invoice's workflow chain (decisions
+    # §420): one query, for the `po_mismatch` / `quality_hold` rows only.
+    instances = await workflow_instances_for(
+        db,
+        [by_id[i] for i, exc in chosen.items() if needs_approval_chain(exc, by_id[i])],
+    )
     return {
         inv_id: {
             "id": str(exc.id),
             "exception_type": exc.exception_type,
             "clear_refusal": segregation_refusal(
-                exc, by_id[inv_id], user.id, action="resolve", org_settings=org_settings
+                exc,
+                by_id[inv_id],
+                user.id,
+                action="resolve",
+                org_settings=org_settings,
+                instance=instances.get(inv_id),
             ),
         }
         for inv_id, exc in chosen.items()

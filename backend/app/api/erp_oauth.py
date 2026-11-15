@@ -133,6 +133,12 @@ class OAuthStatusResponse(BaseModel):
     #: ``status_sync_unsupported`` / ``status_sync_needs_reconnect``); None when
     #: available, or when the verdict could not be read.
     status_sync_refusal: str | None = None
+    #: Permissions this connection's consent was found not to cover, coded
+    #: (``payments_scope_missing``: a Xero connection made before
+    #: ``accounting.payments``, decisions §415). The settings page says what
+    #: is limited and offers Reconnect, which grants them. Empty while none is
+    #: recorded, and while the connection needs reconnecting anyway.
+    scope_gaps: list[str] = []
     #: The redirect URI to register on a bring-your-own provider app.
     redirect_uri: str
     providers: list[ProviderStatus]
@@ -283,6 +289,7 @@ async def oauth_status(
         call_usage=await _call_usage(resolved),
         status_sync_available=sync_readable and sync_refusal is None,
         status_sync_refusal=sync_refusal,
+        scope_gaps=[] if needs_reconnect else erp_oauth.scope_gaps(oauth),
         **common,
     )
 

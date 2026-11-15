@@ -1,10 +1,12 @@
 """Outbound webhook subscriptions + delivery log — control-plane.
 
 A ``WebhookSubscription`` lets an org's external integrator subscribe to
-platform events (invoice approved, payment settled, exception raised) at a
-target URL. Each emitted event becomes a ``WebhookDelivery`` row per matching
-active subscription; the dispatch service signs the payload (HMAC-SHA256) and
-POSTs it with bounded retries, dead-lettering after exhaustion.
+platform events (invoice approved, approval recalled, payment settled,
+exception raised) at a target URL. Each emitted event becomes a
+``WebhookDelivery`` row per matching active subscription; the dispatch service
+signs the payload (HMAC-SHA256) and POSTs it with bounded retries,
+dead-lettering after exhaustion. Each event's payload is defined once, in
+``app/schemas/webhook_events.py``.
 
 Both tables live in the CONTROL plane keyed by ``organization_id`` — the SAME
 placement as the programmatic ``ApiKey`` (see ``app/models/api_key.py``): an
@@ -43,11 +45,15 @@ DELIVERY_DEAD = "dead"  # retries exhausted — dead-letter
 # Event types an org may subscribe to. Kept as plain strings (mirrors the
 # notification EVENT_* constants) so adding one needs no migration.
 EVENT_INVOICE_APPROVED = "invoice.approved"
+# An approval was taken back (`review.recall_approval`, decisions §374, §414):
+# an integrator that acted on `invoice.approved` has to hear it was withdrawn.
+EVENT_INVOICE_APPROVAL_RECALLED = "invoice.approval_recalled"
 EVENT_PAYMENT_SETTLED = "payment.settled"
 EVENT_EXCEPTION_RAISED = "exception.raised"
 
 WEBHOOK_EVENT_TYPES = (
     EVENT_INVOICE_APPROVED,
+    EVENT_INVOICE_APPROVAL_RECALLED,
     EVENT_PAYMENT_SETTLED,
     EVENT_EXCEPTION_RAISED,
 )

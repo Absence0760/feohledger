@@ -1,6 +1,6 @@
 """Emit a domain event to every matching active subscription.
 
-``emit_event`` is the single chokepoint the three event sources call. It is
+``emit_event`` is the single chokepoint the event sources call. It is
 **best-effort and never raises into its caller** — a webhook failure must never
 break the invoice/payment transition that produced the event (same contract as
 ``notification_dispatch.notify_event``). It:
@@ -40,10 +40,16 @@ from app.config import settings
 from app.models.webhook import (
     DELIVERY_PENDING,
     EVENT_EXCEPTION_RAISED,
+    EVENT_INVOICE_APPROVAL_RECALLED,
     EVENT_INVOICE_APPROVED,
     EVENT_PAYMENT_SETTLED,
     WebhookDelivery,
     WebhookSubscription,
+)
+from app.schemas.webhook_events import (
+    WebhookExceptionData,
+    WebhookInvoiceApprovalRecalledData,
+    WebhookInvoiceData,
 )
 from app.services.billing.entitlements import get_entitlements, has_entitlement
 from app.services.billing.plan_catalog import FEATURE_PUBLIC_API
@@ -257,9 +263,23 @@ def _spawn_immediate_attempt(delivery_id: uuid.UUID) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Typed emit helpers for the three event sources — keep the call sites at the
-# emit sites a single, obvious line.
+# Typed emit helpers for the event sources — keep the call sites at the emit
+# sites a single, obvious line. Each builds `data` through its model in
+# `app/schemas/webhook_events.py`, the same model the published OpenAPI
+# describes, so the contract and the bytes sent cannot drift apart.
 # ---------------------------------------------------------------------------
+
+
+def _invoice_fields(invoice) -> dict:
+    """The invoice's public-facing fields every invoice event carries."""
+    return {
+        "invoice_id": str(invoice.id),
+        "invoice_number": getattr(invoice, "invoice_number", None),
+        "vendor_name": getattr(invoice, "vendor_name", None),
+        "amount": _money_str(getattr(invoice, "amount", None)),
+        "currency": getattr(invoice, "currency", None) or "USD",
+        "status": getattr(getattr(invoice, "status", None), "value", None),
+    }
 
 
 async def emit_invoice_approved(invoice, *, occurrence_id=None) -> None:
@@ -273,14 +293,32 @@ async def emit_invoice_approved(invoice, *, occurrence_id=None) -> None:
         organization_id=invoice.organization_id,
         event_type=EVENT_INVOICE_APPROVED,
         event_key=_occurrence_key(occurrence_id),
-        data={
-            "invoice_id": str(invoice.id),
-            "invoice_number": getattr(invoice, "invoice_number", None),
-            "vendor_name": getattr(invoice, "vendor_name", None),
-            "amount": _money_str(getattr(invoice, "amount", None)),
-            "currency": getattr(invoice, "currency", None) or "USD",
-            "status": getattr(getattr(invoice, "status", None), "value", None),
-        },
+        data=WebhookInvoiceData(**_invoice_fields(invoice)).model_dump(),
+    )
+
+
+async def emit_invoice_approval_recalled(
+    invoice, *, recalled_from: str, occurrence_id=None
+) -> None:
+    """Emit ``invoice.approval_recalled`` when an approval is taken back
+    (``review.recall_approval``, decisions §374, §414).
+
+    An integrator that acted on ``invoice.approved`` — queued the bill, told a
+    supplier it would be paid — otherwise never learns the approval was
+    withdrawn. ``recalled_from`` is the prior status (``approved`` / ``failed``).
+    Who recalled and why are deliberately NOT sent: like ``invoice.approved``,
+    the payload names no person (decisions §421), and both stay in the audit row.
+    ``occurrence_id`` identifies THIS recall: an invoice can be recalled,
+    re-approved and recalled again.
+    """
+    await emit_event(
+        organization_id=invoice.organization_id,
+        event_type=EVENT_INVOICE_APPROVAL_RECALLED,
+        event_key=_occurrence_key(occurrence_id),
+        data=WebhookInvoiceApprovalRecalledData(
+            **_invoice_fields(invoice),
+            recalled_from=recalled_from,
+        ).model_dump(),
     )
 
 
@@ -295,14 +333,7 @@ async def emit_payment_settled(invoice, *, occurrence_id=None) -> None:
         organization_id=invoice.organization_id,
         event_type=EVENT_PAYMENT_SETTLED,
         event_key=_occurrence_key(occurrence_id),
-        data={
-            "invoice_id": str(invoice.id),
-            "invoice_number": getattr(invoice, "invoice_number", None),
-            "vendor_name": getattr(invoice, "vendor_name", None),
-            "amount": _money_str(getattr(invoice, "amount", None)),
-            "currency": getattr(invoice, "currency", None) or "USD",
-            "status": getattr(getattr(invoice, "status", None), "value", None),
-        },
+        data=WebhookInvoiceData(**_invoice_fields(invoice)).model_dump(),
     )
 
 
@@ -336,16 +367,16 @@ async def emit_exception_raised(
         organization_id=organization_id,
         event_type=EVENT_EXCEPTION_RAISED,
         event_key=str(exception_id),
-        data={
-            "exception_id": str(exception_id),
-            "exception_type": exception_type,
-            "severity": severity,
-            "status": status,
-            "invoice_id": str(inv_id) if inv_id else None,
-            "invoice_number": getattr(invoice, "invoice_number", None),
-            "vendor_name": getattr(invoice, "vendor_name", None),
-            "amount": _money_str(getattr(invoice, "amount", None)),
-            "currency": getattr(invoice, "currency", None) or "USD",
-            "link": f"/invoices/{inv_id}" if inv_id else "/exceptions",
-        },
+        data=WebhookExceptionData(
+            exception_id=str(exception_id),
+            exception_type=exception_type,
+            severity=severity,
+            status=status,
+            invoice_id=str(inv_id) if inv_id else None,
+            invoice_number=getattr(invoice, "invoice_number", None),
+            vendor_name=getattr(invoice, "vendor_name", None),
+            amount=_money_str(getattr(invoice, "amount", None)),
+            currency=getattr(invoice, "currency", None) or "USD",
+            link=f"/invoices/{inv_id}" if inv_id else "/exceptions",
+        ).model_dump(),
     )

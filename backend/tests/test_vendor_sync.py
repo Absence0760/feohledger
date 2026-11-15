@@ -9,11 +9,19 @@ isolation.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
-from sqlalchemy import func, select
+import pytest
+from sqlalchemy import func, select, text
 
 from app.models.vendor import Vendor
+from app.services.erp_adapters.base import ErpAdapter, VendorPayload
+from app.services.vendor_erp_manual_link import (
+    ERP_VENDOR_ALREADY_LINKED,
+    ErpManualLinkError,
+    link_vendor_to_erp_record,
+)
 from app.services.vendor_sync import sync_vendors_from_erp
 
 #: What a pull with no realm and nothing to repair reports beside its counts.
@@ -635,3 +643,159 @@ async def test_an_over_long_name_is_stored_shortened_and_marked_never_aborts_the
         again = await sync_vendors_from_erp(s, org_id, pull)
         await s.commit()
     assert (again["updated"], again["unchanged"]) == (0, 2)
+
+
+# ---------------------------------------------------------------------------
+# A sync and a hand-made link on one realm serialize (decisions §415)
+#
+# Nothing on `vendors` makes an ERP id unique per realm, so the advisory lock
+# both take (`vendor_erp_manual_link.link_lock`) is the only thing stopping a
+# sync's name link and a person's link from both landing on one ERP record.
+# Each case holds one side's transaction open, proves the other is BLOCKED on
+# the lock (`pg_stat_activity`, a real signal, not a sleep), then commits.
+# ---------------------------------------------------------------------------
+
+
+class _OneRecordErp(ErpAdapter):
+    """A connected, searchable ERP holding one supplier record."""
+
+    erp_type = "xero"
+    supports_vendor_search = True
+
+    def __init__(self, record: VendorPayload):
+        super().__init__({})
+        self.record = record
+
+    async def search_vendors(self, *, name, tax_id):  # pragma: no cover - unused
+        raise NotImplementedError
+
+    async def get_vendor(self, erp_vendor_id):
+        return self.record if erp_vendor_id == self.record.erp_vendor_id else None
+
+
+async def _blocked_on_a_lock(mk, pid: int, *, timeout_s: float = 10.0) -> bool:
+    """Poll ``pg_stat_activity`` until backend ``pid`` waits on a lock."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while loop.time() < deadline:
+        async with mk() as s:
+            waiting = (
+                await s.execute(
+                    text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"),
+                    {"pid": pid},
+                )
+            ).scalar_one_or_none()
+        if waiting == "Lock":
+            return True
+        await asyncio.sleep(0.02)
+    return False
+
+
+async def _two_candidates(mk, org_id, name: str) -> tuple[uuid.UUID, uuid.UUID]:
+    """``name_match``: an unlinked manual vendor a sync would adopt by name;
+    ``other``: the vendor a person links to the same record by hand."""
+    async with mk() as s:
+        name_match = Vendor(organization_id=org_id, name=name, status="unverified", source="manual")
+        other = Vendor(organization_id=org_id, name=f"{name} (AP)", status="active")
+        s.add_all([name_match, other])
+        await s.commit()
+        return name_match.id, other.id
+
+
+async def _holders(mk, org_id, realm: str, erp_id: str) -> list[uuid.UUID]:
+    async with mk() as s:
+        return list(
+            (
+                await s.execute(
+                    select(Vendor.id).where(
+                        Vendor.organization_id == org_id,
+                        Vendor.erp_vendor_id == erp_id,
+                        Vendor.erp_link_realm == realm,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def _pid(session) -> int:
+    return (await session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+
+
+async def test_a_sync_waits_for_a_hand_made_link_and_then_honours_it(realdb):
+    """A person's link holds the lock; the sync blocks behind it and, once the
+    link commits, matches the record by its id on the linked vendor rather
+    than adopting the name-matching one as a second holder."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    realm = f"xero:{uuid.uuid4().hex[:12]}"
+    name = f"Lockstep Supplies {uuid.uuid4().hex[:6]}"
+    record = VendorPayload(erp_vendor_id="ERP-LOCK", name=name, active=True)
+    name_match, other = await _two_candidates(mk, org_id, name)
+
+    async with mk() as linking, mk() as syncing:
+        await link_vendor_to_erp_record(
+            linking, _OneRecordErp(record), vendor_id=other, realm=realm, erp_vendor_id="ERP-LOCK"
+        )
+        sync_pid = await _pid(syncing)
+        sync = asyncio.create_task(
+            sync_vendors_from_erp(
+                syncing, org_id, [{"erp_vendor_id": "ERP-LOCK", "name": name}], realm=realm
+            )
+        )
+        try:
+            assert await _blocked_on_a_lock(mk, sync_pid), "the sync did not wait on the link"
+            assert not sync.done()
+            await linking.commit()
+            result = await asyncio.wait_for(sync, timeout=30)
+            await syncing.commit()
+        finally:
+            if not sync.done():
+                sync.cancel()
+
+    assert result["conflicts"] == []
+    assert await _holders(mk, org_id, realm, "ERP-LOCK") == [other]
+    async with mk() as s:
+        assert (await s.get(Vendor, name_match)).erp_vendor_id is None
+
+
+async def test_a_hand_made_link_waits_for_a_sync_and_is_then_refused(realdb):
+    """The other order: the sync adopts the record by name under the lock; the
+    person's link blocks behind it and, once the sync commits, is refused as
+    already linked instead of making a second holder."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    realm = f"xero:{uuid.uuid4().hex[:12]}"
+    name = f"Lockstep Traders {uuid.uuid4().hex[:6]}"
+    record = VendorPayload(erp_vendor_id="ERP-LOCK", name=name, active=True)
+    name_match, other = await _two_candidates(mk, org_id, name)
+
+    async with mk() as syncing, mk() as linking:
+        result = await sync_vendors_from_erp(
+            syncing, org_id, [{"erp_vendor_id": "ERP-LOCK", "name": name}], realm=realm
+        )
+        assert result["updated"] == 1  # linked by name, not yet committed
+        link_pid = await _pid(linking)
+        link = asyncio.create_task(
+            link_vendor_to_erp_record(
+                linking,
+                _OneRecordErp(record),
+                vendor_id=other,
+                realm=realm,
+                erp_vendor_id="ERP-LOCK",
+            )
+        )
+        try:
+            assert await _blocked_on_a_lock(mk, link_pid), "the link did not wait on the sync"
+            assert not link.done()
+            await syncing.commit()
+            with pytest.raises(ErpManualLinkError) as refused:
+                await asyncio.wait_for(link, timeout=30)
+            await linking.rollback()
+        finally:
+            if not link.done():
+                link.cancel()
+
+    assert refused.value.code == ERP_VENDOR_ALREADY_LINKED
+    assert await _holders(mk, org_id, realm, "ERP-LOCK") == [name_match]

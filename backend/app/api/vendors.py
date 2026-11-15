@@ -79,8 +79,13 @@ from app.schemas.vendor import (
     VendorChangeRequestResponse,
     VendorChangeReviewRequest,
     VendorCreate,
+    VendorErpCandidate,
     VendorErpLinkItem,
+    VendorErpLinkRequest,
+    VendorErpLinkResponse,
     VendorErpLinksResponse,
+    VendorErpSearchRequest,
+    VendorErpSearchResponse,
     VendorErpUnlinkRequest,
     VendorErpUnlinkResponse,
     VendorResponse,
@@ -104,6 +109,12 @@ from app.services.sanctions_categories import (
     has_adverse_media,
 )
 from app.services.vendor_card_revocation import revoke_vendor_cards
+from app.services.vendor_erp_manual_link import (
+    ErpManualLinkError,
+    link_vendor_to_erp_record,
+    search_candidates,
+    search_refusal,
+)
 from app.services.vendor_erp_unlink import (
     ErpUnlinkError,
     unlink_vendor_erp_link,
@@ -1841,16 +1852,187 @@ async def list_vendor_erp_links(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(_VENDOR_READ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
+    org: Organization = Depends(get_tenant),
 ):
     """The vendor's ERP links, one per company: the row link (the company it was
     last synced in) and each link kept for another company (decisions §356).
-    The same readers as the vendor detail."""
+    The same readers as the vendor detail. `search_refusal`: the verdict on
+    searching the connected ERP for a record and linking this vendor to it by
+    hand (§415) — `null` when both doors would accept, else their coded
+    refusal (`vendor_erp_search_unavailable`, `vendor_erp_link_exists`)."""
     await ensure_in_entity_scope(
         db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
     )
     vendor = await _get_vendor_or_404(db, vendor_id)
     links = await vendor_erp_links(db, vendor)
-    return VendorErpLinksResponse(vendor_id=str(vendor.id), links=_erp_link_items(links))
+    return VendorErpLinksResponse(
+        vendor_id=str(vendor.id),
+        links=_erp_link_items(links),
+        search_refusal=await _erp_search_refusal(db, org, vendor),
+    )
+
+
+async def _erp_search_refusal(db: AsyncSession, org: Organization, vendor: Vendor) -> dict | None:
+    """`search_refusal` (`vendor_erp_manual_link.search_refusal`) read from the
+    stored settings alone (no credential store opened on a read): the adapter
+    class the settings select, and the company the stored connection names. A
+    connection that needs reconnecting answers `vendor_erp_search_unavailable`;
+    the search would only be refused."""
+    from app.services.erp_adapters.dispatcher import adapter_class, resolve_adapter_key
+
+    erp = (org.settings or {}).get("erp")
+    adapter_cls = realm = None
+    if isinstance(erp, dict) and erp:
+        oauth = erp.get("oauth")
+        if not (isinstance(oauth, dict) and oauth.get("needs_reconnect")):
+            adapter_cls = adapter_class(resolve_adapter_key(erp))
+            realm = connection_realm(erp)
+    refusal = await search_refusal(db, vendor, adapter_cls=adapter_cls, realm=realm)
+    return refusal.detail if refusal is not None else None
+
+
+async def _erp_adapter_for_link(org: Organization, control_db: AsyncSession):
+    """``(adapter, realm)`` for a hand-made link: the resolved config, the
+    live-ERP plan gate, and the adapter it selects (the vendor sync's own
+    steps). 503 when the sealed credentials cannot be opened; 409
+    `vendor_erp_search_unavailable` when no ERP, or one that cannot search."""
+    from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
+
+    try:
+        erp_config = await provider_config(org, "erp", db=control_db)
+    except CredentialCryptoError:
+        raise HTTPException(status_code=503, detail=CREDENTIALS_UNAVAILABLE_DETAIL) from None
+    if not erp_config:
+        exc = ErpManualLinkError.unavailable()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    await ensure_live_erp_entitled(control_db, org.id, erp_config)
+    try:
+        adapter = get_erp_adapter(erp_config)
+    except UnknownErpAdapterError:
+        exc = ErpManualLinkError.unavailable()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    return adapter, connection_realm(erp_config)
+
+
+@router.post("/{vendor_id}/erp-links/search", response_model=VendorErpSearchResponse)
+async def search_vendor_erp_records(
+    vendor_id: uuid.UUID,
+    body: VendorErpSearchRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),  # noqa: ARG001 - gate
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
+):
+    """Search the connected ERP's whole contact list for this vendor's record
+    (decisions §415, `services/vendor_erp_manual_link`): by `query` (the
+    vendor's name when blank) and by the vendor's tax number, read from its
+    row. For a supplier no vendor sync can see — a Xero customer with no bill
+    or PO from us yet. Reads only; links nothing.
+
+    `vendor.manage`, like the link it leads to. 409
+    `vendor_erp_search_unavailable` when the ERP cannot be searched or no
+    company is connected; 502 on a failed ERP read (`erp_pull_failure`). A
+    candidate says whether its tax number matches, never the number."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    adapter, realm = await _erp_adapter_for_link(org, control_db)
+    try:
+        candidates, truncated = await search_candidates(
+            db, adapter, vendor, realm=realm, query=body.query
+        )
+    except ErpManualLinkError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except Exception as exc:
+        logger.warning(
+            "ERP vendor search failed for vendor %s: %s", vendor_id, exc.__class__.__name__
+        )
+        raise erp_pull_failure(exc) from exc
+    return VendorErpSearchResponse(
+        realm=str(realm),
+        candidates=[
+            VendorErpCandidate(
+                erp_vendor_id=c.erp_vendor_id,
+                name=c.name,
+                email=c.email,
+                active=c.active,
+                tax_id_matches=c.tax_id_matches,
+                linked_elsewhere=c.linked_elsewhere,
+            )
+            for c in candidates
+        ],
+        truncated=truncated,
+    )
+
+
+@router.post("/{vendor_id}/erp-links/link", response_model=VendorErpLinkResponse)
+async def link_vendor_erp_record(
+    vendor_id: uuid.UUID,
+    body: VendorErpLinkRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
+    org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
+):
+    """Link the vendor to an ERP supplier record by hand, in the connected
+    company (decisions §415). The record is re-read from the ERP by its id
+    first: 404 `erp_vendor_not_found`, 409 `erp_vendor_inactive`. 409
+    `vendor_erp_link_exists` when the vendor already holds a link in this
+    company (unlink it first, §375); 409 `erp_vendor_already_linked` when
+    another vendor holds the record here; 409 `vendor_erp_search_unavailable`.
+    A row link from another company is kept for it (§356). Writes
+    `vendor.erp_linked` naming the realm, the record, its ERP name and
+    whether its tax number matched. Only the link changes: the vendor's own
+    fields stay as keyed until a sync that lists the record updates them.
+    The response carries the vendor's new `search_refusal`
+    (`vendor_erp_link_exists` now), so the panel stops offering Link."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
+    await _get_vendor_or_404(db, vendor_id)
+    adapter, realm = await _erp_adapter_for_link(org, control_db)
+    try:
+        result = await link_vendor_to_erp_record(
+            db, adapter, vendor_id=vendor_id, realm=realm, erp_vendor_id=body.erp_vendor_id
+        )
+    except ErpManualLinkError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except Exception as exc:
+        logger.warning(
+            "ERP vendor read failed for vendor %s: %s", vendor_id, exc.__class__.__name__
+        )
+        raise erp_pull_failure(exc) from exc
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org_id,
+        actor_id=user.id,
+        action="vendor.erp_linked",
+        entity_type="vendor",
+        entity_id=vendor_id,
+        details={
+            "realm": result.realm,
+            "erp_vendor_id": result.erp_vendor_id,
+            "erp_name": result.erp_name,
+            "tax_id_matches": result.tax_id_matches,
+            **({"kept": result.kept} if result.kept else {}),
+        },
+    )
+    await db.commit()
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    await db.refresh(vendor)
+    links = await vendor_erp_links(db, vendor)
+    return VendorErpLinkResponse(
+        realm=result.realm,
+        erp_vendor_id=result.erp_vendor_id,
+        vendor=VendorResponse.from_db(vendor),
+        links=_erp_link_items(links),
+        search_refusal=await _erp_search_refusal(db, org, vendor),
+    )
 
 
 @router.post("/{vendor_id}/erp-links/unlink", response_model=VendorErpUnlinkResponse)
@@ -1858,6 +2040,7 @@ async def unlink_vendor_erp(
     vendor_id: uuid.UUID,
     body: VendorErpUnlinkRequest,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -1873,7 +2056,8 @@ async def unlink_vendor_erp(
     is in flight to that company. Writes `vendor.erp_unlinked` naming the realm
     and every id cleared. The vendor's next push to that company is refused
     `vendor_not_linked`, and a later sync may re-link it only by the normal
-    unique-name rule.
+    unique-name rule. The response carries the vendor's new `search_refusal`
+    (§415), since clearing the connected company's link may open the search.
     """
     await ensure_in_entity_scope(
         db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
@@ -1902,6 +2086,7 @@ async def unlink_vendor_erp(
         cleared=result.cleared,
         vendor=VendorResponse.from_db(vendor),
         links=_erp_link_items(links),
+        search_refusal=await _erp_search_refusal(db, org, vendor),
     )
 
 

@@ -237,6 +237,10 @@ _TENANT_MUTATORS_WITHOUT_DIRECT_AUDIT: dict[tuple[str, str], str] = {
     ("app.api.reports", "run_adhoc"): "runs a whitelisted report query — reads, never writes",
     ("app.api.reports", "run_saved"): "runs a whitelisted report query — reads, never writes",
     ("app.api.vendors", "bulk_export_vendors"): "CSV export — reads, never writes",
+    ("app.api.vendors", "search_vendor_erp_records"): (
+        "searches the ERP's contact list for candidates — links nothing, persists nothing "
+        "(decisions §415); the link it leads to is the audited write"
+    ),
     ("app.api.workflow_definitions", "simulate_workflow"): (
         "dry-run of a definition against a synthetic invoice — persists nothing"
     ),

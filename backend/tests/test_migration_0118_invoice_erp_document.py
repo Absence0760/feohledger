@@ -33,6 +33,14 @@ def _load():
     return module
 
 
+def _load_0132():
+    path = REVISION.parent / "0132_invoice_erp_doc_id_idx.py"
+    spec = importlib.util.spec_from_file_location("_mig_0132_for_0118", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 async def _run(engine, fn) -> None:
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
@@ -149,6 +157,11 @@ async def test_0118_adds_the_columns_and_backfills_the_unambiguous_id(realdb):
         assert await _row(posted) == ("NEWER", None)
     finally:
         await _run(engine, mig.upgrade)
+        # The downgrade dropped the column and with it the index 0132 put on it,
+        # which 0118's upgrade does not rebuild. Re-apply 0132 too, or every
+        # later test on this tenant runs against a schema the model does not
+        # describe (0132's own test read "no index" off it in CI).
+        await _run(engine, _load_0132().upgrade)
         await engine.dispose()
 
 

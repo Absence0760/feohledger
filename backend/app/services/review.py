@@ -374,10 +374,10 @@ def refuse_unless_in_review(invoice: Invoice) -> None:
 
     The single in-app approve / reject doors call it first; the email, Slack
     and Teams doors answer the same predicate in their own response shapes.
-    ``POST /api/invoices/bulk/status`` does not reach here: setting a batch's
-    status is a separate, documented manager capability (``new → approved`` is
-    a legal transition for it), and whether it should also skip drafts is
-    tracked in ``docs/followups.md``.
+    ``POST /api/invoices/bulk/status`` calls it per row for an ``approved``
+    target and reports a refusal as that row's coded skip (decisions §418);
+    its ``rejected`` target is held to the same stage by the state machine,
+    where ``ready_for_review → rejected`` is the only edge into ``rejected``.
     """
     from fastapi import HTTPException, status
 
@@ -590,6 +590,7 @@ async def approve_invoice(
     the invoice at another PO.
     """
     from app.services.approval_chain import advance_approval_chain
+    from app.services.invoice_warnings import reraise_holds_cleared_by_an_approver
 
     # Read the approval config: the invoice's frozen snapshot, falling back —
     # fail-CLOSED — to the org's active definition when it has none. See
@@ -752,6 +753,10 @@ async def approve_invoice(
         # Records the approval; refuses an approver who already signed another
         # level (`approval_level_reuse`).
         chain_complete = advance_approval_chain(instance, actor_id)
+        # The level approver is now an approver of the invoice: a receipt or
+        # inspection hold they cleared before signing is raised again
+        # (decisions §422).
+        await reraise_holds_cleared_by_an_approver(db, invoice, org_settings=org_settings)
         if not chain_complete:
             # More levels needed — stay in ready_for_review, record partial.
             #
@@ -786,6 +791,10 @@ async def approve_invoice(
     # By id, beside the display name: a receipt this approver hand-records
     # afterwards must not lift the invoice's payment hold (decisions §389).
     record_final_approval(invoice, approved_by=actor_name, actor_id=actor_id)
+    # And a `po_mismatch` / `quality_hold` they cleared before approving no
+    # longer stands: it is raised again in this transaction, before any run
+    # can stage the invoice (decisions §422, amending §420).
+    await reraise_holds_cleared_by_an_approver(db, invoice, org_settings=org_settings)
 
     # Digital signature on the approval (SOX non-repudiation): an HMAC-SHA256
     # "timestamp + user hash" over the canonical approval facts (invoice id +

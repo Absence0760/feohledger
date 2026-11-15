@@ -296,6 +296,8 @@ CASES = [
     # Clearing a vendor's ERP link in one company (decisions §375) — an edit to
     # the vendor master like every other one here.
     ("/api/vendors/{vendor_id}/erp-links/unlink", "POST", _VENDOR_MANAGE),
+    ("/api/vendors/{vendor_id}/erp-links/search", "POST", _VENDOR_MANAGE),
+    ("/api/vendors/{vendor_id}/erp-links/link", "POST", _VENDOR_MANAGE),
     # --- vendor.block: sticky payment block/unblock. ---
     ("/api/vendors/{vendor_id}/block", "POST", _VENDOR_BLOCK),
     # `cancel-cards` retries the card revocation a reject / deactivate (vendor

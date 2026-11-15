@@ -32,17 +32,25 @@ from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.user import User
+from app.models.workflow import WorkflowInstance
 from app.schemas.money import json_money_string
 from app.schemas.payment import RecordErpReportedPaymentRequest
-from app.services.erp_status_sync import erp_product_name, is_erp_paid_report
+from app.services.erp_status_sync import (
+    ERP_REPORT_PAID_NOT_RECORDED,
+    erp_product_name,
+    is_erp_paid_report,
+)
 from app.services.exception_lifecycle import (
     ACTIONABLE_STATUSES,
     EXCEPTION_SEVERITY_RANK,
     RESOLUTION_ACTIONS,
     invoices_for,
+    needs_approval_chain,
     record_assignment,
     record_decision,
     segregation_refusal,
+    workflow_instance_for,
+    workflow_instances_for,
 )
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.search import ilike_contains
@@ -92,7 +100,11 @@ def actionable_refusal(exc: APException) -> ActionRefusal | None:
 
 
 def decision_refusals(
-    exc: APException, inv: Invoice | None, user: User, org_settings: dict | None
+    exc: APException,
+    inv: Invoice | None,
+    user: User,
+    org_settings: dict | None,
+    instance: WorkflowInstance | None = None,
 ) -> dict:
     """What ``POST /{id}/resolve`` would answer ``user`` for each action on
     this row — ``{"resolve", "dismiss", "escalate"}``, each a coded refusal or
@@ -101,6 +113,8 @@ def decision_refusals(
     ``exception_lifecycle.segregation_refusal`` — the predicate
     ``record_decision`` raises from. The queue used to check only the status,
     so the uploader of a duplicate invoice was offered a Resolve that 403s.
+    ``instance`` is the invoice's workflow instance, which the approver axis
+    reads on a ``po_mismatch`` / ``quality_hold`` (decisions §420).
     """
     from app.api.refusals import coded_refusal, role_not_permitted
     from app.services.exception_lifecycle import refusal_message
@@ -112,7 +126,9 @@ def decision_refusals(
         return {action: state.verdict() for action in RESOLUTION_ACTIONS}
     out: dict = {}
     for action in RESOLUTION_ACTIONS:
-        code = segregation_refusal(exc, inv, user.id, action=action, org_settings=org_settings)
+        code = segregation_refusal(
+            exc, inv, user.id, action=action, org_settings=org_settings, instance=instance
+        )
         out[action] = coded_refusal(code, refusal_message(code)) if code else None
     return out
 
@@ -122,8 +138,47 @@ def decision_refusals(
 EXCEPTION_NOT_ERP_PAID_REPORT = "exception_not_erp_paid_report"
 
 
+#: `detail.code` when `POST /{id}/record-erp-payment` names no rail over a
+#: payment whose kept breakdown does not stand over every rail by itself
+#: (`erp_payment_split_stands`): one rail, none, or parts that do not add up
+#: to the stated cash leave the person's rail as the record, so it must be
+#: named (decisions §413).
+ERP_PAYMENT_METHOD_REQUIRED = "erp_payment_method_required"
+
+
+def _kept_split_stands(report: dict | None) -> bool | None:
+    """Whether a ``paid_not_recorded`` row's kept breakdown would be booked
+    whatever one rail a person names (``external_payment.
+    split_stands_over_any_rail``), judged against the cash the row states, the
+    figure the one-click books. ``None`` when the row states no figure or no
+    breakdown: the record then reads the bill again (§393) or books the rail
+    the person names, and the dialog keeps its picker. Server-side because it
+    is an exact sum the client may not do (`frontend/docs/money-formatting.md`)."""
+    from decimal import Decimal, InvalidOperation
+
+    from app.services.erp_status_sync import reported_payment_parts
+    from app.services.external_payment import split_stands_over_any_rail
+    from app.services.payment_methods import rail_parts_from_json
+
+    if not isinstance(report, dict) or report.get("kind") != ERP_REPORT_PAID_NOT_RECORDED:
+        return None
+    stated = report.get("amount")
+    parts = rail_parts_from_json(report.get("payment_parts"))
+    if not stated or not parts:
+        return None
+    try:
+        amount = Decimal(str(stated))
+    except (InvalidOperation, ValueError):
+        return None
+    return split_stands_over_any_rail(reported_payment_parts(parts), amount)
+
+
 def record_erp_payment_refusal(
-    exc: APException, inv: Invoice | None, user: User, org_settings: dict | None
+    exc: APException,
+    inv: Invoice | None,
+    user: User,
+    org_settings: dict | None,
+    instance: WorkflowInstance | None = None,
 ) -> dict | None:
     """What ``POST /{id}/record-erp-payment`` would answer ``user`` before it
     reaches the money gates — ``None`` to offer the action, else a coded
@@ -158,7 +213,9 @@ def record_erp_payment_refusal(
     if is_payment_blocking(exc.exception_type):
         if not holds_any_role(user, EXCEPTION_DECIDE_ROLES):
             return role_not_permitted()
-        code = segregation_refusal(exc, inv, user.id, action="resolve", org_settings=org_settings)
+        code = segregation_refusal(
+            exc, inv, user.id, action="resolve", org_settings=org_settings, instance=instance
+        )
         if code:
             return coded_refusal(code, refusal_message(code))
     refusal = record_segregation(inv, user.id, org_settings)
@@ -168,15 +225,21 @@ def record_erp_payment_refusal(
 
 
 def _caller_verdicts(
-    exc: APException, inv: Invoice | None, user: User, org_settings: dict | None
+    exc: APException,
+    inv: Invoice | None,
+    user: User,
+    org_settings: dict | None,
+    instance: WorkflowInstance | None = None,
 ) -> dict:
     """The caller's verdicts on this row's actions, for the list and the detail:
     Resolve / Dismiss / Escalate (`decision_refusals`) and — only on a row that
     carries an ERP-reported payment — recording it in one click
     (`record_erp_payment_refusal`)."""
-    out = {"decision_refusals": decision_refusals(exc, inv, user, org_settings)}
+    out = {"decision_refusals": decision_refusals(exc, inv, user, org_settings, instance)}
     if is_erp_paid_report(exc):
-        out["record_erp_payment_refusal"] = record_erp_payment_refusal(exc, inv, user, org_settings)
+        out["record_erp_payment_refusal"] = record_erp_payment_refusal(
+            exc, inv, user, org_settings, instance
+        )
     return out
 
 
@@ -241,6 +304,13 @@ def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
         "erp_name": (
             erp_product_name((exc.erp_report or {}).get("erp_type")) if exc.erp_report else None
         ),
+        # On a `paid_not_recorded` row stating a figure and a breakdown: True
+        # when that breakdown is booked whatever one rail a person names (it
+        # adds up and spans several rails, decisions §396), so the record
+        # dialog shows the split in place of its rail picker and may send no
+        # rail; False when the person's rail would be the record. None on
+        # every other row (§413).
+        "erp_payment_split_stands": _kept_split_stands(exc.erp_report),
         "status": exc.status,
         "resolution": exc.resolution,
         "resolved_by": exc.resolved_by,
@@ -386,13 +456,20 @@ async def list_exceptions(
     query = query.order_by(*order_by).offset(pagination.offset).limit(pagination.limit)
     result = await db.execute(query)
     rows = result.all()
+    # The page's workflow chains in one query, for the approver axis on its
+    # `po_mismatch` / `quality_hold` rows only.
+    instances = await workflow_instances_for(
+        db, [inv for exc, inv in rows if needs_approval_chain(exc, inv)]
+    )
 
     items = [
         {
             **_exception_dict(exc, inv),
             # The caller's verdict on Resolve / Dismiss / Escalate for this row,
             # from the gates the resolve endpoint runs (`decision_refusals`).
-            **_caller_verdicts(exc, inv, user, org.settings),
+            **_caller_verdicts(
+                exc, inv, user, org.settings, instances.get(inv.id) if inv else None
+            ),
         }
         for exc, inv in rows
     ]
@@ -529,7 +606,11 @@ async def get_exception(
     exc, inv = row
     # With the caller's verdicts, like a list row: the queue opens this row's
     # dialog from a deep link (`/exceptions?id=`) and offers its buttons from them.
-    return {**_exception_dict(exc, inv), **_caller_verdicts(exc, inv, user, org.settings)}
+    instance = await workflow_instance_for(db, exc, inv)
+    return {
+        **_exception_dict(exc, inv),
+        **_caller_verdicts(exc, inv, user, org.settings, instance),
+    }
 
 
 class ResolveRequest(BaseModel):
@@ -609,17 +690,23 @@ async def bulk_resolve(
     # invoice's correlation) or to run the segregation check (which reads the
     # invoice's implicated actors).
     invoices = await invoices_for(db, rows)
+    # Likewise one query for the workflow chains the approver axis reads, on the
+    # batch's `po_mismatch` / `quality_hold` rows only.
+    instances = await workflow_instances_for(
+        db, [invoices.get(e.id) for e in rows if needs_approval_chain(e, invoices.get(e.id))]
+    )
 
     for exc in rows:
         if exc.status not in ACTIONABLE_STATUSES:
             skipped.append({"id": str(exc.id), "reason": f"already_{exc.status}"})
             continue
         inv = invoices.get(exc.id)
+        instance = instances.get(inv.id) if inv is not None else None
         # Pre-check rather than catching `record_decision`'s 403: this endpoint
         # owes a per-row reason, and a raise mid-loop would also abandon the
         # rows already mutated in this transaction.
         refusal = segregation_refusal(
-            exc, inv, user.id, action=body.action, org_settings=org.settings
+            exc, inv, user.id, action=body.action, org_settings=org.settings, instance=instance
         )
         if refusal is not None:
             skipped.append({"id": str(exc.id), "reason": refusal})
@@ -633,6 +720,7 @@ async def bulk_resolve(
             actor_name=user.full_name,
             invoice=inv,
             org_settings=org.settings,
+            instance=instance,
         )
         updated += 1
 
@@ -752,6 +840,7 @@ async def record_erp_payment(
         REFUSAL_AMOUNT_MISMATCH,
         ExternalPaymentRefused,
         record_invoice_paid_outside,
+        split_stands_over_any_rail,
     )
     from app.services.payment_methods import rail_parts_from_json
 
@@ -785,7 +874,9 @@ async def record_erp_payment(
     if row is None or row.invoice_id != found.invoice_id:
         raise HTTPException(status_code=404, detail="Exception not found")
 
-    verdict = record_erp_payment_refusal(row, invoice, user, org.settings)
+    verdict = record_erp_payment_refusal(
+        row, invoice, user, org.settings, await workflow_instance_for(db, row, invoice)
+    )
     if verdict is not None:
         status_code = {
             EXCEPTION_NOT_ERP_PAID_REPORT: http_status.HTTP_409_CONFLICT,
@@ -853,6 +944,25 @@ async def record_erp_payment(
             )
         amount = stated_amount
 
+    # No rail named: only over a breakdown that is the record whatever rail a
+    # person would name (decisions §396), the case the dialog shows the split
+    # for instead of its picker. Anywhere else the person's rail IS the record
+    # (one rail stated, none, or parts that do not add up), so it must be
+    # named, never defaulted. Judged on the figure being booked, the stated one
+    # or the read-back's, before anything is written (§413).
+    if body.method is None and not (
+        stated
+        and amount is not None
+        and split_stands_over_any_rail(reported_payment_parts(stated_parts), amount)
+    ):
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=coded_refusal(
+                ERP_PAYMENT_METHOD_REQUIRED,
+                "Choose how this payment was made.",
+            ),
+        )
+
     # Every refusal BEFORE anything is written: in `lambda` audit mode an audit
     # row leaves for SQS when it is dispatched, so resolving first and rolling
     # back on a refused record would ship an `exception.resolved` for a row
@@ -866,7 +976,7 @@ async def record_erp_payment(
             db,
             org=org,
             invoice=invoice,
-            method=body.method.value,
+            method=body.method.value if body.method is not None else None,
             reference=body.reference,
             paid_on=body.paid_on,
             actor_id=user.id,

@@ -12,6 +12,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import ScreeningBadge from '#lib/components/ui/ScreeningBadge.svelte';
+	import VendorErpLinkSearch from '#lib/components/modals/VendorErpLinkSearch.svelte';
 	import {
 		screenVendor,
 		getScreeningHistory,
@@ -31,6 +32,7 @@
 		type SanctionsCheck,
 		type ScreeningStatus,
 		type VendorErpLink,
+		type VendorErpLinkResponse,
 		type EnrichmentFieldSuggestion
 	} from '#lib/types/vendor.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -39,6 +41,8 @@
 	import { getVendorScore, type VendorScoreResponse } from '#lib/api/enrichment.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
+	import { isAllowed, refusalText, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
+	import { tick } from 'svelte';
 
 	const SCREENING_RESULTS: ScreeningStatus[] = ['unscreened', 'clear', 'review', 'match'];
 
@@ -113,8 +117,16 @@
 		return key ? m(key) : name;
 	}
 
+	// The per-vendor reads below key on the id, not the object: every mutation
+	// hands the parent a fresh `vendor` (`onupdated`), and an effect reading
+	// `vendor.id` straight off the prop re-runs on that new object, refetching
+	// the same vendor's panels mid-action — which blanked a link just made and
+	// dropped focus off the note that replaced its button (decisions §415). A
+	// derived primitive only changes when a different vendor opens.
+	const vendorId = $derived(vendor.id);
+
 	$effect(() => {
-		const id = vendor.id;
+		const id = vendorId;
 		if (!canSeeScore) return;
 		loadingScore = true;
 		scoreError = false;
@@ -133,7 +145,7 @@
 
 	// Load history whenever the open vendor changes.
 	$effect(() => {
-		const id = vendor.id;
+		const id = vendorId;
 		loadingHistory = true;
 		getScreeningHistory(id)
 			.then((rows) => {
@@ -234,6 +246,14 @@
 	let erpLinks = $state<VendorErpLink[]>([]);
 	let loadingErpLinks = $state(true);
 	let erpLinksError = $state(false);
+	// The server's verdict on searching the ERP for a record and linking this
+	// vendor to it by hand (§415): `undefined` until it answers (offer
+	// nothing), `null` to offer the search, else the refusal. Per vendor, so a
+	// vendor already linked in the connected company is not offered a Link
+	// the server refuses `vendor_erp_link_exists` (ui-patterns § Whether to
+	// offer an action).
+	let erpSearchRefusal = $state<ActionRefusal | undefined>(undefined);
+	let erpSearchNote = $state<HTMLElement | null>(null);
 	/** The realm whose Unlink is armed (`''` stands for the unnamed row link),
 	 *  or null. A realm is never the empty string. */
 	let unlinkArmed = $state<string | null>(null);
@@ -242,16 +262,19 @@
 	const realmKey = (realm: string | null) => realm ?? '';
 
 	$effect(() => {
-		const id = vendor.id;
+		const id = vendorId;
 		loadingErpLinks = true;
 		erpLinksError = false;
 		unlinkArmed = null;
+		erpSearchRefusal = undefined;
 		getVendorErpLinks(id)
 			.then((res) => {
 				erpLinks = res.links;
+				erpSearchRefusal = res.search_refusal;
 			})
 			.catch(() => {
 				erpLinks = [];
+				erpSearchRefusal = undefined;
 				erpLinksError = true;
 			})
 			.finally(() => {
@@ -281,6 +304,7 @@
 		try {
 			const res = await unlinkVendorErpLink(vendor.id, link.realm);
 			erpLinks = res.links;
+			erpSearchRefusal = res.search_refusal;
 			onupdated(res.vendor);
 			toast(m('vendors.modal.erp.unlinkedToast', { id: link.erp_vendor_id }), 'success');
 		} catch (err) {
@@ -290,6 +314,20 @@
 			busy = '';
 		}
 	}
+
+	async function erpLinked(res: VendorErpLinkResponse) {
+		erpLinks = res.links;
+		erpSearchRefusal = res.search_refusal;
+		onupdated(res.vendor);
+		// The Link just pressed is gone with the search: move focus to the
+		// sentence that replaced it rather than dropping it on the page.
+		await tick();
+		erpSearchNote?.focus();
+	}
+
+	/** A refusal the reader can act on is stated where the search was; one
+	 *  they cannot (no searchable ERP connected) hides it. */
+	const ERP_SEARCH_EXPLAINED: readonly string[] = ['vendor_erp_link_exists'];
 
 	// --- External enrichment (advisory firmographics + steward apply) ---------
 	// `enrichRun` holds the last enrich result; `selected` is the steward's
@@ -490,7 +528,9 @@
 											variant="danger"
 											armed={unlinkArmed === realmKey(link.realm)}
 											disabled={busy !== ''}
-											ariaLabel={m('vendors.modal.erp.unlinkAria', { id: link.erp_vendor_id, company })}
+											ariaLabel={unlinkArmed === realmKey(link.realm)
+												? m('vendors.modal.erp.confirmUnlinkAria', { id: link.erp_vendor_id, company })
+												: m('vendors.modal.erp.unlinkAria', { id: link.erp_vendor_id, company })}
 											onclick={() => unlinkErp(link)}
 										>
 											{#if unlinking === realmKey(link.realm)}
@@ -508,6 +548,27 @@
 					</tbody>
 				</table>
 			</div>
+		{/if}
+		{#if canUnlinkErp && !loadingErpLinks && !erpLinksError && erpSearchRefusal && ERP_SEARCH_EXPLAINED.includes(erpSearchRefusal.code)}
+			<p
+				class="hint muted erp-search-note"
+				tabindex="-1"
+				bind:this={erpSearchNote}
+				data-testid="vendor-erp-find-refusal"
+			>
+				{refusalText(erpSearchRefusal, m)}
+			</p>
+		{:else if canUnlinkErp && !loadingErpLinks && !erpLinksError && isAllowed(erpSearchRefusal)}
+			<!-- Keyed by vendor: a fresh search per vendor, so no answer for one
+			     can be shown under, or linked to, another (decisions §415). -->
+			{#key vendor.id}
+			<VendorErpLinkSearch
+				vendorId={vendor.id}
+				vendorName={vendor.name}
+				disabled={busy !== ''}
+				onlinked={erpLinked}
+			/>
+			{/key}
 		{/if}
 	</section>
 
@@ -716,6 +777,9 @@
 		font-size: 0.8rem;
 		line-height: 1.4;
 		margin: 0;
+	}
+	.erp-search-note {
+		margin-top: 12px;
 	}
 	.score-headline {
 		display: flex;

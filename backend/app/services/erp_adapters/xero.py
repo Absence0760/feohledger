@@ -21,6 +21,18 @@ References (checked 2026-10-08):
   https://developer.xero.com/documentation/api/accounting/payments
 * Paging up to 1,000 rows (``pageSize``):
   https://devblog.xero.com/conquer-data-overload-mastering-paging-in-the-xero-api-03ceacfeb184
+* Contacts search (checked 2026-11-14 in the OpenAPI above; the developer site
+  refuses automated reads): ``searchTerm`` is "a case-insensitive text search
+  across the Name, FirstName, LastName, ContactNumber and EmailAddress
+  fields"; ``where`` filters by any element (``TaxNumber``), and
+  ``GET Contacts/{ContactID}`` reads one record. Scope ``accounting.contacts.read``.
+
+**A connection consented before ``accounting.payments``** (decisions §415)
+cannot list or write payments. The status sync records that on the connection
+(``settings.erp.oauth.scope_gaps``: ``payments_scope_missing``) the first time
+Xero refuses the ``Payments`` change listing, and from then on
+:meth:`XeroAdapter.changed_bills` reads only the incremental ``Invoices``
+listing and the write-back refuses before any call, until an admin reconnects.
 
 **Status sync-back and payment write-back** (decisions §295, extended to Xero in
 §386; ``supports_status_sync``). A bill's ``AmountPaid`` is the sum of the
@@ -69,6 +81,7 @@ from app.services.erp_adapters.base import (
     NOT_CONNECTED,
     PAYMENT_ACCOUNT_NOT_MAPPED,
     PAYMENT_EXCEEDS_BALANCE,
+    PAYMENTS_SCOPE_MISSING,
     SYNC_LISTING_MAX_ROWS,
     VENDOR_NOT_LINKED,
     ErpBillReport,
@@ -76,6 +89,7 @@ from app.services.erp_adapters.base import (
     ErpInvoiceStatus,
     ErpListingIncomplete,
     ErpPostResult,
+    ErpScopeMissing,
     GLAccountPayload,
     InvoicePayload,
     ListingGap,
@@ -86,6 +100,7 @@ from app.services.erp_adapters.base import (
     PoSkipReason,
     SkippedPo,
     VendorPayload,
+    VendorSearchResult,
     erp_http_failure,
     erp_preflight_refusal,
     erp_refusal,
@@ -101,6 +116,7 @@ from app.services.erp_adapters.bill_allocation import (
     allocate_bill_lines,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
+from app.services.erp_adapters.log_redaction import redact_query_strings_containing
 from app.services.erp_adapters.oauth_base import (
     ExternalCompany,
     OAuthErpAdapter,
@@ -133,6 +149,18 @@ CURRENCY_MISMATCH = "currency_mismatch"
 PERIOD_CLOSED = "period_closed"
 VENDOR_INACTIVE = "vendor_inactive"
 ACCOUNT_INACTIVE = "account_inactive"
+#: A vendor-link search by tax number puts the number in the query string
+#: (``where=TaxNumber==...``), and httpx logs every request URL at INFO: the
+#: query of any logged URL naming the field is redacted (a tax id never
+#: reaches a log, project invariant).
+redact_query_strings_containing("taxnumber")
+#: Contacts one vendor-link search reads per term (one page); more matches
+#: than that answer ``truncated`` and the person narrows the search.
+_SEARCH_PAGE_SIZE = 50
+#: The shape a ``ContactID`` may take before it goes into a request path (a
+#: GUID at Xero; letters, digits and hyphens bound it without assuming more,
+#: so nothing else — a slash, a dot — ever reaches the path).
+_CONTACT_ID = re.compile(r"^[0-9A-Za-z-]{1,64}$")
 #: Rows a change listing asks for per page (Xero's ceiling), and the page size
 #: Xero answered with before it allowed larger ones. A page shorter than the
 #: floor is the last; a longer one may be the last or may be Xero still paging
@@ -295,6 +323,9 @@ class XeroAdapter(OAuthErpAdapter):
     #: A Xero bill carries no marker of ours; its never-reused InvoiceID is
     #: matched by reference (``report_from_bill``).
     bills_match_by_reference = True
+    #: The vendor page can find any contact by name or tax number and link it
+    #: by hand (``search_vendors`` / ``get_vendor``, decisions §415).
+    supports_vendor_search = True
 
     @classmethod
     async def list_external_tenants(
@@ -871,7 +902,7 @@ class XeroAdapter(OAuthErpAdapter):
         key: str,
         bill_ids,
         *,
-        scope_gap_is_incomplete: bool = False,
+        scope_refusal_raises: bool = False,
     ) -> list[str]:
         """Every record of ``path`` changed since ``headers['If-Modified-Since']``,
         reduced to bill ids by ``bill_ids``. The whole listing or a raise: past
@@ -880,11 +911,11 @@ class XeroAdapter(OAuthErpAdapter):
 
         A page Xero refuses raises :class:`XeroRequestError`, so the pass fails
         and its high-water mark stays put. The exception, with
-        ``scope_gap_is_incomplete``, is a 401 / 403: a connection consented
+        ``scope_refusal_raises``, is a 403: a connection consented
         before ``accounting.payments`` was asked for cannot read payments at
-        all and no retry changes that, so it answers as an incomplete listing
-        and the sweep falls back to reading every payable bill, which needs
-        only the invoices scope."""
+        all and no retry changes that, so it raises :class:`_ScopeRefused`
+        for :meth:`changed_bills` to report as the connection's scope gap
+        (decisions §415)."""
         out: list[str] = []
         seen = 0
         for page in range(1, sync_listing_pages(_PAGE_FLOOR) + 1):
@@ -894,8 +925,8 @@ class XeroAdapter(OAuthErpAdapter):
                 params={**params, "page": page, "pageSize": _CHANGE_PAGE_SIZE},
                 headers=headers,
             )
-            if resp.status_code in (401, 403) and scope_gap_is_incomplete:
-                raise ErpListingIncomplete(PROVIDER, path, ListingGap.fetch_failed)
+            if resp.status_code == 403 and scope_refusal_raises:
+                raise _ScopeRefused
             if resp.status_code != 200:
                 raise XeroRequestError(resp.status_code)
             rows = [r for r in _json(resp).get(key) or [] if isinstance(r, dict)]
@@ -915,7 +946,27 @@ class XeroAdapter(OAuthErpAdapter):
         modified (``If-Modified-Since``), plus the bill every ACCPAY payment
         modified since then pays, so a payment applied or deleted is read as a
         change of its bill whether or not the bill's own timestamp moved. The
-        bills themselves are read back by :meth:`bill_report`."""
+        bills themselves are read back by :meth:`bill_report`.
+
+        **A consent without ``accounting.payments``** (decisions §415). The
+        ``Invoices`` listing is read first, so when Xero then refuses the
+        ``Payments`` listing 403 (forbidden, not unauthenticated) the token
+        has just been honoured for this organisation, and the refusal is the
+        missing scope. A 401 is not: it has already been through
+        ``RefreshOnUnauthorized``'s replay, so it means the token itself was
+        not accepted, and the pass fails with its mark unmoved like any other
+        refused read — a sticky gap recorded from it would stop the payments
+        listing and the write-back for a reason that is not the scope. That raises
+        :class:`ErpScopeMissing` carrying the bills the ``Invoices`` listing
+        found; the status sync records ``payments_scope_missing`` on the
+        connection, and every later pass, seeing it recorded
+        (:meth:`scope_gaps`), reads the ``Invoices`` listing alone: no
+        request a certain refusal answers, and no fall-back to reading every
+        payable bill on every tick, which spent the organisation's daily
+        allowance (1,000 calls on Starter) and told nobody why. A bill a
+        payment changes still shows up there as long as Xero moves the bill's
+        ``UpdatedDateUTC`` when its ``AmountPaid`` / ``Status`` change, which
+        is what the ``INVOICE`` webhook (§392) relies on too."""
         # Xero documents the header as a UTC timestamp `yyyy-mm-ddThh:mm:ss`,
         # with no offset; a form it does not parse would be ignored or refused.
         stamp = since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
@@ -929,15 +980,22 @@ class XeroAdapter(OAuthErpAdapter):
                 "Invoices",
                 lambda row: [row.get("InvoiceID")],
             )
-            bills += await self._modified_since(
-                client,
-                headers,
-                "Payments",
-                {"where": 'PaymentType=="ACCPAYPAYMENT"'},
-                "Payments",
-                lambda row: [(row.get("Invoice") or {}).get("InvoiceID")],
-                scope_gap_is_incomplete=True,
-            )
+            if PAYMENTS_SCOPE_MISSING in self.scope_gaps():
+                return list(dict.fromkeys(bills))
+            try:
+                bills += await self._modified_since(
+                    client,
+                    headers,
+                    "Payments",
+                    {"where": 'PaymentType=="ACCPAYPAYMENT"'},
+                    "Payments",
+                    lambda row: [(row.get("Invoice") or {}).get("InvoiceID")],
+                    scope_refusal_raises=True,
+                )
+            except _ScopeRefused:
+                raise ErpScopeMissing(
+                    PROVIDER, PAYMENTS_SCOPE_MISSING, list(dict.fromkeys(bills))
+                ) from None
         return list(dict.fromkeys(bills))
 
     async def _our_payments(self, client, headers, payment_id: str, bill_id: str) -> list[dict]:
@@ -983,6 +1041,10 @@ class XeroAdapter(OAuthErpAdapter):
         """
         if not payload.bill_id:
             return erp_preflight_refusal(PROVIDER, BILL_NOT_IN_ERP)
+        if PAYMENTS_SCOPE_MISSING in self.scope_gaps():
+            # The consent cannot write payments (decisions §415): said, not a
+            # certain 401/403 spent and read as an HTTP failure.
+            return erp_preflight_refusal(PROVIDER, PAYMENTS_SCOPE_MISSING)
         if not payload.pay_from_account_erp_id:
             return erp_preflight_refusal(PROVIDER, PAYMENT_ACCOUNT_NOT_MAPPED)
         try:
@@ -1082,6 +1144,11 @@ class XeroAdapter(OAuthErpAdapter):
         try:
             if not payload.bill_id:
                 return ErpPostResult(success=True, message="No bill in Xero")
+            if PAYMENTS_SCOPE_MISSING in self.scope_gaps():
+                # A consent without `accounting.payments` (decisions §415)
+                # could not have written a payment, nor can it find or delete
+                # one: refused, so the caller flags it for a person.
+                return erp_preflight_refusal(PROVIDER, PAYMENTS_SCOPE_MISSING)
             headers = await self._headers()
             async with self.oauth_client(timeout=30) as client:
                 bill = await self._read_bill(client, headers, payload.bill_id)
@@ -1174,7 +1241,8 @@ class XeroAdapter(OAuthErpAdapter):
         carries neither flag until its first bill. Customer-only contacts,
         which can number in the thousands, stay out. A contact that is already
         a customer and is about to become a supplier with no PO is the one case
-        still missed (``docs/followups.md``). The contacts on every unbilled PO
+        the walk cannot see; a person links it by hand from the vendor page
+        (:meth:`search_vendors`, decisions §415). The contacts on every unbilled PO
         are added too, which also covers a customer sent a PO. Like the
         contact walk, that read is complete or raises: the vendor sync reads
         absence as evidence.
@@ -1199,6 +1267,67 @@ class XeroAdapter(OAuthErpAdapter):
                 "Contacts", {"IDs": batch, "includeArchived": "true"}, "Contacts"
             )
         return [_contact_to_vendor(raw) for raw in rows if raw.get("ContactID")]
+
+    async def search_vendors(self, *, name: str | None, tax_id: str | None) -> VendorSearchResult:
+        """Contacts matching ``name`` (Xero's ``searchTerm``) or exactly
+        ``tax_id`` (``where TaxNumber==``), customers included, archived ones
+        too (``active=False``) — the record a person links a vendor to by
+        hand when the vendor walk cannot see it yet: a customer with no bill
+        and no PO from us carries neither flag :meth:`list_vendors` reads
+        (decisions §415). One page per term; more than that is ``truncated``.
+        A tax number carrying a quote or a backslash is not searched for (it
+        could not be quoted into the filter safely, and no real one has
+        either). Raises :class:`XeroRequestError` on a refused read.
+        """
+        headers = await self._headers()
+        terms: list[dict] = []
+        if name and name.strip():
+            terms.append({"searchTerm": name.strip()})
+        tax = (tax_id or "").strip()
+        if tax and '"' not in tax and "\\" not in tax:
+            terms.append({"where": f'TaxNumber=="{tax}"'})
+        found: dict[str, dict] = {}
+        truncated = False
+        async with self.oauth_client(timeout=15) as client:
+            for term in terms:
+                resp = await client.get(
+                    f"{_api_base()}/Contacts",
+                    params={
+                        **term,
+                        "includeArchived": "true",
+                        "page": 1,
+                        "pageSize": _SEARCH_PAGE_SIZE,
+                    },
+                    headers=headers,
+                )
+                if resp.status_code != 200:
+                    raise XeroRequestError(resp.status_code)
+                rows = [r for r in _json(resp).get("Contacts") or [] if isinstance(r, dict)]
+                truncated = truncated or len(rows) >= _SEARCH_PAGE_SIZE
+                for raw in rows:
+                    if raw.get("ContactID"):
+                        found.setdefault(str(raw["ContactID"]), raw)
+        return VendorSearchResult(
+            vendors=[_contact_to_vendor(raw) for raw in found.values()], truncated=truncated
+        )
+
+    async def get_vendor(self, erp_vendor_id: str) -> VendorPayload | None:
+        """The contact ``erp_vendor_id`` names, read now; None when Xero
+        answers 404 or the id is not shaped like a ContactID (never put in a
+        path).
+        Raises :class:`XeroRequestError` on any other refusal."""
+        if not _CONTACT_ID.match(str(erp_vendor_id or "")):
+            return None
+        headers = await self._headers()
+        async with self.oauth_client(timeout=15) as client:
+            resp = await client.get(f"{_api_base()}/Contacts/{erp_vendor_id}", headers=headers)
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise XeroRequestError(resp.status_code)
+        rows = [r for r in _json(resp).get("Contacts") or [] if isinstance(r, dict)]
+        match = [r for r in rows if str(r.get("ContactID") or "").lower() == erp_vendor_id.lower()]
+        return _contact_to_vendor(match[0]) if match else None
 
     async def list_gl_accounts(self) -> list[GLAccountPayload]:
         """The whole chart (Xero returns it unpaged), or :class:`ErpListingIncomplete`.
@@ -1300,6 +1429,11 @@ async def _status_get(client, url: str, **kwargs) -> httpx.Response:
         return resp
     await asyncio.sleep(int(raw))
     return await client.get(url, **kwargs)
+
+
+class _ScopeRefused(Exception):
+    """A change listing Xero refused 401 / 403 for want of a scope
+    (:meth:`XeroAdapter._modified_since`); internal to :meth:`changed_bills`."""
 
 
 class XeroRequestError(RuntimeError):

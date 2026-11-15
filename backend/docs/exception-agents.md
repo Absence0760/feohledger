@@ -165,9 +165,11 @@ that follows does.
 ### The agent inherits the queue's segregation rule
 
 Clearing a payment-**blocking** exception (`duplicate` / `fraud_flag` /
-`line_total_mismatch` / `payment_reconciliation`) is what lets a payment run pay
-the invoice, and it is refused for an actor implicated in that payable or
-recorded as having raised the flag — see
+`line_total_mismatch` / `payment_reconciliation` / `quality_hold` /
+`po_mismatch`) is what lets a payment run pay the invoice, and it is refused for
+an actor implicated in that payable, recorded as having raised the flag, or —
+on a `po_mismatch` / `quality_hold` — one of the invoice's approvers
+(decisions §420) — see
 [`docs/authentication.md`](../../docs/authentication.md) § Segregation of duties
 on the exception queue.
 
@@ -193,7 +195,22 @@ so an org that disabled the control does not find the agent still refusing.
 resolvers** (amount-within-tolerance, missing-PO, multi-PO split). They joined the
 gate when `po_mismatch` became payment-blocking, so a run the invoice's uploader
 triggers escalates rather than clearing their own PO variance
-(`test_a_po_mismatch_agent_run_triggered_by_the_uploader_escalates`). `duplicate`
+(`test_a_po_mismatch_agent_run_triggered_by_the_uploader_escalates`), and so does
+one its approver triggers
+(`test_a_po_mismatch_agent_run_triggered_by_its_approver_escalates`). Those
+resolvers approve the invoice on the triggering human's behalf before the row is
+resolved, so the approver axis is judged against who had approved **before** the
+run: the coordinator reads `approval_chain.approver_ids` ahead of `apply` and
+passes the same set to `record_decision` (`approvers=`). The run's own approval
+does not refuse its own resolve, which rests on the re-match no longer finding
+the mismatch (`decision.refound`) and on no implicated receipt lifting the hold
+(`_receipts_implicated`), not on the human's word
+(`test_the_approval_an_agent_run_gives_does_not_refuse_its_own_resolve`). The
+approval's re-judge of cleared holds (decisions §422) does not undo it either:
+the row being decided is still open when `apply` approves, so nothing is
+re-raised beside it, and the re-judge runs no detector that could mark it
+`refound`
+(`test_the_re_judge_does_not_undo_an_agents_own_resolve`). `duplicate`
 and `fraud_flag` are escalate-only stubs (§ Deferred) and the remaining blocking
 types have no resolver at all. That is why
 `tests/test_exception_agent_queue_segregation.py` also registers a probe resolver

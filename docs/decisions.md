@@ -20983,3 +20983,1041 @@ exact-state helper checks the final flag; Merge's 429 sent once);
 the margin on both paths; the margin's floor; a 429 possibly posted and not
 retried). The #654 sandbox entry in `docs/followups.md` now names the margin
 and the 429 as what that pass settles.
+
+## 410. An ERP push runs only for an invoice still at `sending_to_erp`; any other status is skipped and the job counts as done (§374 follow-up, 2026-11-14)
+
+**Context.** `erp_dispatch._run_local` and `erp_lambda` load the invoice by id
+and call `services/erp.send_to_erp_internal` whatever status it holds. An SQS
+redelivery, or a second dispatch of the same push, can arrive after the first
+has finished. Since §374 that includes an invoice whose push failed and whose
+approval was then recalled to `ready_for_review`: the stale job posted a bill
+for an invoice under review, with figures that may be about to change. A job
+for an invoice that had already landed (`sent_to_erp`, `done`) called the
+adapter again, then hit an invalid transition and raised out of both its
+success and failure branches.
+
+**Decision.** `send_to_erp_internal` asks before every attempt, the first
+included. It re-reads the row `FOR UPDATE` with `populate_existing`, so the
+committed status decides even though the dispatchers' sessions keep loaded
+attributes across commits. Unless that status is `sending_to_erp`, the skip
+leaves behind:
+
+- **No adapter call and no status change.** Nothing about the invoice is the
+  push's to change anymore.
+- **No audit row.** The audit trail records status transitions, and none
+  happened. An `invoice.erp_*` row would also become the "latest ERP entry"
+  that the web modal's and the mobile panel's ERP status read
+  (`InvoiceModal.svelte` `erpInfo`, `erp_status_panel.dart`), so a no-op
+  redelivery would replace the real outcome in the UI.
+- **`state_data` untouched.** The retry counter, the outcome-unknown flag and
+  its final stamp (§405, §409), the pending job and the orphan keys stay as
+  the last real attempt left them. A later `POST /{id}/retry-erp` after
+  re-approval resumes from that record.
+- **One `logger.warning`** naming the invoice id and the status found (no
+  PII). It is logged before the rollback that releases the lock, because a
+  rollback expires `invoice.id`.
+- **A normal return.** The Lambda deletes the message instead of redelivering
+  a job that can never become valid, and the local worker ends.
+
+The check runs before each attempt, not only the first. Every backoff commits
+and gives the lock back, and a concurrent push of the same invoice can finish
+in that window. `sending_to_erp` leaves only by a push (`sent_to_erp` /
+`failed`), so the gate cannot pre-empt a person's action.
+
+**Rejected.**
+
+- *Checking in the dispatchers.* There are two, and `send_to_erp_internal` is
+  the only push path. One check there covers both, and any future caller.
+- *Raising so the job retries or dead-letters.* The status will not come back
+  to this job, so a retry only delays the same skip. A dead letter would page
+  someone over a correct no-op.
+- *Holding the lock across the adapter call.* `_call_erp` already commits the
+  outcome-unknown flag before the call, ending the transaction. The lock makes
+  the gate read the committed status, and the correlation-id idempotency key
+  still covers two pushes that both pass it.
+
+**Cost.** One extra locked `SELECT` per attempt. A push with no workflow
+instance (no pre-call commit in `_call_erp`) holds the row lock across the
+adapter call, as its final transition already needed the row.
+
+Tests: `tests/test_erp_push_flow.py`: each non-`sending_to_erp` status
+skipped with no call, audit row or `state_data` change, and the warning
+logged; the gate asked again after a backoff; on a real tenant, a stale
+`sending_to_erp` object whose row was recalled meanwhile posts nothing, and a
+real `sending_to_erp` push still lands. The mock-session tests point the gate
+at the fixture invoice's own status through an autouse fixture.
+
+## 411. A skipped auto-send is recovered by a sweep, inside a window, and a refusal is recorded once per approval (§304 follow-up, 2026-11-14)
+
+**The gap.** §304 runs the "send to the ERP on approval" push as post-commit
+work, in its own transaction after the approval commits. A process that dies
+in between (a deploy, an OOM) leaves the invoice `approved` with neither an
+`invoice.erp_submitted` nor an `invoice.erp_auto_send_refused` row. Nothing is
+lost, since the invoice is payable and sendable by hand, but the automation the
+workflow promised was skipped and nothing said so.
+
+**The fix.** `services/erp_auto_send_sweep` (sweep `erp-auto-send`, off by
+default, `FEOH_ERP_AUTO_SEND_SWEEP_*`) finds such approvals and runs each
+through `erp_send.send_after_approval`, the approval's own path. It does not
+re-implement any gate: the live-ERP check, the snapshot predicate
+(`auto_send_configured`), the row lock that acts only on `approved`, the plan
+and export gates, and the refusal row are all the ones an on-time auto-send
+meets. `send_after_approval` now returns what it did (`AUTO_SEND_SENT` /
+`_REFUSED` / `_SKIPPED` / `_FAILED`) so the sweep can count; the approval doors
+ignore the value. A recovered push or refusal carries `details.recovered: true`
+beside the usual `trigger`, and a NULL actor, because no person started it.
+
+**What counts as missed.** `approved` now; a snapshot with a not-disabled
+`erp_export` step carrying `auto_send_on_approval: true` (a JSONB containment
+pre-filter, exact for any workflow the builder can save, with the Python
+predicate re-applied inside `send_after_approval`); a latest approval, by its
+audit row (`invoice.approved` or `invoice.auto_approved`, the only two
+transitions that queue an auto-send), inside the window; and nothing since that
+approval answering it.
+
+- **Since that approval, not ever.** A refusal of an earlier approval does not
+  answer a re-approval after a recall: the second approval's job is the one
+  that never ran.
+- **A void is not an approval.** `POST /api/payments/{id}/void` returns an
+  invoice to `approved`, and it may already hold a bill in the ERP. A later
+  entry into `approved` by any action other than the two approval actions
+  answers the approval, so a voided invoice is never auto-pushed. Rejected:
+  keying on the latest entry into `approved` of any kind; that would have
+  re-posted voided invoices whose bill is already in the ERP.
+- **Keyed by audit row, not `approval_date`.** `approval_date` is a `Date`,
+  which cannot tell "two minutes ago" from "this morning", and it survives a
+  recall. The audit rows are joined on `correlation_id` (indexed) as well as
+  `entity_id` (not indexed on `audit_log`).
+
+**The window.** At least `FEOH_ERP_AUTO_SEND_SWEEP_DELAY_SECONDS` (5 min, floor
+60) after the approval, so the approval's own job has had its chance (neither
+the push nor a refusal can double, below, so the delay saves redundant work
+rather than guarding correctness). At most `FEOH_ERP_AUTO_SEND_SWEEP_LOOKBACK_HOURS` (24 h). The
+lookback is a fence: §304 left stored `true` flags in place, so a tenant can
+hold approved invoices from before auto-send existed whose snapshot says
+"send". Without a lookback, turning the sweep on would push every one of them,
+out of the payment queue, without anyone having chosen that. With it, only
+approvals recent enough that the automation plainly should have run are taken.
+The cost: an approval missed while the sweep itself was off for longer than the
+lookback stays unsent, as it would have without the sweep. It is still
+sendable by hand.
+
+**A cap, not a page.** `backend/CLAUDE.md` says batch size is a page, because a
+bare `LIMIT` starves the tail when the work does not change the state the sweep
+filters on. This work does: a recovery is sent (no longer `approved`) or
+refused (a refusal row now answers the approval). So each tenant takes at most
+`FEOH_ERP_AUTO_SEND_SWEEP_BATCH_SIZE` (100) a tick, oldest approval first, by
+`(approved_at, id)`, a total order. The one case that stays a candidate is a
+send that raised unexpectedly and wrote nothing. It is counted in
+`invoice_failures`, so `GET /api/health/sweeps` reports the tick `partial` and
+the streak alert fires if it persists, and the lookback releases the row after
+at most that window, so no row holds the tail for ever.
+
+**An approval made before the ERP was live is not a missed one.** The
+approval's job returns without writing anything when the tenant has no live
+ERP (the mock, or none), so that trail looks exactly like a crash's, and a
+tenant that approves on the mock and then connects a real ERP would otherwise
+have its last day's flagged approvals pushed as "recovered". For an OAuth ERP
+(QuickBooks, Xero, Sage) the connection's `settings.erp.oauth.connected_at` is
+a second floor under the lookback: an approval before it is never taken. A
+reconnect moves that stamp forward too, which only ever excludes more. A
+directly configured ERP (NetSuite, Business Central, Intacct, SYSPRO) records
+no such moment, so for those the residual stands, bounded by the lookback: an
+approval made on the mock up to 24 hours before the live ERP was saved can be
+pushed once. Rejected: writing an `invoice.erp_auto_send_skipped` row whenever
+the job finds no live ERP. That would put a new action on every approval in
+every mock tenant with the flag on (all the dev and e2e ones), and need its
+own label on three clients, to close a narrow window the lookback already
+bounds.
+
+**A refusal is recorded once per approval, under the row lock.** The push
+could never double: `start_erp_send`'s `approved → sending_to_erp` transition
+under the invoice row lock is its guard. A refusal could, and not only between
+two sweep replicas. `audit_log.created_at` is its transaction's start, so a bulk
+approve's rows all carry the batch's start while its one post-commit job works
+through the invoices in turn; a batch whose job outruns the delay can meet the
+sweep on the same approval. `erp_send` now asks, under the invoice's row lock,
+whether a refusal of the latest approval is already on the trail, and writes
+nothing if so (`_refusal_already_recorded`). Two runs on one approval
+serialise on that lock, and the second sees the first's committed row. This
+makes the refusal idempotent in itself, for the approval doors too, so no
+cross-request lock is needed. Rejected: a per-tenant session-level advisory
+lock held for the pass. It was the first draft, and review found it a
+liability. It did not cover the bulk-job case. It held a pooled connection idle
+for up to a hundred sends. A cancellation during the unlock could return the
+connection to the pool still holding the lock. And session-level advisory
+locks break silently behind a transaction-pooling proxy. In
+`FEOH_AUDIT_MODE=lambda` the refusal row lands later through SQS, so the check
+cannot see it there; the delay is what covers that mode, and the push still
+cannot double.
+
+**Production.** Off by default, like every sweep that calls out. Turning it on
+is a (b) entry in `docs/followups.md`, ordered after the §304 check of stored
+flags.
+
+Tests: `backend/tests/test_erp_auto_send_sweep.py` (sent once and marked; a
+refusal recorded once; both edges of the window; a re-approval after an earlier
+refusal; a void back to `approved`; snapshots that do not say so; a mock-ERP
+tenant; two sweeps at once recording one refusal; a refusal already on the
+trail not recorded again; an approval before and after an OAuth connection;
+a raising send counted as a failure the health report sees; the cap taking the
+oldest first; off by default and registered). `tests/test_sweep_health.py`
+pins the name, the flag and the lifespan start.
+
+## 412. A Sage Intacct entity is its own ERP realm; migration 0131 stamps a located connection's links with its current location (§395 follow-up, 2026-11-14)
+
+**The gap.** `services/erp_link_realm` keyed Sage Intacct by `company_id`
+alone (§284's realm). With `location_id` set, every Intacct call carries
+`X-IA-API-Param-Entity`, and an entity holds vendors and accounts the top
+level and its sibling entities do not. Re-pointing a connection at another
+entity of the same company therefore kept the first entity's vendor and GL
+links as this realm's, and the push sent a vendor id the new entity does not
+hold. Intacct refuses it and the adapter reads the refusal back as
+`vendor_inactive`, which tells the user to reactivate a vendor that is fine.
+
+**The realm.** The Intacct identity is now `<company>|<location>`, the
+location normalised like every identity field and **appended only when set**
+(`_OPTIONAL_IDENTITY_FIELDS`). A location change is then a realm change like
+a QuickBooks company change, with nothing new to build: the push refuses the
+old entity's links (`vendor_not_linked` / `account_not_linked`); the next
+vendor and chart sync files them as kept links for that entity (§356, §376)
+and re-judges each by evidence; a return to the first entity posts its vendor
+links at once and restores its GL state at the next chart sync. A pushed
+bill's `state_data.erp_realm` carries the entity too, so the status sync and
+the write-back stop reading a bill in an entity the connection no longer
+reaches, and a bill there is held as `erp_bill_unlinked_other_company`.
+
+**Rejected: always writing the delimiter** (`sage_intacct:<company>|` for the
+top level). It would make every pre-0131 stamp distinguishable from a new one,
+but it changes the realm of every Intacct connection, so every top-level
+tenant's links and bills would need rewriting for no change in meaning, and
+0115's frozen realm (pinned to the live function by its test) would stop
+matching. Appending only when set leaves a top-level connection's realm
+exactly as it was.
+
+**Migration 0131: what an existing stamp's location was.** Nothing recorded
+the location a link or bill was made under. The only location anything knows
+is the connection's own at migration time, so 0131 reads a stamp naming the
+org's **current** company as made under its **current** location, and
+rewrites `sage_intacct:<company>` to `sage_intacct:<company>|<location>` in
+every place a realm is stored: `vendors` / `gl_accounts.erp_link_realm`, the
+pending `erp_link_candidates.realm`, `vendor_erp_links` /
+`gl_account_erp_links` (+ candidates), `workflow_instances.state_data.erp_realm`,
+and 0115's `settings.erp.legacy_link_realm` on the control plane. That is a
+guess for one case, and this says so: a link made at the top level before the
+location was set is attributed to the location. Nothing distinguishes it, and
+if the guess is wrong the next sync re-judges it by evidence. A top-level
+connection's stamps are untouched, since its realm did not change. A stamp
+naming another Intacct company is untouched too, and now reads as that
+company's top level. With no connection to that company there is no location
+to name. Leaving the stamp is the honest reading. It matters only if the
+tenant reconnects to that company's top level, where a kept vendor link made
+under one of its entities would post before any sync, as every kept link does
+(§356). Whether Intacct then refuses the id or another vendor holds it depends
+on whether vendor ids repeat across entities, which is not verified yet; the
+sandbox pass in `docs/followups.md` (Verify the SYSPRO, Sage Intacct, ...
+adapters, #654) now names that question.
+
+**Rejected: nulling the old stamps and leaning on 0115's legacy trust.** A
+NULL link is trusted by the push only while the realm equals
+`legacy_link_realm`. Re-pointing that snapshot at the Intacct entity would
+also trust every older NULL link in the tenant, including those made under a
+previous ERP or a mock sync, on Intacct pushes. **Rejected: leaving old stamps
+to the next sync, no migration.** A located connection's links would refuse
+until a sync, and every bill it had pushed would read as another company's,
+opening `erp_bill_unlinked_other_company` holds on invoices that are fine.
+**Rejected: a realm alias** (a control-plane map of "old stamp means new
+realm") honoured by every reader. Every link reader, both syncs, the kept-link
+restore and four bill-realm comparisons would carry it permanently, for a
+one-off.
+
+**How a tenant migration knows its organization's connection.** A tenant
+database holds no organization settings, so `alembic/env.py`, on a
+`FEOH_MIGRATE_TENANT` run, puts a lookup in
+`config.attributes["tenant_organization_erp"]`. It reads that tenant's
+`organizations.settings->'erp'` from the control plane by `db_name`, through
+the app's engine factory (IAM auth included), on first call only, awaited on
+the migration's greenlet. It reads and never writes, so the objection to a
+tenant migration that reads the control plane (§266: two databases, no
+atomicity between a copy and a strip) does not arise. Without the lookup (a bare
+`MigrationContext`, or the control plane's own run over its tenant-table
+copies) 0131 cannot tell which stamps to rewrite. It raises if the database
+holds any `sage_intacct:` stamp, and is a no-op otherwise.
+
+Tests: `tests/test_erp_link_realm.py` (the entity realm, and a location change
+that refuses, re-judges, keeps and restores the entity's vendor and GL links);
+`tests/test_migration_0131_intacct_location_realm.py` (the frozen realm pinned
+to the live one; every stamp kind rewritten for the current company only,
+idempotent and reversible; other connections untouched; the refusal without
+the org's settings; the control-plane snapshot; and a real
+`FEOH_MIGRATE_TENANT` `alembic upgrade` from 0130 through env.py's lookup).
+
+## 413. The record dialog shows the ERP's figure and split, and names no rail over a split that stands (§386 and §396 follow-ups, 2026-11-15)
+
+**The gap.** A `paid_not_recorded` row keeps the cash the ERP states
+(`erp_report.amount` / `amount_currency`, §386) and how it was paid rail by
+rail (`payment_parts`, §396), and the one-click record books both. The dialog
+on `/exceptions` showed neither. A person saw an `amount_mismatch` refusal
+without the figure to reconcile, and a payment made on two rails asked for one
+rail the server then ignored, with a response whose `method: null` said
+nothing about why.
+
+**The rule.**
+
+- **Both figures, never compared on the client.** The dialog shows the ERP's
+  figure in the code the ERP stated beside the invoice's amount in the
+  invoice's own code. The followup said "in the invoice's currency"; we render
+  each figure in its own code instead (`frontend/docs/money-formatting.md`).
+  The two codes differ exactly when the server refuses the record (§386), and
+  labelling the ERP figure with the invoice's code would hide that. A row
+  stating no figure says so: the bill is read again at record time (§393).
+- **Whether a split stands is the server's call.** "Stands" means the
+  breakdown adds up exactly, in whole cents, and spans more than one rail
+  (`split_by_rail` applies it). That needs exact sums, which the client may
+  not do. The row carries `erp_payment_split_stands`, computed by
+  `external_payment.split_stands_over_any_rail`, the same rule `_rail_split`
+  uses to keep a breakdown against a person's rail. The client compares
+  rails only, to decide when to show a split at all (more than one rail; a
+  part with no rail stated counts as one).
+- **No rail is named over a split that stands.** The picker becomes a
+  read-only line and the body omits `method`. The server's `method` is
+  optional on `record-erp-payment` only. An omitted rail is accepted only
+  when the figure being booked (stated, or the read-back's) carries a
+  breakdown that stands. Anywhere else it is 422
+  `erp_payment_method_required`, because the person's rail is then the record
+  (one rail, none, or parts that do not add up). `record-outside` still
+  requires a rail. Rejected: sending the prefilled or first part's rail
+  anyway. The server would ignore it, but the audit's `method_stated` would
+  record a pick nobody made. A null `method_stated` beside an `applied`
+  breakdown says what happened.
+- **A split that does not stand is shown, with the picker.** The note says the
+  parts do not add up, so the split is not kept and the rail chosen is
+  recorded for the whole payment, as `_rail_split` books it.
+- **The payment says how it split.** `PaymentResponse.rail_breakdown` (each
+  part's rail or null and amount, through `rail_parts_from_json`, so a
+  malformed array reads as none) explains `method: null` on every payment
+  read, not only this one.
+
+**Mobile.** The mobile exception detail has no record flow (it shows the
+PO-rematch note only), so it has nothing to change.
+
+Tests: `tests/test_payment_methods.py` (the stands rule against
+`_rail_split` for every rail a person could name; `PaymentResponse`'s
+breakdown and a malformed one; only the ERP record may omit the rail);
+`tests/test_erp_status_sync.py` (the detail's verdict, the response's
+breakdown, no rail over a standing split audited as `method_stated: null`,
+422 with nothing booked over one rail, a cent short, or no breakdown);
+`frontend/src/lib/types/erpReport.test.ts` (parts as booked, malformed as
+none, rails only); `codedRefusals.test.ts`;
+`tests-e2e/payments/erp-reported-payment.spec.ts` (the figures beside each
+other, the split shown and booked with no rail sent).
+
+## 414. A recalled approval is an outbound webhook event, and the published OpenAPI carries the webhook catalogue (§374 follow-up, 2026-11-14)
+
+**The gap.** `transition_invoice` emitted `invoice.approved` to webhook
+subscribers, but the recall (§374) emitted nothing. An integrator that acted on
+the approval (queued the bill, told the supplier it would be paid) never
+learned it had been withdrawn. And the published OpenAPI described none of the
+webhooks: the push half of the developer contract lived only in
+`backend/docs/public-api.md`.
+
+**Decision.**
+
+- **`invoice.approval_recalled` joins `WEBHOOK_EVENT_TYPES`.** It is emitted
+  from the same hook as its siblings, `workflow_engine._maybe_emit_webhook`,
+  keyed off the transition's action (`RECALL_ACTION`, the only action allowed
+  to walk `RECALL_EDGES`), not its resulting status: `ready_for_review` is also
+  where a resubmit or a fresh extraction lands, and those are not events. The
+  hook now receives the action, the status left and the actor from
+  `transition_invoice`.
+- **What it carries.** The same invoice fields as `invoice.approved` (id,
+  number, vendor name, amount as an exact string, currency, status, here
+  `ready_for_review`), plus `recalled_from` (`approved` or `failed`) and
+  `recalled_by_user_id`, the recaller's opaque control-plane id. **Not** the
+  reason: it is free text a person typed, so it can hold anything, and it stays
+  in the `invoice.approval_recalled` audit row. The user id is the one datum
+  `invoice.approved` does not carry: pseudonymous (no name or email crosses
+  the boundary, and only the customer's own admins can map it to a person),
+  sent to the customer's own endpoint, and what lets a receiver attribute the
+  withdrawal at all.
+- **Each event's `data` is defined once**, as a Pydantic model in
+  `app/schemas/webhook_events.py`. The emitters build the payload through it
+  (`model_dump()`), and `api/v1_openapi.build_public_openapi` publishes it
+  under the OpenAPI 3.1 `webhooks` section (one entry per catalogued type: the
+  signed envelope, the delivery headers, `data` as a component `$ref`), and the
+  `/api/v1/docs` page lists them. Building through the model, rather than a
+  parallel schema checked against hand-written dicts, means the published
+  payload and the bytes a receiver gets cannot drift. The existing three
+  events' payloads are byte-for-byte unchanged.
+- **One catalogue, held together by a test.** `tests/test_webhook_event_catalogue.py`
+  fails unless the models, the summaries, the admin page's event picker
+  (`frontend/src/lib/types/webhooks.ts`, read as source) and the spec's
+  `webhooks` entries all name exactly `WEBHOOK_EVENT_TYPES`, and each emitter
+  sends exactly its model's fields. `invoice.approval_recalled:<uuid>` is 62
+  characters, inside `webhook_deliveries.event_id`'s 64.
+
+**Timing, kept as it is.** Like `invoice.approved` and `payment.settled`, the
+recall is emitted inline in `transition_invoice`, and `emit_event` commits the
+delivery row in its own control-plane session — before the tenant transaction
+that changed the status commits. A rollback after that point delivers an event
+for a change that did not happen. That holds for all three invoice events, so
+the recall keeps its siblings' timing rather than diverge; moving the hook onto
+`post_commit.enqueue_post_commit` for all of them is a (c) entry in
+`docs/followups.md`.
+
+**Considered.** A separate `invoice.status_changed` event carrying every
+transition: rejected, because receivers subscribe to meanings, and a generic
+event would push the state machine's graph into every integration. Emitting
+`invoice.approved` again with a `recalled: true` flag: rejected, because a
+receiver filtering on the event type would read the withdrawal as a second
+approval.
+
+**Where.** `app/models/webhook.py`, `app/schemas/webhook_events.py`,
+`app/services/webhooks/dispatch.py`, `app/services/workflow_engine.py`,
+`app/api/v1_openapi.py`, `frontend/src/lib/types/webhooks.ts` and the six
+locale hints. Tests: `tests/test_webhook_event_catalogue.py`;
+`tests/test_invoice_recall_approval.py::test_the_recall_is_delivered_to_webhook_subscribers`
+(the door, end to end, to a delivery row). Docs: `backend/docs/public-api.md`
+(§ Event catalog, § Payload, § Event sources wired, § Published OpenAPI spec),
+`backend/docs/api-surface.md` (`/invoices`, `/webhooks`). Closes the §374
+follow-up "nothing outside FeohLedger hears that an approval was recalled".
+
+## 415. A Xero consent without the payments scope is recorded on the connection, and a supplier no sync can see is linked by hand (§386 follow-ups, 2026-11-14)
+
+**Context.** §386 left two Xero follow-ups. A connection consented before
+`accounting.payments` was asked for cannot list payments, and the sweep read
+that 401/403 as an incomplete change listing and fell back to reading every
+payable bill: correct, but it spent the organisation's daily allowance (1,000
+calls on Xero's Starter tier) on every tick, and nothing told the admin why.
+And the vendor walk (`IsSupplier==true OR IsCustomer==false`, plus every
+unbilled PO's contact) cannot see a contact that is already a **customer** and
+has had no bill and no PO from us, since Xero sets `IsSupplier` only on a
+contact's first bill; that vendor's first push was refused
+`vendor_not_linked`, and only a bill, the very thing refused, could ever flag
+it.
+
+**Decision — the scope gap is a coded state on the connection.**
+
+- **Found by the refusal, not guessed from the token.** `changed_bills` reads
+  `Invoices` first, so when Xero then refuses the `Payments` listing 403 the
+  token has just been honoured for this organisation, and the refusal is the
+  missing scope. **A 401 is not a gap**: it has already been through
+  `RefreshOnUnauthorized`'s replay, so it means the token was not accepted,
+  and recording it would stop the payments listing and the write-back for
+  good (only a reconnect clears a gap) for a reason that is not the scope. It
+  fails the pass with its mark unmoved, like a 503 (the review caught a first
+  draft that took 401 too). The adapter raises `ErpScopeMissing(code=
+  "payments_scope_missing", bill_ids=<what Invoices found>)`. Rejected:
+  reading the access token's `scope` claim (unverified, its shape
+  unpublished, and a misread would stop the payments listing on a consent
+  that has it until someone reconnects).
+- **Recorded once, by the status sync.** `sync_org` writes
+  `settings.erp.oauth.scope_gaps = ["payments_scope_missing"]` through
+  `erp_oauth.update_connection_metadata`, keyed to the connection id. That
+  pass still reads every payable bill, as every pass before it did, so the
+  switch loses nothing the missing listing would have named since the mark.
+  A reconnect mints a new block (`new_connection`) asking for every scope, so
+  the gap clears itself; nothing re-probes.
+- **Then the adapter stops asking.** `OAuthErpAdapter.scope_gaps()` reads the
+  recorded codes from its config. With the payments gap, `changed_bills`
+  reads the incremental `Invoices` listing alone (no request a certain
+  refusal answers, no full fall-back), and `post_payment` / `void_payment`
+  refuse `payments_scope_missing` before any call (a new `ERP_REFUSAL_CODES`
+  member, localized as `erpRefusal.paymentsScopeMissing`), where before they
+  spent a 401 (and a token refresh) and read it as an HTTP failure.
+- **Shown.** `GET /api/organization/erp/oauth/status` states `scope_gaps`
+  (empty while the connection needs reconnecting anyway), and
+  `ErpConnectionPanel` says what is limited (`org.erp.oauth.scopeGapPayments`;
+  an unknown code reads as the generic `scopeGap`) and offers Reconnect, the
+  button it already showed for an expiring connection. The on-request pass
+  stays available: it reads the Invoices listing.
+
+**Accepted residual.** With the gap recorded, a payment reaches us only when
+it moves its bill's `UpdatedDateUTC`. Applying or deleting a payment changes
+the bill's `AmountPaid`, `AmountDue` and possibly `Status`, so it should; the
+`INVOICE` webhook (§392) rests on the same assumption. Unconfirmed live
+(`docs/followups.md` (b), the Xero webhook entry).
+
+**Decision — a vendor is linked to an ERP record by hand.**
+
+- **Search the whole contact list, on demand, from the vendor page.**
+  `ErpAdapter.search_vendors(name, tax_id)` (`supports_vendor_search`; Xero:
+  `GET Contacts?searchTerm=` and `?where=TaxNumber==""`, archived included,
+  one page of 50 each, `truncated` past it) and `get_vendor(id)` (`GET
+  Contacts/{id}`). `searchTerm` covers Name, FirstName, LastName,
+  ContactNumber and EmailAddress (Xero-OpenAPI `xero_accounting.yaml`,
+  checked 2026-11-14; the developer site refuses automated reads), so the tax
+  number needs its own `where`. Not a listing: absence proves nothing and no
+  sync reads it. A tax number with a quote or backslash is not searched for;
+  the tax-number URL's query is redacted from the httpx log (marker
+  `taxnumber`).
+- **The tax number never travels.** `POST /api/vendors/{id}/erp-links/search`
+  takes only a name (`query`, the vendor's own when blank); the server reads
+  the vendor's stored tax number itself, and a candidate says only
+  `tax_id_matches` (separators and case aside), `active`, and
+  `linked_elsewhere` when another vendor holds it in this company (a flag, not
+  the holder's id: realm uniqueness is org-wide, but the holder may sit in an
+  entity the searching user cannot see).
+- **The link re-reads the record and keeps every link rule.** `POST
+  …/erp-links/link` re-reads the record by id (404 `erp_vendor_not_found`,
+  409 `erp_vendor_inactive`); refuses a vendor already linked in this company
+  (row, kept, or a row link naming no company: 409 `vendor_erp_link_exists`,
+  unlink first, §375) and a record another vendor holds here (409
+  `erp_vendor_already_linked`); keeps a row link from another named company
+  (§356); writes only the link, stamped with the connected company (§284). A
+  later sync that lists the record matches it by id; one that does not leaves
+  it alone (a same-company link is never re-judged). Audited
+  `vendor.erp_linked` with the record's ERP name. `vendor.manage`, like the
+  unlink. The vendor modal mounts the search keyed by vendor, and a search
+  answer that lands after the vendor changed is dropped.
+- **One lock for every writer of new links in a company.** The check-then-write
+  runs under the vendor row lock and an advisory transaction lock on
+  `(organization, realm)` (`vendor_erp_manual_link.link_lock`), which
+  `sync_vendors_from_erp` now takes too, so two links of one record, or a link
+  racing a sync's name adoption, cannot both land.
+- **Offered only where it can run.** `GET /api/vendors/{id}/erp-links` states
+  `search_available` from the stored settings alone (the adapter class and a
+  named company; no credential store opened on a read), and the vendor modal
+  shows the search to a `vendor.manage` holder only then.
+- Rejected: syncing the found contact through `sync_vendors_from_erp` (it reads
+  a whole listing, and a one-record pull would unlink by absence and count
+  names wrongly); widening the walk to every contact (customer-only contacts
+  can number in the thousands, and the name rule would link the wrong one);
+  returning the tax number masked (any part of it is more than the person
+  needs to choose).
+
+**fake-erp.** `GET /xero/…/Contacts` honours `searchTerm` and `where=
+TaxNumber==`, and the customer `xero-contact-2` carries a tax number, so the
+hand-made link can be driven against it.
+
+**Not verified live:** that Xero answers a missing scope 403 (a 401 there
+would leave such a connection failing its passes instead, visibly, until a
+reconnect), that a
+payment moves the bill's `UpdatedDateUTC`, and the two Contacts searches
+(added to the Xero Demo Company checks in `docs/followups.md` (b)).
+
+Tests: `tests/test_xero_status_sync_adapter.py` (the gap raised with the
+Invoices bills, a recorded gap reading Invoices alone, a 503 still failing the
+pass, the write-back and void refused before any call);
+`tests/test_erp_status_sync.py` (the sweep records the gap once, reads every
+bill on that pass, and the next pass is built from it with no full read);
+`tests/test_erp_oauth.py` (`scope_gaps` on `/status`, none while reconnecting,
+none on a fresh consent); `tests/test_erp_xero_adapter.py` (both searches,
+the unsafe tax number, truncation, `get_vendor`, the path guard, the log
+redaction); `tests/test_vendor_erp_manual_link.py` (search and link on real
+rows, every refusal, the kept link, the audit row, `vendor.manage`, a later
+sync leaving the link, `search_available`); `tests/test_sod_endpoint_wiring.py`;
+`src/lib/types/erpConnection.test.ts` (`oauthScopeGapKeys`, the strings in
+every locale); `src/lib/api/codedRefusals.test.ts` (the five link refusals);
+`src/lib/types/vendor.test.ts` (`erpCandidateLinkable`);
+`tests-e2e/organization/erp-connection.spec.ts` (the panel's gap and
+Reconnect) and `tests-e2e/vendors/erp-unlink.spec.ts` (find and link, stubbed
+ERP).
+
+## 416. A vendor create ends on the new vendor's detail, over the unchanged list (closes a `docs/followups.md` entry, round 12, 2026-11-14)
+
+**Context.** `/vendors` is ordered by name and pages 25 at a time, and
+`CreateVendorModal`'s `onsaved` only refetched page one. On a tenant with more
+than a page of vendors, a new vendor whose name sorted past page one did not
+appear after it was created, and nothing but the closed dialog said it had
+been saved. `tests-e2e/vendors/create-invite.spec.ts` hit it on a well-used
+e2e tenant.
+
+**Decision.** After `CreateVendorModal` saves, the page closes it and opens the
+new vendor's `VendorModal` (`routes/vendors/+page.svelte::openCreatedVendor`),
+then refetches the list behind it. The detail is a dialog over the list, so
+the list's URL-backed `?search=&status=&sort=&order=` is untouched and closing
+the detail returns the user to exactly the view they created from. The page
+waits for the create dialog to unmount (`await tick()`) before opening the
+detail, so the create dialog's focus restore lands on **+ New Vendor** first
+and the detail records that as its trigger: focus moves into the detail on
+open and returns to **+ New Vendor** on close (WCAG 2.4.3), never to a control
+inside a dialog that has already gone. `CreateVendorModal`'s contract is
+unchanged (`onsaved(vendor)` still hands the created vendor back), and
+`/vendors` is its only caller.
+
+**Rejected.**
+
+- *Pinning the new vendor at the top of the list until the next reload.* A row
+  out of sort order is a second ordering rule the table has to explain, and it
+  disagrees with the count, the chips and Load more until it disappears.
+- *Filtering the list to the new vendor.* It rewrites the user's own
+  search / status in the URL, so Back and a shared link no longer show the
+  view they were working in.
+
+**Cost.** A user creating several vendors in a row closes each detail before
+the next **+ New Vendor**. That is one Esc, and the detail is where the next
+step for a new vendor (screening, bank details, invite) starts anyway.
+
+Tests: `tests-e2e/vendors/create-invite.spec.ts` (the create dialog closes, the
+detail opens on the new vendor's name with focus inside it, and Esc returns
+focus to **+ New Vendor**). No vitest: the change is a dialog hand-off with no
+logic separable from the DOM.
+
+## 417. The generic ERP webhook matches a delivery with no correlation id by the ERP's document id, to exactly one invoice in the push's realm (§302 follow-up, round 12, 2026-11-14)
+
+**Context.** `POST /api/erp/webhook/{erp_type}` resolved an invoice only by
+`correlation_id` and returned early without one ("not supported yet"). A
+provider whose webhook names its own bill but does not echo our correlation id
+therefore had every status change dropped. Since §302 the bill id a confirmed
+push returned is on `invoices.erp_document_id`, so there is a column to look
+it up by; the followup (`docs/followups.md`, "Surfaced by storing the ERP
+document id on the invoice") asked for that lookup, acting only on exactly one
+match. QuickBooks, Xero and Merge.dev have their own routes, which already
+match a bill by `erp_reference` within the push's realm (§392, §399), so this
+is for direct integrations on the generic route.
+
+**Decision.**
+
+- **The lookup sits after the signature, inside the tenant's own database.**
+  §408's order is unchanged: every secret-free check, then the unseal, then
+  the HMAC, then dedup and the status map. A document id that can name no
+  invoice (not a string or integer, blank, or longer than the column's 255) is
+  refused with the body's other shape checks, before the tenant database is
+  opened. A correlation id that is present still decides alone, unparseable
+  ones included.
+- **Exactly one candidate, or nothing.** `api/erp_webhook._invoice_id_by_document`
+  selects distinct invoice ids carrying the id (limit 2). Two or more is the
+  same silent 204 as none, logged as a warning without the id: an ambiguous
+  id is never resolved by picking one, because the wrong invoice moving to
+  `paid` or `failed` is worse than a status a person can still see in the ERP.
+- **Scoped to the realm the push recorded.** An invoice whose push stamped
+  `state_data["erp_realm"]` counts only when it equals the realm the tenant's
+  connection names now (`erp_link_realm.connection_realm`), so an id issued by
+  another ERP, or another company of the same ERP after a reconnect, matches
+  nothing. A push from before realms were recorded has none and is judged by
+  the id alone, as §392's correlation path judges it; a connection that names
+  no realm (`mock`) matches only those.
+- **Same row lock, re-checked under it.** The id found is locked through
+  `get_invoice_for_update`, like the correlation path, and the handler stops if
+  the locked row no longer carries the document id: a confirmed re-push can
+  replace the bill between the lookup and the lock.
+- **Indexed, not unique.** Migration 0132 adds `ix_invoices_erp_document_id`
+  (tenant DBs; declared `index=True` on the model for `create_all`). A unique
+  index was rejected: a provider repeating an id would then make the second
+  confirmed push fail to save, where today the webhook refuses the ambiguous
+  id and the push still records what the ERP returned.
+
+**Rejected.**
+
+- *Matching `state_data["erp_reference"]` instead.* It falls back to the
+  `"UNKNOWN"` placeholder and is unindexed JSON; the column holds only the
+  ERP's real id (§302).
+- *Taking the newest of several matches.* Recency says nothing about which
+  invoice the ERP meant.
+
+**Cost.** A provider that reports a bill under an id no confirmed push
+recorded (or two invoices sharing one) still has those events dropped
+silently; they are visible only in the ERP. That is the same outcome as before
+for them, and correct for everyone else.
+
+Tests: `tests/test_erp_webhook_transitions.py` (an unusable id never opens the
+tenant DB, signed or not; a forged delivery never reaches the lookup; over a
+real DB, one match moves with and without a recorded realm, two invoices
+carrying the id are both left alone, an id pushed to another realm matches
+nothing, and a forged delivery moves nothing). Migration 0132 is held by
+`tests/test_migration_model_index_parity.py` and `tests/test_alembic_revision_ids.py`.
+
+## 418. A bulk approve is a review decision: `POST /bulk/status → approved` skips a row not in `ready_for_review` (closes the §305 follow-up, round 12, 2026-11-14)
+
+**Context.** §305 put the four single review doors (in-app approve / reject,
+email, Slack, Teams) on one predicate, `review.awaiting_review`, and left
+`POST /api/invoices/bulk/status` with `status=approved` able to move a `new`
+draft (and a `pending` row the reader was still on) straight to `approved`,
+through the same approve gates. Segregation and the money limits held there;
+the review stage did not. Whether that was a manager's deliberate direct
+approval or a hole was left as a product call in `docs/followups.md`.
+
+**Decision.** It is a hole. The bulk `approved` branch calls
+`review.refuse_unless_in_review` for each row before the version check and
+before `approve_invoice`, and reports a refusal as that row's skip through
+`_refused_skip`: code `invoice_not_in_review`, the four doors' own code and
+sentence, so the web list and every locale already state it
+(`frontend/src/lib/api/codedRefusals.ts` → `refusal.invoiceNotInReview`). An
+approval by a person now always follows a review stage, whichever door it came
+through. The check answers before the stale-version skip: being a draft is the
+fact the approver needs, not that its version was not bound.
+
+**What else moves an invoice to `approved` without review, and why it stays.**
+
+- `/complete`'s amount floor (`settings.approval.auto_approve_below`,
+  `new → approved` as "system (below threshold)") and extraction's
+  auto-approve (`pending → approved`, `decide_auto_approve`) are org policy
+  that removes the review step on purpose, under their own gates (segregation,
+  the once-approved rule of §379, an entry-only caller never firing either).
+  They are not a person deciding an invoice, so this rule does not reach them;
+  `approved_by` names the system on both.
+- The exception agents (`gl_coding`, `amount_mismatch`, `missing_po`,
+  `multi_po_split`) already re-check `ready_for_review` under the row lock
+  before `approve_invoice`.
+- `workflow_engine.VALID_TRANSITIONS` keeps `new → approved` and
+  `pending → approved`: the two policies above walk them. The edge is not the
+  door; the doors are.
+
+**Rejected.**
+
+- *Keeping `new → approved` in bulk as a manager's direct approval.* It is the
+  one path where a person signs an invoice nobody submitted for review, and the
+  web picker never offered it (`VALID_TRANSITIONS` on the client has no
+  `new → approved`), so only the API and the mobile sheet could reach it.
+- *Calling `refuse_unless_in_review` inside `approve_invoice` itself.* Every
+  caller already checks first (the single door, the three message doors, the
+  agents), so it would change no outcome today while breaking the service-level
+  tests that drive `approve_invoice` with bare namespaces. The doors-check
+  pattern is the established one; a new approval door must call it, as the bulk
+  one now does.
+
+**Cost.** A script that bulk-approved drafts now gets them back as skips and
+has to submit them first (`ready_for_review`), which runs `/complete`'s
+required-field check.
+
+Tests: `tests/test_bulk_status_controls.py` (`new`, `pending` and `rejected`
+rows skipped with `invoice_not_in_review` beside a `ready_for_review` row that
+still lands; the skip answers before the version check);
+`frontend/src/lib/api/codedRefusals.test.ts` (the skip row localizes in every
+shipped locale).
+
+## 419. The outbound-host guard resolves httpx through imports, and an `org_host_client` adopter's checked URL must trace to its per-org key (§334 / §339 / §345 follow-up, 2026-11-14)
+
+**Context.** Two gaps in `tests/test_url_safety.py`, recorded in
+`docs/followups.md` and triggered by §406's change to that file.
+`_plain_client_calls` counted only the literal `httpx.AsyncClient(...)` /
+`httpx.Client(...)` spelling, so `import httpx as h`, `from httpx import
+AsyncClient [as X]`, `from httpx import Client` and the module-level helpers
+(`httpx.get`, `httpx.post`, `httpx.stream`, each of which opens a plain
+`httpx.Client`) built an unpinned client in a guarded module without moving the
+count. And the `org_host_client` adopter check passed as long as the factory was
+called, whatever URL it was handed: `org_host_client(_BASE_URL, ...)` followed
+by a request to the per-org `base_url` would have vetted a constant and passed.
+
+**Decision.**
+
+- **Every spelling counts.** `_module_bindings` reads a module's imports
+  (module-wide, including those inside functions) to find each local name bound
+  to `httpx` or to one of its attributes, and `_plain_client_calls` counts any
+  call that resolves to `AsyncClient`, `Client`, `request`, `stream` or a verb
+  helper. The same resolution names `url_safety`'s factories, so the adopter
+  checks and the "no blocking `pinned_client` in a coroutine" guard also see
+  `url_safety.pinned_client(...)` and aliased imports, not only the bare name.
+- **The checked URL traces to the per-org key.** `_ORG_HOST_MODULES` now maps
+  each module to the config key its host is read from (`gateway_url`,
+  `base_url`, `webhook_url`). `_config_keys` follows the URL argument of every
+  `org_host_client` call through locals, `self` attributes assigned anywhere in
+  the class, `self` helper methods' returns, `or` fallbacks, f-strings, `str()`
+  and string methods, down to `config.get("<key>")` / `cfg[...]` /
+  `self.config.get(...)`. The key must be among what it reaches; a constant, a
+  `settings.*` value, or a `.get` on anything but the adapter's config reaches
+  nothing.
+- **Bespoke adopters stay in the guarded set.** `pinned_async_client` takes no
+  URL: it vets whatever it is asked to dial. So for `_ORG_HOST_BESPOKE` the
+  check is that each module still imports `url_safety` (which keeps it under
+  the plain-client count) and still calls a pinned factory.
+
+The stricter guard found no unguarded client in `backend/app`: no module
+spells httpx any other way today. Each new form was proved by a scratch module
+under `app/services/` (the count test fails on it) and by rewriting the
+Clearbit and PEPPOL adopters to vet `_BASE_URL` / `settings.peppol_gateway_url`
+(the trace test fails on each); both were reverted. The resolver and the
+tracer have their own table tests
+(`test_plain_client_count_resolves_every_import_spelling`,
+`test_config_key_tracer_follows_only_the_per_org_value`).
+
+**Rejected.**
+
+- *Tracing the request URL as well as the factory's.* The client is pinned, so
+  a request to any host is vetted at connect anyway; the up-front check exists
+  for a clean refusal, and the factory's argument is the thing that can be
+  pointed at the wrong value.
+- *A data-flow library (or running the code) instead of an AST walk.* The
+  adopters use a handful of shapes and the guard has to run in a unit test with
+  no I/O. A shape the tracer cannot follow fails closed (the key is not
+  reached), so an unusual adopter gets a failing test, not a silent pass.
+- *Counting bare references to `httpx.AsyncClient` (a factory passed around
+  uncalled).* Type annotations use the same name throughout the adapters;
+  counting them would bury the signal. Nothing in `app/` passes the class as a
+  value today.
+
+## 420. The invoice's approvers may not clear its `po_mismatch` or `quality_hold` in the queue (widens §169 at the operator's call; closes a `docs/followups.md` entry, round 12, 2026-11-14)
+
+**The gap.** Since §389 a goods receipt, and since §401 a passing inspection,
+that an invoice's approver records after approving no longer lifts the
+invoice's hold. The queue was open: `exception_lifecycle.segregation_refusal`
+refused only the implicated set and the raiser (§169), so the same approver
+could resolve or dismiss the held `po_mismatch` / `quality_hold` by hand, on
+their own word rather than on an independent receipt or inspection. §389 and
+§401 bound an approver who did not use the queue, not one set on it. §169 had
+deliberately left approvers able to clear, so closing this needed that policy
+widened; the operator made that call.
+
+**Decision.** A third refusal axis, for `po_mismatch` and `quality_hold` only
+(`exception_lifecycle.APPROVER_SEGREGATED_TYPES`), naming the invoice's
+approvers: `approval_chain.approver_ids`, the approval of record
+(`Invoice.approved_by_user_id`, migration 0129) ∪ every level approval on the
+invoice's workflow chain. Its code is `segregation_approver`, with its own
+sentence on the 403 and its own translation on web and mobile, because the
+reader has to be told which of their duties collides: "a user involved in
+creating this invoice" is wrong for an approver.
+
+Everything else mirrors §169 / §170 exactly:
+
+- `resolve` / `dismiss` only. `escalate` stays open: an escalated hold still
+  blocks the run, and it is the refused approver's exit.
+- `settings.exceptions.require_segregation: false` lifts this axis with the
+  other two; the approval step's own `require_segregation` does not govern the
+  queue, for §169's reason. That matches §389, where the queue's opt-out
+  already lifted the reverse-order receipt rule.
+- NULL permissive: an invoice nobody has approved, or one approved before
+  migration 0129 whose approval names nobody, refuses nobody on this axis.
+- Every door `segregation_refusal` serves reads it: the single and bulk
+  resolve (bulk as a per-row `skipped` reason), the queue's per-row verdicts
+  (list and detail), the payments queue's `clear_refusal`, `clearance_stands`
+  (an approver's own earlier clearance no longer suppresses a re-raise, as
+  §367 / §374 do for a decider implicated later), and the agent coordinator.
+
+**Why only those two types.** They are the holds a receipt or an inspection
+evidences, and the point of §389 / §401 is that the approver cannot supply
+that evidence for their own invoice. A `duplicate`, `fraud_flag`,
+`line_total_mismatch` or `payment_reconciliation` is not lifted by a receipt
+or an inspection, and an AP manager approving an invoice and then judging its
+duplicate flag is not the conflict this closes. Widening to every blocking
+type would be a second policy nobody asked for.
+
+**The chain is read, not just the row.** The followup noted that
+`approved_by_user_id` lets the pure predicate read the approval of record
+without I/O. A level approver is still an approver, in §389's set and here, so
+the predicate takes the invoice's `WorkflowInstance` as an optional argument.
+The doors that judge a page at once batch it in one query
+(`workflow_instances_for`, only for `po_mismatch` / `quality_hold` rows), the
+single-row doors fetch it (`workflow_instance_for`, no query for any other
+type), and `record_decision` loads it itself when a caller did not pass one
+and the decision is in scope, for the reason it already loads the invoice: a
+control that weakens when an optional argument is omitted is the
+omission-reads-as-oversight failure. A caller that omits it from a *verdict*
+reads the approval of record alone, never nothing.
+
+**The agent judges against who had approved before the run.** Agents inherit
+the triggering human's refusal (§170), so a run triggered by someone who had
+already approved the invoice escalates. But the `po_mismatch` resolvers
+(amount, missing PO, multi-PO split) themselves approve the invoice on the
+triggering human's behalf, and only then is the row resolved through
+`record_decision`. Judged on the row after the apply, every auto-resolution
+would be refused, and as a bare 403 after the savepoint, the regression §170's
+handler exists to prevent. So the coordinator reads `approver_ids` before the
+apply and passes that set to both the pre-check and `record_decision`
+(`approvers=`). This is not an exemption: that resolve rests on the re-match
+no longer finding the mismatch (`decision.refound`) and on no implicated
+receipt, approvers included, lifting the hold (`_receipts_implicated`, §389),
+the same evidence the PO-match auto-close would have closed the row on. The
+human's word is not involved. `quality_hold` has no resolver.
+
+**Rejected.**
+
+- *Reading only `approved_by_user_id`.* Cheaper, but it leaves a level
+  approver of a multi-level chain free to clear the hold their own level
+  signed, and it would disagree with §389's set about who an approver is.
+- *Refusing the approval instead of the clearance* (an approver may not
+  approve an invoice whose hold they cleared). The hold is the fail-closed
+  side, as §389 chose. Refusing approval would let the clearance stand and
+  release the payment whenever someone else approved.
+- *Exempting `via="agent"` from the approver axis.* That would let an approver
+  who triggers the run clear their own hold through the agent, the laundering
+  route §170 closed.
+
+**Cost.** A manager who both approves invoices and works the queue can no
+longer close the PO or inspection hold on an invoice they approved, and a hold
+they cleared before approving comes back at the next refresh after they
+approve. Either a colleague clears it or the evidence arrives from someone
+else (a receipt or inspection recorded by another user lifts it in that
+request). A one-person AP team has the per-org opt-out, as for §169.
+
+Tests: `backend/tests/test_exception_resolve_segregation.py` (the predicate on
+the approval of record and on a chain level approver, escalate open, the type
+scope, the opt-out, axis order, `clearance_stands`, the single-row 403 and
+verdicts, bulk per-row with a chain, the payments queue's `clear_refusal`);
+`backend/tests/test_exception_agent_queue_segregation.py` (an approver's run
+escalates; the run's own approval does not refuse its resolve);
+`backend/tests/test_queue_action_verdicts.py` (verdict / resolve parity);
+`frontend/src/lib/api/codedRefusals.test.ts` and
+`mobile/test/l10n/coded_refusal_messages_test.dart` (the code is stated).
+
+## 421. `invoice.approval_recalled` names no person, like `invoice.approved` (§414 amendment, round 12, 2026-11-15)
+
+**Context.** §414 added `invoice.approval_recalled` with a `recalled_by_user_id`
+field: the recaller's opaque control-plane id. No other outbound event names a
+person, and `backend/docs/public-api.md` promised PII-free payloads.
+
+**Decision.** The field is removed before the event ships. The payload is
+`invoice.approved`'s fields plus `recalled_from`; who recalled and why stay in
+the tenant's audit trail (`invoice.approval_recalled` audit row), where access
+is governed by RBAC and retention, not copied to every subscriber endpoint.
+
+**Why.** Data minimisation: an integrator that acted on an approval needs to
+know it was withdrawn and what state the invoice is in, not by whom. An opaque
+id is still personal data once a subscriber can map it (they can via
+`/api/v1` users), and a new person reference in a third-party-bound payload
+would need the ROPA and DPA flow-down reviewed. Parity with `invoice.approved`
+keeps the catalogue's rule simple: events describe documents, not people.
+
+**Rejected.** Keeping the id (§414's original choice): convenient for an
+integrator wanting to notify the recaller, but no integrator has asked, and
+adding a field later is non-breaking while removing one is breaking.
+`test_webhook_event_catalogue.py` now asserts no `user` field in the recall
+payload.
+
+## 422. An approval re-judges the holds its approver cleared first, in the same transaction (amends §420, round-12 money-path review, 2026-11-15)
+
+**The gap.** §420 refuses an invoice's approvers clearing its `po_mismatch` /
+`quality_hold`, but only in one order. In the other, X resolves the open hold
+while X is not yet an approver (allowed), then X approves. Approval gates on no
+blocking exception, `review.approve_invoice` refreshes warnings only when
+corrections are sent, and the payment run reads only open and escalated rows
+(`payment_runs.blocking_exception_types`), so the invoice entered a run and was
+paid on X's word alone. §420's **Cost** paragraph says such a hold "comes back
+at the next refresh after they approve". That is wrong: no refresh is
+guaranteed between the approval and a run. This entry corrects it; §420's body
+is left as written.
+
+**Decision.** Every site that stamps an approver re-judges the invoice's closed
+`po_mismatch` / `quality_hold` rows in the same transaction, right after the
+stamp: `review.approve_invoice` after `advance_approval_chain` (each chain
+level) and after `record_final_approval` (the single and bulk approve, the
+email / Slack / Teams / mobile doors and the exception agents all go through
+it; bulk since §418), `/complete`'s amount floor, and extraction's
+auto-approve. The helper is `invoice_warnings.reraise_holds_cleared_by_an_approver`.
+A closed row is a candidate only when a person decided it and its stamp still
+equals the invoice's current fingerprint, and `_ensure_exception` raises it
+again with the row's own finding. That is the question the detector's
+suppression already asks (§366 / §367): `_ensure_exception` raises nothing
+while an open row of the type holds the invoice, and nothing while some
+clearance of that finding still stands (`exception_lifecycle.clearance_stands`,
+which reads the approver axis since §420). A colleague's clearance therefore
+survives the approval, and only the new approver's own clearance is undone.
+`backend/tests/test_exception_resolve_segregation.py` pins each stamping site
+by AST, so a new one cannot skip the re-judge.
+
+**Why not run `refresh_warnings` inside the approval.** It would work for the
+plain case, but it re-runs every detector in the middle of an approval, and the
+PO match is the one that matters here. The multi-PO split resolver writes its
+`po_match` by hand and then approves. A re-match there reads its combined
+reference as an unknown PO and marks the row the agent is deciding `refound`,
+so the coordinator escalates a resolve it had judged correctly against the
+approvers from before its run (§420). The re-judge runs no detector. A
+stale-stamped clearance suppresses nothing, so the next refresh judges the new
+facts with no help from it. A row an agent or a detector closed has no stamp
+(`_bind_fingerprint_to_decision`), so the re-judge never touches one.
+
+**The agent's own resolve stands.** An agent's apply approves while the row it
+is deciding is still open, so the re-judge raises nothing beside it, even when
+the triggering human holds an older clearance stamped as the invoice hashes
+now. The coordinator then resolves that row, judged against the approvers from
+before the run (§420), and the resolve is not undone.
+
+**Rejected.**
+
+- *Refusing the approval* to someone who cleared the hold. §420 rejected this
+  already: refusing the approval would leave the clearance standing, and it
+  would release the payment as soon as anyone else approved.
+- *Re-checking at the payment run.* The run would have to re-ask
+  `clearance_stands` of every closed row, for every invoice, on every build,
+  and the queue would show the hold as clear until someone built a run. Raising
+  the hold at the approval keeps "an open row blocks" as the one rule the queue
+  and the builder share (§319).
+
+**Cost.** None beyond §420's: a manager who cleared a hold and then approved
+the invoice finds the hold open again at once, for a colleague to clear or for
+independent evidence to lift. On `/complete`'s floor the re-judge rarely finds
+a candidate: the floor approves a `new` invoice, and the refresh on `new`
+clears `po_match`, so an earlier clearance's stamp no longer matches.
+
+Tests: `backend/tests/test_exception_resolve_segregation.py` (clear then
+approve: the hold is back and the run builder 409s on it, for both types; a
+colleague's clearance survives the approval; a chain level approver re-raises;
+an agent run that approves still resolves its own row with no second hold; the
+AST pin on every stamping site).
+
+## 423. A document-id webhook match trusts a pre-realm push only under the push's own legacy rule (§417 amendment, round 12, 2026-11-14)
+
+**Context.** §417 let `POST /api/erp/webhook/{erp_type}` name its invoice by
+`erp_document_id`, scoped to the realm the push recorded, but judged an
+invoice whose push recorded **no** realm by the id alone. Every other reader
+of a pre-realm (NULL) link — the push (`services/erp`), the payment
+write-back (`erp_payment_writeback`) and the PO receipt push — trusts it only
+while `erp_link_realm.legacy_links_trusted(erp_config, realm)` holds: the
+realm migration 0115 recorded for the tenant is still the one it is connected
+to (§284, §356). The round's money-path review found the gap. ERP document ids
+are small per-ERP numbers, not UUIDs: invoice A pushed to NetSuite before
+realms were recorded keeps `erp_document_id = "1042"`; the tenant moves to
+Business Central; a correctly signed BC `Paid` for BC's own bill 1042 matched
+A and moved it `posted_in_erp → paid`, so the payment queue never paid the
+supplier.
+
+**Decision.**
+
+- `api/erp_webhook._invoice_id_by_document` matches an invoice whose push
+  recorded the current realm, and a NULL-realm invoice **only when
+  `legacy_links_trusted(erp_config, realm)`** — the same helper, called the
+  same way, as the push. Once the tenant has connected anywhere else, a
+  pre-realm invoice is no candidate at all, so it neither matches nor makes a
+  current-realm bill with the same id ambiguous.
+- A connection that names no realm (`mock`, an OAuth ERP with no completed
+  consent) matches nothing. §417 let it match NULL-realm invoices; with no
+  company to attribute an id to, no id can be trusted.
+- §408's order and the rest of §417 are unchanged: the lookup still runs only
+  after the signature verifies, every refusal is the same silent 204, and two
+  candidates are still refused.
+
+**Why.** §417's "judged by the id alone, as §392's correlation path judges
+it" carried the correlation path's reasoning to an id that does not share its
+property: a correlation id is our UUID and cannot collide across ERPs, a
+document id is theirs and routinely does. One legacy rule for every reader of
+a NULL realm keeps the webhook from being the single door where a company
+switch is ignored.
+
+**Rejected.** Never matching NULL-realm invoices: a tenant that never changed
+company would lose every document-id delivery for invoices pushed before
+migration 0115, which the push itself still treats as live. Matching them only
+when no realm-stamped candidate exists: that still lets another ERP's bill
+1042 move A whenever the new ERP has not yet been pushed a 1042 of ours.
+
+Pinned in `backend/tests/test_erp_webhook_transitions.py`
+(`test_a_pre_realm_push_is_matched_only_while_its_legacy_realm_is_trusted`,
+`test_a_pre_realm_push_and_a_current_one_sharing_an_id_resolve_to_the_current`,
+`test_a_document_id_matches_nothing_when_no_company_can_be_named`).
+
+## 424. The hand-link search is offered on a per-vendor verdict, and a vendor already linked in the connected company cannot search (§415 follow-up, round 12, 2026-11-14)
+
+**Context.** §415 shipped `search_available` on `GET /api/vendors/{id}/erp-links`:
+whether the connected ERP can be searched at all, the same answer for every
+vendor. A vendor already linked in the connected company was therefore still
+offered **Find this vendor in the ERP**, and every Link it pressed was refused
+`vendor_erp_link_exists`, including the second one, right after a link it had
+just made. That is the page restating half of the endpoint's rule, the drift
+issue #575 retired (`frontend/docs/ui-patterns.md` § Whether to offer an
+action).
+
+**Decision.**
+
+- **The read answers a verdict, not a capability.** `search_available` is
+  replaced by `search_refusal`: `null`, or the coded refusal
+  `vendor_erp_search_unavailable` / `vendor_erp_link_exists`, computed by
+  `vendor_erp_manual_link.search_refusal`, which the search and the link both
+  raise from. The link and unlink responses carry the vendor's new verdict, so
+  the panel closes the moment a link lands and reopens when that company's
+  link is cleared. The page explains `vendor_erp_link_exists` (unlinking is
+  something the reader can do, in the same panel) and hides on anything else.
+- **The search refuses a vendor already linked here.** Its only purpose is
+  the link, which would be refused; a search that answers candidates nobody can
+  link is the dead end the panel just stopped offering.
+- **The link refuses it before reading the record from the ERP**, and again
+  under the locks as before, so a refused link costs no provider call.
+
+**Rejected.** Keeping `search_available` beside the verdict: a second signal
+the page could read instead (ui-patterns: never add a second check beside the
+verdict). Hiding the panel without a reason for a linked vendor: the reader
+would not know why the search they used yesterday is gone, nor that Unlink is
+the way back to it.
+
+**Enforced by** `backend/tests/test_vendor_erp_manual_link.py` (verdict / search
+/ link parity per link state, the refused link reads nothing, unlink reopens it)
+and `frontend/tests-e2e/vendors/erp-unlink.spec.ts` (the panel is gone after a
+link; a refused vendor gets the sentence or nothing).

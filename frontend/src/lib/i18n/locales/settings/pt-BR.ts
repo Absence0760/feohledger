@@ -428,6 +428,8 @@ export const messages = {
 	'org.erp.oauth.needsReconnect': 'A conexão com o {erp} expirou. Reconecte para continuar enviando faturas.',
 	'org.erp.oauth.reconnect': 'Reconectar ao {erp}',
 	'org.erp.oauth.expiresSoon': "A conexão com o {erp} expira em {date}. Reconecte antes disso para continuar enviando faturas e sincronizando pagamentos.",
+	'org.erp.oauth.scopeGapPayments': "Esta conexão com o {erp} foi feita antes de o FeohLedger pedir permissão para ler e lançar pagamentos. Até você reconectar para concedê-la, pagamentos feitos no {erp} só são detectados quando a própria conta muda, e pagamentos feitos pelo FeohLedger não são lançados no {erp}. Reconecte logo, ou o FeohLedger pode deixar passar uma conta paga no {erp}.",
+	'org.erp.oauth.scopeGap': "Falta a esta conexão com o {erp} uma permissão que o FeohLedger agora solicita. Reconecte para concedê-la.",
 	'org.erp.usage.ofShare': "Chamadas à API do {erp} hoje: {used} da sua cota diária de {limit}. A contagem é zerada às {reset}.",
 	'org.erp.usage.ofQuota': "Chamadas à API do {erp} hoje: {used} das {limit} diárias da sua chave de assinatura. A contagem é zerada às {reset}.",
 	'org.erp.usage.noLimit': "Chamadas à API do {erp} hoje: {used}. A contagem é zerada às {reset}.",
@@ -813,7 +815,7 @@ export const messages = {
 	'admin.webhooks.title': 'Webhooks',
 	'admin.webhooks.createWebhook': '+ Criar webhook',
 	'admin.webhooks.hintPre':
-		'Webhooks de saída enviam eventos da plataforma (fatura aprovada, pagamento liquidado, exceção gerada) ao seu endpoint como JSON assinado. O segredo de assinatura HMAC de cada inscrição é exibido apenas uma vez na criação — guarde-o em local seguro e use-o para verificar o cabeçalho',
+		'Webhooks de saída enviam eventos da plataforma (fatura aprovada, aprovação revogada, pagamento liquidado, exceção gerada) ao seu endpoint como JSON assinado. O segredo de assinatura HMAC de cada inscrição é exibido apenas uma vez na criação — guarde-o em local seguro e use-o para verificar o cabeçalho',
 	'admin.webhooks.hintPost': '.',
 	'admin.webhooks.subscriptions': 'Inscrições',
 	'admin.webhooks.loadingSubs': 'Carregando webhooks…',

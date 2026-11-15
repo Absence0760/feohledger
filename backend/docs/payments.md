@@ -2471,7 +2471,17 @@ stays open for a person but is never recorded.
   itself; the caller then also needs the exception queue's role and must pass
   its segregation rule. The recorder's segregation rule always applies.
   `GET /api/exceptions` (and the detail) report the caller's verdict as
-  `record_erp_payment_refusal`.
+  `record_erp_payment_refusal`. The record books the figure the row states
+  (`erp_report.amount` / `amount_currency`), and its kept breakdown
+  (`payment_parts`) when that adds up; the dialog shows both beside the
+  invoice's own amount. `method` may be omitted only where the row's
+  `erp_payment_split_stands` is true (the breakdown adds up exactly and spans
+  several rails, so it is the record whatever rail is named; the dialog shows
+  the split read only and sends none, and the audit's `method_stated` is
+  null). Anywhere else an omitted rail is 422 `erp_payment_method_required`,
+  since the person's rail is then the record (decisions §396, §413). The 201
+  body is the `Payment`, whose `rail_breakdown` (each part's rail or null and
+  amount) explains a split payment's `method: null`.
 - *Any other record.* Whichever door records the invoice paid, `_complete`
   resolves its live `paid_not_recorded` rows (`via: payment_recorded`).
 Segregation of duties doesn't apply — there is no human actor. The payment is
@@ -2951,7 +2961,7 @@ and clear.
 | `blocked_reason` | the stable, PII-free reason code — set for a `required_method` row too, so the UI can say WHY the rail is pinned |
 | `required_method` | the one rail this invoice is still payable on, or `null` |
 | `record_outside_refusal` | a different question: the code `POST /api/payments/record-outside` would refuse this row with, or `null` — see § Recording a payment made outside FeohLedger |
-| `blocking_exception` | `{id, exception_type, clear_refusal}` of the open payment-blocking exception behind the row (the type `blocked_reason` names), or `null`. `clear_refusal` is `exception_lifecycle.segregation_refusal` for THIS caller resolving it (`segregation_implicated` / `segregation_raiser`), so the page can say someone else must clear it (decisions §319) |
+| `blocking_exception` | `{id, exception_type, clear_refusal}` of the open payment-blocking exception behind the row (the type `blocked_reason` names), or `null`. `clear_refusal` is `exception_lifecycle.segregation_refusal` for THIS caller resolving it (`segregation_implicated` / `segregation_raiser` / `segregation_approver`, decisions §420), so the page can say someone else must clear it (decisions §319) |
 | `erp_reported_payment` | `{exception_id, erp_name, method, reference, paid_on}` from the newest live `paid_not_recorded` exception on the invoice, or `null` — what "Record as paid" pre-fills |
 | `selectable_total` | rows "select all N matching" resolves (`/queue/ids`) — excludes blocked AND rail-pinned rows |
 | `blocked_total` | rows whose checkbox is disabled, i.e. exactly the `blocked` ones |

@@ -748,6 +748,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Segregación de funciones: un usuario que participó en la creación de esta factura no puede resolver una excepción que bloquea su pago. Escálela o pida a otro usuario que decida.';
 
   @override
+  String get codedRefusalExceptionSegregationApprover =>
+      'Segregación de funciones: un usuario que aprobó esta factura no puede también resolver su retención por recepción o inspección. Escálela o pida a otro usuario que decida.';
+
+  @override
   String get invoiceDetailApproved => 'Factura aprobada';
 
   @override

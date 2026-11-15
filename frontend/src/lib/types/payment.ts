@@ -267,6 +267,12 @@ export function paymentMethodLabelKey(method: string): MessageKey | null {
 	return PAYMENT_METHOD_LABEL_KEYS[method as PaymentMethod] ?? null;
 }
 
+/** One part of a payment's kept rail breakdown (`schemas/payment.py::PaymentRailPart`). */
+export interface PaymentRailPart {
+	method: string | null;
+	amount: MoneyAmount;
+}
+
 export interface Payment {
 	id: string;
 	/**
@@ -295,6 +301,12 @@ export interface Payment {
 	/** `schemas/payment.py::PaymentResponse.amount` is `MoneyAmount` — a JSON number on the wire. */
 	amount: MoneyAmount;
 	method: PaymentMethod | null;
+	/** Which rails paid how much, when the ERP stated a breakdown that stands
+	 *  (`PaymentResponse.rail_breakdown`, migration 0130, decisions §396): what
+	 *  explains `method: null` on a payment made on two rails. Each part's
+	 *  `amount` is in the payment's `currency`; `method` null = not stated.
+	 *  Null or absent when no breakdown is kept. */
+	rail_breakdown?: PaymentRailPart[] | null;
 	status: PaymentStatus;
 	reference: string | null;
 	/**

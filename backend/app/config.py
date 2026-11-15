@@ -425,6 +425,23 @@ class Settings(BaseSettings):
     # Lead times, in days, for the "reconnect soon" notice. Each is sent once
     # per expiry date Intuit reports.
     erp_connection_expiry_notice_days: list[int] = [30, 7, 1]
+    # Auto-send recovery (decisions §411, `services/erp_auto_send_sweep`): an
+    # approval whose "send to the ERP on approval" job never ran (the process
+    # died between the approval's commit and the post-commit push) is found and
+    # pushed through `erp_send.send_after_approval`, the approval's own path.
+    # Off by default like every sweep that calls out. Only approvals older than
+    # the delay (so the approval's own job has had its chance) and younger than
+    # the lookback (so turning it on never pushes old approvals nobody expected
+    # to move) are taken, oldest first, at most `batch_size` per tenant a tick.
+    erp_auto_send_sweep_enabled: bool = False
+    erp_auto_send_sweep_interval_seconds: int = 300
+    # The floor keeps the sweep from racing an approval whose own job is still
+    # running. Neither the push nor a refusal can double (both are decided
+    # under the invoice row lock), so it is about not doing redundant work, and
+    # about lambda audit mode, where a refusal row lands late.
+    erp_auto_send_sweep_delay_seconds: int = Field(default=300, ge=60)
+    erp_auto_send_sweep_lookback_hours: int = Field(default=24, ge=1)
+    erp_auto_send_sweep_batch_size: int = Field(default=100, ge=1)
 
     # Commerce / inventory sync (decisions §273, `services/commerce_sync.py`).
     # OPERATOR-only override that points EVERY commerce adapter at one fake

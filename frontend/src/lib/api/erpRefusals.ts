@@ -155,7 +155,9 @@ const KEYS: Record<string, MessageKey> = {
 	payment_account_not_mapped: 'erpRefusal.paymentAccountNotMapped',
 	bill_not_in_erp: 'erpRefusal.billNotInErp',
 	payment_exceeds_balance: 'erpRefusal.paymentExceedsBalance',
-	bill_payment_voided: 'erpRefusal.billPaymentVoided'
+	bill_payment_voided: 'erpRefusal.billPaymentVoided',
+	// A Xero consent from before `accounting.payments` (decisions §415)
+	payments_scope_missing: 'erpRefusal.paymentsScopeMissing'
 };
 
 /** The sentences that name Intuit's numeric fault code as `{code}`. */

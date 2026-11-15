@@ -751,6 +751,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas résoudre une exception qui bloque son paiement. Escaladez-la ou demandez à un autre utilisateur de décider.';
 
   @override
+  String get codedRefusalExceptionSegregationApprover =>
+      'Séparation des tâches : un utilisateur ayant approuvé cette facture ne peut pas aussi lever son blocage de réception ou d\'inspection. Escaladez-la ou demandez à un autre utilisateur de décider.';
+
+  @override
   String get invoiceDetailApproved => 'Facture approuvée';
 
   @override

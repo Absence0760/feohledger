@@ -374,10 +374,18 @@ async def transition_invoice(
     # Best-effort outbound-webhook emit (the push counterpart of the /api/v1
     # pull surface). Same chokepoint as the notification hook — keyed off the
     # resulting status so every path that converges on `approved`/`paid` emits
-    # exactly once. `emit_event` opens its own control-plane session, never
-    # raises into here, and is a silent no-op when FEOH_WEBHOOKS_ENABLED is off.
+    # exactly once, and off the action for the recall, whose resulting status
+    # (`ready_for_review`) other transitions share. `emit_event` opens its own
+    # control-plane session, never raises into here, and is a silent no-op when
+    # FEOH_WEBHOOKS_ENABLED is off.
     try:
-        await _maybe_emit_webhook(invoice, target_status, occurrence_id=occurrence_id)
+        await _maybe_emit_webhook(
+            invoice,
+            target_status,
+            occurrence_id=occurrence_id,
+            action_name=action_name,
+            old_status=old_status,
+        )
     except Exception:  # noqa: BLE001 — a webhook emit must never break the transition
         _log.exception("webhook emit hook failed for invoice transition to %s", target_status.value)
     return invoice
@@ -388,18 +396,32 @@ async def _maybe_emit_webhook(
     target_status: InvoiceStatus,
     *,
     occurrence_id: uuid.UUID | None = None,
+    action_name: str | None = None,
+    old_status: str | None = None,
 ) -> None:
     """Map an invoice status transition to an outbound webhook event + emit.
 
-    Only `approved` → `invoice.approved` and `paid` → `payment.settled` are
-    emitted here (`exception.raised` is emitted from
-    `exception_service.create_exception`).
+    Emitted here: `approved` → `invoice.approved`, `paid` → `payment.settled`,
+    and the recall (:data:`RECALL_ACTION`, the one action allowed to walk
+    :data:`RECALL_EDGES`) → `invoice.approval_recalled`, carrying the status
+    it was recalled from and who recalled it (decisions §374, §414). The recall
+    is matched on the action, not the resulting status, because
+    `ready_for_review` is also where a resubmit or a fresh extraction lands.
+    `exception.raised` is emitted from `exception_service.create_exception`.
 
     `occurrence_id` is the caller's per-transition id and becomes the event's
     dedupe key. Re-emitting the SAME transition (same id) still dedupes; a NEW
     transition mints a new id and therefore a new, deliverable event.
     """
-    if target_status is InvoiceStatus.approved:
+    if action_name == RECALL_ACTION:
+        from app.services.webhooks import emit_invoice_approval_recalled
+
+        await emit_invoice_approval_recalled(
+            invoice,
+            recalled_from=old_status,
+            occurrence_id=occurrence_id,
+        )
+    elif target_status is InvoiceStatus.approved:
         from app.services.webhooks import emit_invoice_approved
 
         await emit_invoice_approved(invoice, occurrence_id=occurrence_id)

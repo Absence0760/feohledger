@@ -17,7 +17,8 @@ Connection metadata lives in ``settings.erp.oauth``::
         "expires_at": "<ISO-8601 UTC>",
         "external_tenant_id": "...",  # QBO realmId / Xero tenantId / Sage business id
         # plus org_id, connection_id, client_source, connected_at,
-        # refresh_token_expires_at, needs_reconnect: see services/erp_oauth
+        # refresh_token_expires_at, needs_reconnect, scope_gaps: see
+        # services/erp_oauth
     }
 
 The tokens are sealed in ``provider_credentials`` and never reach an adapter's
@@ -295,6 +296,15 @@ class OAuthErpAdapter(ErpAdapter):
             erp_settings=erp_settings,
         )
         return clean_companies([(value, value)]) if value else []
+
+    def scope_gaps(self) -> frozenset[str]:
+        """The coded permissions this connection's consent was found not to
+        cover (``settings.erp.oauth.scope_gaps``, decisions §415). An adapter
+        skips a call it knows the consent refuses, and refuses a write it
+        cannot make, rather than spending a request on a certain 401/403."""
+        from app.services import erp_oauth
+
+        return frozenset(erp_oauth.scope_gaps(self.config.get("oauth")))
 
     def external_tenant_id(self) -> str:
         """The provider-side company id captured at consent (QBO ``realmId`` etc.)."""

@@ -14,6 +14,7 @@ import {
 	missingRequired,
 	oauthAttentionKey,
 	oauthConnectionState,
+	oauthScopeGapKeys,
 	optionLabelKey,
 	withoutOAuthReturn,
 	type ErpOAuthStatus,
@@ -877,6 +878,45 @@ describe('statusSyncStartedKey', () => {
 			}
 			for (const key of ['org.erp.oauth.checkPayments', 'org.erp.oauth.checkingPayments'] as const) {
 				expect(messages[key], `${locale}: ${key}`).toBeTruthy();
+			}
+		}
+	});
+});
+
+describe('oauthScopeGapKeys', () => {
+	const connected = (overrides: Partial<ErpOAuthStatus> = {}) =>
+		status({ provider: 'xero', connected: true, ...overrides });
+
+	it('says what a consent without the payments scope limits (decisions §415)', () => {
+		expect(oauthScopeGapKeys('xero', connected({ scope_gaps: ['payments_scope_missing'] }))).toEqual(
+			['org.erp.oauth.scopeGapPayments']
+		);
+		expect(oauthScopeGapKeys('xero', connected({ scope_gaps: [] }))).toEqual([]);
+		// An older server sends no field.
+		expect(oauthScopeGapKeys('xero', connected())).toEqual([]);
+	});
+
+	it('reads a gap this build does not know as the generic sentence, once', () => {
+		expect(
+			oauthScopeGapKeys('xero', connected({ scope_gaps: ['new_gap', 'other_gap'] }))
+		).toEqual(['org.erp.oauth.scopeGap']);
+	});
+
+	it('says nothing for another ERP or a connection that is not live', () => {
+		const gap = connected({ scope_gaps: ['payments_scope_missing'] });
+		expect(oauthScopeGapKeys('quickbooks_online', gap)).toEqual([]);
+		expect(oauthScopeGapKeys('xero', { ...gap, needs_reconnect: true, connected: false })).toEqual(
+			[]
+		);
+		expect(oauthScopeGapKeys('xero', null)).toEqual([]);
+	});
+
+	it('has every scope-gap sentence, naming the ERP, in every locale', async () => {
+		const { loadAllMessages } = await import('#lib/i18n/allMessages.ts');
+		for (const locale of SUPPORTED_LOCALES) {
+			const messages = await loadAllMessages(locale);
+			for (const key of ['org.erp.oauth.scopeGapPayments', 'org.erp.oauth.scopeGap'] as const) {
+				expect(messages[key], `${locale}: ${key}`).toContain('{erp}');
 			}
 		}
 	});

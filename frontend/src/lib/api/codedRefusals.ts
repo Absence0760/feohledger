@@ -506,6 +506,7 @@ const BUILDERS: Record<string, Builder> = {
 	// reports per skipped row, so the two doors agree on the names.
 	segregation_raiser: fixed('refusal.exceptionSegregationRaiser'),
 	segregation_implicated: fixed('refusal.exceptionSegregationImplicated'),
+	segregation_approver: fixed('refusal.exceptionSegregationApprover'),
 	// `api/credit_memos.py`
 	credit_memo_vendor_mismatch: fixed('refusal.creditMemoVendorMismatch'),
 	credit_memo_vendor_unresolved: fixed('refusal.creditMemoVendorUnresolved'),
@@ -682,6 +683,9 @@ const BUILDERS: Record<string, Builder> = {
 	// `api/exceptions.py::record_erp_payment` — a kept ERP payment stating no
 	// cash figure whose bill could not be read back to confirm one (§393)
 	erp_paid_amount_unconfirmed: fixed('refusal.erpPaidAmountUnconfirmed'),
+	// The same door, asked with no rail over a payment whose kept breakdown
+	// does not stand by itself, so the person's rail is the record (§413)
+	erp_payment_method_required: fixed('refusal.erpPaymentMethodRequired'),
 	// `api/payments.py` — `GET /runs/{id}/nacha` (`services/nacha.py`)
 	nacha_requires_record_only: fixed('refusal.nachaRequiresRecordOnly'),
 	nacha_not_configured: nachaNotConfigured,
@@ -791,6 +795,13 @@ const BUILDERS: Record<string, Builder> = {
 		if (typeof n !== 'number' || !Number.isInteger(n) || n < 1) return null;
 		return t('refusal.vendorErpUnlinkInFlight', { n });
 	},
+	// Linking a vendor to an ERP record by hand (`services/vendor_erp_manual_link.py`,
+	// decisions §415). None names a vendor, a record or a tax number.
+	vendor_erp_search_unavailable: fixed('refusal.vendorErpSearchUnavailable'),
+	vendor_erp_link_exists: fixed('refusal.vendorErpLinkExists'),
+	erp_vendor_already_linked: fixed('refusal.erpVendorAlreadyLinked'),
+	erp_vendor_not_found: fixed('refusal.erpVendorNotFound'),
+	erp_vendor_inactive: fixed('refusal.erpVendorInactive'),
 	// Closing a workspace (`api/organization_close.py`, decisions §306). The
 	// refusal's blockers are listed by the page itself; the toast is the
 	// fixed sentence, and a blocker list this build cannot read falls back.

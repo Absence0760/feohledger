@@ -310,10 +310,28 @@ this applies to them.
 The webhook handler:
 1. Validates the request (signature, API key, or IP whitelist)
 2. Dedupes by `event_id` (`services/webhook_security.is_event_already_processed`)
-3. Looks up the invoice by `correlation_id` or `erp_document_id`
+3. Looks up the invoice by `correlation_id`, or, when the delivery carries
+   none, by `erp_document_id` (see below)
 4. Maps the ERP status to our internal status
 5. Transitions the invoice (e.g., `sent_to_erp` → `posted_in_erp`)
 6. Writes an audit log entry
+
+**A delivery with no `correlation_id` is matched by the ERP's document id,
+and only to one invoice** (decisions §417). The generic route then looks for
+the invoice whose confirmed push stored that id on `invoices.erp_document_id`
+(indexed, migration 0132), inside the tenant's own database and only after the
+signature verifies. An invoice whose push recorded a connection realm
+(`state_data["erp_realm"]`) counts only while the tenant is connected to that
+same realm, so an id from another ERP or another company of the same ERP
+matches nothing. An invoice pushed before realms were recorded counts only
+while the push's own legacy rule trusts it (`erp_link_realm.legacy_links_trusted`:
+the tenant is still on the realm migration 0115 recorded; decisions §423),
+because document ids are small per-ERP numbers that collide across ERPs; a
+connection that names no realm (`mock`) matches nothing. Two or more candidates are refused rather than guessed between, a
+silent 204 like no match at all. The match is re-checked under the
+`get_invoice_for_update` row lock, so a confirmed re-push that replaced the bill
+in between is not acted on. A correlation id that is present still decides
+alone, as before.
 
 **The ERP paying an invoice FeohLedger never paid is recorded, not dropped.**
 `posted_in_erp → paid` is not a state-machine edge (a `paid` invoice needs a
@@ -471,10 +489,18 @@ differs:
   set to the connection's high-water mark (`yyyy-mm-ddThh:mm:ss`, UTC), 1,000
   rows a page, whole or `ErpListingIncomplete` (then every payable bill is read
   back). Only bills an invoice here was pushed as are read back; the rest of
-  what the organisation changed is never read. A connection
-  consented before `accounting.payments` was asked for cannot list payments;
-  that is an incomplete listing, so the sweep falls back to the full read,
-  which needs only the invoices scope. For a bill just paid in Xero, an admin
+  what the organisation changed is never read. **A connection consented
+  before `accounting.payments`** cannot list payments (decisions §415): the
+  first pass Xero refuses the `Payments` listing 403 (right after honouring
+  the token for `Invoices`; a 401 is the token, not the scope, and fails the
+  pass as before) records the coded scope gap
+  `payments_scope_missing` on the connection (`settings.erp.oauth.scope_gaps`)
+  and reads every payable bill once; from then on `changed_bills` reads the
+  incremental `Invoices` listing alone, so a payment reaches us when it moves
+  its bill's `UpdatedDateUTC`, and the write-back and void refuse
+  `payments_scope_missing` before any call. `GET …/oauth/status` states
+  `scope_gaps`, and the ERP panel says what is limited and offers Reconnect;
+  a reconnect writes a new connection block with no gap. For a bill just paid in Xero, an admin
   can run the same pass for the tenant now: `POST
   /api/organization/erp/oauth/status-sync` (admin, audited first, four an hour
   per tenant, one at a time, 202 and the pass runs after the response; 409
@@ -1427,8 +1453,14 @@ reasoning).
   refusal there is not a 409 to the approver: the invoice stays `approved` and
   an `invoice.erp_auto_send_refused` audit row records the coded refusal. With
   the flag off (or absent), approving advances the step pointer only. The push
-  is post-commit work: a process that dies between the approval and the job
-  skips it without a trace (tracked in `docs/followups.md`).
+  is post-commit work, so a process that dies between the approval and the
+  job skips it; the recovery sweep (`services/erp_auto_send_sweep`, sweep
+  `erp-auto-send`, `FEOH_ERP_AUTO_SEND_SWEEP_ENABLED`, off by default,
+  decisions §411) finds an approval older than a few minutes and younger than
+  the lookback that nothing on the trail answers, and runs it through the
+  same `send_after_approval`. Its rows carry `details.recovered: true` and no
+  actor. A payment void back to `approved` is not an approval and is never
+  auto-sent.
 - **A hand-off that raises lands at `failed`.** When `dispatch_erp` raises after
   the `sending_to_erp` commit (an SQS send), `start_erp_send` moves the invoice
   to `failed` with an `invoice.erp_failed` row (`error: "ERP send could not be
@@ -1530,6 +1562,9 @@ links each pulled account through `services/gl_account_sync.sync_chart_from_erp`
    company, so sandbox "7" and production "7" are different accounts. Every link
    records its connection realm (`erp_link_realm`, `services/erp_link_realm`:
    the OAuth company id, or a direct adapter's company fields; never a secret).
+   A Sage Intacct entity (`location_id`) is a realm of its own, appended only
+   when set, so a top-level connection keeps `sage_intacct:<company>`
+   (decisions §412, migration 0131).
    A link from another realm — or from before migration 0115 (NULL) — is kept
    only when the pull shows the same id holding the row's own code; otherwise
    it is dropped and the row is re-matched by code. Between two named realms
@@ -2023,6 +2058,18 @@ re-entered push resumes rather than restarts. A **non-retryable** result
 `job_unconfirmed`) or an OAuth ERP with no usable connection fails the invoice
 on the first attempt. After the last attempt the invoice goes to `failed`, with
 `last_error` on the instance and an `invoice.erp_failed` audit row.
+
+**Only an invoice still at `sending_to_erp` is pushed** (decisions §410).
+Before every attempt, the first included, `send_to_erp_internal` re-reads the
+invoice `FOR UPDATE` from the committed row and goes no further unless it is
+`sending_to_erp`. Both dispatchers (`erp_dispatch`, `erp_lambda`) hand over
+whatever row they load, and an SQS redelivery or a second dispatch can arrive
+after the push it repeats has landed, failed, or failed and had its approval
+recalled. Without the gate, that last case posts a bill for an invoice back in
+review. A skipped push makes no adapter call, changes no status, writes no
+audit row and leaves `state_data` alone. It logs one warning naming the
+invoice id and the status it found, then returns normally, so the Lambda
+deletes the message instead of redelivering it.
 
 **A deterministic 4xx is never retried** (decisions §285). Every adapter builds
 an HTTP failure with `base.erp_http_failure(provider, status)`, whose
@@ -2537,7 +2584,7 @@ documented answer; a refused mint, a refusal or an outage is `failed`.
 | `client_secret` | **yes** | OAuth client secret |
 | `company_id` | no | Intacct company id |
 | `user_id` | no | Web Services user authorized for the app (token `username` is `user_id@company_id`) |
-| `location_id` | no (optional) | Top-level entity of a multi-entity company; sent as `X-IA-API-Param-Entity` on every call |
+| `location_id` | no (optional) | Top-level entity of a multi-entity company; sent as `X-IA-API-Param-Entity` on every call. Part of the connection realm when set (`sage_intacct:<company>\|<location>`), so changing it re-judges every vendor and GL link at the next sync (decisions §412) |
 | `po_document_type` | no (optional) | Purchasing transaction definition used for POs (default `Purchase Order`) |
 
 | Operation | Call |
@@ -2578,6 +2625,15 @@ Request rules worth knowing:
 - **GL account types.** Intacct classifies only balance sheet vs income
   statement, so balance-sheet credit accounts (liability or equity) stay
   unclassified rather than guessed.
+
+- **The entity is the realm.** An entity holds vendors and accounts the top
+  level and its siblings do not, so a link (and a pushed bill's
+  `state_data.erp_realm`) made under one `location_id` counts only under that
+  one. Re-pointing the connection at another entity refuses the old links
+  (`vendor_not_linked` / `account_not_linked`) until a sync re-judges them, and
+  keeps them for a return (decisions §412). Migration 0131 stamped the links
+  and bills of a connection that already had a location with its location at
+  migration time: nothing recorded an earlier one.
 
 Tests: `backend/tests/test_erp_sage_intacct_adapter.py`. fake-erp surface:
 `/intacct/ia/api/v1` (`FEOH_ERP_INTACCT_API_BASE`).
@@ -2747,7 +2803,9 @@ endpoints, which dev points at fake-erp so the connect flow runs locally
 `accounting.payments` (status sync-back and payment write-back, §386) was added
 after the first connections: one consented before it reads bills' payments
 only through the bills themselves and cannot write a payment back until an
-admin reconnects.
+admin reconnects. The status sync records that gap on the connection the first
+time Xero refuses the payments listing, and the settings panel shows it
+(decisions §415, § Xero status sync-back above).
 
 **`settings.erp` keys:** `oauth` (written by `erp_oauth` only),
 `bill_status` (`AUTHORISED` default, or `DRAFT`), `default_tax_type`
@@ -2756,7 +2814,9 @@ admin reconnects.
 | Method | Xero call | Notes |
 |---|---|---|
 | `test_connection` | `GET Organisation` | |
-| `list_vendors` | `GET Contacts?where=IsSupplier==true OR IsCustomer==false&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); only an `ACTIVE` contact is `active` (`ARCHIVED`, and `GDPRREQUEST` for one erased on request, are not). Xero sets `IsSupplier` only once a contact has a bill (and it cannot be set through the API), so a supplier with no bill yet carries neither flag: `IsCustomer==false` reads it, and customer-only contacts stay out. A supplier sent a PO is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone. A contact that is already a customer and becomes a supplier with no bill and no PO is still missed (`docs/followups.md`) |
+| `list_vendors` | `GET Contacts?where=IsSupplier==true OR IsCustomer==false&includeArchived=true`, then `GET PurchaseOrders?Status=` DRAFT / SUBMITTED / AUTHORISED and `GET Contacts?IDs=` for their contacts | paged, 100/page, up to `SYNC_LISTING_MAX_ROWS` (else `ErpListingIncomplete`); only an `ACTIVE` contact is `active` (`ARCHIVED`, and `GDPRREQUEST` for one erased on request, are not). Xero sets `IsSupplier` only once a contact has a bill (and it cannot be set through the API), so a supplier with no bill yet carries neither flag: `IsCustomer==false` reads it, and customer-only contacts stay out. A supplier sent a PO is read from the unbilled POs; a failed read of those raises too, since the vendor sync treats an absent vendor as gone. A contact that is already a customer and becomes a supplier with no bill and no PO is not in this walk; a person finds and links it by hand from the vendor page (`search_vendors`, below; decisions §415) |
+| `search_vendors` | `GET Contacts?searchTerm=<name>` and `GET Contacts?where=TaxNumber=="<tax id>"`, `includeArchived=true`, one page of 50 each | every contact, customers included, for the vendor page's hand-made link (`services/vendor_erp_manual_link`, decisions §415). Not a listing: no sync reads it. A full page answers `truncated`. A tax number with a quote or a backslash is not searched for. The tax-number URL's query is redacted from the httpx log (`log_redaction`, marker `taxnumber`) |
+| `get_vendor` | `GET Contacts/{ContactID}` | the link's re-read; 404 → None; an id not shaped like a ContactID never reaches the path |
 | `list_gl_accounts` | `GET Accounts` | `Class` → account_type; only an `ACTIVE` account is `active` (`ARCHIVED` and `DELETED` are not) |
 | `bill_report` / `changed_bills` / `bills_for_payment` | `GET Invoices/{id}`, `GET Payments/{id}` + `GET Accounts/{id}` for the rail; `GET Invoices` + `GET Payments` with `If-Modified-Since` | § Xero status sync-back and payment write-back |
 | `post_payment` / `void_payment` | `GET Payments?where=Reference==…`, `PUT Payments`; `POST Payments/{id}` `{"Status": "DELETED"}` | same section |
@@ -3725,7 +3785,7 @@ and calls `await self.access_token()`.
 | `POST /api/organization/erp/oauth/pending/select` | admin + `erp_integrations` plan; **credentialed** | `{company_id}` → `200 {connected, provider, external_tenant_id}`, the nonce cookie cleared. Checks the offered id and the plan on a peek, then spends the pending connect (GETDEL) and links through the callback's own claim-and-link (`_claim_and_link`: realm lock, linked-elsewhere check, `organization.erp_connected` audit-first with `picked_from`). Coded refusals: `409 erp_pick_expired`, `409 erp_pick_unknown_company` (an id the consent did not offer; audited `organization.erp_connect_refused`), `409 already_linked`, `503 credentials_unavailable`, `503 audit_unavailable`; the plan gate's own `402`. Every refusal but `erp_pick_expired` and a token that cannot be opened leaves the pending connect to pick from again (§355). |
 | `DELETE /api/organization/erp/oauth/pending` | admin; **credentialed** | Drops the parked consent, links nothing: `{discarded}` (idempotent), the cookie cleared and `organization.erp_connect_cancelled` written best-effort when one was dropped. The token is not revoked (§337's reason). |
 | `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth` and the sealed tokens (audit row first), then revokes best-effort: `{"disconnected", "revoked", "revocation"}`, `revocation` being `revoked`, `failed` (the provider did not confirm, or could not be reached) or `unsupported` (it has no revocation endpoint: Blackbaud), and null when nothing was connected. The settings page says "Disconnected" only on `revoked`; otherwise it tells the admin to remove FeohLedger on the provider's side (`types/erpConnection.disconnectMessage`). `503` when the credential store cannot be opened, with nothing changed. |
-| `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
+| `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, expires_soon, reconnect_reason, connected_at, call_usage, status_sync_available, status_sync_refusal, scope_gaps, redirect_uri, providers: [{key, display_name, available, client_source}]}`. `scope_gaps` lists the coded permissions the consent was found not to cover (`payments_scope_missing`, decisions §415), empty while none is recorded or while the connection needs reconnecting. `call_usage` is `{scope, used, limit, resets_at, paused_reason, paused_until}` for an ERP whose adapter has a `call_budget` (Blackbaud), else null — and null when Redis cannot say. Never a token, never the subscription key. |
 
 Connect and disconnect write `organization.erp_connected` /
 `organization.erp_disconnected` (provider, client source, the sealed paths

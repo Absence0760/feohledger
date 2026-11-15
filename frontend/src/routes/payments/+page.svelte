@@ -304,7 +304,8 @@
 		// The open payment-blocking exception behind `blocked_reason` — its id
 		// (the row links to it), its type, and THIS reader's segregation-of-
 		// duties code for clearing it (`segregation_implicated` /
-		// `segregation_raiser`), so the row can say a colleague must clear it.
+		// `segregation_raiser` / `segregation_approver`), so the row can say a
+		// colleague must clear it.
 		blocking_exception?: {
 			id: string;
 			exception_type: string;
@@ -802,6 +803,8 @@
 				return m('payments.queue.clearRefusal.implicated');
 			case 'segregation_raiser':
 				return m('payments.queue.clearRefusal.raiser');
+			case 'segregation_approver':
+				return m('payments.queue.clearRefusal.approver');
 			case null:
 			case undefined:
 				return '';

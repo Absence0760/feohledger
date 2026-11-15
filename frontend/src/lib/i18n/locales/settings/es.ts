@@ -428,6 +428,8 @@ export const messages = {
 	'org.erp.oauth.needsReconnect': 'La conexión con {erp} ha caducado. Vuelva a conectar para seguir enviando facturas.',
 	'org.erp.oauth.reconnect': 'Volver a conectar con {erp}',
 	'org.erp.oauth.expiresSoon': "La conexión con {erp} vence el {date}. Vuelva a conectarla antes para seguir enviando facturas y sincronizando pagos.",
+	'org.erp.oauth.scopeGapPayments': "Esta conexión con {erp} se hizo antes de que FeohLedger pidiera permiso para leer y registrar pagos. Hasta que vuelva a conectarla para concederlo, los pagos hechos en {erp} solo se detectan cuando cambia la propia factura, y los pagos hechos a través de FeohLedger no se registran en {erp}. Vuelva a conectarla pronto, o FeohLedger podría pasar por alto una factura pagada en {erp}.",
+	'org.erp.oauth.scopeGap': "A esta conexión con {erp} le falta un permiso que FeohLedger ahora solicita. Vuelva a conectarla para concederlo.",
 	'org.erp.usage.ofShare': "Llamadas a la API de {erp} hoy: {used} de su cuota diaria de {limit}. El recuento se reinicia a las {reset}.",
 	'org.erp.usage.ofQuota': "Llamadas a la API de {erp} hoy: {used} de las {limit} diarias de su clave de suscripción. El recuento se reinicia a las {reset}.",
 	'org.erp.usage.noLimit': "Llamadas a la API de {erp} hoy: {used}. El recuento se reinicia a las {reset}.",
@@ -813,7 +815,7 @@ export const messages = {
 	'admin.webhooks.title': 'Webhooks',
 	'admin.webhooks.createWebhook': '+ Crear webhook',
 	'admin.webhooks.hintPre':
-		'Los webhooks salientes envían eventos de la plataforma (factura aprobada, pago liquidado, excepción generada) a tu endpoint como JSON firmado. El secreto de firma HMAC de cada suscripción se muestra solo una vez al crearla — guárdalo en un lugar seguro y úsalo para verificar el encabezado',
+		'Los webhooks salientes envían eventos de la plataforma (factura aprobada, aprobación retirada, pago liquidado, excepción generada) a tu endpoint como JSON firmado. El secreto de firma HMAC de cada suscripción se muestra solo una vez al crearla — guárdalo en un lugar seguro y úsalo para verificar el encabezado',
 	'admin.webhooks.hintPost': '.',
 	'admin.webhooks.subscriptions': 'Suscripciones',
 	'admin.webhooks.loadingSubs': 'Cargando webhooks…',

@@ -17,6 +17,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Tabs from '#lib/components/ui/Tabs.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
 	import {
 		EXCEPTION_SEVERITIES,
 		exceptionSeverityLabelKey,
@@ -50,13 +51,16 @@
 		type ExceptionDescriptionText
 	} from '#lib/api/exceptionDescription.ts';
 	import {
+		erpPaymentParts,
 		erpPrefill,
 		erpRefusalNote,
 		isErpPaidReport,
 		poRematchNote,
-		type ErpReport
+		spansSeveralRails,
+		type ErpReport,
+		type RailPartView
 	} from '#lib/types/erpReport.ts';
-	import type { PaymentMethod } from '#lib/types/payment.ts';
+	import { paymentMethodLabelKey, type PaymentMethod } from '#lib/types/payment.ts';
 	import { localToday } from '#lib/types/paymentExecution.ts';
 	import RecordPaymentFields from '#lib/components/payments/RecordPaymentFields.svelte';
 
@@ -111,6 +115,13 @@
 		/** Only on a row carrying an ERP-reported payment: the caller's verdict
 		 *  on `POST /{id}/record-erp-payment`. Absent = unknown = not offered. */
 		record_erp_payment_refusal?: ActionRefusal;
+		/** On a `paid_not_recorded` row stating a figure and a breakdown: the
+		 *  SERVER's judgement that the breakdown is booked whatever one rail a
+		 *  person names (it adds up exactly and spans several rails, decisions
+		 *  §396, §413). True → the dialog shows the split instead of a rail
+		 *  picker and sends no rail; false → the person's rail is the record.
+		 *  Null or absent on every other row, and the picker stays. */
+		erp_payment_split_stands?: boolean | null;
 	}
 
 	/** Every chip tally on the page — see {@link ExceptionSummary}. */
@@ -661,18 +672,51 @@
 		return erpRefusalNote(exc.erp_report, m);
 	}
 
+	// The ERP's breakdown of the payment, shown only when it spans more than
+	// one rail (one rail is just the method, which the form already shows).
+	const erpParts = $derived<RailPartView[]>(
+		resolveTarget && isErpPaidReport(resolveTarget.erp_report)
+			? erpPaymentParts(resolveTarget.erp_report)
+			: []
+	);
+	const erpShowSplit = $derived(spansSeveralRails(erpParts));
+	// The split is the record over any rail picked: the picker becomes a fact.
+	const erpSplitStands = $derived(erpShowSplit && resolveTarget?.erp_payment_split_stands === true);
+	// What the note under the split may claim. Three states, because the
+	// server's verdict has three: true (it stands), false (it was judged and
+	// does not), and null/absent (not judged: no stated figure, parts its
+	// stricter parser rejects, or an older server). Only `false` may say the
+	// parts do not add up; for null nobody checked, so the note says the
+	// record decides. The picker stays for both (decisions §413).
+	const erpSplitNote = $derived(
+		erpSplitStands
+			? m('exceptions.erpPayment.splitStands')
+			: resolveTarget?.erp_payment_split_stands === false
+				? m('exceptions.erpPayment.splitDropped')
+				: m('exceptions.erpPayment.splitUnjudged')
+	);
+
+	function railLabel(rail: PaymentMethod | null): string {
+		const key = rail ? paymentMethodLabelKey(rail) : null;
+		return key ? m(key) : m('exceptions.erpPayment.railNotStated');
+	}
+
 	async function commitRecordErpPayment() {
 		const target = resolveTarget;
 		const reference = erpReference.trim();
 		const method = erpMethod;
-		if (!target || !method || !reference || !erpPaidOn) return;
+		const splitStands = erpSplitStands;
+		if (!target || (!method && !splitStands) || !reference || !erpPaidOn) return;
 		recordingErp = true;
 		erpError = '';
 		try {
 			// No `amount`: the server records the figure the ERP states (reading
-			// the bill again when the row kept none), never one typed here.
+			// the bill again when the row kept none), never one typed here. No
+			// `method` over a split that stands: the server books the split
+			// whatever rail is named, so the audit's `method_stated` stays null
+			// rather than recording a pick nobody made (decisions §413).
 			await api.post(`/api/exceptions/${target.id}/record-erp-payment`, {
-				method,
+				...(splitStands ? {} : { method }),
 				reference,
 				paid_on: erpPaidOn
 			});
@@ -1347,6 +1391,51 @@
 					{m('exceptions.erpPayment.title', { erp: erpName(resolveTarget) })}
 				</h3>
 				<p class="modal-hint">{m('exceptions.erpPayment.intro')}</p>
+				<!-- The figures to reconcile: what the ERP says was paid, in the code
+				     it stated, beside what the invoice is for, in the invoice's own.
+				     Both rendered, never compared here: the server refuses a record
+				     whose figure or currency differs (decisions §386). -->
+				<dl class="erp-figures" data-testid="erp-payment-figures">
+					<div>
+						<dt>{m('exceptions.erpPayment.reportedAmount', { erp: erpName(resolveTarget) })}</dt>
+						<dd data-testid="erp-payment-reported-amount">
+							{#if resolveTarget.erp_report?.amount}
+								<Money
+									amount={resolveTarget.erp_report.amount}
+									currency={resolveTarget.erp_report.amount_currency ?? null}
+								/>
+							{:else}
+								{m('exceptions.erpPayment.amountNotStated')}
+							{/if}
+						</dd>
+					</div>
+					<div>
+						<dt>{m('exceptions.erpPayment.invoiceAmount')}</dt>
+						<dd data-testid="erp-payment-invoice-amount">
+							<Money amount={resolveTarget.amount} currency={resolveTarget.currency} />
+						</dd>
+					</div>
+				</dl>
+				{#if erpShowSplit}
+					<div class="erp-split" data-testid="erp-payment-split">
+						<h4 id="erp-payment-split-title">
+							{m('exceptions.erpPayment.splitTitle', { erp: erpName(resolveTarget) })}
+						</h4>
+						<ul aria-labelledby="erp-payment-split-title">
+							{#each erpParts as part, i (i)}
+								<li data-testid="erp-payment-split-part">
+									<span>{railLabel(part.rail)}</span>
+									<Money
+										amount={part.amount}
+										currency={resolveTarget.erp_report?.amount_currency ?? null}
+										mono
+									/>
+								</li>
+							{/each}
+						</ul>
+						<p class="modal-hint" data-testid="erp-payment-split-note">{erpSplitNote}</p>
+					</div>
+				{/if}
 				<form
 					data-testid="erp-payment-form"
 					onsubmit={(e) => { e.preventDefault(); commitRecordErpPayment(); }}
@@ -1358,6 +1447,7 @@
 						maxDate={erpMaxDate}
 						idPrefix="erp-payment"
 						testid="erp-payment"
+						methodFixed={erpSplitStands ? m('exceptions.erpPayment.splitMethod') : null}
 					/>
 					{#if erpError}
 						<p class="modal-error" role="alert" data-testid="erp-payment-error">{erpError}</p>
@@ -1372,7 +1462,7 @@
 								: undefined}
 							disabled={recordingErp ||
 								!isAllowed(resolveTarget.record_erp_payment_refusal) ||
-								!erpMethod ||
+								(!erpMethod && !erpSplitStands) ||
 								!erpReference.trim() ||
 								!erpPaidOn ||
 								erpPaidOn > erpMaxDate}
@@ -1714,6 +1804,47 @@
 		display: flex;
 		flex-direction: column;
 		gap: 12px;
+	}
+
+	.erp-figures {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+		gap: 8px 16px;
+		margin: 0 0 12px;
+	}
+
+	.erp-figures dt,
+	.erp-split h4 {
+		margin: 0 0 2px;
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: var(--text-muted);
+	}
+
+	.erp-figures dd {
+		margin: 0;
+		font-size: 0.9rem;
+		color: var(--text);
+	}
+
+	.erp-split {
+		margin: 0 0 12px;
+	}
+
+	.erp-split ul {
+		list-style: none;
+		margin: 0 0 6px;
+		padding: 0;
+	}
+
+	.erp-split li {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 4px 0;
+		border-bottom: 1px solid var(--border);
+		font-size: 0.85rem;
+		color: var(--text);
 	}
 
 	.modal-error {

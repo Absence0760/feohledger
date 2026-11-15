@@ -278,9 +278,14 @@ async def test_coordinator_threads_org_settings_into_resolver_apply():
     invoice_result = MagicMock()
     invoice_result.scalar_one = MagicMock(return_value=invoice)
 
+    # The pre-check reads the invoice's workflow chain for the approver axis
+    # on a `po_mismatch` (decisions §420); this invoice has none.
+    no_chain = MagicMock()
+    no_chain.scalars.return_value.all.return_value = []
+
     db = AsyncMock()
     db.add = MagicMock()
-    db.execute = AsyncMock(side_effect=[locked_result, invoice_result])
+    db.execute = AsyncMock(side_effect=[locked_result, invoice_result, no_chain])
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.begin_nested = MagicMock()

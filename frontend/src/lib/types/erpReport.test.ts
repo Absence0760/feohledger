@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+	erpPaymentParts,
 	erpPrefill,
 	erpRefusalNote,
 	isErpPaidReport,
 	isPoRematchClears,
-	poRematchNote
+	poRematchNote,
+	spansSeveralRails
 } from './erpReport.ts';
 
 describe('isErpPaidReport', () => {
@@ -96,5 +98,55 @@ describe('poRematchNote', () => {
 		expect(poRematchNote({ kind: 'paid_not_recorded' }, 'X', t, date)).toBeNull();
 		expect(poRematchNote(null, 'X', t, date)).toBeNull();
 		expect(isPoRematchClears(undefined)).toBe(false);
+	});
+});
+
+describe('erpPaymentParts', () => {
+	it('keeps each part and its exact amount string, untouched', () => {
+		expect(
+			erpPaymentParts({
+				payment_parts: [
+					{ method: 'check', amount: '150.00' },
+					{ method: 'card', amount: '100.10' }
+				]
+			})
+		).toEqual([
+			{ rail: 'check', amount: '150.00' },
+			{ rail: 'card', amount: '100.10' }
+		]);
+	});
+
+	it('reads a rail that cannot be recorded outside FeohLedger as not stated, as the server books it', () => {
+		const parts = erpPaymentParts({
+			payment_parts: [
+				{ method: null, amount: '1.00' },
+				{ method: 'virtual_card', amount: '2.00' },
+				{ method: 'barter', amount: '3.00' },
+				{ method: ' CHECK ', amount: '4.00' }
+			]
+		});
+		expect(parts.map((p) => p.rail)).toEqual([null, null, null, 'check']);
+	});
+
+	it('reads a malformed breakdown as none, never as part of one', () => {
+		expect(erpPaymentParts({ payment_parts: [{ method: 'check', amount: '1.00' }, { method: 'card' }] })).toEqual([]);
+		expect(
+			erpPaymentParts({
+				payment_parts: [{ method: 'card', amount: 5 as unknown as string }]
+			})
+		).toEqual([]);
+		expect(erpPaymentParts({ payment_parts: null })).toEqual([]);
+		expect(erpPaymentParts({})).toEqual([]);
+		expect(erpPaymentParts(null)).toEqual([]);
+	});
+});
+
+describe('spansSeveralRails', () => {
+	it('counts rails only, a part with none stated as a rail of its own', () => {
+		expect(spansSeveralRails([{ rail: 'check', amount: '1.00' }, { rail: 'card', amount: '1.00' }])).toBe(true);
+		expect(spansSeveralRails([{ rail: 'check', amount: '1.00' }, { rail: null, amount: '1.00' }])).toBe(true);
+		expect(spansSeveralRails([{ rail: 'card', amount: '1.00' }, { rail: 'card', amount: '2.00' }])).toBe(false);
+		expect(spansSeveralRails([{ rail: null, amount: '1.00' }])).toBe(false);
+		expect(spansSeveralRails([])).toBe(false);
 	});
 });

@@ -169,7 +169,9 @@ async def test_an_active_vendor_may_be_rejected_from_its_row(realdb):
 # ── Exception resolve / dismiss / escalate ────────────────────────────────
 
 
-async def _exception(realdb, *, exception_type, uploaded_by=None, raised_by=None, status="open"):
+async def _exception(
+    realdb, *, exception_type, uploaded_by=None, raised_by=None, approved_by=None, status="open"
+):
     mk = realdb.sessionmaker(TENANT)
     org_id = realdb.info(TENANT).org_id
     inv_id = uuid.uuid4()
@@ -185,6 +187,7 @@ async def _exception(realdb, *, exception_type, uploaded_by=None, raised_by=None
                 status=InvoiceStatus.approved,
                 organization_id=org_id,
                 uploaded_by_id=uploaded_by,
+                approved_by_user_id=approved_by,
                 correlation_id=uuid.uuid4(),
             )
         )
@@ -211,6 +214,8 @@ async def test_the_exception_verdicts_match_resolve(realdb, role):
         "blocking_clean": {"exception_type": "duplicate"},
         "blocking_uploaded_by_caller": {"exception_type": "duplicate", "uploaded_by": me},
         "blocking_raised_by_caller": {"exception_type": "fraud_flag", "raised_by": me},
+        # Decisions §420: the approver of a held invoice may not clear the hold.
+        "hold_approved_by_caller": {"exception_type": "po_mismatch", "approved_by": me},
         "non_blocking_uploaded_by_caller": {"exception_type": "missing_data", "uploaded_by": me},
         "resolved": {"exception_type": "duplicate", "status": "resolved"},
     }
@@ -235,6 +240,7 @@ async def test_the_exception_verdicts_match_resolve(realdb, role):
             None,
             "segregation_implicated",
             "segregation_raiser",
+            "segregation_approver",
             "exception_not_actionable",
         }, seen
 

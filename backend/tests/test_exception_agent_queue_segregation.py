@@ -283,3 +283,93 @@ async def test_a_po_mismatch_agent_run_triggered_by_the_uploader_escalates(reald
     assert "Segregation of duties" in res.json()["decision"]["rationale"]
     async with mk() as s:
         assert (await s.get(APException, exc_id)).status == "escalated"
+
+
+async def _po_mismatch_on_fresh_invoice(realdb, *, number: str, approved_by_role: str | None):
+    """A `po_mismatch` on an invoice nobody uploaded, optionally approved."""
+    await _set_settings(realdb, dict(_AGGRESSIVE))
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv = Invoice(
+        id=uuid.uuid4(),
+        organization_id=info.org_id,
+        invoice_number=number,
+        vendor_name="Globex Corporation",
+        amount=Decimal("1500.00"),
+        currency="USD",
+        status="ready_for_review",
+        uploaded_by_id=None,
+        approved_by_user_id=info.users[approved_by_role] if approved_by_role else None,
+    )
+    from app.services.exception_service import create_exception
+
+    async with mk() as s:
+        s.add(inv)
+        await s.flush()
+        exc = await create_exception(
+            s,
+            exception_type="po_mismatch",
+            severity="warning",
+            description="detector output",
+            organization_id=info.org_id,
+            invoice=inv,
+            raised_by_user_id=None,
+        )
+        exc_id = exc.id
+        await s.commit()
+    return mk, exc_id
+
+
+@pytest.mark.asyncio
+async def test_a_po_mismatch_agent_run_triggered_by_its_approver_escalates(realdb, monkeypatch):
+    """Decisions §420: the invoice's approvers may not clear its `po_mismatch`,
+    and an agent run they trigger inherits that refusal as an escalation."""
+    from app.services.exception_agents import coordinator
+
+    monkeypatch.setattr(coordinator, "get_resolver", lambda _t: _AutoResolvingPoMismatchProbe())
+    mk, exc_id = await _po_mismatch_on_fresh_invoice(
+        realdb, number="INV-AGSOD-APR", approved_by_role="admin"
+    )
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/exceptions/{exc_id}/agent-resolve")
+
+    assert res.status_code == 200, res.text
+    assert res.json()["decision"]["action_taken"] == "escalated"
+    assert "approved this invoice" in res.json()["decision"]["rationale"]
+    async with mk() as s:
+        assert (await s.get(APException, exc_id)).status == "escalated"
+
+
+class _ApprovingPoMismatchProbe(_AutoResolvingPoMismatchProbe):
+    """A PO resolver's shape from the gate's side: its apply approves the
+    invoice on the triggering human's behalf, so the human becomes the approval
+    of record before the resolve is recorded."""
+
+    async def apply(self, db, *, exception, invoice, actor_id, **_kw):
+        invoice.approved_by_user_id = actor_id
+
+
+@pytest.mark.asyncio
+async def test_the_approval_an_agent_run_gives_does_not_refuse_its_own_resolve(realdb, monkeypatch):
+    """The resolve is judged against who had approved BEFORE the run: the
+    run's own approval is evidence-checked (re-match, `_receipts_implicated`),
+    not the human's word, and judging the row after it would refuse every PO
+    auto-resolution with a bare 403."""
+    from app.services.exception_agents import coordinator
+
+    monkeypatch.setattr(coordinator, "get_resolver", lambda _t: _ApprovingPoMismatchProbe())
+    mk, exc_id = await _po_mismatch_on_fresh_invoice(
+        realdb, number="INV-AGSOD-APR-RUN", approved_by_role=None
+    )
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/exceptions/{exc_id}/agent-resolve")
+
+    assert res.status_code == 200, res.text
+    assert res.json()["decision"]["action_taken"] == "auto_resolved"
+    async with mk() as s:
+        row = await s.get(APException, exc_id)
+        assert row.status == "resolved"
+        inv = await s.get(Invoice, row.invoice_id)
+        assert str(inv.approved_by_user_id) == str(realdb.info(TENANT).users["admin"])

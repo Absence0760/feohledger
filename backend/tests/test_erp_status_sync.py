@@ -766,7 +766,10 @@ async def test_the_one_click_books_the_kept_split_over_a_persons_one_rail(realdb
     [row] = await _exceptions(realdb, inv_id)
     body = {"method": "check", "reference": BILL, "paid_on": utc_today().isoformat()}
     async with realdb.client(key="a", role="admin") as c:
+        detail = await c.get(f"/api/exceptions/{row.id}")
         resp = await c.post(f"/api/exceptions/{row.id}/record-erp-payment", json=body)
+    # The dialog is told the split stands, so it shows it instead of a picker.
+    assert detail.status_code == 200 and detail.json()["erp_payment_split_stands"] is True
     assert resp.status_code == 201, resp.text
     [booked] = await _payments(realdb, inv_id)
     assert booked.method is None
@@ -774,9 +777,97 @@ async def test_the_one_click_books_the_kept_split_over_a_persons_one_rail(realdb
         {"method": "check", "amount": "150.00"},
         {"method": "card", "amount": "100.00"},
     ]
+    # The response explains its `method: null`: the parts that paid it.
+    assert resp.json()["method"] is None
+    assert resp.json()["rail_breakdown"] == [
+        {"method": "check", "amount": 150.0},
+        {"method": "card", "amount": 100.0},
+    ]
     details = await _recorded_outside_details(realdb, booked.id)
     assert details["rail_breakdown_status"] == "applied"
     assert details["method_stated"] == "check"
+
+
+async def _kept_paid_row(realdb, inv_id, parts):
+    """A kept ``paid_not_recorded`` row stating 250.00 USD and ``parts``."""
+    async with realdb.sessionmaker("a")() as s:
+        row = APException(
+            organization_id=realdb.info("a").org_id,
+            invoice_id=inv_id,
+            exception_type="erp_reconciliation",
+            severity="warning",
+            description="kept",
+            status="open",
+            erp_report={
+                "kind": "paid_not_recorded",
+                "erp_type": "quickbooks_online",
+                "erp_document_id": BILL,
+                "method": None,
+                "reference": BILL,
+                "paid_on": utc_today().isoformat(),
+                "paid_on_reported": True,
+                "amount": "250.00",
+                "amount_currency": "USD",
+                "payment_parts": parts,
+                "refusal_code": "external_payment_blocking_exception",
+            },
+        )
+        s.add(row)
+        await s.commit()
+        return row.id
+
+
+async def test_the_one_click_names_no_rail_over_a_split_that_stands(realdb):
+    """Over a breakdown that is the record whatever rail is named, the dialog
+    sends none (decisions §413); the audit says no rail was stated, not one
+    the form defaulted to."""
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(
+        realdb,
+        inv_id,
+        [{"method": "check", "amount": "150.00"}, {"method": None, "amount": "100.00"}],
+    )
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert resp.status_code == 201, resp.text
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None
+    assert booked.rail_breakdown == [
+        {"method": "check", "amount": "150.00"},
+        {"method": None, "amount": "100.00"},
+    ]
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown_status"] == "applied"
+    assert details["method_stated"] is None
+
+
+@pytest.mark.parametrize(
+    ("parts", "stands"),
+    [
+        # One rail: a person's rail corrects it, so it must be named.
+        ([{"method": "card", "amount": "200.00"}, {"method": "card", "amount": "50.00"}], False),
+        # A cent short: dropped, and the person's rail is the record.
+        ([{"method": "check", "amount": "150.00"}, {"method": "card", "amount": "99.99"}], False),
+        # No breakdown at all.
+        (None, None),
+    ],
+)
+async def test_the_one_click_refuses_no_rail_where_the_persons_rail_is_the_record(
+    realdb, parts, stands
+):
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(realdb, inv_id, parts)
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    async with realdb.client(key="a", role="admin") as c:
+        detail = await c.get(f"/api/exceptions/{row_id}")
+        resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert detail.json()["erp_payment_split_stands"] is stands
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "erp_payment_method_required"
+    assert await _payments(realdb, inv_id) == []
+    [row] = [e for e in await _exceptions(realdb, inv_id) if e.id == row_id]
+    assert row.status == "open"
 
 
 async def test_a_bill_part_paid_in_quickbooks_records_nothing_and_blocks(realdb):
@@ -1886,6 +1977,45 @@ async def test_the_sweep_covers_xero_tenants(realdb, monkeypatch):
     assert org.settings["erp"]["oauth"].get("status_sync_through")
 
 
+async def test_a_xero_connection_without_payments_records_the_gap_once(realdb, monkeypatch):
+    """A Xero consent from before `accounting.payments` (decisions §415): the
+    first pass that meets the refusal records `payments_scope_missing` on the
+    connection and still reads every payable bill; the next pass is built from
+    the recorded gap (the adapter sees it, so it reads only the Invoices
+    listing) and reads incrementally, with no full fall-back."""
+    from datetime import UTC, datetime
+
+    from app.config import settings
+    from app.services.erp_adapters.base import PAYMENTS_SCOPE_MISSING, ErpScopeMissing
+    from app.services.erp_adapters.xero import XeroAdapter
+
+    await _connect_xero(realdb)
+    seen_gaps: list[frozenset[str]] = []
+
+    async def changed_bills(self, since):
+        seen_gaps.append(self.scope_gaps())
+        if PAYMENTS_SCOPE_MISSING not in self.scope_gaps():
+            raise ErpScopeMissing("Xero", PAYMENTS_SCOPE_MISSING, [])
+        return []
+
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    first = datetime(2026, 11, 1, tzinfo=UTC)
+    with patch.object(XeroAdapter, "changed_bills", changed_bills):
+        result = await erp_status_sync.run_status_sync_once(now=first)
+        assert result.failures == 0 and result.full_reconciliations >= 1
+        org = await _org(realdb)
+        oauth = org.settings["erp"]["oauth"]
+        assert oauth["scope_gaps"] == [PAYMENTS_SCOPE_MISSING]
+        assert oauth["status_sync_through"] == first.isoformat()
+
+        before = result.full_reconciliations
+        later = await erp_status_sync.sync_org_now(org, now=first + timedelta(hours=1))
+    assert later.full_reconciliations == 0, before
+    assert seen_gaps[-1] == frozenset({PAYMENTS_SCOPE_MISSING})
+    # Still recorded, once.
+    assert (await _org(realdb)).settings["erp"]["oauth"]["scope_gaps"] == [PAYMENTS_SCOPE_MISSING]
+
+
 async def test_an_on_request_pass_is_refused_with_a_code(realdb, monkeypatch):
     from app.config import settings
 
@@ -1960,3 +2090,82 @@ async def test_an_on_request_pass_refused_at_start_is_still_audited(realdb, monk
         )
     assert row.details["outcome"] == "refused"
     assert row.details["refusal"] == "status_sync_off"
+
+
+# ---------------------------------------------------------------------------
+# record-erp-payment with no rail named (decisions §413), the cases beside the
+# stated-figure ones above: a payment-BLOCKING row, and a legacy row whose
+# figure (and breakdown) only the read-back states.
+# ---------------------------------------------------------------------------
+
+
+async def test_the_one_click_books_a_standing_split_with_no_rail_on_a_blocking_row(realdb):
+    """The payment-blocking variant: the row is cleared on the way, so the
+    record and its resolve happen together with no rail named."""
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(
+        realdb,
+        inv_id,
+        [{"method": "check", "amount": "150.00"}, {"method": "card", "amount": "100.00"}],
+    )
+    async with realdb.sessionmaker("a")() as s:
+        row = await s.get(APException, row_id)
+        row.exception_type = "payment_reconciliation"
+        row.severity = "error"
+        row.erp_report = {**row.erp_report, "refusal_code": "external_payment_in_run"}
+        await s.commit()
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert resp.status_code == 201, resp.text
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None and booked.amount == Decimal("250.00")
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown_status"] == "applied"
+    assert details["method_stated"] is None
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "resolved"
+
+
+async def test_the_one_click_judges_no_rail_on_the_read_backs_split(realdb, monkeypatch):
+    """A legacy row states no figure, so its split is unknown until the bill is
+    read again: a two-rail bill read back stands, and no rail is needed."""
+    inv_id, corr, _, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=True)
+    report = await _qbo_report(
+        corr,
+        "250.00",
+        [_qbo_cash("901", "150.00"), _qbo_cash("902", "100.00", pay_type="CreditCard")],
+    )
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    patcher, read = _bill_reads(report)
+    with patcher:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert resp.status_code == 201, resp.text
+    read.assert_awaited_once_with(BILL)
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None and booked.amount == Decimal("250.00")
+    assert booked.rail_breakdown == [
+        {"method": "check", "amount": "150.00"},
+        {"method": "card", "amount": "100.00"},
+    ]
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown_status"] == "applied"
+    assert details["method_stated"] is None
+
+
+async def test_the_one_click_refuses_no_rail_when_the_read_back_is_one_rail(realdb, monkeypatch):
+    """The same legacy row, its bill read back as one cheque: the person's rail
+    would be the record, so an omitted one is refused and nothing is written."""
+    inv_id, corr, _, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=True)
+    report = await _qbo_report(corr, "250.00", [_qbo_cash("901", "250.00")])
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    patcher, _ = _bill_reads(report)
+    with patcher:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "erp_payment_method_required"
+    assert await _payments(realdb, inv_id) == []
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "open"

@@ -881,3 +881,72 @@ def test_every_skip_the_bulk_endpoint_writes_itself_is_coded():
         invoices.INVOICE_RECALL_ONE_AT_A_TIME,
     ):
         assert code.startswith("invoice_")
+
+
+# ---------------------------------------------------------------------------
+# Bulk approve is a review decision (decisions §418): a row that is not in
+# `ready_for_review` is skipped with the code the four single review doors
+# refuse with, never moved `new → approved` past the review it never entered.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status", [InvoiceStatus.new, InvoiceStatus.pending, InvoiceStatus.rejected]
+)
+async def test_bulk_approve_skips_a_row_not_awaiting_review(realdb, status):
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    # uploaded_by_id NULL: no segregation refusal to mask the review-stage one.
+    draft_id = await _seed(mk, info.org_id, number=f"BULK-NOREV-{status.value}", status=status)
+    ok_id = await _seed(mk, info.org_id, number=f"BULK-NOREV-OK-{status.value}")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={"ids": [str(draft_id), str(ok_id)], "status": "approved"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # The row in review still lands; only the other is skipped.
+    assert body["updated"] == 1
+    assert body["skipped"] == [
+        {
+            "id": str(draft_id),
+            "reason": "This invoice is not awaiting review, so it cannot be approved or rejected.",
+            "code": "invoice_not_in_review",
+            "params": {},
+        }
+    ]
+
+    async with mk() as s:
+        draft = (await s.execute(select(Invoice).where(Invoice.id == draft_id))).scalar_one()
+        ok = (await s.execute(select(Invoice).where(Invoice.id == ok_id))).scalar_one()
+        approved_rows = (
+            await s.execute(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(AuditLog.entity_id == draft_id, AuditLog.action == "invoice.approved")
+            )
+        ).scalar_one()
+    assert draft.status == status, "a row outside review must not move"
+    assert draft.approval_date is None and not draft.approved_by
+    assert approved_rows == 0
+    assert ok.status == InvoiceStatus.approved
+
+
+@pytest.mark.asyncio
+async def test_bulk_approve_review_skip_answers_before_the_version_check(realdb):
+    """A draft is refused for being a draft even when the client bound no
+    version for it — the stage is the fact the approver needs, not staleness."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    draft_id = await _seed(mk, info.org_id, number="BULK-NOREV-VER", status=InvoiceStatus.new)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={"ids": [str(draft_id)], "status": "approved", "expected_updated_at": {}},
+        )
+    assert resp.status_code == 200, resp.text
+    assert [s["code"] for s in resp.json()["skipped"]] == ["invoice_not_in_review"]

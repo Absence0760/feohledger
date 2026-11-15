@@ -89,6 +89,47 @@ export interface VendorErpLink {
 export interface VendorErpLinksResponse {
 	vendor_id: string;
 	links: VendorErpLink[];
+	/** The verdict on searching the connected ERP for a record and linking
+	 *  this vendor to it by hand (decisions §415; ui-patterns § Whether to
+	 *  offer an action): `null` when both doors would accept, else their coded
+	 *  refusal — `vendor_erp_search_unavailable` or `vendor_erp_link_exists`.
+	 *  Absent (an older server) is a refusal: offer nothing. */
+	search_refusal?: ActionRefusal;
+}
+
+// One ERP record `POST /api/vendors/{id}/erp-links/search` found (decisions
+// §415). No tax number: only whether it matches the vendor's.
+// `linked_elsewhere`: another vendor already holds it in this company.
+export interface VendorErpCandidate {
+	erp_vendor_id: string;
+	name: string;
+	email: string | null;
+	active: boolean;
+	tax_id_matches: boolean;
+	linked_elsewhere: boolean;
+}
+
+export interface VendorErpSearchResponse {
+	realm: string;
+	candidates: VendorErpCandidate[];
+	/** More matches than one search reads: narrow it. */
+	truncated: boolean;
+}
+
+// `POST /api/vendors/{id}/erp-links/link`.
+export interface VendorErpLinkResponse {
+	realm: string;
+	erp_vendor_id: string;
+	vendor: Vendor;
+	links: VendorErpLink[];
+	/** The vendor's `search_refusal` after the change. */
+	search_refusal?: ActionRefusal;
+}
+
+/** Can this candidate be linked to the vendor? Not when archived in the ERP
+ *  or held by another vendor here (the server refuses both). */
+export function erpCandidateLinkable(c: VendorErpCandidate): boolean {
+	return c.active && !c.linked_elsewhere;
 }
 
 // `POST /api/vendors/{id}/erp-links/unlink`.
@@ -97,6 +138,8 @@ export interface VendorErpUnlinkResponse {
 	cleared: { placement: 'row' | 'kept'; erp_vendor_id: string }[];
 	vendor: Vendor;
 	links: VendorErpLink[];
+	/** The vendor's `search_refusal` after the change. */
+	search_refusal?: ActionRefusal;
 }
 
 // One card a vendor-ineligibility write could not close (PII-free).

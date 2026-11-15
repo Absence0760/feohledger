@@ -534,6 +534,33 @@ test.describe('/organization ERP connection', () => {
 		}
 	});
 
+	test('a connection made before the payments scope says what it limits and offers Reconnect', async ({
+		page
+	}) => {
+		// decisions §415: the status sync recorded `payments_scope_missing` on a
+		// Xero consent from before `accounting.payments`.
+		await stubStatus(page, () =>
+			oauthStatus({
+				provider: 'xero',
+				connected: true,
+				external_tenant_id: 'xt-1',
+				scope_gaps: ['payments_scope_missing']
+			})
+		);
+		await page.goto('/organization?section=erp');
+		const card = panel(page);
+		try {
+			await card.getByTestId('erp-provider-select').selectOption('xero');
+			await expect(card.getByTestId('erp-oauth-scope-gap')).toHaveText(
+				'This connection to Xero was made before FeohLedger asked for permission to read and record payments. Until you reconnect to grant it, payments made in Xero are picked up only when the bill itself changes, and payments made through FeohLedger aren\'t recorded in Xero. Reconnect soon, or FeohLedger could miss a bill paid in Xero.'
+			);
+			await expect(card.getByTestId('erp-oauth-reconnect')).toHaveText('Reconnect to Xero');
+			await expectNoA11yViolations(page);
+		} finally {
+			await resetErp(page);
+		}
+	});
+
 	test('a failed ERP list load offers Try again', async ({ page }) => {
 		let failures = 1;
 		await page.route(

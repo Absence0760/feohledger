@@ -16,6 +16,8 @@ moment a rail exists anywhere in the codebase without BOTH treatments.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from app.schemas.payment import PaymentMethod
@@ -365,3 +367,89 @@ def test_a_breakdown_round_trips_as_exact_strings_and_a_malformed_one_is_none():
     assert rail_parts_from_json([{"method": "card", "amount": "x"}]) == ()
     assert rail_parts_from_json({"method": "card"}) == ()
     assert rail_parts_from_json(None) == ()
+
+
+@pytest.mark.parametrize(
+    ("parts", "amount", "stands"),
+    [
+        # Two rails summing exactly: the split is the record over any one rail.
+        ((("check", "150.00"), ("card", "100.00")), "250.00", True),
+        # A part with no rail stated counts as a rail of its own.
+        ((("check", "150.00"), (None, "100.00")), "250.00", True),
+        # One rail: a person naming another corrects it (`superseded`).
+        ((("card", "200.00"), ("card", "50.00")), "250.00", False),
+        # A cent short, or a fraction of a cent: dropped, the person's rail stands.
+        ((("check", "150.00"), ("card", "99.99")), "250.00", False),
+        ((("check", "33.335"), ("card", "66.665")), "100.00", False),
+        # No breakdown at all.
+        ((), "250.00", False),
+    ],
+)
+def test_a_split_stands_over_any_rail_only_when_it_reconciles_across_rails(parts, amount, stands):
+    """The rule the record dialog's read-only rail reads (decisions §413):
+    exactly when `_rail_split` keeps a breakdown against a person's rail."""
+    from app.services.external_payment import _rail_split, split_stands_over_any_rail
+
+    stated = _parts(*parts)
+    assert split_stands_over_any_rail(stated, Decimal(amount)) is stands
+    # Whatever rail a person names, a standing split is booked unchanged.
+    if stands:
+        for rail in ("ach", "card", None):
+            kept = _rail_split(stated, Decimal(amount), method=rail, source="user")
+            assert kept.status == "applied" and kept.method is None
+
+
+def test_the_payment_response_states_its_kept_breakdown_or_none():
+    """`method: null` on a two-rail payment is explained by its parts; a
+    malformed or absent breakdown reads as none, never as part of one."""
+    from types import SimpleNamespace
+
+    from app.schemas.payment import PaymentResponse
+
+    def payment(breakdown):
+        return SimpleNamespace(
+            id="p",
+            correlation_id=None,
+            invoice_id="i",
+            payment_run_id=None,
+            amount=Decimal("250.00"),
+            method=None,
+            status="completed",
+            reference="R",
+            created_at=None,
+            updated_at=None,
+            provider="external",
+            failure_reason=None,
+            submitted_at=None,
+            completed_at=None,
+            settled_amount=None,
+            settled_currency=None,
+            discount_amount=None,
+            discount_offer_id=None,
+            rail_breakdown=breakdown,
+        )
+
+    split = [{"method": "check", "amount": "150.00"}, {"method": None, "amount": "100.00"}]
+    out = PaymentResponse.from_db(payment(split)).model_dump(mode="json")
+    assert out["rail_breakdown"] == [
+        {"method": "check", "amount": 150.0},
+        {"method": None, "amount": 100.0},
+    ]
+    assert PaymentResponse.from_db(payment(None)).rail_breakdown is None
+    malformed = [{"method": "card", "amount": 5}]
+    assert PaymentResponse.from_db(payment(malformed)).rail_breakdown is None
+
+
+def test_only_the_erp_record_may_omit_the_rail():
+    """The one-click may name no rail (the endpoint judges whether it may);
+    recording a payment with no ERP breakdown behind it always names one."""
+    from pydantic import ValidationError
+
+    from app.schemas.payment import RecordErpReportedPaymentRequest, RecordPaymentOutsideRequest
+
+    body = {"reference": "R", "paid_on": "2026-11-01"}
+    assert RecordErpReportedPaymentRequest(**body).method is None
+    with pytest.raises(ValidationError):
+        RecordPaymentOutsideRequest(**body, invoice_id="00000000-0000-0000-0000-000000000001")
+    with pytest.raises(ValidationError):
+        RecordErpReportedPaymentRequest(**body, method="virtual_card")

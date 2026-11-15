@@ -104,13 +104,16 @@ def test_the_only_automatic_approval_action_is_not_a_human_one():
 def test_only_the_two_auto_approve_paths_write_the_automatic_action():
     """`invoice.auto_approved` is the evidence that NOBODY approved. If a third
     writer appears it must be reviewed against that meaning (a person-driven
-    path writing it would inflate the rate) and added here deliberately."""
+    path writing it would inflate the rate) and added here deliberately.
+
+    A writer is a file that passes the literal as an `action_name=` / `action=`
+    argument. A file that only *reads* the action (`services/erp_send.py`
+    matches approvals by it to queue an auto-send) is not one."""
+    writer = re.compile(r'\baction(?:_name)?=\s*\(?\s*["\']invoice\.auto_approved["\']')
     writers = sorted(
         str(p.relative_to(_APP))
         for p in _APP.rglob("*.py")
-        if p.name != "touchless.py"
-        and re.search(r'["\']invoice\.auto_approved["\']', p.read_text())
-        and "action_name=" in p.read_text()
+        if p.name != "touchless.py" and writer.search(p.read_text())
     )
     assert writers == ["api/workflow.py", "services/extraction.py"], writers
 

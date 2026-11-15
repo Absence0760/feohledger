@@ -1501,3 +1501,88 @@ def test_list_pos_maps_an_unapproved_po_to_unissued(token, xero_status, expected
         _client(cm).get = AsyncMock(return_value=_resp(200, {"PurchaseOrders": [po]}))
         (row,) = _run(_adapter().list_pos())
     assert row.status == expected
+
+
+# ---------------------------------------------------------------------------
+# vendor-link search (decisions §415)
+# ---------------------------------------------------------------------------
+
+
+def test_the_vendor_search_reads_every_contact_by_name_and_tax_number(token):
+    """A customer with no bill and no PO carries neither flag `list_vendors`
+    reads, so the search asks for every contact: no supplier filter, archived
+    ones too; by `searchTerm` and by an exact `TaxNumber`, one page each."""
+    customer = {
+        "ContactID": VENDOR,
+        "Name": "Bloom Florists",
+        "IsCustomer": True,
+        "IsSupplier": False,
+        "TaxNumber": "GB123456789",
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(return_value=_resp(200, {"Contacts": [customer]}))
+        result = _run(_adapter().search_vendors(name="Bloom", tax_id="GB123456789"))
+    by_name, by_tax = (c.kwargs["params"] for c in client.get.await_args_list)
+    assert by_name["searchTerm"] == "Bloom" and "where" not in by_name
+    assert by_tax["where"] == 'TaxNumber=="GB123456789"' and "searchTerm" not in by_tax
+    for params in (by_name, by_tax):
+        assert params["includeArchived"] == "true" and params["page"] == 1
+    # Found by both terms, listed once.
+    assert [v.erp_vendor_id for v in result.vendors] == [VENDOR]
+    assert result.truncated is False
+
+
+def test_the_vendor_search_never_quotes_an_unsafe_tax_number_into_the_filter(token):
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(return_value=_resp(200, {"Contacts": []}))
+        _run(_adapter().search_vendors(name="Acme", tax_id='12" OR Name!="'))
+        _run(_adapter().search_vendors(name=None, tax_id=None))
+    assert [c.kwargs["params"].get("where") for c in client.get.await_args_list] == [None]
+
+
+def test_a_full_search_page_is_truncated_and_a_refused_one_raises(token):
+    rows = [{"ContactID": f"c-{i}", "Name": f"Acme {i}"} for i in range(50)]
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(200, {"Contacts": rows}))
+        assert _run(_adapter().search_vendors(name="Acme", tax_id=None)).truncated is True
+    from app.services.erp_adapters.xero import XeroRequestError
+
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(503, {}))
+        with pytest.raises(XeroRequestError):
+            _run(_adapter().search_vendors(name="Acme", tax_id=None))
+
+
+def test_get_vendor_reads_one_contact_by_its_id(token):
+    contact = {"ContactID": VENDOR, "Name": "Bloom Florists", "ContactStatus": "ARCHIVED"}
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(return_value=_resp(200, {"Contacts": [contact]}))
+        found = _run(_adapter().get_vendor(VENDOR))
+    assert client.get.await_args.args[0].endswith(f"/Contacts/{VENDOR}")
+    assert (found.erp_vendor_id, found.active) == (VENDOR, False)
+    with patch("httpx.AsyncClient") as cm:
+        _client(cm).get = AsyncMock(return_value=_resp(404, {}))
+        assert _run(_adapter().get_vendor(VENDOR)) is None
+
+
+def test_get_vendor_never_puts_a_non_guid_in_the_path(token):
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock()
+        assert _run(_adapter().get_vendor("../Invoices")) is None
+    client.get.assert_not_awaited()
+
+
+def test_a_tax_number_search_url_is_redacted_from_the_httpx_log():
+    """httpx logs every request URL at INFO; the tax number is in the query."""
+    import app.services.erp_adapters.xero  # noqa: F401 — registers the marker
+    from app.services.erp_adapters.log_redaction import redact_url_query
+
+    line = (
+        "https://api.xero.com/api.xro/2.0/Contacts?where=TaxNumber%3D%3D%22GB123456789%22"
+        "&includeArchived=true"
+    )
+    assert "GB123456789" not in str(redact_url_query(line))

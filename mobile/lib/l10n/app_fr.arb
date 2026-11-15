@@ -200,6 +200,7 @@
   "codedRefusalGateMeasured": "Mesuré à {measured} — la limite est fixée en {currency}.",
   "codedRefusalExceptionSegregationRaiser": "Séparation des tâches : l'utilisateur dont l'action a déclenché cette exception ne peut pas aussi la résoudre. Escaladez-la ou demandez à un autre utilisateur de décider.",
   "codedRefusalExceptionSegregationImplicated": "Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas résoudre une exception qui bloque son paiement. Escaladez-la ou demandez à un autre utilisateur de décider.",
+  "codedRefusalExceptionSegregationApprover": "Séparation des tâches : un utilisateur ayant approuvé cette facture ne peut pas aussi lever son blocage de réception ou d'inspection. Escaladez-la ou demandez à un autre utilisateur de décider.",
   "invoiceDetailApproved": "Facture approuvée",
   "invoiceDetailApproveFailed": "Impossible d'approuver la facture — veuillez réessayer",
   "invoiceDetailRejected": "Facture rejetée",
