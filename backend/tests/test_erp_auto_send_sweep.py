@@ -14,7 +14,9 @@ Pinned here, on real Postgres:
 * "since that approval": a refusal of an EARLIER approval does not answer a
   re-approval, and a payment void back to `approved` is not an approval;
 * a snapshot without the flag, or a tenant on the mock ERP, is never touched;
-* another replica holding the tenant's lock makes this one skip the tenant;
+* two replicas at once record one refusal, and a refusal of this approval
+  already on the trail is not recorded again;
+* an approval made before an OAuth ERP was connected is not recovered;
 * a send that raises is counted as a failure, so the health report says so;
 * the per-tenant cap takes the oldest approval first;
 * the sweep is off by default and registered with the health report.
@@ -27,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from app.config import Settings, settings
 from app.models.invoice import Invoice, InvoiceStatus
@@ -329,42 +331,68 @@ async def test_a_tenant_on_the_mock_erp_is_not_swept(realdb, dispatched):
 # ---------------------------------------------------------------------------
 
 
-async def test_another_replica_holding_the_tenant_lock_makes_this_one_skip_it(realdb, dispatched):
-    from app.database import get_tenant_engine
+async def test_two_replicas_at_once_record_one_refusal(realdb, dispatched):
+    """No cross-request lock: the invoice row lock serialises the two runs, and
+    the second finds the first's refusal of this approval and does nothing."""
+    import asyncio
 
     await _write_erp(realdb, LIVE_ERP)
     inv_id = await _seed_approved(realdb, approved_at=_ago(minutes=10))
-    async with realdb.control_sessionmaker()() as s:
-        db_name = (await s.get(Organization, realdb.info(TENANT).org_id)).db_name
+    await _open_duplicate(realdb, inv_id)
 
-    async with get_tenant_engine(db_name).connect() as other:
-        other = await other.execution_options(isolation_level="AUTOCOMMIT")
-        await other.execute(
-            text("SELECT pg_advisory_lock(CAST(:k AS BIGINT))"), {"k": sweep.ADVISORY_LOCK_KEY}
-        )
-        try:
-            busy = await sweep.run_auto_send_sweep_once()
-        finally:
-            await other.execute(
-                text("SELECT pg_advisory_unlock(CAST(:k AS BIGINT))"),
-                {"k": sweep.ADVISORY_LOCK_KEY},
-            )
+    first, second = await asyncio.gather(
+        sweep.run_auto_send_sweep_once(), sweep.run_auto_send_sweep_once()
+    )
 
-    assert busy.tenants_busy >= 1
+    assert first.invoices_refused + second.invoices_refused == 1
+    assert first.invoice_failures == second.invoice_failures == 0
     assert dispatched == []
-    assert await _status(realdb, inv_id) == InvoiceStatus.approved
+    assert len(await _audit(realdb, inv_id, AUTO_SEND_REFUSED_ACTION)) == 1
 
-    # Released: the next tick takes it, and gives its own lock back.
-    assert (await sweep.run_auto_send_sweep_once()).invoices_sent == 1
-    async with get_tenant_engine(db_name).connect() as probe:
-        probe = await probe.execution_options(isolation_level="AUTOCOMMIT")
-        got = await probe.scalar(
-            text("SELECT pg_try_advisory_lock(CAST(:k AS BIGINT))"), {"k": sweep.ADVISORY_LOCK_KEY}
-        )
-        assert got is True
-        await probe.execute(
-            text("SELECT pg_advisory_unlock(CAST(:k AS BIGINT))"), {"k": sweep.ADVISORY_LOCK_KEY}
-        )
+
+async def test_a_refusal_already_recorded_for_this_approval_is_not_recorded_again(
+    realdb, dispatched
+):
+    """The approval's own slow job (a long bulk batch) and the sweep can both
+    reach one approval; whichever is second writes nothing."""
+    from app.services.erp_send import AUTO_SEND_SKIPPED, send_after_approval
+
+    await _write_erp(realdb, LIVE_ERP)
+    inv_id = await _seed_approved(realdb, approved_at=_ago(minutes=10))
+    await _open_duplicate(realdb, inv_id)
+    await _trail(realdb, inv_id, AUTO_SEND_REFUSED_ACTION, _ago(minutes=9))
+
+    outcome = await send_after_approval(
+        realdb.sessionmaker(TENANT)().bind,
+        invoice_id=inv_id,
+        org_id=realdb.info(TENANT).org_id,
+        org_settings={"erp": LIVE_ERP},
+        actor_id=None,
+        recovered=True,
+    )
+
+    assert outcome == AUTO_SEND_SKIPPED
+    assert len(await _audit(realdb, inv_id, AUTO_SEND_REFUSED_ACTION)) == 1
+
+
+@pytest.mark.parametrize(
+    ("connected_ago", "expect_sent"),
+    [(timedelta(minutes=5), False), (timedelta(hours=2), True)],
+    ids=["approved-before-the-erp-was-connected", "approved-after-it"],
+)
+async def test_an_approval_before_the_oauth_erp_was_connected_is_not_recovered(
+    realdb, dispatched, connected_ago, expect_sent
+):
+    """With no live ERP the approval's job writes nothing, so its trail looks
+    like a crash's; the connection's moment tells them apart."""
+    connected_at = (datetime.now(UTC) - connected_ago).isoformat()
+    await _write_erp(realdb, {**LIVE_ERP, "oauth": {"connected_at": connected_at}})
+    inv_id = await _seed_approved(realdb, approved_at=_ago(minutes=10))
+
+    result = await sweep.run_auto_send_sweep_once()
+
+    assert result.invoices_sent == (1 if expect_sent else 0)
+    assert dispatched == ([(inv_id, None)] if expect_sent else [])
 
 
 async def test_a_send_that_raises_is_counted_so_the_health_report_says_so(

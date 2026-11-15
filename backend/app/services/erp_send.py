@@ -42,6 +42,12 @@ AUTO_SEND_REFUSED = "refused"
 AUTO_SEND_SKIPPED = "skipped"
 AUTO_SEND_FAILED = "failed"
 
+#: The transitions into ``approved`` that queue an auto-send: a person's final
+#: approval (``review.approve_invoice``) and the two auto-approvals (``/complete``'s
+#: amount floor, the extraction worker). Any other entry into ``approved`` (a
+#: payment void) is not an approval and never auto-sends.
+APPROVAL_ACTIONS = ("invoice.approved", "invoice.auto_approved")
+
 #: `Session.info` key holding the approvals this transaction will auto-send
 #: once it commits. One post-commit job per transaction, however many invoices
 #: a bulk approve finalised, so they run one after another on one connection
@@ -428,6 +434,11 @@ async def _send_after_approval(
             )
         except HTTPException as exc:
             await db.rollback()
+            if await _refusal_already_recorded(db, invoice_id, correlation_id):
+                # Another run answered this approval first (the recovery sweep
+                # beside a slow approval job, or two sweep replicas).
+                await db.rollback()
+                return AUTO_SEND_SKIPPED
             await _record_refusal(
                 db,
                 invoice_id=invoice_id,
@@ -455,6 +466,56 @@ async def _send_after_approval(
                 rollback_exc.__class__.__name__,
             )
         return AUTO_SEND_FAILED
+
+
+def latest_approval_at(invoice_id, correlation_id):
+    """The moment of the invoice's latest approval, as a correlated scalar.
+
+    Keyed on ``correlation_id`` (indexed; every row the invoice's transitions
+    and the auto-send write carries it) as well as ``entity_id`` (not indexed
+    on ``audit_log``). Shared with the recovery sweep, so "since that
+    approval" means one thing."""
+    from sqlalchemy import func, select
+
+    from app.models.workflow import AuditLog
+
+    return (
+        select(func.max(AuditLog.created_at))
+        .where(
+            AuditLog.correlation_id == correlation_id,
+            AuditLog.entity_id == invoice_id,
+            AuditLog.action.in_(APPROVAL_ACTIONS),
+        )
+        .scalar_subquery()
+    )
+
+
+async def _refusal_already_recorded(
+    db: AsyncSession, invoice_id: uuid.UUID, correlation_id: uuid.UUID
+) -> bool:
+    """Has a refusal of the invoice's latest approval already been recorded?
+
+    Asked under the invoice's row lock (taken here, held until the caller's
+    commit or rollback), so two runs answering one approval serialise and the
+    second sees the first's row: a refusal is recorded once per approval
+    (decisions §411). In ``FEOH_AUDIT_MODE=lambda`` the row lands later through
+    SQS, so this cannot see it; the push itself is guarded by the row lock
+    either way."""
+    from sqlalchemy import exists, select
+
+    from app.models.workflow import AuditLog
+    from app.services.workflow_engine import get_invoice_for_update
+
+    await get_invoice_for_update(db, invoice_id)
+    query = select(
+        exists().where(
+            AuditLog.correlation_id == correlation_id,
+            AuditLog.entity_id == invoice_id,
+            AuditLog.action == AUTO_SEND_REFUSED_ACTION,
+            AuditLog.created_at >= latest_approval_at(invoice_id, correlation_id),
+        )
+    )
+    return bool(await db.scalar(query))
 
 
 async def _record_refusal(

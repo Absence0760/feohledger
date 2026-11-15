@@ -435,9 +435,10 @@ class Settings(BaseSettings):
     # to move) are taken, oldest first, at most `batch_size` per tenant a tick.
     erp_auto_send_sweep_enabled: bool = False
     erp_auto_send_sweep_interval_seconds: int = 300
-    # The floor keeps the sweep clear of an approval whose own job is still
-    # running: the push itself cannot double (the `approved` row lock), but two
-    # refusals of one approval would put two rows on the trail.
+    # The floor keeps the sweep from racing an approval whose own job is still
+    # running. Neither the push nor a refusal can double (both are decided
+    # under the invoice row lock), so it is about not doing redundant work, and
+    # about lambda audit mode, where a refusal row lands late.
     erp_auto_send_sweep_delay_seconds: int = Field(default=300, ge=60)
     erp_auto_send_sweep_lookback_hours: int = Field(default=24, ge=1)
     erp_auto_send_sweep_batch_size: int = Field(default=100, ge=1)

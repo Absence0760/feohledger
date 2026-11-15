@@ -20984,7 +20984,7 @@ the margin on both paths; the margin's floor; a 429 possibly posted and not
 retried). The #654 sandbox entry in `docs/followups.md` now names the margin
 and the 429 as what that pass settles.
 
-## 411. A skipped auto-send is recovered by a sweep, inside a window, one replica per tenant (§304 follow-up, 2026-11-14)
+## 411. A skipped auto-send is recovered by a sweep, inside a window, and a refusal is recorded once per approval (§304 follow-up, 2026-11-14)
 
 **The gap.** §304 runs the "send to the ERP on approval" push as post-commit
 work, in its own transaction after the approval commits. A process that dies
@@ -21027,9 +21027,9 @@ approval answering it.
   `entity_id` (not indexed on `audit_log`).
 
 **The window.** At least `FEOH_ERP_AUTO_SEND_SWEEP_DELAY_SECONDS` (5 min, floor
-60) after the approval, so the approval's own job has had its chance; that job
-and the sweep could never double the push (the row lock), but they could each
-record a refusal. At most `FEOH_ERP_AUTO_SEND_SWEEP_LOOKBACK_HOURS` (24 h). The
+60) after the approval, so the approval's own job has had its chance (neither
+the push nor a refusal can double, below, so the delay saves redundant work
+rather than guarding correctness). At most `FEOH_ERP_AUTO_SEND_SWEEP_LOOKBACK_HOURS` (24 h). The
 lookback is a fence: §304 left stored `true` flags in place, so a tenant can
 hold approved invoices from before auto-send existed whose snapshot says
 "send". Without a lookback, turning the sweep on would push every one of them,
@@ -21050,22 +21050,43 @@ send that raised unexpectedly and wrote nothing. It is counted in
 the streak alert fires if it persists, and the lookback releases the row after
 at most that window, so no row holds the tail for ever.
 
-**One replica per tenant.** Each tenant pass runs under a session-level
-`pg_try_advisory_lock` taken in that tenant's database, on a dedicated
-autocommit connection held for the pass while each send uses its own. A replica
-that finds it held skips the tenant this tick (`tenants_busy`). The house
-pattern for sweeps is a row lock plus an under-lock re-check, and the sweep
-keeps the re-check (each candidate's predicate is asked again just before it is
-sent), but a row lock cannot span the call: `send_after_approval` opens its own
-session and takes the same row lock, and it releases it before recording a
-refusal. Two replicas could then each read "no answer yet" and each record a
-refusal for one approval. The advisory lock closes that without changing
-`erp_send`'s locking, and advisory locks are scoped to one database, so one
-constant key serves every tenant. If the unlock fails, the connection is
-invalidated rather than returned to the pool holding the lock. In
-`FEOH_AUDIT_MODE=lambda` a refusal row lands asynchronously, so a lagging row
-could still let a later tick record a second refusal; the delay is what covers
-that, and the push itself still cannot double.
+**An approval made before the ERP was live is not a missed one.** The
+approval's job returns without writing anything when the tenant has no live
+ERP (the mock, or none), so that trail looks exactly like a crash's, and a
+tenant that approves on the mock and then connects a real ERP would otherwise
+have its last day's flagged approvals pushed as "recovered". For an OAuth ERP
+(QuickBooks, Xero, Sage) the connection's `settings.erp.oauth.connected_at` is
+a second floor under the lookback: an approval before it is never taken. A
+reconnect moves that stamp forward too, which only ever excludes more. A
+directly configured ERP (NetSuite, Business Central, Intacct, SYSPRO) records
+no such moment, so for those the residual stands, bounded by the lookback: an
+approval made on the mock up to 24 hours before the live ERP was saved can be
+pushed once. Rejected: writing an `invoice.erp_auto_send_skipped` row whenever
+the job finds no live ERP. That would put a new action on every approval in
+every mock tenant with the flag on (all the dev and e2e ones), and need its
+own label on three clients, to close a narrow window the lookback already
+bounds.
+
+**A refusal is recorded once per approval, under the row lock.** The push
+could never double: `start_erp_send`'s `approved → sending_to_erp` transition
+under the invoice row lock is its guard. A refusal could, and not only between
+two sweep replicas. `audit_log.created_at` is its transaction's start, so a bulk
+approve's rows all carry the batch's start while its one post-commit job works
+through the invoices in turn; a batch whose job outruns the delay can meet the
+sweep on the same approval. `erp_send` now asks, under the invoice's row lock,
+whether a refusal of the latest approval is already on the trail, and writes
+nothing if so (`_refusal_already_recorded`). Two runs on one approval
+serialise on that lock, and the second sees the first's committed row. This
+makes the refusal idempotent in itself, for the approval doors too, so no
+cross-request lock is needed. Rejected: a per-tenant session-level advisory
+lock held for the pass. It was the first draft, and review found it a
+liability. It did not cover the bulk-job case. It held a pooled connection idle
+for up to a hundred sends. A cancellation during the unlock could return the
+connection to the pool still holding the lock. And session-level advisory
+locks break silently behind a transaction-pooling proxy. In
+`FEOH_AUDIT_MODE=lambda` the refusal row lands later through SQS, so the check
+cannot see it there; the delay is what covers that mode, and the push still
+cannot double.
 
 **Production.** Off by default, like every sweep that calls out. Turning it on
 is a (b) entry in `docs/followups.md`, ordered after the §304 check of stored
@@ -21074,7 +21095,8 @@ flags.
 Tests: `backend/tests/test_erp_auto_send_sweep.py` (sent once and marked; a
 refusal recorded once; both edges of the window; a re-approval after an earlier
 refusal; a void back to `approved`; snapshots that do not say so; a mock-ERP
-tenant; another replica holding the lock, then the lock released after a pass;
+tenant; two sweeps at once recording one refusal; a refusal already on the
+trail not recorded again; an approval before and after an OAuth connection;
 a raising send counted as a failure the health report sees; the cap taking the
 oldest first; off by default and registered). `tests/test_sweep_health.py`
 pins the name, the flag and the lifespan start.
