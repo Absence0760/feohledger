@@ -308,7 +308,12 @@ otherwise). Point the backend at it with
   *Fake Xero Supplier Co*, `xero-contact-4` (a new supplier with neither flag
   set, decisions §386) and `xero-contact-5` (`GDPRREQUEST`, erased on request:
   synced inactive); the customer `xero-contact-2` is filtered out.
-  `GET /Contacts/{id}` reads one (the refused-create explanation).
+  `GET /Contacts?searchTerm=…` (case-insensitive, over Name / FirstName /
+  LastName / ContactNumber / EmailAddress) and `?where=TaxNumber=="…"` search
+  every contact, customers included: the vendor page's hand-made link
+  (decisions §415) finds `xero-contact-2` (tax number `GB999000111`) that way.
+  `GET /Contacts/{id}` reads one (the refused-create explanation, and the
+  link's re-read).
 - `GET /Accounts` — `xero-acc-6100` / `6200` (default tax type `INPUT`) and
   `xero-acc-6300` (no default tax type: a taxed bill is refused unless the org
   sets `default_tax_type`), plus the pay-from accounts `xero-acc-090` (`BANK`)

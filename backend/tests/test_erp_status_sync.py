@@ -1977,6 +1977,45 @@ async def test_the_sweep_covers_xero_tenants(realdb, monkeypatch):
     assert org.settings["erp"]["oauth"].get("status_sync_through")
 
 
+async def test_a_xero_connection_without_payments_records_the_gap_once(realdb, monkeypatch):
+    """A Xero consent from before `accounting.payments` (decisions §415): the
+    first pass that meets the refusal records `payments_scope_missing` on the
+    connection and still reads every payable bill; the next pass is built from
+    the recorded gap (the adapter sees it, so it reads only the Invoices
+    listing) and reads incrementally, with no full fall-back."""
+    from datetime import UTC, datetime
+
+    from app.config import settings
+    from app.services.erp_adapters.base import PAYMENTS_SCOPE_MISSING, ErpScopeMissing
+    from app.services.erp_adapters.xero import XeroAdapter
+
+    await _connect_xero(realdb)
+    seen_gaps: list[frozenset[str]] = []
+
+    async def changed_bills(self, since):
+        seen_gaps.append(self.scope_gaps())
+        if PAYMENTS_SCOPE_MISSING not in self.scope_gaps():
+            raise ErpScopeMissing("Xero", PAYMENTS_SCOPE_MISSING, [])
+        return []
+
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    first = datetime(2026, 11, 1, tzinfo=UTC)
+    with patch.object(XeroAdapter, "changed_bills", changed_bills):
+        result = await erp_status_sync.run_status_sync_once(now=first)
+        assert result.failures == 0 and result.full_reconciliations >= 1
+        org = await _org(realdb)
+        oauth = org.settings["erp"]["oauth"]
+        assert oauth["scope_gaps"] == [PAYMENTS_SCOPE_MISSING]
+        assert oauth["status_sync_through"] == first.isoformat()
+
+        before = result.full_reconciliations
+        later = await erp_status_sync.sync_org_now(org, now=first + timedelta(hours=1))
+    assert later.full_reconciliations == 0, before
+    assert seen_gaps[-1] == frozenset({PAYMENTS_SCOPE_MISSING})
+    # Still recorded, once.
+    assert (await _org(realdb)).settings["erp"]["oauth"]["scope_gaps"] == [PAYMENTS_SCOPE_MISSING]
+
+
 async def test_an_on_request_pass_is_refused_with_a_code(realdb, monkeypatch):
     from app.config import settings
 

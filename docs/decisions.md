@@ -21382,6 +21382,138 @@ locale hints. Tests: `tests/test_webhook_event_catalogue.py`;
 `backend/docs/api-surface.md` (`/invoices`, `/webhooks`). Closes the §374
 follow-up "nothing outside FeohLedger hears that an approval was recalled".
 
+## 415. A Xero consent without the payments scope is recorded on the connection, and a supplier no sync can see is linked by hand (§386 follow-ups, 2026-11-14)
+
+**Context.** §386 left two Xero follow-ups. A connection consented before
+`accounting.payments` was asked for cannot list payments, and the sweep read
+that 401/403 as an incomplete change listing and fell back to reading every
+payable bill: correct, but it spent the organisation's daily allowance (1,000
+calls on Xero's Starter tier) on every tick, and nothing told the admin why.
+And the vendor walk (`IsSupplier==true OR IsCustomer==false`, plus every
+unbilled PO's contact) cannot see a contact that is already a **customer** and
+has had no bill and no PO from us, since Xero sets `IsSupplier` only on a
+contact's first bill; that vendor's first push was refused
+`vendor_not_linked`, and only a bill, the very thing refused, could ever flag
+it.
+
+**Decision — the scope gap is a coded state on the connection.**
+
+- **Found by the refusal, not guessed from the token.** `changed_bills` reads
+  `Invoices` first, so when Xero then refuses the `Payments` listing 403 the
+  token has just been honoured for this organisation, and the refusal is the
+  missing scope. **A 401 is not a gap**: it has already been through
+  `RefreshOnUnauthorized`'s replay, so it means the token was not accepted,
+  and recording it would stop the payments listing and the write-back for
+  good (only a reconnect clears a gap) for a reason that is not the scope. It
+  fails the pass with its mark unmoved, like a 503 (the review caught a first
+  draft that took 401 too). The adapter raises `ErpScopeMissing(code=
+  "payments_scope_missing", bill_ids=<what Invoices found>)`. Rejected:
+  reading the access token's `scope` claim (unverified, its shape
+  unpublished, and a misread would stop the payments listing on a consent
+  that has it until someone reconnects).
+- **Recorded once, by the status sync.** `sync_org` writes
+  `settings.erp.oauth.scope_gaps = ["payments_scope_missing"]` through
+  `erp_oauth.update_connection_metadata`, keyed to the connection id. That
+  pass still reads every payable bill, as every pass before it did, so the
+  switch loses nothing the missing listing would have named since the mark.
+  A reconnect mints a new block (`new_connection`) asking for every scope, so
+  the gap clears itself; nothing re-probes.
+- **Then the adapter stops asking.** `OAuthErpAdapter.scope_gaps()` reads the
+  recorded codes from its config. With the payments gap, `changed_bills`
+  reads the incremental `Invoices` listing alone (no request a certain
+  refusal answers, no full fall-back), and `post_payment` / `void_payment`
+  refuse `payments_scope_missing` before any call (a new `ERP_REFUSAL_CODES`
+  member, localized as `erpRefusal.paymentsScopeMissing`), where before they
+  spent a 401 (and a token refresh) and read it as an HTTP failure.
+- **Shown.** `GET /api/organization/erp/oauth/status` states `scope_gaps`
+  (empty while the connection needs reconnecting anyway), and
+  `ErpConnectionPanel` says what is limited (`org.erp.oauth.scopeGapPayments`;
+  an unknown code reads as the generic `scopeGap`) and offers Reconnect, the
+  button it already showed for an expiring connection. The on-request pass
+  stays available: it reads the Invoices listing.
+
+**Accepted residual.** With the gap recorded, a payment reaches us only when
+it moves its bill's `UpdatedDateUTC`. Applying or deleting a payment changes
+the bill's `AmountPaid`, `AmountDue` and possibly `Status`, so it should; the
+`INVOICE` webhook (§392) rests on the same assumption. Unconfirmed live
+(`docs/followups.md` (b), the Xero webhook entry).
+
+**Decision — a vendor is linked to an ERP record by hand.**
+
+- **Search the whole contact list, on demand, from the vendor page.**
+  `ErpAdapter.search_vendors(name, tax_id)` (`supports_vendor_search`; Xero:
+  `GET Contacts?searchTerm=` and `?where=TaxNumber==""`, archived included,
+  one page of 50 each, `truncated` past it) and `get_vendor(id)` (`GET
+  Contacts/{id}`). `searchTerm` covers Name, FirstName, LastName,
+  ContactNumber and EmailAddress (Xero-OpenAPI `xero_accounting.yaml`,
+  checked 2026-11-14; the developer site refuses automated reads), so the tax
+  number needs its own `where`. Not a listing: absence proves nothing and no
+  sync reads it. A tax number with a quote or backslash is not searched for;
+  the tax-number URL's query is redacted from the httpx log (marker
+  `taxnumber`).
+- **The tax number never travels.** `POST /api/vendors/{id}/erp-links/search`
+  takes only a name (`query`, the vendor's own when blank); the server reads
+  the vendor's stored tax number itself, and a candidate says only
+  `tax_id_matches` (separators and case aside), `active`, and
+  `linked_elsewhere` when another vendor holds it in this company (a flag, not
+  the holder's id: realm uniqueness is org-wide, but the holder may sit in an
+  entity the searching user cannot see).
+- **The link re-reads the record and keeps every link rule.** `POST
+  …/erp-links/link` re-reads the record by id (404 `erp_vendor_not_found`,
+  409 `erp_vendor_inactive`); refuses a vendor already linked in this company
+  (row, kept, or a row link naming no company: 409 `vendor_erp_link_exists`,
+  unlink first, §375) and a record another vendor holds here (409
+  `erp_vendor_already_linked`); keeps a row link from another named company
+  (§356); writes only the link, stamped with the connected company (§284). A
+  later sync that lists the record matches it by id; one that does not leaves
+  it alone (a same-company link is never re-judged). Audited
+  `vendor.erp_linked` with the record's ERP name. `vendor.manage`, like the
+  unlink. The vendor modal mounts the search keyed by vendor, and a search
+  answer that lands after the vendor changed is dropped.
+- **One lock for every writer of new links in a company.** The check-then-write
+  runs under the vendor row lock and an advisory transaction lock on
+  `(organization, realm)` (`vendor_erp_manual_link.link_lock`), which
+  `sync_vendors_from_erp` now takes too, so two links of one record, or a link
+  racing a sync's name adoption, cannot both land.
+- **Offered only where it can run.** `GET /api/vendors/{id}/erp-links` states
+  `search_available` from the stored settings alone (the adapter class and a
+  named company; no credential store opened on a read), and the vendor modal
+  shows the search to a `vendor.manage` holder only then.
+- Rejected: syncing the found contact through `sync_vendors_from_erp` (it reads
+  a whole listing, and a one-record pull would unlink by absence and count
+  names wrongly); widening the walk to every contact (customer-only contacts
+  can number in the thousands, and the name rule would link the wrong one);
+  returning the tax number masked (any part of it is more than the person
+  needs to choose).
+
+**fake-erp.** `GET /xero/…/Contacts` honours `searchTerm` and `where=
+TaxNumber==`, and the customer `xero-contact-2` carries a tax number, so the
+hand-made link can be driven against it.
+
+**Not verified live:** that Xero answers a missing scope 403 (a 401 there
+would leave such a connection failing its passes instead, visibly, until a
+reconnect), that a
+payment moves the bill's `UpdatedDateUTC`, and the two Contacts searches
+(added to the Xero Demo Company checks in `docs/followups.md` (b)).
+
+Tests: `tests/test_xero_status_sync_adapter.py` (the gap raised with the
+Invoices bills, a recorded gap reading Invoices alone, a 503 still failing the
+pass, the write-back and void refused before any call);
+`tests/test_erp_status_sync.py` (the sweep records the gap once, reads every
+bill on that pass, and the next pass is built from it with no full read);
+`tests/test_erp_oauth.py` (`scope_gaps` on `/status`, none while reconnecting,
+none on a fresh consent); `tests/test_erp_xero_adapter.py` (both searches,
+the unsafe tax number, truncation, `get_vendor`, the path guard, the log
+redaction); `tests/test_vendor_erp_manual_link.py` (search and link on real
+rows, every refusal, the kept link, the audit row, `vendor.manage`, a later
+sync leaving the link, `search_available`); `tests/test_sod_endpoint_wiring.py`;
+`src/lib/types/erpConnection.test.ts` (`oauthScopeGapKeys`, the strings in
+every locale); `src/lib/api/codedRefusals.test.ts` (the five link refusals);
+`src/lib/types/vendor.test.ts` (`erpCandidateLinkable`);
+`tests-e2e/organization/erp-connection.spec.ts` (the panel's gap and
+Reconnect) and `tests-e2e/vendors/erp-unlink.spec.ts` (find and link, stubbed
+ERP).
+
 ## 416. A vendor create ends on the new vendor's detail, over the unchanged list (closes a `docs/followups.md` entry, round 12, 2026-11-14)
 
 **Context.** `/vendors` is ordered by name and pages 25 at a time, and

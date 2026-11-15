@@ -2703,3 +2703,42 @@ async def test_status_offers_no_payment_check_when_the_verdict_cannot_be_read(re
     )
     body = await _status_body(realdb)
     assert body["status_sync_available"] is False and body["status_sync_refusal"] is None
+
+
+@pytest.mark.plan("scale")
+async def test_status_states_a_recorded_scope_gap_while_connected(realdb, monkeypatch):
+    """A consent found not to cover a permission (decisions §415) is stated, coded,
+    so the settings page can say what is limited and offer Reconnect; none is
+    stated while the connection needs reconnecting anyway, and a fresh consent
+    starts with none."""
+    monkeypatch.setattr(settings, "erp_status_sync_enabled", True)
+    block = {**_connected_block(realdb.info("a").org_id), "scope_gaps": ["payments_scope_missing"]}
+    await _set_settings(realdb, {"erp": _config(block)})
+    body = await _status_body(realdb)
+    assert body["scope_gaps"] == ["payments_scope_missing"]
+    # The pass still runs: it reads the incremental Invoices listing alone.
+    assert body["status_sync_available"] is True
+
+    await _set_settings(realdb, {"erp": _config({**block, "needs_reconnect": True})})
+    assert (await _status_body(realdb))["scope_gaps"] == []
+
+    await _set_settings(realdb, {"erp": _config(_connected_block(realdb.info("a").org_id))})
+    assert (await _status_body(realdb))["scope_gaps"] == []
+
+
+def test_a_fresh_consent_records_no_scope_gap():
+    """A reconnect mints a new block, so a gap recorded on the old one is gone."""
+    from app.services.erp_adapters.xero import XERO_OAUTH
+
+    block, _ = erp_oauth.new_connection(
+        spec=XERO_OAUTH,
+        token_response={"access_token": "a", "refresh_token": "r", "expires_in": 1800},
+        external_tenant_id="xt-1",
+        org_id=uuid.uuid4(),
+        client_source="platform",
+    )
+    assert erp_oauth.SCOPE_GAPS_KEY not in block
+    assert erp_oauth.scope_gaps(block) == []
+    assert erp_oauth.scope_gaps({"scope_gaps": ["payments_scope_missing", 3, ""]}) == [
+        "payments_scope_missing"
+    ]

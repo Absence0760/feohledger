@@ -55,6 +55,7 @@ from app.models.vendor import Vendor, VendorErpLink
 from app.services.audit_dispatch import dispatch_audit
 from app.services.erp_record_names import fit_name
 from app.services.vendor_erp_links import keep_link
+from app.services.vendor_erp_manual_link import link_lock
 from app.services.vendor_screening import screen_best_effort
 from app.services.vendor_tax_id import rekey_tax_id
 
@@ -190,6 +191,9 @@ async def sync_vendors_from_erp(
     # -- links kept from an earlier connection to this company --------------
     restored = 0
     if realm is not None:
+        # The lock a hand-made link takes (decisions §415): a person linking a
+        # record while this pull adopts it by name cannot both win.
+        await link_lock(db, organization_id, realm)
         restored = await _restore_kept_links(db, organization_id, realm, audited, unlinked)
 
     linked = (

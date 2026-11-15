@@ -2163,11 +2163,14 @@ XERO_CONTACTS = [
         "IsSupplier": True,
         "PaymentTerms": {"Bills": {"Day": 30, "Type": "DAYSAFTERBILLDATE"}},
     },
+    # A customer with no bill and no PO from us: no vendor walk can see it,
+    # so a person links it by hand from the vendor page (decisions §415).
     {
         "ContactID": "xero-contact-2",
         "Name": "Fake Xero Customer Co",
         "IsSupplier": False,
         "IsCustomer": True,
+        "TaxNumber": "GB999000111",
     },
     # Real Xero sets IsSupplier only once a contact has a bill, so a supplier
     # that has only been sent purchase orders is NOT one (seen live in the
@@ -2432,6 +2435,17 @@ async def xero_contacts(request: Request, page: int = 1) -> JSONResponse:
         rows = [c for c in rows if c.get("IsSupplier")]
     elif where == "IsSupplier==trueORIsCustomer==false":
         rows = [c for c in rows if c.get("IsSupplier") or not c.get("IsCustomer")]
+    elif where.startswith('TaxNumber=="') and where.endswith('"'):
+        # The vendor page's hand-made link searches by exact tax number
+        # (decisions §415); Xero's `where` filters on any element.
+        wanted = request.query_params["where"].split('=="', 1)[1][:-1]
+        rows = [c for c in rows if c.get("TaxNumber") == wanted]
+    term = request.query_params.get("searchTerm", "").strip().lower()
+    if term:
+        # Xero: "a case-insensitive text search across the Name, FirstName,
+        # LastName, ContactNumber and EmailAddress fields" (OpenAPI, §415).
+        fields = ("Name", "FirstName", "LastName", "ContactNumber", "EmailAddress")
+        rows = [c for c in rows if any(term in str(c.get(f) or "").lower() for f in fields)]
     ids = {i for i in request.query_params.get("IDs", "").split(",") if i}
     if ids:
         rows = [c for c in rows if c["ContactID"] in ids]

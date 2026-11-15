@@ -794,6 +794,13 @@ const BUILDERS: Record<string, Builder> = {
 		if (typeof n !== 'number' || !Number.isInteger(n) || n < 1) return null;
 		return t('refusal.vendorErpUnlinkInFlight', { n });
 	},
+	// Linking a vendor to an ERP record by hand (`services/vendor_erp_manual_link.py`,
+	// decisions §415). None names a vendor, a record or a tax number.
+	vendor_erp_search_unavailable: fixed('refusal.vendorErpSearchUnavailable'),
+	vendor_erp_link_exists: fixed('refusal.vendorErpLinkExists'),
+	erp_vendor_already_linked: fixed('refusal.erpVendorAlreadyLinked'),
+	erp_vendor_not_found: fixed('refusal.erpVendorNotFound'),
+	erp_vendor_inactive: fixed('refusal.erpVendorInactive'),
 	// Closing a workspace (`api/organization_close.py`, decisions §306). The
 	// refusal's blockers are listed by the page itself; the toast is the
 	// fixed sentence, and a blocker list this build cannot read falls back.

@@ -434,6 +434,8 @@ export const enSettings = {
 	'org.erp.oauth.needsReconnect': 'The connection to {erp} has expired. Reconnect to keep sending invoices.',
 	'org.erp.oauth.reconnect': 'Reconnect to {erp}',
 	'org.erp.oauth.expiresSoon': "The connection to {erp} expires on {date}. Reconnect before then to keep sending invoices and syncing payments.",
+	'org.erp.oauth.scopeGapPayments': "This connection to {erp} was made before FeohLedger asked for permission to read and record payments. Until you reconnect to grant it, payments made in {erp} are picked up only when the bill itself changes, and payments made through FeohLedger aren't recorded in {erp}.",
+	'org.erp.oauth.scopeGap': "This connection to {erp} is missing a permission FeohLedger now asks for. Reconnect to grant it.",
 	'org.erp.usage.ofShare': "API calls to {erp} today: {used} of your daily share of {limit}. The count resets at {reset}.",
 	'org.erp.usage.ofQuota': "API calls to {erp} today: {used} of your subscription key's daily {limit}. The count resets at {reset}.",
 	'org.erp.usage.noLimit': "API calls to {erp} today: {used}. The count resets at {reset}.",

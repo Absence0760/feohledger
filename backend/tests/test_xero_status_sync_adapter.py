@@ -32,8 +32,10 @@ from app.services.erp_adapters.base import (
     BILL_PAYMENT_VOIDED,
     PAYMENT_ACCOUNT_NOT_MAPPED,
     PAYMENT_EXCEEDS_BALANCE,
+    PAYMENTS_SCOPE_MISSING,
     ErpBillState,
     ErpListingIncomplete,
+    ErpScopeMissing,
     PaymentPayload,
 )
 from app.services.erp_adapters.dispatcher import get_erp_adapter, status_sync_adapter_keys
@@ -504,10 +506,62 @@ def test_changed_bills_past_the_listing_cap_raises_incomplete(xero):
         asyncio.run(_adapter().changed_bills(datetime(2026, 10, 1, tzinfo=UTC)))
 
 
-def test_a_connection_without_the_payments_scope_falls_back_to_a_full_read(xero):
+def _gap_adapter() -> XeroAdapter:
+    """A connection on which the status sync recorded the payments gap (§415)."""
+    return XeroAdapter(
+        {**CONFIG, "oauth": {**CONFIG["oauth"], "scope_gaps": [PAYMENTS_SCOPE_MISSING]}}
+    )
+
+
+def test_a_connection_without_the_payments_scope_reports_the_gap_with_its_bills(xero):
+    """The Payments listing refused for want of the scope is the connection's
+    scope gap, carrying what the Invoices listing (read first) found (§415)."""
+    xero.bill()
     xero.answers[("GET", "Payments")] = httpx.Response(403)
-    with pytest.raises(ErpListingIncomplete):
+    with pytest.raises(ErpScopeMissing) as caught:
         asyncio.run(_adapter().changed_bills(datetime(2026, 10, 1, tzinfo=UTC)))
+    assert caught.value.code == PAYMENTS_SCOPE_MISSING
+    assert caught.value.bill_ids == [BILL]
+
+
+def test_a_recorded_payments_gap_reads_only_the_invoices_listing(xero):
+    """Once recorded, no pass asks for payments again: the Invoices listing
+    alone, incremental, and nothing raised (§415)."""
+    xero.bill()
+    xero.answers[("GET", "Payments")] = httpx.Response(403)
+    changed = asyncio.run(_gap_adapter().changed_bills(datetime(2026, 10, 1, tzinfo=UTC)))
+    assert changed == [BILL]
+    assert xero.sent("GET", "/Payments") == []
+    [invoices] = xero.sent("GET", "/Invoices")
+    assert invoices.headers["If-Modified-Since"] == "2026-10-01T00:00:00"
+
+
+@pytest.mark.parametrize("status", [401, 503])
+def test_another_refusal_of_the_payments_listing_still_fails_the_pass(xero, status):
+    """Only a 403 is the scope. A 401 already went through the token refresh's
+    replay, so it is the token, not the consent's scope: recording it as a gap
+    would stop the payments listing and the write-back for good. It, like a
+    503, fails the pass with its mark unmoved (§415)."""
+    xero.answers[("GET", "Payments")] = httpx.Response(status)
+    with pytest.raises(XeroRequestError):
+        asyncio.run(_adapter().changed_bills(datetime(2026, 10, 1, tzinfo=UTC)))
+
+
+def test_a_recorded_payments_gap_refuses_the_write_back_before_any_call(xero):
+    xero.bill()
+    result = asyncio.run(_gap_adapter().post_payment(_payload()))
+    assert not result.success
+    assert result.refusal_code == PAYMENTS_SCOPE_MISSING
+    assert result.not_posted is True
+    assert xero.requests == []
+
+
+def test_a_recorded_payments_gap_refuses_the_void_before_any_call(xero):
+    xero.bill()
+    result = asyncio.run(_gap_adapter().void_payment(_payload()))
+    assert not result.success
+    assert result.refusal_code == PAYMENTS_SCOPE_MISSING
+    assert xero.requests == []
 
 
 def test_a_failed_change_listing_raises_so_the_mark_stays(xero):

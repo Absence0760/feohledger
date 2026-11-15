@@ -74,6 +74,7 @@
 		OAUTH_ERROR_KEYS,
 		oauthAttentionKey,
 		oauthConnectionState,
+		oauthScopeGapKeys,
 		optionLabelKey,
 		pickRefusalKey,
 		platformConnectUrl,
@@ -194,6 +195,10 @@
 	// Why it must be reconnected, or that it expires soon (decisions §295).
 	const attentionKey = $derived(provider ? oauthAttentionKey(provider.key, oauthStatus) : null);
 	const expiresSoon = $derived(attentionKey === 'org.erp.oauth.expiresSoon');
+	// A consent that lacks a permission FeohLedger now asks for (decisions
+	// §415): what is limited, and Reconnect, which grants it.
+	const scopeGapKeys = $derived(provider ? oauthScopeGapKeys(provider.key, oauthStatus) : []);
+	const offerReconnect = $derived(expiresSoon || scopeGapKeys.length > 0);
 	// "Check payments now" (decisions §392): offered only while the server says
 	// an on-request status-sync pass would run (`status_sync_available`).
 	const paymentCheckOffered = $derived(
@@ -878,6 +883,11 @@
 								})}
 							</p>
 						{/if}
+						{#each scopeGapKeys as key (key)}
+							<p class="oauth-state failure-text" data-testid="erp-oauth-scope-gap">
+								{m(key, { erp: providerLabel(provider) })}
+							</p>
+						{/each}
 						{#if callUsageText.length}
 							<div class="call-usage" data-testid="erp-call-usage">
 								<p class="oauth-state">{callUsageText[0]}</p>
@@ -930,9 +940,10 @@
 											: m('org.erp.oauth.checkPayments')}
 									</button>
 								{/if}
-								{#if expiresSoon}
-									<!-- A fresh consent replaces the expiring one in place
-									     (the callback writes a new connection). -->
+								{#if offerReconnect}
+									<!-- A fresh consent replaces the expiring or narrower one
+									     in place (the callback writes a new connection, which
+									     asks for every scope). -->
 									<button
 										class="btn-test"
 										data-testid="erp-oauth-reconnect"
