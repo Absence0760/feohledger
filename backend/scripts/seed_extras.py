@@ -541,6 +541,8 @@ async def seed_extras(session, org_id: uuid.UUID) -> dict[str, int]:
                     Expense(
                         organization_id=org_id,
                         report_id=report.id,
+                        # A report's lines are its owner's (decisions §434).
+                        created_by_user_id=report.employee_user_id,
                         expense_date=today - timedelta(days=30 - line_no),
                         merchant=merchants[line_no % len(merchants)],
                         category=cat,
@@ -566,6 +568,7 @@ async def seed_extras(session, org_id: uuid.UUID) -> dict[str, int]:
             _ent(
                 Expense(
                     organization_id=org_id,
+                    created_by_user_id=actor_id,
                     expense_date=today - timedelta(days=n + 1),
                     merchant=merchants[n % len(merchants)],
                     category=cat,

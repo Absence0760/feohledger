@@ -251,6 +251,10 @@ export interface Expense {
 	status: string;
 	reimbursable: boolean;
 	mileage_miles: number | null;
+	// Who created the line — its owner while it sits on no report, and the
+	// only person who may put it on one (decisions §434). null for a line
+	// written before migration 0134 (no recorded creator).
+	created_by_user_id: string | null;
 	created_at: string;
 	updated_at: string;
 }

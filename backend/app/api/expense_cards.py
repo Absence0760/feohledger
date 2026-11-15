@@ -536,6 +536,10 @@ async def create_expense_from_card(
         amount=txn.amount,
         currency=txn.currency,
         payment_method=_payment_method_for(txn),
+        # Whoever minted the line owns it, as for `POST /api/expenses`: a card
+        # transaction names no cardholder user, so the caller is the only
+        # creator there is to record (decisions §434). Only they may attach it.
+        created_by_user_id=user.id,
         organization_id=org_id,
         entity_id=txn.entity_id,
     )

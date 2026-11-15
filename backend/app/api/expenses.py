@@ -77,10 +77,12 @@ from app.services.expense_controls import (
     EXPENSE_CARD_RECONCILED,
     EXPENSE_FX_RATE_UNAVAILABLE,
     EXPENSE_FX_SOURCE_MISSING,
+    expense_creator_refusal,
     report_approve_check,
     report_approve_refusal,
     report_compose_refusal,
     report_draft_refusal,
+    report_line_creator_refusal,
     report_lines_unconverted_detail,
     report_owner_refusal,
     report_policy_blocked_detail,
@@ -178,6 +180,7 @@ def _to_response(e: Expense) -> ExpenseResponse:
         status=str(e.status),
         reimbursable=e.reimbursable,
         mileage_miles=float(e.mileage_miles) if e.mileage_miles is not None else None,
+        created_by_user_id=str(e.created_by_user_id) if e.created_by_user_id else None,
         created_at=e.created_at.isoformat() if e.created_at else "",
         updated_at=e.updated_at.isoformat() if e.updated_at else "",
     )
@@ -364,6 +367,33 @@ def _require_report_owner(report: ExpenseReport, user: User) -> None:
     ownership.
     """
     refusal = report_owner_refusal(report, user.id)
+    if refusal is not None:
+        raise refusal.http()
+
+
+def _require_loose_line_creator(expense: Expense, user: User) -> None:
+    """A line on NO report is its creator's: only they may change its claim
+    fields, replace its receipt or delete it (``expense_not_creator``).
+
+    The loose-line half of :func:`_require_report_owner` — a line on a report
+    is gated by that report's owner instead. Before ``created_by_user_id``
+    (migration 0134) a loose line had no owner, so any author role could
+    rewrite a colleague's line and the colleague would attach and submit it
+    unaware. The same acts stay open as on a report line: GL coding and card
+    reconciliation are not authorship of the claim (decisions §434)."""
+    if expense.report_id is not None:
+        return
+    refusal = expense_creator_refusal(expense, user.id)
+    if refusal is not None:
+        raise refusal.http()
+
+
+def _require_line_attachable(report: ExpenseReport, expense: Expense) -> None:
+    """Only a line its creator owns may go onto a report
+    (``expense_report_foreign_line``) — so attaching never adopts a colleague's
+    line, and a report's lines are all its owner's (decisions §434). Every
+    attach path runs it after the target's owner gate."""
+    refusal = report_line_creator_refusal(report, expense)
     if refusal is not None:
         raise refusal.http()
 
@@ -780,6 +810,9 @@ async def create_expense(
         payment_method=body.payment_method,
         reimbursable=body.reimbursable,
         mileage_miles=body.mileage_miles,
+        # The authenticated caller, never a body field: the line's owner while
+        # it sits on no report, and an input to report SoD (decisions §434).
+        created_by_user_id=user.id,
         organization_id=org_id,
         entity_id=entity_id,
     )
@@ -857,6 +890,8 @@ async def upload_receipt(
         owning = await _get_report_or_404(db, expense.report_id)
         _require_report_owner(owning, user)
         _require_report_unlocked(owning)
+    else:
+        _require_loose_line_creator(expense, user)
     try:
         file_key, _file_url = await upload_expense_receipt(org_id, expense.id, file)
     except ValueError as exc:
@@ -866,6 +901,8 @@ async def upload_receipt(
         owning = await _get_report_or_404(db, expense.report_id, for_update=True)
         _require_report_owner(owning, user)
         _require_report_unlocked(owning)
+    else:
+        _require_loose_line_creator(expense, user)
     expense.receipt_file_key = file_key
     # A newly-attached receipt can clear a receipt_required violation.
     await _refresh_policy_violations(db, expense, org)
@@ -1183,6 +1220,7 @@ async def update_expense(
                 target = await _get_report_or_404(db, new_report, for_update=True)
                 _require_draft_report(target)
                 _require_report_owner(target, user)
+                _require_line_attachable(target, expense)
                 affected_reports.add(new_report)
             expense.report_id = new_report
             moved.append("report_id")
@@ -1206,10 +1244,14 @@ async def update_expense(
     # Editing any of those fields on a line that sits on a report is authoring
     # the claim, so it is the owner's alone — `gl_account_id` stays open for the
     # same reason it stays open on a locked report (`_require_report_owner`).
+    #
+    # A line on NO report is its creator's in the same way (decisions §434).
     if changed and expense.report_id:
         owning = await _get_report_or_404(db, expense.report_id, for_update=True)
         _require_report_owner(owning, user)
         _require_report_unlocked(owning)
+    elif changed:
+        _require_loose_line_creator(expense, user)
 
     # An amount / currency change ripples into the owning report's total — the
     # locked conversion describes the OLD amount+currency, so it must be re-locked.
@@ -1275,6 +1317,8 @@ async def delete_expense(
         report_row = await _get_report_or_404(db, owning_report, for_update=True)
         _require_report_owner(report_row, user)
         _require_report_unlocked(report_row)
+    else:
+        _require_loose_line_creator(expense, user)
     # A card-reconciled expense is the target of a real FK
     # (`corporate_card_transactions.matched_expense_id`), so Postgres refused
     # the DELETE and it surfaced as an unhandled `ForeignKeyViolationError` — a
@@ -1630,6 +1674,7 @@ async def attach_expenses(
     affected_reports: set[uuid.UUID] = set()
     attached: list[Expense] = []
     detached: list[Expense] = []
+    newly_attached: list[Expense] = []
     for eid in expense_uuids:
         expense = await _get_expense_or_404(db, eid)
         if body.detach:
@@ -1640,6 +1685,8 @@ async def attach_expenses(
                 clear_expense_conversion(expense)
                 detached.append(expense)
         else:
+            if expense.report_id != report.id:
+                newly_attached.append(expense)
             if expense.report_id and expense.report_id != report.id:
                 affected_reports.add(expense.report_id)
             expense.report_id = report.id
@@ -1652,6 +1699,13 @@ async def attach_expenses(
         # Pulling a line off someone else's report onto mine rewrites theirs.
         _require_report_owner(source, user)
         _require_report_unlocked(source)
+
+    # Only the owner's own lines go onto their report — attaching no longer
+    # adopts a colleague's line (decisions §434). After the source-report
+    # gates, so a line pulled off someone else's report still answers
+    # `expense_report_not_owner` first, as the PATCH move does.
+    for expense in newly_attached:
+        _require_line_attachable(report, expense)
 
     # Lock each newly-attached line into the report's currency before totalling.
     for expense in attached:

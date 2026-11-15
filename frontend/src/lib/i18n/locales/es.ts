@@ -4064,6 +4064,8 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "No se puede aplicar una nota de crédito en estado {status}.",
 	'refusal.creditMemoExceedsBalance': "El importe de la nota de crédito supera el saldo acreditable restante de la factura ({remaining}).",
 	'refusal.expenseReportNotOwner': "Solo el propietario del informe puede cambiar sus líneas o enviarlo.",
+	'refusal.expenseNotCreator': "Solo la persona que creó este gasto puede cambiarlo o eliminarlo.",
+	'refusal.expenseReportForeignLine': "Este gasto lo creó otra persona. Solo quien lo creó puede añadirlo a un informe.",
 	'refusal.expenseReportNotDraft': "Solo un informe en borrador se puede cambiar o enviar (estado de este: {status}).",
 	'refusal.expenseReportNotSubmitted': "Solo un informe enviado se puede aprobar o rechazar (estado de este: {status}).",
 	'refusal.expenseReportSelfReject': "Segregación de funciones: no puede rechazar su propio informe de gastos. Otro revisor debe decidirlo.",

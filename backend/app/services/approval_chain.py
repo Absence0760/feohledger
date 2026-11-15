@@ -164,9 +164,12 @@ def violates_segregation(
     passes the draft's material editors
     (``purchase_requisitions.material_editor_ids``, migration 0102 —
     ``PATCH`` lets another user rewrite a draft's lines, vendor, currency and
-    budget, then approve what they wrote). The expense-report and pre-approval
-    shims pass ``None``: neither table records who edited a row, so there is no
-    second actor to name. The ``getattr`` default is what keeps a *future*
+    budget, then approve what they wrote). The expense-report shim passes the
+    recorded creators of the report's lines other than its owner
+    (``expense_controls.report_line_creators``, migration 0134 — empty once
+    the attach gate holds, read anyway). The pre-approval shim passes
+    ``None``: that table records no editor, so there is no second actor to
+    name. The ``getattr`` default is what keeps a *future*
     subject that forgets from raising ``AttributeError`` on the approval path,
     where the cost of a 500 is an outage on the control rather than a bypass of
     it.

@@ -4004,6 +4004,8 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "ステータスが {status} のクレジットメモは適用できません。",
 	'refusal.creditMemoExceedsBalance': "クレジットメモの金額が請求書の残りのクレジット可能残高（{remaining}）を超えています。",
 	'refusal.expenseReportNotOwner': "明細の変更や提出ができるのは、レポートの所有者のみです。",
+	'refusal.expenseNotCreator': "この経費を変更または削除できるのは、作成した本人のみです。",
+	'refusal.expenseReportForeignLine': "この経費は別のユーザーが作成したものです。レポートに追加できるのは作成した本人のみです。",
 	'refusal.expenseReportNotDraft': "変更や提出ができるのは下書きのレポートのみです（このレポートのステータス：{status}）。",
 	'refusal.expenseReportNotSubmitted': "承認や却下ができるのは提出済みのレポートのみです（このレポートのステータス：{status}）。",
 	'refusal.expenseReportSelfReject': "職務分掌：ご自身の経費レポートを却下することはできません。別のレビュー担当者が判断する必要があります。",
