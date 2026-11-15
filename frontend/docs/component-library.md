@@ -352,7 +352,10 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   "Choose how it was paid" placeholder and the select is `required`, for an ERP
   report that named no recordable rail), `reference`, `paidOn`; plus `maxDate`,
   `idPrefix` (unique per page, for the hint's id) and `testid` (the
-  `data-testid` prefix, default `record`). Shared by the payment queue's
+  `data-testid` prefix, default `record`), and `methodFixed`: a sentence shown
+  read only (`{testid}-method-fixed`) in place of the select, for an ERP split
+  over several rails that is the record whatever rail is picked (decisions
+  §413); the caller then sends no `method`. Shared by the payment queue's
   "Record as paid" dialog and the exception dialog's "Record the ERP's payment"
   panel, which both pre-fill it with `types/erpReport.ts::erpPrefill`
   (decisions §319).

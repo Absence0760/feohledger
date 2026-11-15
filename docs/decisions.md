@@ -20983,3 +20983,63 @@ exact-state helper checks the final flag; Merge's 429 sent once);
 the margin on both paths; the margin's floor; a 429 possibly posted and not
 retried). The #654 sandbox entry in `docs/followups.md` now names the margin
 and the 429 as what that pass settles.
+
+## 413. The record dialog shows the ERP's figure and split, and names no rail over a split that stands (§386 and §396 follow-ups, 2026-11-15)
+
+**The gap.** A `paid_not_recorded` row keeps the cash the ERP states
+(`erp_report.amount` / `amount_currency`, §386) and how it was paid rail by
+rail (`payment_parts`, §396), and the one-click record books both. The dialog
+on `/exceptions` showed neither. A person saw an `amount_mismatch` refusal
+without the figure to reconcile, and a payment made on two rails asked for one
+rail the server then ignored, with a response whose `method: null` said
+nothing about why.
+
+**The rule.**
+
+- **Both figures, never compared on the client.** The dialog shows the ERP's
+  figure in the code the ERP stated beside the invoice's amount in the
+  invoice's own code. The followup said "in the invoice's currency"; we render
+  each figure in its own code instead (`frontend/docs/money-formatting.md`).
+  The two codes differ exactly when the server refuses the record (§386), and
+  labelling the ERP figure with the invoice's code would hide that. A row
+  stating no figure says so: the bill is read again at record time (§393).
+- **Whether a split stands is the server's call.** "Stands" means the
+  breakdown adds up exactly, in whole cents, and spans more than one rail
+  (`split_by_rail` applies it). That needs exact sums, which the client may
+  not do. The row carries `erp_payment_split_stands`, computed by
+  `external_payment.split_stands_over_any_rail`, the same rule `_rail_split`
+  uses to keep a breakdown against a person's rail. The client compares
+  rails only, to decide when to show a split at all (more than one rail; a
+  part with no rail stated counts as one).
+- **No rail is named over a split that stands.** The picker becomes a
+  read-only line and the body omits `method`. The server's `method` is
+  optional on `record-erp-payment` only. An omitted rail is accepted only
+  when the figure being booked (stated, or the read-back's) carries a
+  breakdown that stands. Anywhere else it is 422
+  `erp_payment_method_required`, because the person's rail is then the record
+  (one rail, none, or parts that do not add up). `record-outside` still
+  requires a rail. Rejected: sending the prefilled or first part's rail
+  anyway. The server would ignore it, but the audit's `method_stated` would
+  record a pick nobody made. A null `method_stated` beside an `applied`
+  breakdown says what happened.
+- **A split that does not stand is shown, with the picker.** The note says the
+  parts do not add up, so the split is not kept and the rail chosen is
+  recorded for the whole payment, as `_rail_split` books it.
+- **The payment says how it split.** `PaymentResponse.rail_breakdown` (each
+  part's rail or null and amount, through `rail_parts_from_json`, so a
+  malformed array reads as none) explains `method: null` on every payment
+  read, not only this one.
+
+**Mobile.** The mobile exception detail has no record flow (it shows the
+PO-rematch note only), so it has nothing to change.
+
+Tests: `tests/test_payment_methods.py` (the stands rule against
+`_rail_split` for every rail a person could name; `PaymentResponse`'s
+breakdown and a malformed one; only the ERP record may omit the rail);
+`tests/test_erp_status_sync.py` (the detail's verdict, the response's
+breakdown, no rail over a standing split audited as `method_stated: null`,
+422 with nothing booked over one rail, a cent short, or no breakdown);
+`frontend/src/lib/types/erpReport.test.ts` (parts as booked, malformed as
+none, rails only); `codedRefusals.test.ts`;
+`tests-e2e/payments/erp-reported-payment.spec.ts` (the figures beside each
+other, the split shown and booked with no rail sent).
