@@ -21216,3 +21216,106 @@ Tests: `tests-e2e/vendors/create-invite.spec.ts` (the create dialog closes, the
 detail opens on the new vendor's name with focus inside it, and Esc returns
 focus to **+ New Vendor**). No vitest: the change is a dialog hand-off with no
 logic separable from the DOM.
+
+## 420. The invoice's approvers may not clear its `po_mismatch` or `quality_hold` in the queue (widens §169 at the operator's call; closes a `docs/followups.md` entry, round 12, 2026-11-14)
+
+**The gap.** Since §389 a goods receipt, and since §401 a passing inspection,
+that an invoice's approver records after approving no longer lifts the
+invoice's hold. The queue was open: `exception_lifecycle.segregation_refusal`
+refused only the implicated set and the raiser (§169), so the same approver
+could resolve or dismiss the held `po_mismatch` / `quality_hold` by hand, on
+their own word rather than on an independent receipt or inspection. §389 and
+§401 bound an approver who did not use the queue, not one set on it. §169 had
+deliberately left approvers able to clear, so closing this needed that policy
+widened; the operator made that call.
+
+**Decision.** A third refusal axis, for `po_mismatch` and `quality_hold` only
+(`exception_lifecycle.APPROVER_SEGREGATED_TYPES`), naming the invoice's
+approvers: `approval_chain.approver_ids`, the approval of record
+(`Invoice.approved_by_user_id`, migration 0129) ∪ every level approval on the
+invoice's workflow chain. Its code is `segregation_approver`, with its own
+sentence on the 403 and its own translation on web and mobile, because the
+reader has to be told which of their duties collides: "a user involved in
+creating this invoice" is wrong for an approver.
+
+Everything else mirrors §169 / §170 exactly:
+
+- `resolve` / `dismiss` only. `escalate` stays open: an escalated hold still
+  blocks the run, and it is the refused approver's exit.
+- `settings.exceptions.require_segregation: false` lifts this axis with the
+  other two; the approval step's own `require_segregation` does not govern the
+  queue, for §169's reason. That matches §389, where the queue's opt-out
+  already lifted the reverse-order receipt rule.
+- NULL permissive: an invoice nobody has approved, or one approved before
+  migration 0129 whose approval names nobody, refuses nobody on this axis.
+- Every door `segregation_refusal` serves reads it: the single and bulk
+  resolve (bulk as a per-row `skipped` reason), the queue's per-row verdicts
+  (list and detail), the payments queue's `clear_refusal`, `clearance_stands`
+  (an approver's own earlier clearance no longer suppresses a re-raise, as
+  §367 / §374 do for a decider implicated later), and the agent coordinator.
+
+**Why only those two types.** They are the holds a receipt or an inspection
+evidences, and the point of §389 / §401 is that the approver cannot supply
+that evidence for their own invoice. A `duplicate`, `fraud_flag`,
+`line_total_mismatch` or `payment_reconciliation` is not lifted by a receipt
+or an inspection, and an AP manager approving an invoice and then judging its
+duplicate flag is not the conflict this closes. Widening to every blocking
+type would be a second policy nobody asked for.
+
+**The chain is read, not just the row.** The followup noted that
+`approved_by_user_id` lets the pure predicate read the approval of record
+without I/O. A level approver is still an approver, in §389's set and here, so
+the predicate takes the invoice's `WorkflowInstance` as an optional argument.
+The doors that judge a page at once batch it in one query
+(`workflow_instances_for`, only for `po_mismatch` / `quality_hold` rows), the
+single-row doors fetch it (`workflow_instance_for`, no query for any other
+type), and `record_decision` loads it itself when a caller did not pass one
+and the decision is in scope, for the reason it already loads the invoice: a
+control that weakens when an optional argument is omitted is the
+omission-reads-as-oversight failure. A caller that omits it from a *verdict*
+reads the approval of record alone, never nothing.
+
+**The agent judges against who had approved before the run.** Agents inherit
+the triggering human's refusal (§170), so a run triggered by someone who had
+already approved the invoice escalates. But the `po_mismatch` resolvers
+(amount, missing PO, multi-PO split) themselves approve the invoice on the
+triggering human's behalf, and only then is the row resolved through
+`record_decision`. Judged on the row after the apply, every auto-resolution
+would be refused, and as a bare 403 after the savepoint, the regression §170's
+handler exists to prevent. So the coordinator reads `approver_ids` before the
+apply and passes that set to both the pre-check and `record_decision`
+(`approvers=`). This is not an exemption: that resolve rests on the re-match
+no longer finding the mismatch (`decision.refound`) and on no implicated
+receipt, approvers included, lifting the hold (`_receipts_implicated`, §389),
+the same evidence the PO-match auto-close would have closed the row on. The
+human's word is not involved. `quality_hold` has no resolver.
+
+**Rejected.**
+
+- *Reading only `approved_by_user_id`.* Cheaper, but it leaves a level
+  approver of a multi-level chain free to clear the hold their own level
+  signed, and it would disagree with §389's set about who an approver is.
+- *Refusing the approval instead of the clearance* (an approver may not
+  approve an invoice whose hold they cleared). The hold is the fail-closed
+  side, as §389 chose. Refusing approval would let the clearance stand and
+  release the payment whenever someone else approved.
+- *Exempting `via="agent"` from the approver axis.* That would let an approver
+  who triggers the run clear their own hold through the agent, the laundering
+  route §170 closed.
+
+**Cost.** A manager who both approves invoices and works the queue can no
+longer close the PO or inspection hold on an invoice they approved, and a hold
+they cleared before approving comes back at the next refresh after they
+approve. Either a colleague clears it or the evidence arrives from someone
+else (a receipt or inspection recorded by another user lifts it in that
+request). A one-person AP team has the per-org opt-out, as for §169.
+
+Tests: `backend/tests/test_exception_resolve_segregation.py` (the predicate on
+the approval of record and on a chain level approver, escalate open, the type
+scope, the opt-out, axis order, `clearance_stands`, the single-row 403 and
+verdicts, bulk per-row with a chain, the payments queue's `clear_refusal`);
+`backend/tests/test_exception_agent_queue_segregation.py` (an approver's run
+escalates; the run's own approval does not refuse its resolve);
+`backend/tests/test_queue_action_verdicts.py` (verdict / resolve parity);
+`frontend/src/lib/api/codedRefusals.test.ts` and
+`mobile/test/l10n/coded_refusal_messages_test.dart` (the code is stated).

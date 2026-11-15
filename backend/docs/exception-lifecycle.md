@@ -200,15 +200,19 @@ Clearing a payment-**blocking** exception is a money-path authorisation, so
 `record_decision` refuses an actor implicated in the linked invoice
 (`Invoice.uploaded_by_id` ∪ `Invoice.segregation_actor_ids`, through
 `approval_chain.violates_segregation`) **or** recorded as the flag's raiser
-(`exceptions.raised_by_user_id`, migration `0098`). `resolve` and `dismiss`
-only — `escalate` is the refused actor's exit and an escalated row still blocks
-the run. NULL on both axes is permissive; `settings.exceptions
-.require_segregation: false` is the explicit per-org opt-out. The single-row
-403 is a coded refusal whose `code` is the same `segregation_raiser` /
-`segregation_implicated` string `/bulk/resolve` reports per skipped row. Full rules,
+(`exceptions.raised_by_user_id`, migration `0098`) **or**, on a `po_mismatch` or
+`quality_hold` only, one of the invoice's approvers (`approval_chain.approver_ids`:
+the approval of record ∪ the chain's level approvals; decisions §420 — those
+holds wait for a receipt or an inspection the approver did not supply).
+`resolve` and `dismiss` only — `escalate` is the refused actor's exit and an
+escalated row still blocks the run. NULL on every axis is permissive;
+`settings.exceptions.require_segregation: false` is the explicit per-org
+opt-out. The single-row 403 is a coded refusal whose `code` is the same
+`segregation_raiser` / `segregation_implicated` / `segregation_approver` string
+`/bulk/resolve` reports per skipped row. Full rules,
 including what each refusal says and why a refusal is logged rather than
 audited: [`docs/authentication.md`](../../docs/authentication.md) § Segregation
-of duties on the exception queue, and `docs/decisions.md` §169–§170.
+of duties on the exception queue, and `docs/decisions.md` §169–§170 and §420.
 
 **Being the chokepoint is what makes it safe to put the check here**, and it is
 also why the two non-queue callers (compliance release, portal) need no exemption: neither

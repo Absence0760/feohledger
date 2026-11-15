@@ -1391,27 +1391,6 @@ scope (§260) — do not fold them into any of these.
       next change to `services/erp_oauth`.
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
-- [ ] **(c) The approver of record can still resolve their invoice's
-      `po_mismatch` or `quality_hold` by hand in the queue.** Since §389 a
-      receipt, and since §401 a passing inspection, the approver records after
-      approving no longer lifts the invoice's hold, but
-      `exception_lifecycle.segregation_refusal` refuses only the implicated set
-      and the raiser (§169), so the same approver can resolve the held row
-      themselves, on their own word rather than an independent receipt.
-      **Durable fix:** a third refusal axis for `po_mismatch` and
-      `quality_hold` (the holds a receipt or an inspection evidences) naming
-      the invoice's approvers
-      (`approval_chain.approver_ids`; `approved_by_user_id` is on the row, so
-      the pure predicate can read the approval of record without I/O), with
-      its coded sentence on web and mobile, read by every door
-      `segregation_refusal` serves (single and bulk resolve, the agent
-      coordinator, the payments queue verdict, `clearance_stands`). It widens
-      §169's policy, which deliberately left approvers able to clear, so it
-      needs that call made. Until it is, §389 and §401 bind an approver who
-      does not use the queue, not one set on it. **Trigger:** the operator's call on
-      widening §169, which should be the next decision on this control; at the
-      latest the next change to `exception_lifecycle.segregation_refusal`, or
-      the first tenant running three-way matching with more than one approver.
 - [ ] **(c) A multi-PO split's `po_ids` vanish on the next warning refresh, and
       the receiver check with them.** `approval_chain.receipt_recorders` reads
       the split's PO ids from `po_match.po_ids`, but `refresh_warnings`

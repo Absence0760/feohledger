@@ -624,9 +624,11 @@ where somebody could:
   the invoice's newest live receipt and falls back to a PO-level one only when
   that receipt has none, so a hold raised by a receipt's `fail` lifts only on a
   pass recorded against that receipt — a PO-level pass beside it is never
-  read. Raising a hold is never refused — a `fail` from anyone lands. (The
-  queue does not yet refuse an approver resolving the row by hand —
-  `docs/followups.md`, as for §389.)
+  read. Raising a hold is never refused — a `fail` from anyone lands. Nor may
+  an approver resolve or dismiss the held row by hand in the queue: on a
+  `quality_hold` (and a `po_mismatch`) `exception_lifecycle.segregation_refusal`
+  refuses the invoice's approvers too, 403 `segregation_approver` (decisions
+  §420).
   Not the audit log: in `FEOH_AUDIT_MODE=lambda` no local row exists, so an
   audit-based check would fail open. When the QMS sync takes over a row that
   was not its own (same inspection number), it also replaces the typed PO / GR
@@ -663,9 +665,10 @@ where somebody could:
   an independent person:** cancel the approver's receipt (cancelling can only
   raise a hold) and have someone else record the delivery, which lifts the hold
   in that request, or have someone else resolve the held row in the queue after
-  checking the delivery. (The queue does not yet refuse the approver of record
-  resolving it by hand: `exception_lifecycle.segregation_refusal` refuses the
-  implicated set and the raiser, not approvers — `docs/followups.md`.) The
+  checking the delivery. That someone must not be an approver: the queue refuses
+  the invoice's approvers resolving or dismissing its `po_mismatch`
+  (`exception_lifecycle.segregation_refusal`, 403 `segregation_approver`,
+  decisions §420). The
   approval step's `require_segregation: false` lifts it, as it lifts §267, and
   so does `settings.exceptions.require_segregation: false`, which lifts every
   auto-close limit here. Receipt entry re-matches the PO's invoices under
