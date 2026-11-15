@@ -582,18 +582,19 @@ _PLAIN_CLIENT_ALLOWED: dict[str, tuple[int, str]] = {
     ),
 }
 
-#: Modules that send to a host a TENANT can configure. Each must stay in the
-#: guarded set above (import url_safety) and route its per-org host through
-#: ``org_host_client``, so dropping the import cannot quietly drop the module
-#: out of the plain-client check too.
-_ORG_HOST_MODULES = (
-    "services/peppol_adapters/as4_gateway.py",  # settings.peppol.gateway_url
-    "services/extraction_adapters/ollama.py",  # settings.extraction.base_url (BYOK)
-    "services/chat_notification_adapters/slack_adapter.py",  # chat webhook_url
-    "services/chat_notification_adapters/teams_adapter.py",  # chat webhook_url
-    "services/enrichment_adapters/clearbit.py",  # settings.enrichment base_url
-    "services/enrichment_adapters/dun_bradstreet.py",  # settings.enrichment base_url
-)
+#: Modules that send to a host a TENANT can configure, with the per-org config
+#: key that host is read from. Each must stay in the guarded set above (import
+#: url_safety) and route that key's value through ``org_host_client`` — the URL
+#: the factory checks must trace back to the key, so a call that vets a constant
+#: or the operator setting while the request goes to the per-org host fails.
+_ORG_HOST_MODULES = {
+    "services/peppol_adapters/as4_gateway.py": "gateway_url",  # settings.peppol
+    "services/extraction_adapters/ollama.py": "base_url",  # settings.extraction (BYOK)
+    "services/chat_notification_adapters/slack_adapter.py": "webhook_url",  # chat
+    "services/chat_notification_adapters/teams_adapter.py": "webhook_url",  # chat
+    "services/enrichment_adapters/clearbit.py": "base_url",  # settings.enrichment
+    "services/enrichment_adapters/dun_bradstreet.py": "base_url",  # settings.enrichment
+}
 
 #: Modules that send to a per-org host through their OWN check + pinned client,
 #: because they need something ``org_host_client`` does not offer: a resolver
@@ -625,16 +626,67 @@ _ORG_HOST_NOT_YET_SENT = {
 
 def test_org_configurable_hosts_go_through_org_host_client():
     guarded = dict(_guarded_modules())
-    for rel in _ORG_HOST_MODULES:
+    for rel, key in _ORG_HOST_MODULES.items():
         assert rel in guarded, f"{rel} no longer imports url_safety"
+        tree = guarded[rel]
         calls = [
-            node
-            for node in ast.walk(guarded[rel])
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "org_host_client"
+            (node, fn, cls)
+            for node, fn, cls in _calls_in_context(tree)
+            if _url_safety_name(tree, node.func) == "org_host_client"
         ]
         assert calls, f"{rel} does not route its per-org host through org_host_client"
+        for call, fn, cls in calls:
+            url = call.args[0] if call.args else _kwarg(call, "url")
+            assert url is not None, f"{rel}:{call.lineno} passes org_host_client no URL"
+            sources = _config_keys(url, fn, cls)
+            assert key in sources, (
+                f"{rel}:{call.lineno}: the URL org_host_client checks does not trace to "
+                f"the per-org {key!r} (traces to {sorted(sources) or 'nothing per-org'})"
+            )
+
+
+def test_config_key_tracer_follows_only_the_per_org_value():
+    """The tracer behind the adopter check: it must follow the shapes the
+    adopters use, and must not credit a constant or the operator setting."""
+
+    def keys(src: str) -> set[str]:
+        tree = ast.parse(src)
+        found: set[str] = set()
+        for call, fn, cls in _calls_in_context(tree):
+            if _url_safety_name(tree, call.func) == "org_host_client":
+                found |= _config_keys(call.args[0], fn, cls)
+        return found
+
+    imp = "from app.utils.url_safety import org_host_client\n"
+    traced = {
+        # attribute set in __init__ from the config, with a constant fallback
+        "class A:\n def __init__(self, config):\n"
+        "  self.u = (config or {}).get('webhook_url') or ''\n"
+        " async def f(self):\n  return await org_host_client(self.u, allow_private=False)\n": {
+            "webhook_url"
+        },
+        # local assigned from a helper method returning the stripped config value
+        "class A:\n def _org(self):\n  return str(self.config.get('base_url') or '').strip()\n"
+        " async def f(self):\n  u = self._org()\n"
+        "  return await org_host_client(u, allow_private=False)\n": {"base_url"},
+        # the module alias form, with a subscript read
+        "from app.utils import url_safety as us\n"
+        "async def f(cfg):\n"
+        "  return await us.org_host_client(cfg['base_url'], allow_private=False)\n": {"base_url"},
+    }
+    for src, expected in traced.items():
+        assert keys(imp + src) == expected, src
+    untraced = (
+        "BASE = 'https://api.example.com'\nclass A:\n def __init__(self, config):\n"
+        "  self.u = config.get('base_url')\n"
+        " async def f(self):\n  return await org_host_client(BASE, allow_private=False)\n",
+        "from app.config import settings\nasync def f(config):\n"
+        "  return await org_host_client(settings.ollama_base_url, allow_private=False)\n",
+        "async def f(response):\n"
+        "  return await org_host_client(response.get('base_url'), allow_private=False)\n",
+    )
+    for src in untraced:
+        assert keys(imp + src) == set(), src
 
 
 _PINNED_FACTORIES = {"org_host_client", "pinned_async_client", "pinned_client"}
@@ -653,9 +705,18 @@ def _called_names(tree) -> set[str]:
 
 
 def test_bespoke_per_org_hosts_still_build_a_pinned_client():
+    """A bespoke module's pinned client takes no URL — it vets whatever it is
+    asked to dial — so the trace that matters is the other way round: it must
+    stay in the guarded set, where the plain-client count fails any unpinned
+    client it builds for that host."""
+    guarded = dict(_guarded_modules())
     for rel in _ORG_HOST_BESPOKE:
-        names = _called_names(ast.parse((_APP / rel).read_text()))
-        assert names & _PINNED_FACTORIES, f"{rel} sends to a per-org host unpinned"
+        assert rel in guarded, f"{rel} no longer imports url_safety"
+        tree = guarded[rel]
+        factories = {
+            _url_safety_name(tree, n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)
+        }
+        assert factories & _PINNED_FACTORIES, f"{rel} sends to a per-org host unpinned"
 
 
 def test_per_org_hosts_not_yet_sent_build_no_http_client():
@@ -808,18 +869,232 @@ def _guarded_modules():
             yield rel, ast.parse(src)
 
 
+def _module_bindings(tree, module: str) -> tuple[set[str], dict[str, str]]:
+    """How ``tree`` can name ``module`` and its attributes, through any import:
+    the local names bound to the module itself (``import httpx``, ``import httpx
+    as h``, ``from app.utils import url_safety as us``) and a map of local name →
+    attribute for ``from module import X [as Y]``. Imports inside functions count
+    too, module-wide: an over-approximation, which makes the plain-client count
+    stricter, never looser."""
+    parent, _, leaf = module.rpartition(".")
+    modules: set[str] = set()
+    names: dict[str, str] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name == module:
+                    # ``import a.b.c`` binds ``a``; only an alias binds the leaf.
+                    modules.add(a.asname or a.name)
+        elif isinstance(n, ast.ImportFrom) and n.level == 0:
+            for a in n.names:
+                if n.module == module:
+                    names[a.asname or a.name] = a.name
+                elif parent and n.module == parent and a.name == leaf:
+                    modules.add(a.asname or a.name)
+    return modules, names
+
+
+def _resolved_attr(tree, func, module: str) -> str | None:
+    """The ``module`` attribute a call's ``func`` names, whatever the import
+    spelling, or None when it names something else."""
+    modules, names = _module_bindings(tree, module)
+    if isinstance(func, ast.Name):
+        return names.get(func.id)
+    if isinstance(func, ast.Attribute):
+        value = func.value
+        dotted = []
+        while isinstance(value, ast.Attribute):
+            dotted.append(value.attr)
+            value = value.value
+        if isinstance(value, ast.Name):
+            path = ".".join([value.id, *reversed(dotted)])
+            if path in modules or path == module:
+                return func.attr
+    return None
+
+
+def _url_safety_name(tree, func) -> str | None:
+    return _resolved_attr(tree, func, "app.utils.url_safety")
+
+
+#: Every httpx entry point that builds an UNPINNED client: the two constructors,
+#: and the module-level request helpers, which each open a plain ``httpx.Client``.
+_HTTPX_PLAIN_ENTRY_POINTS = {
+    "AsyncClient",
+    "Client",
+    "request",
+    "stream",
+    "get",
+    "options",
+    "head",
+    "post",
+    "put",
+    "patch",
+    "delete",
+}
+
+
 def _plain_client_calls(tree) -> int:
-    count = 0
-    for node in ast.walk(tree):
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _resolved_attr(tree, node.func, "httpx") in _HTTPX_PLAIN_ENTRY_POINTS
+    )
+
+
+def test_plain_client_count_resolves_every_import_spelling():
+    """Each spelling of a plain httpx client counts, not only the literal
+    ``httpx.AsyncClient(...)``, so an alias cannot slip a client past the count
+    guard below. Names that merely resemble httpx's do not."""
+    counted = (
+        "import httpx\nhttpx.AsyncClient()\n",
+        "import httpx\nhttpx.Client()\n",
+        "import httpx as h\nh.AsyncClient()\n",
+        "import httpx as h\nh.Client()\n",
+        "from httpx import AsyncClient\nAsyncClient()\n",
+        "from httpx import AsyncClient as X\nX()\n",
+        "from httpx import Client\nClient()\n",
+        "from httpx import Client as C\nC()\n",
+        "def f():\n    from httpx import AsyncClient as X\n    return X()\n",
+        "import httpx\nhttpx.get('https://example.com')\n",
+        "from httpx import post\npost('https://example.com')\n",
+        "import httpx as h\nh.stream('GET', 'https://example.com')\n",
+    )
+    for src in counted:
+        assert _plain_client_calls(ast.parse(src)) == 1, src
+    not_counted = (
+        "from app.utils.url_safety import pinned_async_client\npinned_async_client()\n",
+        "import httpx\nhttpx.Timeout(5)\n",
+        "import httpx\nclient.get('https://example.com')\n",
+        "from somewhere import AsyncClient\nAsyncClient()\n",
+        "import httpx\nAsyncClient()\n",
+        "import httpx\ndef f(c: httpx.AsyncClient) -> httpx.Client: ...\n",
+    )
+    for src in not_counted:
+        assert _plain_client_calls(ast.parse(src)) == 0, src
+
+
+def _calls_in_context(tree):
+    """Every call in ``tree`` with its innermost enclosing function and class."""
+
+    def visit(node, fn, cls):
+        for child in ast.iter_child_nodes(node):
+            child_fn, child_cls = fn, cls
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                child_fn = child
+            elif isinstance(child, ast.ClassDef):
+                child_fn, child_cls = None, child
+            if isinstance(child, ast.Call):
+                yield child, fn, cls
+            yield from visit(child, child_fn, child_cls)
+
+    yield from visit(tree, None, None)
+
+
+def _kwarg(call, name):
+    return next((k.value for k in call.keywords if k.arg == name), None)
+
+
+def _is_config_root(expr) -> bool:
+    """The adapter's per-org config dict: ``config`` / ``cfg``, ``self.config``,
+    or either behind an ``or {}`` default."""
+    if isinstance(expr, ast.Name):
+        return expr.id in ("config", "cfg")
+    if isinstance(expr, ast.Attribute):
+        return (
+            expr.attr == "config" and isinstance(expr.value, ast.Name) and expr.value.id == "self"
+        )
+    if isinstance(expr, ast.BoolOp):
+        return any(_is_config_root(v) for v in expr.values)
+    return False
+
+
+def _assigned_values(scope, target):
+    """The values assigned to ``target`` (a local name, or ``self.attr``) in scope."""
+
+    def matches(t):
+        if isinstance(target, ast.Name):
+            return isinstance(t, ast.Name) and t.id == target.id
+        return (
+            isinstance(t, ast.Attribute)
+            and t.attr == target.attr
+            and isinstance(t.value, ast.Name)
+            and t.value.id == "self"
+        )
+
+    for n in ast.walk(scope):
+        if isinstance(n, ast.Assign) and any(matches(t) for t in n.targets):
+            yield n.value
+        elif isinstance(n, ast.AnnAssign | ast.NamedExpr) and n.value and matches(n.target):
+            yield n.value
+
+
+def _config_keys(expr, fn, cls, depth: int = 0) -> set[str]:
+    """The per-org config keys a URL expression is read from: through locals,
+    ``self`` attributes, ``self`` helper methods' returns, ``or`` fallbacks,
+    f-strings and string methods. A constant or ``settings.*`` contributes none."""
+    if depth > 10:
+        return set()
+
+    def again(e, f=fn):
+        return _config_keys(e, f, cls, depth + 1)
+
+    if isinstance(expr, ast.Call):
+        func = expr.func
+        if isinstance(func, ast.Attribute):
+            if (
+                func.attr == "get"
+                and _is_config_root(func.value)
+                and expr.args
+                and isinstance(expr.args[0], ast.Constant)
+                and isinstance(expr.args[0].value, str)
+            ):
+                return {expr.args[0].value}
+            if isinstance(func.value, ast.Name) and func.value.id == "self" and cls is not None:
+                keys: set[str] = set()
+                for m in cls.body:
+                    if not isinstance(m, ast.FunctionDef | ast.AsyncFunctionDef):
+                        continue
+                    if m.name == func.attr:
+                        for r in ast.walk(m):
+                            if isinstance(r, ast.Return) and r.value is not None:
+                                keys |= again(r.value, m)
+                return keys
+            return again(func.value)  # "...".strip() / .rstrip("/")
+        if isinstance(func, ast.Name) and func.id == "str" and expr.args:
+            return again(expr.args[0])
+        return set()
+    if isinstance(expr, ast.Subscript):
         if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in ("AsyncClient", "Client")
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "httpx"
+            _is_config_root(expr.value)
+            and isinstance(expr.slice, ast.Constant)
+            and isinstance(expr.slice.value, str)
         ):
-            count += 1
-    return count
+            return {expr.slice.value}
+        return set()
+    if isinstance(expr, ast.BoolOp):
+        return set().union(*(again(v) for v in expr.values))
+    if isinstance(expr, ast.IfExp):
+        return again(expr.body) | again(expr.orelse)
+    if isinstance(expr, ast.JoinedStr):
+        return set().union(
+            set(), *(again(v.value) for v in expr.values if isinstance(v, ast.FormattedValue))
+        )
+    if isinstance(expr, ast.Name) and fn is not None:
+        return set().union(set(), *(again(v) for v in _assigned_values(fn, expr)))
+    if (
+        isinstance(expr, ast.Attribute)
+        and isinstance(expr.value, ast.Name)
+        and expr.value.id == "self"
+        and cls is not None
+    ):
+        keys = set()
+        for m in cls.body:
+            if isinstance(m, ast.FunctionDef | ast.AsyncFunctionDef):
+                keys |= set().union(set(), *(again(v, m) for v in _assigned_values(m, expr)))
+        return keys
+    return set()
 
 
 def test_guarded_modules_send_through_the_pinned_client():
@@ -839,17 +1114,21 @@ def test_blocking_pinned_client_is_never_built_in_a_coroutine():
     `async def` it would stall the event loop (project invariant)."""
     offenders = []
     for path in sorted(_APP.rglob("*.py")):
+        rel = path.relative_to(_APP).as_posix()
         tree = ast.parse(path.read_text())
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.AsyncFunctionDef):
                 continue
             for node in ast.walk(fn):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "pinned_client"
+                if isinstance(node, ast.Call) and (
+                    _url_safety_name(tree, node.func) == "pinned_client"
+                    or (
+                        rel == "utils/url_safety.py"
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "pinned_client"
+                    )
                 ):
-                    offenders.append(f"{path.relative_to(_APP)}:{node.lineno}")
+                    offenders.append(f"{rel}:{node.lineno}")
     assert offenders == []
 
 

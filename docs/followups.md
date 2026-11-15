@@ -2029,14 +2029,6 @@ user-visible halves still open.
       hold. **Durable fix:** find the lock it waits on and scope the script's
       targets to its own slot. **Trigger:** the next time it hangs, or the next
       change to the rename script.
-- [ ] **(c) Two gaps in the outbound-host guard.** `_plain_client_calls` counts
-      only the literal `httpx.AsyncClient(...)` form in modules that import
-      `url_safety` (an alias or `from httpx import AsyncClient` is missed, though
-      the discovery guard still forces classification), and the adopter checks
-      confirm the factory is called, not that the per-org URL is what it is
-      given. **Durable fix:** resolve httpx client constructors through imports
-      in the AST walk, and assert the factory's URL argument traces to the
-      settings value. **Trigger:** the next change to `test_url_safety.py`.
 
 ### Surfaced by the Python 3.15 Dependabot bumps (2026-11-06)
 
