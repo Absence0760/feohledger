@@ -20493,3 +20493,71 @@ the record's own `vendorId`, which is refused even with a blank pay-to;
 `tests/test_erp_refusal_codes.py` and `frontend/src/lib/api/erpRefusals.test.ts`
 (the code catalogued and stated). fake-erp's BC create now states
 `payToVendorId` (the vendor card's, else the vendor's own).
+
+## 407. Business Central and SYSPRO name the customer's step at tenant deletion, with nothing to call (§400 follow-up, 2026-11-14)
+
+**Context.** §400 made tenant deletion end or name the access a
+stored-credential ERP holds, keyed on the adapter's `provider_side_disconnect`,
+and left Merge.dev, Business Central, NetSuite and SYSPRO silent. A deleted
+Business Central or SYSPRO tenant's confirmation said nothing about access that
+outlives our sealed copy.
+
+**Decision.**
+
+- **Business Central: `unsupported`, and the customer disables our client ID
+  and deletes the secret.** The connection is service-to-service: the customer
+  registers an app in their own Microsoft Entra tenant, gives us its client id
+  and a client secret, and enables the client id on BC's *Microsoft Entra
+  Applications* page ("Using Service to Service Authentication", Task 1 and
+  Task 2,
+  <https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/automation-apis-using-s2s-authentication>,
+  checked 2026-11-14). We hold the secret, never a consent or a refresh token,
+  and mint access tokens that live 60–90 minutes ("Access tokens" § Token
+  lifetime, <https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens>,
+  checked 2026-11-14). The identity platform's discovery document
+  (<https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration>,
+  read 2026-11-14) lists no `revocation_endpoint`. So
+  `BusinessCentralAdapter.provider_side_disconnect` names both halves: set our
+  client ID to Disabled (or delete it) on that BC page, and delete the client
+  secret from the app registration in the Entra admin center.
+- **SYSPRO: `unsupported`, and the customer locks out the operator.** The access
+  is the stored operator code and password. e.net's `Logoff` ends one session,
+  not the operator's ability to log on, and every operation already sends it in
+  a `finally`, so there is no session of ours to end and no call that ends the
+  credential. SYSPRO's Operator Maintenance
+  (<https://help.syspro.com/syspro-8-2025/g_programs/imp/imppmp/imppmp.htm>,
+  checked 2026-11-14) documents **Operator locked out** ("the operator is unable
+  to load SYSPRO") and **Usage for e.net business objects** = **No access**
+  ("the operator code cannot be used as a login for the business objects of
+  e.net Solutions"); the step names those, or a new password.
+- Neither adapter sets `revokes_stored_access`: the outcome is decided at the
+  read with no provider call, so a closure defers nothing.
+
+**Rejected.**
+
+- *Counting a SYSPRO `Logoff` at deletion as a revoke.* It would need a `Logon`
+  first, with the very credential we are told to forget, only to end the
+  session it just opened. It ends nothing that outlives the call, and reporting
+  `revoked` would tell the customer the operator is safe when it is not.
+- *Deleting our client secret or disabling the service principal through
+  Microsoft Graph.* Our token is scoped to the Business Central API only. Asking
+  every customer to grant us `Application.ReadWrite.*` in their directory to
+  make deletion tidier would widen what a leaked secret can do far more than
+  it narrows what deletion leaves.
+- *Asking the SYSPRO customer to change the company password too.* Every
+  operator of the company shares it; changing it breaks every other user and
+  integration, and the operator lockout already ends our access.
+- *A generic "remove FeohLedger from connected apps" line.* Neither product has
+  such a list (as §400 found for Intacct).
+
+**Side effect, accepted.** BC access tokens already issued live out their 60–90
+minutes after the customer acts; nothing on either side can shorten that. The
+confirmation's "NOT revoked: the provider has no revocation endpoint" wording
+is accurate for both: neither documents a revocation for what we hold.
+
+**Tests.** `tests/test_tenant_deletion.py`
+(`test_bc_and_syspro_are_unsupported_at_once_and_name_the_step`: no HTTP call,
+`unsupported` decided at the read on a closure's session, the step named, no
+secret in the log or confirmation) and `tests/test_erp_syspro_adapter.py`
+(`test_revoke_is_unsupported_and_calls_no_one`: no `Logon` or `Logoff`). Business
+Central has no adapter-specific suite; its case is the deletion test.

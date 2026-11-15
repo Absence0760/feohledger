@@ -1277,3 +1277,29 @@ def test_po_status_maps_an_order_in_process_to_unissued(order_status, expected):
     from app.services.erp_adapters.syspro import _po_status
 
     assert _po_status({"OrderStatus": order_status}) == expected
+
+
+# ---------------------------------------------------------------------------
+# Tenant deletion (decisions §407)
+# ---------------------------------------------------------------------------
+
+
+def test_revoke_is_unsupported_and_calls_no_one():
+    """The stored operator login is the access. e.net's Logoff ends a session,
+    never the operator, and every operation already sends it, so deletion has
+    nothing to call and the customer locks the operator out in SYSPRO."""
+    from app.services.erp_oauth import REVOKE_UNSUPPORTED
+
+    fake = FakeSyspro()
+    outcome = _run(fake, SysproAdapter(CONFIG).revoke_stored_access)
+
+    assert outcome == REVOKE_UNSUPPORTED
+    assert fake.requests == [], "no Logon, and no Logoff of a session we do not hold"
+    assert SysproAdapter.revokes_stored_access is False
+    step = SysproAdapter.provider_side_disconnect
+    assert "Operator locked out" in step and "Operator Maintenance" in step
+    assert "No access" in step and "password" in step
+    # The company password is shared by every operator; never asked to change.
+    assert "company password" not in step
+    for secret in (PASSWORD, COMPANY_PASSWORD, CONFIG["operator"]):
+        assert secret not in step

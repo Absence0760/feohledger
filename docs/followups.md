@@ -1808,21 +1808,20 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by the ERP revoke work (#655, decisions §400)
 
-- [ ] **(c) Four stored-credential ERPs say nothing at tenant deletion.**
+- [ ] **(c) Two stored-credential ERPs say nothing at tenant deletion.**
       Tenant deletion now revokes Sage Intacct's tokens and names the step the
-      customer takes for Intacct and Sage Accounting (ZA), keyed on the
-      adapter's `provider_side_disconnect`. Merge.dev, Business Central,
-      NetSuite and SYSPRO state none, so a deleted tenant's confirmation is
+      customer takes for Intacct, Sage Accounting (ZA), Business Central and
+      SYSPRO (§407), keyed on the adapter's `provider_side_disconnect`.
+      Merge.dev and NetSuite state none, so a deleted tenant's confirmation is
       silent about access that outlives our sealed copy: the Merge.dev linked
-      account (Merge documents a delete-account endpoint that ends it), BC's
-      Entra app consent, NetSuite's token-based-auth token, and SYSPRO's
-      operator logon. **Durable fix:** per adapter, read the provider's
+      account (Merge documents a delete-account endpoint that ends it) and
+      NetSuite's token-based-auth token. **Durable fix:** per adapter, read the provider's
       documentation (URL + date in the docs), set `provider_side_disconnect`,
       and override `revoke_stored_access` where a revoke or delete endpoint is
       documented (`revokes_stored_access = True`), with a test in
       `test_tenant_deletion.py` and the adapter's own suite. **Trigger:** each
-      adapter's next change; Merge.dev and Business Central were left out of
-      round 10 only because parallel lanes owned those files. **Merge.dev
+      adapter's next change; Merge.dev was left out of round 10 only because a
+      parallel lane owned its file. **Merge.dev
       also has a second credential since §399:** the Merge webhook signature
       key the tenant stored as `webhook_signing_secret` is Merge's, so the
       customer must end it (and the webhook) at Merge too. Until they do, the
