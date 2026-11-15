@@ -916,3 +916,23 @@ async def test_erp_webhook_dedup_store_down_after_verifying_asks_for_redelivery(
         )
     assert result.status_code == 503 and result.body == b""
     engine.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("provided", "ok"),
+    [
+        ("a" * 64, True),
+        ("0123456789abcdef" * 4, True),
+        ("a" * 63, False),
+        ("a" * 65, False),
+        ("A" * 64, False),  # the verifier compares against hexdigest(), lower-case only
+        ("g" * 64, False),
+        ("a" * 63 + "\n", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_well_formed_hex_sha256_accepts_only_what_the_verifier_can(provided, ok):
+    from app.services.webhook_security import well_formed_hex_sha256
+
+    assert well_formed_hex_sha256(provided) is ok

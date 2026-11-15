@@ -634,3 +634,30 @@ async def test_an_erp_send_without_openable_credentials_lands_failed(realdb):
             .all()
         )
     assert row.details["error"] == ERP_CREDENTIALS_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_stored_secret_paths_names_only_this_block_and_never_unseals(realdb, monkeypatch):
+    """The per-tenant ERP webhooks ask this before an unauthenticated request may
+    make them unseal (decisions §408): names only, scoped to the one block, and an
+    org with no row has nothing stored."""
+    from app.services import provider_credentials
+
+    org = await _org(realdb)
+    async with realdb.control_sessionmaker()() as s:
+        assert await provider_credentials.stored_secret_paths(org, "erp", db=s) == frozenset()
+
+    await realdb.store_provider_secrets("a", "cards", {"api_key": SECRET})
+    await realdb.store_provider_secrets("a", "erp", {"webhook_signing_secret": SECRET})
+
+    def _no_unseal(*_a, **_k):
+        raise AssertionError("stored_secret_paths must not decrypt")
+
+    monkeypatch.setattr(provider_credentials, "_open_row", _no_unseal)
+    monkeypatch.setattr(provider_credentials, "open_secrets_sync", _no_unseal)
+    async with realdb.control_sessionmaker()() as s:
+        erp = await provider_credentials.stored_secret_paths(org, "erp", db=s)
+        cards = await provider_credentials.stored_secret_paths(org, "cards", db=s)
+    assert any("webhook_signing_secret" in p for p in erp)
+    assert not any("api_key" in p for p in erp)
+    assert any("api_key" in p for p in cards)
