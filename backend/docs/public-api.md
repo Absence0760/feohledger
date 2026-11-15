@@ -475,8 +475,8 @@ id is already occurrence-unique, since a re-raised exception is a new row.
 
 `invoice.approval_recalled` carries the same invoice fields plus the status
 the approval was recalled from (`approved`, or `failed` for an approved
-invoice whose ERP push failed) and the recaller's opaque user id. The recall's
-free-text reason is **not** sent — it can hold anything a person typed, and it
+invoice whose ERP push failed). It names no person (decisions §421), and the
+recall's free-text reason is **not** sent — it can hold anything a person typed, and it
 stays in the `invoice.approval_recalled` audit row:
 
 ```jsonc
