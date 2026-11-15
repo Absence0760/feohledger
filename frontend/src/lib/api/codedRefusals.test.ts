@@ -1437,6 +1437,8 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 		// The skips that reuse a code stated elsewhere still need theirs here.
 		for (const code of [
 			'invoice_entry_window_closed',
+			// A bulk approve of a row not in review (decisions §418).
+			'invoice_not_in_review',
 			INVOICE_STALE_APPROVAL,
 			INVOICE_REQUIRED_FIELDS_MISSING
 		]) {
@@ -1482,5 +1484,21 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 			params: {}
 		};
 		expect(localizeApiDetail(row, deT)).toBe(de['refusal.invoiceStillExtracting']);
+	});
+
+	it('a bulk approve of a draft states the review doors’ own refusal, in every locale', () => {
+		// `POST /bulk/status → approved` skips a row not in `ready_for_review`
+		// with the code the four single review doors refuse with (§418).
+		const row = {
+			id: 'x',
+			reason: 'This invoice is not awaiting review, so it cannot be approved or rejected.',
+			code: 'invoice_not_in_review',
+			params: {}
+		};
+		for (const [locale, messages] of LOCALES) {
+			const text = localizeApiDetail(row, translator(messages, locale));
+			expect(text, locale).toBe((messages as Record<string, string>)['refusal.invoiceNotInReview']);
+			expect(text, locale).toBeTruthy();
+		}
 	});
 });

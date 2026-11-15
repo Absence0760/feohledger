@@ -1795,19 +1795,6 @@ scope (§260) — do not fold them into any of these.
       reviewer reporting they cannot act on an invoice assigned to an absent
       colleague.
 
-- [ ] **(c) Bulk status can still approve a `new` draft past review.** The
-      four review-decision doors (in-app approve / reject, email, Slack,
-      Teams) now refuse an invoice that is not `ready_for_review`
-      (`review.awaiting_review`), but `POST /api/invoices/bulk/status` with
-      `status=approved` still moves a `new` invoice straight to `approved`
-      (`new → approved` is a legal transition for it), through the same approve
-      gates — so segregation and the money limits hold, the review stage does
-      not. **Durable fix:** a product call — either the bulk approve branch
-      skips non-`ready_for_review` rows with a reported reason (it already
-      skips-and-reports), or `new → approved` is documented as the manager's
-      deliberate direct approval and kept. **Trigger:** the next change to bulk
-      status, or an auditor asking whether every approval passed review.
-
 - [ ] **(c) Other pages still restate server predicates to decide whether to
       offer an action.** Converted so far: payment queue record-outside (#573);
       History Void / Release / Dismiss; run Approve / Execute / Cancel; invoice
