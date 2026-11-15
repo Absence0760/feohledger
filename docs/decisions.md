@@ -21863,3 +21863,52 @@ integrator wanting to notify the recaller, but no integrator has asked, and
 adding a field later is non-breaking while removing one is breaking.
 `test_webhook_event_catalogue.py` now asserts no `user` field in the recall
 payload.
+
+## 423. A document-id webhook match trusts a pre-realm push only under the push's own legacy rule (§417 amendment, round 12, 2026-11-14)
+
+**Context.** §417 let `POST /api/erp/webhook/{erp_type}` name its invoice by
+`erp_document_id`, scoped to the realm the push recorded, but judged an
+invoice whose push recorded **no** realm by the id alone. Every other reader
+of a pre-realm (NULL) link — the push (`services/erp`), the payment
+write-back (`erp_payment_writeback`) and the PO receipt push — trusts it only
+while `erp_link_realm.legacy_links_trusted(erp_config, realm)` holds: the
+realm migration 0115 recorded for the tenant is still the one it is connected
+to (§284, §356). The round's money-path review found the gap. ERP document ids
+are small per-ERP numbers, not UUIDs: invoice A pushed to NetSuite before
+realms were recorded keeps `erp_document_id = "1042"`; the tenant moves to
+Business Central; a correctly signed BC `Paid` for BC's own bill 1042 matched
+A and moved it `posted_in_erp → paid`, so the payment queue never paid the
+supplier.
+
+**Decision.**
+
+- `api/erp_webhook._invoice_id_by_document` matches an invoice whose push
+  recorded the current realm, and a NULL-realm invoice **only when
+  `legacy_links_trusted(erp_config, realm)`** — the same helper, called the
+  same way, as the push. Once the tenant has connected anywhere else, a
+  pre-realm invoice is no candidate at all, so it neither matches nor makes a
+  current-realm bill with the same id ambiguous.
+- A connection that names no realm (`mock`, an OAuth ERP with no completed
+  consent) matches nothing. §417 let it match NULL-realm invoices; with no
+  company to attribute an id to, no id can be trusted.
+- §408's order and the rest of §417 are unchanged: the lookup still runs only
+  after the signature verifies, every refusal is the same silent 204, and two
+  candidates are still refused.
+
+**Why.** §417's "judged by the id alone, as §392's correlation path judges
+it" carried the correlation path's reasoning to an id that does not share its
+property: a correlation id is our UUID and cannot collide across ERPs, a
+document id is theirs and routinely does. One legacy rule for every reader of
+a NULL realm keeps the webhook from being the single door where a company
+switch is ignored.
+
+**Rejected.** Never matching NULL-realm invoices: a tenant that never changed
+company would lose every document-id delivery for invoices pushed before
+migration 0115, which the push itself still treats as live. Matching them only
+when no realm-stamped candidate exists: that still lets another ERP's bill
+1042 move A whenever the new ERP has not yet been pushed a 1042 of ours.
+
+Pinned in `backend/tests/test_erp_webhook_transitions.py`
+(`test_a_pre_realm_push_is_matched_only_while_its_legacy_realm_is_trusted`,
+`test_a_pre_realm_push_and_a_current_one_sharing_an_id_resolve_to_the_current`,
+`test_a_document_id_matches_nothing_when_no_company_can_be_named`).

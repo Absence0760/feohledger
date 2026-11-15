@@ -957,18 +957,26 @@ async def test_a_document_id_is_never_looked_up_before_the_signature_verifies(fa
     lookup.assert_not_called()
 
 
-async def _generic_tenant(realdb):
+async def _generic_tenant(realdb, *, legacy_realm=None):
     """Tenant ``a`` on the generic direct ERP with its webhook key sealed; the
-    realm its connection names now."""
+    realm its connection names now. ``legacy_realm`` is the realm migration
+    0115 recorded for its pre-realm links (``settings.erp.legacy_link_realm``):
+    ``"current"`` for the realm it is still connected to, any other string for
+    one it has since left, ``None`` for none recorded."""
     from sqlalchemy.orm.attributes import flag_modified
 
     from app.models.organization import Organization
-    from app.services.erp_link_realm import connection_realm
+    from app.services.erp_link_realm import LEGACY_REALM_KEY, connection_realm
 
     info = realdb.info("a")
+    erp = dict(GENERIC_DIRECT_ERP)
+    if legacy_realm is not None:
+        erp[LEGACY_REALM_KEY] = (
+            connection_realm(GENERIC_DIRECT_ERP) if legacy_realm == "current" else legacy_realm
+        )
     async with realdb.control_sessionmaker()() as s:
         org = await s.get(Organization, info.org_id)
-        org.settings = {**(org.settings or {}), "erp": dict(GENERIC_DIRECT_ERP)}
+        org.settings = {**(org.settings or {}), "erp": erp}
         flag_modified(org, "settings")
         await s.commit()
     await realdb.store_provider_secrets("a", "erp", {"webhook_signing_secret": "erp-secret"})
@@ -1021,11 +1029,13 @@ async def _pushed_invoice(realdb, document_id, *, realm, status=InvoiceStatus.se
     return inv_id
 
 
-async def _deliver_doc_only(realdb, monkeypatch, fake_redis, document_id, *, secret="erp-secret"):
+async def _deliver_doc_only(
+    realdb, monkeypatch, fake_redis, document_id, *, secret="erp-secret", status_value="posted"
+):
     from app.api import erp_webhook
 
     monkeypatch.setattr(erp_webhook, "control_session_factory", realdb.control_sessionmaker())
-    body = json.loads(_doc_only_body(document_id))
+    body = json.loads(_doc_only_body(document_id, status_value=status_value))
     body["tenant_slug"] = realdb.info("a").slug
     raw = json.dumps(body).encode("utf-8")
     return await erp_webhook.erp_webhook(
@@ -1046,7 +1056,9 @@ async def _invoice_status(realdb, inv_id):
 async def test_a_document_id_alone_moves_its_one_invoice(
     realdb, monkeypatch, fake_redis, recorded_realm
 ):
-    realm = await _generic_tenant(realdb)
+    # A pre-realm (NULL) push counts only while the legacy realm is still the
+    # current one (decisions §423); the untrusted cases are pinned below.
+    realm = await _generic_tenant(realdb, legacy_realm="current")
     inv_id = await _pushed_invoice(
         realdb, "BILL-417", realm=realm if recorded_realm == "current" else None
     )
@@ -1063,7 +1075,7 @@ async def test_a_document_id_alone_moves_its_one_invoice(
 async def test_a_document_id_two_invoices_carry_is_refused_not_guessed(
     realdb, monkeypatch, fake_redis
 ):
-    realm = await _generic_tenant(realdb)
+    realm = await _generic_tenant(realdb, legacy_realm="current")
     first = await _pushed_invoice(realdb, "BILL-TWICE", realm=realm)
     second = await _pushed_invoice(realdb, "BILL-TWICE", realm=None)
 
@@ -1086,6 +1098,73 @@ async def test_a_document_id_from_another_realm_matches_nothing(
 
     assert result is None
     assert await _invoice_status(realdb, inv_id) == InvoiceStatus.sent_to_erp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("legacy_realm", "expected"),
+    [
+        (None, InvoiceStatus.posted_in_erp),
+        ("netsuite:1234567", InvoiceStatus.posted_in_erp),
+        ("current", InvoiceStatus.paid),
+    ],
+)
+async def test_a_pre_realm_push_is_matched_only_while_its_legacy_realm_is_trusted(
+    realdb, monkeypatch, fake_redis, legacy_realm, expected
+):
+    """Decisions §423: a NULL-realm invoice is judged by the push's legacy
+    rule, not by the id alone. ERP document ids are small per-ERP numbers, so
+    an invoice pushed to NetSuite as "1042" before realms were recorded must
+    not be moved by the current ERP's signed report about its OWN bill 1042 —
+    when no legacy realm was recorded, or the recorded one is not the realm
+    the tenant is connected to now, it matches nothing (silent 204, invoice
+    unchanged). While the tenant is still on that realm it still matches."""
+    await _generic_tenant(realdb, legacy_realm=legacy_realm)
+    inv_id = await _pushed_invoice(realdb, "1042", realm=None, status=InvoiceStatus.posted_in_erp)
+
+    result = await _deliver_doc_only(realdb, monkeypatch, fake_redis, "1042", status_value="paid")
+
+    assert result is None
+    assert await _invoice_status(realdb, inv_id) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_pre_realm_push_and_a_current_one_sharing_an_id_resolve_to_the_current(
+    realdb, monkeypatch, fake_redis
+):
+    """With the legacy realm untrusted the NULL-realm invoice is no candidate
+    at all, so the current realm's own bill is the one match, not an
+    ambiguity."""
+    realm = await _generic_tenant(realdb, legacy_realm="netsuite:1234567")
+    legacy = await _pushed_invoice(realdb, "1042", realm=None)
+    current = await _pushed_invoice(realdb, "1042", realm=realm)
+
+    result = await _deliver_doc_only(realdb, monkeypatch, fake_redis, "1042")
+
+    assert result is None
+    assert await _invoice_status(realdb, legacy) == InvoiceStatus.sent_to_erp
+    assert await _invoice_status(realdb, current) == InvoiceStatus.posted_in_erp
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "erp_config",
+    [
+        {},
+        {"integration_method": "direct", "type": "mock"},
+        {"integration_method": "direct", "type": "quickbooks_online"},
+    ],
+)
+async def test_a_document_id_matches_nothing_when_no_company_can_be_named(erp_config):
+    """No connection realm (``mock``, an OAuth ERP with no consent) names no
+    company a document id could belong to: the lookup refuses before querying
+    (decisions §423)."""
+    from app.api.erp_webhook import _invoice_id_by_document
+
+    db = MagicMock()
+    db.execute = AsyncMock()
+    assert await _invoice_id_by_document(db, "1042", erp_config) is None
+    db.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
