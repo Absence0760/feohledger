@@ -2902,8 +2902,19 @@ async def bulk_status_change(
             )
             continue
         if target == DBInvoiceStatus.approved:
-            from app.services.review import approve_invoice
+            from app.services.review import approve_invoice, refuse_unless_in_review
 
+            # Bulk approve is a review decision like the four single doors
+            # (in-app, email, Slack, Teams), so it reads their one predicate:
+            # a row not in `ready_for_review` (a `new` draft, a `pending` row
+            # mid-read, a `rejected` one) is skipped with
+            # `invoice_not_in_review`, never approved past the review stage it
+            # never entered (decisions §418).
+            try:
+                refuse_unless_in_review(inv)
+            except HTTPException as exc:
+                skipped.append(_refused_skip(inv.id, exc, "invoice is not awaiting review"))
+                continue
             if expected_versions is not None:
                 seen = expected_versions.get(inv.id)
                 if seen is None or not matches_loaded_version(inv, seen):

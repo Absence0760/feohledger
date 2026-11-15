@@ -20983,3 +20983,62 @@ exact-state helper checks the final flag; Merge's 429 sent once);
 the margin on both paths; the margin's floor; a 429 possibly posted and not
 retried). The #654 sandbox entry in `docs/followups.md` now names the margin
 and the 429 as what that pass settles.
+
+## 418. A bulk approve is a review decision: `POST /bulk/status → approved` skips a row not in `ready_for_review` (closes the §305 follow-up, round 12, 2026-11-14)
+
+**Context.** §305 put the four single review doors (in-app approve / reject,
+email, Slack, Teams) on one predicate, `review.awaiting_review`, and left
+`POST /api/invoices/bulk/status` with `status=approved` able to move a `new`
+draft (and a `pending` row the reader was still on) straight to `approved`,
+through the same approve gates. Segregation and the money limits held there;
+the review stage did not. Whether that was a manager's deliberate direct
+approval or a hole was left as a product call in `docs/followups.md`.
+
+**Decision.** It is a hole. The bulk `approved` branch calls
+`review.refuse_unless_in_review` for each row before the version check and
+before `approve_invoice`, and reports a refusal as that row's skip through
+`_refused_skip`: code `invoice_not_in_review`, the four doors' own code and
+sentence, so the web list and every locale already state it
+(`frontend/src/lib/api/codedRefusals.ts` → `refusal.invoiceNotInReview`). An
+approval by a person now always follows a review stage, whichever door it came
+through. The check answers before the stale-version skip: being a draft is the
+fact the approver needs, not that its version was not bound.
+
+**What else moves an invoice to `approved` without review, and why it stays.**
+
+- `/complete`'s amount floor (`settings.approval.auto_approve_below`,
+  `new → approved` as "system (below threshold)") and extraction's
+  auto-approve (`pending → approved`, `decide_auto_approve`) are org policy
+  that removes the review step on purpose, under their own gates (segregation,
+  the once-approved rule of §379, an entry-only caller never firing either).
+  They are not a person deciding an invoice, so this rule does not reach them;
+  `approved_by` names the system on both.
+- The exception agents (`gl_coding`, `amount_mismatch`, `missing_po`,
+  `multi_po_split`) already re-check `ready_for_review` under the row lock
+  before `approve_invoice`.
+- `workflow_engine.VALID_TRANSITIONS` keeps `new → approved` and
+  `pending → approved`: the two policies above walk them. The edge is not the
+  door; the doors are.
+
+**Rejected.**
+
+- *Keeping `new → approved` in bulk as a manager's direct approval.* It is the
+  one path where a person signs an invoice nobody submitted for review, and the
+  web picker never offered it (`VALID_TRANSITIONS` on the client has no
+  `new → approved`), so only the API and the mobile sheet could reach it.
+- *Calling `refuse_unless_in_review` inside `approve_invoice` itself.* Every
+  caller already checks first (the single door, the three message doors, the
+  agents), so it would change no outcome today while breaking the service-level
+  tests that drive `approve_invoice` with bare namespaces. The doors-check
+  pattern is the established one; a new approval door must call it, as the bulk
+  one now does.
+
+**Cost.** A script that bulk-approved drafts now gets them back as skips and
+has to submit them first (`ready_for_review`), which runs `/complete`'s
+required-field check.
+
+Tests: `tests/test_bulk_status_controls.py` (`new`, `pending` and `rejected`
+rows skipped with `invoice_not_in_review` beside a `ready_for_review` row that
+still lands; the skip answers before the version check);
+`frontend/src/lib/api/codedRefusals.test.ts` (the skip row localizes in every
+shipped locale).

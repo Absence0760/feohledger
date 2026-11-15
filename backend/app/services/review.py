@@ -374,10 +374,10 @@ def refuse_unless_in_review(invoice: Invoice) -> None:
 
     The single in-app approve / reject doors call it first; the email, Slack
     and Teams doors answer the same predicate in their own response shapes.
-    ``POST /api/invoices/bulk/status`` does not reach here: setting a batch's
-    status is a separate, documented manager capability (``new → approved`` is
-    a legal transition for it), and whether it should also skip drafts is
-    tracked in ``docs/followups.md``.
+    ``POST /api/invoices/bulk/status`` calls it per row for an ``approved``
+    target and reports a refusal as that row's coded skip (decisions §418);
+    its ``rejected`` target is held to the same stage by the state machine,
+    where ``ready_for_review → rejected`` is the only edge into ``rejected``.
     """
     from fastapi import HTTPException, status
 
