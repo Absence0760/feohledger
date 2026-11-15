@@ -511,6 +511,55 @@ class VendorErpLinksResponse(BaseModel):
 
     vendor_id: str
     links: list[VendorErpLinkItem] = Field(default_factory=list)
+    #: The connected ERP can be searched for a supplier record and the vendor
+    #: linked to it by hand (`POST …/erp-links/search` / `…/link`, decisions
+    #: §415): an adapter that implements it, connected to a named company.
+    search_available: bool = False
+
+
+class VendorErpSearchRequest(BaseModel):
+    """`POST /api/vendors/{id}/erp-links/search`. `query` is a name to search
+    for; blank searches for the vendor's own name. The vendor's tax number is
+    always searched for too, read from its row — never sent in a request."""
+
+    query: str | None = Field(default=None, max_length=100)
+
+
+class VendorErpCandidate(BaseModel):
+    """One ERP record the search found. No tax number: only whether it matches
+    the vendor's. `linked_elsewhere`: another vendor already holds it here, so
+    it cannot be linked to this one (a flag, not the holder's id: the holder
+    may sit in an entity the caller cannot see)."""
+
+    erp_vendor_id: str
+    name: str
+    email: str | None = None
+    active: bool
+    tax_id_matches: bool
+    linked_elsewhere: bool = False
+
+
+class VendorErpSearchResponse(BaseModel):
+    realm: str
+    candidates: list[VendorErpCandidate] = Field(default_factory=list)
+    #: The ERP had more matches than one search reads: narrow the search.
+    truncated: bool = False
+
+
+class VendorErpLinkRequest(BaseModel):
+    """`POST /api/vendors/{id}/erp-links/link` — the ERP record to link, as a
+    search returned it. Re-read from the ERP by this id before linking."""
+
+    erp_vendor_id: str = Field(min_length=1, max_length=128)
+
+
+class VendorErpLinkResponse(BaseModel):
+    """The link made, the vendor as it now stands, and its links."""
+
+    realm: str
+    erp_vendor_id: str
+    vendor: VendorResponse
+    links: list[VendorErpLinkItem] = Field(default_factory=list)
 
 
 class VendorErpUnlinkRequest(BaseModel):

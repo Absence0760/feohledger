@@ -359,6 +359,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "bill_not_in_erp",
         "payment_exceeds_balance",
         "bill_payment_voided",
+        # Xero: a connection consented before `accounting.payments` (§415)
+        "payments_scope_missing",
     }
 )
 
@@ -475,6 +477,13 @@ BILL_NOT_IN_ERP = "bill_not_in_erp"
 #: Stable reason code: the payment is larger than what the ERP still shows
 #: open on the bill. Posting it would overpay the bill in the ERP.
 PAYMENT_EXCEEDS_BALANCE = "payment_exceeds_balance"
+
+#: Stable reason code, and the coded scope gap recorded on the connection
+#: (``settings.erp.oauth.scope_gaps``, decisions §415): the consent predates
+#: the ERP's payments permission (Xero's ``accounting.payments``), so the
+#: payment write-back cannot be made, and the status sync reads payments only
+#: through the bills' own changes until an admin reconnects.
+PAYMENTS_SCOPE_MISSING = "payments_scope_missing"
 
 #: Stable reason code: the ERP payment this payment id already created was
 #: voided in the ERP by someone there. Posting it again would overrule them,
@@ -784,6 +793,15 @@ class VendorPayload:
     legacy_code: str | None = None
 
 
+@dataclass
+class VendorSearchResult:
+    """What :meth:`ErpAdapter.search_vendors` found. ``truncated``: the ERP had
+    more matches than one search reads, so the person should narrow it."""
+
+    vendors: list[VendorPayload]
+    truncated: bool = False
+
+
 #: How many rows a chart or vendor listing reads before it gives up as
 #: incomplete (an adapter whose own page cap already reaches further, such as
 #: QuickBooks' 50 x 1000, keeps it). Generous on purpose: past it the listing
@@ -839,6 +857,28 @@ class ErpListingIncomplete(RuntimeError):
 ERP_CALL_BUDGET_EXHAUSTED = "erp_call_budget_exhausted"
 
 
+class ErpScopeMissing(RuntimeError):
+    """A change listing the connection's consent does not cover (decisions §415).
+
+    Raised by :meth:`ErpAdapter.changed_bills` when the ERP refuses one of its
+    listings as forbidden for want of a permission the consent never granted (a Xero
+    connection made before ``accounting.payments``), after the listings it
+    CAN read went through. ``code`` is the scope gap the status sync records
+    on the connection (``settings.erp.oauth.scope_gaps``), after which the
+    adapter stops asking; ``bill_ids`` is what the readable listings found.
+    No retry changes the answer, and only a reconnect clears it (a new
+    connection starts with no recorded gap).
+
+    PII-free: the provider literal, a code and the ERP's bill ids.
+    """
+
+    def __init__(self, provider: str, code: str, bill_ids: list[str]):
+        self.provider = provider
+        self.code = code
+        self.bill_ids = bill_ids
+        super().__init__(f"{provider} change listing not covered by the consent: {code}")
+
+
 class ErpCallBudgetExhausted(RuntimeError):
     """An ERP read refused before its call by ``services/erp_call_budget``.
 
@@ -873,6 +913,12 @@ class ErpAdapter:
     #: its bills match an invoice only within the realm the push recorded, so
     #: the sweep never reads a bill only a realm-less push names (§386).
     bills_match_by_reference: bool = False
+    #: True for an adapter that can search the ERP's whole contact list for a
+    #: supplier by name or tax number, and read one record by its id
+    #: (:meth:`search_vendors` / :meth:`get_vendor`): the vendor page's "find
+    #: in the ERP" link, for a supplier its vendor walk cannot see yet
+    #: (decisions §415).
+    supports_vendor_search: bool = False
     #: For an ERP reached with stored credentials rather than an OAuth consent:
     #: the step the customer takes at the provider to end the access those
     #: credentials gave FeohLedger, which deleting our copy does not end
@@ -977,6 +1023,22 @@ class ErpAdapter:
         changes no link.
         """
         return []
+
+    async def search_vendors(self, *, name: str | None, tax_id: str | None) -> VendorSearchResult:
+        """Records in the ERP's WHOLE contact list matching ``name`` (a text
+        search) or ``tax_id`` (exactly), whatever their supplier flag — for a
+        person choosing which record to link a vendor to by hand
+        (``services/vendor_erp_manual_link``, decisions §415). Not a listing:
+        absence here is evidence of nothing, and no sync reads it. Raises on a
+        failed read. Default (``supports_vendor_search`` False): nothing found.
+        """
+        return VendorSearchResult(vendors=[])
+
+    async def get_vendor(self, erp_vendor_id: str) -> VendorPayload | None:
+        """The ERP record ``erp_vendor_id`` names, read now, or None when the
+        ERP answers that it does not exist. Raises on a failed read. Default:
+        None."""
+        return None
 
     async def test_connection(self) -> bool:
         """Verify the ERP connection is working."""

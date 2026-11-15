@@ -39,6 +39,7 @@ The consent METADATA lives in ``Organization.settings.erp.oauth``::
         "client_source": "tenant" | "platform",
         "connected_at": "<ISO-8601 UTC>",
         "needs_reconnect": true | absent,
+        "scope_gaps": ["payments_scope_missing"] | absent,
     }
 
 The TOKENS are sealed in ``provider_credentials`` with the block's other
@@ -1229,6 +1230,23 @@ async def discard_pending_connect(org_id: uuid.UUID, cookie_value: str | None) -
 #: provider, or a lifetime cap it never reported).
 RECONNECT_EXPIRED = "refresh_token_expired"
 RECONNECT_REVOKED = "refresh_token_revoked"
+
+
+#: ``settings.erp.oauth.scope_gaps``: the coded permissions this consent was
+#: found not to cover (``erp_adapters.base.PAYMENTS_SCOPE_MISSING``, decisions
+#: §415), recorded by the status sync through
+#: :func:`update_connection_metadata`. Keyed to the connection like every other
+#: metadata key, so a reconnect (a new block, minted by :func:`new_connection`)
+#: starts with none: a fresh consent asks for every scope the spec lists.
+SCOPE_GAPS_KEY = "scope_gaps"
+
+
+def scope_gaps(oauth: Any) -> list[str]:
+    """The coded scope gaps recorded on a connection, in stored order."""
+    raw = oauth.get(SCOPE_GAPS_KEY) if isinstance(oauth, dict) else None
+    if not isinstance(raw, list):
+        return []
+    return [str(code) for code in raw if isinstance(code, str) and code]
 
 
 def reconnect_reason(oauth: dict, *, now: datetime | None = None) -> str:

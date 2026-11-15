@@ -1966,9 +1966,14 @@ async def _open_bill_ids(org: Organization, realm: str | None) -> list[str]:
 async def sync_org(org: Organization, *, now: datetime, result: StatusSyncResult) -> None:
     """One connected company's pass. Raises on our own failure; the high-water
     mark moves only when the whole pass went through."""
-    from app.services.erp_adapters.base import ErpListingIncomplete
+    from app.services.erp_adapters.base import ErpListingIncomplete, ErpScopeMissing
     from app.services.erp_link_realm import connection_realm
-    from app.services.erp_oauth import parse_timestamp, update_connection_metadata
+    from app.services.erp_oauth import (
+        SCOPE_GAPS_KEY,
+        parse_timestamp,
+        scope_gaps,
+        update_connection_metadata,
+    )
     from app.services.erp_payment_writeback import resume_pending_voids
 
     oauth_meta = ((org.settings or {}).get("erp") or {}).get("oauth") or {}
@@ -1985,10 +1990,27 @@ async def sync_org(org: Organization, *, now: datetime, result: StatusSyncResult
     if mark is not None:
         since = min(since, mark)
     since = max(since, now - _CDC_REACH)
+    provider = str(oauth_meta.get("provider") or adapter.erp_type)
+    connection_id = str(oauth_meta.get("connection_id") or "")
     try:
         bill_ids = await adapter.changed_bills(since)
     except ErpListingIncomplete:
         bill_ids, full = [], True  # more changes than one CDC answer holds
+    except ErpScopeMissing as exc:
+        # The consent does not cover one of the change listings (a Xero
+        # connection made before `accounting.payments`, decisions §415).
+        # Recorded on the connection, where `/status` and the ERP panel show
+        # it and the adapter reads it to stop asking; a reconnect mints a new
+        # block without it. This one pass still reads every payable bill, as
+        # every pass before the gap was recorded did, so nothing the missing
+        # listing would have named since the mark is lost in the switch.
+        await update_connection_metadata(
+            provider,
+            org.id,
+            connection_id,
+            {SCOPE_GAPS_KEY: sorted({*scope_gaps(oauth_meta), exc.code})},
+        )
+        bill_ids, full = exc.bill_ids, True
     if full:
         result.full_reconciliations += 1
         bill_ids = [*bill_ids, *await _open_bill_ids(org, connection_realm(erp_config))]
@@ -1997,10 +2019,7 @@ async def sync_org(org: Organization, *, now: datetime, result: StatusSyncResult
         result.invoices_changed += await sync_bills(org, bill_ids, event_id=None)
     result.voids_pending += await resume_pending_voids(org)
     await update_connection_metadata(
-        str(oauth_meta.get("provider") or adapter.erp_type),
-        org.id,
-        str(oauth_meta.get("connection_id") or ""),
-        {SYNCED_THROUGH_KEY: now.isoformat()},
+        provider, org.id, connection_id, {SYNCED_THROUGH_KEY: now.isoformat()}
     )
 
 

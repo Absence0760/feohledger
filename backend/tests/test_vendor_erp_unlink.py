@@ -256,7 +256,11 @@ async def test_list_erp_links_reports_row_then_kept(realdb):
     async with realdb.client(key="a", role="cfo") as client:
         r = await client.get(f"/api/vendors/{vid}/erp-links")
     assert r.status_code == 200, r.text
-    assert r.json() == {
+    body = r.json()
+    # Whether the ERP can be searched to link by hand (decisions §415):
+    # `test_vendor_erp_manual_link.py` pins it.
+    assert isinstance(body.pop("search_available"), bool)
+    assert body == {
         "vendor_id": str(vid),
         "links": [
             {"realm": r2, "erp_vendor_id": "1", "placement": "row"},
