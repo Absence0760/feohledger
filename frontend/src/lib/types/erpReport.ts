@@ -36,6 +36,13 @@ export interface ErpReport {
 	 *  stated figure or nothing. */
 	amount?: string | null;
 	amount_currency?: string | null;
+	/** How the ERP says `amount` was paid, one entry per cash payment: its rail
+	 *  (null = not stated) and the exact decimal string it paid, in
+	 *  `amount_currency` (decisions §396). Stated only beside `amount`, which it
+	 *  breaks down; absent or null when the ERP stated no breakdown. Whether the
+	 *  parts add up is the server's call (`erp_payment_split_stands` on the
+	 *  exception row), never summed here. */
+	payment_parts?: ErpPaymentPart[] | null;
 	refusal_code?: string | null;
 	/** `po_rematch_clears`: the PO number matched, and the UTC day seen. */
 	po_number?: string | null;
@@ -48,6 +55,19 @@ export interface ErpReport {
 	refusal?: unknown;
 	payment_id?: string | null;
 	payment_run_id?: string | null;
+}
+
+/** One part of an ERP-stated payment breakdown, as the row keeps it. */
+export interface ErpPaymentPart {
+	method?: string | null;
+	amount?: string | null;
+}
+
+/** A breakdown part ready to render: a rail a payment made outside FeohLedger
+ *  can be recorded on, or `null` for "not stated", and its exact amount. */
+export interface RailPartView {
+	rail: PaymentMethod | null;
+	amount: string;
 }
 
 /** `erp_report.kind` of the rows the payment write-back opens with a refusal. */
@@ -145,4 +165,40 @@ export function erpPrefill(
 		reference: (report?.reference ?? '').trim(),
 		paidOn: ISO_DATE.test(paidOn) && paidOn <= today ? paidOn : today
 	};
+}
+
+/**
+ * The ERP's breakdown of a reported payment, part by part, as the server books
+ * it: a rail it cannot record on (`virtual_card`, an unknown string) reads as
+ * not stated, the rule of `erp_status_sync.reported_payment_parts`. A malformed
+ * breakdown (a part with no exact amount string) reads as none at all, never as
+ * a partial list that would look like the whole (`payment_methods.
+ * rail_parts_from_json`). Amounts are passed through untouched, never parsed.
+ */
+export function erpPaymentParts(report: Pick<ErpReport, 'payment_parts'> | null | undefined): RailPartView[] {
+	const parts = report?.payment_parts;
+	if (!Array.isArray(parts)) return [];
+	const out: RailPartView[] = [];
+	for (const part of parts) {
+		if (!part || typeof part !== 'object' || typeof part.amount !== 'string' || !part.amount.trim()) {
+			return [];
+		}
+		const rail = typeof part.method === 'string' ? part.method.trim().toLowerCase() : '';
+		out.push({
+			rail: (EXTERNAL_PAYMENT_METHODS as readonly string[]).includes(rail)
+				? (rail as PaymentMethod)
+				: null,
+			amount: part.amount
+		});
+	}
+	return out;
+}
+
+/**
+ * Does this breakdown span more than one rail? A part with no rail stated
+ * counts as one of its own, as the server counts it. Rails only: no amount is
+ * compared or added, which is the server's job.
+ */
+export function spansSeveralRails(parts: readonly RailPartView[]): boolean {
+	return new Set(parts.map((p) => p.rail)).size > 1;
 }

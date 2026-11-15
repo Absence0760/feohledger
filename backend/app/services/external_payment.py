@@ -550,6 +550,20 @@ async def _complete(
     )
 
 
+def split_stands_over_any_rail(parts: Sequence[RailPart], amount: Decimal) -> bool:
+    """Would this ERP breakdown be the record whatever one rail a person names?
+
+    True exactly when :func:`_rail_split` keeps it against a person's rail: it
+    reconciles (``split_by_rail`` applies it) and it spans more than one rail,
+    a part with no rail stated counting as one of them. The exception queue's
+    record dialog reads this to show the split in place of a rail picker, and
+    ``POST /api/exceptions/{id}/record-erp-payment`` to accept a record that
+    names no rail (decisions §396, §413). ``parts`` are as booked: run through
+    ``erp_status_sync.reported_payment_parts`` first."""
+    split = split_by_rail(parts, amount, method=None)
+    return split.status == RAIL_SPLIT_APPLIED and len({p.method for p in split.breakdown}) > 1
+
+
 def _rail_split(
     parts: Sequence[RailPart], amount: Decimal, *, method: str | None, source: Source
 ) -> RailSplit:

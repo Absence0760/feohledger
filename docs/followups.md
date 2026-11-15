@@ -1339,20 +1339,20 @@ scope (§260) — do not fold them into any of these.
       `feat/erp-status-sync` branch. It contradicts §295's "either place may
       pay" decision and needs a product call before reuse. **Trigger:** the
       first tenant on one of those ERPs who pays bills in the ERP.
-- [ ] **(c) The exception dialog's one-click record asks for one rail over a
-      payment the ERP split across two.** A kept `paid_not_recorded` row can
-      carry `payment_parts` (decisions §396), and the record books that split
-      over the rail the person picks, but the dialog
-      (`frontend/src/routes/exceptions/+page.svelte`) still requires a rail,
-      never shows the split, and the response's `method: null` says nothing
-      about why; only the audit row's `method_stated` keeps their pick.
-      **Durable fix:** add `payment_parts` to `ErpReport`
-      (`frontend/src/lib/types/erpReport.ts`), render the split in the
-      invoice's currency when it spans more than one rail, and make the rail
-      field read-only there (the server already ignores it); expose the
-      payment's breakdown on `PaymentResponse`. **Trigger:** the first two-rail
-      row a person records, or the next change to the exception dialog (with
-      the ERP-amount entry below it).
+- [ ] **(c) "Record as paid" on the payment queue drops a kept ERP split.**
+      The queue's record (`POST /api/payments/record-outside`) books the rail
+      the person picks and the figure the invoice owes, and `_complete`
+      resolves any live `paid_not_recorded` row on the way, so a row whose ERP
+      breakdown spans two rails (decisions §396) is closed with one rail and
+      no `rail_breakdown`: the card part lands on the payer's 1099. The
+      exception dialog books the split (§413), and the queue's dialog is
+      pre-filled from the same row (`erp_reported_payment`) but never sees it.
+      **Durable fix:** when the invoice has a live `paid_not_recorded` row,
+      send the queue's record through the row's one-click path (or refuse
+      `record-outside` there and point at `/exceptions?id=`), and show the
+      split in the queue's dialog as `/exceptions` does. **Trigger:** the
+      first two-rail row recorded from the queue, or the next change to the
+      queue's record dialog.
 - [ ] **(c) A Xero connection made before `accounting.payments` reads every
       payable bill on every pass.** Its `Payments` change listing answers
       401/403, which the sweep reads as an incomplete listing and falls back
@@ -1362,15 +1362,6 @@ scope (§260) — do not fold them into any of these.
       that `/status` and the ERP panel show ("reconnect to grant payments"),
       and read only the incremental `Invoices` listing until then.
       **Trigger:** the first pre-§386 Xero connection with status sync on.
-- [ ] **(c) The exception dialog does not show the amount the ERP reports
-      paid.** A `paid_not_recorded` row now keeps it (`erp_report.amount` /
-      `amount_currency`, §386), and the one-click record books it or refuses,
-      but `frontend/src/lib/types/erpReport.ts` has no field for it and the
-      dialog shows no figure, so a person sees the refusal without the number
-      to reconcile. **Durable fix:** add the fields to `ErpReport` and render
-      the amount in the invoice's currency (`frontend/docs/money-formatting.md`)
-      in the record dialog. **Trigger:** the first Xero tenant, or the next
-      change to the exception dialog.
 - [ ] **(c) A Xero customer who becomes a supplier is missed until its first
       bill or PO.** The vendor sync reads `IsSupplier==true OR
       IsCustomer==false` (§386): Xero sets `IsSupplier` only once a contact has

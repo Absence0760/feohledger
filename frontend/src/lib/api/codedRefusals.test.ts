@@ -367,6 +367,7 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 		['external_payment_nothing_to_pay', 'refusal.externalPaymentNothingToPay'],
 		['external_payment_paid_on_future', 'refusal.externalPaymentPaidOnFuture'],
 		['erp_paid_amount_unconfirmed', 'refusal.erpPaidAmountUnconfirmed'],
+		['erp_payment_method_required', 'refusal.erpPaymentMethodRequired'],
 		['nacha_requires_record_only', 'refusal.nachaRequiresRecordOnly'],
 		['nacha_already_exported', 'refusal.nachaAlreadyExported'],
 		['nacha_run_not_exportable', 'refusal.nachaRunNotExportable'],

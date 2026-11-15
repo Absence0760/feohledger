@@ -766,7 +766,10 @@ async def test_the_one_click_books_the_kept_split_over_a_persons_one_rail(realdb
     [row] = await _exceptions(realdb, inv_id)
     body = {"method": "check", "reference": BILL, "paid_on": utc_today().isoformat()}
     async with realdb.client(key="a", role="admin") as c:
+        detail = await c.get(f"/api/exceptions/{row.id}")
         resp = await c.post(f"/api/exceptions/{row.id}/record-erp-payment", json=body)
+    # The dialog is told the split stands, so it shows it instead of a picker.
+    assert detail.status_code == 200 and detail.json()["erp_payment_split_stands"] is True
     assert resp.status_code == 201, resp.text
     [booked] = await _payments(realdb, inv_id)
     assert booked.method is None
@@ -774,9 +777,97 @@ async def test_the_one_click_books_the_kept_split_over_a_persons_one_rail(realdb
         {"method": "check", "amount": "150.00"},
         {"method": "card", "amount": "100.00"},
     ]
+    # The response explains its `method: null`: the parts that paid it.
+    assert resp.json()["method"] is None
+    assert resp.json()["rail_breakdown"] == [
+        {"method": "check", "amount": 150.0},
+        {"method": "card", "amount": 100.0},
+    ]
     details = await _recorded_outside_details(realdb, booked.id)
     assert details["rail_breakdown_status"] == "applied"
     assert details["method_stated"] == "check"
+
+
+async def _kept_paid_row(realdb, inv_id, parts):
+    """A kept ``paid_not_recorded`` row stating 250.00 USD and ``parts``."""
+    async with realdb.sessionmaker("a")() as s:
+        row = APException(
+            organization_id=realdb.info("a").org_id,
+            invoice_id=inv_id,
+            exception_type="erp_reconciliation",
+            severity="warning",
+            description="kept",
+            status="open",
+            erp_report={
+                "kind": "paid_not_recorded",
+                "erp_type": "quickbooks_online",
+                "erp_document_id": BILL,
+                "method": None,
+                "reference": BILL,
+                "paid_on": utc_today().isoformat(),
+                "paid_on_reported": True,
+                "amount": "250.00",
+                "amount_currency": "USD",
+                "payment_parts": parts,
+                "refusal_code": "external_payment_blocking_exception",
+            },
+        )
+        s.add(row)
+        await s.commit()
+        return row.id
+
+
+async def test_the_one_click_names_no_rail_over_a_split_that_stands(realdb):
+    """Over a breakdown that is the record whatever rail is named, the dialog
+    sends none (decisions §413); the audit says no rail was stated, not one
+    the form defaulted to."""
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(
+        realdb,
+        inv_id,
+        [{"method": "check", "amount": "150.00"}, {"method": None, "amount": "100.00"}],
+    )
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert resp.status_code == 201, resp.text
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None
+    assert booked.rail_breakdown == [
+        {"method": "check", "amount": "150.00"},
+        {"method": None, "amount": "100.00"},
+    ]
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown_status"] == "applied"
+    assert details["method_stated"] is None
+
+
+@pytest.mark.parametrize(
+    ("parts", "stands"),
+    [
+        # One rail: a person's rail corrects it, so it must be named.
+        ([{"method": "card", "amount": "200.00"}, {"method": "card", "amount": "50.00"}], False),
+        # A cent short: dropped, and the person's rail is the record.
+        ([{"method": "check", "amount": "150.00"}, {"method": "card", "amount": "99.99"}], False),
+        # No breakdown at all.
+        (None, None),
+    ],
+)
+async def test_the_one_click_refuses_no_rail_where_the_persons_rail_is_the_record(
+    realdb, parts, stands
+):
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(realdb, inv_id, parts)
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    async with realdb.client(key="a", role="admin") as c:
+        detail = await c.get(f"/api/exceptions/{row_id}")
+        resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert detail.json()["erp_payment_split_stands"] is stands
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "erp_payment_method_required"
+    assert await _payments(realdb, inv_id) == []
+    [row] = [e for e in await _exceptions(realdb, inv_id) if e.id == row_id]
+    assert row.status == "open"
 
 
 async def test_a_bill_part_paid_in_quickbooks_records_nothing_and_blocks(realdb):
