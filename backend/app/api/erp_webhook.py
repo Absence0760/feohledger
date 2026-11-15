@@ -825,18 +825,27 @@ async def _invoice_id_by_document(
     own database. An invoice whose push recorded a connection realm
     (``state_data["erp_realm"]``) counts only when it is the realm the tenant
     is connected to now, so a document id issued by another ERP, or another
-    company of the same ERP, matches nothing; an invoice pushed before realms
-    were recorded has none and is judged by the id alone. Two or more
-    candidates are refused, never guessed between: the caller answers the same
-    silent 204 as for no match.
+    company of the same ERP, matches nothing.
+
+    An invoice pushed before realms were recorded has none, and counts only
+    while the push's own legacy rule trusts NULL-realm links under the current
+    realm (``erp_link_realm.legacy_links_trusted``, decisions §423): ERP
+    document ids are small per-ERP numbers, so once the tenant has connected
+    elsewhere a NULL-realm invoice's "1042" says nothing about the new ERP's
+    bill 1042. With no realm at all (``mock``, an OAuth ERP with no consent)
+    no company can be named and nothing matches. Two or more candidates are
+    refused, never guessed between: the caller answers the same silent 204 as
+    for no match.
     """
-    from app.services.erp_link_realm import connection_realm
+    from app.services.erp_link_realm import connection_realm, legacy_links_trusted
 
     realm = connection_realm(erp_config)
+    if realm is None:
+        return None
     recorded = WorkflowInstance.state_data["erp_realm"].astext
-    realm_clause = recorded.is_(None)
-    if realm is not None:
-        realm_clause = or_(realm_clause, recorded == realm)
+    realm_clause = recorded == realm
+    if legacy_links_trusted(erp_config, realm):
+        realm_clause = or_(realm_clause, recorded.is_(None))
     rows = (
         await db.execute(
             select(Invoice.id)

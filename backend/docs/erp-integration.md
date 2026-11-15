@@ -323,8 +323,11 @@ the invoice whose confirmed push stored that id on `invoices.erp_document_id`
 signature verifies. An invoice whose push recorded a connection realm
 (`state_data["erp_realm"]`) counts only while the tenant is connected to that
 same realm, so an id from another ERP or another company of the same ERP
-matches nothing; an invoice pushed before realms were recorded is judged by the
-id alone. Two or more candidates are refused rather than guessed between, a
+matches nothing. An invoice pushed before realms were recorded counts only
+while the push's own legacy rule trusts it (`erp_link_realm.legacy_links_trusted`:
+the tenant is still on the realm migration 0115 recorded; decisions §423),
+because document ids are small per-ERP numbers that collide across ERPs; a
+connection that names no realm (`mock`) matches nothing. Two or more candidates are refused rather than guessed between, a
 silent 204 like no match at all. The match is re-checked under the
 `get_invoice_for_update` row lock, so a confirmed re-push that replaced the bill
 in between is not acted on. A correlation id that is present still decides
