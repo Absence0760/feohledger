@@ -1031,7 +1031,9 @@ or is a sibling of a fix that needs its own pass.
 - [ ] **(c) Three refusals a user acts on are still English-only.** §238 coded the
       approval, CFO / max-amount, credit-memo, expense and stale-edit refusals. Not
       done: the per-row skip reasons `POST /api/invoices/bulk-status` returns
-      (built by `api/invoices._skip_reason`, plus the two §263 added — a row
+      where the refusal behind them is not coded (since §387 a coded refusal
+      becomes a coded skip, and §418's `invoice_not_in_review` is one; the
+      English fallback is `api/invoices._skip_reason`, plus the two §263 added — a row
       changed since the approver loaded it, which the single approve already
       codes as `invoice_stale_approval`, and "Required fields missing", which
       `/complete` codes as `invoice_required_fields_missing`), the payment-run SoD and CFO sign-off
@@ -2031,6 +2033,42 @@ user-visible halves still open.
       tenant … could not be opened` error in production, a KMS throttling
       alarm on the credential key, or the first customer relying on the
       generic route.
+
+### Surfaced by round 12 (2026-11-15, round PR #716, decisions §410–§421)
+
+- [ ] **(c) A push that reaches `sending_to_erp` with its retry counter spent
+      makes no attempt and leaves the invoice there.** §410's gate lets a push
+      through only at `sending_to_erp`, but `send_to_erp_internal` still reads
+      the instance's retry count before its first attempt; a count already at
+      the limit (a redelivery after the last retry, or an operator re-queue)
+      returns without calling the adapter or moving the invoice to `failed`,
+      so it sits at `sending_to_erp` with no refusal on its trail. No current
+      path is known to produce it. **Durable fix:** treat "no attempts left" as
+      a final failure: transition to `failed` with a coded
+      `erp_retries_exhausted` refusal (possibly-posted if the outcome flag is
+      set), with a `tests/test_erp_push_flow.py` case. **Trigger:** the next
+      change to `services/erp.py`'s retry loop, or an invoice found stuck at
+      `sending_to_erp`.
+- [ ] **(c) Mobile bulk status shows no reason for a skipped row.** The
+      mobile bulk sheet offers Approved for any selection, and `BulkResult`
+      keeps only the skipped ids, so since §418 a bulk approve of drafts on
+      mobile says "N skipped" with no reason (true of every skip type before
+      §418 too). **Durable fix:** keep `{id, code, params}` per skip in the
+      mobile `BulkResult`, render each through `coded_refusal_messages.dart`,
+      and offer Approved only for `ready_for_review` rows as the web picker
+      does, with a widget test. **Trigger:** the next change to mobile bulk
+      actions.
+- [ ] **(c) The auto-send sweep cannot fence a directly configured ERP's
+      connection time.** §411 skips approvals made before an OAuth ERP's
+      `connected_at`, but NetSuite, Business Central, Sage Intacct and SYSPRO
+      are saved as settings and record no connection time, so an approval made
+      while the tenant was on the mock, up to the 24 h lookback before the live
+      ERP was saved, can be pushed once by the sweep. **Durable fix:** stamp
+      `erp.configured_at` whenever `PATCH /api/organization` changes the ERP
+      type or its realm-defining fields (the same writer that drops sealed
+      secrets, `erp_adapters/catalog.secrets_to_drop`), and fence on it in
+      `erp_auto_send_sweep`. **Trigger:** turning the sweep on for a tenant on
+      a directly configured ERP.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
