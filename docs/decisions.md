@@ -21046,3 +21046,73 @@ logged; the gate asked again after a backoff; on a real tenant, a stale
 `sending_to_erp` object whose row was recalled meanwhile posts nothing, and a
 real `sending_to_erp` push still lands. The mock-session tests point the gate
 at the fixture invoice's own status through an autouse fixture.
+
+## 414. A recalled approval is an outbound webhook event, and the published OpenAPI carries the webhook catalogue (§374 follow-up, 2026-11-14)
+
+**The gap.** `transition_invoice` emitted `invoice.approved` to webhook
+subscribers, but the recall (§374) emitted nothing. An integrator that acted on
+the approval (queued the bill, told the supplier it would be paid) never
+learned it had been withdrawn. And the published OpenAPI described none of the
+webhooks: the push half of the developer contract lived only in
+`backend/docs/public-api.md`.
+
+**Decision.**
+
+- **`invoice.approval_recalled` joins `WEBHOOK_EVENT_TYPES`.** It is emitted
+  from the same hook as its siblings, `workflow_engine._maybe_emit_webhook`,
+  keyed off the transition's action (`RECALL_ACTION`, the only action allowed
+  to walk `RECALL_EDGES`), not its resulting status: `ready_for_review` is also
+  where a resubmit or a fresh extraction lands, and those are not events. The
+  hook now receives the action, the status left and the actor from
+  `transition_invoice`.
+- **What it carries.** The same invoice fields as `invoice.approved` (id,
+  number, vendor name, amount as an exact string, currency, status, here
+  `ready_for_review`), plus `recalled_from` (`approved` or `failed`) and
+  `recalled_by_user_id`, the recaller's opaque control-plane id. **Not** the
+  reason: it is free text a person typed, so it can hold anything, and it stays
+  in the `invoice.approval_recalled` audit row. The user id is the one datum
+  `invoice.approved` does not carry: pseudonymous (no name or email crosses
+  the boundary, and only the customer's own admins can map it to a person),
+  sent to the customer's own endpoint, and what lets a receiver attribute the
+  withdrawal at all.
+- **Each event's `data` is defined once**, as a Pydantic model in
+  `app/schemas/webhook_events.py`. The emitters build the payload through it
+  (`model_dump()`), and `api/v1_openapi.build_public_openapi` publishes it
+  under the OpenAPI 3.1 `webhooks` section (one entry per catalogued type: the
+  signed envelope, the delivery headers, `data` as a component `$ref`), and the
+  `/api/v1/docs` page lists them. Building through the model, rather than a
+  parallel schema checked against hand-written dicts, means the published
+  payload and the bytes a receiver gets cannot drift. The existing three
+  events' payloads are byte-for-byte unchanged.
+- **One catalogue, held together by a test.** `tests/test_webhook_event_catalogue.py`
+  fails unless the models, the summaries, the admin page's event picker
+  (`frontend/src/lib/types/webhooks.ts`, read as source) and the spec's
+  `webhooks` entries all name exactly `WEBHOOK_EVENT_TYPES`, and each emitter
+  sends exactly its model's fields. `invoice.approval_recalled:<uuid>` is 62
+  characters, inside `webhook_deliveries.event_id`'s 64.
+
+**Timing, kept as it is.** Like `invoice.approved` and `payment.settled`, the
+recall is emitted inline in `transition_invoice`, and `emit_event` commits the
+delivery row in its own control-plane session — before the tenant transaction
+that changed the status commits. A rollback after that point delivers an event
+for a change that did not happen. That holds for all three invoice events, so
+the recall keeps its siblings' timing rather than diverge; moving the hook onto
+`post_commit.enqueue_post_commit` for all of them is a (c) entry in
+`docs/followups.md`.
+
+**Considered.** A separate `invoice.status_changed` event carrying every
+transition: rejected, because receivers subscribe to meanings, and a generic
+event would push the state machine's graph into every integration. Emitting
+`invoice.approved` again with a `recalled: true` flag: rejected, because a
+receiver filtering on the event type would read the withdrawal as a second
+approval.
+
+**Where.** `app/models/webhook.py`, `app/schemas/webhook_events.py`,
+`app/services/webhooks/dispatch.py`, `app/services/workflow_engine.py`,
+`app/api/v1_openapi.py`, `frontend/src/lib/types/webhooks.ts` and the six
+locale hints. Tests: `tests/test_webhook_event_catalogue.py`;
+`tests/test_invoice_recall_approval.py::test_the_recall_is_delivered_to_webhook_subscribers`
+(the door, end to end, to a delivery row). Docs: `backend/docs/public-api.md`
+(§ Event catalog, § Payload, § Event sources wired, § Published OpenAPI spec),
+`backend/docs/api-surface.md` (`/invoices`, `/webhooks`). Closes the §374
+follow-up "nothing outside FeohLedger hears that an approval was recalled".

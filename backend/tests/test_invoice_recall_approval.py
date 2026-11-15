@@ -523,6 +523,67 @@ async def test_the_recall_is_audited_and_the_approval_row_is_untouched(realdb):
     assert (await _row(realdb, invoice_id)).approved_by_user_id == admin
 
 
+@pytest.mark.plan("scale")
+async def test_the_recall_is_delivered_to_webhook_subscribers(realdb, monkeypatch):
+    """An integrator that heard `invoice.approved` hears the recall too
+    (decisions §414): one `invoice.approval_recalled` delivery naming the prior
+    status and the recaller, and not the reason a person typed."""
+    from sqlalchemy import delete
+
+    from app.config import settings
+    from app.models.webhook import (
+        EVENT_INVOICE_APPROVAL_RECALLED,
+        WebhookDelivery,
+        WebhookSubscription,
+    )
+    from app.services.webhooks import dispatch
+    from app.services.webhooks.signing import generate_signing_secret
+
+    monkeypatch.setattr(settings, "webhooks_enabled", True)
+    monkeypatch.setattr(dispatch, "_spawn_immediate_attempt", lambda _id: None)
+    org_id = realdb.info(TENANT).org_id
+    secret, prefix = generate_signing_secret()
+    sub = WebhookSubscription(
+        id=uuid.uuid4(),
+        organization_id=org_id,
+        name="recall-hook",
+        target_url="https://example.test/hook",
+        event_types=[EVENT_INVOICE_APPROVAL_RECALLED],
+        signing_secret=secret,
+        secret_prefix=prefix,
+        active=True,
+    )
+    control_mk = realdb.control_sessionmaker()
+    async with control_mk() as s:
+        s.add(sub)
+        await s.commit()
+    try:
+        invoice_id = await _invoice(realdb)
+        resp = await _recall(realdb, "ap_manager", invoice_id, reason="Wrong payee 12345678")
+        assert resp.status_code == 200, resp.text
+
+        async with control_mk() as s:
+            (delivery,) = (
+                await s.execute(
+                    select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id)
+                )
+            ).scalars()
+        assert delivery.event_type == EVENT_INVOICE_APPROVAL_RECALLED
+        data = delivery.payload["data"]
+        assert data["invoice_id"] == str(invoice_id)
+        assert data["status"] == "ready_for_review"
+        assert data["recalled_from"] == "approved"
+        assert data["recalled_by_user_id"] == str(realdb.info(TENANT).users["ap_manager"])
+        assert "Wrong payee" not in str(delivery.payload)
+    finally:
+        async with control_mk() as s:
+            await s.execute(
+                delete(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id)
+            )
+            await s.execute(delete(WebhookSubscription).where(WebhookSubscription.id == sub.id))
+            await s.commit()
+
+
 # ── Re-approval re-runs the chain ──────────────────────────────────────────
 
 

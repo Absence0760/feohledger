@@ -813,7 +813,7 @@ export const messages = {
 	'admin.webhooks.title': 'Webhooks',
 	'admin.webhooks.createWebhook': '+ Webhook erstellen',
 	'admin.webhooks.hintPre':
-		'Ausgehende Webhooks senden Plattformereignisse (Rechnung genehmigt, Zahlung abgewickelt, Ausnahme ausgelöst) als signiertes JSON an Ihren Endpunkt. Das HMAC-Signaturgeheimnis jedes Abonnements wird nur einmal bei der Erstellung angezeigt — bewahren Sie es sicher auf und verwenden Sie es zur Verifizierung des',
+		'Ausgehende Webhooks senden Plattformereignisse (Rechnung genehmigt, Genehmigung zurückgenommen, Zahlung abgewickelt, Ausnahme ausgelöst) als signiertes JSON an Ihren Endpunkt. Das HMAC-Signaturgeheimnis jedes Abonnements wird nur einmal bei der Erstellung angezeigt — bewahren Sie es sicher auf und verwenden Sie es zur Verifizierung des',
 	'admin.webhooks.hintPost': 'Headers.',
 	'admin.webhooks.subscriptions': 'Abonnements',
 	'admin.webhooks.loadingSubs': 'Webhooks werden geladen…',

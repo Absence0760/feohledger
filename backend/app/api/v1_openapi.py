@@ -11,7 +11,12 @@ with:
 - an ``info.version`` of ``v1`` and a ``servers`` entry built from
   ``FEOH_API_PUBLIC_URL`` so generated clients hit the right base URL;
 - the published ``V1Invoice`` / ``V1InvoiceList`` component schemas only — no
-  internal-only model leaks in.
+  internal-only model leaks in;
+- an OpenAPI 3.1 ``webhooks`` section: one entry per outbound event in
+  ``models/webhook.WEBHOOK_EVENT_TYPES``, its body the signed envelope with the
+  event's ``data`` model from ``schemas/webhook_events`` — the same model the
+  emitter builds the payload through, so the published payload cannot drift
+  from the delivered one.
 
 Both this spec and the human-readable docs page respect the
 ``FEOH_PUBLIC_API_ENABLED`` kill switch: when the public API is off, the spec and
@@ -36,6 +41,12 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import settings
+from app.models.webhook import WEBHOOK_EVENT_TYPES
+from app.schemas.webhook_events import (
+    WEBHOOK_EVENT_DATA_MODELS,
+    WEBHOOK_EVENT_SUMMARIES,
+    webhook_envelope_schema,
+)
 
 # Stable contract version of the public surface. Bumping the path prefix
 # (``/api/v2``) is what introduces a new version; this string tracks it.
@@ -63,9 +74,9 @@ def build_public_openapi(app: FastAPI) -> dict[str, Any]:
 
     Generates the full app spec from the live route table, then keeps only the
     ``/api/v1`` paths (minus the meta endpoints), prunes orphaned component
-    schemas, and overlays the ``X-API-Key`` security scheme + ``servers`` +
-    contract version. Pure with respect to the app (reads routes, returns a new
-    dict) — safe to call per request.
+    schemas, and overlays the ``X-API-Key`` security scheme + the outbound
+    ``webhooks`` catalogue + ``servers`` + contract version. Pure with respect
+    to the app (reads routes, returns a new dict) — safe to call per request.
     """
     full = get_openapi(
         title="FeohLedger — Public Developer API",
@@ -113,7 +124,10 @@ def build_public_openapi(app: FastAPI) -> dict[str, Any]:
     full["components"] = components
     full["security"] = [{"ApiKeyAuth": []}]
 
-    # 4. A servers entry so generated clients hit the right base URL.
+    # 4. The outbound webhook catalogue — the push half of the contract.
+    full["webhooks"] = _webhooks_section(components["schemas"])
+
+    # 5. A servers entry so generated clients hit the right base URL.
     full["servers"] = [
         {
             "url": settings.api_public_url.rstrip("/"),
@@ -122,6 +136,76 @@ def build_public_openapi(app: FastAPI) -> dict[str, Any]:
     ]
 
     return full
+
+
+_SCHEMA_REF = "#/components/schemas/{model}"
+
+#: Headers every delivery carries (`services/webhooks/delivery`).
+_WEBHOOK_HEADERS: tuple[tuple[str, bool, str], ...] = (
+    (
+        "X-Webhook-Signature",
+        True,
+        "Hex HMAC-SHA256 of the raw body under the subscription's current signing secret.",
+    ),
+    (
+        "X-Webhook-Signature-Previous",
+        False,
+        "The same, under the retiring secret — sent only during a rotation's overlap window.",
+    ),
+    ("X-Webhook-Event-Id", True, "The event id (the body's `id`). Dedupe on it."),
+    ("X-Webhook-Event-Type", True, "The event type (the body's `type`)."),
+)
+
+
+def _webhooks_section(component_schemas: dict[str, Any]) -> dict[str, Any]:
+    """Build the OpenAPI 3.1 ``webhooks`` map and add each event's ``data``
+    model to ``component_schemas``.
+
+    One entry per type in ``WEBHOOK_EVENT_TYPES``, in that order; a type with no
+    ``data`` model raises here, so a new event cannot be added to the catalogue
+    without being published.
+    """
+    webhooks: dict[str, Any] = {}
+    for event_type in WEBHOOK_EVENT_TYPES:
+        model = WEBHOOK_EVENT_DATA_MODELS[event_type]
+        schema = model.model_json_schema(ref_template=_SCHEMA_REF)
+        for name, definition in (schema.pop("$defs", None) or {}).items():
+            component_schemas.setdefault(name, definition)
+        component_schemas.setdefault(model.__name__, schema)
+        webhooks[event_type] = {
+            "post": {
+                "operationId": f"webhook_{event_type.replace('.', '_')}",
+                "summary": WEBHOOK_EVENT_SUMMARIES[event_type],
+                "description": (
+                    f"Delivered to a subscription that lists `{event_type}`, as a "
+                    "signed JSON POST. Retried with backoff on any non-2xx; dedupe "
+                    "on `X-Webhook-Event-Id`."
+                ),
+                "security": [],
+                "parameters": [
+                    {
+                        "name": name,
+                        "in": "header",
+                        "required": required,
+                        "description": description,
+                        "schema": {"type": "string"},
+                    }
+                    for name, required, description in _WEBHOOK_HEADERS
+                ],
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": webhook_envelope_schema(
+                                event_type, _SCHEMA_REF.format(model=model.__name__)
+                            )
+                        }
+                    },
+                },
+                "responses": {"2XX": {"description": "Received. Any non-2xx is retried."}},
+            }
+        }
+    return webhooks
 
 
 def _referenced_schema_names(paths: dict[str, Any], all_schemas: dict[str, Any]) -> set[str]:
@@ -348,6 +432,7 @@ def render_docs_html(spec: dict[str, Any]) -> str:
             parts.append(_render_parameters(op.get("parameters") or []))
             parts.append(_render_responses(op.get("responses") or {}))
 
+    parts.append(_render_webhooks(spec.get("webhooks") or {}))
     parts.append(_render_schemas((spec.get("components") or {}).get("schemas") or {}))
     parts.append("</body></html>")
     return "".join(p for p in parts if p)
@@ -388,6 +473,30 @@ def _render_responses(responses: dict[str, Any]) -> str:
         return ""
     head = "<tr><th>Status</th><th>Description</th><th>Body</th></tr>"
     return f"<table><thead>{head}</thead><tbody>{''.join(rows)}</tbody></table>"
+
+
+def _render_webhooks(webhooks: dict[str, Any]) -> str:
+    """The outbound events, each with its summary and its ``data`` schema."""
+    if not webhooks:
+        return ""
+    parts = [
+        "<h2>Webhooks</h2>",
+        "<p>Events FeohLedger POSTs to a subscription's URL. Each body is "
+        "<code>{id, type, created_at, organization_id, data}</code>; "
+        "verify <code>X-Webhook-Signature</code> and dedupe on "
+        "<code>X-Webhook-Event-Id</code>.</p>",
+    ]
+    for event_type in webhooks:
+        op = (webhooks[event_type] or {}).get("post") or {}
+        body = (((op.get("requestBody") or {}).get("content") or {}).get("application/json")) or {}
+        data = ((body.get("schema") or {}).get("properties") or {}).get("data") or {}
+        parts.append(f"<h3><code>{_esc(event_type)}</code></h3>")
+        if op.get("summary"):
+            parts.append(f"<p>{_esc(op['summary'])}</p>")
+        label = _schema_label(data)
+        if label:
+            parts.append(f'<p class="muted"><code>data</code>: <code>{_esc(label)}</code></p>')
+    return "".join(parts)
 
 
 def _render_schemas(schemas: dict[str, Any]) -> str:

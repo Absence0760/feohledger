@@ -6,11 +6,18 @@
 // only `secret_prefix`).
 
 /** A subscribable platform event type (mirrors `WEBHOOK_EVENT_TYPES`). */
-export type WebhookEventType = 'invoice.approved' | 'payment.settled' | 'exception.raised';
+export type WebhookEventType =
+	| 'invoice.approved'
+	| 'invoice.approval_recalled'
+	| 'payment.settled'
+	| 'exception.raised';
 
-/** All event types the create/edit forms offer, in display order. */
+/** All event types the create/edit forms offer, in display order (the
+ *  backend's order — `backend/tests/test_webhook_event_catalogue.py` reads
+ *  this list and fails when the two differ). */
 export const WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
 	'invoice.approved',
+	'invoice.approval_recalled',
 	'payment.settled',
 	'exception.raised'
 ];

@@ -831,7 +831,7 @@ export const enSettings = {
 	'admin.webhooks.title': 'Webhooks',
 	'admin.webhooks.createWebhook': '+ Create webhook',
 	'admin.webhooks.hintPre':
-		'Outbound webhooks push platform events (invoice approved, payment settled, exception raised) to your endpoint as signed JSON. Each subscription\'s HMAC signing secret is shown only once at creation — store it somewhere safe and use it to verify the',
+		'Outbound webhooks push platform events (invoice approved, approval recalled, payment settled, exception raised) to your endpoint as signed JSON. Each subscription\'s HMAC signing secret is shown only once at creation — store it somewhere safe and use it to verify the',
 	'admin.webhooks.hintPost': 'header.',
 	'admin.webhooks.subscriptions': 'Subscriptions',
 	'admin.webhooks.loadingSubs': 'Loading webhooks…',

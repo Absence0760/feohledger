@@ -813,7 +813,7 @@ export const messages = {
 	'admin.webhooks.title': 'Webhooks',
 	'admin.webhooks.createWebhook': '+ Criar webhook',
 	'admin.webhooks.hintPre':
-		'Webhooks de saída enviam eventos da plataforma (fatura aprovada, pagamento liquidado, exceção gerada) ao seu endpoint como JSON assinado. O segredo de assinatura HMAC de cada inscrição é exibido apenas uma vez na criação — guarde-o em local seguro e use-o para verificar o cabeçalho',
+		'Webhooks de saída enviam eventos da plataforma (fatura aprovada, aprovação revogada, pagamento liquidado, exceção gerada) ao seu endpoint como JSON assinado. O segredo de assinatura HMAC de cada inscrição é exibido apenas uma vez na criação — guarde-o em local seguro e use-o para verificar o cabeçalho',
 	'admin.webhooks.hintPost': '.',
 	'admin.webhooks.subscriptions': 'Inscrições',
 	'admin.webhooks.loadingSubs': 'Carregando webhooks…',

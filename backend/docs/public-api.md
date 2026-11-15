@@ -256,6 +256,16 @@ What the document carries:
   typed as a **string** (money-is-exact — exact arithmetic over JSON, no float),
   and the `status` / `page` / `page_size` pagination parameters on the list
   operation.
+- A `webhooks` section (OpenAPI 3.1) — the push half of the contract: one entry
+  per outbound event in `WEBHOOK_EVENT_TYPES`, its request body the signed
+  envelope (`id`, `type`, `created_at`, `organization_id`, `data`), its headers
+  (`X-Webhook-Signature`, `-Previous`, `-Event-Id`, `-Event-Type`), and `data`
+  a `$ref` to the event's component schema (`WebhookInvoiceData`,
+  `WebhookInvoiceApprovalRecalledData`, `WebhookExceptionData`). Those schemas
+  come from `app/schemas/webhook_events.py`, the same Pydantic models the
+  emitters build the payload through, so the published payload and the bytes a
+  receiver gets cannot drift; a type with no model fails the spec build. The
+  `/api/v1/docs` page lists them under **Webhooks** (decisions §414).
 
 The route mount is additive in `app/main.py` (`public_v1_openapi_router`); the
 generator is pure with respect to the app (reads routes, returns a fresh dict),
@@ -356,9 +366,20 @@ gated on the `organizations` table existing — mirrors 0055).
 
 ### Event catalog
 
-`invoice.approved`, `payment.settled`, `exception.raised` (see
-`app/models/webhook.py::WEBHOOK_EVENT_TYPES`). The catalog is plain strings, so
-adding one needs no migration.
+`invoice.approved`, `invoice.approval_recalled`, `payment.settled`,
+`exception.raised` (see `app/models/webhook.py::WEBHOOK_EVENT_TYPES`). The
+catalog is plain strings, so adding one needs no migration — but it does need a
+`data` model and summary in `app/schemas/webhook_events.py` and an entry in the
+admin page's picker (`frontend/src/lib/types/webhooks.ts`);
+`tests/test_webhook_event_catalogue.py` fails until all three agree, and the
+published spec's `webhooks` section picks the new event up from the model.
+
+**`invoice.approval_recalled`** (decisions §374, §414) tells an integrator that
+an approval it may already have acted on — from `invoice.approved` — was taken
+back (`POST /api/invoices/{id}/recall-approval`). The invoice is back at
+`ready_for_review` and is not payable until it is approved again, which emits a
+fresh `invoice.approved`. A receiver that queued a bill or told the supplier it
+would be paid on the approval should undo that here.
 
 ### Signing
 
@@ -452,6 +473,23 @@ Re-emitting the SAME occurrence (same id) still collapses to one delivery — th
 is what makes a replay safe. `exception.raised` is unaffected: an exception row's
 id is already occurrence-unique, since a re-raised exception is a new row.
 
+`invoice.approval_recalled` carries the same invoice fields plus the status
+the approval was recalled from (`approved`, or `failed` for an approved
+invoice whose ERP push failed) and the recaller's opaque user id. The recall's
+free-text reason is **not** sent — it can hold anything a person typed, and it
+stays in the `invoice.approval_recalled` audit row:
+
+```jsonc
+{ "id": "invoice.approval_recalled:<occurrence-id>", "type": "invoice.approval_recalled",
+  "created_at": "<iso8601>", "organization_id": "<org-id>",
+  "data": { "invoice_id": "…", "invoice_number": "…", "vendor_name": "…",
+            "amount": "123.45", "currency": "USD", "status": "ready_for_review",
+            "recalled_from": "approved", "recalled_by_user_id": "<user-id>" } }
+```
+
+Like the approval it withdraws, its id is per occurrence: recalled, re-approved
+and recalled again delivers twice.
+
 `exception.raised` carries the exception classification plus the same invoice
 metadata (and a deep link):
 
@@ -470,7 +508,9 @@ exception (e.g. a Positive Pay never-issued cheque) carries `invoice_id` /
 `invoice_number` / `vendor_name` / `amount` as `null` and `link: "/exceptions"`.
 
 `amount` is an **exact JSON string** (money-is-exact), not a float. Payloads are
-PII-free — invoice/exception metadata only, no bank/tax/PAN fields.
+PII-free — invoice/exception metadata only, no bank/tax/PAN fields, no name or
+email. The one person reference is `invoice.approval_recalled`'s
+`recalled_by_user_id`, an opaque id.
 
 ### Dispatch + retry + dead-letter
 
@@ -553,6 +593,13 @@ alongside the existing notification hook, keyed off the resulting status:
 converges on those statuses (the ERP-sync / payment-webhook / direct-schedule
 paths) emits exactly once, here — once per *transition*, each carrying the
 occurrence id that transition minted.
+
+**`invoice.approval_recalled`** comes from the same hook, but keyed off the
+transition's action (`workflow_engine.RECALL_ACTION`, the one action allowed to
+walk the recall edges) rather than its resulting status — `ready_for_review` is
+also where a resubmit or a fresh extraction lands, and those are not events.
+`transition_invoice` hands the hook the status it left and the actor, which
+become `recalled_from` and `recalled_by_user_id`.
 
 **`exception.raised`** is emitted from the shared exception-create chokepoint
 `services/exception_service.create_exception`. Every `Exception` row in the
