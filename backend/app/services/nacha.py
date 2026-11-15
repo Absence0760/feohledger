@@ -165,15 +165,32 @@ def has_offset(config: dict | None) -> bool:
     return any(cfg.get(key) not in (None, "") for key in OFFSET_FIELDS)
 
 
+class OffsetAccountReentryRequired(ValueError):
+    """A save changed the offset's bank or account type but did not re-send the
+    account number. Carries the field NAME only, never a value."""
+
+    field = "offset_account"
+
+
+def _routing_key(raw: object) -> object:
+    return "".join(raw.split()) if isinstance(raw, str) else raw
+
+
 def carry_offset_account(incoming: object, stored: object) -> object:
     """``incoming`` with the stored offset account number kept when it was not re-sent.
 
     The account number is write-only on the way out — `GET /api/organization`
     shows it as a last-4 mask (`org_settings_view`) — so a settings form that
     re-saves the block sends it blank, or sends the mask back. Either keeps the
-    stored number, as long as the save still asks for a balanced file; a save
-    that clears every offset key clears the account with them. Returns a new
-    dict when it changes anything; never mutates its arguments.
+    stored number, as long as the save still asks for a balanced file AND
+    names the same offset account: the same ``offset_routing`` (ignoring
+    whitespace) and the same ``offset_account_type``. A number belongs to its
+    bank, so a save that moves the offset to another routing number or type
+    without re-entering the number raises :class:`OffsetAccountReentryRequired`
+    rather than debit the old number at the new bank (decisions §432,
+    round-13 amendment). A save that clears every offset key clears the
+    account with them. Returns a new dict when it changes anything; never
+    mutates its arguments.
     """
     if not isinstance(incoming, dict) or not isinstance(stored, dict):
         return incoming
@@ -186,6 +203,11 @@ def carry_offset_account(incoming: object, stored: object) -> object:
         return incoming
     sent = incoming.get("offset_account")
     if sent in (None, "") or sent == mask_secret(stored_account):
+        same_account = _routing_key(incoming.get("offset_routing")) == _routing_key(
+            stored.get("offset_routing")
+        ) and incoming.get("offset_account_type") == stored.get("offset_account_type")
+        if not same_account:
+            raise OffsetAccountReentryRequired(OffsetAccountReentryRequired.field)
         return {**incoming, "offset_account": stored_account}
     return incoming
 

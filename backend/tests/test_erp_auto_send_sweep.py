@@ -19,7 +19,10 @@ Pinned here, on real Postgres:
 * an approval made before an OAuth ERP was connected is not recovered;
 * a send that raises is counted as a failure, so the health report says so;
 * the per-tenant cap takes the oldest approval first;
-* the sweep is off by default and registered with the health report.
+* the sweep is off by default and registered with the health report;
+* a push stranded at `sending_to_erp` (§428) is re-driven or failed, and never
+  re-driven while its own job sleeps between attempts, nor when no audit row
+  records its entry (round-13 amendment).
 """
 
 from __future__ import annotations
@@ -668,3 +671,147 @@ async def test_a_re_driven_push_lands_through_send_to_erp_internal(realdb, monke
     call.assert_awaited_once()
     assert await _status(realdb, inv_id) == InvoiceStatus.done
     assert len(await _audit(realdb, inv_id, "invoice.erp_confirmed")) == 1
+
+
+async def test_a_push_sleeping_between_attempts_is_not_re_driven(realdb, redriven, monkeypatch):
+    """The first attempt ends `not_posted` with nothing earlier unknown, so
+    `_call_erp` drops the outcome-unknown stamp; the job then sleeps before its
+    second attempt. Run the sweep inside that sleep: the push must read as
+    attempted (the never-cleared attempt stamp, and `erp_retries` = 1) and be
+    left to its own job, never re-driven beside it (round-13 amendment, §428)."""
+    from app.services import erp as erp_service
+    from app.services.erp import (
+        ATTEMPT_STARTED_AT_KEY,
+        OUTCOME_UNKNOWN_AT_KEY,
+        send_to_erp_internal,
+    )
+    from app.services.erp_adapters.base import ErpPostResult
+
+    class _Adapter:
+        calls = 0
+
+        async def post_invoice(self, payload):
+            _Adapter.calls += 1
+            if _Adapter.calls == 1:
+                result = ErpPostResult(success=False, message="HTTP 503", retryable=True)
+                result.not_posted = True
+                return result
+            return ErpPostResult(success=True, erp_document_id="NS-BILL-9")
+
+    monkeypatch.setattr(erp_service, "get_erp_adapter", lambda config: _Adapter())
+
+    mid_backoff: list = []
+
+    async def _sweep_during_backoff(_seconds):
+        async with realdb.sessionmaker(TENANT)() as s:
+            inst = (
+                await s.execute(
+                    select(WorkflowInstance).where(WorkflowInstance.invoice_id == inv_id)
+                )
+            ).scalar_one()
+            mid_backoff.append(dict(inst.state_data))
+        mid_backoff.append(await sweep.run_auto_send_sweep_once())
+
+    monkeypatch.setattr(erp_service.asyncio, "sleep", _sweep_during_backoff)
+    await _write_erp(realdb, LIVE_ERP)
+    # The job runs late: its push entered `sending_to_erp` past the delay.
+    inv_id = await _seed_stranded(realdb, started_at=_ago(minutes=10))
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = await s.get(Invoice, inv_id)
+        await send_to_erp_internal(s, inv, actor_id=None, erp_config=MOCK_ERP)
+
+    state, result = mid_backoff
+    # The condition the old reading mistook for "no attempt".
+    assert OUTCOME_UNKNOWN_AT_KEY not in state
+    assert state["erp_retries"] == 1
+    assert ATTEMPT_STARTED_AT_KEY in state
+    assert (result.pushes_redriven, result.pushes_interrupted) == (0, 0)
+    assert redriven == []
+    # The job's own second attempt lands the push, once.
+    assert _Adapter.calls == 2
+    assert await _status(realdb, inv_id) == InvoiceStatus.done
+    assert len(await _audit(realdb, inv_id, "invoice.erp_confirmed")) == 1
+
+
+def test_a_retry_count_is_an_attempt_even_with_no_stamp():
+    """A row from before the attempt stamp existed, mid-backoff: `erp_retries`
+    alone proves an attempt of this push ended (every push resets it to 0), and
+    it is dated at the push's entry so the lookback still releases it."""
+    started = _ago(minutes=10)
+    assert sweep._attempt_started_at({"erp_retries": 1}, started) == started
+    assert sweep._attempt_started_at({"erp_retries": "garbled"}, started) == started
+    assert sweep._attempt_started_at({"erp_retries": 0}, started) is None
+    assert sweep._attempt_started_at({}, started) is None
+
+
+async def _seed_untrailed(realdb, *, state_data: dict | None = None) -> uuid.UUID:
+    """An invoice at `sending_to_erp` with NO audit row recording that entry
+    (`audit_log` is append-only, so the trail is never written rather than
+    deleted: a Lambda-shipped row that never landed)."""
+    inv_id = await _seed_approved(realdb, approved_at=None, status=InvoiceStatus.sending_to_erp)
+    if state_data is not None:
+        async with realdb.sessionmaker(TENANT)() as s:
+            inst = (
+                await s.execute(
+                    select(WorkflowInstance).where(WorkflowInstance.invoice_id == inv_id)
+                )
+            ).scalar_one()
+            inst.state_data = state_data
+            await s.commit()
+    return inv_id
+
+
+async def _age_invoice_row(realdb, inv_id, at: datetime) -> None:
+    from sqlalchemy import update
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        await s.execute(update(Invoice).where(Invoice.id == inv_id).values(updated_at=at))
+        await s.commit()
+
+
+async def test_a_stranded_push_with_no_entry_row_fails_closed(realdb, redriven):
+    """No audit row records the entry into `sending_to_erp`: the sweep cannot
+    tell this push's attempts from an earlier one's, so it never re-drives it.
+    It lands at `failed` coded `erp_push_interrupted` for a person (round-13
+    amendment, §428), where it used to be dropped from the sweep for ever."""
+    from app.services.erp import ERP_PUSH_INTERRUPTED
+
+    await _write_erp(realdb, LIVE_ERP)
+    inv_id = await _seed_untrailed(realdb)
+    await _age_invoice_row(realdb, inv_id, _ago(minutes=10))
+
+    result = await sweep.run_auto_send_sweep_once()
+
+    assert (result.pushes_redriven, result.pushes_interrupted) == (0, 1)
+    assert redriven == []
+    assert await _status(realdb, inv_id) == InvoiceStatus.failed
+    (row,) = await _audit(realdb, inv_id, "invoice.erp_failed")
+    assert row.details["refusal"]["code"] == ERP_PUSH_INTERRUPTED
+
+
+@pytest.mark.parametrize("case", ["row-touched-inside-the-delay", "attempt-stamped-recently"])
+async def test_a_stranded_push_with_no_entry_row_is_left_while_it_may_be_live(
+    realdb, redriven, case
+):
+    """Not failed under a push that may still be running: the invoice row was
+    written inside the delay (a Lambda-shipped audit row may not have landed
+    yet), or an attempt stamp inside the lookback says one began."""
+    from app.services.erp import ATTEMPT_STARTED_AT_KEY
+
+    await _write_erp(realdb, LIVE_ERP)
+    if case == "row-touched-inside-the-delay":
+        inv_id = await _seed_untrailed(realdb)
+        await _age_invoice_row(realdb, inv_id, _ago(seconds=30))
+    else:
+        inv_id = await _seed_untrailed(
+            realdb,
+            state_data={"erp_retries": 1, ATTEMPT_STARTED_AT_KEY: _ago(minutes=9).isoformat()},
+        )
+        await _age_invoice_row(realdb, inv_id, _ago(minutes=10))
+
+    result = await sweep.run_auto_send_sweep_once()
+
+    assert (result.pushes_redriven, result.pushes_interrupted) == (0, 0)
+    assert redriven == []
+    assert await _status(realdb, inv_id) == InvoiceStatus.sending_to_erp

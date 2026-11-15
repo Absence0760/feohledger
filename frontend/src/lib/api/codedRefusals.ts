@@ -666,9 +666,15 @@ const BUILDERS: Record<string, Builder> = {
 					status: statusLabel(status, paymentStatusLabelKey, t)
 				});
 	}),
+	// With `exception_id` the invoice also holds an ERP split only its exception
+	// can book, which the run-level record refuses too: the shared sentence
+	// says to cancel the run first (decisions §426, round-13 amendment).
 	external_payment_in_run: forInvoice((p, t) => {
 		const run = str(p, 'payment_run_id');
-		return run === null ? null : t('refusal.externalPaymentInRun', { run: run.slice(0, 8) });
+		if (run === null) return null;
+		return str(p, 'exception_id') === null
+			? t('refusal.externalPaymentInRun', { run: run.slice(0, 8) })
+			: t('refusal.externalPaymentErpSplitInRun', { run: run.slice(0, 8) });
 	}),
 	external_payment_amount_mismatch: forInvoice((p, t) => {
 		const amount = invoiceMoney(p, 'amount', 'currency');
@@ -686,7 +692,15 @@ const BUILDERS: Record<string, Builder> = {
 	// A live `paid_not_recorded` row keeps a split over several rails that one
 	// rail cannot describe (decisions §426); `params.exception_id` is the row
 	// whose one-click books it, which the queue's dialog links to.
-	external_payment_erp_split: forInvoice(fixed('refusal.externalPaymentErpSplit')),
+	// From the run-level record it also carries `payment_run_id`: the row's
+	// one-click refuses an invoice in a run, so the shared sentence says to
+	// cancel the run first (round-13 amendment to §426).
+	external_payment_erp_split: forInvoice((p, t) => {
+		const run = str(p, 'payment_run_id');
+		return run === null
+			? t('refusal.externalPaymentErpSplit')
+			: t('refusal.externalPaymentErpSplitInRun', { run: run.slice(0, 8) });
+	}),
 	external_payment_paid_on_future: fixed('refusal.externalPaymentPaidOnFuture'),
 	// `api/exceptions.py::record_erp_payment` — a kept ERP payment stating no
 	// cash figure whose bill could not be read back to confirm one (§393)

@@ -2447,7 +2447,8 @@ from that work is the one entry below.
       "send" and that nothing answered, so do it after the stored flags are
       confirmed, not before. It also re-drives any push stranded at
       `sending_to_erp` from the last 24 hours with no attempt made, and fails
-      older stranded pushes as `erp_push_interrupted` (decisions §428), so
+      older stranded pushes (and any with no audit row recording its entry)
+      as `erp_push_interrupted` (decisions §428), so
       list `sending_to_erp` invoices first and expect those. **Trigger:** the first tenant that relies on
       auto-send in production, or the first report of an approved invoice
       that did not reach the ERP.

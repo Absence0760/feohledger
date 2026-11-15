@@ -2347,4 +2347,183 @@ async def test_a_run_record_is_refused_over_a_kept_split(realdb):
         await s.rollback()
     assert refusal is not None
     assert refusal.code == REFUSAL_ERP_SPLIT
-    assert refusal.params == {"exception_id": str(row_id)}
+    # The run is named too: the row's one-click refuses an invoice in a run, so
+    # the refusal says to cancel the run first (round-13 amendment to §426).
+    assert refusal.params == {"exception_id": str(row_id), "payment_run_id": str(run.id)}
+    assert "Cancel the run first" in refusal.message
+
+
+async def _draft_run_holding(realdb, inv_id) -> uuid.UUID:
+    """A draft run whose one pending payment holds ``inv_id``."""
+    from app.models.payment import PaymentRun
+
+    async with realdb.sessionmaker("a")() as s:
+        run = PaymentRun(
+            organization_id=realdb.info("a").org_id,
+            status="draft",
+            total_amount=Decimal("250.00"),
+            initiated_by=realdb.info("a").users["ap_manager"],
+        )
+        s.add(run)
+        await s.flush()
+        s.add(
+            Payment(
+                invoice_id=inv_id,
+                payment_run_id=run.id,
+                amount=Decimal("250.00"),
+                method="ach",
+                status="pending",
+                correlation_id=uuid.uuid4(),
+            )
+        )
+        await s.commit()
+        return run.id
+
+
+async def test_an_invoice_in_a_run_with_a_kept_split_is_told_to_leave_the_run(realdb):
+    """§426's two refusals used to meet in a dead end: the run-level record
+    refuses the split, the row's one-click refuses the invoice in a run, and
+    neither said how out. Both now name the run and the row and say to cancel
+    the run first (round-13 amendment); nothing is written by either."""
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(realdb, inv_id, _TWO_RAILS)
+    run_id = await _draft_run_holding(realdb, inv_id)
+    async with realdb.client(key="a", role="admin") as c:
+        from_row = await c.post(
+            f"/api/exceptions/{row_id}/record-erp-payment",
+            json={"reference": BILL, "paid_on": utc_today().isoformat()},
+        )
+        from_run = await c.post(
+            f"/api/payments/runs/{run_id}/record-outside",
+            json={"reference": BILL, "paid_on": utc_today().isoformat()},
+        )
+    assert from_row.status_code == 409, from_row.text
+    row_detail = from_row.json()["detail"]
+    assert row_detail["code"] == "external_payment_in_run"
+    assert row_detail["params"] == {"payment_run_id": str(run_id), "exception_id": str(row_id)}
+    assert "Cancel the run first" in row_detail["message"]
+
+    assert from_run.status_code == 409, from_run.text
+    run_detail = from_run.json()["detail"]
+    assert run_detail["code"] == "external_payment_erp_split"
+    assert run_detail["params"]["payment_run_id"] == str(run_id)
+    assert run_detail["params"]["exception_id"] == str(row_id)
+    assert "Cancel the run first" in run_detail["message"]
+
+    [held] = await _payments(realdb, inv_id)
+    assert held.status == "pending" and held.payment_run_id == run_id
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "open"
+
+    # The way out the refusals name: cancel the run, then the row books it.
+    async with realdb.client(key="a", role="admin") as c:
+        cancelled = await c.post(f"/api/payments/runs/{run_id}/cancel")
+        booked = await c.post(
+            f"/api/exceptions/{row_id}/record-erp-payment",
+            json={"reference": BILL, "paid_on": utc_today().isoformat()},
+        )
+    assert cancelled.status_code == 200, cancelled.text
+    assert booked.status_code == 201, booked.text
+    [paid] = [p for p in await _payments(realdb, inv_id) if p.payment_run_id is None]
+    assert paid.rail_breakdown == _TWO_RAILS
+
+
+async def test_an_in_run_refusal_with_no_kept_split_keeps_its_own_sentence(realdb):
+    """Without a standing split the in-run refusal is unchanged: the run-level
+    record is a way out, so nothing more is said."""
+    from app.services.external_payment import (
+        REFUSAL_PAYMENT_IN_RUN,
+        ExternalPaymentRefused,
+        record_invoice_paid_outside,
+    )
+    from app.services.workflow_engine import get_invoice_for_update
+
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    await _kept_paid_row(realdb, inv_id, [{"method": "card", "amount": "250.00"}])
+    run_id = await _draft_run_holding(realdb, inv_id)
+    org = await _org(realdb)
+    async with realdb.sessionmaker("a")() as s:
+        invoice = await get_invoice_for_update(s, inv_id)
+        with pytest.raises(ExternalPaymentRefused) as refused:
+            await record_invoice_paid_outside(
+                s,
+                org=org,
+                invoice=invoice,
+                method="check",
+                reference=BILL,
+                paid_on=utc_today(),
+                actor_id=realdb.info("a").users["admin"],
+                source="user",
+            )
+        await s.rollback()
+    assert refused.value.refusal.code == REFUSAL_PAYMENT_IN_RUN
+    assert refused.value.refusal.params == {"payment_run_id": str(run_id)}
+
+
+# ---------------------------------------------------------------------------
+# `external_payment.erp_split_refusal`, directly
+# ---------------------------------------------------------------------------
+
+
+async def test_the_split_refusal_exempts_only_the_row_it_answers(realdb):
+    """The row's own one-click passes it as ``answering`` and is let through;
+    answering some other exception exempts nothing."""
+    from app.services.external_payment import REFUSAL_ERP_SPLIT, erp_split_refusal
+
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(realdb, inv_id, _TWO_RAILS)
+    async with realdb.sessionmaker("a")() as s:
+        invoice = await s.get(Invoice, inv_id)
+        exempt = await erp_split_refusal(s, invoice, answering=frozenset({row_id}))
+        other = await erp_split_refusal(s, invoice, answering=frozenset({uuid.uuid4()}))
+        plain = await erp_split_refusal(s, invoice)
+    assert exempt is None
+    for refusal in (other, plain):
+        assert refusal is not None and refusal.code == REFUSAL_ERP_SPLIT
+        assert refusal.params == {"exception_id": str(row_id)}
+
+
+async def test_an_erp_sourced_record_is_not_held_by_a_kept_split(realdb):
+    """The gate is a person's: ``source="erp"`` (the status sync booking what
+    the ERP reported) passes over the same kept split that refuses a
+    ``source="user"`` record of the same invoice."""
+    from app.services.external_payment import (
+        REFUSAL_ERP_SPLIT,
+        ExternalPaymentRefused,
+        record_invoice_paid_outside,
+    )
+    from app.services.workflow_engine import get_invoice_for_update
+
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    await _kept_paid_row(realdb, inv_id, _TWO_RAILS)
+    org = await _org(realdb)
+    kwargs = dict(
+        org=org,
+        method="check",
+        reference=BILL,
+        paid_on=utc_today(),
+        amount=Decimal("250.00"),
+        amount_currency="USD",
+    )
+    async with realdb.sessionmaker("a")() as s:
+        invoice = await get_invoice_for_update(s, inv_id)
+        with pytest.raises(ExternalPaymentRefused) as refused:
+            await record_invoice_paid_outside(
+                s,
+                invoice=invoice,
+                actor_id=realdb.info("a").users["admin"],
+                source="user",
+                **kwargs,
+            )
+        await s.rollback()
+    assert refused.value.refusal.code == REFUSAL_ERP_SPLIT
+
+    async with realdb.sessionmaker("a")() as s:
+        invoice = await get_invoice_for_update(s, inv_id)
+        recorded = await record_invoice_paid_outside(
+            s, invoice=invoice, actor_id=None, source="erp", **kwargs
+        )
+        await s.commit()
+    assert recorded.created
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.amount == Decimal("250.00") and booked.status == "completed"

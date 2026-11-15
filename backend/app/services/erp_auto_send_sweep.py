@@ -72,26 +72,40 @@ that dies in between leaves the invoice there with no job, and §410's gate lets
 only a job move it. The same tick's second pass, :func:`_redrive_tenant`, takes
 an invoice at ``sending_to_erp`` whose latest entry into that status is older
 than the delay and has no ``invoice.erp_*`` row after it, and decides under the
-invoice's row lock, from the workflow instance's attempt stamp
-(``erp.OUTCOME_UNKNOWN_AT_KEY``, committed before every adapter call):
+invoice's row lock whether an attempt of this push has begun. That is read from
+signals a clean failure cannot erase (:func:`_attempt_started_at`): the
+never-cleared ``erp.ATTEMPT_STARTED_AT_KEY`` committed before every adapter
+call, and ``erp_retries``, which every new push resets to 0 and only a finished
+attempt raises. The outcome-unknown stamp alone is not such a signal: an
+attempt that ends ``not_posted`` drops it, so a push sleeping in its 2 s / 4 s
+backoff used to read as never attempted and be re-driven beside its own job.
 
 * **no attempt since the transition, inside the window** (the lookback, and the
   ERP's ``configured_at`` / ``connected_at``): re-dispatched through
   ``dispatch_erp``, which lands in ``send_to_erp_internal``: the same status
   gate, the same correlation-id idempotency key, the same possibly-posted
-  state handed to the adapter. Nothing new can post a bill twice: in Lambda
-  mode the FIFO queue's per-invoice message group runs the re-drive after any
-  original message, which then finds the invoice moved and skips (§410); in
-  local mode the original job is a task started at the commit, and one that
-  has stamped no attempt in the delay died with its process;
+  state handed to the adapter. In Lambda mode the FIFO queue's per-invoice
+  message group runs the re-drive after any original message, which then
+  finds the invoice moved and skips (§410). In local mode the original job is
+  a task started at the commit; the re-drive relies on that task having died
+  if it has stamped no attempt within the delay. That is an inference, not a
+  lock: a job that is alive but has not reached its first adapter call after
+  the whole delay (60 s by default) would run beside the re-drive, and the
+  ERP adapter's correlation-id idempotency lookup is then what stops a second
+  bill;
 * **no attempt, outside the window**: landed at ``failed`` coded
   ``erp_push_interrupted`` (``erp.fail_interrupted_erp_send``), never pushed
   on nobody's say-so: a day later the bill may have been keyed into the ERP by
   hand, and a push started before the current ERP was configured was meant
   for another one. ``POST /{id}/retry-erp`` takes it from there;
-* **an attempt began and nothing ended it**: left alone while the attempt is
-  inside the lookback (it may still be running, and a Lambda redelivery
-  re-drives it), then landed at ``failed`` the same way, possibly-posted.
+* **an attempt began and nothing ended the push**: left alone while the
+  attempt is inside the lookback (it may still be running or sleeping between
+  attempts, and a Lambda redelivery re-drives it), then landed at ``failed``
+  the same way, possibly-posted;
+* **no audit row records the entry at all** (a Lambda-shipped row that never
+  landed, a restored database): never re-driven, since its attempts cannot
+  be told from an earlier push's. Left while the attempt stamp is inside the
+  lookback, otherwise landed at ``failed`` the same way (round-13 amendment to §428).
 
 Never moves money: it books a bill in the customer's ERP, exactly what the
 approval would have done. Off by default (``FEOH_ERP_AUTO_SEND_SWEEP_ENABLED``).
@@ -282,11 +296,21 @@ def _stranded_query(*, now: datetime, invoice_id: uuid.UUID | None = None):
     longer than the delay ago, and no ``invoice.erp_*`` row written after that
     entry (a push's own outcome rows leave the status, so any such row means a
     push answered it). Oldest first, capped; with ``invoice_id``, the same
-    question of one invoice."""
+    question of one invoice.
+
+    An invoice at ``sending_to_erp`` with no audit row recording that entry
+    (a Lambda-shipped audit row that never landed, or a database restored
+    without it) has ``started_at`` NULL. It is still selected, once
+    the invoice row itself has been untouched for the delay (its
+    ``updated_at`` is no earlier than the entry, so a push whose audit row is
+    merely still in flight is not taken), and :func:`_redrive_one` never
+    re-drives it: with no start it cannot tell this push's attempts from an
+    earlier push's (round-13 amendment to §428)."""
     delay = timedelta(seconds=settings.erp_auto_send_sweep_delay_seconds)
     pushing = select(
         Invoice.id.label("id"),
         Invoice.correlation_id.label("correlation_id"),
+        Invoice.updated_at.label("updated_at"),
         _latest_push_start(Invoice.id, Invoice.correlation_id).label("started_at"),
     ).where(Invoice.status == InvoiceStatus.sending_to_erp)
     if invoice_id is not None:
@@ -298,10 +322,16 @@ def _stranded_query(*, now: datetime, invoice_id: uuid.UUID | None = None):
         AuditLog.created_at > pushing.c.started_at,
         AuditLog.action.like("invoice.erp\\_%"),
     )
+    due = now - delay
     return (
         select(pushing.c.id, pushing.c.started_at)
-        .where(pushing.c.started_at <= now - delay, not_(answered))
-        .order_by(pushing.c.started_at.asc(), pushing.c.id.asc())
+        .where(
+            or_(
+                and_(pushing.c.started_at <= due, not_(answered)),
+                and_(pushing.c.started_at.is_(None), pushing.c.updated_at <= due),
+            )
+        )
+        .order_by(pushing.c.started_at.asc().nulls_first(), pushing.c.id.asc())
         .limit(settings.erp_auto_send_sweep_batch_size)
     )
 
@@ -309,12 +339,36 @@ def _stranded_query(*, now: datetime, invoice_id: uuid.UUID | None = None):
 def _attempt_started_at(state_data: dict | None, started_at: datetime) -> datetime | None:
     """When an attempt of THIS push began, or None if none has.
 
-    ``erp.OUTCOME_UNKNOWN_AT_KEY`` is committed before every adapter call, so a
-    stamp at or after the push's entry into ``sending_to_erp`` is an attempt of
-    this push; an older one is an earlier push's. Final or not: either way an
-    attempt reached the point of calling the ERP."""
-    stamp = erp._stamp_time((state_data or {}).get(erp.OUTCOME_UNKNOWN_AT_KEY))
-    return stamp if stamp is not None and stamp >= started_at else None
+    Read from signals a clean failure cannot erase. ``erp.OUTCOME_UNKNOWN_AT_KEY``
+    alone is not one: ``_call_erp`` drops it when an attempt ends ``not_posted``
+    and nothing earlier was unknown, so a push sleeping in its backoff between
+    two attempts would read as never attempted, and a re-drive would run a
+    second send loop beside the first. So:
+
+    * ``erp.ATTEMPT_STARTED_AT_KEY``, committed before every adapter call and
+      never cleared, and the outcome stamp: one at or after the push's entry
+      into ``sending_to_erp`` is an attempt of this push, an older one an
+      earlier push's;
+    * ``erp_retries``, which every new push resets to 0 in the transaction
+      that enters ``sending_to_erp`` and only a finished attempt raises. Any
+      other value (a positive or an unreadable one) means an attempt of this
+      push ended, even with no stamp to date it (a row written before the
+      stamp existed); it is then dated at the push's entry, its earliest
+      possible moment, so the lookback still releases it."""
+    state = state_data or {}
+    stamps = [
+        stamp
+        for stamp in (
+            erp._stamp_time(state.get(erp.ATTEMPT_STARTED_AT_KEY)),
+            erp._stamp_time(state.get(erp.OUTCOME_UNKNOWN_AT_KEY)),
+        )
+        if stamp is not None and stamp >= started_at
+    ]
+    if stamps:
+        return max(stamps)
+    if state.get("erp_retries", 0) != 0:
+        return started_at
+    return None
 
 
 #: :func:`_redrive_one` outcomes.
@@ -343,7 +397,18 @@ async def _redrive_one(
             return _LEFT
         started_at = row.started_at
         instance = await get_workflow_instance(db, invoice_id)
-        attempted = _attempt_started_at(instance.state_data if instance else None, started_at)
+        state_data = instance.state_data if instance else None
+        if started_at is None:
+            # No record of when this push began: never re-driven, since its
+            # attempts cannot be told from an earlier push's. Left while the
+            # latest attempt stamp says one may still be running; otherwise a
+            # person decides, through `retry-erp` (round-13 amendment, §428).
+            recent = erp._stamp_time((state_data or {}).get(erp.ATTEMPT_STARTED_AT_KEY))
+            if recent is not None and recent >= floor:
+                await db.rollback()
+                return _LEFT
+            return _INTERRUPTED if await erp.fail_interrupted_erp_send(db, invoice_id) else _LEFT
+        attempted = _attempt_started_at(state_data, started_at)
         if attempted is not None:
             # An attempt began and nothing ended it. It may still be running
             # (or be redelivered) inside the lookback; past it, nothing will.

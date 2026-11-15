@@ -292,11 +292,28 @@ async def _state_refusals(
     return out
 
 
+async def _standing_erp_split(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    answering: frozenset[uuid.UUID] = frozenset(),
+):
+    """The invoice's live ``paid_not_recorded`` row whose kept split over
+    several rails stands, other than one in ``answering``; None if none."""
+    from app.services.erp_status_sync import kept_split_stands, live_erp_paid_reports
+
+    for row in await live_erp_paid_reports(db, [invoice.id], fresh=True):
+        if row.id not in answering and kept_split_stands(row.erp_report):
+            return row
+    return None
+
+
 async def erp_split_refusal(
     db: AsyncSession,
     invoice: Invoice,
     *,
     answering: frozenset[uuid.UUID] = frozenset(),
+    payment_run_id: uuid.UUID | None = None,
 ) -> Refusal | None:
     """Refuse a person's record of an invoice whose ERP-reported payment was
     made on several rails, unless it answers that very row. ``None`` = allowed.
@@ -309,18 +326,67 @@ async def erp_split_refusal(
     own one-click, which ``params.exception_id`` names (decisions §426). A row
     whose breakdown does not stand (one rail, or parts that do not add up)
     leaves the person's rail as the record, so any door may book it, as before.
-    """
-    from app.services.erp_status_sync import kept_split_stands, live_erp_paid_reports
 
-    for row in await live_erp_paid_reports(db, [invoice.id], fresh=True):
-        if row.id not in answering and kept_split_stands(row.erp_report):
+    ``payment_run_id``: the draft run the invoice is in, when the run-level
+    record asks. That one-click refuses an invoice in a run
+    (``external_payment_in_run``), so the refusal also says the invoice must
+    leave the run first, and carries the run as ``params.payment_run_id``
+    (:func:`_in_run_refusal`; round-13 amendment to §426).
+    """
+    row = await _standing_erp_split(db, invoice, answering=answering)
+    if row is None:
+        return None
+    if payment_run_id is not None:
+        return Refusal(
+            REFUSAL_ERP_SPLIT,
+            SPLIT_IN_RUN_MESSAGE,
+            params={"exception_id": str(row.id), "payment_run_id": str(payment_run_id)},
+        )
+    return Refusal(
+        REFUSAL_ERP_SPLIT,
+        "The ERP reports this invoice paid on more than one payment method. Record "
+        "it from its exception, which keeps how the payment was split.",
+        params={"exception_id": str(row.id)},
+    )
+
+
+#: The one sentence both doors give for an invoice in a draft run whose ERP
+#: split only its exception can book: each door alone refuses it, so each says
+#: the run has to let it go first (decisions §426, round-13 amendment). A draft
+#: run gives up its invoices only by being cancelled.
+SPLIT_IN_RUN_MESSAGE = (
+    "This invoice is in a payment run, and the ERP reports it paid on more than one "
+    "payment method, which only its exception can record. Cancel the run first, then "
+    "record the invoice from its exception."
+)
+
+
+async def _in_run_refusal(
+    db: AsyncSession,
+    invoice: Invoice,
+    payment_run_id: uuid.UUID,
+    *,
+    source: Source,
+) -> Refusal:
+    """``external_payment_in_run`` for an invoice in a draft run. For a person's
+    record of an invoice whose kept ERP split stands (the row's one-click, or
+    any other door), the run-level record is no way out either (it refuses
+    ``external_payment_erp_split``), so the refusal says to cancel the run and
+    names the row (``params.exception_id``)."""
+    if source == "user":
+        row = await _standing_erp_split(db, invoice)
+        if row is not None:
             return Refusal(
-                REFUSAL_ERP_SPLIT,
-                "The ERP reports this invoice paid on more than one payment method. Record "
-                "it from its exception, which keeps how the payment was split.",
-                params={"exception_id": str(row.id)},
+                REFUSAL_PAYMENT_IN_RUN,
+                SPLIT_IN_RUN_MESSAGE,
+                params={"payment_run_id": str(payment_run_id), "exception_id": str(row.id)},
             )
-    return None
+    return Refusal(
+        REFUSAL_PAYMENT_IN_RUN,
+        "This invoice is in a payment run. Record the whole run as paid "
+        "outside FeohLedger, or cancel the run first.",
+        params={"payment_run_id": str(payment_run_id)},
+    )
 
 
 _NOTHING_TO_PAY = Refusal(
@@ -698,12 +764,7 @@ async def record_invoice_paid_outside(
     for existing in live:
         if existing.payment_run_id is not None:
             raise ExternalPaymentRefused(
-                Refusal(
-                    REFUSAL_PAYMENT_IN_RUN,
-                    "This invoice is in a payment run. Record the whole run as paid "
-                    "outside FeohLedger, or cancel the run first.",
-                    params={"payment_run_id": str(existing.payment_run_id)},
-                )
+                await _in_run_refusal(db, invoice, existing.payment_run_id, source=source)
             )
         if not _is_undispatched(existing) or target is not None:
             raise ExternalPaymentRefused(
@@ -822,7 +883,7 @@ async def run_payment_refusal(
     refusal = await check_recordable(db, org=org, invoice=invoice, actor_id=actor_id)
     if refusal is not None:
         return refusal
-    refusal = await erp_split_refusal(db, invoice)
+    refusal = await erp_split_refusal(db, invoice, payment_run_id=payment.payment_run_id)
     if refusal is not None:
         return refusal
     if not _is_undispatched(payment):
