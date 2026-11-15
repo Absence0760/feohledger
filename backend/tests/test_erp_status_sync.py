@@ -2090,3 +2090,82 @@ async def test_an_on_request_pass_refused_at_start_is_still_audited(realdb, monk
         )
     assert row.details["outcome"] == "refused"
     assert row.details["refusal"] == "status_sync_off"
+
+
+# ---------------------------------------------------------------------------
+# record-erp-payment with no rail named (decisions §413), the cases beside the
+# stated-figure ones above: a payment-BLOCKING row, and a legacy row whose
+# figure (and breakdown) only the read-back states.
+# ---------------------------------------------------------------------------
+
+
+async def test_the_one_click_books_a_standing_split_with_no_rail_on_a_blocking_row(realdb):
+    """The payment-blocking variant: the row is cleared on the way, so the
+    record and its resolve happen together with no rail named."""
+    inv_id, _ = await _seed(realdb, status=InvoiceStatus.posted_in_erp)
+    row_id = await _kept_paid_row(
+        realdb,
+        inv_id,
+        [{"method": "check", "amount": "150.00"}, {"method": "card", "amount": "100.00"}],
+    )
+    async with realdb.sessionmaker("a")() as s:
+        row = await s.get(APException, row_id)
+        row.exception_type = "payment_reconciliation"
+        row.severity = "error"
+        row.erp_report = {**row.erp_report, "refusal_code": "external_payment_in_run"}
+        await s.commit()
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert resp.status_code == 201, resp.text
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None and booked.amount == Decimal("250.00")
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown_status"] == "applied"
+    assert details["method_stated"] is None
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "resolved"
+
+
+async def test_the_one_click_judges_no_rail_on_the_read_backs_split(realdb, monkeypatch):
+    """A legacy row states no figure, so its split is unknown until the bill is
+    read again: a two-rail bill read back stands, and no rail is needed."""
+    inv_id, corr, _, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=True)
+    report = await _qbo_report(
+        corr,
+        "250.00",
+        [_qbo_cash("901", "150.00"), _qbo_cash("902", "100.00", pay_type="CreditCard")],
+    )
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    patcher, read = _bill_reads(report)
+    with patcher:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert resp.status_code == 201, resp.text
+    read.assert_awaited_once_with(BILL)
+    [booked] = await _payments(realdb, inv_id)
+    assert booked.method is None and booked.amount == Decimal("250.00")
+    assert booked.rail_breakdown == [
+        {"method": "check", "amount": "150.00"},
+        {"method": "card", "amount": "100.00"},
+    ]
+    details = await _recorded_outside_details(realdb, booked.id)
+    assert details["rail_breakdown_status"] == "applied"
+    assert details["method_stated"] is None
+
+
+async def test_the_one_click_refuses_no_rail_when_the_read_back_is_one_rail(realdb, monkeypatch):
+    """The same legacy row, its bill read back as one cheque: the person's rail
+    would be the record, so an omitted one is refused and nothing is written."""
+    inv_id, corr, _, row_id = await _legacy_qbo_row(realdb, monkeypatch, blocking=True)
+    report = await _qbo_report(corr, "250.00", [_qbo_cash("901", "250.00")])
+    body = {"reference": BILL, "paid_on": utc_today().isoformat()}
+    patcher, _ = _bill_reads(report)
+    with patcher:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(f"/api/exceptions/{row_id}/record-erp-payment", json=body)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "erp_payment_method_required"
+    assert await _payments(realdb, inv_id) == []
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.get(APException, row_id)).status == "open"
