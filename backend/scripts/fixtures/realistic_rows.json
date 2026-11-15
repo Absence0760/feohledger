@@ -22,6 +22,10 @@
     "name": "Priya Raghunathan-Okonkwo",
     "email": "accounts.payable.operations.manager@dayone-trading.example.com"
   },
+  "controller": {
+    "name": "Søren Ó Briain-Vasconcelos",
+    "email": "financial.controller.exceptions.review@dayone-trading.example.com"
+  },
   "tax_exclusive_invoice": {
     "vendor_name": "Ångström Präzisionsinstrumente & Kalibrierdienste (Europa) GmbH",
     "invoice_number": "INV-2026-10-EU/000123456789-CAL",

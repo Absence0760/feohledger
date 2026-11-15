@@ -26,18 +26,22 @@ import {
  *
  *   1. the admin signs in with the temporary password, is forced to change it,
  *      and enrols TOTP;
- *   2. the admin invites an AP Manager, whose invitation arrives by email;
+ *   2. the admin invites an AP Manager and a financial controller (a second
+ *      AP Manager), whose invitations arrive by email;
  *   3. the admin uploads the first invoice — a tax-exclusive e-invoice from a
  *      supplier nobody has set up, so the vendor is auto-created unverified —
  *      and it references a purchase order that does not exist;
- *   4. the AP Manager signs in (forced change), clears the PO flag, verifies
- *      the supplier, approves the invoice and records it paid outside
- *      FeohLedger;
- *   5. the admin resets the AP Manager's password, and the AP Manager's next
+ *   4. the controller signs in (forced change) and clears the PO flag. It is a
+ *      third person's call: the admin uploaded the invoice and the AP Manager
+ *      will approve it, and an approver who cleared the hold would have it
+ *      re-raised by their own approval (decisions §420, §422);
+ *   5. the AP Manager signs in (forced change), verifies the supplier,
+ *      approves the invoice and records it paid outside FeohLedger;
+ *   6. the admin resets the AP Manager's password, and the AP Manager's next
  *      sign-in is forced to change it; the new password then works;
- *   6. the admin signs back in, through the TOTP challenge.
+ *   7. the admin signs back in, through the TOTP challenge.
  *
- * Two browser contexts, one per person, for the whole journey — the way two
+ * Three browser contexts, one per person, for the whole journey — the way two
  * people on two laptops would do it, and it means the admin signs in with a
  * password and a TOTP code exactly twice.
  */
@@ -58,15 +62,18 @@ test.beforeAll(() => {
 // Carried from step to step. The journey is one story; each test is a chapter.
 let admin: Page;
 let manager: Page;
+let controller: Page;
 let contexts: BrowserContext[] = [];
 let mfaSecret = '';
 let mfaStepUsed = -1;
 let invoiceId = '';
 let vendorId = '';
 let managerPassword = '';
+let controllerPassword = '';
 
 const ADMIN_PASSWORD = 'Day-One-Owner-Passw0rd';
 const MANAGER_PASSWORD = 'Day-One-Manager-Passw0rd';
+const CONTROLLER_PASSWORD = 'Day-One-Controller-Passw0rd';
 const MANAGER_PASSWORD_AFTER_RESET = 'After-Reset-Manager-Passw0rd';
 
 async function person(browser: Browser): Promise<Page> {
@@ -79,6 +86,7 @@ test.beforeAll(async ({ browser }) => {
 	if (!tenant) return;
 	admin = await person(browser);
 	manager = await person(browser);
+	controller = await person(browser);
 });
 
 test.afterAll(async () => {
@@ -179,13 +187,17 @@ test('first admin: temporary password, forced change, TOTP enrolment', async () 
 	await expect(admin.getByText('Enabled', { exact: true })).toBeVisible();
 });
 
-test('admin invites an AP Manager, whose invitation arrives by email', async () => {
+/** The admin invites `name` as an AP Manager from /admin; returns the
+ *  temporary password from the email they receive, after checking it is the
+ *  one the admin was shown and that the email carries the tenant's own
+ *  sign-in URL. */
+async function inviteApManager(name: string, email: string): Promise<string> {
 	await admin.goto('/admin');
 	await admin.getByRole('button', { name: '+ Invite User' }).click();
 	const modal = admin.locator('div.modal[role="dialog"][aria-label="Invite user"]');
 	await expect(modal).toBeVisible();
-	await modal.locator('input[type="text"]').fill(REAL.managerName);
-	await modal.locator('input[type="email"]').fill(REAL.managerEmail);
+	await modal.locator('input[type="text"]').fill(name);
+	await modal.locator('input[type="email"]').fill(email);
 	await modal.locator('.check-label', { hasText: 'AP Manager' }).locator('input').check();
 
 	const created = admin.waitForResponse(
@@ -198,16 +210,27 @@ test('admin invites an AP Manager, whose invitation arrives by email', async () 
 	await expect(credentials).toBeVisible();
 	const shown = (await credentials.locator('.credential-value.password').textContent())?.trim();
 	await credentials.getByRole('button', { name: /^Done$/ }).click();
-	await expect(admin.locator('table tbody td.email-cell', { hasText: REAL.managerEmail })).toBeVisible();
+	await expect(admin.locator('table tbody td.email-cell', { hasText: email })).toBeVisible();
 	await expectNoPageOverflow(admin);
 
-	// What the manager actually receives: the tenant's own sign-in URL and the
+	// What the invitee actually receives: the tenant's own sign-in URL and the
 	// same temporary password the admin was shown.
-	const invite = await awaitEmail(admin, t().mailpit_url, REAL.managerEmail, /invited/i);
+	const invite = await awaitEmail(admin, t().mailpit_url, email, /invited/i);
 	expect(invite.text).toContain(new URL(admin.url()).origin);
-	managerPassword = /Password:\s+(\S+)/.exec(invite.text)?.[1] ?? '';
-	expect(managerPassword).not.toBe('');
-	expect(managerPassword).toBe(shown);
+	const password = /Password:\s+(\S+)/.exec(invite.text)?.[1] ?? '';
+	expect(password).not.toBe('');
+	expect(password).toBe(shown);
+	return password;
+}
+
+test('admin invites an AP Manager, whose invitation arrives by email', async () => {
+	managerPassword = await inviteApManager(REAL.managerName, REAL.managerEmail);
+});
+
+// A third person, so the PO flag can be cleared by someone who neither
+// uploaded nor approves the invoice (decisions §420, §422).
+test('admin invites a financial controller, whose invitation arrives by email', async () => {
+	controllerPassword = await inviteApManager(REAL.controllerName, REAL.controllerEmail);
 });
 
 test('a provider secret is sealed under the KMS key, not the development key', async () => {
@@ -281,26 +304,26 @@ test('admin uploads the first invoice: a tax-exclusive e-invoice from a new supp
 	await expectNoPageOverflow(admin);
 });
 
-test('AP Manager: first sign-in forces a change, then the PO flag is cleared', async () => {
-	await manager.goto('/login');
-	await answerConsent(manager);
-	await submitLogin(manager, REAL.managerEmail, managerPassword);
-	await changePassword(manager, managerPassword, MANAGER_PASSWORD);
+test('controller: first sign-in forces a change, then the PO flag is cleared', async () => {
+	await controller.goto('/login');
+	await answerConsent(controller);
+	await submitLogin(controller, REAL.controllerEmail, controllerPassword);
+	await changePassword(controller, controllerPassword, CONTROLLER_PASSWORD);
 
-	await manager.goto('/exceptions');
-	const row = manager.locator('table tbody tr', { hasText: 'PO Mismatch' }).filter({
+	await controller.goto('/exceptions');
+	const row = controller.locator('table tbody tr', { hasText: 'PO Mismatch' }).filter({
 		hasText: REAL.invoiceNumber
 	});
 	await expect(row).toBeVisible();
-	await expectNoPageOverflow(manager);
+	await expectNoPageOverflow(controller);
 
 	await row.getByRole('button', { name: 'Resolve' }).click();
-	const dialog = manager
+	const dialog = controller
 		.getByRole('dialog')
-		.filter({ has: manager.getByTestId('exception-resolve-form') });
+		.filter({ has: controller.getByTestId('exception-resolve-form') });
 	await expect(dialog).toBeVisible();
 	await dialog.locator('input[type="text"]').fill(`${REAL.poNumber} was a verbal order, confirmed with operations`);
-	const resolved = manager.waitForResponse(
+	const resolved = controller.waitForResponse(
 		(r) => /\/api\/exceptions\/[^/]+\/resolve$/.test(r.url()) && r.request().method() === 'POST'
 	);
 	await dialog.getByRole('button', { name: 'Resolve', exact: true }).click();
@@ -308,6 +331,13 @@ test('AP Manager: first sign-in forces a change, then the PO flag is cleared', a
 	expect(resp.status()).toBe(200);
 	expect(((await resp.json()) as { status: string }).status).toBe('resolved');
 	await expect(dialog).toBeHidden();
+});
+
+test('AP Manager: first sign-in forces a change', async () => {
+	await manager.goto('/login');
+	await answerConsent(manager);
+	await submitLogin(manager, REAL.managerEmail, managerPassword);
+	await changePassword(manager, managerPassword, MANAGER_PASSWORD);
 });
 
 test('AP Manager verifies the new supplier', async () => {
