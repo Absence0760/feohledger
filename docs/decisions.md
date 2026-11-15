@@ -20983,3 +20983,66 @@ exact-state helper checks the final flag; Merge's 429 sent once);
 the margin on both paths; the margin's floor; a 429 possibly posted and not
 retried). The #654 sandbox entry in `docs/followups.md` now names the margin
 and the 429 as what that pass settles.
+
+## 410. An ERP push runs only for an invoice still at `sending_to_erp`; any other status is skipped and the job counts as done (§374 follow-up, 2026-11-14)
+
+**Context.** `erp_dispatch._run_local` and `erp_lambda` load the invoice by id
+and call `services/erp.send_to_erp_internal` whatever status it holds. An SQS
+redelivery, or a second dispatch of the same push, can arrive after the first
+has finished. Since §374 that includes an invoice whose push failed and whose
+approval was then recalled to `ready_for_review`: the stale job posted a bill
+for an invoice under review, with figures that may be about to change. A job
+for an invoice that had already landed (`sent_to_erp`, `done`) called the
+adapter again, then hit an invalid transition and raised out of both its
+success and failure branches.
+
+**Decision.** `send_to_erp_internal` asks before every attempt, the first
+included. It re-reads the row `FOR UPDATE` with `populate_existing`, so the
+committed status decides even though the dispatchers' sessions keep loaded
+attributes across commits. Unless that status is `sending_to_erp`, the skip
+leaves behind:
+
+- **No adapter call and no status change.** Nothing about the invoice is the
+  push's to change anymore.
+- **No audit row.** The audit trail records status transitions, and none
+  happened. An `invoice.erp_*` row would also become the "latest ERP entry"
+  that the web modal's and the mobile panel's ERP status read
+  (`InvoiceModal.svelte` `erpInfo`, `erp_status_panel.dart`), so a no-op
+  redelivery would replace the real outcome in the UI.
+- **`state_data` untouched.** The retry counter, the outcome-unknown flag and
+  its final stamp (§405, §409), the pending job and the orphan keys stay as
+  the last real attempt left them. A later `POST /{id}/retry-erp` after
+  re-approval resumes from that record.
+- **One `logger.warning`** naming the invoice id and the status found (no
+  PII). It is logged before the rollback that releases the lock, because a
+  rollback expires `invoice.id`.
+- **A normal return.** The Lambda deletes the message instead of redelivering
+  a job that can never become valid, and the local worker ends.
+
+The check runs before each attempt, not only the first. Every backoff commits
+and gives the lock back, and a concurrent push of the same invoice can finish
+in that window. `sending_to_erp` leaves only by a push (`sent_to_erp` /
+`failed`), so the gate cannot pre-empt a person's action.
+
+**Rejected.**
+
+- *Checking in the dispatchers.* There are two, and `send_to_erp_internal` is
+  the only push path. One check there covers both, and any future caller.
+- *Raising so the job retries or dead-letters.* The status will not come back
+  to this job, so a retry only delays the same skip. A dead letter would page
+  someone over a correct no-op.
+- *Holding the lock across the adapter call.* `_call_erp` already commits the
+  outcome-unknown flag before the call, ending the transaction. The lock makes
+  the gate read the committed status, and the correlation-id idempotency key
+  still covers two pushes that both pass it.
+
+**Cost.** One extra locked `SELECT` per attempt. A push with no workflow
+instance (no pre-call commit in `_call_erp`) holds the row lock across the
+adapter call, as its final transition already needed the row.
+
+Tests: `tests/test_erp_push_flow.py`: each non-`sending_to_erp` status
+skipped with no call, audit row or `state_data` change, and the warning
+logged; the gate asked again after a backoff; on a real tenant, a stale
+`sending_to_erp` object whose row was recalled meanwhile posts nothing, and a
+real `sending_to_erp` push still lands. The mock-session tests point the gate
+at the fixture invoice's own status through an autouse fixture.
