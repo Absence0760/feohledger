@@ -27,6 +27,7 @@ from fastapi import HTTPException, status
 from app.api.refusals import ActionRefusal, coded_refusal
 from app.models.expense import (
     CorporateCardTransaction,
+    Expense,
     ExpenseReport,
     ExpenseReportStatus,
     ReconciliationStatus,
@@ -36,6 +37,12 @@ from app.models.expense import (
 
 #: Only the owner may compose or submit a report (`_require_report_owner`).
 EXPENSE_REPORT_NOT_OWNER = "expense_report_not_owner"
+#: Only a loose line's creator may change its claim fields, replace its receipt
+#: or delete it (`expense_creator_refusal`, decisions §434).
+EXPENSE_NOT_CREATOR = "expense_not_creator"
+#: A line someone else created may not be attached to a report
+#: (`report_line_creator_refusal`, decisions §434).
+EXPENSE_REPORT_FOREIGN_LINE = "expense_report_foreign_line"
 #: Submit / attach / detach on a report that has left `draft`.
 EXPENSE_REPORT_NOT_DRAFT = "expense_report_not_draft"
 #: Approve / reject on a report that is not `submitted`.
@@ -132,6 +139,56 @@ def report_owner_refusal(report: ExpenseReport, actor_id: uuid.UUID) -> ActionRe
     return None
 
 
+def expense_creator_refusal(expense: Expense, actor_id: uuid.UUID) -> ActionRefusal | None:
+    """Only a LOOSE line's creator may change its claim fields, replace its
+    receipt or delete it (403 ``expense_not_creator``, decisions §434).
+
+    The line-level sibling of :func:`report_owner_refusal`: a line on a report
+    is its report owner's, and a line on no report is its creator's. Without it
+    any author role could rewrite a colleague's loose line, and the colleague
+    then attached and submitted it unaware.
+
+    The caller applies it to a line on no report only; a line on a report is
+    gated by its report's owner. A NULL creator is a line written before
+    migration 0134 — no recorded owner, so nothing to refuse on (§141's
+    reading of a NULL invoice uploader; the residue §434 records)."""
+    creator = expense.created_by_user_id
+    if creator is not None and creator != actor_id:
+        return ActionRefusal(
+            EXPENSE_NOT_CREATOR,
+            "Only the person who created this expense can change or delete it.",
+            status.HTTP_403_FORBIDDEN,
+            coded=True,
+        )
+    return None
+
+
+def report_line_creator_refusal(report: ExpenseReport, expense: Expense) -> ActionRefusal | None:
+    """A line may be attached only to a report its creator owns (403
+    ``expense_report_foreign_line``, decisions §434).
+
+    Every attach path already requires the caller to own the target
+    (:func:`report_owner_refusal`); this adds that the LINE is the owner's too,
+    so attaching no longer adopts a colleague's line and a report's lines are
+    all its owner's — which is what makes the owner-only segregation check
+    complete. Compared with the report's owner rather than the caller: the
+    invariant is about the report, and the two are equal once the owner gate
+    has passed. A NULL creator (a pre-0134 line) is attachable as before.
+    ``params.expense_id`` names the refused line, since one attach can carry
+    several."""
+    creator = expense.created_by_user_id
+    if creator is not None and creator != report.employee_user_id:
+        return ActionRefusal(
+            EXPENSE_REPORT_FOREIGN_LINE,
+            f"Expense {expense.id} was created by someone else; only its creator "
+            "can put it on a report.",
+            status.HTTP_403_FORBIDDEN,
+            params={"expense_id": str(expense.id)},
+            coded=True,
+        )
+    return None
+
+
 def _not_draft(report: ExpenseReport, message: str, http_status: int) -> ActionRefusal | None:
     if report.status != ExpenseReportStatus.draft:
         return ActionRefusal(
@@ -202,16 +259,32 @@ def _not_submitted(report: ExpenseReport, verb: str) -> ActionRefusal | None:
     return None
 
 
+def report_line_creators(report: ExpenseReport) -> list[str]:
+    """Every recorded creator of the report's lines other than its owner, as
+    the stringified ids ``violates_segregation`` compares (decisions §434).
+
+    Empty for every report composed since migration 0134: the attach gate
+    (:func:`report_line_creator_refusal`) admits only the owner's own lines.
+    It is read anyway, so the approver ≠ author rule keys on the people the
+    lines record rather than on that gate holding — a line whose author is not
+    the owner still names someone who must not decide the report. Reads
+    ``report.expenses``, which every report load selects in."""
+    owner = report.employee_user_id
+    return sorted(
+        {
+            str(e.created_by_user_id)
+            for e in report.expenses
+            if e.created_by_user_id is not None and e.created_by_user_id != owner
+        }
+    )
+
+
 def _segregation_subject(report: ExpenseReport) -> SimpleNamespace:
-    """The report as the shared segregation rule reads an invoice."""
+    """The report as the shared segregation rule reads an invoice: the owner,
+    plus every other recorded creator of its lines (decisions §434)."""
     return SimpleNamespace(
         uploaded_by_id=report.employee_user_id,
-        # No second implicated actor exists to name: only the owner may
-        # compose, edit or submit a report (`report_owner_refusal`), so the
-        # owner IS the complete author set. Stated rather than left absent: a
-        # missing attribute on a fraud control reads as an oversight, and
-        # `violates_segregation`'s getattr default would silently supply it.
-        segregation_actor_ids=None,
+        segregation_actor_ids=report_line_creators(report),
     )
 
 

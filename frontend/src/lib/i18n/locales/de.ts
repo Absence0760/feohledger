@@ -4072,6 +4072,8 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "Eine Gutschrift mit dem Status {status} kann nicht angewendet werden.",
 	'refusal.creditMemoExceedsBalance': "Der Gutschriftsbetrag übersteigt den verbleibenden gutschriftfähigen Saldo der Rechnung ({remaining}).",
 	'refusal.expenseReportNotOwner': "Nur der Eigentümer der Abrechnung kann ihre Positionen ändern oder sie einreichen.",
+	'refusal.expenseNotCreator': "Nur die Person, die diese Ausgabe erfasst hat, kann sie ändern oder löschen.",
+	'refusal.expenseReportForeignLine': "Diese Ausgabe wurde von jemand anderem erfasst. Nur die Person, die sie erfasst hat, kann sie einer Abrechnung hinzufügen.",
 	'refusal.expenseReportNotDraft': "Nur ein Entwurf kann geändert oder eingereicht werden (Status dieser Abrechnung: {status}).",
 	'refusal.expenseReportNotSubmitted': "Nur eine eingereichte Abrechnung kann genehmigt oder abgelehnt werden (Status dieser Abrechnung: {status}).",
 	'refusal.expenseReportSelfReject': "Funktionstrennung: Sie können Ihre eigene Spesenabrechnung nicht ablehnen. Ein anderer Prüfer muss darüber entscheiden.",

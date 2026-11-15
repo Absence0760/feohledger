@@ -4248,6 +4248,8 @@ export const en = {
 	'refusal.creditMemoNotApplicable': "A credit memo that is {status} cannot be applied.",
 	'refusal.creditMemoExceedsBalance': "The credit memo amount exceeds the invoice's remaining creditable balance ({remaining}).",
 	'refusal.expenseReportNotOwner': "Only the report's owner can change its lines or submit it.",
+	'refusal.expenseNotCreator': "Only the person who created this expense can change or delete it.",
+	'refusal.expenseReportForeignLine': "This expense was created by someone else. Only its creator can put it on a report.",
 	'refusal.expenseReportNotDraft': "Only a draft report can be changed or submitted (this one is {status}).",
 	'refusal.expenseReportNotSubmitted': "Only a submitted report can be approved or rejected (this one is {status}).",
 	'refusal.expenseReportSelfReject': "Segregation of duties: you cannot reject your own expense report. Another reviewer must decide it.",

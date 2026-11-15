@@ -436,6 +436,10 @@ const BUILDERS: Record<string, Builder> = {
 	// are read from
 	expense_cfo_required: expenseCfoGate,
 	expense_report_not_owner: fixed('refusal.expenseReportNotOwner'),
+	// A line on no report is its creator's, and only its creator may put it on
+	// a report (decisions §434).
+	expense_not_creator: fixed('refusal.expenseNotCreator'),
+	expense_report_foreign_line: fixed('refusal.expenseReportForeignLine'),
 	expense_report_not_draft: (p, t) => {
 		const status = str(p, 'status');
 		return status === null

@@ -22440,3 +22440,57 @@ conflict and `receipts_clear_hold`; the inspector),
 set and it survives a refresh) and
 `backend/tests/test_migration_0133_invoice_split_po_ids.py` (model parity,
 both backfills, re-runs, control-plane no-op).
+
+## 434. A line on no report is its creator's, and only its creator may put it on a report (§241 follow-up, round 13, 2026-11-15)
+
+§241 made a report's lines its owner's, but a line on no report had no owner:
+`expenses` recorded no creator, any `admin` / `ap_manager` / `ap_clerk` could
+rewrite a colleague's loose line, and attaching adopted it. A manager could edit
+a clerk's line and the clerk would attach and submit it unaware; the approver ≠
+owner check held, but the line's real author was not in the set it read.
+
+Migration 0134 adds `expenses.created_by_user_id` (tenant, nullable, no FK),
+stamped with the authenticated caller on both create paths and pinned at every
+`Expense(...)` site by `tests/test_expense_creator_stamping.py`. Three rules
+read it (`services/expense_controls.py`):
+
+1. **A loose line is its creator's.** Changing a claim field, replacing the
+   receipt or deleting it is refused to anyone else (403
+   `expense_not_creator`). The gate is the line-level twin of §241's owner gate,
+   and it leaves open what §241 left open: GL coding and card reconciliation
+   are not authorship.
+2. **Only a line its creator owns may go onto a report** (403
+   `expense_report_foreign_line`, `params.expense_id`), on the attach endpoint
+   and on a `PATCH` that moves the line. Refusing the attach, rather than
+   letting it through and recording the creator on the report, is what makes
+   §241's choice hold: every line on a report is its owner's, so the owner is
+   the complete author set. The rule compares the creator with the report's
+   owner, not the caller; the owner gate already makes them equal.
+3. **The SoD set reads the line creators anyway.** `report_line_creators`
+   feeds `segregation_actor_ids`, so a line whose recorded creator is not the
+   owner refuses that person as approver or rejecter. Under rule 2 the set is
+   empty for every new report. It is read so the fraud control keys on what
+   the rows record, not on a gate having held, and it costs one pass over lines
+   already loaded.
+
+**A card-minted line belongs to whoever minted it.** `/create-expense` stamps
+the caller. A card transaction names no cardholder user, so any other choice is
+inferred, and §141 says a fraud control's inputs must be observed. The cost is
+that a reconciler cannot mint a line for a colleague to attach. The colleague
+holds the same role (`CARD_CREATE_EXPENSE_ROLES` is the author set), so they can
+mint it themselves.
+
+**NULL means "no recorded creator" and is permissive, as §141 reads a NULL
+invoice uploader.** Existing rows are not backfilled. The `expense.created`
+audit row is not local in lambda audit mode, and before 0134 attaching adopted
+lines, so a report's owner is no better a proxy. A guessed creator would block a
+real owner from their own line or put an unobserved name in the SoD set. A NULL
+loose line keeps the pre-0134 rules: any author role may edit it and any report
+owner may attach it. The attach does not stamp it either, since that would be
+the guess again. Failing closed was rejected. Nobody could edit, attach or
+delete an existing loose line, so every one would be stranded until someone
+changed the database by hand, and that is an outage, not a control. The residue
+is the set of loose lines that existed at deploy, and it only shrinks.
+
+Mobile does not ship expenses, so the two codes are localized in the web app's
+six locales only.

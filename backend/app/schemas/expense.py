@@ -145,6 +145,10 @@ class ExpenseResponse(BaseModel):
     status: str
     reimbursable: bool
     mileage_miles: float | None
+    # Who created the line — its owner while it sits on no report (decisions
+    # §434). Always the authenticated caller, never read from a request body.
+    # NULL for a line written before migration 0134 (not backfilled, §141).
+    created_by_user_id: str | None = None
     created_at: str
     updated_at: str
 

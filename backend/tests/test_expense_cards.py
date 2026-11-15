@@ -825,6 +825,9 @@ async def test_deleting_a_reconciled_expense_is_refused_not_a_500(realdb):
         )
         assert matched.status_code == 200, matched.text
 
+    # The delete is the line's creator's (a loose line is its creator's —
+    # decisions §434), so the clerk who created it is the one refused here.
+    async with realdb.client(key="a", role="ap_clerk") as c:
         refused = await c.delete(f"/api/expenses/{expense_id}")
         assert refused.status_code == 409, refused.text
         assert refused.json()["detail"] == {
@@ -846,6 +849,7 @@ async def test_deleting_a_reconciled_expense_is_refused_not_a_500(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         unmatched = await c.post(f"/api/corporate-card-transactions/{txn_id}/unmatch")
         assert unmatched.status_code == 200, unmatched.text
+    async with realdb.client(key="a", role="ap_clerk") as c:
         assert (await c.delete(f"/api/expenses/{expense_id}")).status_code == 204
 
     async with mk() as s:

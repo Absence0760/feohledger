@@ -1317,6 +1317,8 @@ describe('the expense report and card reconciliation refusals (decisions §348, 
 	it.each([
 		['expense_fx_source_missing', 'refusal.expenseFxSourceMissing'],
 		['expense_card_reconciled', 'refusal.expenseCardReconciled'],
+		['expense_not_creator', 'refusal.expenseNotCreator'],
+		['expense_report_foreign_line', 'refusal.expenseReportForeignLine'],
 		['card_txn_expense_already_matched', 'refusal.cardTxnExpenseAlreadyMatched']
 	] as [string, MainMessageKey][])('%s is the fixed sentence %s in every locale', (code, key) => {
 		for (const [locale, messages] of LOCALES) {

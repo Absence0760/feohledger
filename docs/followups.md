@@ -1030,20 +1030,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to any of those messages, or the first
       non-English tenant running payment runs.
 
-- [ ] **(c) An expense that sits on no report has no owner, so anyone can rewrite it.**
-      §241 made a report's lines owner-only, but `expenses` has no creator column.
-      A loose line stays editable by any `admin` / `ap_manager` / `ap_clerk` until a
-      report owner attaches it, and attaching adopts it. A manager can therefore
-      edit a clerk's loose line, and the clerk then attaches and submits it unaware.
-      The approver ≠ owner check still holds, but the line's real author is not in
-      the set it checks.
-      **Durable fix:** `expenses.created_by_user_id` (tenant migration, NULL for
-      existing rows, which no honest author exists to backfill — §141's reasoning),
-      stamped on create; claim-field edits of a loose line restricted to its creator;
-      attach refused for a line someone else created.
-      **Trigger:** the next change to expense ownership or the expense SoD check,
-      or a persona-fraudster pass over expenses.
-
 ### Surfaced by writing the help centre (2026-10-06, decisions §244)
 
 Writing the in-app guides against the code turned these up. The guides

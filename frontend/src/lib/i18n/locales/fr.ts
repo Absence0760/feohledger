@@ -4073,6 +4073,8 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "Un avoir au statut {status} ne peut pas être appliqué.",
 	'refusal.creditMemoExceedsBalance': "Le montant de l'avoir dépasse le solde créditable restant de la facture ({remaining}).",
 	'refusal.expenseReportNotOwner': "Seul le propriétaire de la note de frais peut modifier ses lignes ou la soumettre.",
+	'refusal.expenseNotCreator': "Seule la personne qui a créé cette dépense peut la modifier ou la supprimer.",
+	'refusal.expenseReportForeignLine': "Cette dépense a été créée par quelqu’un d’autre. Seule la personne qui l’a créée peut l’ajouter à une note de frais.",
 	'refusal.expenseReportNotDraft': "Seule une note de frais en brouillon peut être modifiée ou soumise (statut de celle-ci : {status}).",
 	'refusal.expenseReportNotSubmitted': "Seule une note de frais soumise peut être approuvée ou rejetée (statut de celle-ci : {status}).",
 	'refusal.expenseReportSelfReject': "Séparation des tâches : vous ne pouvez pas rejeter votre propre note de frais. Un autre réviseur doit en décider.",
