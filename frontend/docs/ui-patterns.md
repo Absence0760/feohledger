@@ -856,6 +856,7 @@ Where each verdict lives (backend gate → field):
 | Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
 | Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
+| Vendor modal (Find this vendor in the ERP) | `GET /api/vendors/{id}/erp-links` → `search_refusal` (also on the link / unlink responses) | `services/vendor_erp_manual_link.search_refusal`. `vendor_erp_link_exists` replaces the search with its sentence; any other refusal hides it (decisions §415) |
 | Bank-change queue | `approve_refusal` | `api/vendors.change_request_approve_refusal` |
 | Expense reports (list + detail) | `actions.{submit,approve,reject,compose}` | `services/expense_controls.report_{submit,approve,reject,compose}_refusal` |
 | Expense card transactions | `actions.{match,create_expense,unmatch,ignore}` | `services/expense_controls.card_txn_{link,unmatch,ignore}_refusal` |
@@ -864,7 +865,8 @@ Each is pinned by a backend parity test that, for every seeded role and row
 state, asks both sides — the verdict and the real POST — and fails unless they
 agree (`tests/test_payment_action_verdicts.py`,
 `tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`,
-`tests/test_payment_queue_blocked.py`, `tests/test_expense_action_verdicts.py`).
+`tests/test_payment_queue_blocked.py`, `tests/test_expense_action_verdicts.py`,
+`tests/test_vendor_erp_manual_link.py`).
 A new verdict ships with one.
 
 Which refusals a page *explains* beside a disabled control, rather than hiding
