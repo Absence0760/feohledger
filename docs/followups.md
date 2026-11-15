@@ -1376,16 +1376,6 @@ scope (§260) — do not fold them into any of these.
       next change to `services/erp_oauth`.
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
-- [ ] **(c) A multi-PO split's `po_ids` vanish on the next warning refresh, and
-      the receiver check with them.** `approval_chain.receipt_recorders` reads
-      the split's PO ids from `po_match.po_ids`, but `refresh_warnings`
-      rewrites `po_match` and the combined `po_number` resolves to no PO, so a
-      receiver of one leg of a split can approve after any later edit.
-      **Durable fix:** persist the split's PO links outside the recomputed
-      `po_match` (a link table or a column the matcher only appends to) and
-      read the receiver set from it. **Trigger:** the next PO-matching change
-      touching multi-PO splits, or the first customer splitting invoices across
-      POs.
 - [ ] **(c) Extraction BYOK keys are still plain JSONB.**
       `settings.extraction.api_key` / `aws_secret_access_key` were not in §266's
       scope and are admin-readable. **Durable fix:** add an `extraction` block

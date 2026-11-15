@@ -1700,7 +1700,9 @@ invoice's PO cannot approve it: `review.approve_invoice` reads
 `approval_chain.receipt_recorders` (live = status outside
 `CANCELLED_GR_STATUSES`; `source = manual` with a named recorder; the POs the
 invoice's `po_number` names under the matcher's entity/vendor scope, plus the
-stored match's `po_id` / `po_ids`; receipts in the invoice's own entity) and
+stored match's `po_id` and every PO a multi-PO split linked,
+`invoices.split_po_ids`, which no warning refresh rewrites (decisions §433);
+receipts in the invoice's own entity) and
 `check_receiving_segregation` refuses with 403 `approval_segregation_receiver`.
 It runs after any corrections, so a `po_number` correction cannot slip past it,
 and on every door because every door calls `approve_invoice`; bulk approve

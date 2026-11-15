@@ -147,6 +147,15 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     # has_gr, gr_id, issues}. Populated by `services.invoice_warnings.refresh_warnings`
     # whenever the invoice changes. NULL when the invoice has no `po_number`.
     po_match: Mapped[dict | None] = mapped_column(JSONB)
+    # The POs a multi-PO split linked this invoice to (stringified UUIDs, like
+    # `segregation_actor_ids`). The split writes a combined `po_number` that
+    # resolves to no PO, and `po_match` is rewritten by every warning refresh,
+    # so this column is the only durable record of the set. One writer, append
+    # only: `exception_agents/resolvers/multi_po_split.apply`; the matcher never
+    # touches it, and a later `po_number` edit does not clear it. Read by
+    # `approval_chain._invoice_po_ids`, the PO set the receiver / inspector
+    # segregation rules check (decisions §267, §389, §404, §433; migration 0133).
+    split_po_ids: Mapped[list | None] = mapped_column(JSONB)
     # The bill of record in the ERP: the document id the adapter returned when a
     # push was confirmed (`services/erp._call_erp`, the one writer), e.g. a Xero
     # InvoiceID or a QuickBooks Bill Id. NULL until a push succeeds. Kept across
