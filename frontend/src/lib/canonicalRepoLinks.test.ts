@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 // `github.com/jaredhoward/project-account-payables`, which was wrong twice
 // over: the repo had been renamed to `feohledger`, and `jaredhoward` is a
 // DIFFERENT PERSON's GitHub account (a name collision — this project lives
-// under the `Absence0760` org). So the primary call-to-action on the pricing
+// under the `jaredhoward-dev` org, moved there from the `Absence0760`
+// account in project-mgmt#14). So the primary call-to-action on the pricing
 // page sent every visitor to a 404 in a stranger's namespace.
 //
 // Nothing caught it because no test asserts where an outbound link goes, and a
@@ -18,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 // axe-core, …) are none of this test's business. Only a URL that claims to be
 // THIS project has to be canonical.
 
-const CANONICAL_OWNER = 'Absence0760';
+const CANONICAL_OWNER = 'jaredhoward-dev';
 const CANONICAL_REPO = 'feohledger';
 const CANONICAL = `${CANONICAL_OWNER}/${CANONICAL_REPO}`;
 
@@ -55,7 +56,7 @@ function githubLinks(): { file: string; owner: string; repo: string }[] {
 const SELF_REFERENTIAL = /^(feohledger|project-account-payables|account-payables|betterap)$/i;
 
 describe('outbound GitHub links to this project are canonical', () => {
-	it('every self-referential link is Absence0760/feohledger', () => {
+	it('every self-referential link is jaredhoward-dev/feohledger', () => {
 		const offenders = githubLinks()
 			.filter(({ owner, repo }) => SELF_REFERENTIAL.test(repo) || owner === 'jaredhoward')
 			.filter(({ owner, repo }) => `${owner}/${repo}` !== CANONICAL)

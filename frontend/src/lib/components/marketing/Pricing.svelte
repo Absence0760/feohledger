@@ -146,7 +146,7 @@
 				text={m('marketing.pricing.selfHost')}
 				links={{
 					source: {
-						href: 'https://github.com/Absence0760/feohledger',
+						href: 'https://github.com/jaredhoward-dev/feohledger',
 						label: m('marketing.pricing.selfHostLink')
 					}
 				}}
