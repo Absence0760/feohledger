@@ -4,7 +4,7 @@ Tracking sheet for the founder critical-path. Update the checkboxes
 inline as you complete each step. Target: first paying customer.
 
 Mirrored as GitHub issue
-[#446](https://github.com/Absence0760/feohledger/issues/446) for the tracker
+[#446](https://github.com/jaredhoward-dev/feohledger/issues/446) for the tracker
 view, which carries the same checklist plus the credential-blocked items from
 [followups.md](../followups.md) § (a)/(b). Keep the two reconciled when either
 moves — the runbooks in this directory stay the authoritative *procedure* for
@@ -37,7 +37,7 @@ each step.
   - [ ] Webhook live
   - [ ] First test charge works
 - [x] **Pilot payment model: no rail** — decided in
-      [#517](https://github.com/Absence0760/feohledger/issues/517). FeohLedger does
+      [#517](https://github.com/jaredhoward-dev/feohledger/issues/517). FeohLedger does
       not move money for the pilot: customers pay suppliers from their own bank or
       ERP and FeohLedger records it (ERP `Paid` webhook, "record as paid outside",
       or a NACHA file the customer uploads to its own bank). Deployed tenants with
@@ -78,7 +78,7 @@ each step.
   - [x] support@ email live — created 2026-09-17 as a Migadu alias onto `ops@`,
         alongside `privacy@`, `security@`, `legal@` and `sales@`. Mail DNS applied
         the same day; SES verified but still sandboxed. **Delivery not yet proven
-        by a real inbound send** — see [#446](https://github.com/Absence0760/feohledger/issues/446) § 3
+        by a real inbound send** — see [#446](https://github.com/jaredhoward-dev/feohledger/issues/446) § 3
   - [ ] Status page live
   - [ ] Uptime monitoring to phone — built in Terraform (`infra/uptime.tf`,
         decisions §311); open until the toll-free number is registered, the

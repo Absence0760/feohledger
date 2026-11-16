@@ -9,7 +9,7 @@ Audit for secrets / env vars / API keys that should be server-only but are reach
 Two trust boundaries, and a leak crosses one of them:
 
 - **Client vs server.** Anything reaching `frontend/` as `PUBLIC_*` ships inside the static bundle to every browser; everything else must stay backend-side. The frontend is `adapter-static` with no SSR, so it has no server-only path to hide a secret in.
-- **Public repo vs secret store.** **This repo is public.** Per the root `CLAUDE.md`, production secrets live in the private estate repo `Absence0760/infra-secrets` (per-project subdir, AWS KMS) — an encrypted `*.sops` payload must **not** be committed here, because ciphertext in public history is a permanent artefact even after rotation. Today no `*.sops` file exists in this repo; a newly-tracked one is itself a finding.
+- **Public repo vs secret store.** **This repo is public.** Per the root `CLAUDE.md`, production secrets live in the private estate repo `jaredhoward-dev/infra-secrets` (per-project subdir, AWS KMS) — an encrypted `*.sops` payload must **not** be committed here, because ciphertext in public history is a permanent artefact even after rotation. Today no `*.sops` file exists in this repo; a newly-tracked one is itself a finding.
 
 Find any key on the wrong side of either boundary.
 

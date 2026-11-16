@@ -55,7 +55,7 @@ disarmed `aws-deploy.yml`) assume through OIDC, whose ARN is the
 be added to it.** It is minted by the estate account
 bootstrap (`~/github/templates/infra/modules/project-baseline`, driven by
 `~/github/templates/scripts/new-project-account.sh`), its inputs live in
-`Absence0760/infra-secrets` → `feohledger/bootstrap.tfvars`, and its state is in
+`jaredhoward-dev/infra-secrets` → `feohledger/bootstrap.tfvars`, and its state is in
 the mgmt account's bucket. Change the trust policy there, never here — the
 module is shared by every project account, so fixing it locally would fix this
 account and leave the next one broken.
@@ -84,7 +84,7 @@ can see, and across this org some do and some do not. So read it, never build it
 from the slug:
 
 ```bash
-gh api repos/Absence0760/feohledger/actions/oidc/customization/sub --jq .sub_claim_prefix
+gh api repos/jaredhoward-dev/feohledger/actions/oidc/customization/sub --jq .sub_claim_prefix
 ```
 
 Getting it wrong is silent: the role mints fine, the plan is clean, and the first
@@ -261,13 +261,13 @@ reviewer, and sends SSM Run Command to the VM, which runs
 3. **Give the workflow the instance id**, as a `production` environment secret
    (secret, not variable: this repo's workflow logs are public, and secrets are
    masked in them):
-   `gh secret set VM_INSTANCE_ID --env production --repo Absence0760/feohledger --body "$(AWS_PROFILE=feohledger terraform -chdir=infra output -raw app_instance_id)"`
+   `gh secret set VM_INSTANCE_ID --env production --repo jaredhoward-dev/feohledger --body "$(AWS_PROFILE=feohledger terraform -chdir=infra output -raw app_instance_id)"`
 4. **Prove the OIDC handshake** (issue #449): run **AWS OIDC preflight**
-   (`gh workflow run aws-oidc-preflight.yml --repo Absence0760/feohledger`) and
+   (`gh workflow run aws-oidc-preflight.yml --repo jaredhoward-dev/feohledger`) and
    approve it. If it fails, the trust policy's subject is wrong — fix it in the
    baseline module (§ The deploy role is not owned here), not here.
 5. **Arm the workflow**:
-   `gh variable set VM_DEPLOY_ENABLED --repo Absence0760/feohledger --body true`.
+   `gh variable set VM_DEPLOY_ENABLED --repo jaredhoward-dev/feohledger --body true`.
    Until then a release skips the deploy job rather than failing it.
 6. **Publish a release** (or run `Deploy to the VM` by hand from `main`) and
    approve it; the run's log ends with the tail of `deploy.sh`'s output.
@@ -332,15 +332,15 @@ are in the repo root with `AWS_PROFILE=feohledger`.
    record.
 2. **Give the workflow its targets** as `production` environment secrets. The
    bucket name embeds the account id and this repo's run logs are public:
-   `gh secret set FRONTEND_BUCKET --env production --repo Absence0760/feohledger --body "$(terraform -chdir=infra output -raw frontend_bucket)"`
+   `gh secret set FRONTEND_BUCKET --env production --repo jaredhoward-dev/feohledger --body "$(terraform -chdir=infra output -raw frontend_bucket)"`
    and
-   `gh secret set CLOUDFRONT_DISTRIBUTION_ID --env production --repo Absence0760/feohledger --body "$(terraform -chdir=infra output -raw frontend_distribution_id)"`.
+   `gh secret set CLOUDFRONT_DISTRIBUTION_ID --env production --repo jaredhoward-dev/feohledger --body "$(terraform -chdir=infra output -raw frontend_distribution_id)"`.
 3. **Set the two build variables** as repository variables (the SPA builds in
    an ungated job, which can't read environment variables):
-   `gh variable set APP_URL --repo Absence0760/feohledger --body https://feohledger.com`
-   and `gh variable set PUBLIC_API_URL --repo Absence0760/feohledger --body https://api.feohledger.com`.
+   `gh variable set APP_URL --repo jaredhoward-dev/feohledger --body https://feohledger.com`
+   and `gh variable set PUBLIC_API_URL --repo jaredhoward-dev/feohledger --body https://api.feohledger.com`.
 4. **Arm the publish**:
-   `gh variable set FRONTEND_PUBLISH_ENABLED --repo Absence0760/feohledger --body true`.
+   `gh variable set FRONTEND_PUBLISH_ENABLED --repo jaredhoward-dev/feohledger --body true`.
 5. **Publish a release** and approve it. After the VM step the job uploads the
    build, waits for the invalidation, and smoke-checks the distribution's
    `*.cloudfront.net` name: this build's `version.json`, the SPA on `/` and on a
@@ -476,7 +476,7 @@ cheapest: $2 a month, registration in about 15 days.
 
 ## Secrets
 
-This repo is **public**, so it holds no secret — not even an encrypted one (`../docs/decisions.md` §12, §165). The project's secrets live sops-encrypted in the private `Absence0760/infra-secrets` repo under `feohledger/`, keyed by `alias/feohledger-sops`. The estate account bootstrap (`~/github/templates/scripts/new-project-account.sh`) created that key in the FeohLedger account, alongside the state bucket and the deploy role; this module neither creates nor manages it.
+This repo is **public**, so it holds no secret — not even an encrypted one (`../docs/decisions.md` §12, §165). The project's secrets live sops-encrypted in the private `jaredhoward-dev/infra-secrets` repo under `feohledger/`, keyed by `alias/feohledger-sops`. The estate account bootstrap (`~/github/templates/scripts/new-project-account.sh`) created that key in the FeohLedger account, alongside the state bucket and the deploy role; this module neither creates nor manages it.
 
 The one secret this module handles is the RDS master password (break-glass only — the app signs in with IAM tokens, `../docs/decisions.md` §310), and it handles it without storing it: an ephemeral variable feeding a write-only attribute, supplied from `infra-secrets/feohledger/terraform.sops.yaml` at apply time (§ Workload stack). The earlier plan here — a `carlpett/sops` `sops_file` data source — was dropped because a data source's value lands in state in plaintext; the write-only path keeps it out of state and plan files entirely. Every other variable is operator config, not a credential; it is still sops-encrypted in `infra-secrets/feohledger/prod.tfvars.sops` and decrypted only for the length of `terraform plan` (§ Applying). Access is IAM — an operator needs `kms:Decrypt` on the key plus read access to the private repo; nothing in this repo changes. Rotation: `../docs/secrets-rotation.md`.
 
