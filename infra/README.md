@@ -128,7 +128,7 @@ The apex SPF authorizes Migadu alone: SES mail's envelope sender is on `send.`, 
 
 Bring it up in this order:
 
-1. **Add the domain in Migadu** (admin.migadu.com → Domains, in the estate's existing account) and copy the token from its DNS page — the part after `hosted-email-verify=`. Put it, and the DMARC report mailbox, in `infra-secrets/feohledger/prod.tfvars`:
+1. **Add the domain in Migadu** (admin.migadu.com → Domains, in the estate's existing account) and copy the token from its DNS page — the part after `hosted-email-verify=`. Put it, and the DMARC report mailbox, in `infra-secrets/feohledger/prod.tfvars.sops` (`AWS_PROFILE=feohledger sops ~/github/infra-secrets/feohledger/prod.tfvars.sops`):
    ```hcl
    migadu_verification_token = "<token>"
    dmarc_report_email        = "ops@feohledger.com"
@@ -181,11 +181,12 @@ aws sso login --profile feohledger
 printf 'bucket = "feohledger-tfstate-%s"\n' "$(aws sts get-caller-identity --profile feohledger --query Account --output text)" > backend.config
 rm -f backend_override.tf   # a leftover validate override would keep state on your laptop
 AWS_PROFILE=feohledger terraform init -backend-config=backend.config
-AWS_PROFILE=feohledger terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan
+AWS_PROFILE=feohledger sops exec-file --no-fifo --filename prod.tfvars ../../infra-secrets/feohledger/prod.tfvars.sops 'terraform plan -var-file={} -out=tfplan'
 AWS_PROFILE=feohledger terraform apply tfplan
+rm tfplan
 ```
 
-The filled tfvars is operator config rather than a secret — bucket names, the budget alert address — but it is not public either, so its canonical copy lives in the private `infra-secrets` repo as `feohledger/prod.tfvars` (plaintext, beside the encrypted secrets) — the estate convention for non-secret env config. Start it from `terraform.tfvars.example`. The path above assumes `infra-secrets` is cloned beside this repo under `~/github/`.
+The filled tfvars is operator config rather than a credential — bucket names, the budget alert address, the Migadu verification token — but it is not public either, so its canonical copy lives in the private `infra-secrets` repo as `feohledger/prod.tfvars.sops`, sops-encrypted (binary format) under `alias/feohledger-sops` like the secrets beside it: the org will have other members, and the values stay off GitHub. Edit it with `AWS_PROFILE=feohledger sops ~/github/infra-secrets/feohledger/prod.tfvars.sops`; start a new one from `terraform.tfvars.example`. `sops exec-file` decrypts it to a 0600 temp file outside the repo, passes that path as `{}`, and deletes it when `terraform plan` exits. The saved plan does hold the variable values in plaintext: `tfplan` is gitignored (`infra/.gitignore`), and delete it after the apply. The path above assumes `infra-secrets` is cloned beside this repo under `~/github/`.
 
 ## Workload stack
 
@@ -211,17 +212,17 @@ Both instances are burstable and run in *unlimited* credit mode (the AWS default
 
 **First apply — operator steps.** Steps 2–3 touch a secret, so they are yours to run; nothing here prints it.
 
-1. Add `alert_emails = ["…"]` to `prod.tfvars` (it has no default — the repo is public).
+1. Add `alert_emails = ["…"]` to `prod.tfvars.sops` (`AWS_PROFILE=feohledger sops ~/github/infra-secrets/feohledger/prod.tfvars.sops`; it has no default — the repo is public).
 2. Create the master password once in `infra-secrets` (a 48-hex-character value is URL-safe, which it must be because the break-glass `FEOH_DATABASE_URL` embeds it): `cd ~/github/infra-secrets && AWS_PROFILE=feohledger sops feohledger/terraform.sops.yaml`, and add a `db_master_password:` key set to the output of `openssl rand -hex 24`.
 3. Plan and apply with the password passed in from sops (one line each):
-   `cd ~/github/feohledger/infra && AWS_PROFILE=feohledger TF_VAR_db_master_password="$(AWS_PROFILE=feohledger sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan`
+   `cd ~/github/feohledger/infra && AWS_PROFILE=feohledger TF_VAR_db_master_password="$(AWS_PROFILE=feohledger sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" sops exec-file --no-fifo --filename prod.tfvars ../../infra-secrets/feohledger/prod.tfvars.sops 'terraform plan -var-file={} -out=tfplan'`
    then `AWS_PROFILE=feohledger TF_VAR_db_master_password="$(AWS_PROFILE=feohledger sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform apply tfplan`.
-   An ephemeral variable must be supplied again at apply time even from a saved plan — that is the reason it appears twice. `AWS_PROFILE` is set inside the `$( … )` too: a prefix assignment reaches only the command it precedes, so without it the substitution decrypts with no profile.
+   An ephemeral variable must be supplied again at apply time even from a saved plan — that is the reason it appears twice; the other variables are inside the saved plan, so `apply` takes no var file. `sops exec-file` hands the environment, `TF_VAR_db_master_password` included, to `terraform plan`. `AWS_PROFILE` is set inside the `$( … )` too: a prefix assignment reaches only the command it precedes, so without it the substitution decrypts with no profile.
    If `plan` reports the cached provider "does not match any of the checksums recorded in the dependency lock file", re-run `terraform init -backend-config=backend.config` and keep the `h1:` line it adds until the apply is done — restoring the lock first brings the error straight back. Then `git restore .terraform.lock.hcl`, so one workstation's hash never lands in a commit.
 4. Confirm the SNS subscription email AWS sends to each alert address.
 5. Then the VM side: `../deploy/README.md` (bootstrap, the sops env with `FEOH_DATABASE_URL` pointing at the `db_address` output, first deploy, then § Database role to move the app onto `feoh_app`).
 
-**Rotating the master password**: put the new value in `terraform.sops.yaml`, bump `db_master_password_version` in `prod.tfvars`, and apply as in step 3. Once the app is on `feoh_app` (`../deploy/README.md` § Database role) nothing on the VM holds the master password, so the app keeps running through it. Before that cutover the password was inside `FEOH_DATABASE_URL` in `prod.sops.yaml` too, and had to be changed there and redeployed in the same sitting. `../docs/secrets-rotation.md` § RDS master password.
+**Rotating the master password**: put the new value in `terraform.sops.yaml`, bump `db_master_password_version` in `prod.tfvars.sops`, and apply as in step 3. Once the app is on `feoh_app` (`../deploy/README.md` § Database role) nothing on the VM holds the master password, so the app keeps running through it. Before that cutover the password was inside `FEOH_DATABASE_URL` in `prod.sops.yaml` too, and had to be changed there and redeployed in the same sitting. `../docs/secrets-rotation.md` § RDS master password.
 
 ## Release deploys
 
@@ -348,7 +349,7 @@ are in the repo root with `AWS_PROFILE=feohledger`.
 6. **Try a tenant flow on the CloudFront hostname** before moving DNS. The
    `*.cloudfront.net` name carries no tenant, so the app shows the marketing
    page there. Sign-in is checked properly after step 7, on `sandbox.`.
-7. **Cut over**: `frontend_on_cloudfront = true` in `prod.tfvars`, then plan and
+7. **Cut over**: `frontend_on_cloudfront = true` in `prod.tfvars.sops`, then plan and
    apply. The plan should change `aws_route53_record.apex` and `.tenants` from
    the IP to an alias, and add two `spa_ipv6` records. Nothing else. The next
    release's smoke check then covers the apex and a tenant host too: it notices
@@ -456,14 +457,14 @@ cheapest: $2 a month, registration in about 15 days.
 **Operator steps**
 
 1. **Apply the checks** (they need no phone): add `uptime_tenant_slug` (a
-   tenant you control, such as the test tenant) to `prod.tfvars`, then plan and
+   tenant you control, such as the test tenant) to `prod.tfvars.sops`, then plan and
    apply as in § Workload stack step 3. The plan should add the health checks
    (two, or three with the slug), one `uptime` alarm per check,
    `platform_certificate_expiry` and `aws_sns_topic.pager`. It should change
    only `db_storage` (its actions gain the pager topic) and destroy nothing.
    Each alarm emails ALARM, then OK, within a few minutes of the apply.
 2. **Add the phone** once the toll-free registration is Complete and the
-   number is verified: `alert_phone_number = "+1…"` in `prod.tfvars`, then plan
+   number is verified: `alert_phone_number = "+1…"` in `prod.tfvars.sops`, then plan
    and apply again. The plan should add `pager_sms`, the `pager` SMS
    preferences, `pager_delivery_failed` and `pager_sms_spend`, and the number shows as
    `(sensitive value)`.
@@ -477,7 +478,7 @@ cheapest: $2 a month, registration in about 15 days.
 
 This repo is **public**, so it holds no secret — not even an encrypted one (`../docs/decisions.md` §12, §165). The project's secrets live sops-encrypted in the private `Absence0760/infra-secrets` repo under `feohledger/`, keyed by `alias/feohledger-sops`. The estate account bootstrap (`~/github/templates/scripts/new-project-account.sh`) created that key in the FeohLedger account, alongside the state bucket and the deploy role; this module neither creates nor manages it.
 
-The one secret this module handles is the RDS master password (break-glass only — the app signs in with IAM tokens, `../docs/decisions.md` §310), and it handles it without storing it: an ephemeral variable feeding a write-only attribute, supplied from `infra-secrets/feohledger/terraform.sops.yaml` at apply time (§ Workload stack). The earlier plan here — a `carlpett/sops` `sops_file` data source — was dropped because a data source's value lands in state in plaintext; the write-only path keeps it out of state and plan files entirely. Every other variable is operator config, not a credential. Access is IAM — an operator needs `kms:Decrypt` on the key plus read access to the private repo; nothing in this repo changes. Rotation: `../docs/secrets-rotation.md`.
+The one secret this module handles is the RDS master password (break-glass only — the app signs in with IAM tokens, `../docs/decisions.md` §310), and it handles it without storing it: an ephemeral variable feeding a write-only attribute, supplied from `infra-secrets/feohledger/terraform.sops.yaml` at apply time (§ Workload stack). The earlier plan here — a `carlpett/sops` `sops_file` data source — was dropped because a data source's value lands in state in plaintext; the write-only path keeps it out of state and plan files entirely. Every other variable is operator config, not a credential; it is still sops-encrypted in `infra-secrets/feohledger/prod.tfvars.sops` and decrypted only for the length of `terraform plan` (§ Applying). Access is IAM — an operator needs `kms:Decrypt` on the key plus read access to the private repo; nothing in this repo changes. Rotation: `../docs/secrets-rotation.md`.
 
 ## Tearing everything down
 
@@ -487,7 +488,7 @@ Note: audit-logs bucket uses Object Lock in **Compliance** mode — you cannot d
 
 ## See also
 
-- `~/github/infra-secrets/feohledger/` (private) — the encrypted secrets and their plaintext template
+- `~/github/infra-secrets/feohledger/` (private) — the encrypted secrets, `prod.tfvars.sops`, and their plaintext template
 - `~/github/project-mgmt/docs/secrets-management.md` — the estate secrets pattern
 - `../backend/CLAUDE.md` § Secrets management — day-to-day encrypt/decrypt workflow
 - `../docs/soc2-readiness.md` — control-by-control status + pending items

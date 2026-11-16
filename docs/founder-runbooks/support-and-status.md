@@ -100,7 +100,7 @@ For a solo founder, "on-call" is just "you". Minimum setup:
    `alert_phone_number` for the uptime checks and for database storage
    running out (`infra/README.md` § Uptime checks and paging). What is left is
    operator work: register a toll-free number, verify your phone in the SNS SMS
-   sandbox, set the number in `prod.tfvars`, apply, and test-fire an alarm. A
+   sandbox, set the number in `prod.tfvars.sops`, apply, and test-fire an alarm. A
    phone *call* rather than a text would need PagerDuty or similar on top.
 2. Commit to responding within 15 min during business hours, 1h
    off-hours.

@@ -102,8 +102,10 @@ Required values for prod:
 cd infra
 # backend.config names the state bucket — see infra/README.md § Applying
 AWS_PROFILE=feohledger terraform init -backend-config=backend.config
-AWS_PROFILE=feohledger terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan   # read this carefully
+# prod.tfvars.sops is sops-encrypted; exec-file decrypts it to a temp file for the plan only
+AWS_PROFILE=feohledger sops exec-file --no-fifo --filename prod.tfvars ../../infra-secrets/feohledger/prod.tfvars.sops 'terraform plan -var-file={} -out=tfplan'   # read this carefully
 AWS_PROFILE=feohledger terraform apply tfplan
+rm tfplan   # the saved plan holds the variable values in plaintext
 ```
 
 Expect errors on the first run. Common ones:

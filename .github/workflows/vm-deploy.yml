@@ -310,7 +310,7 @@ jobs:
             exit 1
           fi
           if ! grep -qi '^x-amz-cf-id:' <<<"$headers"; then
-            echo "::error::${app} is not served by CloudFront, and the VM serves no SPA (docs/decisions.md §364). Is frontend_on_cloudfront still true in infra/prod.tfvars?"
+            echo "::error::${app} is not served by CloudFront, and the VM serves no SPA (docs/decisions.md §364). Is frontend_on_cloudfront still true in infra-secrets/feohledger/prod.tfvars.sops?"
             exit 1
           fi
           origins+=("${app}" "https://smoke-check.${app#https://}")

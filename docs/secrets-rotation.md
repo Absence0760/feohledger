@@ -230,7 +230,8 @@ restore, a pgvector upgrade, a cutover re-run.
 1. In your own terminal, `openssl rand -hex 24` (URL-safe — the break-glass URL
    embeds it), and put it in `infra-secrets/feohledger/terraform.sops.yaml` as
    `db_master_password`.
-2. Bump `db_master_password_version` in `prod.tfvars` and apply as in
+2. Bump `db_master_password_version` in `prod.tfvars.sops`
+   (`AWS_PROFILE=feohledger sops ~/github/infra-secrets/feohledger/prod.tfvars.sops`) and apply as in
    `infra/README.md` § Workload stack step 3 (the password is a write-only,
    ephemeral input: it never lands in state or a plan file).
 3. Nothing on the VM changes. Confirm the app is still on the app role:
