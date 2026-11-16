@@ -2219,7 +2219,7 @@ as oversights.
       complete its registration (sole proprietor, ~15 days), give SNS the
       resource policy on the number, verify the operator's phone in the SNS
       SMS sandbox, then set `alert_phone_number` and `uptime_tenant_slug` in
-      `infra-secrets/feohledger/prod.tfvars` (never in this repo), apply, and
+      `infra-secrets/feohledger/prod.tfvars.sops` (never in this repo), apply, and
       ring the phone with `aws cloudwatch set-alarm-state`. Every step is
       `infra/README.md` § Uptime checks and paging. **Trigger:** before
       customer #1 (#446 § Support + status).

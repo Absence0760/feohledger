@@ -36,7 +36,7 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 # ignore the phone.
 #
 # The phone number is personal data and this repo is public: it comes only from
-# the private prod.tfvars, and with none set the topic has no subscriber and
+# the private prod.tfvars.sops, and with none set the topic has no subscriber and
 # nothing is texted (plan and validate still work). The SNS SMS sandbox and the
 # toll-free origination number US delivery needs are operator steps outside
 # Terraform: infra/README.md § Uptime checks and paging.

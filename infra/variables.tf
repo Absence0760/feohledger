@@ -246,7 +246,7 @@ variable "alert_emails" {
 }
 
 variable "alert_phone_number" {
-  description = "Mobile number the pager topic texts (uptime.tf's external checks and database storage), in E.164 form such as +15555550123. Personal data and this repo is public, so there is no default: set it only in the private prod.tfvars. Null creates no SMS subscription. In the SNS SMS sandbox it must first be verified in the SNS console (us-east-1), and US delivery needs a registered toll-free origination number (README.md § Uptime checks and paging)."
+  description = "Mobile number the pager topic texts (uptime.tf's external checks and database storage), in E.164 form such as +15555550123. Personal data and this repo is public, so there is no default: set it only in the private prod.tfvars.sops. Null creates no SMS subscription. In the SNS SMS sandbox it must first be verified in the SNS console (us-east-1), and US delivery needs a registered toll-free origination number (README.md § Uptime checks and paging)."
   type        = string
   default     = null
   sensitive   = true
@@ -258,7 +258,7 @@ variable "alert_phone_number" {
 }
 
 variable "uptime_tenant_slug" {
-  description = "Slug of one tenant whose host (<slug>.<domain>) uptime.tf checks from outside, covering the tenant wildcard's DNS and certificate on CloudFront. Use a tenant you control, such as a test tenant. No default, so the repo names no real tenant; set it in the private prod.tfvars. Null skips the tenant check; the apex and API checks run regardless."
+  description = "Slug of one tenant whose host (<slug>.<domain>) uptime.tf checks from outside, covering the tenant wildcard's DNS and certificate on CloudFront. Use a tenant you control, such as a test tenant. No default, so the repo names no real tenant; set it in the private prod.tfvars.sops. Null skips the tenant check; the apex and API checks run regardless."
   type        = string
   default     = null
 

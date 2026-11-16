@@ -82,7 +82,7 @@ each step.
   - [ ] Status page live
   - [ ] Uptime monitoring to phone — built in Terraform (`infra/uptime.tf`,
         decisions §311); open until the toll-free number is registered, the
-        phone verified and set in `prod.tfvars`, the stack applied, and a test
+        phone verified and set in `prod.tfvars.sops`, the stack applied, and a test
         alarm has rung it (`infra/README.md` § Uptime checks and paging)
   - [ ] Incident runbook written
 - [ ] **Insurance** — **hard gate before customer #1** for a sole proprietor
