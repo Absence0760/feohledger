@@ -25,7 +25,7 @@
 	},
 	"devDependencies": {
 		"@axe-core/playwright": "^4.14.0",
-		"@iconify-json/material-symbols": "1.2.97",
+		"@iconify-json/material-symbols": "1.2.98",
 		"@playwright/test": "1.65.0",
 		"@sveltejs/adapter-static": "4.0.1",
 		"@sveltejs/kit": "3.1.1",
