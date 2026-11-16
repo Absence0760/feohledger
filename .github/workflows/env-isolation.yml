@@ -6,10 +6,10 @@ name: Env isolation guard
 # placeholder keys. The moment a real endpoint or a live credential lands in
 # one, it is public, permanent, and archived by third parties.
 #
-# gitleaks already scans for known credential formats. This guard is the
-# semantic complement: it asserts the committed dev defaults still *point at
-# the local stack*, and that no env file outside the documented allowlist is
-# tracked at all.
+# The secret scans (secret-scan.yml in CI, gitleaks pre-commit) already look
+# for known credential formats. This guard is the semantic complement: it
+# asserts the committed dev defaults still *point at the local stack*, and
+# that no env file outside the documented allowlist is tracked at all.
 #
 # It never prints a matched value — only the file, the line number, and the
 # rule. A CI log is as public as the repo, so a guard that echoed the thing it

@@ -80,7 +80,7 @@ For each: the literal env-var name and the file:line, what should change. **Neve
 - `backend/.env.development`, `frontend/.env.development`, `infra/terraform.tfvars.example` — the committed safe-default shapes
 - `frontend/CLAUDE.md` — the static-only / no-SSR invariant
 - `.github/workflows/{aws-deploy,terraform,mobile-release,dependabot-lockfile,claude}.yml` — the credential-bearing workflows
-- `.github/workflows/gitleaks.yml` — the scanner already running in CI; a finding it should have caught is a *scanner* finding too
+- `.github/workflows/secret-scan.yml` — the scanner already running in CI (TruffleHog; a verified or unknown finding fails it, unverified ones are annotations); a finding it should have caught is a *scanner* finding too
 - `.claude/hooks/security-patterns.sh` — the pre-commit pattern guard
 - `docs/secrets-rotation.md` — what to rotate, when, and how (the fix half of every Critical here)
 - Root `CLAUDE.md` § Secrets, and `~/github/project-mgmt/docs/secrets-management.md` — why nothing encrypted is committed to this public repo

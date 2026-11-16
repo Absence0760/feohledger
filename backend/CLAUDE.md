@@ -202,7 +202,7 @@ Two things to know before trusting it:
   cannot start a workflow run unattended (GitHub blocks that path to prevent
   loops — which is also what stops the workflow re-triggering itself). What it
   does instead is not "no run": the `synchronize` event still creates the CI /
-  Security / gitleaks runs against the new head and parks them in
+  Security / secret-scan runs against the new head and parks them in
   `action_required`, so the PR keeps reading red until a maintainer approves
   them. Approve the parked runs to get a verified green — the PR checks tab's
   "Approve and run", or `gh api -X POST
