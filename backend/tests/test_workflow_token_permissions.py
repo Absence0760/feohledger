@@ -36,8 +36,8 @@ SARIF_ACTIONS = {
 # Actions that upload SARIF themselves when an input says so, and not
 # otherwise. zizmor-action uploads through codeql-action/upload-sarif unless
 # `advanced-security` is false (supply-chain-scan.yml, decisions §349). Scorecard
-# does not allowlist it, like gitleaks-action below, so its job-level grant may
-# still be reported there; this test pins that the grant is at least used.
+# does not allowlist it, so its job-level grant may still be reported there;
+# this test pins that the grant is at least used.
 SARIF_ACTIONS_BY_INPUT = {
     "zizmorcore/zizmor-action": ("advanced-security", True),
 }
@@ -47,12 +47,9 @@ SARIF_ACTIONS_BY_INPUT = {
 # (decisions §365); `./` is the older workspace-relative form, still valid.
 LOCAL_WORKFLOW_PREFIXES = ("$/.github/workflows/", "./.github/workflows/")
 
-TOP_LEVEL_EXCEPTIONS = {
-    # One job, and gitleaks-action uploads its own SARIF. A job-level grant
-    # would be the same token on the same job, and Scorecard does not
-    # allowlist gitleaks-action, so moving it changes nothing.
-    "gitleaks.yml",
-}
+# None today. gitleaks.yml was the one (gitleaks-action uploaded its own
+# SARIF); secret-scan.yml, which replaced it, grants only `contents: read`.
+TOP_LEVEL_EXCEPTIONS: set[str] = set()
 
 
 def _load(name: str, root: Path = WORKFLOWS) -> dict:

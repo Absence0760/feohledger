@@ -77,7 +77,7 @@ name: Dependabot lockfile sync
 # What GitHub does instead is NOT "no run at all", and the difference decides
 # what an operator has to do. Observed on the first real Dependabot bumps this
 # workflow synced (#379, #381, 2026-09-07): the `pull_request` **synchronize**
-# event still creates the CI / Security / gitleaks runs against the new head,
+# event still creates the CI / Security / secret-scan runs against the new head,
 # and parks every one of them in `action_required` — queued, awaiting a
 # maintainer's approval. So the synced commit is unverified *pending one
 # approval*, not unverified with no path forward, and the PR reads red until
@@ -511,7 +511,7 @@ jobs:
             echo
             echo "> **CI has not re-run on this commit yet.** A \`GITHUB_TOKEN\`"
             echo "> push cannot start a run unattended, so this head's CI /"
-            echo "> Security / gitleaks runs are parked in \`action_required\`"
+            echo "> Security / secret-scan runs are parked in \`action_required\`"
             echo "> awaiting approval - which is why the PR still reads red."
             echo "> **Approve them** to get a verified green before merging:"
             echo "> the PR checks tab's \"Approve and run\", or"
