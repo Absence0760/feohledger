@@ -16,7 +16,7 @@ tells you what the incorporation has to produce.
 
 ## Before any of this: the pilot runs with no rail
 
-**Decided in [#517](https://github.com/Absence0760/feohledger/issues/517):
+**Decided in [#517](https://github.com/jaredhoward-dev/feohledger/issues/517):
 for the pilot, FeohLedger does not move money.** Customers pay their suppliers
 from their own bank or ERP; FeohLedger captures, extracts, matches, approves,
 keeps the audit trail and *records* that the payment happened. Every

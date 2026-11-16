@@ -596,7 +596,7 @@ collects it, so a stock admin's stolen session or password alone no longer
 produces a full account number (`backend/docs/privacy.md` § Banking data in a
 DSAR bundle).
 
-**Issue:** [#423](https://github.com/Absence0760/feohledger/issues/423)
+**Issue:** [#423](https://github.com/jaredhoward-dev/feohledger/issues/423)
 
 **Found:** 2026-09-15, in the pre-counsel legal review of the published pages
 (`reviews/saas-legal-review-legal-pages.md`, H12).
@@ -669,7 +669,7 @@ a deployment that has not enabled it still accumulates these files. That is the
 same posture every sweep in this project has (guard rail 7) and is now a
 deployment step rather than a missing capability.
 
-**Issue:** [#425](https://github.com/Absence0760/feohledger/issues/425)
+**Issue:** [#425](https://github.com/jaredhoward-dev/feohledger/issues/425)
 
 **Found:** 2026-09-15, same review (H10).
 
@@ -734,7 +734,7 @@ collection is capped with a `truncated` flag and its true total. Documents are
 enumerated as references, not inlined as base64 — inlining would have put a
 W-9's TIN into the body of a routine export.
 
-**Issue:** [#424](https://github.com/Absence0760/feohledger/issues/424)
+**Issue:** [#424](https://github.com/jaredhoward-dev/feohledger/issues/424)
 
 **Found:** 2026-09-15, while drafting the published Privacy Policy and DPA
 (`docs/decisions.md` §175) — the pages could not honestly describe the erasure

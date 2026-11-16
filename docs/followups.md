@@ -31,7 +31,7 @@ matching entry here carries the category, durable fix, and trigger. Keep the
 pair consistent — if an item leaves this file, its roadmap section either loses
 its `**Open:**` line or moves to the archive.
 
-[#321](https://github.com/Absence0760/feohledger/issues/321) is the GitHub-side
+[#321](https://github.com/jaredhoward-dev/feohledger/issues/321) is the GitHub-side
 entry point, but it is **a pointer to this file, not a mirror of it** — it holds
 no item list to keep in sync. It was a transcribed checklist until 2026-09-22,
 and an audit that re-derived both found the copy stale at nearly every sync
@@ -212,7 +212,7 @@ Earlier on 2026-09-22 the #321 / #443 batch itself — five agents, each in its 
 worktree — closed **nineteen**, narrowed two and opened eight, taking the file
 from 61 → 50. Before that, 2026-09-17 (round 26) closed eleven plus the
 engineering half of
-[#432](https://github.com/Absence0760/feohledger/issues/432) and opened nine, and
+[#432](https://github.com/jaredhoward-dev/feohledger/issues/432) and opened nine, and
 a housekeeping pass the same day pruned 54 checked entries, 21 emptied sections
 and two prose-only CLOSED narratives, taking the file from 2570 lines to 1215;
 nothing open was removed by it.
@@ -364,7 +364,7 @@ nobody re-reads outlives the thing it describes.
 ### The published legal set has loose ends
 
 - [ ] **The sub-processor notice has no privacy / DPO contact to reach.**
-      ([#427](https://github.com/Absence0760/feohledger/issues/427)) The notice
+      ([#427](https://github.com/jaredhoward-dev/feohledger/issues/427)) The notice
       itself is built (decisions §321): a `notice=True` entry in
       `backend/app/services/subprocessor_changelog.py` is published on
       `/legal/sub-processors` § 10 and emailed to every active administrator of
@@ -720,7 +720,7 @@ reliable part of it.
       **Trigger:** the first request to rename or merge a GL account, or any work on
       cross-entity coding.
 
-- [ ] **(c) Breakpoints are ad hoc — the deferred half of [#432](https://github.com/Absence0760/feohledger/issues/432).**
+- [ ] **(c) Breakpoints are ad hoc — the deferred half of [#432](https://github.com/jaredhoward-dev/feohledger/issues/432).**
       Round 26 closed #432's two engineering parts (the `/organization` 320px failure and a
       reflow guard widened from 5 routes to 45) and deliberately did **not** make the
       viewport-floor call, which is a product decision. Measured while there, correcting the
@@ -745,8 +745,8 @@ reliable part of it.
 ### Surfaced by the follow-up batch (2026-09-22)
 
 Eight agents, each in its own worktree, closed ten entries — all eight the
-[#321](https://github.com/Absence0760/feohledger/issues/321) /
-[#443](https://github.com/Absence0760/feohledger/issues/443) batch had opened earlier the
+[#321](https://github.com/jaredhoward-dev/feohledger/issues/321) /
+[#443](https://github.com/jaredhoward-dev/feohledger/issues/443) batch had opened earlier the
 same day, plus the two round 31 had left narrowed (PO currency, CI service images) — and
 narrowed one more (§197–§204). These fourteen are what that work found and could not
 honestly fold in: each is a product call, needs a tenant migration or an operator script,
@@ -1387,7 +1387,7 @@ scope (§260) — do not fold them into any of these.
 
 - [ ] **(c) The VM release workflow never smoke-checks the API through public
       DNS.** The day-one gaps the first production deploy found are closed
-      ([#575](https://github.com/Absence0760/feohledger/issues/575): the no-seed
+      ([#575](https://github.com/jaredhoward-dev/feohledger/issues/575): the no-seed
       day-one CI job, production-shaped fixtures, single-owner rules with
       shown-equals-allowed parity tests, Compose parity, script exit-code tests).
       One piece is still open. `vm-deploy.yml` runs `deploy/smoke.sh --vm` on the
@@ -1930,12 +1930,12 @@ user-visible halves still open.
 
 Categories (a) and (b) are operator work, not engineering work. Both are
 mirrored — alongside the founder critical path — as GitHub issue
-[#446](https://github.com/Absence0760/feohledger/issues/446), the running
+[#446](https://github.com/jaredhoward-dev/feohledger/issues/446), the running
 checklist for everything only the operator can do; the in-repo half of that pair
 is [founder-runbooks/status.md](founder-runbooks/status.md). Keep all three
 reconciled when an item closes.
 
-- [ ] **Appoint EU and UK Art 27 representatives.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) A controller established
+- [ ] **Appoint EU and UK Art 27 representatives.** ([#428](https://github.com/jaredhoward-dev/feohledger/issues/428)) A controller established
       outside the EU/UK that offers services to people there must appoint a
       representative in each, named and addressable in the privacy notice. The
       product targets both (PEPPOL e-invoicing, EU VAT, UK VAT/HMRC features,
@@ -2099,7 +2099,7 @@ as oversights.
       comes first.
 
 - [ ] **Verify NetSuite's OAuth 2.0 client-credentials sign-in against a real
-      account** ([#654](https://github.com/Absence0760/feohledger/issues/654); built under #653).
+      account** ([#654](https://github.com/jaredhoward-dev/feohledger/issues/654); built under #653).
       The grant is built from Oracle's documentation and proven against
       fake-erp, whose token endpoint verifies the assertion's signature and
       claims (`tools/fake-erp/netsuite_oauth2.py`). Unverified against Oracle:
@@ -2307,7 +2307,7 @@ as oversights.
       **Trigger:** the first
       deploy carrying §317.
 
-- [ ] **Create the five published contact aliases.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) `/legal/*` tells readers to
+- [ ] **Create the five published contact aliases.** ([#428](https://github.com/jaredhoward-dev/feohledger/issues/428)) `/legal/*` tells readers to
       write to `privacy@`, `security@`, `legal@`, `support@` and `sales@` on
       `feohledger.com` (`frontend/src/lib/legal/operator.ts` → `CONTACT`).
       **All five now exist.** `infra/email.tf` — merged as **#417** (`98fd5ff0`)
@@ -2328,9 +2328,9 @@ as oversights.
       **Trigger:** before `feohledger.com` serves the app to anyone outside the
       project.
       Ref: [decisions.md](decisions.md) §175. Tracker:
-      [#446](https://github.com/Absence0760/feohledger/issues/446) § 3.
+      [#446](https://github.com/jaredhoward-dev/feohledger/issues/446) § 3.
 
-- [ ] **Fill the operator facts and get counsel to review the legal set.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) Two
+- [ ] **Fill the operator facts and get counsel to review the legal set.** ([#428](https://github.com/jaredhoward-dev/feohledger/issues/428)) Two
       facts in `frontend/src/lib/legal/operator.ts` are still `null` and render
       as `[… to be confirmed]`: the EU and UK Art 27 representatives (tracked
       separately above). The rest were set 2026-10-07

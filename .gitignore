@@ -74,7 +74,7 @@ web_modules/
 # committed on purpose so a fresh clone runs with zero env setup. Personal
 # overrides go in a gitignored .env / .env.local / .env.development.local and
 # win over the committed defaults. Real deployed secrets live ONLY in the
-# private Absence0760/infra-secrets repo (feohledger/), sops-encrypted under the
+# private jaredhoward-dev/infra-secrets repo (feohledger/), sops-encrypted under the
 # project's AWS KMS key. This repo is PUBLIC, so sops payloads are ignored too:
 # ciphertext in public history is permanent (docs/decisions.md §12, §165), and
 # CI's env-isolation guard fails on a tracked one.

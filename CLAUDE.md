@@ -35,7 +35,7 @@ Full-stack accounts payable management app. SvelteKit frontend + FastAPI backend
 - **mobile/** — Flutter 3.50.0 (pinned exactly in `mobile/pubspec.yaml`), Dart 3.14+, iOS + Android. Material 3, ChangeNotifier stores.
 - **infra/** — Terraform for the FeohLedger AWS account (security substrate today). See `infra/README.md`.
 - **Local infra** — Docker Compose for Postgres/Redis/MinIO. The frontend deploys to S3 + CloudFront on a published release, after the backend reaches the VM (`.github/workflows/vm-deploy.yml`, `deploy/publish-frontend.sh`; `infra/frontend.tf`).
-- **Secrets** — deployed secrets are sops-encrypted under the project's AWS KMS key (`alias/feohledger-sops`, in the FeohLedger account) and live in the **private** estate repo `Absence0760/infra-secrets`, under `feohledger/`. **This repo is PUBLIC: never commit a `*.sops` file here** — ciphertext in public history is permanent (the mistake meryl-green-designs made). `.gitignore` ignores them and CI's env-isolation guard fails on a tracked one; the old in-repo scaffold is gone (`docs/decisions.md` §165). Pattern + onboarding: `~/github/project-mgmt/docs/secrets-management.md`. See `backend/CLAUDE.md` → Secrets management for the local-dev flow.
+- **Secrets** — deployed secrets are sops-encrypted under the project's AWS KMS key (`alias/feohledger-sops`, in the FeohLedger account) and live in the **private** estate repo `jaredhoward-dev/infra-secrets`, under `feohledger/`. **This repo is PUBLIC: never commit a `*.sops` file here** — ciphertext in public history is permanent (the mistake meryl-green-designs made). `.gitignore` ignores them and CI's env-isolation guard fails on a tracked one; the old in-repo scaffold is gone (`docs/decisions.md` §165). Pattern + onboarding: `~/github/project-mgmt/docs/secrets-management.md`. See `backend/CLAUDE.md` → Secrets management for the local-dev flow.
 
 ## Commands
 
@@ -556,7 +556,7 @@ Worktree notes:
   protection on `main` requires a pull request with the `CI gate` check green,
   linear history and every conversation resolved; it is enforced on admins, and
   force-pushes and deletions are refused (`gh api
-  repos/Absence0760/feohledger/branches/main/protection`; also
+  repos/jaredhoward-dev/feohledger/branches/main/protection`; also
   `docs/soc2-readiness.md`). A local `git merge` into `main` therefore cannot
   be pushed. Before retiring a worktree, land its branch:
   ```bash

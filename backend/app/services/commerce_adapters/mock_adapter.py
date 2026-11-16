@@ -56,7 +56,7 @@ SPEC = CommerceProviderSpec(
     label="Mock commerce platform (local)",
     auth="credentials",
     fields=(),
-    docs_url="https://github.com/Absence0760/feohledger/blob/main/backend/docs/commerce-integration.md",
+    docs_url="https://github.com/jaredhoward-dev/feohledger/blob/main/backend/docs/commerce-integration.md",
     supports_fractional_quantities=True,
 )
 

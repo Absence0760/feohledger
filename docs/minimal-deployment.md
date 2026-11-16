@@ -123,7 +123,7 @@ Resizing is a change to `app_instance_type` in the tfvars (a stop → change-typ
 3. **Everything stays in `local` dispatch mode.** The Lambda/SQS split exists
    for burst isolation, which a pilot doesn't have.
 4. **Secrets follow the estate pattern.** This repo is public — `*.sops` files
-   go in the private `Absence0760/infra-secrets` repo (per-project subdir +
+   go in the private `jaredhoward-dev/infra-secrets` repo (per-project subdir +
    per-project KMS key), never committed here. The EC2 instance profile gets
    KMS access to both the sops key and the app key, plus scoped S3 access
    (§ 1 below), so no static AWS keys live on the box;
