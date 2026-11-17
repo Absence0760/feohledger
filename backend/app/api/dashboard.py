@@ -668,8 +668,12 @@ async def get_dashboard(
     bottleneck_rows = compute_approval_bottleneck(pending_steps)
 
     # ----- Discount capture rate ------------------------------------
-    # Join Invoice → PaymentSchedule → Payment(completed) and sort every
-    # discount-scheduled invoice into captured / missed / still-capturable.
+    # Join Invoice → its CURRENT PaymentSchedule → Payment(completed) and sort
+    # every discount-scheduled invoice into captured / missed /
+    # still-capturable. The schedule side is `payment_schedules.
+    # latest_schedules()`, never the table: an invoice is one discount, on the
+    # terms of its current schedule, so a superseded row must not count it a
+    # second time (it did, while this joined every row).
     #
     # Grouped in SQL, like every other figure on this page — three rows come
     # back, one per bucket. This block used to stream EVERY discount-scheduled
@@ -687,8 +691,10 @@ async def get_dashboard(
     # same reference-implementation-plus-grouped-reducer pair
     # `currency_conversion.rollup_from_grouped_rows` established for the
     # whole-book rollup, with an equivalence test pinning the two together.
-    from app.models.payment import PaymentSchedule
     from app.services.analytics import discount_capture_from_grouped_rows
+    from app.services.payment_schedules import latest_schedules
+
+    sched = latest_schedules()
 
     # The discount is a percentage of the invoice, so the reporting figure is
     # the same percentage of the invoice's REPORTING amount — `_rep_expr`, the
@@ -703,34 +709,36 @@ async def get_dashboard(
     # "matches what auditors expect") and it is what `discount_offers.
     # discount_savings` already uses for this very quantity, base × percent ÷
     # 100; this tile was the one place computing it the other way.
-    _disc_amount = func.round(Invoice.amount * PaymentSchedule.discount_percent / 100, 2)
-    _disc_amount_reporting = func.round(_rep_expr * PaymentSchedule.discount_percent / 100, 2)
-    # Per invoice-and-schedule, with the completed payments collapsed to the
-    # earliest `completed_at`. The GROUP BY is the fold's, unchanged: an
-    # invoice carrying two schedules on different terms is still two rows.
+    _disc_amount = func.round(Invoice.amount * sched.discount_percent / 100, 2)
+    _disc_amount_reporting = func.round(_rep_expr * sched.discount_percent / 100, 2)
+    # One row per invoice, with the completed payments collapsed to the
+    # earliest `completed_at`. The schedule columns ride in the GROUP BY only
+    # because they are selected; `latest_schedules()` already gives each
+    # invoice exactly one schedule, so an invoice that carries a superseded
+    # schedule on different terms is still ONE row, on its current terms.
     eligible = (
         _inv(
             select(
                 _disc_amount.label("discount_amount"),
                 _disc_amount_reporting.label("discount_amount_reporting"),
                 _unconv_expr.label("unconverted"),
-                PaymentSchedule.discount_date.label("discount_date"),
+                sched.discount_date.label("discount_date"),
                 func.min(Payment.completed_at).label("paid_at"),
             )
-            .join(PaymentSchedule, PaymentSchedule.invoice_id == Invoice.id)
+            .join(sched, sched.invoice_id == Invoice.id)
             .outerjoin(
                 Payment,
                 (Payment.invoice_id == Invoice.id) & (Payment.status == "completed"),
             )
-            .where(PaymentSchedule.discount_percent.isnot(None))
+            .where(sched.discount_percent.isnot(None))
             .group_by(
                 Invoice.id,
                 Invoice.amount,
                 Invoice.currency,
                 Invoice.reporting_amount,
                 Invoice.reporting_currency,
-                PaymentSchedule.discount_percent,
-                PaymentSchedule.discount_date,
+                sched.discount_percent,
+                sched.discount_date,
             )
         )
     ).subquery()

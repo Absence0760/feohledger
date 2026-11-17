@@ -50,7 +50,6 @@ from app.models.payment import (
     LIVE_PAYMENT_TERMINAL_STATUSES,
     Payment,
     PaymentRun,
-    PaymentSchedule,
 )
 from app.models.user import User
 from app.models.vendor import Vendor
@@ -155,6 +154,7 @@ from app.services.payment_runs import (
     rollup_payment_statuses,
     run_refusal_reasons,
 )
+from app.services.payment_schedules import latest_schedules
 from app.services.payment_settlement_record import (
     SettlementCompletion,
     open_settlement_mismatch_exception,
@@ -861,25 +861,30 @@ async def _payment_queue_rollup(
     # half-away-from-zero; the Python side passes `ROUND_HALF_UP` explicitly to
     # match it, because `Decimal.quantize`'s default (ROUND_HALF_EVEN) made the
     # two disagree on a genuine half-cent.
+    #
+    # Joined to the invoice's CURRENT schedule only
+    # (`payment_schedules.latest_schedules`): a bare join to the table summed
+    # an invoice's discount once per schedule row it carried.
+    sched = latest_schedules()
     disc_where = [
         *where,
-        PaymentSchedule.discount_date.isnot(None),
-        PaymentSchedule.discount_date >= today,
-        PaymentSchedule.discount_percent.isnot(None),
+        sched.discount_date.isnot(None),
+        sched.discount_date >= today,
+        sched.discount_percent.isnot(None),
     ]
     disc_agg = apply_entity_scope(
         select(
             cur_key.label("cur"),
             func.coalesce(
-                func.sum(func.round(Invoice.amount * PaymentSchedule.discount_percent / 100, 2)),
+                func.sum(func.round(Invoice.amount * sched.discount_percent / 100, 2)),
                 0,
             ).label("save"),
             func.coalesce(
-                func.sum(func.round(rep_expr * PaymentSchedule.discount_percent / 100, 2)), 0
+                func.sum(func.round(rep_expr * sched.discount_percent / 100, 2)), 0
             ).label("save_rep"),
         )
         .select_from(Invoice)
-        .join(PaymentSchedule, PaymentSchedule.invoice_id == Invoice.id)
+        .join(sched, sched.invoice_id == Invoice.id)
         .where(*disc_where)
         .group_by(cur_key),
         Invoice,
@@ -1077,10 +1082,15 @@ async def payment_queue(
     # `services/analytics`, `discount_optimizer` and `cash_flow_alerts` answer.
     today = utc_today()
 
+    # The invoice's CURRENT schedule, at most one per invoice
+    # (`payment_schedules.latest_schedules`). A bare outer join to the table
+    # listed an invoice once per schedule row — twice on one page, and the
+    # duplicate shifted every later page's offset away from `total`.
+    current_schedule = latest_schedules()
     page_q = (
         apply_entity_scope(
-            select(Invoice, PaymentSchedule)
-            .outerjoin(PaymentSchedule, PaymentSchedule.invoice_id == Invoice.id)
+            select(Invoice, current_schedule)
+            .outerjoin(current_schedule, current_schedule.invoice_id == Invoice.id)
             .where(*_queue_base_where()),
             Invoice,
             entity_id,

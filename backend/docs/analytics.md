@@ -320,7 +320,7 @@ SELECT bucket,
            END AS bucket,
            …                              -- the per-row figures, below
       FROM invoices
-      JOIN payment_schedules ON …
+      JOIN <latest_schedules()> ON …     -- one schedule per invoice
       LEFT JOIN payments ON … AND payments.status = 'completed'
      WHERE discount_percent IS NOT NULL AND <entity scope>
      GROUP BY invoices.id, …, discount_percent, discount_date
@@ -350,8 +350,13 @@ Three details are load-bearing:
   TimeZone, so a payment at 23:30 UTC on the deadline would miss its own
   discount window on any server configured east of UTC — the same class of bug
   `utils/dates.utc_today` exists to prevent.
-- **The inner `GROUP BY` is the fold's, unchanged.** An invoice carrying two
-  payment schedules on different terms was two rows before and is two rows now.
+- **One row per invoice, on its current schedule.** The join is to
+  `services/payment_schedules.latest_schedules()` (a `DISTINCT ON` over
+  `LATEST_SCHEDULE_ORDER`), not the table. The port first kept the fold's
+  per-schedule grouping, so an invoice carrying a superseded schedule on
+  different terms was two eligible rows and its discount counted twice; an
+  invoice is one discount, on the terms the cash forecast and the discount
+  engine read for it too. Pinned in `tests/test_payment_schedule_latest.py`.
 
 What stays in Python is what was never per-row: the three-bucket vocabulary,
 the `captured / (captured + missed)` rate, and the `insufficient_data` state.
