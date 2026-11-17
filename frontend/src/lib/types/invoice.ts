@@ -302,6 +302,11 @@ export interface PoMatch {
 	match_type: 'none' | '2-way' | '3-way' | '4-way';
 	po_id: string | null;
 	po_number: string | null;
+	/** A multi-PO split's legs (`invoices.split_po_ids`, decisions §433): the
+	 *  match read the invoice against these POs combined, `po_id` is null and
+	 *  `po_number` is the invoice's own combined reference. Empty for a single
+	 *  PO; absent on a match persisted before the matcher read splits. */
+	po_ids?: string[];
 	// `services/po_matching.py::_json_safe` renders every Decimal on the
 	// persisted `invoices.po_match` JSONB down to a JSON number, so these
 	// arrive numeric — but they are money, and the variance in particular is a
@@ -328,6 +333,8 @@ export interface PoMatch {
 	inspection_result: 'pass' | 'fail' | 'partial' | null;
 	inspection_accepted_quantity: number | null;
 	inspection_required: boolean;
+	/** Every inspection the match read — one per inspected leg on a split. */
+	inspection_ids?: string[];
 	/** One finding per entry: `{code, params, message}` from the catalogue's
 	 *  `po_match.issue.*` family — localize through `poMatchIssueText`. A match
 	 *  persisted before that family existed holds bare English strings, and

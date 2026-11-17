@@ -485,7 +485,7 @@ async def _receipts_implicated(db, exception, invoice, org_settings) -> bool:
     if not exception_segregation_enabled(org_settings):
         return False
     live = await match_invoice_under_org_rules(db, invoice, org_settings)
-    return not await receipts_clear_hold(db, invoice, live.po_id)
+    return not await receipts_clear_hold(db, invoice, live.matched_po_ids())
 
 
 def _record(
