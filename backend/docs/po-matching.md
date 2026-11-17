@@ -146,6 +146,59 @@ Covered by `backend/tests/test_po_matching_algorithm.py` (the guard),
 `test_po_matching_critical_path.py::test_realdb_currency_guard_against_recorded_po_currencies`
 and the three agent test files.
 
+### A PO that records no currency
+
+`unknown` is honest, but for a PO with no source left to ask it is permanent:
+migration 0099 copied the requisition's code and nothing else, there is no
+`PATCH /api/purchase-orders/{id}`, and only an ERP re-sync that states a code
+ever writes one. Until then every invoice matched against that PO carries the
+face-value note, and the three agents above escalate on it — so a tenant on
+pre-0099 POs (seeded, contract-spawned, or from an ERP that states no code)
+loses agent autonomy on exactly the invoices that used to auto-resolve.
+
+**When to run the backfill:** a tenant's agents stop auto-resolving PO
+mismatches with "the PO records no currency", or a support request asks to
+label legacy POs — and someone who knows the answer can say "these orders were
+all USD". `scripts/backfill_po_currency.py` takes that assertion; it never
+infers one (the org-currency proxy is what §197 rejected):
+
+```bash
+# from backend/ — dry run (the default): what would be stamped, what the set already records
+python scripts/backfill_po_currency.py --tenant acme --currency USD
+# narrow the set: an entity (slug or id), a po_number prefix, created strictly before a date
+python scripts/backfill_po_currency.py --tenant acme --currency EUR \
+    --entity acme-de --po-prefix DE- --created-before 2026-09-22
+# write, and keep the PII-free manifest (counts + PO ids)
+python scripts/backfill_po_currency.py --tenant acme --currency USD --apply --manifest po-currency-acme.json
+```
+
+- **Only NULL rows are written**, by a compare-and-swap `UPDATE … WHERE currency
+  IS NULL`; a PO whose source stated a code keeps it. The dry run lists the codes
+  the named set *already* records and warns when one differs from the assertion —
+  the sign the set is drawn wider than the orders you know about.
+- **The code must be a real ISO 4217 currency** (shape via
+  `utils.currency_code`, membership via `e_invoice.codelists.ISO_4217_CURRENCIES`);
+  the no-currency and testing codes are refused.
+- **Matching re-verifies in the same transaction.** Every invoice citing a
+  stamped PO number that is not `paid` / `done` goes back through
+  `refresh_warnings` with the org's settings — the refresh a goods receipt
+  triggers. An invoice in the asserted currency now reads `same`, so the note
+  goes and the agents can act; one in another currency reads `different` and gets
+  its `po_currency_mismatch` warning and payment-blocking `po_mismatch` hold with
+  the stamp. A stamp cannot make a finding disappear (`unknown` already compared
+  at face value, which is what `same` compares), so this raises holds and
+  closes none that a refresh would not close anyway. Paid / done invoices are
+  skipped, as the ERP PO sync skips them: a hold on money already paid stops
+  nothing.
+- **Audited:** one `purchase_order.currency_backfilled` row per applied run (no
+  actor — a tool run by an operator), carrying the asserted code, the scope,
+  the counts and the stamped PO ids; never a PO number, vendor or amount.
+
+A wrong assertion is a wrong label that looks right, which is worse than the
+bare figure it replaces — check it against the source (the ERP's base currency,
+the contract, the requisitions) before `--apply`. Covered by
+`backend/tests/test_po_currency_backfill.py`.
+
 ### The sync refreshes a PO's lines, never just its total
 
 The receipt-value check scales the PO total by received / ordered quantity, so
