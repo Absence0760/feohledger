@@ -53,7 +53,7 @@ from app.schemas.recurring_invoice import (
 )
 from app.services import recurring_invoices as svc
 from app.services.audit_dispatch import dispatch_audit
-from app.services.gl_chart import refuse_gl_codes_outside_chart
+from app.services.gl_chart import gl_code_off_chart, refuse_gl_codes_outside_chart
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -132,6 +132,29 @@ def _seed_next_run_on(template: RecurringInvoiceTemplate, *, after: date) -> Non
     template.next_run_on = candidate
 
 
+def _off_chart_clause():
+    """Is this template's ``gl_account`` one its entity's chart would refuse
+    today? Correlated to the enclosing ``RecurringInvoiceTemplate`` row."""
+    t = RecurringInvoiceTemplate
+    return gl_code_off_chart(t.gl_account, t.entity_id, t.organization_id)
+
+
+async def _respond(
+    db: AsyncSession, template: RecurringInvoiceTemplate
+) -> RecurringTemplateResponse:
+    """One template's response, with ``gl_account_off_chart`` read the same way
+    the list reads it — so a row the page replaces in place after an edit or a
+    lifecycle action keeps (or loses) its flag exactly as a reload would."""
+    off_chart = bool(
+        (
+            await db.execute(
+                select(_off_chart_clause()).where(RecurringInvoiceTemplate.id == template.id)
+            )
+        ).scalar()
+    )
+    return RecurringTemplateResponse.from_db(template, gl_account_off_chart=off_chart)
+
+
 # --------------------------------------------------------------------------- #
 # List / create / detail
 # --------------------------------------------------------------------------- #
@@ -143,9 +166,10 @@ def _recurring_list_filters(
     status_filter: str | None,
     vendor_id: uuid.UUID | None,
     search: str | None,
+    gl_off_chart: bool = False,
 ):
-    """Apply the recurring-template ``status`` / ``vendor_id`` / free-text
-    filters to ``query``.
+    """Apply the recurring-template ``status`` / ``vendor_id`` / free-text /
+    ``gl_off_chart`` filters to ``query``.
 
     Shared by ``GET /api/recurring`` and ``GET /api/recurring/summary`` so the
     KPI rollup can never describe a different set than the rows it sits above.
@@ -163,6 +187,8 @@ def _recurring_list_filters(
                 ilike_contains(RecurringInvoiceTemplate.vendor_name, term),
             )
         )
+    if gl_off_chart:
+        query = query.where(_off_chart_clause())
     return query
 
 
@@ -171,6 +197,10 @@ async def list_templates(
     status_filter: str | None = Query(None, alias="status"),
     vendor_id: uuid.UUID | None = None,
     search: str | None = None,
+    gl_off_chart: bool = Query(
+        False,
+        description="Only templates whose GL code the chart no longer accepts",
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_tenant_db),
@@ -182,19 +212,21 @@ async def list_templates(
         status_filter=status_filter,
         vendor_id=vendor_id,
         search=search,
+        gl_off_chart=gl_off_chart,
     )
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
     query = (
-        query.order_by(
-            RecurringInvoiceTemplate.created_at.desc(), RecurringInvoiceTemplate.id.desc()
-        )
+        query.add_columns(_off_chart_clause().label("gl_off_chart"))
+        .order_by(RecurringInvoiceTemplate.created_at.desc(), RecurringInvoiceTemplate.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    rows = list((await db.execute(query)).scalars().all())
+    rows = (await db.execute(query)).all()
     return RecurringTemplateListResponse(
-        items=[RecurringTemplateResponse.from_db(t) for t in rows],
+        items=[
+            RecurringTemplateResponse.from_db(t, gl_account_off_chart=bool(off)) for t, off in rows
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -208,6 +240,7 @@ async def template_summary(
     status_filter: str | None = Query(None, alias="status"),
     vendor_id: uuid.UUID | None = None,
     search: str | None = None,
+    gl_off_chart: bool = False,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(*_READ_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -236,6 +269,7 @@ async def template_summary(
                 status_filter=status_filter,
                 vendor_id=vendor_id,
                 search=search,
+                gl_off_chart=gl_off_chart,
             ).group_by(tmpl.status)
         )
     ).all()
@@ -267,6 +301,7 @@ async def template_summary(
                 status_filter=status_filter,
                 vendor_id=vendor_id,
                 search=search,
+                gl_off_chart=gl_off_chart,
             )
             .group_by(currency_key)
             .order_by(currency_key)
@@ -286,12 +321,29 @@ async def template_summary(
                 status_filter=status_filter,
                 vendor_id=vendor_id,
                 search=search,
+                gl_off_chart=gl_off_chart,
             )
         )
     ).scalar()
 
+    off_chart_count = (
+        await db.execute(
+            _recurring_list_filters(
+                apply_entity_scope(
+                    select(func.count()).select_from(tmpl).where(_off_chart_clause()),
+                    tmpl,
+                    entity_id,
+                ),
+                status_filter=status_filter,
+                vendor_id=vendor_id,
+                search=search,
+            )
+        )
+    ).scalar() or 0
+
     return RecurringTemplateSummaryResponse(
         total=sum(by_status.values()),
+        gl_off_chart=int(off_chart_count),
         by_status=by_status,
         monthly_equivalent=[
             RecurringCurrencyTotal(
@@ -369,7 +421,7 @@ async def create_template(
     )
     await db.commit()
     await db.refresh(template)
-    return RecurringTemplateResponse.from_db(template)
+    return await _respond(db, template)
 
 
 @router.get("/{template_id}", response_model=RecurringTemplateResponse)
@@ -380,7 +432,7 @@ async def get_template(
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     template = await _get_scoped(db, template_id, entity_id)
-    return RecurringTemplateResponse.from_db(template)
+    return await _respond(db, template)
 
 
 @router.patch("/{template_id}", response_model=RecurringTemplateResponse)
@@ -477,7 +529,7 @@ async def update_template(
         )
     await db.commit()
     await db.refresh(template)
-    return RecurringTemplateResponse.from_db(template)
+    return await _respond(db, template)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -550,7 +602,7 @@ async def pause_template(
     await _audit_lifecycle(db, template, org_id, user.id, "recurring_template.paused")
     await db.commit()
     await db.refresh(template)
-    return RecurringTemplateResponse.from_db(template)
+    return await _respond(db, template)
 
 
 @router.post("/{template_id}/resume", response_model=RecurringTemplateResponse)
@@ -576,7 +628,7 @@ async def resume_template(
     await _audit_lifecycle(db, template, org_id, user.id, "recurring_template.resumed")
     await db.commit()
     await db.refresh(template)
-    return RecurringTemplateResponse.from_db(template)
+    return await _respond(db, template)
 
 
 @router.post("/{template_id}/end", response_model=RecurringTemplateResponse)
@@ -595,7 +647,7 @@ async def end_template(
     await _audit_lifecycle(db, template, org_id, user.id, "recurring_template.ended")
     await db.commit()
     await db.refresh(template)
-    return RecurringTemplateResponse.from_db(template)
+    return await _respond(db, template)
 
 
 # --------------------------------------------------------------------------- #
