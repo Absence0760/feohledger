@@ -36,10 +36,13 @@ Design constraints (project invariants):
     and bails (→ escalate) on any drift. The coordinator's exception row lock
     prevents a second decision on a resolved exception.
 
-No new column / migration: the link is recorded on ``invoice.po_number`` (a
-combined ``"PO-A,PO-B"`` reference, mirroring how a human would note a split) and
-``invoice.po_match`` (a multi-PO snapshot the modal can render). ``invoice.amount``
-is untouched.
+The link is recorded on ``invoice.po_number`` (a combined ``"PO-A,PO-B"``
+reference, mirroring how a human would note a split) and the legs' ids on
+``invoice.split_po_ids`` (decisions §433). ``po_matching`` reads a split from
+that column, so ``apply`` re-matches through the matcher like ``missing_po_v1``
+and approves only on a clean ``matched`` read as this split — and a later warning
+refresh writes the same ``po_match`` rather than re-raising ``no_po``.
+``invoice.amount`` is untouched.
 
 Currency (migration 0099, decisions §197), the ``missing_po_v1`` rule applied to
 a set: a PO in a DIFFERENT currency from the invoice never enters the pool —
@@ -61,7 +64,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceStatus
-from app.models.procurement import PurchaseOrder, po_currency_code
+from app.models.procurement import PurchaseOrder
 from app.services.approval_chain import (
     cfo_gate_applies,
     max_amount_gate_applies,
@@ -429,8 +432,8 @@ class MultiPOSplitResolver(ExceptionResolver):
     async def apply(
         self, db, *, exception, invoice, evaluation, actor_id, actor_roles=None, org_settings=None
     ) -> None:
-        """Link the invoice to the matched PO set, persist a multi-PO match
-        snapshot, and approve via the audited path. Idempotent + race-safe:
+        """Link the invoice to the matched PO set, re-match it through the
+        matcher, and approve via the audited path. Idempotent + race-safe:
         re-locks the invoice, re-asserts review-readiness + a still-``no_po``
         single-PO live match, re-derives the unique set under the lock, and bails
         (→ escalate) on any drift. NEVER adjusts the invoice amount."""
@@ -440,6 +443,7 @@ class MultiPOSplitResolver(ExceptionResolver):
         from app.services.exception_agents.resolvers.amount_mismatch import (
             refuse_payee_change_after_approval,
         )
+        from app.services.invoice_warnings import refresh_warnings
         from app.services.po_matching import match_invoice_under_org_rules
         from app.services.review import approve_invoice
         from app.services.workflow_engine import get_invoice_for_update
@@ -511,47 +515,42 @@ class MultiPOSplitResolver(ExceptionResolver):
         ):
             raise _NotApprovable(locked.status)
 
-        # Link by a combined po_number reference + align vendor_id, and persist a
-        # multi-PO match snapshot (the single-PO matcher can't produce a `matched`
-        # for a split, so we write the snapshot directly — never re-running
-        # refresh_warnings, which would re-raise a `no_po` exception). The invoice
-        # AMOUNT is left exactly as-is.
         # The payee of an invoice approved once (a recalled one, back in
         # review) is a person's to choose, never the agent's (decisions §379).
         # Asked before any mutation, like the gates above.
         if locked.vendor_id is None:
             refuse_payee_change_after_approval(locked, rows[0].vendor_id)
 
+        # Link by a combined po_number reference + align vendor_id. The invoice
+        # AMOUNT is left exactly as-is.
         combined_ref = ",".join(str(t[1]) for t in triples)
         locked.po_number = combined_ref
-        # The durable record of the set (decisions §433): `po_match` below is a
-        # snapshot the next warning refresh rewrites, and the combined
-        # `po_number` resolves to no PO, so the approval door's receiver /
-        # inspector sets read the split's POs from this column. Append only — a
-        # PO linked once stays linked, so over-refusing is the only error.
-        linked = [str(t[0]) for t in triples]
+        # The durable record of the set (decisions §433): the combined
+        # `po_number` resolves to no single PO, so the matcher reads the split's
+        # legs from this column, and so do the approval door's receiver /
+        # inspector sets. Append only — a PO linked once stays linked, so
+        # over-refusing is the only error.
         prior = [str(i) for i in (locked.split_po_ids or [])]
-        locked.split_po_ids = sorted(set(prior) | set(linked))
+        locked.split_po_ids = sorted(set(prior) | {str(t[0]) for t in triples})
         if locked.vendor_id is None and rows[0].vendor_id is not None:
             locked.vendor_id = rows[0].vendor_id
-        # Money in the snapshot is exact string-Decimal (never float) — the
-        # combined PO total is the authoritative `po_total` here.
-        locked.po_match = {
-            "status": "matched",
-            "match_type": "multi-po-split",
-            "po_count": len(triples),
-            "po_ids": linked,
-            "po_numbers": [str(t[1]) for t in triples],
-            "po_total": str(combined),
-            # Every PO in the set was proven to be in the invoice's currency
-            # above, so the combined total is too — the modal labels it with this.
-            "po_currency": po_currency_code(rows[0].currency),
-            "currency_check": CURRENCY_SAME,
-            "combined_po_total": str(combined),
-            "invoice_amount": str(target),
-            "within_tolerance": True,
-            "issues": [],
-        }
+
+        # Re-match through the matcher, as `missing_po_v1` does, now that it
+        # reads a split from its legs: `po_match` is the matcher's, not a
+        # snapshot of the agent's own, so the next warning refresh writes the
+        # same thing. `org_settings` carries the org's own match rule.
+        await refresh_warnings(db, locked, org_settings=org_settings)
+
+        # The link must produce a clean `matched` read AS this split; anything
+        # else (a leg short-received, an inspection, a stale total) means a
+        # human should look — escalate.
+        post = await match_invoice_under_org_rules(db, locked, org_settings)
+        if (
+            post.status != "matched"
+            or post.currency_check != CURRENCY_SAME
+            or set(post.po_ids) != {str(t[0]) for t in triples}
+        ):
+            raise _NotApprovable(locked.status)
 
         await approve_invoice(
             db,

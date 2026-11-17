@@ -489,6 +489,53 @@ would substitute one masking bug for another (shipment 2 passed, so shipment 1
 reads inspected). Covered by
 `backend/tests/test_po_matching_critical_path.py` § 4-way leg.
 
+### A multi-PO split is matched against its legs
+
+The split agent (`multi_po_split_v1`) links one consolidated invoice to several
+POs by writing a combined `po_number` ("PO-A,PO-B") and the legs' ids in
+`invoices.split_po_ids` (decisions §433). The combined reference resolves to no
+single PO, so the matcher used to read `no_po` on the next refresh after any
+edit and raise again the `po_mismatch` the agent had just resolved. Now
+`match_invoice_to_po` reads the split from its legs (`_split_legs`), on one
+condition: **the reference still names them.** Every number in `po_number`
+must resolve to a PO in `split_po_ids` under the single-PO lookup's own filters
+(the invoice's entity, strictly; its vendor when it has one; the newest row
+per number). A reference someone edited — to one PO, or to a number the set
+does not hold — is matched as written, so it resolves or reads `no_po` like
+any other. A PO in the (append-only) set that the reference no longer names is
+not a leg.
+
+A split is matched as `_match_split` describes:
+
+- **2-way on the combined total** of the legs. Any leg cancelled, unissued or
+  with an unverifiable total holds the invoice, as that PO would alone; any leg
+  in another currency is a currency mismatch; a leg recording no currency makes
+  the comparison `unknown` (face value).
+- **3-way and 4-way per leg, then combined.** Quantities are never pooled
+  before they are judged, because an over-receipt on one leg would hide a short
+  receipt on another. A short leg is worth the share of its total its receipts
+  cover; every other leg its whole total (a leg with no receipt is a 2-way leg).
+  The invoice bills beyond receipt when it asks for more than that sum.
+  `ordered_quantity` / `received_quantity` are the legs' sums, or `null` when
+  one leg is short and another over. Each leg's inspection is read: a `fail`
+  is the representative verdict, then a required inspection missing on any
+  leg (`inspection_result` `null`), then a `partial`.
+- The result names the split: `po_ids` lists the legs, `po_number` is the
+  invoice's own reference and `po_id` is `null`. `inspection_ids` lists every
+  inspection read. The auto-close vets every leg's hand-entered receipts
+  (`receipts_clear_hold` over `MatchResult.matched_po_ids()`) and every
+  inspection (`_inspection_clears_hold`), and a receipt or inspection on one
+  leg re-matches the split (`refresh_invoices_citing_pos` also finds invoices
+  whose `split_po_ids` hold a PO of that number).
+
+The agent now re-matches through the matcher too, the way `missing_po_v1`
+does, and approves only on a clean `matched` read as the split it linked; so
+the `po_match` it leaves is the one every later refresh writes. A split with a
+leg short-received escalates instead of being approved.
+
+Covered by `backend/tests/test_po_match_exception_reconciliation.py` § A
+multi-PO split and `backend/tests/test_exception_agents_multi_po_split.py`.
+
 ### Recording a goods receipt
 
 `POST /api/goods-receipts` (`services/goods_receipts.py`) is the one in-app
@@ -549,7 +596,8 @@ MatchResult:
     po_id, po_number, po_total
     po_currency: str | None     # the PO's own code — labels po_total
     currency_check: "same" | "different" | "unknown" | None  # None = no PO found
-    gr_id  # if 3-way
+    gr_id  # if 3-way (the newest live receipt across a split's legs)
+    po_ids: list[str]           # a multi-PO split's legs; [] for a single PO
     amount_variance: Decimal | None      # invoice - PO; None on a currency mismatch
     amount_variance_pct: Decimal | None  # as percentage; None on a currency mismatch
     within_tolerance: bool
@@ -557,6 +605,7 @@ MatchResult:
     inspection_result: "pass" | "fail" | "partial" | None
     inspection_accepted_quantity: float | None  # partial acceptance qty
     inspection_required: bool              # require_inspection on + inspection missing
+    inspection_ids: list[str]              # every inspection read (one per inspected leg)
     over_receipt: bool          # 3-way: received quantity EXCEEDS ordered
     issues: list[dict]          # {code, params, message} — po_match.issue.* findings
     details: dict               # full match data for audit (has_inspection, inspection_result)

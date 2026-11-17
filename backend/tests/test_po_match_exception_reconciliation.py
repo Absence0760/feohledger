@@ -741,3 +741,266 @@ async def test_recoding_the_gl_before_approval_follows_the_new_rule(realdb):
         ent = await _default_entity_id(s)
         row = await _over_billed_then_recoded(s, org_id, ent, status=InvoiceStatus.ready_for_review)
     assert row.status == "resolved"
+
+
+# --------------------------------------------------------------------------- #
+# A multi-PO split is matched against its legs (decisions §433)
+# --------------------------------------------------------------------------- #
+
+
+async def _split_invoice(s, org_id, ent, legs, *, amount, po_number=None):
+    """An invoice the split agent linked to ``legs``: the combined reference on
+    ``po_number`` and the legs' ids on ``split_po_ids``."""
+    inv = await _add_invoice(
+        s,
+        org_id,
+        ent,
+        po_number=po_number or ",".join(po.po_number for po in legs),
+        amount=amount,
+    )
+    inv.split_po_ids = sorted(str(po.id) for po in legs)
+    await s.flush()
+    return inv
+
+
+async def _two_legs(s, org_id, ent, *, totals=("600.00", "400.00"), qty="10"):
+    tag = uuid.uuid4().hex[:6]
+    return [
+        await _add_po(s, org_id, ent, po_number=f"PO-LEG{i}-{tag}", total=t, qty=qty)
+        for i, t in enumerate(totals)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_split_whose_legs_match_is_not_held_by_a_refresh(realdb):
+    """The followup this closes: the combined reference ("PO-A,PO-B") resolves
+    to no single PO, so every refresh after the split agent's approval read
+    `no_po` and held the invoice again. Read from its legs, it matches."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent)
+        inv = await _split_invoice(s, org_id, ent, legs, amount="1003.00")
+        await s.commit()
+
+        await _refresh(s, inv)
+        await s.commit()
+
+        assert await _rows(s, inv.id) == []
+        assert await blocked_invoice_ids(s, [inv.id]) == set()
+        assert inv.po_match["status"] == "matched"
+        assert inv.po_match["match_type"] == "2-way"
+        assert inv.po_match["po_number"] == inv.po_number
+        assert inv.po_match["po_id"] is None
+        assert inv.po_match["po_ids"] == [str(po.id) for po in legs]
+        assert Decimal(str(inv.po_match["po_total"])) == Decimal("1000.00")
+        assert inv.po_match["currency_check"] == "same"
+        assert inv.po_match["po_currency"] == "USD"
+        codes = [w.get("code") for w in inv.warnings or []]
+        assert "po_not_found" not in codes
+
+
+@pytest.mark.asyncio
+async def test_a_split_billed_above_its_legs_is_still_held(realdb):
+    """Matched as a split, the amount control still runs — on the legs'
+    combined total."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent)
+        inv = await _split_invoice(s, org_id, ent, legs, amount="1237.00")
+        await s.commit()
+
+        await _refresh(s, inv)
+        await s.commit()
+
+        (row,) = await _rows(s, inv.id)
+        assert row.status == "open"
+        assert row.description_code == "po_amount_variance"
+        assert inv.po_match["status"] == "mismatch"
+        assert Decimal(str(inv.po_match["amount_variance"])) == Decimal("237.00")
+        assert await blocked_invoice_ids(s, [inv.id]) == {inv.id}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "unknown",  # edited to a number the split never linked
+        "a_leg_and_a_stranger",  # one leg plus a PO outside the recorded set
+        "a_leg_cancelled",  # every number names a leg, one leg is cancelled
+    ],
+)
+async def test_a_split_reference_that_no_longer_names_its_legs_is_held(realdb, reference):
+    """The legs are read from `split_po_ids` only while the reference agrees
+    with it; otherwise the reference is matched as written."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent)
+        stranger = await _add_po(
+            s, org_id, ent, po_number=f"PO-STR-{uuid.uuid4().hex[:6]}", total="400.00", qty="10"
+        )
+        po_number = {
+            "unknown": f"PO-NOPE-{uuid.uuid4().hex[:6]}",
+            "a_leg_and_a_stranger": f"{legs[0].po_number},{stranger.po_number}",
+            "a_leg_cancelled": None,
+        }[reference]
+        if reference == "a_leg_cancelled":
+            legs[1].status = "cancelled"
+        inv = await _split_invoice(s, org_id, ent, legs, amount="1003.00", po_number=po_number)
+        await s.commit()
+
+        await _refresh(s, inv)
+        await s.commit()
+
+        (row,) = await _rows(s, inv.id)
+        assert row.status == "open"
+        expected = "po_cancelled" if reference == "a_leg_cancelled" else "po_not_found"
+        assert row.description_code == expected
+
+
+@pytest.mark.asyncio
+async def test_a_split_reference_edited_to_one_leg_is_matched_against_that_leg(realdb):
+    """A person who points the invoice back at a single PO is matched against
+    that PO, not the split the column still records."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent)
+        inv = await _split_invoice(
+            s, org_id, ent, legs, amount="1003.00", po_number=legs[0].po_number
+        )
+        await s.commit()
+
+        match = await match_invoice_to_po(s, inv)
+    assert match.po_id == str(legs[0].id)
+    assert match.po_ids == []
+    assert match.status == "mismatch"  # 1003 against the 600 leg alone
+
+
+@pytest.mark.asyncio
+async def test_a_short_leg_is_not_hidden_by_an_over_received_one(realdb):
+    """Receipts are judged per leg: five of ten in on the 600 leg and fifteen
+    of ten on the 400 leg pool to twenty of twenty, which would read fully
+    received. Per leg, the goods in cover 300 + 400 = 700 of a 1003 invoice:
+    billed beyond receipt, and held."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent)
+        await _add_gr(s, org_id, ent, legs[0].id, received="5")
+        await _add_gr(s, org_id, ent, legs[1].id, received="15")
+        inv = await _split_invoice(s, org_id, ent, legs, amount="1003.00")
+        await s.commit()
+
+        match = await match_invoice_to_po(s, inv)
+        assert match.match_type == "3-way"
+        assert match.status == "partial"
+        assert match.over_receipt is True
+        assert match.received_value == Decimal("700")
+        assert match.billed_beyond_receipt is True
+        # No pair of pooled totals states a short leg and an over one.
+        assert match.ordered_quantity is None
+        assert match.received_quantity is None
+        assert {i["code"] for i in match.issues} == {
+            "po_match.issue.partial_receipt",
+            "po_match.issue.over_receipt",
+        }
+
+        await _refresh(s, inv)
+        await s.commit()
+        (row,) = await _rows(s, inv.id)
+        assert row.status == "open"
+        assert row.description_code == "po_partial_receipt"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("recorder_is", "closes"),
+    [("uploader", False), ("someone_else", True)],
+)
+async def test_a_split_hold_lifts_when_its_short_leg_is_received(realdb, recorder_is, closes):
+    """A receipt on one leg reaches the split through
+    `refresh_invoices_citing_pos` (the combined reference equals no leg's
+    number), and the hand-entered receipt is vetted like a single PO's
+    (`receipts_clear_hold` over every leg, decisions §262)."""
+    from app.services.invoice_warnings import refresh_invoices_citing_pos
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    uploader = uuid.uuid4()
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent, totals=("637.00", "400.00"))
+        await _add_gr(s, org_id, ent, legs[0].id, received="5")
+        await _add_gr(s, org_id, ent, legs[1].id, received="10")
+        inv = await _split_invoice(s, org_id, ent, legs, amount="1037.00")
+        inv.uploaded_by_id = uploader
+        await s.commit()
+        await _refresh(s, inv)
+        await s.commit()
+        (row,) = await _rows(s, inv.id)
+        assert row.status == "open"
+
+        gr = await _add_gr(s, org_id, ent, legs[0].id, received="5")
+        gr.source = "manual"
+        gr.recorded_by_user_id = uploader if recorder_is == "uploader" else uuid.uuid4()
+        inv.status = InvoiceStatus.approved
+        await s.commit()
+        await refresh_invoices_citing_pos(
+            s, org_id, {legs[0].po_number}, org_settings={}, caller="test"
+        )
+        await s.commit()
+
+        (row,) = await _rows(s, inv.id)
+        assert row.status == ("resolved" if closes else "open")
+        await s.refresh(inv)
+        assert inv.po_match["status"] == "matched"
+
+
+@pytest.mark.asyncio
+async def test_every_leg_of_a_split_is_inspected(realdb):
+    """A failed inspection on either leg holds the split; a required
+    inspection missing on one leg reads as missing however the other passed."""
+    from app.services.invoice_warnings import blocking_finding_types
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+
+    def _inspection(po, result):
+        return QualityInspection(
+            inspection_number=f"QI-{uuid.uuid4().hex[:6]}",
+            po_id=po.id,
+            result=result,
+            inspected_date=date(2026, 10, 1),
+            source="qms",
+            organization_id=org_id,
+            entity_id=ent,
+        )
+
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent)
+        s.add(_inspection(legs[0], "pass"))
+        inv = await _split_invoice(s, org_id, ent, legs, amount="1003.00")
+        await s.commit()
+
+        missing = await match_invoice_to_po(s, inv, require_inspection=True)
+        assert missing.match_type == "4-way"
+        assert missing.inspection_required is True
+        assert missing.inspection_result is None
+        assert blocking_finding_types(missing) == {"quality_hold"}
+
+        s.add(_inspection(legs[1], "fail"))
+        await s.commit()
+        failed = await match_invoice_to_po(s, inv, require_inspection=True)
+        assert failed.status == "mismatch"
+        assert failed.inspection_result == "fail"
+        assert len(failed.inspection_ids) == 2
+        assert blocking_finding_types(failed) == {"quality_hold"}

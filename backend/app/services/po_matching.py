@@ -4,6 +4,7 @@ Supports 2-way (invoice vs PO), 3-way (invoice vs PO vs GR), and 4-way
 (invoice vs PO vs GR vs Quality Inspection) matching.
 """
 
+import uuid
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal, InvalidOperation
 
@@ -187,6 +188,12 @@ class MatchResult:
     #: invoice is held, as for a cancelled one.
     po_not_issued: bool = False
     gr_id: str | None = None
+    #: A multi-PO split's legs, when the match read the invoice as one
+    #: (``Invoice.split_po_ids`` — see ``_split_legs``); empty for a single-PO
+    #: match, whose PO is ``po_id``. ``po_id`` and ``gr_id`` stay ``None`` /
+    #: the newest receipt across the legs on a split; every money and quantity
+    #: figure is the legs' combined one.
+    po_ids: list[str] = field(default_factory=list)
 
     #: invoice - PO, in the invoice's currency. `None` when the two are in
     #: DIFFERENT currencies: no figure is the difference between EUR and USD
@@ -204,6 +211,11 @@ class MatchResult:
     #: result so `invoice_warnings` can parameterize the quality-hold sentence
     #: from the record instead of cutting a substring out of `issues`.
     inspection_deviation_notes: str | None = None
+    #: Every inspection the match read: the one ``inspection_id`` names on a
+    #: single PO, one per inspected leg on a split. A hold the 4-way leg
+    #: raised may close only when each of them may lift it
+    #: (``invoice_warnings._inspection_clears_hold``).
+    inspection_ids: list[str] = field(default_factory=list)
 
     # 3-way: received quantity EXCEEDS what was ordered. Additive to the
     # persisted `invoice.po_match` shape — `status` deliberately keeps its four
@@ -244,6 +256,13 @@ class MatchResult:
         """JSON-safe dict for the ``invoice.po_match`` JSONB column."""
         return _json_safe(asdict(self))
 
+    def matched_po_ids(self) -> list[str]:
+        """Every PO the match read receipts and inspections on: a split's
+        legs, else the single ``po_id`` (empty when no PO was found)."""
+        if self.po_ids:
+            return list(self.po_ids)
+        return [self.po_id] if self.po_id else []
+
 
 async def match_invoice_to_po(
     db: AsyncSession,
@@ -253,7 +272,9 @@ async def match_invoice_to_po(
 ) -> MatchResult:
     """Match an invoice against POs, goods receipts, and quality inspections.
 
-    1. Find PO by po_number on the invoice
+    1. Find PO by po_number on the invoice — or, for a multi-PO split whose
+       reference still names the legs in ``split_po_ids``, match those legs
+       combined (``_split_legs`` / ``_match_split``)
     2. Compare amounts (2-way match) — only when the invoice and the PO are in
        the SAME currency. Different codes are a ``mismatch`` with no variance;
        a PO that records no code is compared at face value and reported as
@@ -288,6 +309,17 @@ async def match_invoice_to_po(
     if not invoice.po_number:
         result.status = "no_po"
         return result
+
+    tolerance = _to_decimal(tolerance_pct, Decimal("5.0"))
+
+    # A multi-PO split (decisions §433): its combined reference ("PO-A,PO-B")
+    # names no single PO, so the lookup below would read `no_po` and re-raise
+    # the hold the split agent resolved, on every later edit.
+    legs = await _split_legs(db, invoice)
+    if legs is not None:
+        return await _match_split(
+            db, invoice, legs, tolerance=tolerance, require_inspection=require_inspection
+        )
 
     # Find PO by number, confined to the invoice's own entity (see docstring).
     entity_id = getattr(invoice, "entity_id", None)
@@ -336,11 +368,113 @@ async def match_invoice_to_po(
     # stay Decimal in memory; `to_json_dict()` renders them for the JSONB column.
     invoice_amount = _to_decimal(invoice.amount)
     po_total = _to_decimal(po.total)
-    tolerance = _to_decimal(tolerance_pct, Decimal("5.0"))
     result.match_type = "2-way"
     result.po_total_unverifiable_reason = po.total_unverifiable_reason or None
+    _amount_leg(
+        result,
+        cancelled=po.status in CANCELLED_PO_STATUSES,
+        not_issued=po.status == UNISSUED_PO_STATUS,
+        invoice_amount=invoice_amount,
+        invoice_currency=invoice_currency,
+        po_total=po_total,
+        tolerance=tolerance,
+    )
 
-    if po.status in CANCELLED_PO_STATUSES:
+    # 3-way match: check for goods receipts. A PO can have SEVERAL goods receipts
+    # (the normal partial-delivery case — a PO filled by several shipments, each
+    # a separate GR). Fetch them ALL (newest first) rather than a single row via
+    # `scalar_one_or_none()`, which raised MultipleResultsFound on >1 GR and
+    # crashed the matcher. The received-quantity comparison sums across every GR
+    # (so a PO fully filled by two shipments is `matched`, not falsely `partial`);
+    # the newest GR is the representative row for `gr_id` + the inspection leg.
+    # Which receipts count is `_live_receipts`.
+    grs, all_receipts_cancelled = await _live_receipts(db, po, entity_id)
+    gr = grs[0] if grs else None
+
+    if gr or all_receipts_cancelled:
+        result.match_type = "3-way"
+        result.gr_id = str(gr.id) if gr else None
+
+        # Compare received vs ordered quantity, aggregating receipts across ALL
+        # live GRs for the PO. Only when the PO has line items and at least one
+        # GR carries received lines (an empty GR header has nothing to verify)
+        # — or every receipt was cancelled, which is zero received.
+        quantities = _receipt_quantities(po, grs, all_receipts_cancelled)
+        if quantities is not None:
+            po_qty_total, gr_qty_total = quantities
+            result.ordered_quantity = po_qty_total
+            result.received_quantity = gr_qty_total
+
+            if po_qty_total > 0 and gr_qty_total < po_qty_total:
+                result.issues.append(_partial_receipt_issue(po_qty_total, gr_qty_total))
+                if result.status == "matched":
+                    result.status = "partial"
+                # Does the invoice bill beyond what arrived? Same exact-Decimal
+                # tolerance as the amount leg, measured against the received
+                # slice of the PO rather than its whole total. Skipped when the
+                # currencies differ or the PO's total is unverifiable — each is
+                # already a mismatch with no figure to measure against.
+                if (
+                    result.currency_check != CURRENCY_DIFFERENT
+                    and not result.po_total_unverifiable_reason
+                ):
+                    received_value = po_total * gr_qty_total / po_qty_total
+                    result.received_value = received_value
+                    result.billed_beyond_receipt = _bills_beyond(
+                        invoice_amount, received_value, tolerance
+                    )
+            elif po_qty_total > 0 and gr_qty_total > po_qty_total:
+                # Over-receipt. The short side was flagged from the start; the
+                # long side never was, so more units booked in than were ever
+                # ordered passed the 3-way leg in silence — and an over-delivery
+                # is how an invoice for quantities nobody authorised gets its
+                # supporting receipt. Surfaced as an issue (the invoice modal
+                # renders `issues` in its PO-match panel) plus the additive `over_receipt`
+                # flag; `status` is left to the amount control, which is the
+                # gate that decides whether the invoice is payable.
+                result.over_receipt = True
+                result.issues.append(_over_receipt_issue(po_qty_total, gr_qty_total))
+
+    # 4-way match: the inspection of these goods (`_latest_inspection_for`).
+    inspection = await _latest_inspection_for(db, po, gr)
+
+    if inspection is not None:
+        result.match_type = "4-way"
+        result.inspection_ids = [str(inspection.id)]
+        _record_inspection(result, inspection)
+        _inspection_verdict(result, inspection)
+    elif require_inspection and po is not None:
+        result.inspection_required = True
+        result.issues.append(po_match_issue("inspection_required_missing"))
+
+    # Decimal values here are rendered to numbers by `to_json_dict()` at the
+    # JSONB boundary — the arithmetic that produced them was exact Decimal.
+    result.details = _match_details(
+        result,
+        invoice_amount=invoice_amount,
+        tolerance=tolerance,
+        has_gr=gr is not None,
+        all_receipts_cancelled=all_receipts_cancelled,
+        has_inspection=inspection is not None,
+    )
+
+    return result
+
+
+def _amount_leg(
+    result: MatchResult,
+    *,
+    cancelled: bool,
+    not_issued: bool,
+    invoice_amount: Decimal,
+    invoice_currency: str | None,
+    po_total: Decimal,
+    tolerance: Decimal,
+) -> None:
+    """The 2-way leg: set ``result.status`` and its amount fields from the PO
+    (or a split's legs, combined). ``result.currency_check``,
+    ``po_currency`` and ``po_total_unverifiable_reason`` are already set."""
+    if cancelled:
         # The order was called off in the ERP (or here): it authorizes nothing,
         # so no invoice passes the amount control against it, whatever the
         # figures say. Held for a person, like the currency guard.
@@ -350,7 +484,7 @@ async def match_invoice_to_po(
         result.status = "mismatch"
         result.po_cancelled = True
         result.issues.append(po_match_issue("po_cancelled"))
-    elif po.status == UNISSUED_PO_STATUS:
+    elif not_issued:
         # Nobody in the ERP has approved or issued the order yet (a draft, or
         # one awaiting approval): it authorizes nothing, so matching against it
         # would pass the amount control on a draft (decisions §394). Held for
@@ -415,28 +549,54 @@ async def match_invoice_to_po(
         else:
             result.status = "matched"
 
-    # 3-way match: check for goods receipts. A PO can have SEVERAL goods receipts
-    # (the normal partial-delivery case — a PO filled by several shipments, each
-    # a separate GR). Fetch them ALL (newest first) rather than a single row via
-    # `scalar_one_or_none()`, which raised MultipleResultsFound on >1 GR and
-    # crashed the matcher. The received-quantity comparison sums across every GR
-    # (so a PO fully filled by two shipments is `matched`, not falsely `partial`);
-    # the newest GR is the representative row for `gr_id` + the inspection leg.
-    #
-    # CANCELLED receipts are excluded. The sum ignored `GoodsReceipt.status`
-    # entirely, so a delivery that was cancelled or reversed still counted as
-    # goods in hand: it kept the receipt leg at 100%, held the invoice at
-    # `matched` instead of `partial`, and — because the whole point of the
-    # 3-way control is "don't pay for what didn't arrive" — cleared an invoice
-    # for goods the business had explicitly recorded as not received.
-    #
-    # A PO whose receipts are ALL cancelled is a 3-way match with nothing
-    # received — not a 2-way match. It once fell back to 2-way on the reading
-    # "there is no receipt evidence", but a cancelled receipt IS evidence: the
-    # business recorded that the goods did not arrive. Reading it as absence let
-    # cancelling the only receipt turn an over-billed invoice into a clean 2-way
-    # `matched`, which closed its payment hold — and receipts can be cancelled
-    # in the app, by the person who keyed the invoice (decisions §262).
+
+def _bills_beyond(invoice_amount: Decimal, received_value: Decimal, tolerance: Decimal) -> bool:
+    """Whether the invoice asks for more than ``received_value`` by more than
+    the match tolerance — exact Decimal, like the amount leg."""
+    if received_value > 0:
+        over_pct = (invoice_amount - received_value) / received_value * 100
+        return over_pct > tolerance
+    return invoice_amount > 0
+
+
+def _partial_receipt_issue(ordered: Decimal, received: Decimal) -> dict:
+    pct_received = (received / ordered) * Decimal(100)
+    return po_match_issue("partial_receipt", receivedPct=f"{pct_received:.0f}")
+
+
+def _over_receipt_issue(ordered: Decimal, received: Decimal) -> dict:
+    return po_match_issue(
+        "over_receipt",
+        receivedQuantity=format_quantity(received),
+        orderedQuantity=format_quantity(ordered),
+        excessQuantity=format_quantity(received - ordered),
+    )
+
+
+async def _live_receipts(
+    db: AsyncSession, po: PurchaseOrder, entity_id
+) -> tuple[list[GoodsReceipt], bool]:
+    """The PO's live goods receipts (newest first, the representative row
+    first), and whether it has receipts that are ALL cancelled.
+
+    CANCELLED receipts are excluded. The sum ignored `GoodsReceipt.status`
+    entirely, so a delivery that was cancelled or reversed still counted as
+    goods in hand: it kept the receipt leg at 100%, held the invoice at
+    `matched` instead of `partial`, and — because the whole point of the
+    3-way control is "don't pay for what didn't arrive" — cleared an invoice
+    for goods the business had explicitly recorded as not received.
+
+    A PO whose receipts are ALL cancelled is a 3-way match with nothing
+    received — not a 2-way match. It once fell back to 2-way on the reading
+    "there is no receipt evidence", but a cancelled receipt IS evidence: the
+    business recorded that the goods did not arrive. Reading it as absence let
+    cancelling the only receipt turn an over-billed invoice into a clean 2-way
+    `matched`, which closed its payment hold — and receipts can be cancelled
+    in the app, by the person who keyed the invoice (decisions §262).
+
+    Same strict entity scope as the PO lookup — a receipt booked under a
+    different subsidiary must never satisfy this invoice's 3-way leg.
+    """
     gr_query = (
         select(GoodsReceipt)
         .where(
@@ -446,103 +606,61 @@ async def match_invoice_to_po(
         .options(selectinload(GoodsReceipt.line_items))
         .order_by(GoodsReceipt.created_at.desc(), GoodsReceipt.id.desc())
     )
-    # Same strict entity scope as the PO lookup — a receipt booked under a
-    # different subsidiary must never satisfy this invoice's 3-way leg.
     gr_query = apply_entity_scope(gr_query, GoodsReceipt, entity_id)
-    grs = (await db.execute(gr_query)).scalars().all()
-    gr = grs[0] if grs else None
+    grs = list((await db.execute(gr_query)).scalars().all())
+    if grs:
+        return grs, False
+    any_receipt = apply_entity_scope(
+        select(GoodsReceipt.id).where(GoodsReceipt.po_id == po.id).limit(1),
+        GoodsReceipt,
+        entity_id,
+    )
+    return grs, (await db.execute(any_receipt)).scalar_one_or_none() is not None
 
-    all_receipts_cancelled = False
-    if gr is None:
-        any_receipt = apply_entity_scope(
-            select(GoodsReceipt.id).where(GoodsReceipt.po_id == po.id).limit(1),
-            GoodsReceipt,
-            entity_id,
-        )
-        all_receipts_cancelled = (await db.execute(any_receipt)).scalar_one_or_none() is not None
 
-    if gr or all_receipts_cancelled:
-        result.match_type = "3-way"
-        result.gr_id = str(gr.id) if gr else None
+def _receipt_quantities(
+    po: PurchaseOrder, grs: list[GoodsReceipt], all_cancelled: bool
+) -> tuple[Decimal, Decimal] | None:
+    """``(ordered, received)`` for one PO, received summed across every live
+    receipt — or ``None`` when there is nothing to compare: the PO has no
+    lines, or no receipt carries received lines (an empty GR header has
+    nothing to verify). Every receipt cancelled is zero received."""
+    if not po.line_items or not (all_cancelled or any(g.line_items for g in grs)):
+        return None
+    ordered = sum((_to_decimal(li.quantity) for li in po.line_items), Decimal("0"))
+    received = sum(
+        (_to_decimal(li.quantity_received) for g in grs for li in g.line_items),
+        Decimal("0"),
+    )
+    return ordered, received
 
-        # Compare received vs ordered quantity, aggregating receipts across ALL
-        # live GRs for the PO. Only when the PO has line items and at least one
-        # GR carries received lines (an empty GR header has nothing to verify)
-        # — or every receipt was cancelled, which is zero received.
-        if po.line_items and (all_receipts_cancelled or any(g.line_items for g in grs)):
-            po_qty_total = sum((_to_decimal(li.quantity) for li in po.line_items), Decimal("0"))
-            gr_qty_total = sum(
-                (_to_decimal(li.quantity_received) for g in grs for li in g.line_items),
-                Decimal("0"),
-            )
 
-            result.ordered_quantity = po_qty_total
-            result.received_quantity = gr_qty_total
+async def _latest_inspection_for(
+    db: AsyncSession, po: PurchaseOrder, gr: GoodsReceipt | None
+) -> QualityInspection | None:
+    """The quality inspection of this PO's goods. Prefer one tied to the
+    goods receipt (the goods we actually received); fall back to one tied to
+    the PO. Take the most recent.
 
-            if po_qty_total > 0 and gr_qty_total < po_qty_total:
-                pct_received = (gr_qty_total / po_qty_total) * Decimal(100)
-                result.issues.append(
-                    po_match_issue("partial_receipt", receivedPct=f"{pct_received:.0f}")
-                )
-                if result.status == "matched":
-                    result.status = "partial"
-                # Does the invoice bill beyond what arrived? Same exact-Decimal
-                # tolerance as the amount leg, measured against the received
-                # slice of the PO rather than its whole total. Skipped when the
-                # currencies differ or the PO's total is unverifiable — each is
-                # already a mismatch with no figure to measure against.
-                if (
-                    result.currency_check != CURRENCY_DIFFERENT
-                    and not result.po_total_unverifiable_reason
-                ):
-                    received_value = po_total * gr_qty_total / po_qty_total
-                    result.received_value = received_value
-                    if received_value > 0:
-                        over_pct = (invoice_amount - received_value) / received_value * 100
-                        result.billed_beyond_receipt = over_pct > tolerance
-                    else:
-                        result.billed_beyond_receipt = invoice_amount > 0
-            elif po_qty_total > 0 and gr_qty_total > po_qty_total:
-                # Over-receipt. The short side was flagged from the start; the
-                # long side never was, so more units booked in than were ever
-                # ordered passed the 3-way leg in silence — and an over-delivery
-                # is how an invoice for quantities nobody authorised gets its
-                # supporting receipt. Surfaced as an issue (the invoice modal
-                # renders `issues` in its PO-match panel) plus the additive `over_receipt`
-                # flag; `status` is left to the amount control, which is the
-                # gate that decides whether the invoice is payable.
-                result.over_receipt = True
-                over_qty = gr_qty_total - po_qty_total
-                result.issues.append(
-                    po_match_issue(
-                        "over_receipt",
-                        receivedQuantity=format_quantity(gr_qty_total),
-                        orderedQuantity=format_quantity(po_qty_total),
-                        excessQuantity=format_quantity(over_qty),
-                    )
-                )
+    The fallback has to run even when a GR EXISTS, which is the part that was
+    missing: `gr is not None` used to make the GR-scoped lookup the ONLY one,
+    so an inspection recorded against the PO alone became invisible the moment
+    any receipt was booked. `qms_sync` produces exactly that row whenever the
+    QMS knows the PO number but not the GR number (`_resolve_gr_id` returns
+    None and `gr_id` stays NULL), and `POST /api/inspections` accepts a
+    PO-only body too. The control then failed OPEN in the worst direction: a
+    `fail` verdict on rejected goods never reached the matcher, the invoice
+    read a clean `3-way` `matched`, and nothing raised the `quality_hold`
+    exception — the goods are refused and the supplier is paid anyway.
 
-    # 4-way match: check for a quality inspection. Prefer one tied to the
-    # goods receipt (the goods we actually received); fall back to one tied
-    # to the PO. Take the most recent.
-    #
-    # The fallback has to run even when a GR EXISTS, which is the part that was
-    # missing: `gr is not None` used to make the GR-scoped lookup the ONLY one,
-    # so an inspection recorded against the PO alone became invisible the moment
-    # any receipt was booked. `qms_sync` produces exactly that row whenever the
-    # QMS knows the PO number but not the GR number (`_resolve_gr_id` returns
-    # None and `gr_id` stays NULL), and `POST /api/inspections` accepts a
-    # PO-only body too. The control then failed OPEN in the worst direction: a
-    # `fail` verdict on rejected goods never reached the matcher, the invoice
-    # read a clean `3-way` `matched`, and nothing raised the `quality_hold`
-    # exception — the goods are refused and the supplier is paid anyway.
-    #
-    # The fallback is restricted to inspections with NO `gr_id` of their own —
-    # a genuinely PO-level inspection. A row belonging to a *different*
-    # shipment of the same PO also carries this `po_id`, and letting that stand
-    # in for the receipt we're matching would substitute one masking bug for
-    # another (shipment 2 passed, so shipment 1 reads inspected).
-    async def _latest_inspection(*conditions):
+    The fallback is restricted to inspections with NO `gr_id` of their own —
+    a genuinely PO-level inspection. A row belonging to a *different*
+    shipment of the same PO also carries this `po_id`, and letting that stand
+    in for the receipt we're matching would substitute one masking bug for
+    another (shipment 2 passed, so shipment 1 reads inspected).
+    """
+
+    async def _latest(*conditions):
         q = (
             select(QualityInspection)
             .where(*conditions)
@@ -553,47 +671,57 @@ async def match_invoice_to_po(
 
     inspection = None
     if gr is not None:
-        inspection = await _latest_inspection(QualityInspection.gr_id == gr.id)
+        inspection = await _latest(QualityInspection.gr_id == gr.id)
     if inspection is None:
-        inspection = await _latest_inspection(
+        inspection = await _latest(
             QualityInspection.po_id == po.id, QualityInspection.gr_id.is_(None)
         )
+    return inspection
 
-    if inspection is not None:
-        result.match_type = "4-way"
-        result.inspection_id = str(inspection.id)
-        result.inspection_result = inspection.result
+
+def _record_inspection(result: MatchResult, inspection: QualityInspection) -> None:
+    """Carry ``inspection`` as the match's representative verdict."""
+    result.inspection_id = str(inspection.id)
+    result.inspection_result = inspection.result
+    result.inspection_accepted_quantity = (
+        float(inspection.accepted_quantity) if inspection.accepted_quantity is not None else None
+    )
+    result.inspection_deviation_notes = inspection.deviation_notes
+
+
+def _inspection_verdict(result: MatchResult, inspection: QualityInspection) -> None:
+    """Fold one inspection's verdict into ``status`` and ``issues``: ``fail``
+    is a mismatch, ``partial`` a partial match, ``pass`` changes nothing."""
+    if inspection.result == "fail":
+        result.status = "mismatch"
+        if inspection.deviation_notes:
+            issue = po_match_issue("inspection_failed_notes", notes=inspection.deviation_notes)
+        else:
+            issue = po_match_issue("inspection_failed")
+        result.issues.append(issue)
+    elif inspection.result == "partial":
+        if result.status == "matched":
+            result.status = "partial"
         if inspection.accepted_quantity is not None:
-            result.inspection_accepted_quantity = float(inspection.accepted_quantity)
+            issue = po_match_issue(
+                "partial_acceptance",
+                acceptedQuantity=f"{float(inspection.accepted_quantity):g}",
+            )
+        else:
+            issue = po_match_issue("partial_acceptance_unquantified")
+        result.issues.append(issue)
 
-        result.inspection_deviation_notes = inspection.deviation_notes
 
-        if inspection.result == "fail":
-            result.status = "mismatch"
-            if inspection.deviation_notes:
-                issue = po_match_issue("inspection_failed_notes", notes=inspection.deviation_notes)
-            else:
-                issue = po_match_issue("inspection_failed")
-            result.issues.append(issue)
-        elif inspection.result == "partial":
-            if result.status == "matched":
-                result.status = "partial"
-            if result.inspection_accepted_quantity is not None:
-                issue = po_match_issue(
-                    "partial_acceptance",
-                    acceptedQuantity=f"{result.inspection_accepted_quantity:g}",
-                )
-            else:
-                issue = po_match_issue("partial_acceptance_unquantified")
-            result.issues.append(issue)
-        # result == "pass" -> no status change
-    elif require_inspection and po is not None:
-        result.inspection_required = True
-        result.issues.append(po_match_issue("inspection_required_missing"))
-
-    # Decimal values here are rendered to numbers by `to_json_dict()` at the
-    # JSONB boundary — the arithmetic that produced them was exact Decimal.
-    result.details = {
+def _match_details(
+    result: MatchResult,
+    *,
+    invoice_amount: Decimal,
+    tolerance: Decimal,
+    has_gr: bool,
+    all_receipts_cancelled: bool,
+    has_inspection: bool,
+) -> dict:
+    return {
         "match_type": result.match_type,
         "po_total": result.po_total,
         "invoice_amount": invoice_amount,
@@ -605,14 +733,231 @@ async def match_invoice_to_po(
         "po_not_issued": result.po_not_issued,
         "tolerance_pct": tolerance,
         "within_tolerance": result.within_tolerance,
-        "has_gr": gr is not None,
+        "has_gr": has_gr,
         "all_receipts_cancelled": all_receipts_cancelled,
         "over_receipt": result.over_receipt,
         "billed_beyond_receipt": result.billed_beyond_receipt,
-        "has_inspection": inspection is not None,
+        "has_inspection": has_inspection,
         "inspection_result": result.inspection_result,
     }
 
+
+# ---------------------------------------------------------------------------
+# Multi-PO split
+# ---------------------------------------------------------------------------
+
+
+async def _split_legs(db: AsyncSession, invoice: Invoice) -> list[PurchaseOrder] | None:
+    """The POs a multi-PO split linked this invoice to, when its reference
+    still names them — else ``None`` and the single-PO lookup runs.
+
+    The split agent (`multi_po_split_v1`) writes a combined ``po_number``
+    ("PO-A,PO-B") and records the legs' ids in ``Invoice.split_po_ids``, which
+    no refresh rewrites (decisions §433). The legs are read from that column,
+    never re-derived from the numbers, and only while the reference agrees
+    with it: every number in ``po_number`` must resolve to a PO in the set,
+    under the single-PO lookup's own filters (the invoice's entity, strictly;
+    its vendor when it has one; the newest row per number). A reference a
+    person edited away from the split — one PO, or a number the set does not
+    hold — is matched as written, so it resolves or reads ``no_po`` as any
+    other reference does. The column is append-only and may over-name (a
+    re-run split, or a backfill that took every same-numbered PO), so a PO in
+    the set that the reference does not name is not a leg.
+    """
+    split = getattr(invoice, "split_po_ids", None)
+    if not isinstance(split, list) or not split or not invoice.po_number:
+        return None
+    numbers = list(dict.fromkeys(n.strip() for n in invoice.po_number.split(",") if n.strip()))
+    if len(numbers) < 2:
+        return None
+    ids: set[uuid.UUID] = set()
+    for value in split:
+        try:
+            ids.add(uuid.UUID(str(value)))
+        except ValueError:
+            continue
+    if not ids:
+        return None
+
+    query = (
+        select(PurchaseOrder)
+        .where(PurchaseOrder.id.in_(ids), PurchaseOrder.po_number.in_(numbers))
+        .options(selectinload(PurchaseOrder.line_items))
+        .order_by(PurchaseOrder.created_at.desc(), PurchaseOrder.id.desc())
+    )
+    query = apply_entity_scope(query, PurchaseOrder, getattr(invoice, "entity_id", None))
+    if invoice.vendor_id:
+        query = query.where(PurchaseOrder.vendor_id == invoice.vendor_id)
+    by_number: dict[str, PurchaseOrder] = {}
+    for po in (await db.execute(query)).scalars().all():
+        by_number.setdefault(po.po_number, po)
+    if set(by_number) != set(numbers):
+        return None
+    return [by_number[n] for n in numbers]
+
+
+async def _match_split(
+    db: AsyncSession,
+    invoice: Invoice,
+    legs: list[PurchaseOrder],
+    *,
+    tolerance: Decimal,
+    require_inspection: bool,
+) -> MatchResult:
+    """Match a multi-PO split against its legs (``_split_legs``).
+
+    * **2-way** on the legs' combined total — the comparison the split agent
+      linked on. Any leg cancelled, unissued or unverifiable holds the whole
+      invoice, as that PO would on its own; any leg in another currency is a
+      currency mismatch; a leg recording no currency makes the comparison
+      ``unknown`` (face value), as for one PO.
+    * **3-way and 4-way per leg**, then combined. Quantities are never pooled
+      across legs before they are judged: an over-receipt on one leg would
+      otherwise hide a short receipt on another. A short leg counts for the
+      share of its total its receipts cover, every other leg for its whole
+      total (a leg with no receipt evidence is a 2-way leg, as one PO with no
+      receipt is), and the invoice bills beyond receipt when it asks for more
+      than that sum. Every leg's inspection is read: any ``fail`` is the
+      representative verdict, then a required inspection missing on any leg,
+      then a ``partial``.
+
+    ``ordered_quantity`` / ``received_quantity`` are the legs' sums, except
+    when one leg is short and another over: no pair of totals states both, so
+    they are ``None`` and the per-leg figures are in ``issues`` and
+    ``details["legs"]``.
+    """
+    result = MatchResult()
+    entity_id = getattr(invoice, "entity_id", None)
+    invoice_amount = _to_decimal(invoice.amount)
+    invoice_currency = po_currency_code(invoice.currency)
+
+    result.po_ids = [str(po.id) for po in legs]
+    result.po_number = invoice.po_number
+    result.match_type = "2-way"
+    totals = [_to_decimal(po.total) for po in legs]
+    po_total = sum(totals, Decimal("0"))
+    result.po_total = po_total
+
+    codes = [po_currency_code(po.currency) for po in legs]
+    checks = [compare_currencies(invoice_currency, code) for code in codes]
+    if CURRENCY_DIFFERENT in checks:
+        result.currency_check = CURRENCY_DIFFERENT
+        result.po_currency = codes[checks.index(CURRENCY_DIFFERENT)]
+    else:
+        result.currency_check = (
+            CURRENCY_SAME if all(c == CURRENCY_SAME for c in checks) else CURRENCY_UNKNOWN
+        )
+        result.po_currency = codes[0] if len(set(codes)) == 1 else None
+    result.po_total_unverifiable_reason = next(
+        (po.total_unverifiable_reason for po in legs if po.total_unverifiable_reason), None
+    )
+    _amount_leg(
+        result,
+        cancelled=any(po.status in CANCELLED_PO_STATUSES for po in legs),
+        not_issued=any(po.status == UNISSUED_PO_STATUS for po in legs),
+        invoice_amount=invoice_amount,
+        invoice_currency=invoice_currency,
+        po_total=po_total,
+        tolerance=tolerance,
+    )
+
+    newest_gr: GoodsReceipt | None = None
+    any_receipt_evidence = False
+    any_all_cancelled = False
+    quantified = False
+    short = over = False
+    ordered_sum = received_sum = Decimal("0")
+    covered = Decimal("0")
+    inspected: list[QualityInspection] = []
+    uninspected = 0
+    leg_details: list[dict] = []
+
+    for po, total in zip(legs, totals, strict=True):
+        grs, all_cancelled = await _live_receipts(db, po, entity_id)
+        gr = grs[0] if grs else None
+        any_all_cancelled = any_all_cancelled or all_cancelled
+        leg_value = total
+        quantities = None
+        if gr or all_cancelled:
+            any_receipt_evidence = True
+            if gr is not None and (newest_gr is None or gr.created_at > newest_gr.created_at):
+                newest_gr = gr
+            quantities = _receipt_quantities(po, grs, all_cancelled)
+        if quantities is not None:
+            ordered, received = quantities
+            quantified = True
+            ordered_sum += ordered
+            received_sum += received
+            if ordered > 0 and received < ordered:
+                short = True
+                result.issues.append(_partial_receipt_issue(ordered, received))
+                leg_value = total * received / ordered
+            elif ordered > 0 and received > ordered:
+                over = True
+                result.issues.append(_over_receipt_issue(ordered, received))
+        covered += leg_value
+
+        inspection = await _latest_inspection_for(db, po, gr)
+        if inspection is None:
+            uninspected += 1
+        else:
+            inspected.append(inspection)
+            _inspection_verdict(result, inspection)
+
+        leg_details.append(
+            {
+                "po_id": str(po.id),
+                "po_number": po.po_number,
+                "po_total": total,
+                "po_currency": po_currency_code(po.currency),
+                "has_gr": gr is not None,
+                "all_receipts_cancelled": all_cancelled,
+                "ordered_quantity": quantities[0] if quantities else None,
+                "received_quantity": quantities[1] if quantities else None,
+                "inspection_result": inspection.result if inspection is not None else None,
+            }
+        )
+
+    if any_receipt_evidence:
+        result.match_type = "3-way"
+        result.gr_id = str(newest_gr.id) if newest_gr is not None else None
+    if quantified and not (short and over):
+        result.ordered_quantity = ordered_sum
+        result.received_quantity = received_sum
+    result.over_receipt = over
+    if short:
+        if result.status == "matched":
+            result.status = "partial"
+        if result.currency_check != CURRENCY_DIFFERENT and not result.po_total_unverifiable_reason:
+            result.received_value = covered
+            result.billed_beyond_receipt = _bills_beyond(invoice_amount, covered, tolerance)
+
+    if inspected:
+        result.match_type = "4-way"
+        result.inspection_ids = [str(i.id) for i in inspected]
+    missing_required = require_inspection and uninspected > 0
+    if missing_required:
+        result.inspection_required = True
+        result.issues.append(po_match_issue("inspection_required_missing"))
+    failed = [i for i in inspected if i.result == "fail"]
+    partial = [i for i in inspected if i.result == "partial"]
+    # The representative verdict the warnings layer raises on: a failure
+    # first; then a required inspection missing on any leg, which must read as
+    # missing (`inspection_result` None) however the other legs passed.
+    if failed:
+        _record_inspection(result, failed[0])
+    elif not missing_required and (partial or inspected):
+        _record_inspection(result, (partial or inspected)[0])
+
+    result.details = _match_details(
+        result,
+        invoice_amount=invoice_amount,
+        tolerance=tolerance,
+        has_gr=newest_gr is not None,
+        all_receipts_cancelled=any_all_cancelled,
+        has_inspection=bool(inspected),
+    )
+    result.details["legs"] = leg_details
     return result
 
 

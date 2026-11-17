@@ -490,15 +490,16 @@ or three POs. This is the deferred *"Multi-PO split matching"* follow-up to
   sets `invoice.po_number` to a combined `"PO-A,PO-B"` reference + aligns
   `vendor_id` (escalating instead when that would set the payee of an invoice
   ever approved, as `missing_po_v1` does), records the set in
-  **`invoice.split_po_ids`** (append only; its one writer), and writes a
-  **multi-PO match snapshot** onto `invoice.po_match`
-  (`match_type: "multi-po-split"`, the PO ids/numbers + combined total) for the
-  modal. The snapshot is display only: the next warning refresh rewrites
-  `po_match` and the combined reference matches no PO, so the approval door's
-  receiver / inspector sets read the split's POs from `split_po_ids`
-  (decisions §433). The single-PO matcher can't produce a `matched` for a split, so the
-  snapshot is written **directly** — `refresh_warnings` is deliberately **not**
-  called (it would re-run the single-PO matcher and re-raise a `no_po` exception).
+  **`invoice.split_po_ids`** (append only; its one writer; the approval door's
+  receiver / inspector sets read the split's POs from it, decisions §433), then
+  re-matches through `refresh_warnings` as `missing_po_v1` does. The matcher
+  reads a split from its legs while the reference names them
+  (`po-matching.md` § A multi-PO split is matched against its legs), so the
+  `po_match` it writes is the matcher's own — the same one every later refresh
+  writes, which no longer re-raises `no_po`. The agent goes on only if that
+  re-match is a clean `matched`, in the invoice's currency, read as the split it
+  linked; anything else (a leg short-received, a failed inspection) escalates,
+  and the link unwinds with the savepoint.
   It then approves through `review.approve_invoice` (with the triggering user's real `actor_roles`).
   **It NEVER adjusts the invoice amount** — the sum only *selects* the set; the
   amount is left exactly as-is, so the invoice is approved at its own face value.
