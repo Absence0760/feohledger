@@ -1885,6 +1885,14 @@ converted, which is precisely what `unconverted_count` exists to prevent
 `tests/test_payment_queue_reporting_lock.py`, whose last case fails if the
 queue ever restates the rule inline again.
 
+**One schedule per invoice.** The page and the savings rollup both join
+`services/payment_schedules.latest_schedules()` — each invoice's current
+schedule row, by the same `LATEST_SCHEDULE_ORDER` the cash forecast and the
+discount engine read — never the `payment_schedules` table. Joined to the
+table, an invoice carrying two schedule rows was listed twice (pushing the next
+invoice off its page, while `total` still counted it once) and its discount was
+summed twice in `total_savings`.
+
 **The row and the rollup round the same way.** Both compute
 `invoice.amount * discount_percent / 100` from the same `PaymentSchedule` row,
 so they have to agree to the cent. They did not: the per-row figure used
