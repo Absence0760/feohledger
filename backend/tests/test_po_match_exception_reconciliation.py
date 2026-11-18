@@ -825,6 +825,78 @@ async def test_a_split_billed_above_its_legs_is_still_held(realdb):
 
 
 @pytest.mark.asyncio
+async def test_a_split_across_two_currencies_is_held_with_no_combined_total(realdb):
+    """USD 600 + EUR 400 is not 1,000 of anything. The matcher used to sum the
+    legs before any currency check and store `po_total: 1000` beside a single
+    `po_currency`, which the invoice modal rendered as "€1,000.00". The
+    combined figure is withheld, each leg keeps its own, and the hold raises."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent)
+        legs[1].currency = "EUR"
+        inv = await _split_invoice(s, org_id, ent, legs, amount="1000.00")
+        await s.commit()
+
+        await _refresh(s, inv)
+        await s.commit()
+
+        (row,) = await _rows(s, inv.id)
+        assert row.status == "open"
+        assert row.description_code == "po_currency_mismatch"
+        assert await blocked_invoice_ids(s, [inv.id]) == {inv.id}
+        assert inv.po_match["status"] == "mismatch"
+        assert inv.po_match["currency_check"] == "different"
+        assert inv.po_match["po_currency"] == "EUR"
+        assert inv.po_match["po_total"] is None
+        assert inv.po_match["amount_variance"] is None
+        assert inv.po_match["details"]["po_total"] is None
+        assert [
+            (Decimal(str(leg["po_total"])), leg["po_currency"])
+            for leg in inv.po_match["details"]["legs"]
+        ] == [
+            (Decimal("600.00"), "USD"),
+            (Decimal("400.00"), "EUR"),
+        ]
+
+        # The invoice's own code absent (malformed, so it proves nothing): the
+        # legs still disagree with each other, so no sum of them is a figure
+        # and the face-value comparison an `unknown` would make never runs.
+        inv.currency = "1X"
+        result = await match_invoice_to_po(s, inv)
+        assert result.currency_check == "different"
+        assert result.status == "mismatch"
+        assert result.po_total is None
+        assert result.amount_variance is None
+        assert result.received_value is None
+        await s.rollback()
+
+
+@pytest.mark.asyncio
+async def test_a_split_with_a_leg_recording_no_currency_reads_unknown(realdb):
+    """{USD, NULL}: a missing code cannot prove a mismatch, so — §197's rule
+    extended to a sum — the combined total is compared at face value and the
+    result says the currency was not verified (the split agent refuses such a
+    set; `test_exception_agents_multi_po_split.py`)."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        legs = await _two_legs(s, org_id, ent)
+        legs[1].currency = None
+        inv = await _split_invoice(s, org_id, ent, legs, amount="1003.00")
+        await s.commit()
+
+        result = await match_invoice_to_po(s, inv)
+        assert result.currency_check == "unknown"
+        assert result.po_currency is None
+        assert result.po_total == Decimal("1000.00")
+        assert result.status == "matched"
+        assert result.amount_variance == Decimal("3.00")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reference",
     [
