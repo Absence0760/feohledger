@@ -641,7 +641,14 @@ and `GET /api/organization/credentials` reports which are stored, by name.
 changes `provider` drops the sealed key (audited as
 `organization.credentials_updated`, reason `extraction_provider_changed`):
 `claude_vision` and `openai_vision` share the `api_key` slot, so keeping it
-would send one vendor's secret to the other. Every reader — extraction, the
+would send one vendor's secret to the other. The settings panel follows that
+rule before the save: it remembers the provider the stored key belongs to, so
+once the dropdown names another one the key field stops saying a key is stored
+and a hint says the save drops it; a save that would drop the key while the new
+provider's key field is blank is refused with the field marked, since it would
+leave BYOK keyless (Ollama needs no key and is not refused). Platform mode
+resends the saved provider, so a choice the hidden dropdown still holds cannot
+drop the key. Every reader — extraction, the
 GL-only re-read, statement reads, and the three side features that may reuse
 a `claude_vision` key (audit summary, LLM anomaly check, exception-agent
 rationale) — opens it through `provider_credentials.byok_extraction_config`,

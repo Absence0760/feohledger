@@ -242,6 +242,10 @@ export const enSettings = {
 	'org.extraction.model': 'Model',
 	'org.extraction.ollamaHint': 'Runs locally — no data leaves your machine. Install:',
 	'org.extraction.save': 'Save Extraction Settings',
+	'org.extraction.switchDropsKey':
+		'Saving drops the stored key; enter one for {provider}.',
+	'org.extraction.switchNeedsKey':
+		'Enter a key for {provider}: switching provider drops the stored key.',
 	'org.section.erp': 'ERP Integration',
 	'org.section.commerce': "Commerce & inventory",
 	'org.section.erpSaved': 'ERP integration',
