@@ -243,12 +243,15 @@ test.describe('/cfo (admin)', () => {
 		await expect(note).toContainText('across 1 invoice');
 		await expect(note).toContainText('already past due');
 		await expect(page.locator('.cf-bar.overdue')).toHaveCount(1);
-		await expect(page.getByRole('img', { name: /^Overdue .*, committed .*, pending / })).toHaveCount(1);
+		const forecastBar = page.getByRole('img', { name: /^Overdue .*, committed .*, pending / });
+		await expect(forecastBar).toHaveCount(1);
 		await expect(page.locator('.cf-legend')).toContainText('Overdue (owed now)');
 		// A zero pending slice draws no segment, so the 2px separator only ever
 		// sits between two visible segments: overdue then committed, here.
-		await expect(page.locator('.cf-bar-bg .cf-bar')).toHaveCount(2);
-		await expect(page.locator('.cf-bar.pending')).toHaveCount(0);
+		// Scoped to the forecast bar: the DPO chart's bars share `.cf-bar-bg
+		// .cf-bar`, one per vendor row the shared tenant happens to hold.
+		await expect(forecastBar.locator('.cf-bar')).toHaveCount(2);
+		await expect(forecastBar.locator('.cf-bar.pending')).toHaveCount(0);
 
 		// Each what-if total names the overdue slice it includes.
 		await expect(page.getByTestId('whatif-overdue')).toHaveCount(3);
