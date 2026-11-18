@@ -113,6 +113,13 @@ def refusal_of(exc: HTTPException, *, fallback_code: str) -> dict:
 #: attempt either way (decisions §461).
 MFA_CODE_INVALID_DETAIL = coded_refusal("mfa_code_invalid", "Invalid code")
 
+#: The login challenge's email one-time code missed: wrong, expired, or already
+#: spent (``POST /api/auth/mfa/verify`` with ``method=email``, and the portal's
+#: ``/mfa/challenge``). Its own code because its sentence differs from the TOTP
+#: one above — an emailed code also expires — and, like it, folds a wrong code
+#: and an expired one together. A 401 for the same reason (decisions §NEW-T1).
+MFA_EMAIL_CODE_INVALID_DETAIL = coded_refusal("mfa_email_code_invalid", "Invalid or expired code")
+
 
 #: An ERP pull (chart, vendor or PO sync) refused because the org's OAuth
 #: connection is gone — never consented, revoked at the provider, or past its
