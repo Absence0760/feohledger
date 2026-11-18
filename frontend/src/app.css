@@ -1060,6 +1060,11 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	border: 1px solid var(--border-soft);
 	border-radius: var(--radius-lg);
 	width: min(480px, 92vw);
+	/* Never wider than the backdrop's content box (its 20px padding each
+	   side). Every vw width below exceeds it on a phone — 95vw at 390px is
+	   370.5px in a 350px box — and the grid start-aligns the overflow, so the
+	   dialog ran off the right edge. Caps the per-modal width overrides too. */
+	max-width: calc(100vw - 40px);
 	max-height: 90vh;
 	overflow-y: auto;
 	padding: 24px;
