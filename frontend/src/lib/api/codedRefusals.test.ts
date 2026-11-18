@@ -1167,6 +1167,7 @@ describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', 
 		['card_skip_vendor_unscreenable', {}],
 		['card_skip_compliance_hold', { verdict: 'hold' }],
 		['card_skip_erp_bill', { erp_reason: 'erp_bill_not_open' }],
+		['card_skip_currency_unknown', {}],
 		['card_skip_issue_failed', {}],
 		['cards_not_enabled', {}]
 	] as [string, Record<string, unknown>][])('%s is stated in every shipped locale', (code, params) => {

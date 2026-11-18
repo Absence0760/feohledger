@@ -5343,6 +5343,7 @@ export const messages = {
 	'refusal.cardSkipVendorUnscreenable': "Esta factura no tiene un registro de proveedor que verificar, por lo que no se puede emitir una tarjeta.",
 	'refusal.cardSkipComplianceHold': "La verificación de cumplimiento no autorizó el pago al proveedor.",
 	'refusal.cardSkipErpBill': "El ERP no pudo confirmar que esta factura sigue abierta y sin pagar, por lo que no se emitió ninguna tarjeta.",
+	'refusal.cardSkipCurrencyUnknown': "La factura no registra ninguna moneda; indique su moneda antes de emitir una tarjeta.",
 	'refusal.cardSkipIssueFailed': "El proveedor de tarjetas no emitió ninguna tarjeta.",
 	'refusal.cardsNotEnabled': "Las tarjetas virtuales no están habilitadas. Actívelas en la configuración de la organización.",
 	'refusal.statusSyncOff': "La sincronización del estado de los pagos está desactivada en este servidor, así que los pagos registrados en el ERP no se comprueban desde aquí.",

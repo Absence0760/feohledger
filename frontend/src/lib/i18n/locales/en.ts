@@ -5532,6 +5532,7 @@ export const en = {
 	'refusal.cardSkipVendorUnscreenable': "This invoice has no vendor record to screen, so no card can be issued.",
 	'refusal.cardSkipComplianceHold': "Compliance screening did not clear the vendor for payment.",
 	'refusal.cardSkipErpBill': "The ERP could not confirm this bill is still open and unpaid, so no card was issued.",
+	'refusal.cardSkipCurrencyUnknown': "The invoice records no currency; set its currency before issuing a card.",
 	'refusal.cardSkipIssueFailed': "The card provider did not issue a card.",
 	'refusal.cardsNotEnabled': "Virtual cards are not enabled. Turn them on in Organization settings.",
 	'refusal.statusSyncOff': "Payment status sync is turned off on this server, so payments made in the ERP are not checked from here.",
