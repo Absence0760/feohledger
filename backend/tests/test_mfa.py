@@ -31,17 +31,19 @@ def test_generate_totp_secret_is_base32_and_unique():
 def test_provisioning_uri_includes_issuer_and_account():
     from app.services import mfa
 
-    uri = mfa.provisioning_uri("JBSWY3DPEHPK3PXP", "user@acme.com", issuer="Acme AP")
+    uri = mfa.provisioning_uri(
+        "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", "user@acme.com", issuer="Acme AP"
+    )
     assert uri.startswith("otpauth://totp/")
     assert "Acme%20AP" in uri
     assert "user%40acme.com" in uri
-    assert "secret=JBSWY3DPEHPK3PXP" in uri
+    assert "secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP" in uri
 
 
 def test_qr_code_data_url_is_png_data_uri():
     from app.services import mfa
 
-    uri = mfa.provisioning_uri("JBSWY3DPEHPK3PXP", "user@acme.com")
+    uri = mfa.provisioning_uri("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", "user@acme.com")
     data_url = mfa.qr_code_data_url(uri)
     assert data_url.startswith("data:image/png;base64,")
     # PNG bodies aren't tiny; sanity-check minimum size
