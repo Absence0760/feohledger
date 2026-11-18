@@ -191,6 +191,14 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
   nowrap` plus a `title` with the full value. Reference: `/vendors`, whose
   widths are scoped under a page wrapper because `SortableHeader` renders the
   `<th>` from another component.
+- **A list page's table is `fixed`.** Under `table-layout: auto` the columns
+  are sized against the "Loading…" row and then re-sized against the real
+  rows, so every column slides sideways as the data lands. /invoices,
+  /payments, /exceptions, /vendors, /purchase-orders and /gl-accounts are
+  converted; `tests-e2e/reactivity/layout-stability.spec.ts` holds each to a
+  cumulative layout shift under 0.1 with production-like API latency and
+  checks a `fixed` table's header x positions. A new sidebar page fails that
+  spec until it is in its `LIST_PAGES` or `NOT_LIST_PAGES`.
 - **Never make a `<td>` / `<th>` `display: flex` (or grid).** It stops being a
   table cell: the column no longer sizes it, so content overflows the table,
   and its border drifts out of line with the row. Lay out inline children with
