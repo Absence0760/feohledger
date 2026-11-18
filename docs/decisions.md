@@ -23008,7 +23008,7 @@ generation 0.
 
 The test TOTP secrets were 16 base32 characters, which is 80 bits. pyotp 2.12
 refuses anything under 112 bits, and the lock pins 2.10, so the tests passed
-in CI and failed in any fresh venv. Wherever `verify_totp` swallowed the
-error, a refusal test passed for the wrong reason. Every such literal is now
+in CI and failed in any fresh venv. `verify_totp` swallows the error, so on
+2.12 a refusal test could also pass for the wrong reason. Every such literal is now
 32 characters (160 bits, pyotp's `random_base32` default). The followup
 suggested 16 characters, which would not have been enough.
