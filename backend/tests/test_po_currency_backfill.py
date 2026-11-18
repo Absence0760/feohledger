@@ -371,7 +371,8 @@ async def test_stamping_a_split_leg_re_matches_the_split_invoice(realdb):
         await s.commit()
         split_id = split.id
         before = await match_invoice_to_po(s, split)
-        assert before.match_type == "multi-po-split"
+        # The premise: the matcher reads it as a split, across both legs.
+        assert sorted(before.po_ids) == sorted([str(leg_a), str(leg_b)])
         assert before.currency_check == "unknown"
 
     scope = BackfillScope(po_prefix="SPLIT-B")
@@ -423,7 +424,8 @@ async def test_rematch_is_matching_only_and_never_calls_the_llm(realdb, monkeypa
         vendor = Vendor(name="Acme", organization_id=org_id, entity_id=ent)
         s.add(vendor)
         await s.flush()
-        await _po(s, org_id, ent, "PO-LLM")
+        po_id = await _po(s, org_id, ent, "PO-LLM")
+        (await s.get(PurchaseOrder, po_id)).vendor_id = vendor.id  # the lookup's vendor filter
         inv = Invoice(
             invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
             vendor_name="Acme",
