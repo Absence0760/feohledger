@@ -23000,3 +23000,30 @@ primitive the product deliberately keeps behind RBAC and the out-rank guard
 tenant's oldest admin). The operator typed that address when provisioning, and
 naming it means a tenant with several admins cannot be sent the wrong one.
 Printing the link, for the reasons §452 gives.
+
+## §NEW-L4. A badge whose tooltip carries information says it in text too, through one component (round 16, 2026-11-18)
+
+`/recurring`'s "Not generating" badge put the skipped-period count, the period
+and the reason only in a `title`, which a keyboard, a touch screen and a screen
+reader never reach. §442's GL off-chart badge beside it had been fixed in round
+15 by hand: the code in the pill, the reason in a visually-hidden span, the
+tooltip kept for the pointer user. Two badges with the same three-part markup
+is the point at which guard rail 9 asks for a component, so both now render
+`ui/ExplainedBadge` (`label` visible, `explanation` visually hidden and as the
+`title`).
+
+Extracting it found a defect in the round-15 markup. The hidden span opened
+with a literal space (`> {reason}</span>`), and Svelte 5 trims whitespace at
+the edge of an element's children, so the text a screen reader read was "GL
+6800 needs re-codingGL 6800 is not…", one run-on word. The component writes the
+space as an expression (``{` ${explanation}`}``), and both its vitest and the
+e2e spec assert the badge's whole text, so a regression to the literal form
+fails.
+
+Considered and rejected: showing the skip reason as visible text in the row.
+The status column is narrow and already holds up to three pills; the reason is
+a sentence, and the visible pill already names the problem. The visually-hidden
+text gives assistive technology the same information the tooltip gives a
+mouse, which is what WCAG 1.3.1 and 4.1.2 ask for. The i18n key keeps its name
+`recurring.skip.title`; renaming it in six locales would be churn with no
+reader-facing change.

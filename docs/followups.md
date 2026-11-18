@@ -1805,12 +1805,6 @@ user-visible halves still open.
       fix:** clear the tenant's `portal:pwreset:` keys and counters in the
       same sweep. **Trigger:** the next change to workspace closure or portal
       tokens.
-- [ ] **(c) `/recurring`'s "Not generating" badge explains itself only in a
-      tooltip.** The skip badge (`recurring.skip.title`) carries the skipped-
-      period count, period and reason in a `title`, which a keyboard, a touch
-      screen or a screen reader cannot reach. The GL off-chart badge beside it
-      was fixed in round 15. **Durable fix:** the same shape: visible or
-      visually-hidden text. **Trigger:** the next change to `/recurring`.
 - [ ] **(c) The two SSO step-up tests fail in any fresh local venv.**
       `pyproject.toml` allows `pyotp>=2.10,<3`; pyotp 2.12 refuses secrets
       under 112 bits, so `test_sso_only.py`'s step-up tests fail locally while

@@ -12,12 +12,22 @@ import { expect, test } from '../fixtures/helpers';
  * which templates need re-coding: a per-row badge (`gl_account_off_chart`) and
  * a whole-set filter (`gl_off_chart`, counted by `GET /api/recurring/summary`).
  *
+ * The "Not generating" badge for a template the sweep skipped shares the
+ * same shape (`ui/ExplainedBadge`), so it is pinned here too.
+ *
  * The backend verdict is pinned by `backend/tests/test_gl_code_entity_chart.py`;
  * responses are stubbed here so the assertion doesn't depend on the shard
  * tenant's chart.
  */
 
-function template(n: number, glOffChart: boolean) {
+type LastSkip = {
+	reason: string;
+	period_key: string | null;
+	consecutive: number;
+	last_skipped_at: string;
+};
+
+function template(n: number, glOffChart: boolean, lastSkip: LastSkip | null = null) {
 	return {
 		id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
 		name: `E2E GL Template ${n}`,
@@ -44,7 +54,7 @@ function template(n: number, glOffChart: boolean) {
 		status: 'active',
 		variance_tolerance_pct: null,
 		notes: null,
-		last_skip: null,
+		last_skip: lastSkip,
 		gl_account_off_chart: glOffChart,
 		created_at: '2026-01-01T00:00:00Z',
 		updated_at: '2026-01-01T00:00:00Z'
@@ -52,7 +62,10 @@ function template(n: number, glOffChart: boolean) {
 }
 
 /** Stub the list + summary, honouring `gl_off_chart`; returns the list queries seen. */
-async function stubRecurring(page: Page): Promise<URLSearchParams[]> {
+async function stubRecurring(
+	page: Page,
+	templates: ReturnType<typeof template>[] = [template(1, true), template(2, false)]
+): Promise<URLSearchParams[]> {
 	const listQueries: URLSearchParams[] = [];
 	await page.route('**/api/recurring**', async (route) => {
 		const url = new URL(route.request().url());
@@ -72,9 +85,7 @@ async function stubRecurring(page: Page): Promise<URLSearchParams[]> {
 		}
 		if (url.pathname === '/api/recurring') {
 			listQueries.push(url.searchParams);
-			const items = offOnly
-				? [template(1, true)]
-				: [template(1, true), template(2, false)];
+			const items = offOnly ? templates.filter((t) => t.gl_account_off_chart) : templates;
 			return route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -108,6 +119,8 @@ test('a template coded to an account the chart dropped is badged and filterable'
 	await expect(badge.locator('.visually-hidden')).toHaveText(
 		/GL 6800 is not an active account in this template’s chart/
 	);
+	// The pill text and the explanation are separate words when read as text.
+	await expect(badge).toHaveText(/^GL 6800 needs re-coding GL 6800 is not/);
 	await expect(badge).toHaveAttribute('title', /6800/);
 	await expect(live).toBeVisible();
 	await expect(live.locator('.badge.gl-off-chart')).toHaveCount(0);
@@ -139,4 +152,37 @@ test('a deep link to /recurring?gl=off_chart arrives filtered', async ({ page })
 	await expect(page).toHaveURL(/[?&]gl=off_chart/);
 	expect(listQueries.length).toBeGreaterThan(0);
 	expect(listQueries.every((q) => q.get('gl_off_chart') === 'true')).toBe(true);
+});
+
+test('a template that is not generating says why in text, not only a tooltip', async ({
+	page
+}) => {
+	await stubRecurring(page, [
+		template(3, false, {
+			reason: 'missing_amount',
+			period_key: '2026-11',
+			consecutive: 2,
+			last_skipped_at: '2026-11-01T00:00:00Z'
+		}),
+		template(4, false)
+	]);
+
+	await page.goto('/recurring');
+
+	const skipped = page.locator('tr').filter({ hasText: 'E2E GL Template 3' });
+	const generating = page.locator('tr').filter({ hasText: 'E2E GL Template 4' });
+	// The skipped-period count, the period and the reason are in the badge's
+	// text (a visually-hidden span), which a keyboard, a touch screen and a
+	// screen reader reach — a `title` alone reaches none of them. The tooltip
+	// stays for the pointer user. (decisions §NEW-L4)
+	const badge = skipped.locator('.badge.skipped');
+	await expect(badge).toHaveText(
+		'Not generating 2 periods skipped — last 2026-11: no amount set'
+	);
+	await expect(badge.locator('.visually-hidden')).toHaveText(
+		'2 periods skipped — last 2026-11: no amount set'
+	);
+	await expect(badge).toHaveAttribute('title', '2 periods skipped — last 2026-11: no amount set');
+	await expect(generating).toBeVisible();
+	await expect(generating.locator('.badge.skipped')).toHaveCount(0);
 });
