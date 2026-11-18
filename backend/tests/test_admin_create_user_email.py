@@ -71,6 +71,16 @@ async def test_invite_emails_a_set_password_link_and_returns_no_credential(
 
 @pytest.mark.asyncio
 async def test_invite_link_sets_the_password_once_and_the_user_signs_in(realdb, monkeypatch):
+    from tests.test_session_management import FakeRedis
+
+    # A successful login registers a session, which needs the zset+hash
+    # stand-in rather than the key/value-only autouse stub.
+    session_redis = FakeRedis()
+
+    async def _get_redis():
+        return session_redis
+
+    monkeypatch.setattr("app.redis.get_redis", _get_redis)
     sent = capture_outbox(monkeypatch)
     email = f"new-hire-{uuid.uuid4().hex[:8]}@acme.test"
 

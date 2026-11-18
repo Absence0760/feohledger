@@ -118,6 +118,28 @@ def _split_gen(raw: bytes | str | None) -> tuple[str, str] | None:
     return subject, (gen if sep else "0")
 
 
+def stored_owner(raw: bytes | str | None) -> str | None:
+    """The subject an employee token's stored value names (``<user_id>``),
+    whatever its generation — for :mod:`services.credential_cleanup`, which
+    deletes a deleted account's links outright rather than asking whether they
+    are still live. Comparing the raw value would never match: it carries
+    ``#<generation>``."""
+    parts = _split_gen(raw)
+    return parts[0] if parts else None
+
+
+def generation_key(user_id: uuid.UUID) -> str:
+    """The employee generation counter of ``user_id``."""
+    return _gen_key(PASSWORD_RESET_PREFIX, str(user_id))
+
+
+def is_generation_key(key: bytes | str) -> bool:
+    """Whether a key under the employee prefix is a generation counter rather
+    than a token (its value is a number, not a subject)."""
+    key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+    return key_str.startswith(f"{PASSWORD_RESET_PREFIX}gen:")
+
+
 async def _live_subject(r, prefix: str, raw: bytes | str | None) -> str | None:
     """The subject of a stored value, or ``None`` when it was superseded."""
     parts = _split_gen(raw)

@@ -1014,6 +1014,10 @@ async def test_issue_reset_token_stores_the_requested_lifetime(monkeypatch):
         async def setex(self, key, ttl, value):
             stored[key] = ttl
 
+        async def get(self, key):
+            # The subject's generation counter (no reset has superseded any).
+            return None
+
     async def _get():
         return _Recorder()
 

@@ -292,13 +292,16 @@ async def test_apply_new_password_enforces_complexity_and_clears_the_forced_flag
 # ---------------------------------------------------------------------------
 
 
-async def _throwaway_user(client, realdb):
+async def _throwaway_user(client, realdb, *, must_change_password: bool = False):
     """Create a disposable user and return (id, password, token).
 
     A throwaway keeps the seeded logins' passwords intact — control-plane user
     rows are not reset between tests, so changing a seeded password would leak
     into every later test in the session. The invite gives the user no password
     (it emails a set-password link, decisions §283), so one is set on the row.
+    ``must_change_password`` puts it in the state a legacy temporary-password
+    account (or a CLI-provisioned tenant admin) is in — no invite sets it any
+    more (decisions §443), so a forced change needs it set here.
     """
     import uuid
 
@@ -324,7 +327,10 @@ async def _throwaway_user(client, realdb):
         await s.execute(
             update(User)
             .where(User.id == uuid.UUID(body["id"]))
-            .values(hashed_password=await hash_password(password))
+            .values(
+                hashed_password=await hash_password(password),
+                must_change_password=must_change_password,
+            )
         )
         await s.commit()
     return body["id"], password, create_access_token
@@ -472,7 +478,7 @@ async def test_forced_change_password_writes_a_pii_free_audit_row(realdb):
 
     info = realdb.info("a")
     async with realdb.client(key="a", role="admin") as c:
-        user_id, temp_password, mint = await _throwaway_user(c, realdb)
+        user_id, temp_password, mint = await _throwaway_user(c, realdb, must_change_password=True)
         try:
             resp = await c.post(
                 "/api/auth/change-password",
@@ -483,7 +489,7 @@ async def test_forced_change_password_writes_a_pii_free_audit_row(realdb):
             rows = await _password_changed_rows(realdb, user_id)
             assert len(rows) == 1
             assert rows[0].actor_id == uuid.UUID(user_id)
-            # The invite temp carried must_change_password — this was the forced change.
+            # The account carried must_change_password — this was the forced change.
             assert rows[0].details == {"via": "change_password", "forced": True}
             assert "BrandNewPass123" not in str(rows[0].details)
             assert temp_password not in str(rows[0].details)

@@ -637,7 +637,7 @@ export async function createUserWithKnownPassword(
 ): Promise<{ id: string; email: string; password: string }> {
 	const admin = _currentWorkerAdmin();
 	const email = `${opts.emailPrefix ?? 'e2e-pw'}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@test.local`;
-	const resp = await page.request.post(`${API_BASE}/api/admin/users`, {
+	const resp = await page.request.post(`${_API_BASE}/api/admin/users`, {
 		headers: await authedTenantHeaders(page),
 		data: { full_name: 'Password Test', email, role_names: opts.roleNames ?? ['ap_clerk'] }
 	});
