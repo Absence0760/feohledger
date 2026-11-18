@@ -251,6 +251,44 @@ void main() {
     expect(CashFlowStore.instance.horizonDays, 30);
   });
 
+  // AP already past due is carried into the FIRST period on its own
+  // figure. The screen names it in words, beside the rows, rather than
+  // letting it pass as part of an on-schedule total.
+  testWidgets('overdue AP is named in the forecast and on its row',
+      (tester) async {
+    final forecast = _forecastBody();
+    (forecast['periods'] as List).first
+      ..['scheduled_amount'] = '1200.00'
+      ..['committed_amount'] = '200.00'
+      ..['pending_amount'] = '0.00'
+      ..['overdue_amount'] = '1000.00'
+      ..['overdue_count'] = 1;
+    (forecast['totals'] as Map<String, dynamic>)
+      ..['overdue_amount'] = '1000.00'
+      ..['overdue_count'] = 1;
+    ApiClient().debugConfigure(client: _client(forecast: forecast));
+
+    await tester.pumpWidget(_localized(const CashFlowScreen()));
+    await _pumpUntil(tester, find.byType(KpiCard));
+
+    final note = find.textContaining('1 invoice totalling');
+    await tester.scrollUntilVisible(note, 200);
+    expect(note, findsOneWidget);
+    expect(find.textContaining('is already past due'), findsOneWidget);
+    expect(find.textContaining('overdue '), findsOneWidget);
+  });
+
+  testWidgets('a horizon with nothing overdue says nothing about it',
+      (tester) async {
+    ApiClient().debugConfigure(client: _client());
+
+    await tester.pumpWidget(_localized(const CashFlowScreen()));
+    await _pumpUntil(tester, find.byType(KpiCard));
+    await tester.scrollUntilVisible(find.text('Cash Position'), 200);
+
+    expect(find.textContaining('past due'), findsNothing);
+  });
+
   group('part-converted legs are disclosed beside their figures', () {
     // Both legs keep a commitment with no rate into the reporting currency in
     // at FACE value and count it — dropping it would understate the outflow.

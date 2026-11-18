@@ -277,6 +277,24 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
           ),
           const SizedBox(height: 4),
         ],
+        // AP already past due is owed now, so the backend carries it into the
+        // FIRST period on its own figure rather than dropping it (which
+        // overstated cash by exactly the late AP) or folding it into
+        // "committed" as if it were on schedule. Said in words here; the row
+        // below names its slice too.
+        if (data.totals.overdueCount > 0) ...[
+          Text(
+            l.cashFlowForecastOverdue(
+              data.totals.overdueCount,
+              _money(data.totals.overdueAmountDisplay, currency),
+            ),
+            style: TextStyle(
+              color: Colors.red.shade800,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (data.forecastPeriods.isEmpty)
           _emptyCard(l.cashFlowNoOutflows)
         else
@@ -288,14 +306,16 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
   Widget _forecastRow(
       AppLocalizations l, CashFlowForecastPeriod p, String? currency) {
     // One announcement per row instead of period + four money fragments.
+    final overdue = _money(p.overdueAmountDisplay, currency);
     return Semantics(
       label: l.cashFlowForecastRowLabel(
-        p.period,
-        _money(p.scheduledAmountDisplay, currency),
-        _money(p.committedAmountDisplay, currency),
-        _money(p.pendingAmountDisplay, currency),
-        p.count,
-      ),
+            p.period,
+            _money(p.scheduledAmountDisplay, currency),
+            _money(p.committedAmountDisplay, currency),
+            _money(p.pendingAmountDisplay, currency),
+            p.count,
+          ) +
+          (p.overdueCount > 0 ? l.cashFlowOverdueSuffix(overdue) : ''),
       excludeSemantics: true,
       child: Card(
         elevation: 0,
@@ -343,6 +363,15 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
                     style:
                         TextStyle(color: Colors.grey.shade700, fontSize: 11),
                   ),
+                  if (p.overdueCount > 0)
+                    Text(
+                      l.cashFlowOverdueAmount(overdue),
+                      style: TextStyle(
+                        color: Colors.red.shade800,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                 ],
               ),
             ],

@@ -1878,6 +1878,33 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String cashFlowOverdueAmount(String amount) {
+    return 'overdue $amount';
+  }
+
+  @override
+  String cashFlowOverdueSuffix(String amount) {
+    return ', $amount already past due';
+  }
+
+  @override
+  String cashFlowForecastOverdue(int count, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'are',
+      one: 'is',
+    );
+    return '$_temp0 totalling $amount $_temp1 already past due. Owed now, so counted in the first period.';
+  }
+
+  @override
   String get cashFlowPosition => 'Cash Position';
 
   @override

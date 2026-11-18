@@ -546,6 +546,9 @@
     }
   },
   "cashFlowPendingAmount": "保留中 {amount}",
+  "cashFlowOverdueAmount": "期日超過 {amount}",
+  "cashFlowOverdueSuffix": "、うち {amount} は期日超過",
+  "cashFlowForecastOverdue": "請求書 {count, plural, other {{count} 件}}（合計 {amount}）はすでに支払期日を過ぎています。現時点で支払義務があるため、最初の期間に計上しています。",
   "@cashFlowPendingAmount": {
     "placeholders": {
       "amount": {

@@ -1158,6 +1158,26 @@
       "amount": { "type": "String" }
     }
   },
+  "cashFlowOverdueAmount": "overdue {amount}",
+  "cashFlowOverdueSuffix": ", {amount} already past due",
+  "cashFlowForecastOverdue": "{count, plural, one {{count} invoice} other {{count} invoices}} totalling {amount} {count, plural, one {is} other {are}} already past due. Owed now, so counted in the first period.",
+  "@cashFlowOverdueAmount": {
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "@cashFlowOverdueSuffix": {
+    "description": "Appended to a forecast row's screen-reader label when part of the period is already past due.",
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "@cashFlowForecastOverdue": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "amount": { "type": "String" }
+    }
+  },
   "cashFlowPosition": "Cash Position",
   "cashFlowNoPosition": "No cash-position projection for this horizon.",
   "cashFlowOutAmount": "out {amount}",
