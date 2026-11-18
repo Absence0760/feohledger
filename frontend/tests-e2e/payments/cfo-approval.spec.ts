@@ -147,8 +147,13 @@ test.describe('/payments — CFO approval gate', () => {
 				{ headers: await authedTenantHeaders(page) }
 			);
 			expect(resp.status()).toBe(403);
-			const body = (await resp.json()) as { detail: string };
-			expect(body.detail).toContain('CFO');
+			// A coded refusal (decisions §461): the code is the contract the
+			// browser localizes on; the English sentence still names the CFO.
+			const body = (await resp.json()) as {
+				detail: { code: string; message: string };
+			};
+			expect(body.detail.code).toBe('payment_run_awaiting_cfo');
+			expect(body.detail.message).toContain('CFO');
 		} finally {
 			if (runId) deletePaymentRun(runId);
 			hardDeleteInvoice(invoiceId);
