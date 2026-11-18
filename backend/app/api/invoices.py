@@ -56,7 +56,7 @@ from app.api.pagination import (
     pagination_params,
 )
 from app.api.permissions import PERM_INVOICE_APPROVE, effective_permissions
-from app.api.refusals import coded_refusal, refuse_due_before_invoice_date
+from app.api.refusals import coded_refusal, invoice_currency, refuse_due_before_invoice_date
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.agent_decision import AgentDecision
@@ -1707,6 +1707,12 @@ async def update_invoice(
             entity_id=invoice.entity_id,
             codes=[new_gl],
         )
+    # An edit may change the currency, never clear it: a blank, a `null` or a
+    # malformed code is a coded 422, never `""` written to the NOT NULL column
+    # as "no currency" (decisions §457, §NEW-R2). Only when the edit names it,
+    # so a legacy row already holding `""` stays editable for everything else.
+    if "currency" in update_data:
+        update_data["currency"] = invoice_currency(update_data["currency"])
     # Map frontend field name to DB column
     if "vendor" in update_data:
         update_data["vendor_name"] = update_data.pop("vendor")

@@ -14,9 +14,10 @@ Pick the type by what blank means for the field:
   refused like any other malformed code.
 * ``CurrencyCodeOrUnset`` — blank is read as ``None`` ("resolve it for me",
   "fall back to the org's currency"), for fields that documented that.
-* ``BlankableCurrencyCode`` — blank is kept as ``""``: only for the invoice
-  PATCH, where ``""`` is the legacy "no currency" value the credit-memo guard
-  reasons about.
+
+The invoice PATCH uses none of these: it takes the raw string and checks it
+through ``api/refusals.invoice_currency``, so a blank or malformed code is a
+coded 422 rather than written as ``""`` (decisions §NEW-R2).
 """
 
 from typing import Annotated
@@ -36,24 +37,14 @@ def _or_unset(value: str | None) -> str | None:
     return normalize_iso_currency(value)
 
 
-def _blankable(value: str | None) -> str | None:
-    if value is None:
-        return None
-    if not value.strip():
-        return ""
-    return normalize_iso_currency(value)
-
-
 #: A NOT NULL ``currency`` column's request-side type. Carries its own shape
 #: check instead of a bare ``max_length=3``, which would reject `" USD"` before
 #: the strip could rescue it and accept `""` / `"usd"` after.
 CurrencyCode = Annotated[str, AfterValidator(normalize_iso_currency)]
 OptionalCurrencyCode = Annotated[str | None, AfterValidator(_optional)]
 CurrencyCodeOrUnset = Annotated[str | None, AfterValidator(_or_unset)]
-BlankableCurrencyCode = Annotated[str | None, AfterValidator(_blankable)]
 
 __all__ = [
-    "BlankableCurrencyCode",
     "CurrencyCode",
     "CurrencyCodeOrUnset",
     "OptionalCurrencyCode",
