@@ -255,6 +255,29 @@ void main() {
     }
   });
 
+  testWidgets('Record receipt is offered to RECEIPT_ENTRY_ROLES only',
+      (tester) async {
+    // `POST /api/goods-receipts` is admin / ap_manager / ap_clerk; a CFO would
+    // get a guaranteed 403, so the row is hidden for them.
+    for (final (roles, shown) in [
+      (['ap_clerk'], true),
+      (['ap_manager'], true),
+      (['admin'], true),
+      (['cfo'], false),
+    ]) {
+      await _loginAs(roles: roles);
+      await tester.pumpWidget(wrap());
+      await tester.pump();
+      await scrollToBottom(tester);
+
+      expect(
+        find.byKey(const Key('settings-record-goods-receipt')),
+        shown ? findsOneWidget : findsNothing,
+        reason: '$roles',
+      );
+    }
+  });
+
   testWidgets('an admin gets all four Administration rows', (tester) async {
     await _loginAs(roles: ['admin']);
 

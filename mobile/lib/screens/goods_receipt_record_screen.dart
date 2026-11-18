@@ -60,7 +60,14 @@ class _GoodsReceiptRecordScreenState extends State<GoodsReceiptRecordScreen> {
 
   /// The PO whose lines [_quantities] was filled for.
   String? _filledFor;
-  DateTime _receivedDate = DateTime.now();
+  /// The user's own calendar date, at midnight so the picker's `lastDate`
+  /// (now) is never before it.
+  DateTime _receivedDate = _today();
+
+  static DateTime _today() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
   bool _showLinesError = false;
 
   @override
