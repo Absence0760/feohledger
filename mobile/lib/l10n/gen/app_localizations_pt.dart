@@ -4063,7 +4063,40 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get payRecordOnlyBanner =>
-      'O FeohLedger registra os pagamentos da sua organização, mas nunca os envia. Pague os fornecedores pelo seu banco ou ERP e registre cada pagamento aqui, ou crie um lote, baixe o arquivo bancário e registre o lote como pago.';
+      'O FeohLedger registra os pagamentos, mas nunca os envia: pague pelo seu banco ou ERP e registre cada pagamento aqui (o arquivo bancário de um lote está no aplicativo web).';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return 'Preenchido com o pagamento informado por $erp. Confira os dados antes de registrá-lo.';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return 'Valor pago segundo $erp';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return 'Como foi pago segundo $erp';
+  }
+
+  @override
+  String get payRecordRailNotStated => 'Forma não informada';
+
+  @override
+  String get payRecordSplitMethod => 'Dividido entre as formas acima';
+
+  @override
+  String get payRecordSplitStands =>
+      'Este pagamento foi feito com mais de uma forma de pagamento, por isso é registrado com esta divisão. Uma única forma não consegue descrevê-lo.';
+
+  @override
+  String get payRecordSplitDropped =>
+      'Estas partes não somam o valor pago, por isso a divisão não é mantida. A forma que você escolher é registrada para o pagamento inteiro.';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'Se esta divisão é mantida é decidido quando o pagamento é registrado. Se não for mantida, a forma que você escolher é registrada para o pagamento inteiro.';
 
   @override
   String get payRecordAction => 'Registrar como paga';
@@ -8324,7 +8357,40 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get payRecordOnlyBanner =>
-      'O FeohLedger registra os pagamentos da sua organização, mas nunca os envia. Pague os fornecedores pelo seu banco ou ERP e registre cada pagamento aqui, ou crie um lote, baixe o arquivo bancário e registre o lote como pago.';
+      'O FeohLedger registra os pagamentos, mas nunca os envia: pague pelo seu banco ou ERP e registre cada pagamento aqui (o arquivo bancário de um lote está no aplicativo web).';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return 'Preenchido com o pagamento informado por $erp. Confira os dados antes de registrá-lo.';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return 'Valor pago segundo $erp';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return 'Como foi pago segundo $erp';
+  }
+
+  @override
+  String get payRecordRailNotStated => 'Forma não informada';
+
+  @override
+  String get payRecordSplitMethod => 'Dividido entre as formas acima';
+
+  @override
+  String get payRecordSplitStands =>
+      'Este pagamento foi feito com mais de uma forma de pagamento, por isso é registrado com esta divisão. Uma única forma não consegue descrevê-lo.';
+
+  @override
+  String get payRecordSplitDropped =>
+      'Estas partes não somam o valor pago, por isso a divisão não é mantida. A forma que você escolher é registrada para o pagamento inteiro.';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'Se esta divisão é mantida é decidido quando o pagamento é registrado. Se não for mantida, a forma que você escolher é registrada para o pagamento inteiro.';
 
   @override
   String get payRecordAction => 'Registrar como paga';

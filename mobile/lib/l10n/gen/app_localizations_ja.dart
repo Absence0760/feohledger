@@ -3868,7 +3868,40 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get payRecordOnlyBanner =>
-      'FeohLedger は組織の支払いを記録しますが、送金は一切行いません。銀行または ERP から仕入先に支払い、ここで各支払いを記録するか、バッチを作成して銀行ファイルをダウンロードし、バッチを支払済みとして記録してください。';
+      'FeohLedger は支払いを記録するだけで送金は行わないため、銀行または ERP から支払い、ここで各支払いを記録してください（バッチの銀行ファイルは Web アプリにあります）。';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return '$erp が報告した支払いの内容を入力済みです。記録する前に内容を確認してください。';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return '$erp が報告した支払額';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return '$erp による支払方法';
+  }
+
+  @override
+  String get payRecordRailNotStated => '支払方法の記載なし';
+
+  @override
+  String get payRecordSplitMethod => '上記の支払方法に分割';
+
+  @override
+  String get payRecordSplitStands =>
+      'この支払いは複数の支払方法で行われたため、この内訳のまま記録されます。1 つの支払方法では表せません。';
+
+  @override
+  String get payRecordSplitDropped =>
+      'これらの内訳の合計が支払額と一致しないため、内訳は保持されません。選択した支払方法が支払い全体に記録されます。';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'この内訳を保持するかどうかは、支払いを記録するときに判断されます。保持されない場合は、選択した支払方法が支払い全体に記録されます。';
 
   @override
   String get payRecordAction => '支払済みとして記録';

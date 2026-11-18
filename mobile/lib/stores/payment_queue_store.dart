@@ -361,6 +361,32 @@ class PaymentQueueStore extends ChangeNotifier {
     return const RecordOutcome.recorded();
   }
 
+  /// Record the ERP's split payment for [item] through its exception's
+  /// one-click — `POST /api/exceptions/{id}/record-erp-payment` — the path the
+  /// web queue dialog takes when [QueueErpReportedPayment.splitIsTheRecord]:
+  /// `record-outside` refuses a split that stands, and this books it and
+  /// resolves the exception in one transaction. No rail is sent: the split is
+  /// the record. Same outcome handling as [recordOutside].
+  Future<RecordOutcome> recordErpSplit(
+    PaymentQueueItem item,
+    QueueErpReportedPayment reported, {
+    required String reference,
+    required String paidOn,
+  }) async {
+    try {
+      await ExceptionApi.recordErpPayment(
+        reported.exceptionId,
+        reference: reference.trim(),
+        paidOn: paidOn,
+      );
+    } catch (e) {
+      return RecordOutcome.failed(e);
+    }
+    _selection.remove(item.id);
+    await fetch();
+    return const RecordOutcome.recorded();
+  }
+
   /// A run's detail with the caller's verdict on recording it. Throws on a
   /// failed read; the sheet then offers nothing (fail closed).
   Future<PaymentRunRecordDetail> loadRunRecordDetail(String runId) =>
@@ -414,5 +440,6 @@ class PaymentQueueStore extends ChangeNotifier {
         // refused on still shows the action disabled with its reason.
         'record_outside_refusal': i.recordOutsideRefusal,
         'payable_amount': i.payableAmountDisplay,
+        'erp_reported_payment': i.erpReportedPayment?.toJson(),
       };
 }

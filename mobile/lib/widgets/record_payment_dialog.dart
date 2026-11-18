@@ -20,7 +20,18 @@ import 'package:feohledger_mobile/utils/money.dart';
 // only on the run detail's `actions.record_outside` verdict. A refusal that
 // still comes back (segregation of duties depends on who records; a run's
 // per-invoice refusals need the invoice locked) is stated beside the form in
-// the reader's language, and only there — one error, one signal.
+// the reader's language, and only there — one error, one signal. It is spoken
+// once, by `A11y.announce` where it is set: the line itself is not a live
+// region, which made TalkBack say it twice (pinned in
+// `test/a11y/accessibility_test.dart`).
+//
+// A queue row the ERP reported paid (`erp_reported_payment`, a live
+// `paid_not_recorded` exception) opens pre-filled from that report, as the
+// web's dialog does (`erpPrefill`), and shows the ERP's figure and its
+// rail-by-rail split beside the form. Where the server says the split stands,
+// the record goes through the exception's own one-click
+// (`record-erp-payment`), naming no rail: `record-outside` would refuse it
+// (`external_payment_erp_split`, decisions §426).
 
 /// The localized label for a raw rail code from [kExternalPaymentMethods].
 String externalMethodLabel(AppLocalizations l, String code) => switch (code) {
@@ -120,23 +131,73 @@ class _PaidOnField extends StatelessWidget {
   }
 }
 
-/// The refusal / failure line beside a form. Announced when it appears.
+/// The refusal / failure line beside a form. Deliberately NOT a live region:
+/// whoever sets the text announces it once through [A11y.announce], and a
+/// live region on top of that spoke every refusal twice.
 class _ErrorLine extends StatelessWidget {
   final String text;
   const _ErrorLine(this.text);
 
   @override
   Widget build(BuildContext context) => Padding(
+        key: const Key('record-error'),
         padding: const EdgeInsets.only(top: 12),
-        child: Semantics(
-          liveRegion: true,
-          child: Text(
-            text,
-            // Darkened red for AA contrast on the dialog surface.
-            style: TextStyle(color: Colors.red.shade900, fontSize: 13),
-          ),
+        child: Text(
+          text,
+          // Darkened red for AA contrast on the dialog surface.
+          style: TextStyle(color: Colors.red.shade900, fontSize: 13),
         ),
       );
+}
+
+/// The ERP's breakdown of the payment it reported, rail by rail, and what the
+/// record does with it — the web's `ErpPaymentSplit`. Nothing is summed here;
+/// whether the parts add up is the server's verdict ([stands]).
+class _ErpSplit extends StatelessWidget {
+  final QueueErpReportedPayment reported;
+  final String erp;
+  const _ErpSplit({required this.reported, required this.erp});
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final note = switch (reported.splitStands) {
+      true => l.payRecordSplitStands,
+      false => l.payRecordSplitDropped,
+      null => l.payRecordSplitUnjudged,
+    };
+    return Column(
+      key: const Key('record-erp-split'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Semantics(
+          header: true,
+          child: Text(l.payRecordSplitTitle(erp),
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+        ),
+        for (final part in reported.parts)
+          MergeSemantics(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(part.rail == null
+                        ? l.payRecordRailNotStated
+                        : externalMethodLabel(l, part.rail!)),
+                  ),
+                  Text(formatMoneyString(part.amount,
+                      currency: reported.amountCurrency)),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 4),
+        Text(note, style: _hintStyle()),
+      ],
+    );
+  }
 }
 
 TextStyle _hintStyle() => TextStyle(color: Colors.grey.shade700, fontSize: 12);
@@ -153,14 +214,32 @@ class _RecordInvoicePaymentDialog extends StatefulWidget {
 class _RecordInvoicePaymentDialogState
     extends State<_RecordInvoicePaymentDialog> {
   final _reference = TextEditingController();
-  String _method = kExternalPaymentMethods.first;
+
+  /// `null` = not chosen: the ERP named no rail a payment made outside
+  /// FeohLedger can be recorded on, and guessing one (the dialog used to start
+  /// on ACH whatever the ERP said) is wrong for a cheque.
+  String? _method = kExternalPaymentMethods.first;
   DateTime _paidOn = _localToday();
   bool _submitting = false;
   String? _error;
 
+  QueueErpReportedPayment? get _reported => widget.item.erpReportedPayment;
+
+  /// Where the ERP's split is the record: no rail is asked for or sent.
+  bool get _splitIsTheRecord => _reported?.splitIsTheRecord ?? false;
+
   @override
   void initState() {
     super.initState();
+    final reported = _reported;
+    if (reported != null) {
+      // What the ERP already said — rail, reference, date — so nobody
+      // re-keys it.
+      final prefill = reported.prefill(_localToday());
+      _method = prefill.method;
+      _reference.text = prefill.reference;
+      _paidOn = prefill.paidOn;
+    }
     _reference.addListener(() => setState(() {}));
   }
 
@@ -170,7 +249,10 @@ class _RecordInvoicePaymentDialogState
     super.dispose();
   }
 
-  bool get _canSubmit => !_submitting && _reference.text.trim().isNotEmpty;
+  bool get _canSubmit =>
+      !_submitting &&
+      _reference.text.trim().isNotEmpty &&
+      (_splitIsTheRecord || _method != null);
 
   Future<void> _submit() async {
     final l = AppLocalizations.of(context);
@@ -178,12 +260,22 @@ class _RecordInvoicePaymentDialogState
       _submitting = true;
       _error = null;
     });
-    final outcome = await PaymentQueueStore.instance.recordOutside(
-      widget.item,
-      method: _method,
-      reference: _reference.text,
-      paidOn: formatIsoDate(_paidOn),
-    );
+    final store = PaymentQueueStore.instance;
+    final paidOn = formatIsoDate(_paidOn);
+    final reported = _reported;
+    final outcome = _splitIsTheRecord && reported != null
+        ? await store.recordErpSplit(
+            widget.item,
+            reported,
+            reference: _reference.text,
+            paidOn: paidOn,
+          )
+        : await store.recordOutside(
+            widget.item,
+            method: _method!,
+            reference: _reference.text,
+            paidOn: paidOn,
+          );
     if (!mounted) return;
     if (outcome.ok) {
       Navigator.of(context).pop(true);
@@ -203,6 +295,10 @@ class _RecordInvoicePaymentDialogState
     final l = AppLocalizations.of(context);
     final item = widget.item;
     final owed = item.payableAmountDisplay;
+    final reported = _reported;
+    final erp = reported == null
+        ? null
+        : (reported.erpName ?? l.exceptionDetailYourErp);
     return AlertDialog(
       title: Text(l.payRecordTitle),
       content: SingleChildScrollView(
@@ -226,25 +322,49 @@ class _RecordInvoicePaymentDialogState
               const SizedBox(height: 4),
               Text(l.payRecordAmountHint, style: _hintStyle()),
             ],
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _method,
-              decoration: InputDecoration(labelText: l.payRecordMethod),
-              items: [
-                for (final code in kExternalPaymentMethods)
-                  DropdownMenuItem(
-                    value: code,
-                    child: Text(externalMethodLabel(l, code)),
-                  ),
+            // What the ERP says was paid, in the code it stated: rendered,
+            // never compared here (the server refuses a figure that differs).
+            if (reported != null && erp != null) ...[
+              if (reported.amount != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  key: const Key('record-erp-amount'),
+                  '${l.payRecordErpAmount(erp)}: '
+                  '${formatMoneyString(reported.amount!, currency: reported.amountCurrency)}',
+                ),
               ],
-              onChanged: _submitting
-                  ? null
-                  : (v) {
-                      if (v != null) setState(() => _method = v);
-                    },
-            ),
+              const SizedBox(height: 8),
+              Text(l.payRecordPrefilledFromErp(erp), style: _hintStyle()),
+              if (reported.showsSplit) _ErpSplit(reported: reported, erp: erp),
+            ],
+            const SizedBox(height: 12),
+            if (_splitIsTheRecord)
+              InputDecorator(
+                key: const Key('record-method-split'),
+                decoration: InputDecoration(labelText: l.payRecordMethod),
+                child: Text(l.payRecordSplitMethod),
+              )
+            else
+              DropdownButtonFormField<String>(
+                key: const Key('record-method'),
+                initialValue: _method,
+                decoration: InputDecoration(labelText: l.payRecordMethod),
+                items: [
+                  for (final code in kExternalPaymentMethods)
+                    DropdownMenuItem(
+                      value: code,
+                      child: Text(externalMethodLabel(l, code)),
+                    ),
+                ],
+                onChanged: _submitting
+                    ? null
+                    : (v) {
+                        if (v != null) setState(() => _method = v);
+                      },
+              ),
             const SizedBox(height: 12),
             TextField(
+              key: const Key('record-reference'),
               controller: _reference,
               enabled: !_submitting,
               maxLength: 255,
@@ -270,6 +390,7 @@ class _RecordInvoicePaymentDialogState
           child: Text(l.payConfirmCancel),
         ),
         FilledButton(
+          key: const Key('record-submit'),
           onPressed: _canSubmit ? _submit : null,
           child: Text(_submitting ? l.payRecordSubmitting : l.payRecordSubmit),
         ),
@@ -318,6 +439,8 @@ class _RecordRunPaymentDialogState extends State<_RecordRunPaymentDialog> {
         _detail = detail;
         _loading = false;
       });
+      // A refusal replaces the form, so it is spoken once as it appears.
+      if (!_verdict.allowed) A11y.announce(context, _verdictText());
     } catch (_) {
       if (!mounted) return;
       // Fail closed: with no verdict there is no form.
@@ -325,7 +448,20 @@ class _RecordRunPaymentDialogState extends State<_RecordRunPaymentDialog> {
         _loading = false;
         _loadFailed = true;
       });
+      A11y.announce(context, AppLocalizations.of(context).payRunRecordLoadFailed);
     }
+  }
+
+  /// The server's verdict for THIS reader, as the sentence shown for it.
+  String _verdictText() {
+    final l = AppLocalizations.of(context);
+    final refusal = _verdict.refusal;
+    return _refusalText(
+      l,
+      refusal,
+      refusal?['message'] as String?,
+      l.payRunRecordFailed,
+    );
   }
 
   ActionVerdict get _verdict =>
@@ -378,13 +514,7 @@ class _RecordRunPaymentDialogState extends State<_RecordRunPaymentDialog> {
       // The server's verdict for THIS reader: maker-checker, CFO sign-off, a
       // run that is not draft / exported, nothing left to record. Stated,
       // never a form that could only be refused.
-      final refusal = _verdict.refusal;
-      body = _ErrorLine(_refusalText(
-        l,
-        refusal,
-        refusal?['message'] as String?,
-        l.payRunRecordFailed,
-      ));
+      body = _ErrorLine(_verdictText());
     } else {
       body = Column(
         mainAxisSize: MainAxisSize.min,

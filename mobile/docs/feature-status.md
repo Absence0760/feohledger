@@ -73,7 +73,9 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   beside the queue; Execute is offered only on `processor` and **fails closed**
   while the mode is unknown (loading, a failed read, offline, a value this
   build predates — `canDispatchPayments`), and a confirmed `record_only` tenant
-  gets a banner saying FeohLedger records but never sends. **Record as paid**
+  gets a one-sentence note saying FeohLedger records but never sends and that a
+  run's bank file is on the web app; it leads each tab's scroll list rather than
+  sitting above both tabs. **Record as paid**
   is offered in both modes, as on the web, to holders of
   `payment.record_external` (`AuthStore.canRecordExternalPayment`): per queue
   row from the row's own `record_outside_refusal` (deliberately not `blocked`,
@@ -81,14 +83,24 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   when refused; the dialog (`widgets/record_payment_dialog.dart`) takes the
   rail (every rail but `virtual_card`), reference and paid-on date (capped at
   the reader's today) and posts `POST /api/payments/record-outside` with no
-  `amount`, so the server binds the figure owed. Per run, a draft or exported
+  `amount`, so the server binds the figure owed. A row carrying
+  `erp_reported_payment` (a live `paid_not_recorded` exception) opens the
+  dialog pre-filled from it, as the web's `erpPrefill` does: the rail only when
+  it is one a payment outside FeohLedger can be recorded on (otherwise left
+  unchosen, and submit waits for a choice), the reference, and the ERP's date
+  unless missing or in the future (then today). It shows the ERP's stated
+  figure and, when the breakdown spans more than one rail, the split with the
+  server's verdict on it; where `split_stands` is true the rail picker gives
+  way to "split across the methods above" and the record posts to the
+  exception's one-click, `POST /api/exceptions/{id}/record-erp-payment`, with
+  no rail (decisions §426). A refusal is announced once (`A11y.announce`); the
+  error line is not also a live region. Per run, a draft or exported
   run's menu carries **Record run as paid…**, whose dialog reads `GET
   /runs/{id}`'s `actions.record_outside` verdict before it offers a form and
   posts `POST /runs/{id}/record-outside`. Refusals (`external_payment_*`,
   `payment_run_*`, `payments_record_only`) are stated through
   `l10n/coded_refusal_messages.dart`. Still web-only: the NACHA bank file
-  (download, verify, void), pre-filling the dialog from an ERP-reported
-  payment, and booking an ERP split through its exception's one-click.
+  (download, verify, void), which hands over bank account numbers.
   Money is rendered as server-supplied display strings — the device never does float arithmetic on money (totals are server-computed)
 - Quality inspections (4-way matching) — `InspectionsScreen` + `InspectionStore`
   over `GET /api/inspections` with **server-side** outcome chips (`?result=`;

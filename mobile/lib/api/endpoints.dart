@@ -393,6 +393,23 @@ class ExceptionApi {
         .toList();
   }
 
+  /// Record the payment an ERP reported, from the `paid_not_recorded`
+  /// exception that holds it — `POST /api/exceptions/{id}/record-erp-payment`
+  /// (`payment.record_external`). The payment queue's record dialog uses it
+  /// only where the ERP's split stands, so it names no rail: the split is the
+  /// record. Idempotent on reference + date (a replay answers 200); refusals
+  /// arrive coded (`external_payment_*`).
+  static Future<Map<String, dynamic>> recordErpPayment(
+    String id, {
+    required String reference,
+    required String paidOn,
+  }) async {
+    return _api.post('/exceptions/$id/record-erp-payment', {
+      'reference': reference,
+      'paid_on': paidOn,
+    });
+  }
+
   /// `GET /api/exceptions/{id}` — single-exception detail (+ its invoice), for
   /// the detail screen. Same `_exception_dict` shape as the list rows, with the
   /// detail-only fields (resolved_by/at, due_at, time_to_resolution) populated.

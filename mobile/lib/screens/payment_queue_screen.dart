@@ -133,7 +133,9 @@ String _runStatusLabel(AppLocalizations l, String status) => switch (status) {
 /// **Record-only tenants** (the no-rail pilot, backend decisions §251): the
 /// server's execution mode (`GET /api/payments/execution-mode`) decides
 /// whether Execute is offered at all — failing closed while unknown — and a
-/// confirmed record-only tenant gets a banner saying so. "Record as paid" is
+/// confirmed record-only tenant gets a one-sentence note saying so, as the
+/// first item of each tab's list (so it scrolls away rather than holding
+/// height above both tabs at large text sizes). "Record as paid" is
 /// offered in BOTH modes, as on the web: per queue row from the row's own
 /// `record_outside_refusal`, and per run from the run detail's
 /// `actions.record_outside` verdict.
@@ -184,7 +186,6 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       body: Column(
         children: [
           _summaryBar(),
-          _recordOnlyBanner(),
           Expanded(
             child: TabBarView(
               controller: _tabs,
@@ -251,16 +252,14 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
 
   /// Shown only on a CONFIRMED record-only tenant: an unresolved mode hides
   /// the send controls (fail closed) but is not evidence of this, so it says
-  /// nothing. A status, not an alert — it describes the page.
-  Widget _recordOnlyBanner() {
-    return ListenableBuilder(
-      listenable: PaymentQueueStore.instance,
-      builder: (context, _) {
-        if (!PaymentQueueStore.instance.isRecordOnly) {
-          return const SizedBox.shrink();
-        }
-        final l = AppLocalizations.of(context);
-        return Container(
+  /// nothing. A status, not an alert — it describes the page. `null` when
+  /// there is nothing to say; each tab's list leads with it otherwise, so it
+  /// scrolls with the rows. Its one sentence points at the web app for a
+  /// run's bank file, which mobile does not download.
+  Widget? _recordOnlyBanner() {
+    if (!PaymentQueueStore.instance.isRecordOnly) return null;
+    final l = AppLocalizations.of(context);
+    return Container(
           key: const Key('record-only-banner'),
           width: double.infinity,
           margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
@@ -287,8 +286,6 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
             ],
           ),
         );
-      },
-    );
   }
 
   // ── Queue tab ──────────────────────────────────────────────────────
@@ -305,20 +302,32 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
         if (store.error != null && store.queue.isEmpty) {
           return _errorState(store.error!, store.fetch);
         }
+        final banner = _recordOnlyBanner();
         if (store.queue.isEmpty) {
-          return Center(child: Text(l.payQueueEmpty));
+          return ListView(
+            children: [
+              ?banner,
+              const SizedBox(height: 120),
+              Center(child: Text(l.payQueueEmpty)),
+            ],
+          );
         }
 
+        final lead = banner == null ? 0 : 1;
         return Column(
           children: [
             Expanded(
               child: RefreshIndicator(
                 onRefresh: store.fetch,
                 child: ListView.separated(
-                  itemCount: store.queue.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) =>
-                      _queueRow(store.queue[index]),
+                  itemCount: store.queue.length + lead,
+                  // No rule between the note and the first row.
+                  separatorBuilder: (_, index) => index < lead
+                      ? const SizedBox.shrink()
+                      : const Divider(height: 1),
+                  itemBuilder: (context, index) => index < lead
+                      ? banner!
+                      : _queueRow(store.queue[index - lead]),
                 ),
               ),
             ),
@@ -634,23 +643,30 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       builder: (context, _) {
         final l = AppLocalizations.of(context);
         final store = PaymentQueueStore.instance;
+        final banner = _recordOnlyBanner();
         if (store.runs.isEmpty) {
           return RefreshIndicator(
             onRefresh: store.fetchRuns,
             child: ListView(
               children: [
+                ?banner,
                 const SizedBox(height: 120),
                 Center(child: Text(l.payRunsEmpty)),
               ],
             ),
           );
         }
+        final lead = banner == null ? 0 : 1;
         return RefreshIndicator(
           onRefresh: store.fetchRuns,
           child: ListView.separated(
-            itemCount: store.runs.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) => _runRow(store.runs[index]),
+            itemCount: store.runs.length + lead,
+            separatorBuilder: (_, index) => index < lead
+                ? const SizedBox.shrink()
+                : const Divider(height: 1),
+            itemBuilder: (context, index) => index < lead
+                ? banner!
+                : _runRow(store.runs[index - lead]),
           ),
         );
       },

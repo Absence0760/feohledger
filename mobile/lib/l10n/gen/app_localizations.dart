@@ -5932,8 +5932,56 @@ abstract class AppLocalizations {
   /// Pay tab banner on a tenant whose payments FeohLedger records but never sends (GET /api/payments/execution-mode = record_only).
   ///
   /// In en, this message translates to:
-  /// **'FeohLedger records your organization\'s payments but never sends them. Pay suppliers from your bank or ERP, then record each payment here, or build a run, download its bank file and record the run as paid.'**
+  /// **'FeohLedger records payments but never sends them: pay from your bank or ERP, then record each one here (a run\'s bank file is on the web app).'**
   String get payRecordOnlyBanner;
+
+  /// Record-as-paid dialog note when the queue row's erp_reported_payment pre-filled the form.
+  ///
+  /// In en, this message translates to:
+  /// **'Filled in from the payment {erp} reported. Check the details before you record it.'**
+  String payRecordPrefilledFromErp(String erp);
+
+  /// Label for the cash the ERP states was paid, beside the amount owed.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount {erp} reports paid'**
+  String payRecordErpAmount(String erp);
+
+  /// Heading over the ERP's rail-by-rail payment breakdown.
+  ///
+  /// In en, this message translates to:
+  /// **'How {erp} says it was paid'**
+  String payRecordSplitTitle(String erp);
+
+  /// A breakdown part whose rail the ERP did not state (or cannot be recorded outside FeohLedger).
+  ///
+  /// In en, this message translates to:
+  /// **'Method not stated'**
+  String get payRecordRailNotStated;
+
+  /// Stands in for the method picker when the ERP's split is the record (split_stands true).
+  ///
+  /// In en, this message translates to:
+  /// **'Split across the methods above'**
+  String get payRecordSplitMethod;
+
+  /// Note under the split: the server judged it stands (decisions §413).
+  ///
+  /// In en, this message translates to:
+  /// **'This payment was made with more than one method, so it is recorded with this split. One method cannot describe it.'**
+  String get payRecordSplitStands;
+
+  /// Note under the split: judged and does not add up.
+  ///
+  /// In en, this message translates to:
+  /// **'These parts do not add up to the amount paid, so the split is not kept. The method you choose is recorded for the whole payment.'**
+  String get payRecordSplitDropped;
+
+  /// Note under the split: not judged.
+  ///
+  /// In en, this message translates to:
+  /// **'Whether this split is kept is decided when the payment is recorded. If it is not kept, the method you choose is recorded for the whole payment.'**
+  String get payRecordSplitUnjudged;
 
   /// Queue-row button: record this invoice as paid outside FeohLedger.
   ///

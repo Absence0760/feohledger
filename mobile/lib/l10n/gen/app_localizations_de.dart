@@ -4058,7 +4058,41 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get payRecordOnlyBanner =>
-      'FeohLedger erfasst die Zahlungen Ihrer Organisation, versendet sie aber nie. Bezahlen Sie Lieferanten über Ihre Bank oder Ihr ERP und erfassen Sie jede Zahlung hier – oder erstellen Sie einen Lauf, laden Sie seine Bankdatei herunter und erfassen Sie den Lauf als bezahlt.';
+      'FeohLedger erfasst Zahlungen, versendet sie aber nie: Zahlen Sie über Ihre Bank oder Ihr ERP und erfassen Sie jede Zahlung hier (die Bankdatei eines Laufs finden Sie in der Web-App).';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return 'Aus der von $erp gemeldeten Zahlung übernommen. Prüfen Sie die Angaben, bevor Sie sie erfassen.';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return 'Laut $erp gezahlter Betrag';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return 'So wurde laut $erp gezahlt';
+  }
+
+  @override
+  String get payRecordRailNotStated => 'Zahlungsart nicht angegeben';
+
+  @override
+  String get payRecordSplitMethod =>
+      'Aufgeteilt auf die oben genannten Zahlungsarten';
+
+  @override
+  String get payRecordSplitStands =>
+      'Diese Zahlung erfolgte mit mehr als einer Zahlungsart und wird deshalb mit dieser Aufteilung erfasst. Eine einzelne Zahlungsart kann sie nicht beschreiben.';
+
+  @override
+  String get payRecordSplitDropped =>
+      'Diese Teilbeträge ergeben nicht den gezahlten Betrag, daher wird die Aufteilung nicht übernommen. Die gewählte Zahlungsart wird für die gesamte Zahlung erfasst.';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'Ob diese Aufteilung übernommen wird, wird beim Erfassen der Zahlung entschieden. Wird sie nicht übernommen, wird die gewählte Zahlungsart für die gesamte Zahlung erfasst.';
 
   @override
   String get payRecordAction => 'Als bezahlt erfassen';

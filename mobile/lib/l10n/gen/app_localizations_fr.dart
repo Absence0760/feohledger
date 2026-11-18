@@ -4072,7 +4072,40 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get payRecordOnlyBanner =>
-      'FeohLedger enregistre les paiements de votre organisation mais ne les envoie jamais. Payez les fournisseurs depuis votre banque ou votre ERP, puis enregistrez chaque paiement ici, ou créez un lot, téléchargez son fichier bancaire et enregistrez le lot comme payé.';
+      'FeohLedger enregistre les paiements mais ne les envoie jamais : payez depuis votre banque ou votre ERP, puis enregistrez chaque paiement ici (le fichier bancaire d\'un lot est dans l\'application web).';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return 'Renseigné à partir du paiement signalé par $erp. Vérifiez les informations avant de l\'enregistrer.';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return 'Montant payé selon $erp';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return 'Mode de paiement selon $erp';
+  }
+
+  @override
+  String get payRecordRailNotStated => 'Mode non indiqué';
+
+  @override
+  String get payRecordSplitMethod => 'Réparti entre les modes ci-dessus';
+
+  @override
+  String get payRecordSplitStands =>
+      'Ce paiement a été effectué avec plusieurs modes de paiement : il est donc enregistré avec cette répartition. Un seul mode ne peut pas le décrire.';
+
+  @override
+  String get payRecordSplitDropped =>
+      'La somme de ces parts ne correspond pas au montant payé : la répartition n\'est donc pas conservée. Le mode que vous choisissez est enregistré pour l\'ensemble du paiement.';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'La conservation de cette répartition est décidée lors de l\'enregistrement du paiement. Si elle n\'est pas conservée, le mode que vous choisissez est enregistré pour l\'ensemble du paiement.';
 
   @override
   String get payRecordAction => 'Enregistrer comme payée';

@@ -79,6 +79,12 @@ class PaymentQueueItem {
   /// recorded figure itself. `null` from a backend that predates the field.
   final String? payableAmountDisplay;
 
+  /// What the ERP reported paying on this invoice, when it holds a live
+  /// `paid_not_recorded` exception (`api/payments.py::
+  /// _queue_erp_reported_payments`) — the record dialog starts from it, as the
+  /// web's does. `null` otherwise.
+  final QueueErpReportedPayment? erpReportedPayment;
+
   PaymentQueueItem({
     required this.id,
     required this.invoiceNumber,
@@ -97,6 +103,7 @@ class PaymentQueueItem {
     this.requiredMethodCode,
     this.recordOutsideRefusal,
     this.payableAmountDisplay,
+    this.erpReportedPayment,
   });
 
   /// The single rail this row may be paid on, or `null` for "any".
@@ -157,8 +164,161 @@ class PaymentQueueItem {
       payableAmountDisplay: json['payable_amount'] == null
           ? null
           : moneyToDisplay(json['payable_amount']),
+      erpReportedPayment:
+          QueueErpReportedPayment.fromJson(json['erp_reported_payment']),
     );
   }
+}
+
+/// One part of the ERP's breakdown of a reported payment: a rail a payment
+/// made outside FeohLedger can be recorded on, or `null` for "not stated",
+/// and its exact amount string (never parsed).
+class ErpRailPart {
+  final String? rail;
+  final String amount;
+  const ErpRailPart({required this.rail, required this.amount});
+}
+
+/// What a "record this payment" form starts from. [method] is `null` when the
+/// ERP named no rail a payment made outside FeohLedger can be recorded on, so
+/// the person must choose — never a guessed default.
+class RecordPrefill {
+  final String? method;
+  final String reference;
+  final DateTime paidOn;
+  const RecordPrefill({
+    required this.method,
+    required this.reference,
+    required this.paidOn,
+  });
+}
+
+/// A queue row's `erp_reported_payment`: the ERP's report on a live
+/// `paid_not_recorded` exception, flattened for the record dialog. The mobile
+/// mirror of the web's `QueueErpReportedPayment` + `erpPrefill` /
+/// `erpPaymentParts` / `spansSeveralRails` (`frontend/src/lib/types/
+/// erpReport.ts`), reading the same server fields.
+class QueueErpReportedPayment {
+  /// The exception whose one-click (`POST /api/exceptions/{id}/
+  /// record-erp-payment`) books a split that stands.
+  final String exceptionId;
+
+  /// The ERP's product name, or `null` when the adapter has none.
+  final String? erpName;
+  final String? method;
+  final String? reference;
+
+  /// As the server sent it (`YYYY-MM-DD`); [prefill] validates it.
+  final String? paidOn;
+
+  /// The cash the ERP states and the code it stated it in. Display only.
+  final String? amount;
+  final String? amountCurrency;
+
+  /// The breakdown as the server keeps it; empty when there is none or it is
+  /// malformed (never a partial list that would look like the whole).
+  final List<ErpRailPart> parts;
+
+  /// The server's verdict on [parts] (`erp_status_sync.kept_split_stands`):
+  /// true stands, false dropped, null not judged.
+  final bool? splitStands;
+
+  const QueueErpReportedPayment({
+    required this.exceptionId,
+    this.erpName,
+    this.method,
+    this.reference,
+    this.paidOn,
+    this.amount,
+    this.amountCurrency,
+    this.parts = const [],
+    this.splitStands,
+  });
+
+  static final _isoDay = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+
+  static String? _str(Object? v) => v is String ? v : null;
+
+  /// `null` for an absent or malformed report: with no exception id there is
+  /// nothing the dialog could book a split through.
+  static QueueErpReportedPayment? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['exception_id'];
+    if (id is! String || id.isEmpty) return null;
+    final amount = raw['amount'];
+    return QueueErpReportedPayment(
+      exceptionId: id,
+      erpName: _str(raw['erp_name']),
+      method: _str(raw['method']),
+      reference: _str(raw['reference']),
+      paidOn: _str(raw['paid_on']),
+      amount: amount == null ? null : moneyToDisplay(amount),
+      amountCurrency: _str(raw['amount_currency']),
+      parts: _parts(raw['payment_parts']),
+      splitStands: raw['split_stands'] is bool ? raw['split_stands'] as bool : null,
+    );
+  }
+
+  /// The breakdown part by part, as the server books it: a rail that cannot be
+  /// recorded outside FeohLedger (`virtual_card`, an unknown string) reads as
+  /// not stated; a part with no exact amount string makes the whole breakdown
+  /// read as none (`payment_methods.rail_parts_from_json`).
+  static List<ErpRailPart> _parts(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <ErpRailPart>[];
+    for (final part in raw) {
+      if (part is! Map) return const [];
+      final amount = part['amount'];
+      if (amount is! String || amount.trim().isEmpty) return const [];
+      final rail = part['method'] is String
+          ? (part['method'] as String).trim().toLowerCase()
+          : '';
+      out.add(ErpRailPart(
+        rail: kExternalPaymentMethods.contains(rail) ? rail : null,
+        amount: amount,
+      ));
+    }
+    return out;
+  }
+
+  /// Does the breakdown span more than one rail? A part with no rail counts
+  /// as one of its own, as the server counts it. Only then is it shown: one
+  /// rail is just the method the form pre-fills.
+  bool get showsSplit => parts.map((p) => p.rail).toSet().length > 1;
+
+  /// The split is the record whatever rail is picked: `record-outside` would
+  /// refuse it (`external_payment_erp_split`), so the dialog books through
+  /// the exception's one-click and names no rail (decisions §426).
+  bool get splitIsTheRecord => showsSplit && splitStands == true;
+
+  /// The form pre-filled from the report. A rail it did not state, or one
+  /// that cannot be recorded outside FeohLedger, is left unchosen; a missing,
+  /// malformed or future date falls back to [today].
+  RecordPrefill prefill(DateTime today) {
+    final m = (method ?? '').trim().toLowerCase();
+    final day = (paidOn ?? '').length >= 10 ? paidOn!.substring(0, 10) : '';
+    final parsed = _isoDay.hasMatch(day) ? DateTime.tryParse(day) : null;
+    return RecordPrefill(
+      method: kExternalPaymentMethods.contains(m) ? m : null,
+      reference: (reference ?? '').trim(),
+      paidOn: parsed != null && !parsed.isAfter(today) ? parsed : today,
+    );
+  }
+
+  /// For the offline cache round-trip (`PaymentQueueStore._queueItemToJson`).
+  Map<String, dynamic> toJson() => {
+        'exception_id': exceptionId,
+        'erp_name': erpName,
+        'method': method,
+        'reference': reference,
+        'paid_on': paidOn,
+        'amount': amount,
+        'amount_currency': amountCurrency,
+        'payment_parts': [
+          for (final p in parts) {'method': p.rail, 'amount': p.amount},
+        ],
+        'split_stands': splitStands,
+      };
 }
 
 /// Payment-page KPI bar, from `GET /api/payments/summary`. Each value is a
