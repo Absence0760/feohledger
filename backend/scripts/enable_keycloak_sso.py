@@ -16,7 +16,10 @@ After enabling, the acme login page (http://acme.localhost:7777) renders the
 mirrors the seeded admin, so the first SSO login links to the existing row).
 
 The values here MUST match the realm export: client id, client secret, and the
-discovery URL of the `feohledger` realm. localhost:8088 is reachable from
+discovery URL of the `feohledger` realm. The client secret is a fixed, public,
+local-only value; it is sealed into ``provider_credentials`` (block ``sso``)
+through the same writer ``PUT /api/organization/sso`` uses, and the block gets
+the ``client_secret_configured`` marker — never the value. localhost:8088 is reachable from
 the backend process (run on the host, not in a container) and from the browser.
 """
 
@@ -46,13 +49,19 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
 
 from app.database import control_engine, control_session_factory
 from app.models.organization import Organization
+from app.services.provider_credentials import update_secrets
+from app.services.sso import CLIENT_SECRET_MARKER
+
+# Matches `keycloak/realm-export.json`'s `feohledger-app` client. A local-only
+# fixture, not a credential.
+KEYCLOAK_CLIENT_SECRET = "local-dev-keycloak-secret"
 
 KEYCLOAK_SSO_CONFIG = {
     "enabled": True,
     "provider": "oidc",
     "discovery_url": ("http://localhost:8088/realms/feohledger/.well-known/openid-configuration"),
     "client_id": "feohledger-app",
-    "client_secret": "local-dev-keycloak-secret",
+    CLIENT_SECRET_MARKER: True,
     # Empty allowlist = accept any email domain. Add "acme.com" here to exercise
     # the JIT domain-allowlist path in app/api/auth_sso.py.
     "allowed_email_domains": [],
@@ -75,9 +84,13 @@ async def _apply(slug: str, disable: bool) -> None:
         new_settings = dict(org.settings or {})
         if disable:
             new_settings.pop("sso", None)
+            await update_secrets(session, org.id, "sso", {}, ["client_secret"])
             action = "disabled"
         else:
             new_settings["sso"] = dict(KEYCLOAK_SSO_CONFIG)
+            await update_secrets(
+                session, org.id, "sso", {"client_secret": KEYCLOAK_CLIENT_SECRET}, []
+            )
             action = "enabled"
         org.settings = new_settings
         await session.commit()

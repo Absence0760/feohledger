@@ -24,10 +24,17 @@ sub-processor (`/legal/sub-processors`), not a performance setting.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from app.config import Settings
 from app.services import audit_summary
+
+# The BYOK key is sealed (`provider_credentials`); these DB-free tests declare it
+# inline in the settings block, which the fixture serves as the sealed store.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+ORG = uuid.uuid4()
 
 
 def test_shipped_default_is_off():
@@ -36,29 +43,31 @@ def test_shipped_default_is_off():
     assert Settings().audit_summary_enabled is False
 
 
-def test_disabled_resolves_no_api_key_even_when_one_is_configured(monkeypatch):
+async def test_disabled_resolves_no_api_key_even_when_one_is_configured(monkeypatch):
     # The precise failure mode: a key IS present (configured for extraction),
     # and the summary path must still decline to use it.
     monkeypatch.setattr(audit_summary.settings, "audit_summary_enabled", False)
     monkeypatch.setattr(audit_summary.settings, "anthropic_api_key", "sk-ant-configured")
     monkeypatch.setattr(audit_summary.settings, "extraction_model", "claude-opus-5")
 
-    config = audit_summary._resolve_summary_config({})
+    config = await audit_summary._resolve_summary_config({}, organization_id=ORG)
 
     # An empty api_key is what selects the template path downstream.
     assert config["api_key"] == ""
 
 
-def test_disabled_ignores_a_byok_org_key_too(monkeypatch):
+async def test_disabled_ignores_a_byok_org_key_too(monkeypatch):
     # BYOK resolves the key from org settings rather than the platform config,
     # so it is a second route to the same call and needs the same gate.
     monkeypatch.setattr(audit_summary.settings, "audit_summary_enabled", False)
     org_settings = {"extraction": {"program_type": "byok", "api_key": "sk-ant-org"}}
 
-    assert audit_summary._resolve_summary_config(org_settings)["api_key"] == ""
+    assert (await audit_summary._resolve_summary_config(org_settings, organization_id=ORG))[
+        "api_key"
+    ] == ""
 
 
-def test_enabled_still_resolves_the_platform_key(monkeypatch):
+async def test_enabled_still_resolves_the_platform_key(monkeypatch):
     # Opting in must genuinely work — the fix is a changed default, not a
     # disabled feature.
     monkeypatch.setattr(audit_summary.settings, "audit_summary_enabled", True)
@@ -66,13 +75,13 @@ def test_enabled_still_resolves_the_platform_key(monkeypatch):
     monkeypatch.setattr(audit_summary.settings, "audit_summary_model", "")
     monkeypatch.setattr(audit_summary.settings, "extraction_model", "claude-opus-5")
 
-    config = audit_summary._resolve_summary_config({})
+    config = await audit_summary._resolve_summary_config({}, organization_id=ORG)
 
     assert config["api_key"] == "sk-ant-configured"
     assert config["model"] == "claude-opus-5"
 
 
-def test_enabled_still_resolves_a_byok_org_key(monkeypatch):
+async def test_enabled_still_resolves_a_byok_org_key(monkeypatch):
     monkeypatch.setattr(audit_summary.settings, "audit_summary_enabled", True)
     monkeypatch.setattr(audit_summary.settings, "extraction_model", "claude-opus-5")
     org_settings = {
@@ -84,14 +93,14 @@ def test_enabled_still_resolves_a_byok_org_key(monkeypatch):
         }
     }
 
-    config = audit_summary._resolve_summary_config(org_settings)
+    config = await audit_summary._resolve_summary_config(org_settings, organization_id=ORG)
 
     assert config["api_key"] == "sk-ant-org"
     assert config["model"] == "claude-haiku-4-5"
 
 
 @pytest.mark.parametrize("provider", ["openai_vision", None])
-def test_a_byok_key_for_another_provider_never_goes_to_anthropic(monkeypatch, provider):
+async def test_a_byok_key_for_another_provider_never_goes_to_anthropic(monkeypatch, provider):
     """Only a `claude_vision` org holds an Anthropic key. An OpenAI (or
     unspecified) BYOK secret used to be posted to api.anthropic.com as
     `x-api-key`; the platform key is no fallback either."""
@@ -101,6 +110,6 @@ def test_a_byok_key_for_another_provider_never_goes_to_anthropic(monkeypatch, pr
         "extraction": {"program_type": "byok", "provider": provider, "api_key": "sk-openai-org"}
     }
 
-    config = audit_summary._resolve_summary_config(org_settings)
+    config = await audit_summary._resolve_summary_config(org_settings, organization_id=ORG)
 
     assert config["api_key"] == ""

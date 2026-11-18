@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -54,6 +55,7 @@ from app.config import settings
 from app.models.invoice import Invoice, InvoiceExtractionResult
 from app.models.user import User
 from app.models.workflow import AuditLog
+from app.services import provider_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -440,19 +442,19 @@ def build_template_summary(
 # ---------- Config resolution (mirrors extraction) -------------------------
 
 
-def _resolve_summary_config(org_settings: dict | None) -> dict:
+async def _resolve_summary_config(org_settings: dict | None, *, organization_id: uuid.UUID) -> dict:
     """Resolve the LLM config for summarization. Platform mode uses the
-    app-level Anthropic key + model; BYOK uses the org's extraction settings.
+    app-level Anthropic key + model; BYOK uses the org's extraction settings,
+    its sealed key opened through `provider_credentials.byok_extraction_config`.
     Returns `{"api_key", "model"}` — empty `api_key` selects the template path.
     """
     if not settings.audit_summary_enabled:
         return {"api_key": "", "model": ""}
 
-    extraction = (org_settings or {}).get("extraction", {})
-    program_type = extraction.get("program_type", "platform")
     model = settings.audit_summary_model or settings.extraction_model
+    extraction = await provider_credentials.byok_extraction_config(organization_id, org_settings)
 
-    if program_type == "byok":
+    if extraction is not None:
         # Only a `claude_vision` org's key is an Anthropic key. Any other BYOK
         # provider's secret must never be posted to api.anthropic.com, and the
         # platform key is no fallback (it would engage Anthropic for an org that
@@ -638,7 +640,7 @@ async def get_or_build_summary(
 
     events = await _load_events(db, control_db, invoice.correlation_id)
     extraction_meta = await _load_extraction_meta(db, invoice)
-    config = _resolve_summary_config(org_settings)
+    config = await _resolve_summary_config(org_settings, organization_id=invoice.organization_id)
     result = await summarize(invoice, events, extraction_meta, config=config, http_post=http_post)
 
     generated_at = datetime.now(UTC).isoformat()

@@ -45,6 +45,7 @@ from app.api.refusals import (
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.identity_provisioning import (
     DeactivatedAccount,
     EmailDomainNotAllowed,
@@ -64,6 +65,7 @@ from app.services.sso import (
     exchange_code_for_tokens,
     fetch_discovery,
     is_sso_only,
+    load_client_secret,
     redirect_uri,
     resolve_sso_config,
     resolve_sso_tenant_slug,
@@ -269,13 +271,40 @@ async def sso_callback(
     if config is None:
         raise HTTPException(status_code=400, detail="SSO is not configured for this tenant.")
 
+    # The client secret is sealed (`services/sso.load_client_secret`) and
+    # opened only here, after the single-use state above was consumed. A
+    # marker with no stored secret, or a store that cannot open it, fails the
+    # sign-in closed before anything is sent to the IdP. The reason codes name
+    # no value.
+    try:
+        client_secret = await load_client_secret(org.id, db=db)
+    except CredentialCryptoError:
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=None,
+            action="auth.sso.login.failure",
+            details={"tenant": tenant_slug, "ip": ip, "reason": "credentials_unavailable"},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Single sign-on is temporarily unavailable. Try again shortly.",
+        ) from None
+    if client_secret is None:
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=None,
+            action="auth.sso.login.failure",
+            details={"tenant": tenant_slug, "ip": ip, "reason": "client_secret_missing"},
+        )
+        raise HTTPException(status_code=400, detail="SSO is not configured for this tenant.")
+
     discovery = await fetch_discovery(config.discovery_url)
 
     try:
         tokens = await exchange_code_for_tokens(
             discovery,
             config.client_id,
-            config.client_secret,
+            client_secret,
             body.code,
             tenant_slug,
             org.settings,

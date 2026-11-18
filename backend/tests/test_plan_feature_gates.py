@@ -59,7 +59,7 @@ OIDC_READY = {
     "provider": "okta",
     "discovery_url": "https://idp.example.com/.well-known/openid-configuration",
     "client_id": "feoh",
-    "client_secret": "not-a-real-secret",
+    "client_secret_configured": True,
 }
 SAML_READY = {
     "enabled": True,

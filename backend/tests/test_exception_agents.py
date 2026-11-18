@@ -92,6 +92,7 @@ async def test_build_rationale_no_key_returns_template_offline():
     template = "Adjusted invoice amount from 100.00 to 100.50 and approved."
     out = await build_rationale(
         {"extraction": {"program_type": "platform", "api_key": ""}},
+        organization_id=uuid.uuid4(),
         template=template,
         facts={"old_amount": "100.00", "new_amount": "100.50"},
         http_post=_boom,
@@ -100,7 +101,7 @@ async def test_build_rationale_no_key_returns_template_offline():
     assert called is False
 
 
-async def test_build_rationale_byok_empty_key_returns_template():
+async def test_build_rationale_byok_empty_key_returns_template(provider_store_from_settings):
     """A BYOK org with an empty api_key still degrades to the template — the
     no-key path is keyed off the resolved key being falsy, not the program."""
     called = False
@@ -113,6 +114,7 @@ async def test_build_rationale_byok_empty_key_returns_template():
     template = "deterministic rationale"
     out = await build_rationale(
         {"extraction": {"program_type": "byok", "api_key": ""}},
+        organization_id=uuid.uuid4(),
         template=template,
         facts={},
         http_post=_boom,
@@ -121,7 +123,9 @@ async def test_build_rationale_byok_empty_key_returns_template():
     assert called is False
 
 
-async def test_build_rationale_request_leaves_room_for_thinking(monkeypatch):
+async def test_build_rationale_request_leaves_room_for_thinking(
+    monkeypatch, provider_store_from_settings
+):
     """Current models think by default and thinking counts toward max_tokens —
     the old 300 could end the turn before the sentence and silently fall back
     to the template."""
@@ -148,6 +152,7 @@ async def test_build_rationale_request_leaves_room_for_thinking(monkeypatch):
                 "model": "claude-sonnet-5-5",
             }
         },
+        organization_id=uuid.uuid4(),
         template="draft",
         facts={},
         http_post=_post,

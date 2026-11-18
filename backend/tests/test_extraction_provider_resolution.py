@@ -11,10 +11,32 @@ See `app/services/extraction.py::resolve_platform_provider` and
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from app.config import _EXTRACTION_PROVIDERS, Settings
 from app.services import extraction as ext
+from app.services import provider_credentials
+
+ORG = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
+
+
+def _sealed(monkeypatch, secrets: dict) -> list:
+    """Stand in for the sealed store: ``secrets`` is what block ``extraction`` holds.
+
+    Returns the list of ``(org_id, block)`` reads, so a test can assert who
+    opened the store and how often.
+    """
+    reads: list = []
+
+    async def fake_load(org_id, block, *, db=None):
+        reads.append((org_id, block))
+        return dict(secrets) if block == "extraction" else {}
+
+    monkeypatch.setattr(provider_credentials, "load_secrets", fake_load)
+    return reads
+
 
 # --------------------------------------------------------------------------- #
 # The pure resolver
@@ -92,58 +114,88 @@ def test_none_values_are_tolerated():
 # --------------------------------------------------------------------------- #
 
 
-def _platform_config(monkeypatch, *, provider="", key="", environment="development") -> dict:
+async def _platform_config(monkeypatch, *, provider="", key="", environment="development") -> dict:
     monkeypatch.setattr(ext.settings, "extraction_provider", provider)
     monkeypatch.setattr(ext.settings, "anthropic_api_key", key)
     monkeypatch.setattr(ext.settings, "environment", environment)
-    return ext._resolve_extraction_config({})
+    return await ext._resolve_extraction_config({}, organization_id=ORG)
 
 
-def test_resolved_config_uses_the_offline_reader_when_keyless(monkeypatch):
-    config = _platform_config(monkeypatch)
+async def test_resolved_config_uses_the_offline_reader_when_keyless(monkeypatch):
+    config = await _platform_config(monkeypatch)
     assert config["program_type"] == "platform"
     assert config["provider"] == "mock"
     assert config["platform_provider_reason"] == ext.PLATFORM_REASON_NO_KEY_LOCAL
 
 
-def test_resolved_config_is_unchanged_when_a_platform_key_is_set(monkeypatch):
-    config = _platform_config(monkeypatch, key="sk-ant-real-key", environment="production")
+async def test_resolved_config_is_unchanged_when_a_platform_key_is_set(monkeypatch):
+    config = await _platform_config(monkeypatch, key="sk-ant-real-key", environment="production")
     assert config["provider"] == "claude_vision"
     assert config["api_key"] == "sk-ant-real-key"
     assert config["platform_provider_reason"] == ext.PLATFORM_REASON_PLATFORM_KEY
 
 
-def test_resolved_config_honours_the_operator_override(monkeypatch):
-    config = _platform_config(monkeypatch, provider="ollama", key="sk-ant-real-key")
+async def test_resolved_config_honours_the_operator_override(monkeypatch):
+    config = await _platform_config(monkeypatch, provider="ollama", key="sk-ant-real-key")
     assert config["provider"] == "ollama"
     assert config["platform_provider_reason"] == ext.PLATFORM_REASON_CONFIGURED
 
 
-def test_byok_org_is_untouched_by_the_platform_rules(monkeypatch):
-    """A customer's own provider config never routes through the platform chain."""
+async def test_byok_org_is_untouched_by_the_platform_rules(monkeypatch):
+    """A customer's own provider config never routes through the platform chain,
+    and its key comes from the sealed store, opened for THIS org."""
     monkeypatch.setattr(ext.settings, "extraction_provider", "mock")
     monkeypatch.setattr(ext.settings, "anthropic_api_key", "")
-    byok = {"program_type": "byok", "provider": "openai_vision", "api_key": "sk-customer"}
-    assert ext._resolve_extraction_config({"extraction": byok}) == byok
+    reads = _sealed(monkeypatch, {"api_key": "sk-customer"})
+    byok = {"program_type": "byok", "provider": "openai_vision"}
+    assert await ext._resolve_extraction_config({"extraction": byok}, organization_id=ORG) == {
+        **byok,
+        "api_key": "sk-customer",
+    }
+    assert reads == [(ORG, "extraction")]
 
 
-def test_byok_config_is_a_copy_of_the_org_settings_not_the_settings_themselves():
+async def test_byok_key_left_in_the_jsonb_is_never_used(monkeypatch):
+    """Only the sealed store authenticates: a plaintext key in the settings
+    (a hand edit, a pre-0135 backup restored) is stripped, not sent."""
+    _sealed(monkeypatch, {})
+    byok = {"program_type": "byok", "provider": "claude_vision", "api_key": "stray-plaintext"}
+    config = await ext._resolve_extraction_config({"extraction": byok}, organization_id=ORG)
+    assert "api_key" not in config
+    assert config["provider"] == "claude_vision"
+
+
+async def test_platform_mode_never_opens_the_sealed_store(monkeypatch):
+    """A platform org has no tenant secret to read: no control-plane read, no unseal."""
+    monkeypatch.setattr(ext.settings, "anthropic_api_key", "")
+    reads = _sealed(monkeypatch, {"api_key": "sk-customer"})
+    config = await ext._resolve_extraction_config(
+        {"extraction": {"program_type": "platform"}}, organization_id=ORG, announce=False
+    )
+    assert config["program_type"] == "platform"
+    assert reads == []
+
+
+async def test_byok_config_is_a_copy_of_the_org_settings_not_the_settings_themselves(
+    monkeypatch,
+):
     """`run_extraction` writes per-invoice hints into the config it resolves;
     they must never land in the org's settings dict (see the next test)."""
+    _sealed(monkeypatch, {})
     byok = {"program_type": "byok", "provider": "mock"}
-    resolved = ext._resolve_extraction_config({"extraction": byok})
+    resolved = await ext._resolve_extraction_config({"extraction": byok}, organization_id=ORG)
     resolved["gl_account_catalog"] = "6000 — B Marketing"
     assert byok == {"program_type": "byok", "provider": "mock"}
 
 
-def test_offline_fallback_is_logged(monkeypatch, caplog):
+async def test_offline_fallback_is_logged(monkeypatch, caplog):
     """`mock` output must never be mistaken for a real read — it announces itself."""
     with caplog.at_level("WARNING"):
-        _platform_config(monkeypatch)
+        await _platform_config(monkeypatch)
     assert any("OFFLINE" in r.getMessage() for r in caplog.records)
 
 
-def test_silent_resolution_still_resolves_but_says_nothing(monkeypatch, caplog):
+async def test_silent_resolution_still_resolves_but_says_nothing(monkeypatch, caplog):
     """`announce=False` is what the failure path uses.
 
     It re-resolves purely to read the provider for the `ExtractionUsage` row,
@@ -154,15 +206,15 @@ def test_silent_resolution_still_resolves_but_says_nothing(monkeypatch, caplog):
     monkeypatch.setattr(ext.settings, "anthropic_api_key", "")
     monkeypatch.setattr(ext.settings, "environment", "development")
     with caplog.at_level("WARNING"):
-        config = ext._resolve_extraction_config({}, announce=False)
+        config = await ext._resolve_extraction_config({}, organization_id=ORG, announce=False)
     assert config["provider"] == "mock"
     assert config["platform_provider_reason"] == ext.PLATFORM_REASON_NO_KEY_LOCAL
     assert caplog.records == []
 
 
-def test_keyless_deployed_is_logged(monkeypatch, caplog):
+async def test_keyless_deployed_is_logged(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
-        _platform_config(monkeypatch, environment="production")
+        await _platform_config(monkeypatch, environment="production")
     assert any("DEPLOYED" in r.getMessage() for r in caplog.records)
 
 

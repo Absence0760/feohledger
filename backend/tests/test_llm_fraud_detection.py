@@ -13,6 +13,7 @@ shape what the LLM sees and how the response gets parsed:
 from __future__ import annotations
 
 import asyncio
+import uuid
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -306,19 +307,26 @@ def test_detect_anomaly_honours_an_explicit_model():
 # ---------- Which key + model the anomaly check may use -------------------
 
 
-def test_platform_mode_uses_the_platform_key(monkeypatch):
+async def test_platform_mode_uses_the_platform_key(monkeypatch, provider_store_from_settings):
     from app.config import settings
     from app.services.llm_fraud_detection import resolve_anomaly_llm_config
 
     monkeypatch.setattr(settings, "anthropic_api_key", "platform-key")
-    assert resolve_anomaly_llm_config(None) == ("platform-key", None)
-    assert resolve_anomaly_llm_config({"extraction": {"program_type": "platform"}}) == (
+    assert await resolve_anomaly_llm_config(None, organization_id=uuid.uuid4()) == (
+        "platform-key",
+        None,
+    )
+    assert await resolve_anomaly_llm_config(
+        {"extraction": {"program_type": "platform"}}, organization_id=uuid.uuid4()
+    ) == (
         "platform-key",
         None,
     )
 
 
-def test_a_byok_claude_org_uses_its_own_key_and_model(monkeypatch):
+async def test_a_byok_claude_org_uses_its_own_key_and_model(
+    monkeypatch, provider_store_from_settings
+):
     from app.config import settings
     from app.services.llm_fraud_detection import resolve_anomaly_llm_config
 
@@ -331,10 +339,15 @@ def test_a_byok_claude_org_uses_its_own_key_and_model(monkeypatch):
             "model": "claude-opus-5-5",
         }
     }
-    assert resolve_anomaly_llm_config(org) == ("org-anthropic-key", "claude-opus-5-5")
+    assert await resolve_anomaly_llm_config(org, organization_id=uuid.uuid4()) == (
+        "org-anthropic-key",
+        "claude-opus-5-5",
+    )
 
 
-def test_a_byok_key_for_another_provider_is_never_sent_to_anthropic(monkeypatch):
+async def test_a_byok_key_for_another_provider_is_never_sent_to_anthropic(
+    monkeypatch, provider_store_from_settings
+):
     """An org extracting on OpenAI holds an OpenAI secret in
     `settings.extraction.api_key`. It used to be posted to api.anthropic.com as
     `x-api-key`; it must not leave for a provider it does not belong to, and the
@@ -350,16 +363,18 @@ def test_a_byok_key_for_another_provider_is_never_sent_to_anthropic(monkeypatch)
             "api_key": "sk-openai-secret",
         }
     }
-    assert resolve_anomaly_llm_config(org) == ("", None)
+    assert await resolve_anomaly_llm_config(org, organization_id=uuid.uuid4()) == ("", None)
 
 
-def test_a_byok_claude_org_without_a_key_gets_no_check(monkeypatch):
+async def test_a_byok_claude_org_without_a_key_gets_no_check(
+    monkeypatch, provider_store_from_settings
+):
     from app.config import settings
     from app.services.llm_fraud_detection import resolve_anomaly_llm_config
 
     monkeypatch.setattr(settings, "anthropic_api_key", "platform-key")
     org = {"extraction": {"program_type": "byok", "provider": "claude_vision"}}
-    assert resolve_anomaly_llm_config(org) == ("", None)
+    assert await resolve_anomaly_llm_config(org, organization_id=uuid.uuid4()) == ("", None)
 
 
 # ---------- Invoice → dataclass adapters ---------------------------------

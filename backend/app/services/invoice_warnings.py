@@ -2471,7 +2471,9 @@ async def _llm_anomaly_check(
     )
 
     # Platform key, or a BYOK org's own key only when it IS an Anthropic key.
-    api_key, model = resolve_anomaly_llm_config(org_settings)
+    api_key, model = await resolve_anomaly_llm_config(
+        org_settings, organization_id=invoice.organization_id
+    )
     if not api_key:
         return
 

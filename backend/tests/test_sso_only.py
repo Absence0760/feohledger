@@ -30,7 +30,7 @@ _OIDC_READY = {
     "sso_only": True,
     "discovery_url": "https://idp.example.com/.well-known/openid-configuration",
     "client_id": "feoh",
-    "client_secret": "not-a-real-secret",
+    "client_secret_configured": True,
 }
 _SAML_READY = {
     "enabled": True,
@@ -61,7 +61,18 @@ def _without(block: dict, *keys: str) -> dict:
         # Required, but the IdP block does not resolve: the login page has no
         # SSO button, so the password stays open as the escape hatch.
         ({"sso": {"enabled": True, "sso_only": True}}, False),
-        ({"sso": _without(_OIDC_READY, "client_secret")}, False),
+        ({"sso": _without(_OIDC_READY, "client_secret_configured")}, False),
+        # The secret is sealed; a plaintext one left in the block (a hand
+        # edit, a pre-0135 backup) is not the marker and resolves nothing.
+        (
+            {
+                "sso": {
+                    **_without(_OIDC_READY, "client_secret_configured"),
+                    "client_secret": "stray-plaintext",
+                }
+            },
+            False,
+        ),
         ({"sso": _without(_SAML_READY, "idp_x509_cert")}, False),
         ({"sso": {**_OIDC_READY, "discovery_url": "file:///etc/passwd"}}, False),
         ({"sso": {**_SAML_READY, "idp_x509_cert": "not base64 !!"}}, False),
@@ -80,7 +91,9 @@ def test_is_sso_only(settings_dict, expected):
         pytest.param({"sso": "yes"}, id="sso-not-an-object"),
         pytest.param(["not", "a", "mapping"], id="settings-not-an-object"),
         pytest.param({"sso": {**_OIDC_READY, "client_id": 12345}}, id="client_id-not-text"),
-        pytest.param({"sso": {**_OIDC_READY, "client_secret": "   "}}, id="secret-blank"),
+        pytest.param(
+            {"sso": {**_OIDC_READY, "client_secret_configured": "yes"}}, id="marker-not-true"
+        ),
         pytest.param({"sso": {**_OIDC_READY, "discovery_url": "http://[::1"}}, id="bad-ipv6"),
         pytest.param({"sso": {**_OIDC_READY, "provider": ["okta"]}}, id="provider-not-text"),
         pytest.param(

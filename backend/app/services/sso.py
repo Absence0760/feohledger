@@ -9,10 +9,18 @@ discovery document. Tenant-scoped config lives on Organization.settings.sso:
       "provider": "okta" | "entra" | "oidc",     # label only, drives UI copy
       "discovery_url": "https://<tenant>.okta.com/.well-known/openid-configuration",
       "client_id": "...",
-      "client_secret": "...",                    # encrypted at rest via pg
+      "client_secret_configured": true,          # the secret itself is sealed
       "scim_bearer_hash": "<sha256 hex>",        # per-tenant SCIM API token
       "allowed_email_domains": ["acme.com"]      # optional JIT allowlist
     }
+
+The OIDC client secret is not in this block. It is sealed in
+``provider_credentials`` (block ``sso``, ``services/provider_credentials``),
+written only by ``PUT /api/organization/sso`` and opened only by the OIDC
+callback (:func:`load_client_secret`). The block carries a boolean marker,
+``client_secret_configured``, written by that same endpoint in the same
+transaction, so the completeness check that runs on every password sign-in
+(:func:`is_sso_only`) stays local and sync and never unseals anything.
 """
 
 from __future__ import annotations
@@ -96,10 +104,12 @@ class SSOValidationError(ValueError):
 
 @dataclass
 class ResolvedSSOConfig:
+    """The OIDC block's configuration. The client secret is not here: it is
+    sealed, and only the callback opens it (:func:`load_client_secret`)."""
+
     provider: str
     discovery_url: str
     client_id: str
-    client_secret: str
     allowed_email_domains: list[str]
 
 
@@ -109,8 +119,13 @@ class ResolvedSSOConfig:
 # return None for the other protocol so neither can be driven by the wrong one.
 SAML_PROTOCOL = "saml"
 
-# The keys each protocol's IdP block cannot resolve without.
-OIDC_REQUIRED_FIELDS = ("discovery_url", "client_id", "client_secret")
+# The keys each protocol's IdP block cannot resolve without. OIDC also needs
+# its client secret, which is sealed: the block records that one is stored
+# with this marker (see the module docstring), and a missing marker is
+# reported under the name the admin knows, `client_secret`.
+OIDC_REQUIRED_FIELDS = ("discovery_url", "client_id")
+CLIENT_SECRET_FIELD = "client_secret"
+CLIENT_SECRET_MARKER = "client_secret_configured"
 SAML_REQUIRED_FIELDS = ("idp_entity_id", "idp_sso_url", "idp_x509_cert")
 
 
@@ -403,15 +418,45 @@ def resolve_sso_config(org_settings: Mapping[str, Any] | None) -> ResolvedSSOCon
     if _settings_protocol(sso) == SAML_PROTOCOL:
         # SAML tenant — resolved via resolve_saml_config, not the OIDC path.
         return None
-    discovery, client_id, client_secret = _required_text(sso, OIDC_REQUIRED_FIELDS)
+    missing = [
+        name
+        for name in OIDC_REQUIRED_FIELDS
+        if not (isinstance(sso.get(name), str) and sso.get(name).strip())
+    ]
+    # Only a literal `true` counts: the marker is written by the one endpoint
+    # that seals the secret, and a stray plaintext `client_secret` in the
+    # block is never read (the sealed store is the only source).
+    if sso.get(CLIENT_SECRET_MARKER) is not True:
+        missing.append(CLIENT_SECRET_FIELD)
+    if missing:
+        raise SSOConfigError(
+            f"SSO is enabled but these keys are missing, blank or not text: {', '.join(missing)}.",
+            fields=tuple(missing),
+        )
+    discovery, client_id = (sso[name] for name in OIDC_REQUIRED_FIELDS)
     _assert_sso_url_shape(discovery, what="discovery_url")
     return ResolvedSSOConfig(
         provider=_optional_text(sso, "provider", "oidc"),
         discovery_url=discovery,
         client_id=client_id,
-        client_secret=client_secret,
         allowed_email_domains=_email_domains(sso),
     )
+
+
+async def load_client_secret(org_id, *, db: AsyncSession | None = None) -> str | None:
+    """The tenant's sealed OIDC client secret, or ``None`` when none is stored.
+
+    THE read path for it — the callback's code exchange is its only caller, and
+    it runs only after a single-use ``state`` this server minted has been
+    consumed, so an unauthenticated request cannot make the server unseal.
+    Raises ``credential_crypto.CredentialCryptoError`` when the store cannot
+    open it; the caller fails the sign-in closed. Never logged.
+    """
+    from app.services import provider_credentials
+
+    secrets = await provider_credentials.load_secrets(org_id, "sso", db=db)
+    value = secrets.get(CLIENT_SECRET_FIELD)
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _brand_sso_callback_base(org_settings: Mapping[str, Any] | None) -> str:

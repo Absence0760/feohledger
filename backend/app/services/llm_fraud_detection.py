@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -31,6 +32,7 @@ import httpx
 
 from app.config import settings
 from app.schemas.money import json_money
+from app.services import provider_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +188,9 @@ def parse_response(text: str) -> AnomalyResult:
     )
 
 
-def resolve_anomaly_llm_config(org_settings: dict | None) -> tuple[str, str | None]:
+async def resolve_anomaly_llm_config(
+    org_settings: dict | None, *, organization_id: uuid.UUID
+) -> tuple[str, str | None]:
     """The Anthropic ``(api_key, model)`` the anomaly check may use, or ``("", None)``.
 
     Platform mode uses the platform key and the platform extraction model. A
@@ -198,8 +202,8 @@ def resolve_anomaly_llm_config(org_settings: dict | None) -> tuple[str, str | No
     back to the platform key would bill the platform and engage Anthropic as a
     sub-processor for an org that chose a different one.
     """
-    extraction = (org_settings or {}).get("extraction") or {}
-    if extraction.get("program_type") == "byok":
+    extraction = await provider_credentials.byok_extraction_config(organization_id, org_settings)
+    if extraction is not None:
         if extraction.get("provider") != "claude_vision":
             return "", None
         return extraction.get("api_key") or "", extraction.get("model") or None

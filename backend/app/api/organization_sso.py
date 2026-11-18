@@ -13,7 +13,11 @@ it does for `chat_notifications` and `brand.custom_domains`.
 
 The shape rules (write-only secret, carried SCIM keys, PUT-not-merge) live in
 the pure `services/sso_settings`; this module does persistence, RBAC, the
-`sso_only` refusal and the audit write.
+`sso_only` refusal and the audit write. The client secret itself is sealed in
+`provider_credentials` (block `sso`, `services/provider_credentials`) through
+the same writer the credentials endpoint uses, in the same transaction as the
+block and its `client_secret_configured` marker; this endpoint is its only
+writer.
 
 No module logger on purpose: the block holds the OIDC client secret, and what a
 save changed already reaches the audit trail as key names.
@@ -40,6 +44,8 @@ from app.services.billing.plan_catalog import (
     FEATURE_SSO,
     FEATURE_SSO_ENFORCEMENT,
 )
+from app.services.credential_crypto import CredentialCryptoError
+from app.services.provider_credentials import update_secrets
 from app.services.sso import SSOConfigError, check_sso_idp_config, sso_only_requested
 from app.services.sso_settings import (
     SCIM_GROUP_ROLE_MAP_KEY,
@@ -47,6 +53,7 @@ from app.services.sso_settings import (
     SSOSettingsError,
     build_sso_block,
     changed_keys,
+    client_secret_update,
     sso_status,
     stored_sso_block,
 )
@@ -255,6 +262,9 @@ async def update_sso_settings(
             clear_client_secret=body.clear_client_secret,
             scim_group_role_map=body.scim_group_role_map,
         )
+        secret_set, secret_clear = client_secret_update(
+            body.client_secret, body.clear_client_secret
+        )
     except SSOSettingsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
@@ -267,14 +277,30 @@ async def update_sso_settings(
     changed = changed_keys(before, block)
     await refuse_unentitled_sso_block(db, locked.id, block, changed)
 
-    # The row FIRST, and no change without it: this is a sign-in policy (and,
-    # with `client_secret`, a credential) change, and an unrecorded one is worse
-    # than a refused one — the same call `services/sso_break_glass` makes. Names
-    # and posture only: `client_secret` appears in `changed` as a NAME when it
-    # was replaced or cleared; its value never enters the trail, which is
-    # shipped to CloudWatch and a WORM bucket. Written while the row lock is
-    # held; a commit failing after it leaves a row for a save that did not land,
-    # which is the safe direction to be wrong in.
+    # The sealed secret first, unflushed to nothing but this transaction: its
+    # write reports whether the value changed (a rotation behind an unchanged
+    # `client_secret_configured` marker), which the audit row must name. A
+    # store that cannot seal is a 503 with nothing saved.
+    try:
+        secret_changed = await update_secrets(db, locked.id, "sso", secret_set, secret_clear)
+    except CredentialCryptoError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="The credential store is unavailable, so nothing was saved.",
+        ) from None
+    changed = sorted(set(changed) | set(secret_changed))
+
+    # The row before the commit, and no change without it: this is a sign-in
+    # policy (and, with `client_secret`, a credential) change, and an
+    # unrecorded one is worse than a refused one — the same call
+    # `services/sso_break_glass` makes. Names and posture only:
+    # `client_secret` appears in `changed` as a NAME when it was replaced or
+    # cleared; its value never enters the trail, which is shipped to
+    # CloudWatch and a WORM bucket. Written while the row lock is held; a
+    # failure rolls back the sealed write above with everything else, and a
+    # commit failing after it leaves a row for a save that did not land, which
+    # is the safe direction to be wrong in.
     try:
         await record_auth_audit_or_raise(
             organization_id=locked.id,

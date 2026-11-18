@@ -397,6 +397,7 @@ class MultiPOSplitResolver(ExceptionResolver):
         }
         rationale = await build_rationale(
             org_settings,
+            organization_id=invoice.organization_id,
             template=(
                 f"Linked invoice to {len(subset.po_numbers)} purchase orders "
                 f"({combined_ref}) whose totals sum to {subset.combined_total} "

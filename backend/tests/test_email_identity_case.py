@@ -357,6 +357,8 @@ async def test_oidc_callback_refuses_and_audits_in_the_idp_workspace(
     _user_id, email = await mixed_case_user()
     org_b = await _org_b(realdb)
     slug_b = realdb.info("b").slug
+    # The OIDC client secret is sealed; the callback opens it before the exchange.
+    await realdb.store_provider_secrets("b", "sso", {"client_secret": "not-a-real-secret"})
 
     async def _consume_state(state):
         return {"tenant": slug_b, "nonce": "n"}
@@ -371,7 +373,7 @@ async def test_oidc_callback_refuses_and_audits_in_the_idp_workspace(
                 "provider": "okta",
                 "discovery_url": "https://idp.example.test/.well-known/openid-configuration",
                 "client_id": "cid",
-                "client_secret": "not-a-real-secret",
+                "client_secret_configured": True,
             }
         }
 

@@ -52,9 +52,12 @@ always a clean, reproducible state (no persisted volume).
 | Test user (links to seeded admin) | `demo@acme.com` / `demo` |
 | Test user (JIT-provisions new) | `newhire@acme.com` / `demo` |
 
-`pnpm idp:seed` writes exactly these values into `Organization.settings.sso`
-for the chosen tenant (the same shape Okta/Entra would use), merging into the
-existing settings rather than overwriting `cards` / `payments` / etc.
+`pnpm idp:seed` writes these values into `Organization.settings.sso` for the
+chosen tenant (the same shape Okta/Entra would use), merging into the existing
+settings rather than overwriting `cards` / `payments` / etc. — except the client
+secret, which it seals into `provider_credentials` (block `sso`) the way the
+product does, leaving only the `client_secret_configured: true` marker in the
+block. `--disable` removes the block and the sealed secret.
 
 The seed is a **dev shortcut that writes the row directly**: it bypasses the
 product's one writer of `settings.sso`, `PUT /api/organization/sso` (the

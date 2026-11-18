@@ -72,7 +72,15 @@ def test_admin_keeps_configuration_but_no_write_only_credential():
     assert projected["erp"] == {"type": "netsuite", "integration_method": "direct"}
     assert projected["payments"] == {"provider": "modern_treasury"}
     assert projected["cards"] == {"provider": "lithic"}
-    for value in ("erp-client-secret", "erp-api-key", "pay-webhook-secret", "card-api-key"):
+    # The BYOK extraction key is sealed too: a stray copy never reads back.
+    assert projected["extraction"] == {"program_type": "byok"}
+    for value in (
+        "erp-client-secret",
+        "erp-api-key",
+        "pay-webhook-secret",
+        "card-api-key",
+        "extract-api-key",
+    ):
         assert value not in str(projected)
     assert projected["sso"]["scim_bearer_hash"] == "deadbeef"
     # …but never these, for any role.

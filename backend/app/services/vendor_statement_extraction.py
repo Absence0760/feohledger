@@ -32,6 +32,7 @@ See ``backend/docs/vendor-statement-reconciliation.md`` § PDF intake.
 from __future__ import annotations
 
 import logging
+import uuid
 
 from app.services import vendor_statement_recon as recon
 from app.services.extraction_adapters.base import (
@@ -112,7 +113,9 @@ def looks_like_pdf(
     return (filename or "").lower().endswith(".pdf")
 
 
-def resolve_statement_adapter(org_settings: dict | None) -> ExtractionAdapter:
+async def resolve_statement_adapter(
+    org_settings: dict | None, *, organization_id: uuid.UUID
+) -> ExtractionAdapter:
     """Return the org's configured extraction adapter, ready for a statement.
 
     Deliberately reuses ``extraction._resolve_extraction_config`` rather than
@@ -129,14 +132,25 @@ def resolve_statement_adapter(org_settings: dict | None) -> ExtractionAdapter:
     # 422 every other statement-read failure takes, so a config error can't
     # 500 an upload (`resolve_statement_adapter` is called outside the caller's
     # try block).
+    from app.services.credential_crypto import CredentialCryptoError
     from app.services.extraction import _resolve_extraction_config
     from app.services.extraction_adapters import (
         UnknownExtractionProviderError,
         get_extraction_adapter,
     )
+    from app.services.provider_credentials import CREDENTIALS_UNAVAILABLE_DETAIL
 
     try:
-        return get_extraction_adapter(_resolve_extraction_config(org_settings))
+        config = await _resolve_extraction_config(org_settings, organization_id=organization_id)
+    except CredentialCryptoError as exc:
+        # A BYOK org's sealed key could not be opened: nothing was sent, and the
+        # upload gets the same fail-closed 422 as every other read failure.
+        logger.warning("statement extraction: sealed extraction credentials unavailable")
+        raise StatementExtractionError(
+            STATEMENT_REASON_PROVIDER_ERROR, CREDENTIALS_UNAVAILABLE_DETAIL
+        ) from exc
+    try:
+        return get_extraction_adapter(config)
     except UnknownExtractionProviderError as exc:
         logger.warning("statement extraction: unregistered provider configured")
         raise StatementExtractionError(STATEMENT_REASON_PROVIDER_UNKNOWN) from exc
@@ -192,6 +206,7 @@ def normalize_extracted_lines(
 async def extract_statement_lines(
     *,
     org_settings: dict | None,
+    organization_id: uuid.UUID,
     file_bytes: bytes,
     file_key: str = "",
     mime_type: str = "application/pdf",
@@ -204,7 +219,7 @@ async def extract_statement_lines(
 
     Raises :class:`StatementExtractionError` on every failure path.
     """
-    adapter = resolve_statement_adapter(org_settings)
+    adapter = await resolve_statement_adapter(org_settings, organization_id=organization_id)
 
     try:
         result = await adapter.extract_statement(

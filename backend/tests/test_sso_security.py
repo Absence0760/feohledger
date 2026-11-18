@@ -501,7 +501,7 @@ def test_resolve_sso_config_rejects_a_non_http_discovery_url(bad):
             "enabled": True,
             "discovery_url": bad,
             "client_id": "cid",
-            "client_secret": "sec",
+            "client_secret_configured": True,
         }
     }
     with pytest.raises(SSOConfigError):
@@ -693,7 +693,7 @@ def _broken_oidc_org(slug: str = "acme"):
                 "enabled": True,
                 "discovery_url": "https://idp.example/.well-known/openid-configuration",
                 "client_id": "client-123",
-                # client_secret deliberately omitted -> SSOConfigError
+                # no client_secret_configured marker -> SSOConfigError
             }
         },
     )
@@ -815,10 +815,12 @@ async def test_sso_callback_identity_refusals_are_coded(monkeypatch, raised, rea
     config = SimpleNamespace(
         discovery_url="https://idp.test/.well-known/openid-configuration",
         client_id="cid",
-        client_secret="not-a-real-secret",
         allowed_email_domains=[],
         provider="okta",
     )
+
+    async def _secret(org_id, *, db=None):
+        return "not-a-real-secret"
 
     async def _discovery(url):
         return {}
@@ -846,6 +848,7 @@ async def test_sso_callback_identity_refusals_are_coded(monkeypatch, raised, rea
     monkeypatch.setattr(auth_sso, "_fetch_org_by_slug", _fetch_org)
     monkeypatch.setattr(auth_sso, "sign_in_settings", _sign_in_settings)
     monkeypatch.setattr(auth_sso, "_resolve_sso_or_none", lambda settings: config)
+    monkeypatch.setattr(auth_sso, "load_client_secret", _secret)
     monkeypatch.setattr(auth_sso, "fetch_discovery", _discovery)
     monkeypatch.setattr(auth_sso, "exchange_code_for_tokens", _exchange)
     monkeypatch.setattr(auth_sso, "validate_id_token", _validate)
@@ -861,3 +864,119 @@ async def test_sso_callback_identity_refusals_are_coded(monkeypatch, raised, rea
     assert exc.value.status_code == 403
     assert exc.value.detail == {"code": code, "message": message, "params": {}}
     assert [a["details"]["reason"] for a in audits] == [reason]
+
+
+# ---------- the sealed client secret reaches only the code exchange ----------
+
+
+def _sealed_callback_harness(monkeypatch, secret_loader):
+    """Drive `sso_callback` up to the code exchange with every IdP leg stubbed.
+
+    Returns ``(exchanged, audits, org)``: what the exchange was handed, the
+    audit rows written, and the org the callback resolved.
+    """
+    from types import SimpleNamespace
+
+    from app.api import auth_sso
+
+    org = SimpleNamespace(id=uuid.uuid4(), slug="acme", settings={})
+    exchanged: list[tuple] = []
+    audits: list[dict] = []
+
+    async def _consume_state(state):
+        return {"tenant": "acme", "nonce": "nonce-y"}
+
+    async def _fetch_org(slug, db):
+        return org
+
+    async def _sign_in_settings(db, o):
+        return {
+            "sso": {
+                "enabled": True,
+                "discovery_url": "https://idp.test/.well-known/openid-configuration",
+                "client_id": "cid",
+                "client_secret_configured": True,
+                # A stray plaintext value must never be what is sent.
+                "client_secret": "stray-plaintext",
+            }
+        }
+
+    async def _discovery(url):
+        return {}
+
+    async def _exchange(discovery, client_id, client_secret, *rest, **kw):
+        exchanged.append((client_id, client_secret))
+        return {}  # no id_token: the callback stops right after the exchange
+
+    async def _audit(**kw):
+        audits.append(kw)
+
+    monkeypatch.setattr(auth_sso, "consume_state", _consume_state)
+    monkeypatch.setattr(auth_sso, "_fetch_org_by_slug", _fetch_org)
+    monkeypatch.setattr(auth_sso, "sign_in_settings", _sign_in_settings)
+    monkeypatch.setattr(auth_sso, "load_client_secret", secret_loader)
+    monkeypatch.setattr(auth_sso, "fetch_discovery", _discovery)
+    monkeypatch.setattr(auth_sso, "exchange_code_for_tokens", _exchange)
+    monkeypatch.setattr(auth_sso, "dispatch_auth_audit", _audit)
+    return exchanged, audits, org
+
+
+async def _run_callback():
+    from types import SimpleNamespace
+
+    from app.api import auth_sso
+
+    request = SimpleNamespace(client=SimpleNamespace(host="203.0.113.7"), headers={})
+    body = auth_sso.SSOCallbackRequest(code="c", state="s")
+    return await auth_sso.sso_callback(body, request, db=None)
+
+
+@pytest.mark.asyncio
+async def test_sso_callback_sends_the_sealed_secret_not_the_jsonb(monkeypatch):
+    from fastapi import HTTPException
+
+    loaded: list = []
+
+    async def _secret(org_id, *, db=None):
+        loaded.append(org_id)
+        return "sealed-test-secret"
+
+    exchanged, _audits, org = _sealed_callback_harness(monkeypatch, _secret)
+    with pytest.raises(HTTPException):  # stops at "no ID token", after the exchange
+        await _run_callback()
+    assert loaded == [org.id]
+    assert exchanged == [("cid", "sealed-test-secret")]
+
+
+@pytest.mark.asyncio
+async def test_sso_callback_with_no_sealed_secret_is_refused_before_the_idp(monkeypatch):
+    from fastapi import HTTPException
+
+    async def _none(org_id, *, db=None):
+        return None
+
+    exchanged, audits, _org = _sealed_callback_harness(monkeypatch, _none)
+    with pytest.raises(HTTPException) as exc:
+        await _run_callback()
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "SSO is not configured for this tenant."
+    assert exchanged == []
+    assert [a["details"]["reason"] for a in audits] == ["client_secret_missing"]
+
+
+@pytest.mark.asyncio
+async def test_sso_callback_fails_closed_when_the_store_cannot_open(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.services.credential_crypto import CredentialCryptoError
+
+    async def _broken(org_id, *, db=None):
+        raise CredentialCryptoError("credential store unavailable")
+
+    exchanged, audits, _org = _sealed_callback_harness(monkeypatch, _broken)
+    with pytest.raises(HTTPException) as exc:
+        await _run_callback()
+    assert exc.value.status_code == 503
+    assert "secret" not in str(exc.value.detail).lower()
+    assert exchanged == []
+    assert [a["details"]["reason"] for a in audits] == ["credentials_unavailable"]
