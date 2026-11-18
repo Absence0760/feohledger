@@ -1373,7 +1373,7 @@ Modern Treasury and Stripe select sandbox by credential set, not by flag. A save
 that changes `provider` or `sandbox` (or removes a `providers[]` entry, or
 changes its `sandbox`) drops the sealed keys it strands, audited, so a key is
 never sent to a provider or environment it was not typed for
-(`provider_credentials.rail_secrets_to_drop`, decisions §NEW-S1).
+(`provider_credentials.rail_secrets_to_drop`, decisions §464).
 
 `tests/test_payment_adapter_doc_drift.py` pins the Methods column of the table
 above to each adapter's `supported_methods`, so a rail added or dropped in code

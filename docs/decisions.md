@@ -23228,7 +23228,7 @@ Letting the adapter refuse (QuickBooks already answers an unknown code with
 `currency_unknown`): not every adapter checks, and the bill is then refused
 only after an ERP round trip.
 
-## §NEW-S2. A white-label accent is cached per workspace and painted before first paint (round 18, 2026-11-18)
+## 463. A white-label accent is cached per workspace and painted before first paint (round 18, 2026-11-18)
 
 **Problem.** `brand.svelte.ts` reads `GET /api/organization/branding` only after
 `/auth/me`, so after a sign-in or reload a branded tenant's primary buttons,
@@ -23261,7 +23261,7 @@ fetched branding is authoritative: it overwrites or removes the entry.
 - **No CSP hash to update:** the frontend ships no CSP (`infra/frontend.tf`,
   SvelteKit hydration uses inline scripts).
 
-## §NEW-S1. A payment or card key goes with its provider, and an unopenable block can be cleared (round 18, 2026-11-18)
+## 464. A payment or card key goes with its provider, and an unopenable block can be cleared (round 18, 2026-11-18)
 
 **The drop.** Changing `settings.payments.provider` or `settings.cards.provider`
 left the old provider's sealed `api_key` / `client_secret` / webhook key in

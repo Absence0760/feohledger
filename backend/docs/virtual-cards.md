@@ -1036,7 +1036,7 @@ bodyless 503, our failure rather than a verdict on the event; an admin clears an
 unopenable block with `DELETE /api/organization/credentials/cards`). A
 `PATCH /api/organization` that changes `cards.provider` or `cards.sandbox` (or,
 with no provider, `cards.region`) drops the sealed card secrets, audited
-(`provider_credentials.rail_secrets_to_drop`, decisions §NEW-S1). The handler:
+(`provider_credentials.rail_secrets_to_drop`, decisions §464). The handler:
 
 0. bounds the body against `card_webhook_max_bytes` (default 4 MiB) BEFORE
    buffering it — a declared `Content-Length` over the cap rejects without

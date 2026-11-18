@@ -122,7 +122,7 @@ leaves the cached colour standing. Every value is re-validated as a 3- or
 entry cannot inject CSS; every storage access is wrapped, and blocked storage
 means "no cache" (the old behaviour). `reset()` clears the entry.
 `brandAccentCache.test.ts` executes the inline script against the store's own
-reads to keep the two equal (decisions §NEW-S2).
+reads to keep the two equal (decisions §463).
 
 **The fallback mark** — `brand.mark` (`brandTheme.ts::brandMark`,
 `docs/decisions.md` §173). A configured logo always wins. Without one, the

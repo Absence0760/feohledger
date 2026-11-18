@@ -2,7 +2,7 @@
  * Per-workspace cache of the two applied white-label accent values, so a
  * branded tenant's first frame after a reload paints in its own colour rather
  * than the platform blue for a round trip (docs/white-label.md § Accent before
- * first paint, docs/decisions.md §NEW-S2).
+ * first paint, docs/decisions.md §463).
  *
  * Runtime-free on purpose: `brand.svelte.ts` reads and writes it, and
  * `src/app.html`'s `<script id="accent-boot">` repeats the read (it runs before

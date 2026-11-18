@@ -219,7 +219,7 @@ test.describe('supplier portal brand mark', () => {
 
 /**
  * A branded tenant's accent before the branding read lands
- * (docs/decisions.md §NEW-S2). The first load caches the fetched accent per
+ * (docs/decisions.md §463). The first load caches the fetched accent per
  * workspace; on the reload the read is held open, and the accent must already
  * be on <html> — painted by app.html's accent-boot script, not the store.
  */
