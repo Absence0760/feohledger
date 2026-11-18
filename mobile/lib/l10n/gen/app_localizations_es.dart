@@ -140,9 +140,25 @@ class AppLocalizationsEs extends AppLocalizations {
       'Datos en caché — no se pudo conectar al servidor';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'Error: $error';
-  }
+  String get dashboardLoadError =>
+      'No se pudo cargar el panel. Revise su conexión y toque Reintentar.';
+
+  @override
+  String get dashboardRefreshFailed =>
+      'No se pudo actualizar: estas son las últimas cifras cargadas. Deslice hacia abajo para reintentar.';
+
+  @override
+  String get dashboardNeedsAttention => 'Requiere su atención';
+
+  @override
+  String get dashboardOverview => 'Resumen';
+
+  @override
+  String get dashboardEmpty =>
+      'Aún no hay facturas. Las facturas capturadas y subidas aparecerán aquí.';
+
+  @override
+  String get dashboardTopVendorsEmpty => 'Aún no hay gasto por proveedor.';
 
   @override
   String dashboardInvoiceCount(int count) {

@@ -46,12 +46,12 @@
   "dashboardAgingDays60": "60 Days",
   "dashboardAgingDays90plus": "90+",
   "dashboardCachedBanner": "Showing cached data — couldn't reach the server",
-  "dashboardErrorPrefix": "Error: {error}",
-  "@dashboardErrorPrefix": {
-    "placeholders": {
-      "error": { "type": "String" }
-    }
-  },
+  "dashboardLoadError": "Couldn't load the dashboard. Check your connection and tap Retry.",
+  "dashboardRefreshFailed": "Couldn't refresh — these are the last figures loaded. Pull down to try again.",
+  "dashboardNeedsAttention": "Needs your attention",
+  "dashboardOverview": "Overview",
+  "dashboardEmpty": "No invoices yet. Captured and uploaded invoices will appear here.",
+  "dashboardTopVendorsEmpty": "No vendor spend yet.",
   "dashboardInvoiceCount": "{count, plural, one {{count} invoice} other {{count} invoices}}",
   "@dashboardInvoiceCount": {
     "placeholders": {

@@ -140,9 +140,25 @@ class AppLocalizationsEn extends AppLocalizations {
       'Showing cached data — couldn\'t reach the server';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'Error: $error';
-  }
+  String get dashboardLoadError =>
+      'Couldn\'t load the dashboard. Check your connection and tap Retry.';
+
+  @override
+  String get dashboardRefreshFailed =>
+      'Couldn\'t refresh — these are the last figures loaded. Pull down to try again.';
+
+  @override
+  String get dashboardNeedsAttention => 'Needs your attention';
+
+  @override
+  String get dashboardOverview => 'Overview';
+
+  @override
+  String get dashboardEmpty =>
+      'No invoices yet. Captured and uploaded invoices will appear here.';
+
+  @override
+  String get dashboardTopVendorsEmpty => 'No vendor spend yet.';
 
   @override
   String dashboardInvoiceCount(int count) {

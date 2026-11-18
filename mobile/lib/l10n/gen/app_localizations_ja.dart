@@ -138,9 +138,23 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dashboardCachedBanner => 'キャッシュデータを表示中 — サーバーに接続できませんでした';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'エラー: $error';
-  }
+  String get dashboardLoadError => 'ダッシュボードを読み込めませんでした。接続を確認して再試行をタップしてください。';
+
+  @override
+  String get dashboardRefreshFailed =>
+      '更新できませんでした。最後に読み込んだ数値を表示しています。下に引いて再試行してください。';
+
+  @override
+  String get dashboardNeedsAttention => '対応が必要';
+
+  @override
+  String get dashboardOverview => '概要';
+
+  @override
+  String get dashboardEmpty => '請求書はまだありません。取り込んだ請求書やアップロードした請求書がここに表示されます。';
+
+  @override
+  String get dashboardTopVendorsEmpty => '取引先別の支出はまだありません。';
 
   @override
   String dashboardInvoiceCount(int count) {

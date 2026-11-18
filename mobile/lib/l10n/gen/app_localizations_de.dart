@@ -141,9 +141,25 @@ class AppLocalizationsDe extends AppLocalizations {
       'Zwischengespeicherte Daten — Server nicht erreichbar';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'Fehler: $error';
-  }
+  String get dashboardLoadError =>
+      'Das Dashboard konnte nicht geladen werden. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“.';
+
+  @override
+  String get dashboardRefreshFailed =>
+      'Aktualisierung fehlgeschlagen – dies sind die zuletzt geladenen Zahlen. Zum erneuten Versuch nach unten ziehen.';
+
+  @override
+  String get dashboardNeedsAttention => 'Ihre Aufmerksamkeit erforderlich';
+
+  @override
+  String get dashboardOverview => 'Übersicht';
+
+  @override
+  String get dashboardEmpty =>
+      'Noch keine Rechnungen. Erfasste und hochgeladene Rechnungen erscheinen hier.';
+
+  @override
+  String get dashboardTopVendorsEmpty => 'Noch keine Lieferantenausgaben.';
 
   @override
   String dashboardInvoiceCount(int count) {

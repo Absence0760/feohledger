@@ -360,11 +360,41 @@ abstract class AppLocalizations {
   /// **'Showing cached data — couldn\'t reach the server'**
   String get dashboardCachedBanner;
 
-  /// No description provided for @dashboardErrorPrefix.
+  /// No description provided for @dashboardLoadError.
   ///
   /// In en, this message translates to:
-  /// **'Error: {error}'**
-  String dashboardErrorPrefix(String error);
+  /// **'Couldn\'t load the dashboard. Check your connection and tap Retry.'**
+  String get dashboardLoadError;
+
+  /// No description provided for @dashboardRefreshFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t refresh — these are the last figures loaded. Pull down to try again.'**
+  String get dashboardRefreshFailed;
+
+  /// No description provided for @dashboardNeedsAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs your attention'**
+  String get dashboardNeedsAttention;
+
+  /// No description provided for @dashboardOverview.
+  ///
+  /// In en, this message translates to:
+  /// **'Overview'**
+  String get dashboardOverview;
+
+  /// No description provided for @dashboardEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No invoices yet. Captured and uploaded invoices will appear here.'**
+  String get dashboardEmpty;
+
+  /// No description provided for @dashboardTopVendorsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No vendor spend yet.'**
+  String get dashboardTopVendorsEmpty;
 
   /// No description provided for @dashboardInvoiceCount.
   ///

@@ -13,6 +13,7 @@ import 'package:feohledger_mobile/screens/dashboard_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/dashboard_store.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 
 // Wraps a screen with the localization delegates it now needs. No explicit
@@ -166,7 +167,15 @@ void main() {
     await tester.pumpWidget(_localized(const DashboardScreen()));
     await _pumpUntil(tester, find.text('Retry'));
 
-    expect(find.textContaining('Error:'), findsOneWidget);
+    // A localized sentence naming what happened and the next action — never
+    // the exception's own text.
+    expect(
+      find.text("Couldn't load the dashboard. Check your connection and tap "
+          'Retry.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('offline'), findsNothing);
+    expect(find.textContaining('Exception'), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Retry'), findsOneWidget);
     expect(find.byType(KpiCard), findsNothing);
   });
@@ -319,8 +328,14 @@ void main() {
 
     expect(find.byType(KpiCard), findsNWidgets(4));
     expect(find.text('Acme Corp'), findsOneWidget);
+    // The cached copy keeps what the live one showed: the Upcoming count and
+    // total (2, $3K) and the reporting currency. The cache used to drop the
+    // upcoming list and the `reporting` block, so offline read 0 / bare 3K.
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text(r'$3K'), findsOneWidget);
+    expect(find.text(r'$45K'), findsOneWidget);
     // No error surface — cached data satisfies the screen.
-    expect(find.textContaining('Error:'), findsNothing);
+    expect(find.byType(LoadErrorState), findsNothing);
     // ...but the user is told the data is stale.
     expect(find.textContaining('Showing cached data'), findsOneWidget);
   });
@@ -379,6 +394,138 @@ void main() {
 
     expect(find.text('45K'), findsOneWidget);
     expect(find.textContaining(r'$'), findsNothing);
+  });
+
+  group('hierarchy, empty state and accessibility', () {
+    testWidgets('what needs the user leads; the book overview follows', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _json(_dashboardJson())),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      final review = tester.getTopLeft(find.text('For Review')).dy;
+      final upcoming = tester.getTopLeft(find.text('Upcoming')).dy;
+      final aging = tester.getTopLeft(find.text('Invoice Aging')).dy;
+      final total = tester.getTopLeft(find.text('Total Invoices')).dy;
+      expect(review, upcoming); // same row
+      expect(review, lessThan(aging));
+      expect(aging, lessThan(total));
+
+      // Section titles are headings a screen reader can jump between.
+      for (final title in [
+        'Needs your attention',
+        'Invoice Aging',
+        'Overview',
+      ]) {
+        expect(
+          tester.getSemantics(find.text(title)),
+          containsSemantics(label: title, isHeader: true),
+        );
+      }
+      // A vendor row announces once, not as three fragments.
+      await tester.scrollUntilVisible(find.text('Acme Corp'), 200);
+      expect(
+        find.bySemanticsLabel(r'Acme Corp, $20K, 4 invoices'),
+        findsOneWidget,
+      );
+      // No empty notice on a populated book.
+      expect(find.textContaining('No invoices yet'), findsNothing);
+      semantics.dispose();
+    });
+
+    testWidgets('an empty book says so instead of a screen of zeros', (
+      tester,
+    ) async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _json(
+            _dashboardJson(
+              totalInvoices: 0,
+              totalAmount: 0,
+              pipeline: {},
+              vendorSpend: [],
+              upcomingPayments: [],
+              upcomingTotalAmount: 0,
+              aging: {
+                'current': 0,
+                'days_30': 0,
+                'days_60': 0,
+                'days_90_plus': 0,
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.textContaining('No invoices yet'));
+
+      expect(
+        find.text(
+          'No invoices yet. Captured and uploaded invoices will '
+          'appear here.',
+        ),
+        findsOneWidget,
+      );
+      await tester.scrollUntilVisible(find.text('No vendor spend yet.'), 200);
+      expect(find.text('No vendor spend yet.'), findsOneWidget);
+    });
+
+    testWidgets('survives a 200% text scale on a phone without overflow', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _json(
+            _dashboardJson(
+              reportingCurrency: 'ZAR',
+              unconverted: 2,
+              agingUnconverted: 1,
+              aging: {
+                'current': 45300,
+                'days_30': 1234567,
+                'days_60': 98765,
+                'days_90_plus': 4321,
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: appLocalizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: const DashboardScreen(),
+        ),
+      );
+      await _pumpUntil(tester, find.byType(KpiCard));
+      expect(tester.takeException(), isNull);
+
+      // At this scale the aging bands go two across, so "Current" and
+      // "60 Days" start a row each rather than sharing one with "30 Days".
+      await tester.scrollUntilVisible(find.text('60 Days'), 200);
+      expect(
+        tester.getTopLeft(find.text('60 Days')).dy,
+        greaterThan(tester.getTopLeft(find.text('30 Days')).dy),
+      );
+      await tester.scrollUntilVisible(find.text('Acme Corp'), 200);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   group('part-converted rollups are disclosed beside their figures', () {
