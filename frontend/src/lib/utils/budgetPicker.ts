@@ -6,8 +6,8 @@
  * contract — is `./searchPicker.ts` under `ui/SearchPicker`. This module owns
  * only the budget rules, kept DOM-free so vitest can pin them.
  */
-import type { BudgetCheck } from '#lib/types/budget.ts';
-import type { MoneyString } from '#lib/utils/money.ts';
+import type { BudgetCheck, BudgetSpend } from '#lib/types/budget.ts';
+import { isNegativeAmount, type MoneyString } from '#lib/utils/money.ts';
 
 /** A picker option — the fields of `Budget` the picker reads. */
 export interface BudgetPickerOption {
@@ -90,4 +90,55 @@ export function budgetCheckView(input: {
 	return answer.result.would_overspend
 		? { kind: 'overspend', check: answer.result }
 		: { kind: 'within', check: answer.result };
+}
+
+/**
+ * What the live regions under the picker show, and whether they are busy.
+ *
+ * Each typing pause starts a fresh check. Flipping the `role="status"` region
+ * to "Checking the budget…" and back made a screen reader announce twice per
+ * pause; instead the last settled verdict FOR THIS BUDGET stays in place,
+ * marked `busy` (`aria-busy="true"`), until the new one lands — so only a
+ * settled result is ever announced. With nothing settled to hold (a budget
+ * just chosen) the view is `checking` and the form shows that text outside
+ * any live region.
+ *
+ * Holding re-reads the stale answer against the current budget and currency,
+ * so a held verdict can never be another budget's, or another currency's.
+ */
+export function budgetCheckDisplay(
+	input: Parameters<typeof budgetCheckView>[0]
+): { view: BudgetCheckView; busy: boolean } {
+	const view = budgetCheckView(input);
+	if (view.kind !== 'checking') return { view, busy: false };
+	const a = input.answer;
+	if (a && a.budgetId === input.budgetId && a.status !== 'loading') {
+		const held = budgetCheckView({ ...input, amount: a.amount });
+		if (held.kind === 'overspend' || held.kind === 'within' || held.kind === 'failed') {
+			return { view: held, busy: true };
+		}
+	}
+	return { view, busy: true };
+}
+
+/**
+ * The read-only headroom line an approver sees on a submitted requisition.
+ *
+ * Read from `GET /budgets/{id}/spend`, whose `committed` already includes this
+ * requisition (it is open: submitted / pending approval / approved). Never
+ * from `/budgets/check` with the requisition's total — that would count it a
+ * second time. `remaining` is the backend's Decimal subtraction, read as
+ * given; only its sign is inspected.
+ *
+ * - `none` — nothing loaded, or the budget is in another currency (the spend
+ *   legs then refuse this requisition, so the figure would not include it).
+ * - `over` / `within` — the sign of `remaining`.
+ */
+export type BudgetHeadroomView =
+	| { kind: 'none' }
+	| { kind: 'over' | 'within'; spend: BudgetSpend };
+
+export function budgetHeadroomView(spend: BudgetSpend | null, currency: string): BudgetHeadroomView {
+	if (!spend || !sameCurrency(spend.currency, currency)) return { kind: 'none' };
+	return { kind: isNegativeAmount(spend.remaining) ? 'over' : 'within', spend };
 }

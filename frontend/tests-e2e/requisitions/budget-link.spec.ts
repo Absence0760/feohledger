@@ -6,7 +6,9 @@ import {
 	tenantPsql,
 	test
 } from '../fixtures/helpers';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+
+import { expectNoA11yViolations } from '../a11y/axe-helper';
 
 /**
  * `/requisitions` — linking a requisition to a budget from the form.
@@ -26,7 +28,16 @@ import type { Page } from '@playwright/test';
  *     `committed` includes it;
  *   - a budget left in another currency after the currency field changes is
  *     refused in the form (the backend would 422), not compared at face value;
+ *   - once submitted, the approver opening it sees the budget's headroom read
+ *     from `/budgets/{id}/spend` (which already counts it), not re-checked;
+ *   - at a 390px phone width the form, picker popup and warnings reflow and
+ *     pass axe;
  *   - an `ap_clerk` (no read on `/api/budgets`) gets no picker at all.
+ *
+ * Options are always read from the BUDGET listbox: the dialog also holds the
+ * line's GL-account `<select>`, whose native `<option>`s carry the same role,
+ * so an unscoped `getByRole('option')` counted them too on a tenant with GL
+ * accounts.
  */
 
 type Budget = { id: string; name: string };
@@ -75,6 +86,12 @@ async function openNewRequisition(page: Page, number: string, currency: string) 
 	return dialog;
 }
 
+/** The budget picker's own options — never the GL `<select>`'s. */
+function budgetOptions(dialog: Locator, name?: RegExp): Locator {
+	const list = dialog.getByRole('listbox', { name: 'Budget' });
+	return name ? list.getByRole('option', { name }) : list.getByRole('option');
+}
+
 test.describe('/requisitions budget link', () => {
 	test('pick a budget, see the overspend warning, save, and Committed reflects it', async ({
 		page
@@ -91,10 +108,10 @@ test.describe('/requisitions budget link', () => {
 			// Search the tag both budgets share: only the USD one is offered.
 			const picker = dialog.getByRole('combobox', { name: 'Budget' });
 			await picker.fill(`RB-${tag}`);
-			await expect(dialog.getByRole('option')).toHaveCount(1);
-			await expect(dialog.getByRole('option', { name: /Ops \(2026\)/ })).toBeVisible();
-			await expect(dialog.getByRole('option', { name: /Euro/ })).toHaveCount(0);
-			await dialog.getByRole('option', { name: /Ops \(2026\)/ }).click();
+			await expect(budgetOptions(dialog)).toHaveCount(1);
+			await expect(budgetOptions(dialog, /Ops \(2026\)/)).toBeVisible();
+			await expect(budgetOptions(dialog, /Euro/)).toHaveCount(0);
+			await budgetOptions(dialog, /Ops \(2026\)/).click();
 			await expect(picker).toHaveValue(`RB-${tag} Ops (2026)`);
 
 			// 40 of 100: within, with the headroom left after this requisition.
@@ -127,6 +144,17 @@ test.describe('/requisitions budget link', () => {
 			const spend = await page.request.get(`${API_BASE}/api/budgets/${usd.id}/spend`, { headers });
 			expect(spend.status()).toBe(200);
 			expect(Number(((await spend.json()) as { committed: number }).committed)).toBe(150);
+
+			// The approver's view of the submitted requisition: the headroom as
+			// the budget stands, this requisition counted once — not -$200.00,
+			// which a re-check of its 150 against the spend would report.
+			await page.goto(`/requisitions?id=${saved.id}`);
+			const detail = page.getByRole('dialog');
+			await expect(detail.getByTestId('requisition-budget-headroom')).toContainText(
+				'Over budget, counting this requisition: -$50.00 of $100.00 left.'
+			);
+			await expect(detail.getByTestId('requisition-budget-overspend')).toHaveCount(0);
+			await expect(detail.getByTestId('requisition-budget-status')).toHaveCount(0);
 		} finally {
 			cleanup([usd.id, eur.id], [number]);
 		}
@@ -144,7 +172,7 @@ test.describe('/requisitions budget link', () => {
 			await dialog.getByLabel('Line 1 unit price').fill('10');
 			const picker = dialog.getByRole('combobox', { name: 'Budget' });
 			await picker.fill(`RB-${tag}`);
-			await dialog.getByRole('option', { name: /Mismatch/ }).click();
+			await budgetOptions(dialog, /Mismatch/).click();
 			await expect(dialog.getByTestId('requisition-budget-status')).toContainText('Within budget');
 
 			await dialog.getByTestId('requisition-currency').fill('EUR');
@@ -158,6 +186,53 @@ test.describe('/requisitions budget link', () => {
 			await dialog.getByRole('button', { name: 'Clear the selected budget' }).click();
 			await expect(dialog.getByTestId('requisition-budget-mismatch')).toHaveCount(0);
 			await expect(dialog.getByRole('button', { name: 'Create' })).toBeEnabled();
+		} finally {
+			cleanup([usd.id], [number]);
+		}
+	});
+});
+
+test.describe('/requisitions budget link at phone width', () => {
+	test.use({ viewport: { width: 390, height: 844 } });
+
+	test('the form reflows and passes axe with the picker and the overspend warning open', async ({
+		page
+	}) => {
+		const tag = `${Date.now()}`;
+		const headers = await authedTenantHeaders(page);
+		const usd = await createBudget(page, headers, `RB-${tag} Narrow`, '100.00', 'USD');
+		const number = `RQ-BUDGET-NARROW-${tag}`;
+		try {
+			const dialog = await openNewRequisition(page, number, 'USD');
+			await dialog.getByLabel('Line 1 unit price').fill('150');
+			const picker = dialog.getByRole('combobox', { name: 'Budget' });
+
+			const noSidewaysScroll = async () => {
+				const overflow = await page.evaluate(
+					() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+				);
+				expect(overflow, 'the document scrolls sideways at 390px').toBeLessThanOrEqual(0);
+				const box = await dialog.boundingBox();
+				expect(box, 'dialog box').not.toBeNull();
+				expect(box!.x).toBeGreaterThanOrEqual(0);
+				expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+			};
+
+			// The picker's popup open over the form.
+			await picker.fill(`RB-${tag}`);
+			await expect(budgetOptions(dialog, /Narrow/)).toBeVisible();
+			await noSidewaysScroll();
+			await expectNoA11yViolations(page);
+
+			// Chosen, and over budget: the warning under the picker.
+			await budgetOptions(dialog, /Narrow/).click();
+			const overspend = dialog.getByTestId('requisition-budget-overspend');
+			await expect(overspend).toContainText('Over budget');
+			const warningBox = await overspend.boundingBox();
+			const dialogBox = await dialog.boundingBox();
+			expect(warningBox!.x + warningBox!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+			await noSidewaysScroll();
+			await expectNoA11yViolations(page);
 		} finally {
 			cleanup([usd.id], [number]);
 		}
