@@ -15,10 +15,14 @@
 	 */
 	let {
 		show = false,
+		busy = false,
 		message,
 		testId
 	}: {
 		show?: boolean;
+		/** The message is stale and a fresh one is on its way: `aria-busy`
+		 *  holds the announcement until the caller settles it. */
+		busy?: boolean;
 		/** Already-localized text — this component is i18n-agnostic. */
 		message: string;
 		/** `data-testid` for an e2e selector; the class is Svelte-scoped. */
@@ -27,7 +31,7 @@
 </script>
 
 {#if show}
-	<p class="field-warning" role="status" data-testid={testId}>
+	<p class="field-warning" role="status" aria-busy={busy || undefined} data-testid={testId}>
 		<span aria-hidden="true">⚠</span>
 		{message}
 	</p>

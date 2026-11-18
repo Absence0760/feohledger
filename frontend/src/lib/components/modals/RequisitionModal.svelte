@@ -31,14 +31,16 @@
 	import type { GlAccountOption } from '#lib/api/expenses.ts';
 	import { glAccountOptionLabel } from '#lib/types/glAccount.ts';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
-	import { checkBudget, getBudget } from '#lib/api/budgets.ts';
-	import type { Budget } from '#lib/types/budget.ts';
+	import { checkBudget, getBudget, getBudgetSpend } from '#lib/api/budgets.ts';
+	import type { Budget, BudgetSpend } from '#lib/types/budget.ts';
 	import {
-		budgetCheckView,
+		budgetCheckDisplay,
+		budgetHeadroomView,
 		budgetOptionLabel,
 		sameCurrency,
 		type BudgetCheckAnswer,
-		type BudgetCheckView
+		type BudgetCheckView,
+		type BudgetHeadroomView
 	} from '#lib/utils/budgetPicker.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
@@ -182,9 +184,11 @@
 	const checkSequence = createRequestSequencer();
 	let checkTimer: ReturnType<typeof setTimeout>;
 
+	// `checkAnswer` keeps the last SETTLED answer while the next is in flight
+	// (no `loading` write): `budgetCheckDisplay` holds it, busy, so the live
+	// region is not flipped to "Checking…" and back on every typing pause.
 	async function runBudgetCheck(id: string, amount: MoneyString) {
 		const token = checkSequence.start();
-		checkAnswer = { budgetId: id, amount, status: 'loading', result: null };
 		try {
 			const result = await checkBudget(id, amount);
 			if (!checkSequence.canCommit(token)) return;
@@ -209,12 +213,34 @@
 		return () => clearTimeout(checkTimer);
 	});
 
-	const checkView = $derived<BudgetCheckView>(
+	const checkDisplay = $derived<{ view: BudgetCheckView; busy: boolean }>(
 		canLinkBudget && editable
-			? budgetCheckView({ budgetId, budgetCurrency, currency, amount: commitAmount, answer: checkAnswer })
+			? budgetCheckDisplay({ budgetId, budgetCurrency, currency, amount: commitAmount, answer: checkAnswer })
+			: { view: { kind: 'none' }, busy: false }
+	);
+	const checkView = $derived(checkDisplay.view);
+	const budgetCurrencyMismatch = $derived(checkView.kind === 'mismatch');
+
+	// The approver's side of the overspend warning. Once submitted, the
+	// requisition is inside the budget's Committed figure, so its headroom is
+	// read from `/budgets/{id}/spend` as it stands — never re-checked through
+	// `/budgets/check` with this total, which would count it twice. Only for
+	// the statuses the spend legs count (`OPEN_COMMITMENT_REQ_STATUSES`).
+	const COMMITTED_STATUSES = new Set(['submitted', 'pending_approval', 'approved']);
+	let linkedSpend = $state<BudgetSpend | null>(null);
+	$effect(() => {
+		if (!canLinkBudget || !initialBudgetId || !COMMITTED_STATUSES.has(status)) return;
+		getBudgetSpend(initialBudgetId)
+			.then((s) => (linkedSpend = s))
+			.catch(() => {
+				/* advisory: no line rather than a wrong one */
+			});
+	});
+	const headroom = $derived<BudgetHeadroomView>(
+		!editable && budgetId === initialBudgetId
+			? budgetHeadroomView(linkedSpend, currency)
 			: { kind: 'none' }
 	);
-	const budgetCurrencyMismatch = $derived(checkView.kind === 'mismatch');
 
 	function addLine() {
 		lines = [...lines, { description: '', quantity: null, unit_price: '', gl_account_id: '', uom: '' }];
@@ -381,6 +407,7 @@
 					{:else if checkView.kind === 'overspend'}
 						<FieldWarning
 							show
+							busy={checkDisplay.busy}
 							testId="requisition-budget-overspend"
 							message={m('requisitions.modal.budget.overspend', {
 								remainingAfter: formatMoney(checkView.check.remaining_after, { currency: checkView.check.currency }),
@@ -388,10 +415,13 @@
 							})}
 						/>
 					{:else}
-						<p class="budget-status" role="status" data-testid="requisition-budget-status">
-							{#if checkView.kind === 'checking'}
-								{m('requisitions.modal.budget.checking')}
-							{:else if checkView.kind === 'failed'}
+						<p
+							class="budget-status"
+							role="status"
+							aria-busy={checkDisplay.busy || undefined}
+							data-testid="requisition-budget-status"
+						>
+							{#if checkView.kind === 'failed'}
 								{m('requisitions.modal.budget.checkFailed')}
 							{:else if checkView.kind === 'within'}
 								{m('requisitions.modal.budget.within', {
@@ -399,6 +429,39 @@
 									allocated: formatMoney(checkView.check.allocated, { currency: checkView.check.currency })
 								})}
 							{/if}
+						</p>
+						{#if checkView.kind === 'checking'}
+							<!-- Outside the live region: only a settled result is announced. -->
+							<p class="budget-status" data-testid="requisition-budget-checking">
+								{m('requisitions.modal.budget.checking')}
+							</p>
+						{/if}
+					{/if}
+					{#if headroom.kind === 'over'}
+						<FieldWarning
+							show
+							testId="requisition-budget-headroom"
+							message={m('requisitions.modal.budget.headroomOver', {
+								remaining: formatMoney(headroom.spend.remaining, { currency: headroom.spend.currency }),
+								allocated: formatMoney(headroom.spend.allocated, { currency: headroom.spend.currency })
+							})}
+						/>
+					{:else if headroom.kind === 'within'}
+						<p class="budget-status" data-testid="requisition-budget-headroom">
+							{m('requisitions.modal.budget.headroomWithin', {
+								remaining: formatMoney(headroom.spend.remaining, { currency: headroom.spend.currency }),
+								allocated: formatMoney(headroom.spend.allocated, { currency: headroom.spend.currency })
+							})}
+						</p>
+					{/if}
+					{#if headroom.kind !== 'none' && headroom.spend.excluded_row_count > 0}
+						<p class="budget-status" data-testid="requisition-budget-headroom-excluded">
+							{m('requisitions.modal.budget.headroomExcluded', { count: headroom.spend.excluded_row_count })}
+						</p>
+					{/if}
+					{#if headroom.kind !== 'none' && headroom.spend.unverifiable_po_count > 0}
+						<p class="budget-status" data-testid="requisition-budget-headroom-unverified">
+							{m('requisitions.modal.budget.unverifiedPos', { count: headroom.spend.unverifiable_po_count })}
 						</p>
 					{/if}
 					{#if (checkView.kind === 'overspend' || checkView.kind === 'within') && checkView.check.unverifiable_po_count > 0}

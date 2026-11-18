@@ -196,7 +196,17 @@ currency edit can't orphan an existing link either.
 The form links a budget through `ui/BudgetPicker`, which lists only budgets in
 the requisition's currency, and runs `GET /budgets/check` on the draft's total
 before save — an overspend is a warning, a currency mismatch blocks the save.
+While a fresh check runs, the last settled verdict stays in its live region
+marked `aria-busy`, so a screen reader hears only settled results.
 See `backend/docs/procurement-budgets.md` § `GET /budgets/check` contract.
+
+Once submitted (`submitted` / `pending_approval` / `approved` — the statuses
+the spend legs count), the same modal shows the approver a read-only headroom
+line from `GET /budgets/{id}/spend`, whose `committed` already includes this
+requisition: over or within by the sign of the backend's `remaining`, plus the
+unverifiable-PO and other-currency disclosures. It never re-asks
+`/budgets/check` with the requisition's total, which would count it twice
+(`utils/budgetPicker.ts::budgetHeadroomView`).
 
 Existence was checked; **the entity boundary was not**. All three targets carry
 `EntityMixin`, and the org-scoped-only lookup accepted a sibling subsidiary's
