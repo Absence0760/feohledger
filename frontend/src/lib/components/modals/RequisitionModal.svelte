@@ -79,7 +79,9 @@
 		quantity: number | null;
 		// Raw decimal TEXT, not a float. parseFloat-ing on every keystroke and
 		// sending the result is how an exact price reaches the wire rounded;
-		// it is validated once at save and refused, never repaired.
+		// it is validated once at save and refused, never repaired. Written from
+		// the input's own `.value` string: `bind:value` on a `type="number"`
+		// input writes a NUMBER, which broke save with `.trim is not a function`.
 		unit_price: string;
 		gl_account_id: string;
 		uom: string;
@@ -277,7 +279,7 @@
 		saving = true;
 		try {
 			const lineItems: RequisitionLineItemInput[] = lines
-				.filter((l) => l.description.trim() || l.quantity != null || l.unit_price != null)
+				.filter((l) => l.description.trim() || l.quantity != null || l.unit_price.trim())
 				.map((l, i) => ({
 					line_number: i + 1,
 					description: l.description.trim() || null,
@@ -543,7 +545,8 @@
 											min="0"
 											class="num"
 											aria-label={m('requisitions.modal.line.unitPriceAria', { n: i + 1 })}
-											bind:value={l.unit_price}
+											value={l.unit_price}
+											oninput={(e) => (l.unit_price = e.currentTarget.value)}
 										/>
 									{:else}
 										{l.unit_price || '—'}
