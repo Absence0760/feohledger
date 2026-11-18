@@ -808,9 +808,11 @@ async def _match_split(
 
     * **2-way** on the legs' combined total — the comparison the split agent
       linked on. Any leg cancelled, unissued or unverifiable holds the whole
-      invoice, as that PO would on its own; any leg in another currency is a
-      currency mismatch; a leg recording no currency makes the comparison
-      ``unknown`` (face value), as for one PO.
+      invoice, as that PO would on its own; any leg in another currency from
+      the invoice, or two legs in different currencies, is a currency mismatch
+      and ``po_total`` is ``None`` (no sum across currencies is a figure); a
+      leg recording no currency beside legs in the invoice's makes the
+      comparison ``unknown`` (face value), as for one PO.
     * **3-way and 4-way per leg**, then combined. Quantities are never pooled
       across legs before they are judged: an over-receipt on one leg would
       otherwise hide a short receipt on another. A short leg counts for the
@@ -840,9 +842,21 @@ async def _match_split(
 
     codes = [po_currency_code(po.currency) for po in legs]
     checks = [compare_currencies(invoice_currency, code) for code in codes]
-    if CURRENCY_DIFFERENT in checks:
+    known = list(dict.fromkeys(code for code in codes if code))
+    if CURRENCY_DIFFERENT in checks or len(known) > 1:
+        # A leg in another currency from the invoice — or legs whose own known
+        # codes disagree, which the invoice side cannot see when its code is
+        # absent. Either way the legs' totals are in more than one unit, so no
+        # sum of them is a figure: USD 600 + EUR 400 is not "1,000" of
+        # anything, and stored on `po_match` it rendered as €1,000.00. The
+        # combined total is withheld (as for an unverifiable total, §323); each
+        # leg keeps its own figure and code in `details["legs"]`.
         result.currency_check = CURRENCY_DIFFERENT
-        result.po_currency = codes[checks.index(CURRENCY_DIFFERENT)]
+        result.po_total = None
+        if CURRENCY_DIFFERENT in checks:
+            result.po_currency = codes[checks.index(CURRENCY_DIFFERENT)]
+        else:
+            result.po_currency = known[1]
     else:
         result.currency_check = (
             CURRENCY_SAME if all(c == CURRENCY_SAME for c in checks) else CURRENCY_UNKNOWN

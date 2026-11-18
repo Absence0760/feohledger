@@ -508,9 +508,17 @@ not a leg.
 A split is matched as `_match_split` describes:
 
 - **2-way on the combined total** of the legs. Any leg cancelled, unissued or
-  with an unverifiable total holds the invoice, as that PO would alone; any leg
-  in another currency is a currency mismatch; a leg recording no currency makes
-  the comparison `unknown` (face value).
+  with an unverifiable total holds the invoice, as that PO would alone. Any leg
+  in another currency from the invoice — or two legs whose own codes disagree,
+  even when the invoice's is absent — is a currency mismatch (`different`, held
+  as `po_currency_mismatch`), and the combined `po_total` is `null`: USD 600 +
+  EUR 400 is not 1,000 of anything, and stored as a total it rendered as
+  "€1,000.00". Each leg keeps its own `po_total` and `po_currency` in
+  `details["legs"]`. A split whose legs are `{code, NULL}` (one leg in the
+  invoice's currency, one recording none) is §197's rule extended to a sum: the
+  combined total is compared at face value and the result reads `unknown`, and
+  `multi_po_split_v1` refuses such a set — it never links or approves a split
+  it cannot prove is in one currency.
 - **3-way and 4-way per leg, then combined.** Quantities are never pooled
   before they are judged, because an over-receipt on one leg would hide a short
   receipt on another. A short leg is worth the share of its total its receipts
