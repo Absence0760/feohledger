@@ -172,7 +172,13 @@ async def prepare_international_payment(
     # make the home currency compare unequal to itself here while comparing
     # equal in the compliance gate. See `resolve_home_currency`.
     source_currency = normalize_currency_code(org_home_currency) or DEFAULT_HOME_CURRENCY
-    target_currency = normalize_currency_code(invoice.currency) or source_currency
+    # Never defaulted to the home currency: a blank invoice currency is unknown,
+    # and pricing it as domestic pays it in a currency nobody recorded
+    # (decisions §453). Dispatch refuses it first (`dispatch_preflight`); this
+    # keeps the function honest for any other caller.
+    target_currency = normalize_currency_code(invoice.currency)
+    if target_currency is None:
+        raise InternationalPaymentError("currency_unknown: the invoice records no currency")
 
     bank = vendor.bank_details or {}
     iban = bank.get("iban") or ""

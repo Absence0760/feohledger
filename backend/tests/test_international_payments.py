@@ -285,6 +285,26 @@ async def test_prepare_refuses_intl_wire_without_valid_swift():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "   ", None])
+async def test_prepare_refuses_an_invoice_with_no_currency(blank):
+    """A blank invoice currency is unknown, not the home currency: pricing it as
+    domestic would pay it in a currency nobody recorded (decisions §453)."""
+    fx = MockFXAdapter()
+    fx.get_rate = AsyncMock()
+    inv = _invoice(currency=blank)
+    vendor = _vendor(country="US")
+
+    with pytest.raises(InternationalPaymentError, match="currency_unknown"):
+        await prepare_international_payment(
+            invoice=inv,
+            vendor=vendor,
+            org_home_currency="USD",
+            fx_adapter=fx,
+        )
+    fx.get_rate.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_prepare_refuses_when_fx_provider_returns_zero_rate():
     """A misbehaving FX provider returning rate=0 must NOT produce a
     DivisionByZero in source_amount computation — refuse the
