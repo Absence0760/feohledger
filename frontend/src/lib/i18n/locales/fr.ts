@@ -1715,7 +1715,7 @@ export const messages = {
 	'recurring.skip.reason.missingAmount': 'aucun montant défini',
 	'recurring.skip.reason.missingVendor': 'aucun fournisseur défini',
 	'recurring.skip.reason.missingBoth': 'aucun fournisseur ni montant défini',
-	'recurring.glOffChart.pill': 'Compte à réimputer',
+	'recurring.glOffChart.pill': 'Compte {code} à réimputer',
 	'recurring.glOffChart.title':
 		'Le compte {code} n’est pas un compte actif du plan de ce modèle : ses factures sont donc créées sans compte général. Réimputez le modèle.',
 	'recurring.glFilter.all': 'Tout compte général',

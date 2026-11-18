@@ -1858,7 +1858,7 @@ export const en = {
 	'recurring.skip.reason.missingAmount': 'no amount set',
 	'recurring.skip.reason.missingVendor': 'no vendor set',
 	'recurring.skip.reason.missingBoth': 'no vendor or amount set',
-	'recurring.glOffChart.pill': 'Needs GL re-coding',
+	'recurring.glOffChart.pill': 'GL {code} needs re-coding',
 	'recurring.glOffChart.title':
 		'GL {code} is not an active account in this template’s chart, so its invoices are raised without a GL code. Re-code the template.',
 	'recurring.glFilter.all': 'Any GL code',

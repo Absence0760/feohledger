@@ -1125,6 +1125,8 @@ async def test_recurring_summary_is_a_well_formed_zero_on_an_empty_set(realdb):
         "by_status": {},
         "monthly_equivalent": [],
         "soonest_next_run": None,
+        # The off-chart GL count (decisions §442) is a zero too, never absent or null.
+        "gl_off_chart": 0,
     }
 
 

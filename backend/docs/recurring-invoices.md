@@ -454,7 +454,7 @@ a `<Modal>`, status `FilterChips` (`active` / `paused` / `ended`), a KPI row
 (active templates, monthly committed, generated this period, next run), and — in
 the detail modal — an **upcoming-schedule preview** (from
 `GET /{id}/upcoming-schedule`) and the **generated-invoice history** (from
-`GET /{id}/history`). A template whose GL code the chart no longer accepts carries a "Needs GL re-coding" badge, and a second chip group (shown while any exist, URL `?gl=off_chart`) filters the whole set to them. Read roles see the page; mutate actions are gated to
+`GET /{id}/history`). A template whose GL code the chart no longer accepts carries a "GL <code> needs re-coding" badge (the code in the visible text, the reason in a visually-hidden span — not only a `title` tooltip), and a second chip group (shown while any exist, URL `?gl=off_chart`) filters the whole set to them. Read roles see the page; mutate actions are gated to
 admin / ap_manager (`auth.isManager`). See `frontend/CLAUDE.md`.
 
 ## Migration
@@ -491,12 +491,15 @@ seeded tenant. Additive + skip-if-exists, like the rest of `seed_extras`.
   and confirm the generated invoice appears in the history (or the invoice
   queue). Selectors are by accessible name / aria-label / `data-testid` — no
   brittle CSS, no arbitrary sleeps.
-- `frontend/tests-e2e/recurring/gl-off-chart.spec.ts` — the "Needs GL re-coding"
-  badge and the `gl_off_chart` filter chip (stubbed responses).
+- `frontend/tests-e2e/recurring/gl-off-chart.spec.ts` — the off-chart badge
+  (code in its accessible text), the `gl_off_chart` filter chip, and a fresh
+  deep link to `?gl=off_chart` arriving with the chip pressed and the list
+  narrowed (stubbed responses).
 - `backend/tests/test_gl_code_entity_chart.py` § generation — a template coded
   to a since-retired account generates uncoded with the warning (`generate-now`
   and the sweep), a valid code is stamped unchanged, the list flag / filter /
-  summary count, and `gl_code_off_chart` agreeing with `InvoiceChart.judge`.
+  summary count, the flag on every PATCH / pause / resume / end response
+  (`_respond`), and `gl_code_off_chart` agreeing with `InvoiceChart.judge`.
 - Backend `pytest` covers the model, the schemas, the router (CRUD + lifecycle +
   the `409`-once-generated delete guard), the period_key derivation, and the
   idempotency invariant (a double generate for one period creates exactly one

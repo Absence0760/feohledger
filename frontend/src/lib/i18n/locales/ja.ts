@@ -1682,7 +1682,7 @@ export const messages = {
 	'recurring.skip.reason.missingAmount': '金額が未設定',
 	'recurring.skip.reason.missingVendor': '取引先が未設定',
 	'recurring.skip.reason.missingBoth': '取引先と金額が未設定',
-	'recurring.glOffChart.pill': '勘定科目の再設定が必要',
+	'recurring.glOffChart.pill': '勘定科目 {code} の再設定が必要',
 	'recurring.glOffChart.title':
 		'勘定科目 {code} はこのテンプレートの勘定科目表で有効な勘定科目ではないため、請求書は勘定科目なしで作成されます。テンプレートの勘定科目を設定し直してください。',
 	'recurring.glFilter.all': 'すべての勘定科目',

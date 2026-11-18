@@ -1716,7 +1716,7 @@ export const messages = {
 	'recurring.skip.reason.missingAmount': 'sem valor definido',
 	'recurring.skip.reason.missingVendor': 'sem fornecedor definido',
 	'recurring.skip.reason.missingBoth': 'sem fornecedor nem valor definidos',
-	'recurring.glOffChart.pill': 'Reclassificar conta',
+	'recurring.glOffChart.pill': 'Reclassificar conta {code}',
 	'recurring.glOffChart.title':
 		'A conta {code} não é uma conta ativa no plano deste modelo, por isso suas faturas são geradas sem conta contábil. Reclassifique o modelo.',
 	'recurring.glFilter.all': 'Qualquer conta contábil',
