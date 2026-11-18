@@ -15,6 +15,7 @@ import 'package:feohledger_mobile/screens/inspections_screen.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/inspection_store.dart';
 import 'package:feohledger_mobile/widgets/inspection_list_tile.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 Widget _localized(Widget home) => MaterialApp(
   localizationsDelegates: appLocalizationsDelegates,
@@ -28,13 +29,12 @@ http.Response _json(Object body, [int status = 200]) => http.Response(
   headers: {'content-type': 'application/json'},
 );
 
-http.Response _list(List<Map<String, dynamic>> items, {int? total}) =>
-    _json({
-      'items': items,
-      'total': total ?? items.length,
-      'page': 1,
-      'page_size': 20,
-    });
+http.Response _list(List<Map<String, dynamic>> items, {int? total}) => _json({
+  'items': items,
+  'total': total ?? items.length,
+  'page': 1,
+  'page_size': 20,
+});
 
 Map<String, dynamic> _me(List<String> roles) => {
   'id': 'u1',
@@ -145,8 +145,9 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsNothing);
     });
 
-    testWidgets('shows a spinner while the first page is in flight',
-        (tester) async {
+    testWidgets('shows a spinner while the first page is in flight', (
+      tester,
+    ) async {
       await loginThen(
         ['ap_clerk'],
         MockClient((req) async {
@@ -173,22 +174,28 @@ void main() {
       expect(find.text('No quality inspections recorded.'), findsOneWidget);
     });
 
-    testWidgets('a filtered empty result says the FILTER is empty, not the set',
-        (tester) async {
-      await loginThen(['ap_manager'], MockClient((req) async => _list([])));
+    testWidgets(
+      'a filtered empty result says the FILTER is empty, not the set',
+      (tester) async {
+        await loginThen(['ap_manager'], MockClient((req) async => _list([])));
 
-      await tester.pumpWidget(_localized(const InspectionsScreen()));
-      await _pumpUntil(tester, find.text('No quality inspections recorded.'));
+        await tester.pumpWidget(_localized(const InspectionsScreen()));
+        await _pumpUntil(tester, find.text('No quality inspections recorded.'));
 
-      await tester.tap(find.widgetWithText(FilterChip, 'Fail'));
-      await _pumpUntil(tester, find.text('No inspections with this outcome.'));
+        await tester.tap(find.widgetWithText(FilterChip, 'Fail'));
+        await _pumpUntil(
+          tester,
+          find.text('No inspections with this outcome.'),
+        );
 
-      expect(find.text('No inspections with this outcome.'), findsOneWidget);
-      expect(find.text('No quality inspections recorded.'), findsNothing);
-    });
+        expect(find.text('No inspections with this outcome.'), findsOneWidget);
+        expect(find.text('No quality inspections recorded.'), findsNothing);
+      },
+    );
 
-    testWidgets('shows an error state with Retry, and Retry refetches',
-        (tester) async {
+    testWidgets('shows an error state with Retry, and Retry refetches', (
+      tester,
+    ) async {
       var calls = 0;
       await loginThen(
         ['ap_manager'],
@@ -203,6 +210,15 @@ void main() {
       await tester.pumpWidget(_localized(const InspectionsScreen()));
       await _pumpUntil(tester, find.text('Could not load inspections'));
 
+      // The shared first-load state, carrying the localized sentence and never
+      // the exception the store holds
+      // (`ApiException(500): Request failed (500)`).
+      expect(find.byType(LoadErrorState), findsOneWidget);
+      expect(InspectionStore.instance.error, contains('ApiException'));
+      expect(find.textContaining('boom'), findsNothing);
+      expect(find.textContaining('ApiException'), findsNothing);
+      expect(find.textContaining('Request failed'), findsNothing);
+
       expect(find.widgetWithText(FilledButton, 'Retry'), findsOneWidget);
       await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
       await _pumpUntil(tester, find.byType(InspectionListTile));
@@ -210,7 +226,9 @@ void main() {
       expect(find.byType(InspectionListTile), findsOneWidget);
     });
 
-    testWidgets('the outcome chips send ?result= to the server', (tester) async {
+    testWidgets('the outcome chips send ?result= to the server', (
+      tester,
+    ) async {
       final results = <String?>[];
       await loginThen(
         ['ap_manager'],
@@ -226,7 +244,10 @@ void main() {
       expect(find.widgetWithText(FilterChip, 'All'), findsOneWidget);
       expect(find.widgetWithText(FilterChip, 'Pass'), findsOneWidget);
       expect(find.widgetWithText(FilterChip, 'Fail'), findsOneWidget);
-      expect(find.widgetWithText(FilterChip, 'Partial acceptance'), findsOneWidget);
+      expect(
+        find.widgetWithText(FilterChip, 'Partial acceptance'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.widgetWithText(FilterChip, 'Partial acceptance'));
       await _pumpUntilTrue(tester, () => results.length >= 2);
@@ -235,10 +256,9 @@ void main() {
     });
 
     testWidgets('a manager gets the record affordance', (tester) async {
-      await loginThen(
-        ['ap_manager'],
-        MockClient((req) async => _list([_inspectionJson('1')])),
-      );
+      await loginThen([
+        'ap_manager',
+      ], MockClient((req) async => _list([_inspectionJson('1')])));
 
       await tester.pumpWidget(_localized(const InspectionsScreen()));
       await _pumpUntil(tester, find.byType(InspectionListTile));
@@ -246,15 +266,15 @@ void main() {
       expect(find.byType(FloatingActionButton), findsOneWidget);
     });
 
-    testWidgets('a clerk sees the queue and NO record affordance',
-        (tester) async {
+    testWidgets('a clerk sees the queue and NO record affordance', (
+      tester,
+    ) async {
       // The list is role-open on the backend (`get_current_user`) while the
       // create is admin/ap_manager — a clerk chasing a quality hold needs to
       // read a failed inspection, and must not be handed a guaranteed 403.
-      await loginThen(
-        ['ap_clerk'],
-        MockClient((req) async => _list([_inspectionJson('1')])),
-      );
+      await loginThen([
+        'ap_clerk',
+      ], MockClient((req) async => _list([_inspectionJson('1')])));
 
       await tester.pumpWidget(_localized(const InspectionsScreen()));
       await _pumpUntil(tester, find.byType(InspectionListTile));
@@ -308,9 +328,7 @@ void main() {
         find.widgetWithText(FilledButton, 'Record inspection'),
       );
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.widgetWithText(FilledButton, 'Record inspection'),
-      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Record inspection'));
       await _pumpUntilTrue(tester, () => posted != null && listCalls >= 2);
 
       expect(posted!['gr_id'], 'a');
@@ -321,8 +339,9 @@ void main() {
       expect(listCalls, greaterThanOrEqualTo(2));
     });
 
-    testWidgets('a partial acceptance will not submit without a quantity',
-        (tester) async {
+    testWidgets('a partial acceptance will not submit without a quantity', (
+      tester,
+    ) async {
       var posts = 0;
       await loginThen(
         ['admin'],
@@ -360,58 +379,61 @@ void main() {
       expect(find.text('Record Quality Inspection'), findsOneWidget);
     });
 
-    testWidgets('the picker discloses that it holds one page, not every receipt',
-        (tester) async {
-      await loginThen(
-        ['admin'],
-        MockClient((req) async {
-          if (req.url.path == '/api/goods-receipts') {
-            return _list([_receiptJson('a'), _receiptJson('b')], total: 57);
-          }
-          return _list([_inspectionJson('1')]);
-        }),
-      );
+    testWidgets(
+      'the picker discloses that it holds one page, not every receipt',
+      (tester) async {
+        await loginThen(
+          ['admin'],
+          MockClient((req) async {
+            if (req.url.path == '/api/goods-receipts') {
+              return _list([_receiptJson('a'), _receiptJson('b')], total: 57);
+            }
+            return _list([_inspectionJson('1')]);
+          }),
+        );
 
-      await tester.pumpWidget(_localized(const InspectionsScreen()));
-      await _pumpUntil(tester, find.byType(InspectionListTile));
-      await tester.tap(find.byType(FloatingActionButton));
-      await _pumpUntil(tester, find.text('Record Quality Inspection'));
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(_localized(const InspectionsScreen()));
+        await _pumpUntil(tester, find.byType(InspectionListTile));
+        await tester.tap(find.byType(FloatingActionButton));
+        await _pumpUntil(tester, find.text('Record Quality Inspection'));
+        await tester.pumpAndSettle();
 
-      expect(
-        find.textContaining('Showing the 2 most recent of 57 receipts'),
-        findsOneWidget,
-      );
-    });
+        expect(
+          find.textContaining('Showing the 2 most recent of 57 receipts'),
+          findsOneWidget,
+        );
+      },
+    );
 
-    testWidgets('with no receipts the form says why there is nothing to record',
-        (tester) async {
-      await loginThen(
-        ['admin'],
-        MockClient((req) async {
-          if (req.url.path == '/api/goods-receipts') return _list([], total: 0);
-          return _list([_inspectionJson('1')]);
-        }),
-      );
+    testWidgets(
+      'with no receipts the form says why there is nothing to record',
+      (tester) async {
+        await loginThen(
+          ['admin'],
+          MockClient((req) async {
+            if (req.url.path == '/api/goods-receipts')
+              return _list([], total: 0);
+            return _list([_inspectionJson('1')]);
+          }),
+        );
 
-      await tester.pumpWidget(_localized(const InspectionsScreen()));
-      await _pumpUntil(tester, find.byType(InspectionListTile));
-      await tester.tap(find.byType(FloatingActionButton));
-      await _pumpUntil(tester, find.text('Record Quality Inspection'));
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(_localized(const InspectionsScreen()));
+        await _pumpUntil(tester, find.byType(InspectionListTile));
+        await tester.tap(find.byType(FloatingActionButton));
+        await _pumpUntil(tester, find.text('Record Quality Inspection'));
+        await tester.pumpAndSettle();
 
-      expect(
-        find.textContaining('No goods receipts yet'),
-        findsOneWidget,
-      );
-      final submit = tester.widget<FilledButton>(
-        find.widgetWithText(FilledButton, 'Record inspection'),
-      );
-      expect(submit.onPressed, isNull);
-    });
+        expect(find.textContaining('No goods receipts yet'), findsOneWidget);
+        final submit = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Record inspection'),
+        );
+        expect(submit.onPressed, isNull);
+      },
+    );
 
-    testWidgets('a failed receipt load explains itself instead of opening',
-        (tester) async {
+    testWidgets('a failed receipt load explains itself instead of opening', (
+      tester,
+    ) async {
       await loginThen(
         ['admin'],
         MockClient((req) async {
@@ -459,8 +481,9 @@ void main() {
   });
 
   group('InspectionDetailScreen', () {
-    testWidgets('renders the fields and what the outcome does to the match',
-        (tester) async {
+    testWidgets('renders the fields and what the outcome does to the match', (
+      tester,
+    ) async {
       ApiClient().debugConfigure(
         client: MockClient(
           (req) async => _json(

@@ -7,6 +7,7 @@ import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
 import 'package:feohledger_mobile/utils/debouncer.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 
 /// Vendor management — list with status filters + search, verify / reject an
@@ -119,8 +120,8 @@ class _VendorsScreenState extends State<VendorsScreen> {
                 }
 
                 if (store.error != null && store.vendors.isEmpty) {
-                  return _ErrorState(
-                    message: store.error!,
+                  return LoadErrorState(
+                    message: AppLocalizations.of(context).vendorsLoadError,
                     onRetry: store.fetch,
                   );
                 }
@@ -319,30 +320,6 @@ class _VendorsScreenState extends State<VendorsScreen> {
         label: Text(label),
         selected: selected,
         onSelected: (_) => VendorStore.instance.setStatusFilter(value),
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  final String message;
-  final Future<void> Function() onRetry;
-
-  const _ErrorState({required this.message, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline, size: 48, color: Colors.red.shade700),
-          const SizedBox(height: 12),
-          Text(l.vendorsLoadError),
-          const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: Text(l.commonRetry)),
-        ],
       ),
     );
   }

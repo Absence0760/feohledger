@@ -5,6 +5,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/organization.dart';
 import 'package:feohledger_mobile/stores/org_settings_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 /// Admin — organization settings. Reads + edits the safe subset of org settings
 /// the web app exposes: the company profile (address / phone / website / tax id)
@@ -94,7 +95,10 @@ class _OrgSettingsScreenState extends State<OrgSettingsScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (store.error != null && store.settings == null) {
-            return _ErrorState(message: store.error!, onRetry: store.fetch);
+            return LoadErrorState(
+              message: AppLocalizations.of(context).orgSettingsLoadError,
+              onRetry: store.fetch,
+            );
           }
           final settings = store.settings;
           if (settings == null) {
@@ -115,10 +119,16 @@ class _OrgSettingsScreenState extends State<OrgSettingsScreen> {
                 _sectionHeader(l.orgSettingsSectionCompany),
                 _field(_name, l.orgSettingsName, requiredField: true),
                 _field(_address, l.orgSettingsAddress),
-                _field(_phone, l.orgSettingsPhone,
-                    keyboard: TextInputType.phone),
-                _field(_website, l.orgSettingsWebsite,
-                    keyboard: TextInputType.url),
+                _field(
+                  _phone,
+                  l.orgSettingsPhone,
+                  keyboard: TextInputType.phone,
+                ),
+                _field(
+                  _website,
+                  l.orgSettingsWebsite,
+                  keyboard: TextInputType.url,
+                ),
                 _field(_taxId, l.orgSettingsTaxId),
                 const SizedBox(height: 16),
                 _sectionHeader(l.orgSettingsSectionInvoiceDefaults),
@@ -150,12 +160,12 @@ class _OrgSettingsScreenState extends State<OrgSettingsScreen> {
   }
 
   Widget _sectionHeader(String title) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      title,
+      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+    ),
+  );
 
   Widget _field(
     TextEditingController controller,
@@ -174,8 +184,8 @@ class _OrgSettingsScreenState extends State<OrgSettingsScreen> {
         ),
         validator: requiredField
             ? (v) => (v == null || v.trim().isEmpty)
-                ? AppLocalizations.of(context).orgSettingsFieldRequired(label)
-                : null
+                  ? AppLocalizations.of(context).orgSettingsFieldRequired(label)
+                  : null
             : null,
       ),
     );
@@ -208,29 +218,5 @@ class _OrgSettingsScreenState extends State<OrgSettingsScreen> {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
     A11y.announce(context, message);
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  final String message;
-  final Future<void> Function() onRetry;
-
-  const _ErrorState({required this.message, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline, size: 48, color: Colors.red.shade700),
-          const SizedBox(height: 12),
-          Text(l.orgSettingsLoadError),
-          const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: Text(l.commonRetry)),
-        ],
-      ),
-    );
   }
 }

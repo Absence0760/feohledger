@@ -5,6 +5,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/workflow.dart';
 import 'package:feohledger_mobile/screens/workflow_detail_screen.dart';
 import 'package:feohledger_mobile/stores/workflow_store.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 /// Admin — read-only workflow management. Lists the org's workflow definitions
 /// (name, active/default status, step count) over `GET /api/workflows`; tapping
@@ -43,7 +44,10 @@ class _WorkflowsScreenState extends State<WorkflowsScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (store.error != null && store.workflows.isEmpty) {
-            return _ErrorState(onRetry: store.fetch);
+            return LoadErrorState(
+              message: AppLocalizations.of(context).workflowsLoadError,
+              onRetry: store.fetch,
+            );
           }
           if (store.workflows.isEmpty) {
             return Center(child: Text(l.workflowsEmpty));
@@ -84,8 +88,9 @@ class _WorkflowTile extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final stepCount = workflow.steps.length;
     final stepLabel = l.workflowsStepCount(stepCount);
-    final statusText =
-        workflow.isActive ? l.workflowsStatusActive : l.workflowsStatusInactive;
+    final statusText = workflow.isActive
+        ? l.workflowsStatusActive
+        : l.workflowsStatusInactive;
 
     // One merged announcement per row so assistive tech reads a single phrase.
     final semanticsLabel = [
@@ -132,8 +137,9 @@ class WorkflowStatusBadge extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final color = isActive ? Colors.green : Colors.grey;
     final fg = isActive ? Colors.green.shade800 : Colors.grey.shade700;
-    final label =
-        isActive ? l.workflowsStatusActive : l.workflowsStatusInactive;
+    final label = isActive
+        ? l.workflowsStatusActive
+        : l.workflowsStatusInactive;
     return Semantics(
       label: '${l.invoicesColStatus}: $label',
       excludeSemantics: true,
@@ -145,7 +151,11 @@ class WorkflowStatusBadge extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            color: fg,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -173,29 +183,6 @@ class _Pill extends StatelessWidget {
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  final Future<void> Function() onRetry;
-
-  const _ErrorState({required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline, size: 48, color: Colors.red.shade700),
-          const SizedBox(height: 12),
-          Text(l.workflowsLoadError),
-          const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: Text(l.commonRetry)),
-        ],
       ),
     );
   }
