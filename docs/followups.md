@@ -1231,6 +1231,19 @@ scope (§260) — do not fold them into any of these.
       voided there, or the recall stays refused. **Trigger:** the first
       customer who needs to recall a pushed bill, or the live void test now
       pending.
+### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
+
+- [ ] **(c) Clearing an unopenable credential block is API-only.** A sealed
+      row that can no longer be opened (KMS key disabled, a changed dev
+      `FEOH_SECRET_KEY`) is cleared by `DELETE
+      /api/organization/credentials/{block}`, which removes it without opening
+      it, audited (decisions §NEW-S1). The organization page has no control for
+      it: each secret field has its own "remove the stored value", which goes
+      through `PUT` and so answers 503 on such a row. **Durable fix:** when a
+      block's `PUT` answers 503, the panel offers "Clear all stored
+      credentials for this block" (admin, confirm dialog) calling the DELETE.
+      **Trigger:** the first time a tenant admin hits the 503, or the next
+      change to the credential panels.
 
 ### Surfaced by evaluating Baidu's Unlimited OCR (2026-10-11)
 

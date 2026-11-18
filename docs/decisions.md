@@ -23210,4 +23210,4 @@ same row. They cannot be revoked at the provider without being opened, so the
 connection reads as "reconnect" (`erp_oauth` treats a missing refresh token as
 not connected). The organization page has no per-block "remove all" control to
 attach this to, since each secret field has its own "remove the stored value",
-so the action is API-only for now.
+so the action is API-only for now; the button is tracked in `docs/followups.md`.
