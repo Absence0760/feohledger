@@ -523,6 +523,40 @@ async def test_project_tenant_detects_a_real_breach(realdb):
 
 
 @pytest.mark.asyncio
+async def test_project_tenant_counts_overdue_ap(realdb):
+    """AP already past due is the most certain outflow there is. The sweep used
+    to drop it (it reads `_commitment_rows`), so an org whose only problem was
+    a stack of late bills was never warned. It now lands in the first period."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    async with mk() as db:
+        ent = await _default_entity_id(db, info.org_id)
+        await _seed_invoice(
+            db,
+            info.org_id,
+            ent,
+            number="SF-LATE",
+            amount="5000.00",
+            due_date=date.today() - timedelta(days=20),
+        )
+        await db.commit()
+
+    projection = await cash_flow_alerts._project_tenant(
+        db_name=info.db_name,
+        org_settings={
+            "cashflow": {"opening_balance": "1000.00", "min_balance_threshold": "0.00"},
+            "reporting_currency": "USD",
+        },
+        ref_today=date.today(),
+    )
+
+    assert projection is not None
+    assert projection.period is not None, "overdue AP must be able to breach"
+    assert projection.closing == Decimal("-4000.00")
+    assert projection.shortfall == Decimal("4000.00")
+
+
+@pytest.mark.asyncio
 async def test_project_tenant_returns_none_without_a_threshold(realdb):
     info = realdb.info("a")
     projection = await cash_flow_alerts._project_tenant(

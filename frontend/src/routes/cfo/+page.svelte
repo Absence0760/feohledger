@@ -333,6 +333,20 @@
 		<!-- Forecast bar chart -->
 		<div class="chart-card">
 			<h2>{m('cfo.chart.projectedOutflows', { granularity: granLabel(granularity) })}</h2>
+			<!-- AP already past due is owed now, so the API carries it into the
+			     FIRST period as its own `overdue_amount` — inside the bar's total,
+			     outside committed / pending — rather than dropping it (which
+			     overstated cash by exactly the late AP) or folding it into
+			     "committed" as if it were on schedule. Said in words as well as
+			     drawn, so the bar segment is not the only place it shows. -->
+			{#if forecast.totals.overdue_count > 0}
+				<p class="cf-overdue" data-testid="overdue-outflows">
+					{m('cfo.chart.overdueNote', {
+						n: forecast.totals.overdue_count,
+						amount: fmt(forecast.totals.overdue_amount)
+					})}
+				</p>
+			{/if}
 			{#if forecast.periods.length > 0}
 				<div class="cf-bars">
 					{#each forecast.periods as p (p.period)}
@@ -341,8 +355,17 @@
 							<div
 								class="cf-bar-bg"
 								role="img"
-								aria-label={m('cfo.chart.barAria', { committed: fmt(p.committed_amount), pending: fmt(p.pending_amount) })}
+								aria-label={p.overdue_count > 0
+									? m('cfo.chart.barAriaOverdue', { overdue: fmt(p.overdue_amount), committed: fmt(p.committed_amount), pending: fmt(p.pending_amount) })
+									: m('cfo.chart.barAria', { committed: fmt(p.committed_amount), pending: fmt(p.pending_amount) })}
 							>
+								{#if p.overdue_count > 0}
+									<div
+										class="cf-bar overdue"
+										style="width:{(parseMoneyForLayout(p.overdue_amount) / maxScheduled) * 100}%"
+										title={m('cfo.chart.overdueTitle', { amount: fmt(p.overdue_amount) })}
+									></div>
+								{/if}
 								<div
 									class="cf-bar committed"
 									style="width:{(parseMoneyForLayout(p.committed_amount) / maxScheduled) * 100}%"
@@ -361,6 +384,9 @@
 				<div class="cf-legend">
 					<span class="cf-dot committed"></span> {m('cfo.legend.committed')}
 					<span class="cf-dot pending"></span> {m('cfo.legend.pending')}
+					{#if forecast.totals.overdue_count > 0}
+						<span class="cf-dot overdue"></span> {m('cfo.legend.overdue')}
+					{/if}
 				</div>
 			{:else}
 				<p class="empty">{m('cfo.empty.outflows')}</p>
@@ -720,6 +746,10 @@
 		background: color-mix(in srgb, var(--accent) 45%, var(--text));
 	}
 
+	.cf-bar.overdue {
+		background: var(--danger);
+	}
+
 	.cf-bar-amount {
 		font-size: 0.82rem;
 		text-align: right;
@@ -750,6 +780,17 @@
 
 	.cf-dot.pending {
 		background: color-mix(in srgb, var(--accent) 45%, var(--text));
+	}
+
+	.cf-dot.overdue {
+		background: var(--danger);
+	}
+
+	.cf-overdue {
+		font-size: 0.85rem;
+		margin: 0 0 12px;
+		color: var(--danger);
+		font-weight: 600;
 	}
 
 	.scenario-grid {

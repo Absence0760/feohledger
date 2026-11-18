@@ -3022,6 +3022,24 @@ abstract class AppLocalizations {
   /// **'pending {amount}'**
   String cashFlowPendingAmount(String amount);
 
+  /// No description provided for @cashFlowOverdueAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'overdue {amount}'**
+  String cashFlowOverdueAmount(String amount);
+
+  /// Appended to a forecast row's screen-reader label when part of the period is already past due.
+  ///
+  /// In en, this message translates to:
+  /// **', {amount} already past due'**
+  String cashFlowOverdueSuffix(String amount);
+
+  /// No description provided for @cashFlowForecastOverdue.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} invoice} other {{count} invoices}} totalling {amount} {count, plural, one {is} other {are}} already past due. Owed now, so counted in the first period.'**
+  String cashFlowForecastOverdue(int count, String amount);
+
   /// No description provided for @cashFlowPosition.
   ///
   /// In en, this message translates to:

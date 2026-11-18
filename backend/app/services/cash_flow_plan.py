@@ -64,6 +64,9 @@ class PlanPeriod:
     # balance carries forward, so one such row makes this period's `closing` —
     # and every later period's — a figure to resolve, not to act on.
     unconverted_count: int = 0
+    # The part of `outflow` that is AP already past due — non-zero only in the
+    # first period, where `bucket_outflows` times it (it is owed now).
+    overdue_amount: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,9 @@ class PlanArtifact:
     # proposed pay schedule mixes currencies, so `first_shortfall_period` may
     # be a shortfall that does not exist (or may hide one that does).
     unconverted_count: int = 0
+    # Plan-wide AP already past due (all of it in the first period's outflow).
+    overdue_amount: Decimal = Decimal("0")
+    overdue_count: int = 0
 
 
 def assemble_plan(
@@ -171,6 +177,7 @@ def assemble_plan(
                 closing=Decimal(str(p["closing"])),
                 below_threshold=below,
                 unconverted_count=int(p.get("unconverted_count", 0) or 0),
+                overdue_amount=Decimal(str(p.get("overdue_amount", "0") or "0")),
             )
         )
 
@@ -186,7 +193,22 @@ def assemble_plan(
         selected_offer_ids=[r.opportunity.offer_id for r in selected],
         unretimed_offer_ids=unretimed_offer_ids,
         unconverted_count=sum(p.unconverted_count for p in periods),
+        overdue_amount=sum((p.overdue_amount for p in periods), Decimal("0")),
+        overdue_count=sum(int(b.get("overdue_count", 0) or 0) for b in plan_periods),
     )
+
+
+#: Version of the rule that turns a plan's inputs into its commitment rows.
+#: Hashed into every `plan_id`, because the id stands for "the plan these
+#: inputs produce on this date" — when the derivation itself changes, the same
+#: inputs on the same date produce a DIFFERENT plan, and an id minted under the
+#: old rule must stop matching rather than let `/draft-run` (idempotent on
+#: `plan_id`) hand back a run staged from the old set, or `/save` freeze a
+#: curve the user was never shown. Bump it whenever `_commitment_rows` or
+#: `bucket_outflows` changes WHICH rows a plan includes or WHEN they leave.
+#:   v2 — AP already past due is carried into the first period (it used to be
+#:        dropped, so a plan overstated cash by exactly the overdue AP).
+PLAN_DERIVATION_VERSION = "v2-overdue-in-first-period"
 
 
 def compute_plan_id(
@@ -214,7 +236,9 @@ def compute_plan_id(
     still hash identically) plus the calendar ``date`` (not a timestamp —
     "today" determines which commitments are in-horizon, so a plan computed
     yesterday and one computed today for identical parameters are, correctly,
-    two different plans).
+    two different plans) plus :data:`PLAN_DERIVATION_VERSION`, so a change to
+    how rows are derived from those inputs retires every id minted under the
+    old rule.
 
     ``propose_payment_plan`` computes this once and returns it on the tool
     result as ``plan_id``; the enact endpoints
@@ -236,6 +260,7 @@ def compute_plan_id(
             str(cash_budget) if cash_budget is not None else "-",
             str(cost_of_capital_pct),
             today.isoformat(),
+            PLAN_DERIVATION_VERSION,
         ]
     )
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"feoh:cashflow-plan:{parts}"))

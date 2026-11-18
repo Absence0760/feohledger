@@ -1899,6 +1899,33 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String cashFlowOverdueAmount(String amount) {
+    return 'vencido $amount';
+  }
+
+  @override
+  String cashFlowOverdueSuffix(String amount) {
+    return ', dos quais $amount já vencido';
+  }
+
+  @override
+  String cashFlowForecastOverdue(int count, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'estão vencidas',
+      one: 'está vencida',
+    );
+    return '$_temp0 no total de $amount já $_temp1. Devido agora, por isso contado no primeiro período.';
+  }
+
+  @override
   String get cashFlowPosition => 'Posição de Caixa';
 
   @override
@@ -6138,6 +6165,33 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String cashFlowPendingAmount(String amount) {
     return 'pendente $amount';
+  }
+
+  @override
+  String cashFlowOverdueAmount(String amount) {
+    return 'vencido $amount';
+  }
+
+  @override
+  String cashFlowOverdueSuffix(String amount) {
+    return ', dos quais $amount já vencido';
+  }
+
+  @override
+  String cashFlowForecastOverdue(int count, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'estão vencidas',
+      one: 'está vencida',
+    );
+    return '$_temp0 no total de $amount já $_temp1. Devido agora, por isso contado no primeiro período.';
   }
 
   @override

@@ -1,22 +1,24 @@
 """``get_payment_forecast`` tool — projected AP outflow buckets.
 
-Wraps ``services.analytics.bucket_outflows``. Pulls due-dated obligations in
-the committed + pending status sets (lifted from ``app/api/analytics.py``) whose
-due date falls within the horizon, buckets them, and sums. Money is ``Decimal``
+Reads the SAME commitment rows as the CFO cash-flow forecast and the copilot's
+planning tools (``app/api/analytics.py::_commitment_rows``) and buckets them
+with ``services.analytics.bucket_outflows``. It used to run its own query on
+the raw ``Invoice.due_date`` with a ``>= today`` bound and summed the raw
+``Invoice.amount``, so it dropped every past-due invoice (the forecast
+overstated cash by exactly the overdue AP), ignored a payment schedule's due
+date, and added a ¥ invoice to a $ one. One source means the assistant's
+"what do we owe" and the CFO dashboard cannot disagree. Money is ``Decimal``
 end to end.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import _COMMITTED_STATUSES, _PENDING_STATUSES
-from app.models.invoice import Invoice
+from app.api.analytics import _commitment_rows
 from app.services.analytics import bucket_outflows
 from app.services.assistant.tools._currency import resolve_org_currency
 from app.services.assistant.tools.schemas import (
@@ -24,7 +26,6 @@ from app.services.assistant.tools.schemas import (
     ForecastParams,
     ForecastResult,
 )
-from app.tenant import apply_entity_scope
 from app.utils.dates import utc_today
 
 _HORIZON_DAYS = {"7d": 7, "14d": 14, "30d": 30, "60d": 60, "90d": 90}
@@ -47,43 +48,45 @@ async def get_payment_forecast(
     control_db: AsyncSession | None = None,
 ) -> ForecastResult:
     today = utc_today()
-    horizon_days = _HORIZON_DAYS[params.horizon]
-    horizon_end = today + timedelta(days=horizon_days)
-    committed_set = set(_COMMITTED_STATUSES)
-    statuses = list(_COMMITTED_STATUSES) + list(_PENDING_STATUSES)
-
-    stmt = (
-        select(Invoice.due_date, Invoice.amount, Invoice.status)
-        .where(Invoice.status.in_(statuses))
-        .where(Invoice.due_date.isnot(None))
-        .where(Invoice.due_date >= today)
-        .where(Invoice.due_date <= horizon_end)
+    # The org's reporting currency: every row's amount is expressed in it, and
+    # it is the currency the result is labelled with.
+    currency = await resolve_org_currency(org_id, control_db)
+    commitment_rows = await _commitment_rows(
+        db,
+        today=today,
+        horizon_days=_HORIZON_DAYS[params.horizon],
+        include_pending=True,
+        entity_id=entity_id,
+        reporting_currency=currency,
     )
-    stmt = apply_entity_scope(stmt, Invoice, entity_id)
-    rows = (await db.execute(stmt)).all()
-
-    commitment_rows = [
-        {
-            "due_date": due,
-            "amount": Decimal(str(amount or "0")),
-            "committed": (status.value if hasattr(status, "value") else status) in committed_set,
-        }
-        for due, amount, status in rows
-    ]
 
     buckets = bucket_outflows(commitment_rows, granularity=params.granularity, today=today)
 
     out_buckets: list[ForecastBucket] = []
-    total = Decimal("0")
+    total = overdue = Decimal("0")
+    overdue_count = unconverted = 0
     for b in buckets:
         amount = Decimal(str(b["scheduled_amount"]))
         total += amount
-        out_buckets.append(ForecastBucket(period=b["period"], amount=amount, count=int(b["count"])))
+        overdue += Decimal(str(b["overdue_amount"]))
+        overdue_count += int(b["overdue_count"])
+        unconverted += int(b["unconverted_count"])
+        out_buckets.append(
+            ForecastBucket(
+                period=b["period"],
+                amount=amount,
+                count=int(b["count"]),
+                overdue=Decimal(str(b["overdue_amount"])),
+                overdue_count=int(b["overdue_count"]),
+            )
+        )
 
-    currency = await resolve_org_currency(org_id, control_db)
     return ForecastResult(
         currency=currency,
         horizon_label=_HORIZON_LABELS[params.horizon],
         buckets=out_buckets,
         total=total.quantize(Decimal("0.01")),
+        overdue=overdue.quantize(Decimal("0.01")),
+        overdue_count=overdue_count,
+        unconverted_count=unconverted,
     )

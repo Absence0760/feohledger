@@ -1766,6 +1766,26 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String cashFlowOverdueAmount(String amount) {
+    return '期日超過 $amount';
+  }
+
+  @override
+  String cashFlowOverdueSuffix(String amount) {
+    return '、うち $amount は期日超過';
+  }
+
+  @override
+  String cashFlowForecastOverdue(int count, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '請求書 $_temp0（合計 $amount）はすでに支払期日を過ぎています。現時点で支払義務があるため、最初の期間に計上しています。';
+  }
+
+  @override
   String get cashFlowPosition => '資金ポジション';
 
   @override

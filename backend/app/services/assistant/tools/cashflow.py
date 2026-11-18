@@ -118,15 +118,18 @@ async def get_cashflow_forecast(
     buckets = bucket_outflows(rows, granularity=params.granularity, today=today)
 
     periods: list[CashflowPeriod] = []
-    total_scheduled = total_committed = total_pending = _ZERO
-    unconverted = 0
+    total_scheduled = total_committed = total_pending = total_overdue = _ZERO
+    unconverted = overdue_count = 0
     for b in buckets:
         scheduled = Decimal(str(b["scheduled_amount"]))
         committed = Decimal(str(b["committed_amount"]))
         pending = Decimal(str(b["pending_amount"]))
+        overdue = Decimal(str(b["overdue_amount"]))
         total_scheduled += scheduled
         total_committed += committed
         total_pending += pending
+        total_overdue += overdue
+        overdue_count += int(b["overdue_count"])
         unconverted += int(b["unconverted_count"])
         periods.append(
             CashflowPeriod(
@@ -136,6 +139,8 @@ async def get_cashflow_forecast(
                 pending=pending,
                 discount_eligible=Decimal(str(b["discount_eligible_amount"])),
                 count=int(b["count"]),
+                overdue=overdue,
+                overdue_count=int(b["overdue_count"]),
                 unconverted_count=int(b["unconverted_count"]),
             )
         )
@@ -148,6 +153,8 @@ async def get_cashflow_forecast(
         total_scheduled=total_scheduled,
         total_committed=total_committed,
         total_pending=total_pending,
+        total_overdue=total_overdue,
+        overdue_count=overdue_count,
         unconverted_count=unconverted,
     )
 
@@ -203,6 +210,7 @@ async def get_cash_position(
                 outflow=Decimal(str(p["outflow"])),
                 closing=Decimal(str(p["closing"])),
                 below_threshold=below,
+                overdue=Decimal(str(p["overdue_amount"])),
                 unconverted_count=int(p["unconverted_count"]),
             )
         )
@@ -219,6 +227,8 @@ async def get_cash_position(
         min_balance_threshold=threshold,
         periods=periods,
         first_shortfall_period=first_shortfall,
+        overdue_amount=sum((Decimal(str(b["overdue_amount"])) for b in outflow_periods), _ZERO),
+        overdue_count=sum(int(b["overdue_count"]) for b in outflow_periods),
         unconverted_count=unconverted,
     )
 
@@ -244,7 +254,8 @@ async def run_payment_whatif(
     )
 
     scenarios: list[WhatifScenario] = []
-    unconverted = 0
+    unconverted = overdue_count = 0
+    overdue_amount = _ZERO
     for name in ("early", "on_time", "late"):
         s = apply_payment_timing_scenario(
             rows,
@@ -256,6 +267,8 @@ async def run_payment_whatif(
         # Identical across the three scenarios (they re-time the same rows) —
         # take the last rather than summing, which would triple-count.
         unconverted = int(s["unconverted_count"])
+        overdue_amount = Decimal(str(s["overdue_amount"]))
+        overdue_count = int(s["overdue_count"])
         scenarios.append(
             WhatifScenario(
                 scenario=name,
@@ -270,6 +283,8 @@ async def run_payment_whatif(
         horizon_days=horizon_days,
         grace_days=params.grace_days,
         scenarios=scenarios,
+        overdue_amount=overdue_amount,
+        overdue_count=overdue_count,
         unconverted_count=unconverted,
     )
 
@@ -364,11 +379,14 @@ async def propose_payment_plan(
                 outflow=p.outflow,
                 closing=p.closing,
                 below_threshold=p.below_threshold,
+                overdue=p.overdue_amount,
                 unconverted_count=p.unconverted_count,
             )
             for p in plan.periods
         ],
         first_shortfall_period=plan.first_shortfall_period,
+        overdue_amount=plan.overdue_amount,
+        overdue_count=plan.overdue_count,
         unconverted_count=plan.unconverted_count,
         cost_of_capital_pct=optimizer_result.cost_of_capital_pct,
         total_savings_selected=plan.total_savings_selected,

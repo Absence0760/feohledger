@@ -68,6 +68,8 @@ def test_cashflow_forecast_header_and_row_order():
             "pending_amount": Decimal("500.00"),
             "discount_eligible_amount": Decimal("250.00"),
             "count": 3,
+            "overdue_amount": Decimal("0.00"),
+            "overdue_count": 0,
         }
     ]
     out = _read(export_cashflow_forecast(rows))
@@ -80,6 +82,8 @@ def test_cashflow_forecast_header_and_row_order():
         "pending_amount",
         "discount_eligible_amount",
         "count",
+        "overdue_amount",
+        "overdue_count",
     ]
     assert out[1] == [
         "2026-06",
@@ -90,7 +94,33 @@ def test_cashflow_forecast_header_and_row_order():
         "500.00",
         "250.00",
         "3",
+        "0.00",
+        "0",
     ]
+
+
+def test_cashflow_forecast_exports_the_overdue_slice_and_blanks_an_unknown_one():
+    """Past-due AP is carried into the first period (`bucket_outflows`); the
+    CSV names it in two APPENDED columns. A row from a caller that reports no
+    overdue figure exports blank, not `0` — `0` would claim nothing is late."""
+    rows = [
+        {
+            "period": "2026-06",
+            "period_start": date(2026, 6, 1),
+            "period_end": date(2026, 6, 30),
+            "scheduled_amount": Decimal("1200.00"),
+            "committed_amount": Decimal("200.00"),
+            "pending_amount": Decimal("0.00"),
+            "discount_eligible_amount": Decimal("0.00"),
+            "count": 2,
+            "overdue_amount": Decimal("1000.00"),
+            "overdue_count": 1,
+        },
+        {"period": "2026-07", "scheduled_amount": Decimal("5.00"), "count": 1},
+    ]
+    out = _read(export_cashflow_forecast(rows))
+    assert out[1][-2:] == ["1000.00", "1"]
+    assert out[2][-2:] == ["", ""]
 
 
 def test_cashflow_forecast_empty_emits_header_only():

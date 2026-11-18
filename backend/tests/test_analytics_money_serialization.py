@@ -62,6 +62,9 @@ NUMERIC_FIELDS: frozenset[str] = frozenset(
         "count",
         "total_count",
         "unconverted_count",
+        # Past-due commitments carried into the cash forecast's first period
+        # (the money is `overdue_amount`, a string). A count.
+        "overdue_count",
         "invoice_count",
         "exception_count",
         "open_exceptions",

@@ -553,6 +553,52 @@ async def test_chat_forecast_prompt(realdb):
     assert call["result"]["total"] == "300.00"
 
 
+async def test_chat_forecast_counts_overdue_ap_and_names_it(realdb):
+    """`get_payment_forecast` reads the CFO forecast's own commitment rows. Its
+    old private query bounded `due_date >= today`, so "what do we owe" left out
+    every bill already late; it also summed raw amounts across currencies."""
+    from app.utils.dates import utc_today
+
+    today = utc_today()
+    a = realdb.info("a")
+    mk_a = realdb.sessionmaker("a")
+    async with mk_a() as sa:
+        ent_a = await _default_entity_id(sa, a.org_id)
+        await _seed_invoice(
+            sa,
+            a.org_id,
+            ent_a,
+            number="F-LATE",
+            vendor_name="Late",
+            amount="1000.00",
+            due_date=today - timedelta(days=1),
+        )
+        await _seed_invoice(
+            sa,
+            a.org_id,
+            ent_a,
+            number="F-SOON",
+            vendor_name="Soon",
+            amount="200.00",
+            due_date=today + timedelta(days=5),
+        )
+        await sa.commit()
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            "/api/assistant/chat",
+            json={"message": "what's my payment forecast next 30 days?"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    result = body["tool_invocations"][0]["result"]
+    assert result["total"] == "1200.00"
+    assert result["overdue"] == "1000.00"
+    assert result["overdue_count"] == 1
+    assert result["buckets"][0]["overdue"] == "1000.00"
+    assert "already past due" in body["answer"]
+
+
 async def test_chat_forecast_prompt_refuses_ap_clerk(realdb):
     """The payment forecast is org cash exposure: an ap_clerk asking for it gets
     the orchestrator's clean ``role_not_permitted`` refusal — no figures, no 500
@@ -588,7 +634,10 @@ async def test_chat_forecast_prompt_refuses_ap_clerk(realdb):
     assert call["tool"] == "get_payment_forecast"
     assert call["result"] is None, "a refused clerk must receive NO forecast data"
     assert "permission" in call["error"].lower()
-    assert "300" not in resp.text
+    # The seeded figure as money ("300.00"), not the bare digits: the response
+    # carries a random conversation UUID, whose hex contains "300" often
+    # enough to fail this test by chance. A UUID never contains a ".".
+    assert "300.00" not in resp.text
 
     async with mk_a() as sa:
         rows = (

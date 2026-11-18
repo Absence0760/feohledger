@@ -546,6 +546,9 @@
     }
   },
   "cashFlowPendingAmount": "pendente {amount}",
+  "cashFlowOverdueAmount": "vencido {amount}",
+  "cashFlowOverdueSuffix": ", dos quais {amount} já vencido",
+  "cashFlowForecastOverdue": "{count, plural, one {{count} fatura} other {{count} faturas}} no total de {amount} já {count, plural, one {está vencida} other {estão vencidas}}. Devido agora, por isso contado no primeiro período.",
   "@cashFlowPendingAmount": {
     "placeholders": {
       "amount": {

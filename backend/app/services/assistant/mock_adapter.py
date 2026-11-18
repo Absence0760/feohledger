@@ -415,6 +415,11 @@ def _template_answer(tool: str, result: dict | None, error: str | None) -> str:
             f"Projected outflow over the {result.get('horizon_label', '')}: "
             f"{_fmt_money(result.get('total', 0), currency)}."
         ]
+        if result.get("overdue_count"):
+            lines.append(
+                f"Of that, {_fmt_money(result.get('overdue', 0), currency)} "
+                f"({result['overdue_count']} invoice(s)) is already past due."
+            )
         for b in buckets:
             lines.append(
                 f"• {b['period']}: {_fmt_money(b['amount'], currency)} ({b['count']} invoice(s))"
@@ -442,11 +447,17 @@ def _template_answer(tool: str, result: dict | None, error: str | None) -> str:
         periods = result.get("periods", [])
         if not periods:
             return "No projected outflow over the horizon."
-        return (
+        summary = (
             f"Projected outflow: {_fmt_money(result.get('total_committed', 0), currency)} "
             f"committed, {_fmt_money(result.get('total_pending', 0), currency)} pending "
             f"across {len(periods)} period(s)."
         )
+        if result.get("overdue_count"):
+            summary += (
+                f" Plus {_fmt_money(result.get('total_overdue', 0), currency)} already "
+                f"past due ({result['overdue_count']} invoice(s)), owed now."
+            )
+        return summary
 
     if tool == "run_payment_whatif":
         currency = result.get("currency", "")

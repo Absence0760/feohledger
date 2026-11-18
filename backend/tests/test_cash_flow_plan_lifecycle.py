@@ -332,6 +332,20 @@ def test_every_defining_input_moves_the_plan_id(field, value):
     assert compute_plan_id(**_plan_kwargs()) != compute_plan_id(**_plan_kwargs(**{field: value}))
 
 
+def test_plan_id_retires_when_the_row_derivation_changes(monkeypatch):
+    """The id stands for "the plan these inputs produce on this date". When the
+    derivation itself changes — carrying past-due AP into the first period was
+    one — the same inputs on the same date are a different plan, so an id
+    minted under the old rule must stop matching: otherwise `/draft-run`
+    (idempotent on `plan_id`) hands back a run staged from the old set and
+    `/save` freezes a curve the user was never shown."""
+    from app.services import cash_flow_plan
+
+    current = cash_flow_plan.compute_plan_id(**_plan_kwargs())
+    monkeypatch.setattr(cash_flow_plan, "PLAN_DERIVATION_VERSION", "v1")
+    assert cash_flow_plan.compute_plan_id(**_plan_kwargs()) != current
+
+
 def test_plan_id_hashes_the_entity_scope_so_two_entities_are_two_plans():
     """§55 rests entirely on this: scope discovery is safe because exactly two
     ids can be legitimate for a caller (their entity's and the consolidated
