@@ -946,26 +946,6 @@ or is a sibling of a fix that needs its own pass.
 
 ### Surfaced by the round-2 issues batch (2026-10-06, PR #514, decisions §237–§243)
 
-- [ ] **(c) The bulk status change's per-row skip reasons are still English-only.**
-      §238 coded the approval, CFO / max-amount, credit-memo, expense and
-      stale-edit refusals, and §461 the payment-run maker-checker / CFO
-      sign-off refusals and the sign-in MFA challenge's wrong code. Not done:
-      the per-row skip reasons `POST /api/invoices/bulk-status` returns where
-      the refusal behind them is not coded (since §387 a coded refusal becomes
-      a coded skip, and §418's `invoice_not_in_review` is one; the English
-      fallback is `api/invoices._skip_reason`, plus the two §263 added — a row
-      changed since the approver loaded it, which the single approve already
-      codes as `invoice_stale_approval`, and "Required fields missing", which
-      `/complete` codes as `invoice_required_fields_missing`). Also bare: the
-      sign-in challenge's email-OTP miss, `401 "Invalid or expired code"`
-      (employee and portal), a different sentence from the TOTP one §461
-      coded, so it needs its own code.
-      **Durable fix:** per-row codes like `/exceptions/bulk/resolve` already
-      returns, registered in `frontend/src/lib/api/codedRefusals.ts` and the
-      mobile `coded_refusal_messages.dart`.
-      **Trigger:** the next change to any of those messages, or the first
-      non-English tenant bulk-approving invoices.
-
 ### Surfaced by writing the help centre (2026-10-06, decisions §244)
 
 Writing the in-app guides against the code turned these up. The guides

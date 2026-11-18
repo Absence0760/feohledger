@@ -936,8 +936,11 @@ carries the same coded detail but stays a `401`: there is no session yet, so
 nobody is signed out by it — neither web client bounces a 401 on a call that
 carried no token, mobile ends a session on a 401 only when it presented one, and
 the per-account MFA failure budget counts the miss whatever the status
-(`docs/decisions.md` §461). The email-OTP miss ("Invalid or expired code") is
-still plain text.
+(`docs/decisions.md` §461). The emailed one-time code's miss is coded too, as
+`mfa_email_code_invalid` ("Invalid or expired code",
+`api/refusals.MFA_EMAIL_CODE_INVALID_DETAIL`) — its own code because its
+sentence also covers an expired code — and is a `401` for the same reason
+(§NEW-T1).
 
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
