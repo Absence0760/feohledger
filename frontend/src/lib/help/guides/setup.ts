@@ -211,7 +211,7 @@ export const SETUP_GUIDES: Guide[] = [
 						type: 'steps',
 						items: [
 							'Find the person on the {ui:nav.users} tab.',
-							'Click {ui:admin.users.row.deactivate}, then {ui:admin.users.row.confirm}. They are signed out and can no longer sign in by any method, including SSO.',
+							'Click {ui:admin.users.row.deactivate} on their row: it takes effect at once, with no confirm step. They are signed out and can no longer sign in by any method, including SSO.',
 							'If they only changed jobs, open their row and change their roles instead.'
 						]
 					},
