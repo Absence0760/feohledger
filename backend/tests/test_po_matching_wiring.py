@@ -237,6 +237,55 @@ async def test_refresh_po_match_currency_mismatch_names_both_codes_and_no_varian
 
 
 @pytest.mark.asyncio
+async def test_refresh_po_match_split_currency_mismatch_with_a_malformed_invoice_code():
+    """A split whose legs disagree with each other while the invoice's own code
+    is malformed (decisions §445) used to read "Invoice is in  but PO … is in
+    EUR": a blank, and one leg's code standing for every leg. Its own code
+    names every leg code instead, and it holds exactly as the other does."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice(amount=Decimal("1000.00"), currency="1X")
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="2-way",
+        status="mismatch",
+        po_number="PO-A,PO-B",
+        po_ids=["a", "b"],
+        po_total=None,
+        po_currency="EUR",
+        currency_check="different",
+        amount_variance=None,
+        amount_variance_pct=None,
+        within_tolerance=False,
+        details={
+            "legs": [
+                {"po_number": "PO-A", "po_currency": "USD"},
+                {"po_number": "PO-B", "po_currency": "EUR"},
+                {"po_number": "PO-C", "po_currency": None},
+                {"po_number": "PO-D", "po_currency": "USD"},
+            ]
+        },
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["po_currency_mismatch_invoice_currency_unknown"]
+    assert warnings[0]["params"] == {"poNumber": "PO-A,PO-B", "poCurrencies": "USD, EUR"}
+    assert warnings[0]["message"] == (
+        "The invoice records no valid currency and the POs behind PO-A,PO-B are in "
+        "different currencies (USD, EUR) — the amounts were not compared"
+    )
+    assert warnings[0]["severity"] == "warning"
+    ensure.assert_awaited_once()
+    assert ensure.await_args.args[2:4] == ("po_mismatch", "warning")
+
+
+@pytest.mark.asyncio
 async def test_refresh_po_match_unknown_po_currency_leaves_the_po_figure_unlabelled():
     """A PO with no currency is compared at face value; its figure must not
     borrow the invoice's code, so it rides a `number` param, not `money`."""

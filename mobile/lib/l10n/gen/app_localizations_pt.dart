@@ -3297,6 +3297,14 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return 'A nota não registra uma moeda válida e os pedidos de $poNumber estão em moedas diferentes ($poCurrencies) — os valores não foram comparados';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return 'O pedido $poNumber está cancelado — a fatura não foi conferida com ele';
   }
@@ -3514,6 +3522,13 @@ class AppLocalizationsPt extends AppLocalizations {
     String poCurrency,
   ) {
     return 'Divergência de moeda: nota em $invoiceCurrency, pedido em $poCurrency — valores não comparados';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return 'Divergência de moeda: nota sem moeda válida, pedidos em $poCurrencies — valores não comparados';
   }
 
   @override
@@ -7591,6 +7606,14 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return 'A nota não registra uma moeda válida e os pedidos de $poNumber estão em moedas diferentes ($poCurrencies) — os valores não foram comparados';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return 'O pedido $poNumber está cancelado — a fatura não foi conferida com ele';
   }
@@ -7808,6 +7831,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
     String poCurrency,
   ) {
     return 'Divergência de moeda: nota em $invoiceCurrency, pedido em $poCurrency — valores não comparados';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return 'Divergência de moeda: nota sem moeda válida, pedidos em $poCurrencies — valores não comparados';
   }
 
   @override

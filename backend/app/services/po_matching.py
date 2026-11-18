@@ -256,6 +256,15 @@ class MatchResult:
         """JSON-safe dict for the ``invoice.po_match`` JSONB column."""
         return _json_safe(asdict(self))
 
+    def po_currency_codes(self) -> list[str]:
+        """Every distinct code the matched PO side records, in leg order: a
+        split's legs' known codes (``details["legs"]``), else the single PO's
+        ``po_currency``. Empty when none records one."""
+        legs = self.details.get("legs") if self.details else None
+        if legs:
+            return list(dict.fromkeys(leg["po_currency"] for leg in legs if leg["po_currency"]))
+        return [self.po_currency] if self.po_currency else []
+
     def matched_po_ids(self) -> list[str]:
         """Every PO the match read receipts and inspections on: a split's
         legs, else the single ``po_id`` (empty when no PO was found)."""
@@ -470,10 +479,14 @@ def _amount_leg(
     invoice_currency: str | None,
     po_total: Decimal,
     tolerance: Decimal,
+    leg_currencies: list[str] | None = None,
 ) -> None:
     """The 2-way leg: set ``result.status`` and its amount fields from the PO
     (or a split's legs, combined). ``result.currency_check``,
-    ``po_currency`` and ``po_total_unverifiable_reason`` are already set."""
+    ``po_currency`` and ``po_total_unverifiable_reason`` are already set.
+
+    ``leg_currencies`` is a split's distinct known leg codes, which name the
+    finding when the invoice's own code is malformed (``_match_split``)."""
     if cancelled:
         # The order was called off in the ERP (or here): it authorizes nothing,
         # so no invoice passes the amount control against it, whatever the
@@ -521,13 +534,21 @@ def _amount_leg(
         result.amount_variance_pct = None
         result.within_tolerance = False
         result.status = "mismatch"
-        result.issues.append(
-            po_match_issue(
+        if invoice_currency is None:
+            # Only a split reaches here with no invoice code: its legs' own
+            # codes disagree (decisions §445). There is no invoice code to
+            # print and no one PO code either, so the issue names the legs'.
+            issue = po_match_issue(
+                "currency_mismatch_invoice_currency_unknown",
+                poCurrencies=", ".join(leg_currencies or ()),
+            )
+        else:
+            issue = po_match_issue(
                 "currency_mismatch",
                 invoiceCurrency=invoice_currency,
                 poCurrency=result.po_currency,
             )
-        )
+        result.issues.append(issue)
     else:
         variance = invoice_amount - po_total
         if po_total > 0:
@@ -873,6 +894,7 @@ async def _match_split(
         invoice_currency=invoice_currency,
         po_total=po_total,
         tolerance=tolerance,
+        leg_currencies=known,
     )
 
     newest_gr: GoodsReceipt | None = None

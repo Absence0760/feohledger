@@ -3111,6 +3111,14 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return '請求書に有効な通貨が記録されておらず、$poNumber の発注は異なる通貨 ($poCurrencies) のため、金額を比較していません';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return '発注 $poNumber は取り消されています — 請求書はこの発注と照合されていません';
   }
@@ -3328,6 +3336,13 @@ class AppLocalizationsJa extends AppLocalizations {
     String poCurrency,
   ) {
     return '通貨の不一致: 請求は $invoiceCurrency、発注は $poCurrency — 金額は比較されていません';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return '通貨の不一致: 請求に有効な通貨がなく、発注は $poCurrencies — 金額は比較されていません';
   }
 
   @override

@@ -3297,6 +3297,14 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return 'La factura no registra una moneda válida y los pedidos de $poNumber están en monedas distintas ($poCurrencies); los importes no se compararon';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return 'El pedido $poNumber está cancelado — la factura no se cotejó con él';
   }
@@ -3514,6 +3522,13 @@ class AppLocalizationsEs extends AppLocalizations {
     String poCurrency,
   ) {
     return 'Discrepancia de moneda: factura en $invoiceCurrency, pedido en $poCurrency; importes no comparados';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return 'Discrepancia de moneda: factura sin moneda válida, pedidos en $poCurrencies; importes no comparados';
   }
 
   @override

@@ -104,6 +104,10 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'poNumber': 'text',
     'poCurrency': 'text',
   },
+  'po_currency_mismatch_invoice_currency_unknown': {
+    'poNumber': 'text',
+    'poCurrencies': 'text',
+  },
   'po_cancelled': {'poNumber': 'text'},
   'po_not_issued': {'poNumber': 'text'},
   'po_total_unverifiable': {'poNumber': 'text'},
@@ -194,6 +198,9 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'po_match.issue.currency_mismatch': {
     'invoiceCurrency': 'text',
     'poCurrency': 'text',
+  },
+  'po_match.issue.currency_mismatch_invoice_currency_unknown': {
+    'poCurrencies': 'text',
   },
   'po_match.issue.po_cancelled': {},
   'po_match.issue.po_not_issued': {},
@@ -572,6 +579,16 @@ String? _localizeWarningCode(
         poNumber,
         poCurrency,
       );
+    // The invoice records no valid currency and the POs behind {poNumber} are in different currencies ({poCurrencies}) — the amounts were not compared
+    case 'po_currency_mismatch_invoice_currency_unknown':
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      final poCurrencies = _text(p['poCurrencies'], currency);
+      if (poCurrencies == null) return null;
+      return l.invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+        poNumber,
+        poCurrencies,
+      );
     // PO {poNumber} is cancelled — the invoice was not matched against it
     case 'po_cancelled':
       final poNumber = _text(p['poNumber'], currency);
@@ -845,6 +862,13 @@ String? _localizeWarningCode(
       final poCurrency = _text(p['poCurrency'], currency);
       if (poCurrency == null) return null;
       return l.invoicePoMatchIssueCurrencyMismatch(invoiceCurrency, poCurrency);
+    // Currency mismatch: invoice records no valid currency, POs in {poCurrencies} — amounts not compared
+    case 'po_match.issue.currency_mismatch_invoice_currency_unknown':
+      final poCurrencies = _text(p['poCurrencies'], currency);
+      if (poCurrencies == null) return null;
+      return l.invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+        poCurrencies,
+      );
     // PO is cancelled — amounts not compared
     case 'po_match.issue.po_cancelled':
       return l.invoicePoMatchIssuePoCancelled;

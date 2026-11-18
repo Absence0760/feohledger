@@ -4994,6 +4994,15 @@ abstract class AppLocalizations {
     String poCurrency,
   );
 
+  /// No description provided for @invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'The invoice records no valid currency and the POs behind {poNumber} are in different currencies ({poCurrencies}) — the amounts were not compared'**
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  );
+
   /// No description provided for @invoiceWarningPoCancelled.
   ///
   /// In en, this message translates to:
@@ -5243,6 +5252,14 @@ abstract class AppLocalizations {
   String invoicePoMatchIssueCurrencyMismatch(
     String invoiceCurrency,
     String poCurrency,
+  );
+
+  /// No description provided for @invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Currency mismatch: invoice records no valid currency, POs in {poCurrencies} — amounts not compared'**
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
   );
 
   /// No description provided for @invoicePoMatchIssuePoCancelled.
