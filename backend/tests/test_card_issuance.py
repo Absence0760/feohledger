@@ -76,6 +76,32 @@ async def test_issue_card_returns_failure_when_org_has_not_enabled_cards():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "  "])
+async def test_issue_card_refuses_an_invoice_with_no_currency(blank):
+    """A card is denominated in the invoice's currency. One that records none is
+    refused before any provider call, never minted as USD."""
+    from app.services.card_issuance import issue_card_for_invoice
+
+    invoice = _invoice()
+    invoice.currency = blank
+    adapter = MagicMock()
+    adapter.create_card = AsyncMock()
+    with patch("app.services.card_adapters.get_card_adapter", return_value=adapter):
+        result = await issue_card_for_invoice(
+            db=_db(),
+            invoice=invoice,
+            organization_id=uuid.uuid4(),
+            org_settings={"cards": {"enabled": True, "program_type": "platform", "region": "US"}},
+            app_settings=_app_settings(),
+        )
+
+    assert result.success is False
+    assert result.card is None
+    assert result.failure_reason == "currency_unknown"
+    adapter.create_card.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_issue_card_returns_failure_when_settings_missing_cards_key():
     """`org_settings={}` is the same business case as `cards.enabled=False`
     — never enabled. Belt-and-braces because callers can hand us None too."""

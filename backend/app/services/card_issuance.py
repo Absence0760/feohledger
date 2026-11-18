@@ -487,6 +487,7 @@ async def issue_card_for_invoice(
 
     Returns success=False with a populated failure_reason when:
       - The org hasn't enabled cards (`cards.enabled` falsy)
+      - The invoice records no currency (`currency_unknown`)
       - The org names a card provider we have no adapter for
         (`card_provider_not_configured` — never resolved to `mock`)
       - The adapter call fails
@@ -497,6 +498,16 @@ async def issue_card_for_invoice(
     config = _resolve_card_config(org_settings, app_settings)
     if config is None:
         return CardIssueResult(card=None, success=False, failure_reason="cards_not_enabled")
+    # A card is denominated in the invoice's currency; one that records none
+    # (blank: the invoice PATCH's legacy value) is refused before any provider
+    # call, never minted as USD. The run's card leg refuses it earlier
+    # (`payment_runs.dispatch_preflight`); this is the `POST /api/cards/generate`
+    # door, where it surfaces as `card_skip_issue_failed`.
+    from app.services.international_payments import normalize_currency_code
+
+    card_currency = normalize_currency_code(invoice.currency)
+    if card_currency is None:
+        return CardIssueResult(card=None, success=False, failure_reason="currency_unknown")
 
     # Ensure the adapter classes register themselves with the dispatcher.
     import app.services.card_adapters.lithic  # noqa: F401
@@ -535,7 +546,7 @@ async def issue_card_for_invoice(
         vendor_name=invoice.vendor_name,
         vendor_email=None,
         amount=amount or invoice.amount,
-        currency=invoice.currency or "USD",
+        currency=card_currency,
         description=invoice.description,
         expiry_days=expiry_days,
         idempotency_key=build_card_idempotency_key(
@@ -578,7 +589,7 @@ async def issue_card_for_invoice(
         provider_card_id=result.provider_card_id or "",
         last_four=result.last_four,
         amount_limit=amount or invoice.amount,
-        currency=invoice.currency or "USD",
+        currency=card_currency,
         status="created",
         expires_at=datetime.now(UTC) + timedelta(days=expiry_days),
         organization_id=organization_id,
