@@ -174,8 +174,10 @@ test.describe('/organization provider credentials', () => {
 			const refusedPatch = saved();
 			await save.click();
 			await refusedPatch;
-			await expect(page.getByText(PUT_REFUSED)).toBeVisible();
-			await expect(page.getByText('AI Extraction saved')).toHaveCount(0);
+			await expect(
+				page.getByTestId('toast').filter({ hasText: PUT_REFUSED })
+			).toHaveAttribute('data-toast-type', 'error');
+			await expect(page.locator('[data-testid="toast"][data-toast-type="success"]')).toHaveCount(0);
 			await expect(field).toHaveValue(BYOK_SECRET);
 			await page.unroute(putUrl);
 
@@ -189,7 +191,9 @@ test.describe('/organization provider credentials', () => {
 			await save.click();
 			expect(await (await patch).text()).not.toContain(BYOK_SECRET);
 			expect(await (await put).text()).not.toContain(BYOK_SECRET);
-			await expect(page.getByText('AI Extraction saved')).toHaveCount(1);
+			await expect(
+				page.getByTestId('toast').filter({ hasText: 'AI Extraction saved' })
+			).toHaveCount(1);
 			await expect(field).toHaveValue('');
 			await expect(field).toHaveAttribute('placeholder', KEEP);
 			expect((await credentialStatus(page)).extraction).toEqual(['api_key']);
@@ -218,8 +222,10 @@ test.describe('/organization provider credentials', () => {
 			page.on('request', onRequest);
 			await save.click();
 			await expect(
-				page.getByText('Enter a key for GPT-4V (OpenAI): switching provider drops the stored key.')
-			).toBeVisible();
+				page.getByTestId('toast').filter({
+					hasText: 'Enter a key for GPT-4V (OpenAI): switching provider drops the stored key.'
+				})
+			).toHaveAttribute('data-toast-type', 'error');
 			await expect(field).toHaveAttribute('aria-invalid', 'true');
 			await expect(field).toBeFocused();
 			page.off('request', onRequest);
