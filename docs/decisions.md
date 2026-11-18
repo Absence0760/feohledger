@@ -22815,3 +22815,154 @@ stays synchronous and never unseals. Making that check async across its
 callers was rejected: it runs on every password sign-in. A marker without a
 sealed secret fails closed at the callback (400, or 503 when the store cannot
 open it).
+
+## 445. A multi-PO split's combined PO total exists only when every leg is in one currency (amends §437, round 15, 2026-11-18)
+
+When any leg's currency differs from the invoice's, or the legs' known codes
+disagree with each other, the match is `different` and `po_total` is null: no
+sum across currencies is a figure. Before this, a USD 600 leg and a EUR 400
+leg stored `po_total: 1000.00` labelled EUR, and the invoice modal showed
+"€1,000.00". The `po_currency_mismatch` hold still raises. Per-leg totals,
+each with its own code, stay in `details.legs`.
+
+A split whose legs are {code, NULL} is §197 applied to a sum: it compares at
+face value as `unknown`, and `multi_po_split_v1` refuses to auto-approve it.
+
+## 446. The PO currency backfill re-matches through the receipt path's lookup, matching only (amends §436, round 15, 2026-11-18)
+
+The backfill found invoices by `po_number` alone, so a multi-PO split whose
+leg it stamped was never re-matched and its dry run under-counted. It also
+refreshed unlocked, where a receipt's re-match takes invoices `FOR UPDATE` to
+serialise with approval (§267, §389). It now calls
+`refresh_invoices_citing_pos(lock_invoices=True, best_effort=False,
+skip_settled=True, matching_only=True)`, and the dry run counts the same
+`invoices_citing_pos` query, so the count is exactly what `--apply` touches.
+
+`matching_only` runs `refresh_po_match_only`. A currency stamp moves only the
+PO side of the match, so re-running duplicate detection, the vendor-history
+fraud rules and an opted-in LLM anomaly check per invoice costs work, and
+possibly money, for no new answer. Every warning those checks wrote is kept.
+
+The ERP PO sync keeps the full refresh. It also brings time- and
+history-dependent warnings up to date (`past_due`, the vendor-average check,
+the reporting-currency lock, the LLM check), and dropping that would be a
+silent behaviour change rather than a pure cost saving. It can opt in with
+`matching_only=True` if that trade is accepted.
+
+## 447. A BYOK extraction provider switch that would drop the stored key is refused while the new key is blank (amends §444, round 15, 2026-11-18)
+
+§444 drops the sealed key when the provider changes. The organization page
+still showed the key field as "stored" after a switch, so an admin who
+changed Claude to OpenAI and saved with the field blank lost the key, with a
+success toast. The field now reads as stored only while the dropdown names
+the provider the key was saved for. A switch shows a hint that saving drops
+the key, and a blank save after a switch is refused with the field marked and
+focused, as the ERP panel refuses a missing required secret. A confirmation
+was rejected because a keyless BYOK setup is never what the admin intends.
+Ollama, which needs no key, is not blocked.
+
+Platform-mode saves resend the saved provider, so a provider picked in BYOK
+mode and then hidden cannot drop the key either. The extraction, cards and
+payments panels show one toast, after both the settings PATCH and the
+credential PUT settle.
+
+## 448. Mobile record dialogs announce once, pre-fill from the ERP and book a standing split (amends §439, round 15, 2026-11-18)
+
+A refusal is announced once, through `A11y.announce`, the app's convention;
+the error line is no longer also a live region, which TalkBack read twice.
+The run dialog's load failure and server refusal now announce explicitly.
+
+The record dialog pre-fills from a row's `erp_reported_payment` by the web's
+rules: a method only if it can be recorded outside FeohLedger, the reference
+trimmed, and the ERP's date unless missing or in the future. When the server
+says an ERP split stands, the dialog books it through
+`POST /api/exceptions/{id}/record-erp-payment` with no method of its own. The
+NACHA bank file stays web-only by design, since it hands over bank account
+numbers. The record-only note is one sentence, inside each tab's scrolling
+list.
+
+## 449. A /cfo figure that includes overdue AP names it where the total is shown (amends §440, round 15, 2026-11-18)
+
+After §440 the KPI row's Committed and Pipeline no longer summed to Projected
+outflow. An "Overdue (owed now)" card appears when there is overdue AP, the
+cash-position row that carries it says so, and each what-if card states the
+overdue amount it includes, so the visible parts always sum to their
+headline.
+
+The `--danger` / `--accent` pair cannot be told apart by hue (1.13:1 dark,
+1.02:1 light). Stacked-bar segments are separated by a 2px `--surface` line,
+and overdue is hatched, so each segment is at least 3:1 against its separator
+and the split never depends on colour alone.
+
+## 450. An approver sees a submitted requisition's budget headroom as it stands (amends §441, round 15, 2026-11-18)
+
+The overspend warning told a requester that an approver would see it, and
+nothing showed it. A submitted, pending or approved requisition now shows a
+read-only headroom line from `GET /budgets/{id}/spend`, which already counts
+the requisition, never `/budgets/check` with its total, which would count it
+twice. It shows nothing when the budget is in another currency.
+
+The draft pre-check keeps its last settled result for the same budget, marked
+`aria-busy`, while a new check runs, so a screen reader hears only settled
+results, not "Checking…" on every pause in typing.
+
+## 451. Suppliers reset a lost password themselves, without being able to lock anyone out (round 15, 2026-11-18)
+
+`POST /api/portal/auth/forgot-password` mints the existing tenant-bound
+portal token at the forgot-password lifetime. Unlike the AP team's reset
+(§443) it clears nothing, supersedes no earlier link and never re-stamps
+`provisioned_by_user_id`. Anyone can submit an address, so it must not be able
+to lock a supplier out, and no AP actor chose where the link goes.
+
+It answers the same for a known and an unknown address. Budgets of 5 an hour
+per IP and 3 an hour per tenant and address are checked before the lookup.
+The mint, the email and the audit row, which only a matching address
+triggers, run on a detached task, so response time does not reveal whether
+the account exists. The employee route still awaits that work on the known
+branch, a timing leak recorded in `docs/followups.md`.
+
+The supplier's set-password redemption no longer answers 500 when the session
+revoke after it fails: the password is already set and the link spent, so the
+failure is logged by vendor-user id and the response stands.
+
+## 452. The operator's tenant tooling gives the first admin a set-password link, not a password (extends §443, round 15, 2026-11-18)
+
+`scripts/create_tenant.py` creates the first admin with no password and
+emails the same link "Invite User" sends, printing only the address and
+expiry. It refuses before creating anything when there is no tenant URL to
+build the link on. If the tenant exists but the email failed it exits 3 and
+says the admin can use Forgot password once mail works. `--print-link` prints
+the link to the operator's own terminal and sends nothing, for a tenant with
+no working mail; that is the operator's channel, not a response body.
+
+`deploy/add-tenant.sh` no longer generates or prints a password and refuses
+`--admin-password`. `create_tenant.py` keeps `--admin-password` for local dev,
+because the documented setup uses it, and refuses it in a deployed
+environment. The day-one rehearsal reads the admin's link from Mailpit.
+
+## 453. `/draft-run` never stages an invoice whose currency is not recorded (round 15, 2026-11-18)
+
+`invoices.currency` is NOT NULL, but the invoice PATCH keeps `""` as its
+legacy "no currency" value. `/draft-run` read that blank as the reporting
+currency (`cur or run_currency`) and staged the invoice into a single-currency
+run that would pay it in a currency nobody recorded: the substitution
+§160/§196/§200 removed from the formatters, reaching a payment.
+
+Each payable invoice the route leaves out is now listed in
+`DraftRunResponse.skipped` with a code (`currency_unknown`, or
+`currency_not_run_currency` with `params.currency`). A plan with nothing
+stageable answers the coded 409 `draft_run_no_run_currency`, stated in six
+locales, and the plan card no longer reads every 409 as a stale plan.
+
+Rejected: defaulting a blank to the reporting currency, which is the bug; and
+refusing the whole draft run when any invoice lacks a currency, which lets one
+bad row block the plan's whole run. The same `or "USD"` substitution is still
+live in the run builder and at execution; that is recorded in
+`docs/followups.md`.
+
+§440's overdue staging is now pinned by a test and unchanged: an approved
+invoice already past due is staged, and one still in review is not. Whether a
+plan-driven run should cap how overdue an invoice may be is an open product
+question for the operator. A cap would be a `settings.cash_flow` integer
+applied before staging, folded into the plan's derivation so the plan and the
+run agree, with the forecast's overdue slice left uncapped.
