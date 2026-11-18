@@ -296,7 +296,11 @@ Every skip now:
    the template's own id so one template's generation problem reads as one
    thread.
 3. **Surfaces as `last_skip`** on every `/api/recurring` template response, so
-   the UI can tell "not generating" apart from "nothing due yet".
+   the UI can tell "not generating" apart from "nothing due yet". `/recurring`
+   shows a "Not generating" badge whose skipped-period count, period and reason
+   are in a visually-hidden span inside it, with the same sentence as the
+   tooltip — not only in a `title`, which a keyboard, a touch screen or a
+   screen reader cannot reach (`ui/ExplainedBadge`, shared with the GL badge).
 
 **Clearing the marker is not cosmetic, and every path that fixes a template
 does it.** `record_generation_skip` counts *up from whatever it finds*, so a
@@ -454,7 +458,7 @@ a `<Modal>`, status `FilterChips` (`active` / `paused` / `ended`), a KPI row
 (active templates, monthly committed, generated this period, next run), and — in
 the detail modal — an **upcoming-schedule preview** (from
 `GET /{id}/upcoming-schedule`) and the **generated-invoice history** (from
-`GET /{id}/history`). A template whose GL code the chart no longer accepts carries a "GL <code> needs re-coding" badge (the code in the visible text, the reason in a visually-hidden span — not only a `title` tooltip), and a second chip group (shown while any exist, URL `?gl=off_chart`) filters the whole set to them. Read roles see the page; mutate actions are gated to
+`GET /{id}/history`). A template whose GL code the chart no longer accepts carries a "GL <code> needs re-coding" badge (the code in the visible text, the reason in a visually-hidden span — not only a `title` tooltip; `ui/ExplainedBadge`, which the "Not generating" badge shares), and a second chip group (shown while any exist, URL `?gl=off_chart`) filters the whole set to them. Read roles see the page; mutate actions are gated to
 admin / ap_manager (`auth.isManager`). See `frontend/CLAUDE.md`.
 
 ## Migration
