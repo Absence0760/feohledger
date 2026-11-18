@@ -1,4 +1,4 @@
-import type { CashflowForecast, CashPosition } from '#lib/types/analytics.ts';
+import type { CashflowForecast, CashPosition, WhatIfScenarios } from '#lib/types/analytics.ts';
 import { expect, signInAndWait, test } from '../fixtures/helpers';
 
 /**
@@ -20,6 +20,14 @@ test.describe('/cfo (admin)', () => {
 	});
 
 	test('renders the forecast surface with KPI cards and controls', async ({ page }) => {
+		// The overdue card joins the row only when the forecast carries past-due
+		// AP, so the expected count is read off the response this render used
+		// rather than assumed from whatever the seed happens to hold.
+		const forecastResp = page.waitForResponse(
+			(r) => new URL(r.url()).pathname === '/api/analytics/cashflow_forecast'
+		);
+		await page.goto('/cfo');
+		const forecast = (await (await forecastResp).json()) as CashflowForecast;
 		await expect(page.getByRole('heading', { name: 'Cash Flow' })).toBeVisible();
 		// KPI row populated from /cashflow_forecast + /cashflow_whatif. Scoped to
 		// the forecast's own row — the page also embeds the CFO-metrics section
@@ -27,7 +35,7 @@ test.describe('/cfo (admin)', () => {
 		// same shared class.
 		const forecastKpis = page.getByTestId('forecast-kpi-row').locator('.kpi');
 		await expect(forecastKpis.first()).toBeVisible({ timeout: 10_000 });
-		await expect(forecastKpis).toHaveCount(4);
+		await expect(forecastKpis).toHaveCount(forecast.totals.overdue_count > 0 ? 5 : 4);
 		// Granularity + horizon segmented controls present.
 		await expect(page.locator('.seg-btn', { hasText: 'week' })).toBeVisible();
 	});
@@ -169,7 +177,66 @@ test.describe('/cfo (admin)', () => {
 				await route.fulfill({ response: res, json: body });
 			}
 		);
+		await page.route(
+			(url) => url.pathname === '/api/analytics/cashflow_whatif',
+			async (route) => {
+				const res = await route.fetch();
+				const body = (await res.json()) as WhatIfScenarios;
+				for (const s of Object.values(body.scenarios)) {
+					s.overdue_amount = '1000.00';
+					s.overdue_count = 1;
+				}
+				await route.fulfill({ response: res, json: body });
+			}
+		);
+		await page.route(
+			(url) => url.pathname === '/api/analytics/cash_position',
+			async (route) => {
+				const res = await route.fetch();
+				const body = (await res.json()) as CashPosition;
+				body.overdue_amount = '1000.00';
+				body.overdue_count = 1;
+				body.periods = [
+					{
+						period: '2026-06-08',
+						period_start: '2026-06-08',
+						period_end: '2026-06-14',
+						opening: '5000.00',
+						outflow: '1200.00',
+						inflow: '0.00',
+						closing: '3800.00',
+						below_threshold: false,
+						overdue_amount: '1000.00',
+						unconverted_count: 0
+					},
+					{
+						period: '2026-06-15',
+						period_start: '2026-06-15',
+						period_end: '2026-06-21',
+						opening: '3800.00',
+						outflow: '300.00',
+						inflow: '0.00',
+						closing: '3500.00',
+						below_threshold: false,
+						overdue_amount: '0.00',
+						unconverted_count: 0
+					}
+				];
+				body.breaches = [];
+				await route.fulfill({ response: res, json: body });
+			}
+		);
+		// Exactly the money overdue was the forecast's first period, so the
+		// fixture states its own sum: 1,200 = 200 committed + 0 pending + 1,000.
 		await page.goto('/cfo');
+
+		// The KPI row's parts now sum to its headline: an "Overdue (owed now)"
+		// card sits beside Committed and Pipeline, carrying the overdue total.
+		const kpiRow = page.getByTestId('forecast-kpi-row');
+		const overdueKpi = kpiRow.locator('.kpi', { hasText: 'Overdue (owed now)' });
+		await expect(overdueKpi).toHaveCount(1, { timeout: 10_000 });
+		await expect(overdueKpi.locator('.kpi-value')).toContainText('1,000');
+		await expect(kpiRow.locator('.kpi')).toHaveCount(5);
 
 		const note = page.getByTestId('overdue-outflows');
 		await expect(note).toBeVisible({ timeout: 10_000 });
@@ -178,6 +245,21 @@ test.describe('/cfo (admin)', () => {
 		await expect(page.locator('.cf-bar.overdue')).toHaveCount(1);
 		await expect(page.getByRole('img', { name: /^Overdue .*, committed .*, pending / })).toHaveCount(1);
 		await expect(page.locator('.cf-legend')).toContainText('Overdue (owed now)');
+		// A zero pending slice draws no segment, so the 2px separator only ever
+		// sits between two visible segments: overdue then committed, here.
+		await expect(page.locator('.cf-bar-bg .cf-bar')).toHaveCount(2);
+		await expect(page.locator('.cf-bar.pending')).toHaveCount(0);
+
+		// Each what-if total names the overdue slice it includes.
+		await expect(page.getByTestId('whatif-overdue')).toHaveCount(3);
+		await expect(page.getByTestId('whatif-overdue').first()).toContainText('1,000');
+		await expect(page.getByTestId('whatif-overdue').first()).toContainText('already overdue');
+
+		// The cash-position row the overdue AP inflates says so; later rows do not.
+		const region = page.getByRole('region', { name: 'Cash position' });
+		const rows = region.locator('tbody tr');
+		await expect(rows.first().getByTestId('position-overdue-note')).toContainText('1,000');
+		await expect(region.getByTestId('position-overdue-note')).toHaveCount(1);
 	});
 
 	test('Export CSV triggers a download', async ({ page }) => {

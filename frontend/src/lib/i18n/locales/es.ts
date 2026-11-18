@@ -1907,6 +1907,7 @@ export const messages = {
 	'cfo.kpi.committed': 'Comprometido',
 	'cfo.kpi.pipeline': 'Cartera (pendiente)',
 	'cfo.kpi.discountIfEarly': 'Descuento si se paga antes',
+	'cfo.kpi.overdue': 'Vencido (se debe ahora)',
 	'cfo.chart.projectedOutflows': 'Salidas proyectadas ({granularity})',
 	'cfo.chart.barAria': 'Comprometido {committed}, pendiente {pending}',
 	'cfo.chart.barAriaOverdue': 'Vencido {overdue}, comprometido {committed}, pendiente {pending}',
@@ -1926,6 +1927,7 @@ export const messages = {
 	'cfo.whatif.netOutflow': 'salida neta',
 	'cfo.whatif.discountCaptured': '+{amount} de descuento capturado',
 	'cfo.whatif.daysToPay': '~{days} días para pagar',
+	'cfo.whatif.overdueIncluded': 'incl. {amount} ya vencido',
 	'cfo.position.title': 'Posición de caja',
 	'cfo.position.enterOpening': 'Introduzca un saldo bancario inicial arriba para proyectar la posición de caja en curso.',
 	'cfo.position.breach': '{n, plural, one {⚠ # período proyecta por debajo de su alerta de saldo mínimo.} other {⚠ # períodos proyectan por debajo de su alerta de saldo mínimo.}}',
@@ -1989,6 +1991,7 @@ export const messages = {
 	'cfo.position.colOpening': 'Apertura',
 	'cfo.position.colOutflow': 'Salida',
 	'cfo.position.colClosing': 'Cierre',
+	'cfo.position.overdueIncluded': 'incl. {amount} vencido, se debe ahora',
 	'cfo.position.belowMinimum': 'Por debajo del mínimo',
 	'cfo.position.empty': 'No hay salidas proyectadas en esta ventana.',
 
