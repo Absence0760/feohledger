@@ -3296,7 +3296,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'AI が提案した勘定科目が有効な勘定科目表にありません: $codes';
+    return '有効な勘定科目表にない勘定科目のため未設定: $codes';
   }
 
   @override

@@ -3455,7 +3455,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'AI suggested GL code(s) not in active chart: $codes';
+    return 'GL code(s) not in the active chart of accounts, left uncoded: $codes';
   }
 
   @override

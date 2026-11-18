@@ -3475,7 +3475,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'Contas contábeis sugeridas pela IA que não estão no plano ativo: $codes';
+    return 'Contas contábeis fora do plano de contas ativo, não atribuídas: $codes';
   }
 
   @override
@@ -7511,7 +7511,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'Contas contábeis sugeridas pela IA que não estão no plano ativo: $codes';
+    return 'Contas contábeis fora do plano de contas ativo, não atribuídas: $codes';
   }
 
   @override

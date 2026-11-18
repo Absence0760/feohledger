@@ -1025,7 +1025,7 @@
   "invoiceWarningSelfCorrectionCurrencyConflict": "金額は {printedCurrency} で記載されていますが、請求書の通貨は {fieldCurrency} です。金額は空欄のままです。書類から入力してください。",
   "invoiceWarningSelfCorrectionCurrencyMixed": "金額が複数の通貨（{printedCurrencies}）で記載されています。金額は空欄のままです。書類から入力してください。",
   "invoiceWarningSelfCorrectionLineItemMath": "明細 {lineNumber}: {quantity} × {unitPrice} = {expected} ですが、合計は {total} です。",
-  "invoiceWarningGlCodesNotInChart": "AI が提案した勘定科目が有効な勘定科目表にありません: {codes}",
+  "invoiceWarningGlCodesNotInChart": "有効な勘定科目表にない勘定科目のため未設定: {codes}",
   "invoiceWarningGlCodeStalePrior": "この仕入先のキャッシュされた勘定科目「{code}」は有効な勘定科目表にありません。",
   "invoicePoMatchIssuePoNotFound": "発注 {poNumber} が見つかりません",
   "invoicePoMatchIssueCurrencyMismatch": "通貨の不一致: 請求は {invoiceCurrency}、発注は {poCurrency} — 金額は比較されていません",

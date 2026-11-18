@@ -573,7 +573,7 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
     WarningSpec(
         "gl_codes_not_in_chart",
         "gl_account_invalid",
-        "AI suggested GL code(s) not in active chart: {codes}",
+        "GL code(s) not in the active chart of accounts, left uncoded: {codes}",
         {"codes": "text"},
     ),
     WarningSpec(

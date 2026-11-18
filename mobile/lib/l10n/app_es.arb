@@ -859,7 +859,7 @@
   "invoiceWarningSelfCorrectionCurrencyConflict": "Los importes figuran en {printedCurrency}, pero la moneda de la factura indica {fieldCurrency}. Los importes se dejaron en blanco: introdúzcalos desde el documento.",
   "invoiceWarningSelfCorrectionCurrencyMixed": "Los importes figuran en más de una moneda ({printedCurrencies}). Los importes se dejaron en blanco: introdúzcalos desde el documento.",
   "invoiceWarningSelfCorrectionLineItemMath": "Línea {lineNumber}: {quantity} × {unitPrice} = {expected}, pero el total es {total}.",
-  "invoiceWarningGlCodesNotInChart": "Cuentas contables sugeridas por la IA que no están en el plan activo: {codes}",
+  "invoiceWarningGlCodesNotInChart": "Cuentas contables que no están en el plan de cuentas activo, sin imputar: {codes}",
   "invoiceWarningGlCodeStalePrior": "La cuenta contable «{code}» guardada para el proveedor ya no está en el plan de cuentas activo.",
   "invoicePoMatchIssuePoNotFound": "No se encontró el pedido {poNumber}",
   "invoicePoMatchIssueCurrencyMismatch": "Discrepancia de moneda: factura en {invoiceCurrency}, pedido en {poCurrency}; importes no comparados",

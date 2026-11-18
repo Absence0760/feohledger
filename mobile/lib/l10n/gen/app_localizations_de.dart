@@ -3476,7 +3476,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'Von der KI vorgeschlagene Sachkonten fehlen im aktiven Kontenplan: $codes';
+    return 'Sachkonten nicht im aktiven Kontenplan, nicht kontiert: $codes';
   }
 
   @override
