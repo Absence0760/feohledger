@@ -411,8 +411,9 @@ void main() {
         await loginThen(
           ['admin'],
           MockClient((req) async {
-            if (req.url.path == '/api/goods-receipts')
+            if (req.url.path == '/api/goods-receipts') {
               return _list([], total: 0);
+            }
             return _list([_inspectionJson('1')]);
           }),
         );
