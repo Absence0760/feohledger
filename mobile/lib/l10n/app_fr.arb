@@ -964,6 +964,7 @@
   "codedRefusalInvoiceBulkNotFound": "Cette facture est introuvable dans l’entité sélectionnée.",
   "codedRefusalInvoiceStatusImmutable": "Cette facture est au statut {status} : elle ne peut plus être modifiée.",
   "codedRefusalInvoiceRecallOneAtATime": "Une approbation se retire une facture à la fois, avec un motif : utilisez « Retirer l'approbation » sur la facture.",
+  "codedRefusalInvoiceBulkRefused": "Cette facture n'a pas pu passer au statut {status}.",
   "codedRefusalInvoiceRequiredFieldsMissing": "Champs obligatoires manquants : {fields}",
   "codedRefusalInvoiceTransitionInvalid": "Cette facture ne peut pas passer de {from} à {to}.",
   "codedRefusalInvoiceTransitionRecallOnly": "Cette facture ne peut passer de {from} à {to} qu'en retirant son approbation, une facture à la fois : utilisez « Retirer l'approbation » sur la facture.",
@@ -1030,6 +1031,7 @@
   "codedRefusalPaymentRunSegregationExport": "Séparation des tâches : l'utilisateur qui a créé ce lot de paiements ne peut pas aussi exporter son fichier bancaire. Un autre utilisateur doit le faire.",
   "codedRefusalPaymentRunAwaitingCfo": "Ce lot dépasse le seuil d'approbation CFO de l'organisation et attend la validation d'un utilisateur ayant le rôle CFO.",
   "codedRefusalMfaCodeInvalid": "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
+  "codedRefusalMfaEmailCodeInvalid": "Ce code n'est pas valide ou a expiré. Demandez un nouveau code et réessayez.",
   "codedRefusalPaymentRunNotRecordable": "Seul un lot en brouillon, ou dont le fichier bancaire a été exporté, peut être enregistré comme payé.",
   "codedRefusalPaymentRunNothingToRecord": "Ce lot n'a plus de paiements à enregistrer.",
   "codedRefusalExternalPaymentBlockingException": "Cette facture comporte une exception non résolue qui bloque le paiement. Résolvez-la avant d'enregistrer la facture comme payée."

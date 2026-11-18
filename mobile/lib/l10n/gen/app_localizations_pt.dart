@@ -4052,6 +4052,11 @@ class AppLocalizationsPt extends AppLocalizations {
       'Uma aprovação é revogada uma fatura por vez, com um motivo: use Revogar aprovação na fatura.';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'Não foi possível alterar esta fatura para $status.';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return 'Campos obrigatórios ausentes: $fields';
   }
@@ -4314,6 +4319,10 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get codedRefusalMfaCodeInvalid =>
       'Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'Esse código não é válido ou expirou. Solicite um novo código e tente novamente.';
 
   @override
   String get codedRefusalPaymentRunNotRecordable =>
@@ -8373,6 +8382,11 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
       'Uma aprovação é revogada uma fatura por vez, com um motivo: use Revogar aprovação na fatura.';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'Não foi possível alterar esta fatura para $status.';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return 'Campos obrigatórios ausentes: $fields';
   }
@@ -8635,6 +8649,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get codedRefusalMfaCodeInvalid =>
       'Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'Esse código não é válido ou expirou. Solicite um novo código e tente novamente.';
 
   @override
   String get codedRefusalPaymentRunNotRecordable =>

@@ -115,6 +115,10 @@ void main() {
       de.codedRefusalMfaCodeInvalid,
     );
     expect(
+      localizeCodedRefusal(de, refusal('mfa_email_code_invalid')),
+      de.codedRefusalMfaEmailCodeInvalid,
+    );
+    expect(
       localizeCodedRefusal(de, refusal('payment_run_awaiting_cfo')),
       de.codedRefusalPaymentRunAwaitingCfo,
     );
@@ -276,6 +280,13 @@ void main() {
     );
     expect(localizeCodedRefusal(en, refusal('invoice_status_immutable')),
         isNull);
+    // A row refused without a code of its own names its target (§NEW-T1).
+    expect(
+      localizeCodedRefusal(
+          en, refusal('invoice_bulk_refused', {'status': 'new'})),
+      'This invoice could not be changed to New.',
+    );
+    expect(localizeCodedRefusal(en, refusal('invoice_bulk_refused')), isNull);
     expect(
       localizeCodedRefusal(
           en, refusal('invoice_transition_invalid', {'status': 'new'})),

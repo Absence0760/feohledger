@@ -16,7 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import create_vendor_access_token, decode_token
 from app.api.portal_deps import get_current_vendor_user
-from app.api.refusals import MFA_CODE_INVALID_DETAIL, coded_refusal
+from app.api.refusals import (
+    MFA_CODE_INVALID_DETAIL,
+    MFA_EMAIL_CODE_INVALID_DETAIL,
+    coded_refusal,
+)
 from app.config import settings
 from app.models.organization import Organization
 from app.models.vendor import Vendor
@@ -869,7 +873,7 @@ async def portal_mfa_challenge(
     if factor == "email":
         if not await mfa.verify_vendor_email_otp(vu.id, body.code):
             await _audit_verify_failure()
-            raise HTTPException(status_code=401, detail="Invalid or expired code")
+            raise HTTPException(status_code=401, detail=MFA_EMAIL_CODE_INVALID_DETAIL)
     else:
         if not await mfa.verify_totp(vu.mfa_secret, body.code):
             await _audit_verify_failure()

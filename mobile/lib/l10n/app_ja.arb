@@ -1130,6 +1130,7 @@
   "codedRefusalInvoiceBulkNotFound": "選択中のエンティティにこの請求書が見つかりません。",
   "codedRefusalInvoiceStatusImmutable": "この請求書のステータスは{status}のため、変更できません。",
   "codedRefusalInvoiceRecallOneAtATime": "承認の取り消しは理由を添えて1件ずつ行います。請求書の「承認を取り消す」を使用してください。",
+  "codedRefusalInvoiceBulkRefused": "この請求書を{status}に変更できませんでした。",
   "codedRefusalInvoiceRequiredFieldsMissing": "必須項目が入力されていません：{fields}",
   "codedRefusalInvoiceTransitionInvalid": "この請求書は{from}から{to}に移行できません。",
   "codedRefusalInvoiceTransitionRecallOnly": "この請求書を{from}から{to}に移行するには、請求書ごとに承認を取り消す必要があります。請求書の「承認を取り消す」を使用してください。",
@@ -1196,6 +1197,7 @@
   "codedRefusalPaymentRunSegregationExport": "職務分掌: この支払いランを作成したユーザーは、その銀行ファイルをエクスポートすることはできません。別のユーザーが行う必要があります。",
   "codedRefusalPaymentRunAwaitingCfo": "このランは組織のCFO承認しきい値を超えているため、CFOロールを持つユーザーの承認を待っています。",
   "codedRefusalMfaCodeInvalid": "このコードは無効です。認証アプリを確認して、もう一度お試しください。",
+  "codedRefusalMfaEmailCodeInvalid": "このコードは無効か、有効期限が切れています。新しいコードをリクエストして、もう一度お試しください。",
   "codedRefusalPaymentRunNotRecordable": "支払済みとして記録できるのは、下書きのランか、銀行ファイルをエクスポートしたランだけです。",
   "codedRefusalPaymentRunNothingToRecord": "このランには記録する支払いが残っていません。",
   "codedRefusalExternalPaymentBlockingException": "この請求書には、支払いをブロックする未解決の例外があります。支払済みとして記録する前に解決してください。"

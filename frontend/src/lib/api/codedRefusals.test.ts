@@ -106,6 +106,7 @@ describe('codedRefusalText', () => {
 		[INVOICE_STALE_EDIT, 'refusal.invoiceStaleEdit'],
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
 		['mfa_code_invalid', 'refusal.mfaCodeInvalid'],
+		['mfa_email_code_invalid', 'refusal.mfaEmailCodeInvalid'],
 		['payment_run_awaiting_cfo', 'refusal.paymentRunAwaitingCfo'],
 		['payment_cfo_required', 'refusal.paymentCfoRequired'],
 		['erp_not_connected', 'erpRefusal.notConnected'],
@@ -1481,7 +1482,7 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 		const codes = [...source.matchAll(/^INVOICE_[A-Z_]+ = "(invoice_[a-z_]+)"/gm)].map(
 			(x) => x[1]
 		);
-		expect(codes).toHaveLength(4);
+		expect(codes).toHaveLength(5);
 		for (const code of codes) {
 			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
 		}
@@ -1525,6 +1526,20 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 
 	it('invoice_status_immutable without a status falls back to the server English', () => {
 		expect(codedRefusalText('invoice_status_immutable', {}, enT)).toBeNull();
+	});
+
+	it('invoice_bulk_refused names the target by its label, in every shipped locale', () => {
+		// The backstop for a refusal a service raised without a code (§NEW-T1).
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(
+				'invoice_bulk_refused',
+				{ status: 'new' },
+				translator(messages, locale)
+			);
+			expect(text, locale).toContain((messages as Record<string, string>)['invoices.status.new']);
+			expect(text, locale).not.toMatch(/[{}]/);
+		}
+		expect(codedRefusalText('invoice_bulk_refused', {}, enT)).toBeNull();
 	});
 
 	it('a skip row localizes through the transport entry point the bulk toast calls', () => {

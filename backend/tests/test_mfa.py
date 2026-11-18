@@ -355,6 +355,49 @@ async def test_verify_mfa_failure_writes_audit_action():
 
 
 @pytest.mark.asyncio
+async def test_verify_mfa_email_code_miss_is_coded():
+    """The emailed code's miss carries its own code (its sentence also covers an
+    expired code, unlike the TOTP one) and stays a 401 (decisions §NEW-T1)."""
+    from unittest.mock import patch as _patch
+
+    from fastapi import HTTPException
+
+    from app.api import auth as auth_mod
+    from app.schemas.auth import MFAVerifyRequest
+    from app.services import mfa as mfa_svc
+
+    user = _mfa_user(enrolled=True)
+    db = _single_user_db(user)
+
+    async def _fake_audit(**kwargs):
+        pass
+
+    async def _miss(user_id, code):
+        return False
+
+    challenge = mfa_svc.create_challenge_token(user.id)
+
+    with (
+        _patch.object(auth_mod, "dispatch_auth_audit", _fake_audit),
+        _patch.object(auth_mod.mfa, "verify_email_otp", _miss),
+        _patch.object(auth_mod.settings, "mfa_enabled", True),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await auth_mod.verify_mfa(
+                MFAVerifyRequest(challenge_token=challenge, code="000000", method="email"),
+                _mfa_request(),
+                db,
+            )
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == {
+        "code": "mfa_email_code_invalid",
+        "message": "Invalid or expired code",
+        "params": {},
+    }
+
+
+@pytest.mark.asyncio
 async def test_verify_mfa_challenge_token_rejects_replay():
     """Issue #162: once a challenge token has minted a real access token, the
     SAME challenge token must not be usable again — otherwise one password

@@ -23315,3 +23315,46 @@ connection reads as "reconnect" (`erp_oauth` treats a missing refresh token as
 not connected). The organization page has no per-block "remove all" control to
 attach this to, since each secret field has its own "remove the stored value",
 so the action is API-only for now; the button is tracked in `docs/followups.md`.
+
+## §NEW-T1. Every bulk-status skip is coded, and the email-OTP miss too (round 19, 2026-11-18)
+
+**Context.** The last English-only refusals entry in `docs/followups.md` (§238,
+narrowed by §387 and §461) named the bulk status change's per-row skips and the
+sign-in challenge's email-OTP miss. Two of its three skips were already closed:
+§387 had coded the stale-version skip (`invoice_stale_approval`) and the blank
+submit (`invoice_required_fields_missing`). What was left was the fallback,
+`api/invoices._skip_reason`: a refusal reaching `_refused_skip` without
+`{code, message, params}` became a row with only an English `reason`. Every
+refusal `approve_invoice`, `reject_invoice`, `resubmit_invoice` and
+`transition_invoice` raise for a bulk row is coded today, so the fallback was
+unreachable in practice. But that held only by the services' discipline, and
+the next uncoded refusal added to any of them would surface English-only in a
+translated list.
+
+**Decision.**
+- `_refused_skip` no longer has an uncoded exit. An uncoded refusal (a plain
+  string, or a structured detail that is not `{code, message, params}`, such
+  as the GL-chart refusal's shape) becomes `invoice_bulk_refused` with
+  `params.status` set to the target the row could not reach. The refusal's
+  own sentence (`utils/http.detail_text`), or the branch's fallback label,
+  stays as the English `reason`. `_skip_reason` is gone.
+- Web (`codedRefusals.ts`) and mobile (`coded_refusal_messages.dart`) state it
+  as "This invoice could not be changed to {status}", with the status named by
+  its label. An unknown status falls back to the server's sentence.
+- The trade-off: a code-aware client shows that generic sentence even in
+  English, and the server's more specific one stays in `reason`. That is
+  deliberate. A row is either stated in the reader's language or it isn't,
+  and a refusal specific enough to need its own sentence should get its own
+  code at the service that raises it.
+- The email-OTP miss (`POST /api/auth/mfa/verify` with `method=email`, and the
+  portal's `/mfa/challenge`) is `mfa_email_code_invalid`
+  (`api/refusals.MFA_EMAIL_CODE_INVALID_DETAIL`), "Invalid or expired code".
+  It is not `mfa_code_invalid`, because its sentence also covers an expired
+  code. It folds a wrong code and an expired one together, as before. It stays
+  a 401 for §461's reasons.
+
+**Guards.** `tests/test_bulk_status_controls.py::test_an_uncoded_refusal_is_still_a_coded_skip`
+(plain, structured and unreadable details) and the endpoint-codes pin;
+`tests/test_mfa.py::test_verify_mfa_email_code_miss_is_coded`;
+`codedRefusals.test.ts` (the reverse pin now counts five endpoint codes, plus
+the label test) and the mobile `coded_refusal_messages_test.dart`.

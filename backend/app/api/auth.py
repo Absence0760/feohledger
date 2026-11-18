@@ -18,7 +18,11 @@ from app.api.deps import (
     get_current_user,
 )
 from app.api.permissions import effective_permissions
-from app.api.refusals import MFA_CODE_INVALID_DETAIL, coded_refusal
+from app.api.refusals import (
+    MFA_CODE_INVALID_DETAIL,
+    MFA_EMAIL_CODE_INVALID_DETAIL,
+    coded_refusal,
+)
 from app.config import settings
 from app.database import control_session_factory, get_control_db
 from app.models.organization import Organization
@@ -977,7 +981,7 @@ async def verify_mfa(
                 entity_id=user.id,
                 details={"method": "email", "ip": ip},
             )
-            raise HTTPException(status_code=401, detail="Invalid or expired code")
+            raise HTTPException(status_code=401, detail=MFA_EMAIL_CODE_INVALID_DETAIL)
 
     await clear_auth_failures("auth_mfa", mfa_identity)
 

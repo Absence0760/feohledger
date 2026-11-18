@@ -4052,6 +4052,11 @@ class AppLocalizationsEs extends AppLocalizations {
       'Una aprobación se retira de factura en factura, con un motivo: use Retirar aprobación en la factura.';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'Esta factura no se pudo cambiar a $status.';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return 'Faltan campos obligatorios: $fields';
   }
@@ -4312,6 +4317,10 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get codedRefusalMfaCodeInvalid =>
       'Ese código no es válido. Compruebe su aplicación de autenticación e inténtelo de nuevo.';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'Ese código no es válido o ha caducado. Solicite un código nuevo e inténtelo de nuevo.';
 
   @override
   String get codedRefusalPaymentRunNotRecordable =>
