@@ -195,7 +195,7 @@ async def test_login_mfa_path_writes_challenge_issued_audit():
 
     user = _make_user()
     user.mfa_enabled = True
-    user.mfa_secret = "JBSWY3DPEHPK3PXP"
+    user.mfa_secret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
     org = _make_org()
     db = _db_returning(user, org)
 

@@ -26,11 +26,15 @@ this slot — locked out of the seed credential.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from app.models.user import User
+from app.models.workflow import AuditLog
+from app.utils.detached_tasks import drain_detached
 from app.utils.passwords import pwd_context
 from tests.conftest import role_email
 from tests.test_session_management import FakeRedis
@@ -112,6 +116,7 @@ async def test_forgot_password_happy_path_and_old_password_stops_working(
         assert resp.status_code == 200, resp.text
         assert "sent password reset instructions" in resp.json()["detail"].lower()
 
+        await drain_detached()
         assert len(sent) == 1
         msg = sent[0]
         assert msg.to == email
@@ -212,6 +217,7 @@ async def test_a_passwordless_sso_user_can_set_a_password_once_the_plan_drops_ss
 
     async with realdb.client(key=TENANT, role=None) as c:
         assert (await c.post("/api/auth/forgot-password", json={"email": email})).status_code == 200
+        await drain_detached()
         assert len(sent) == 1
         token = sent[0].body_text.split("token=")[1].split("\n")[0].strip()
         new_password = "BrandNewPassw0rd!42"
@@ -245,12 +251,102 @@ async def test_forgot_password_unknown_email_same_response_no_email_sent(
     async with realdb.client(key=TENANT, role=None) as c:
         real_resp = await c.post("/api/auth/forgot-password", json={"email": real_email})
         fake_resp = await c.post("/api/auth/forgot-password", json={"email": fake_email})
+    await drain_detached()
 
     assert real_resp.status_code == fake_resp.status_code == 200
     assert real_resp.json() == fake_resp.json()
     # Only the real account triggers an outbound send.
     assert len(sent) == 1
     assert sent[0].to == real_email
+
+
+@pytest.mark.asyncio
+async def test_the_response_does_not_wait_for_the_mint_send_or_audit(
+    realdb, fake_redis, monkeypatch
+):
+    """Response time must not say the address exists (decisions §451's shape,
+    now on the employee route). The token mint is held on a gate: the 200 has
+    to arrive while it is still held, with no mail sent and no audit row
+    written, and only releasing the gate produces them."""
+    from app.config import settings as cfg
+    from app.services import password_reset
+    from app.services.email_adapters.console_adapter import ConsoleAdapter
+
+    monkeypatch.setattr(cfg, "tenant_url_template", "https://{slug}.feohledger.test", raising=True)
+    sent: list = []
+
+    async def _fake_send(self, message):  # noqa: ANN001
+        sent.append(message)
+
+    monkeypatch.setattr(ConsoleAdapter, "send", _fake_send, raising=True)
+
+    gate = asyncio.Event()
+    minting = asyncio.Event()
+    real_issue = password_reset.issue_reset_token
+
+    async def _gated_issue(user_id, **kwargs):  # noqa: ANN001, ANN003
+        minting.set()
+        await gate.wait()
+        return await real_issue(user_id, **kwargs)
+
+    monkeypatch.setattr(password_reset, "issue_reset_token", _gated_issue)
+
+    email = await _create_throwaway_user(realdb, TENANT, password=SEED_PASSWORD)
+    user_id = await _user_id_for(realdb, email)
+
+    async def _audit_rows() -> int:
+        async with realdb.sessionmaker(TENANT)() as s:
+            rows = await s.execute(
+                select(AuditLog.id).where(
+                    AuditLog.action == "auth.password_reset.requested",
+                    AuditLog.entity_id == user_id,
+                )
+            )
+            return len(rows.all())
+
+    try:
+        async with realdb.client(key=TENANT, role=None) as c:
+            resp = await c.post("/api/auth/forgot-password", json={"email": email})
+        assert resp.status_code == 200, resp.text
+        assert not gate.is_set()
+        assert sent == []
+        assert await _audit_rows() == 0
+    finally:
+        gate.set()
+        await drain_detached()
+
+    assert minting.is_set()
+    assert [m.to for m in sent] == [email]
+    assert await _audit_rows() == 1
+
+
+@pytest.mark.asyncio
+async def test_a_token_store_failure_answers_like_any_other_request(
+    realdb, fake_redis, monkeypatch
+):
+    """Only a real address reaches the token store, so a 500 there would say
+    the address exists. The detached task logs it and the route answers the
+    generic 200, sending nothing."""
+    from app.services import password_reset
+    from app.services.email_adapters.console_adapter import ConsoleAdapter
+
+    sent: list = []
+
+    async def _fake_send(self, message):  # noqa: ANN001
+        sent.append(message)
+
+    monkeypatch.setattr(ConsoleAdapter, "send", _fake_send, raising=True)
+
+    async def _down(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(password_reset, "issue_reset_token", _down)
+    email = await _create_throwaway_user(realdb, TENANT, password=SEED_PASSWORD)
+    async with realdb.client(key=TENANT, role=None) as c:
+        resp = await c.post("/api/auth/forgot-password", json={"email": email})
+    await drain_detached()
+    assert resp.status_code == 200
+    assert sent == []
 
 
 @pytest.mark.asyncio
@@ -269,6 +365,7 @@ async def test_reset_password_token_is_single_use(realdb, fake_redis, monkeypatc
     async with realdb.client(key=TENANT, role=None) as c:
         resp = await c.post("/api/auth/forgot-password", json={"email": email})
         assert resp.status_code == 200
+        await drain_detached()
         token = sent[0].body_text.split("token=")[1].split("\n")[0].strip()
 
         first = await c.post(
@@ -343,6 +440,7 @@ async def test_reset_password_weak_password_rejected(realdb, fake_redis, monkeyp
     async with realdb.client(key=TENANT, role=None) as c:
         resp = await c.post("/api/auth/forgot-password", json={"email": email})
         assert resp.status_code == 200
+        await drain_detached()
         token = sent[0].body_text.split("token=")[1].split("\n")[0].strip()
 
         weak_resp = await c.post(

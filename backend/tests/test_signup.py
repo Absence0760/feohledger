@@ -968,13 +968,10 @@ async def test_forgot_password_works_for_a_signup_admin_who_never_set_one(
         async with realdb.client(key="a", role=None) as c:
             resp = await c.post("/api/auth/forgot-password", json={"email": login_email})
             assert resp.status_code == 200
-            # The send runs on a detached task; let it finish.
-            import asyncio
+            # The send runs on a detached task; wait for it to finish.
+            from app.utils.detached_tasks import drain_detached
 
-            for _ in range(50):
-                if sent:
-                    break
-                await asyncio.sleep(0)
+            await drain_detached()
             (msg,) = sent
             token = msg.body_text.split("token=")[1].split()[0]
             reset = await c.post(

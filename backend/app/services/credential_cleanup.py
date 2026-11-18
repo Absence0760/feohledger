@@ -8,6 +8,11 @@ device label), a half-finished TOTP enrollment, an email OTP, passkey
 challenges, and any unspent forgot-password / set-password link. This removes
 it, so a deleted account leaves nothing personal behind in the cache.
 
+The tenant's suppliers left links too (`portal:pwreset:`): a closure needs
+every portal account already deleted, but a link minted before that deletion
+lives on until its TTL. :func:`forget_portal_links` removes them by the slug
+each one is bound to.
+
 Every live session is blocklisted first (`app.redis.revoke_all_sessions`), so a
 token still in someone's browser is refused by the blocklist as well as by the
 missing user row.
@@ -69,4 +74,41 @@ async def forget_users(user_ids: list[uuid.UUID]) -> int:
     for uid in user_ids:
         removed += await r.delete(password_reset.generation_key(uid))
     logger.info("[credential-cleanup] cleared %d key(s) for %d user(s)", removed, len(user_ids))
+    return removed
+
+
+async def forget_portal_links(slug: str) -> int:
+    """Delete every supplier-portal link bound to tenant ``slug``, and the
+    generation counter of each supplier those links name. Returns keys removed.
+
+    Portal tokens are stored under a keyed digest of the token, with the value
+    ``<slug>:<vendor_user_id>#<generation>``, so they are found by scanning the
+    portal prefix and comparing the stored slug — the same bounded scan
+    :func:`forget_users` makes. A counter is keyed by the supplier id alone, so
+    only a link can tie it to this tenant: one whose links were all redeemed or
+    expired is left to its own TTL. It holds a number under a random id whose
+    row is gone, and names nobody.
+
+    Run at closure, before the slug can be taken again (its cooldown,
+    `utils/slug.ensure_slug_not_held`), so every link bound to it is this
+    tenant's.
+    """
+    r = await get_redis()
+    removed = 0
+    suppliers: set[str] = set()
+    async for key in r.scan_iter(match=f"{password_reset.PORTAL_PASSWORD_RESET_PREFIX}*"):
+        if password_reset.is_portal_generation_key(key):
+            continue
+        owner = password_reset.portal_stored_owner(await r.get(key))
+        if owner is None or owner[0] != slug:
+            continue
+        removed += await r.delete(key)
+        suppliers.add(owner[1])
+    for vendor_user_id in suppliers:
+        removed += await r.delete(password_reset.portal_generation_key(vendor_user_id))
+    logger.info(
+        "[credential-cleanup] cleared %d portal key(s) for %d supplier(s)",
+        removed,
+        len(suppliers),
+    )
     return removed

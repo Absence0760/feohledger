@@ -231,7 +231,7 @@ async def test_login_allowed_when_not_sso_only():
 # ---------------------------------------------------------------------------
 
 SSO_ONLY_SETTINGS = {"sso": _SAML_READY}
-TOTP_SECRET = "JBSWY3DPEHPK3PXP"
+TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 
 
 def _account_with_totp(pw: str):

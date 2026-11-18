@@ -6,13 +6,12 @@ forgot-password lifetime, redeemed at `POST /api/portal/auth/reset-password`.
 The link is read out of the delivered email, the way the supplier's click would.
 
 The send is detached (so response time does not reveal a match);
-`_drain_sends` awaits the module's own task set — the real completion signal —
+`_drain_sends` awaits the shared detached-task registry — the real completion signal —
 before a test reads the outbox.
 """
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 import pytest
@@ -21,6 +20,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.models.vendor_user import VendorUser
 from app.models.workflow import AuditLog
+from app.utils.detached_tasks import drain_detached
 from tests.set_password_mail import capture_outbox, link_mode, link_token, set_password_link
 from tests.test_session_management import FakeRedis
 
@@ -48,10 +48,7 @@ def sent_mail(monkeypatch):
 
 
 async def _drain_sends() -> None:
-    from app.api import portal_auth
-
-    if portal_auth._background_tasks:
-        await asyncio.gather(*list(portal_auth._background_tasks))
+    await drain_detached()
 
 
 async def _supplier_with_password(

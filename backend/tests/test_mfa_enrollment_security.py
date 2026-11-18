@@ -157,7 +157,7 @@ async def test_enroll_start_over_a_live_factor_without_step_up_is_refused():
     from app.api.auth import enroll_mfa_start
     from app.services import mfa as mfa_service
 
-    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
+    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", mfa_enabled=True)
 
     with patch("app.api.auth.settings.mfa_enabled", True):
         with pytest.raises(HTTPException) as exc:
@@ -165,7 +165,7 @@ async def test_enroll_start_over_a_live_factor_without_step_up_is_refused():
 
     assert exc.value.status_code == 400
     assert user.mfa_enabled is True, "a session-only caller must not strip the live factor"
-    assert user.mfa_secret == "JBSWY3DPEHPK3PXP"
+    assert user.mfa_secret == "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
     assert await mfa_service.read_pending_totp_secret(user.id) is None
 
 
@@ -175,7 +175,7 @@ async def test_enroll_start_over_a_live_factor_with_a_wrong_password_is_refused(
     from app.api.auth import enroll_mfa_start
     from app.schemas.auth import MFAStepUpRequest
 
-    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
+    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", mfa_enabled=True)
 
     with (
         patch("app.api.auth.settings.mfa_enabled", True),
@@ -188,7 +188,7 @@ async def test_enroll_start_over_a_live_factor_with_a_wrong_password_is_refused(
 
     assert exc.value.status_code == 400
     assert user.mfa_enabled is True
-    assert user.mfa_secret == "JBSWY3DPEHPK3PXP"
+    assert user.mfa_secret == "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 
 
 @pytest.mark.asyncio
@@ -200,7 +200,7 @@ async def test_enroll_start_with_password_step_up_keeps_the_live_factor_until_ve
     from app.schemas.auth import MFAStepUpRequest
     from app.services import mfa as mfa_service
 
-    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
+    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", mfa_enabled=True)
 
     with (
         patch("app.api.auth.settings.mfa_enabled", True),
@@ -210,8 +210,10 @@ async def test_enroll_start_with_password_step_up_keeps_the_live_factor_until_ve
             body=MFAStepUpRequest(password="correct"), user=user, db=_passkey_db()
         )
 
-    assert resp.secret != "JBSWY3DPEHPK3PXP"
-    assert user.mfa_secret == "JBSWY3DPEHPK3PXP", "live factor must survive enroll-start"
+    assert resp.secret != "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+    assert user.mfa_secret == "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", (
+        "live factor must survive enroll-start"
+    )
     assert user.mfa_enabled is True
     assert await mfa_service.read_pending_totp_secret(user.id) == resp.secret
 
@@ -247,7 +249,7 @@ async def test_enroll_mfa_verify_with_wrong_code_keeps_mfa_disabled():
     from app.services import mfa as mfa_service
 
     user = _fake_user(mfa_secret=None, mfa_enabled=False)
-    await mfa_service.stash_pending_totp_secret(user.id, "JBSWY3DPEHPK3PXP")
+    await mfa_service.stash_pending_totp_secret(user.id, "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
     db = AsyncMock()
     db.commit = AsyncMock()
 
@@ -311,7 +313,7 @@ async def test_enroll_mfa_verify_with_correct_code_flips_on():
     from app.services import mfa as mfa_service
 
     user = _fake_user(mfa_secret=None, mfa_enabled=False)
-    await mfa_service.stash_pending_totp_secret(user.id, "JBSWY3DPEHPK3PXP")
+    await mfa_service.stash_pending_totp_secret(user.id, "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
 
     result = MagicMock()
     result.scalar_one_or_none = MagicMock(return_value=org)
@@ -330,7 +332,7 @@ async def test_enroll_mfa_verify_with_correct_code_flips_on():
         )
 
     # Verify is the ONLY place the candidate becomes the account's factor.
-    assert user.mfa_secret == "JBSWY3DPEHPK3PXP"
+    assert user.mfa_secret == "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
     assert user.mfa_enabled is True
     assert user.mfa_enrolled_at is not None
     assert resp.mfa_enabled is True
@@ -352,7 +354,7 @@ async def test_disable_mfa_requires_password_re_entry():
     from app.api.auth import disable_mfa
     from app.schemas.auth import MFADisableRequest
 
-    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
+    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", mfa_enabled=True)
     # An org that has not closed password sign-in, so the password IS a proof
     # here and it is the wrong one that is refused.
     db = _db_returning_org(SimpleNamespace(id=user.organization_id, settings={}))
@@ -363,7 +365,7 @@ async def test_disable_mfa_requires_password_re_entry():
     assert exc.value.status_code == 400
     # State untouched.
     assert user.mfa_enabled is True
-    assert user.mfa_secret == "JBSWY3DPEHPK3PXP"
+    assert user.mfa_secret == "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 
 
 @pytest.mark.asyncio
@@ -379,7 +381,7 @@ async def test_disable_mfa_refused_when_org_requires_mfa():
         slug="acme",
         settings={"mfa": {"required": True}},
     )
-    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
+    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", mfa_enabled=True)
     user.organization_id = org.id
 
     db = _db_returning_org(org)
@@ -412,7 +414,7 @@ async def test_disable_mfa_clears_secret_and_enrolled_at_on_success():
         plan="pro",
         settings={},
     )
-    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
+    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", mfa_enabled=True)
     user.organization_id = org.id
     db = _db_returning_org(org)
 
@@ -511,7 +513,7 @@ async def test_step_up_failure_is_audited(monkeypatch):
 
     audit = AsyncMock()
     monkeypatch.setattr("app.api.auth.dispatch_auth_audit", audit)
-    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
+    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", mfa_enabled=True)
 
     with (
         patch("app.api.auth.settings.mfa_enabled", True),
@@ -537,7 +539,7 @@ async def test_step_up_is_rate_limited_per_account():
     from app.api.auth import STEP_UP_RATE_LIMIT_PER_MINUTE, enroll_mfa_start
     from app.schemas.auth import MFAStepUpRequest
 
-    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
+    user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", mfa_enabled=True)
     statuses = []
 
     with (

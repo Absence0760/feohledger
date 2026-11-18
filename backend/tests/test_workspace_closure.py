@@ -1267,6 +1267,47 @@ async def test_a_closure_clears_the_deleted_accounts_redis_keys(realdb, trial, m
     assert f"{BLOCKLIST_PREFIX}jti-old" in fake.inner.strings
 
 
+async def test_a_closure_clears_its_suppliers_set_password_links(realdb, trial, monkeypatch):
+    """A closure needs every portal account already deleted, but a link minted
+    before that deletion outlives the row. The closure deletes every portal
+    link bound to its slug and the counter of each supplier they name; another
+    tenant's supplier keeps theirs."""
+    from app.services import password_reset
+
+    fake = _ScanningRedis()
+
+    async def _get():
+        return fake
+
+    for target in (
+        "app.redis.get_redis",
+        "app.services.credential_cleanup.get_redis",
+        "app.services.password_reset.get_redis",
+    ):
+        monkeypatch.setattr(target, _get)
+
+    supplier = uuid.uuid4()
+    elsewhere = uuid.uuid4()
+    other_slug = realdb.info("a").slug
+    # An AP reset bumps the counter before minting, so both the link and a
+    # counter naming the supplier exist.
+    await password_reset.revoke_outstanding_portal(supplier)
+    link = await password_reset.issue_portal_reset_token(trial["slug"], supplier)
+    second = await password_reset.issue_portal_reset_token(trial["slug"], supplier)
+    await password_reset.revoke_outstanding_portal(elsewhere)
+    kept = await password_reset.issue_portal_reset_token(other_slug, elsewhere)
+
+    assert (await _close(realdb, trial["slug"])).status_code == 200
+
+    for token in (link, second):
+        assert password_reset._portal_reset_key(token) not in fake.inner.strings
+    assert password_reset.portal_generation_key(supplier) not in fake.inner.strings
+    assert await password_reset.peek_portal_reset_token(link, trial["slug"]) is None
+    # Another tenant's supplier is untouched: the link and its counter.
+    assert password_reset.portal_generation_key(elsewhere) in fake.inner.strings
+    assert await password_reset.peek_portal_reset_token(kept, other_slug) == elsewhere
+
+
 # ---------------------------------------------------------------------------
 # The sign-in page of a closed workspace
 # ---------------------------------------------------------------------------

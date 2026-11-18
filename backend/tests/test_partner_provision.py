@@ -25,7 +25,6 @@ orphan databases behind.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 import asyncpg
@@ -323,7 +322,7 @@ async def test_provision_absorbs_the_502_send_failure_and_forgot_password_recove
     the false, the admin is left with no password (no credential anywhere),
     and Forgot password — the documented way in — mails the admin a link on
     the child's own host."""
-    from app.api import auth as auth_api
+    from app.utils.detached_tasks import drain_detached
 
     capture_outbox(monkeypatch, fail=True)
     slug = _unique_slug()
@@ -352,8 +351,7 @@ async def test_provision_absorbs_the_502_send_failure_and_forgot_password_recove
         async with realdb.client(key="a", role=None) as anon:
             forgot = await anon.post("/api/auth/forgot-password", json={"email": admin_email})
         assert forgot.status_code == 200, forgot.text
-        if auth_api._background_tasks:
-            await asyncio.gather(*list(auth_api._background_tasks))
+        await drain_detached()
         assert [m.to for m in sent] == [admin_email]
         assert f"//{slug}." in set_password_link(sent[0])
     finally:
