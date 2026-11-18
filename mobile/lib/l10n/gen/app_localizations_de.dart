@@ -1266,6 +1266,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Lieferant nicht verifiziert oder nicht aktiv — zuerst den Lieferanten verifizieren';
 
   @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'Für diese Rechnung ist keine Währung erfasst — zuerst die Währung festlegen';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'Eine verrechnete Gutschrift passt nicht mehr zu Lieferant oder Währung dieser Rechnung — Rechnung zuerst korrigieren';
 

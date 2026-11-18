@@ -1262,6 +1262,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Vendor not verified or not active — verify the vendor first';
 
   @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'No currency recorded on this invoice — set its currency first';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'An applied credit memo no longer matches this invoice\'s vendor or currency — correct the invoice first';
 

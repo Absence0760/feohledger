@@ -1270,6 +1270,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Proveedor no verificado o inactivo: verifique primero el proveedor';
 
   @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'Esta factura no tiene moneda registrada: indique primero su moneda';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'Una nota de crédito aplicada ya no coincide con el proveedor o la moneda de esta factura — corrija primero la factura';
 

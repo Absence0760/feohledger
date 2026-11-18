@@ -1159,6 +1159,10 @@ class AppLocalizationsJa extends AppLocalizations {
       '取引先が未確認または無効です — 先に取引先を確認してください';
 
   @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'この請求書には通貨が記録されていません — 先に通貨を設定してください';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       '適用済みのクレジットメモがこの請求書の仕入先または通貨と一致しなくなりました — 先に請求書を修正してください';
 

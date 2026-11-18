@@ -1273,6 +1273,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Fournisseur non vérifié ou inactif — vérifiez d’abord le fournisseur';
 
   @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'Aucune devise n\'est enregistrée sur cette facture — renseignez d\'abord sa devise';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'Un avoir imputé ne correspond plus au fournisseur ou à la devise de cette facture — corrigez d\'abord la facture';
 

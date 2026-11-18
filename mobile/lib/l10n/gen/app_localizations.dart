@@ -2034,6 +2034,12 @@ abstract class AppLocalizations {
   /// **'Vendor not verified or not active — verify the vendor first'**
   String get payQueueBlockedVendorNotActive;
 
+  /// No description provided for @payQueueBlockedCurrencyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'No currency recorded on this invoice — set its currency first'**
+  String get payQueueBlockedCurrencyUnknown;
+
   /// No description provided for @payQueueBlockedAppliedCreditMismatch.
   ///
   /// In en, this message translates to:

@@ -1271,6 +1271,10 @@ class AppLocalizationsPt extends AppLocalizations {
       'Fornecedor não verificado ou inativo — verifique o fornecedor primeiro';
 
   @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'Esta fatura não tem moeda registrada — defina a moeda primeiro';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'Uma nota de crédito aplicada não corresponde mais ao fornecedor ou à moeda desta fatura — corrija a fatura primeiro';
 
@@ -5578,6 +5582,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get payQueueBlockedVendorNotActive =>
       'Fornecedor não verificado ou inativo — verifique o fornecedor primeiro';
+
+  @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'Esta fatura não tem moeda registrada — defina a moeda primeiro';
 
   @override
   String get payQueueBlockedAppliedCreditMismatch =>
