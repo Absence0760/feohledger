@@ -33,6 +33,7 @@ from app.utils.tenant_urls import (
     is_under_platform_domain,
     password_reset_url,
     platform_domain,
+    portal_password_reset_url,
     sign_in_url,
     tenant_base_url,
 )
@@ -454,6 +455,23 @@ def test_password_reset_url_shapes(monkeypatch):
     )
     monkeypatch.setattr(settings, "tenant_url_template", "")
     assert password_reset_url("acme", None, "t", set_password=True) is None
+
+
+def test_portal_password_reset_url_shapes(monkeypatch):
+    """The supplier portal's set-password page, over the same resolver."""
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.app.example.com")
+    assert (
+        portal_password_reset_url("acme", None, "a/b+c")
+        == "https://acme.app.example.com/portal/reset-password?token=a/b%2Bc"
+    )
+    assert portal_password_reset_url("acme", None, "t", set_password=True) == (
+        "https://acme.app.example.com/portal/reset-password?token=t&mode=set"
+    )
+    assert portal_password_reset_url("acme", _VANITY, "t") == (
+        "https://ap.acmecorp.example/portal/reset-password?token=t"
+    )
+    monkeypatch.setattr(settings, "tenant_url_template", "")
+    assert portal_password_reset_url("acme", None, "t") is None
 
 
 def test_sign_in_url_shapes(monkeypatch):

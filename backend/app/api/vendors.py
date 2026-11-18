@@ -38,6 +38,13 @@ from app.api.permissions import (
     PERM_VENDOR_MANAGE,
 )
 from app.api.refusals import ActionRefusal, erp_pull_failure
+from app.api.set_password_links import (
+    expiry_sentence,
+    link_unavailable,
+    mint_portal_link,
+    require_link_base,
+    send_set_password_email,
+)
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.contract import Contract
@@ -93,11 +100,12 @@ from app.schemas.vendor import (
     VendorUpdate,
     validate_bank_routing_fields,
 )
+from app.services import password_reset
 from app.services.audit_access import build_field_diff, log_access
 from app.services.audit_dispatch import dispatch_audit
 from app.services.credential_crypto import CredentialCryptoError
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_vendors_csv
-from app.services.email_adapters import EmailMessage, get_email_adapter
+from app.services.email_adapters import EmailMessage
 from app.services.erp_link_realm import connection_realm
 from app.services.provider_credentials import (
     CREDENTIALS_UNAVAILABLE_DETAIL,
@@ -108,6 +116,7 @@ from app.services.sanctions_categories import (
     categories_from_raw_response,
     has_adverse_media,
 )
+from app.services.session_management import revoke_user_sessions
 from app.services.vendor_card_revocation import revoke_vendor_cards
 from app.services.vendor_erp_manual_link import (
     ErpManualLinkError,
@@ -144,7 +153,6 @@ from app.utils.bank_masking import BANK_SECRET_KEYS as _BANK_SECRET_KEYS  # noqa
 from app.utils.bank_masking import bank_details_audit_summary as _bank_details_audit_summary
 from app.utils.bank_masking import last4 as _last4
 from app.utils.emails import email_matches, normalize_email
-from app.utils.passwords import generate_temp_password, hash_password
 from app.utils.search import ilike_contains
 from app.utils.tenant_urls import tenant_base_url
 
@@ -2267,23 +2275,22 @@ async def invite_vendor_portal_user(
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    """Create a supplier-portal user for a vendor and email them a temp
-    password. Idempotent-ish: second invite for the same email is rejected
-    (409) so we don't silently overwrite a working credential.
+    """Create a supplier-portal user for a vendor and email them a
+    set-password link. Idempotent-ish: second invite for the same email is
+    rejected (409) so we don't silently overwrite a working credential.
 
-    The temp password is **delivered only by email** — it is not in the
-    response. AP chooses the address, so returning the plaintext credential to
-    the caller made "provision a supplier identity I control" a single
-    frictionless request with no delivery record; the credential now always
-    leaves through the email adapter, which every environment has (`console` in
-    local dev). Delivery is therefore no longer best-effort: a send failure
-    rolls the whole request back (502) rather than leaving a portal account
-    whose password nobody holds. Recovery for a genuinely lost credential is
-    `POST .../reset-password`, which mints and emails a new one.
+    No credential is generated or returned: the account starts with NO
+    password, and a single-use, expiring set-password link bound to this
+    tenant goes to the invited address (`api/set_password_links`,
+    `docs/decisions.md` §283). The email is the link's only channel, so
+    delivery is required: a send failure rolls the whole request back (502)
+    rather than leaving a portal account nobody can sign in to. Recovery for a
+    lost or expired link is `POST .../reset-password`, which mails a new one.
 
     The AP actor is recorded on `VendorUser.provisioned_by_user_id`, which
     `approve_change_request` reads to refuse a bank-change approval by the same
-    person — see that route and `backend/docs/supplier-portal.md`.
+    person — see that route and `backend/docs/supplier-portal.md`. AP still
+    chooses the address the link goes to, so the stamp stays.
     """
     await ensure_in_entity_scope(
         db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
@@ -2301,18 +2308,23 @@ async def invite_vendor_portal_user(
     if existing:
         raise HTTPException(status_code=409, detail="A portal user with this email already exists.")
 
-    temp_password = generate_temp_password()
+    # Nowhere to point the set-password link → refuse before creating anything.
+    require_link_base(org.slug, org.settings)
+
     vu = VendorUser(
         vendor_id=vendor.id,
         organization_id=vendor.organization_id,
         email=email,
         full_name=body.full_name,
-        hashed_password=await hash_password(temp_password),
+        # No password until the supplier sets one through the emailed link;
+        # portal login refuses the account until then.
+        hashed_password=None,
         is_active=True,
-        must_change_password=True,
-        # Segregation of duties, not bookkeeping: this AP actor now knows a
-        # working password for a supplier identity, so they are not an
-        # independent second party to anything that identity submits.
+        must_change_password=False,
+        # Segregation of duties, not bookkeeping: this AP actor chose the
+        # address the set-password link goes to, so they may control this
+        # supplier identity and are not an independent second party to
+        # anything it submits.
         provisioned_by_user_id=user.id,
     )
     db.add(vu)
@@ -2326,9 +2338,9 @@ async def invite_vendor_portal_user(
     # only the deletion. Keyed on the VENDOR (the durable entity), matching the
     # delete row, so both ends of the credential's life sit on the same trail.
     # PII-free by construction: the AP actor, the vendor and the new
-    # `VendorUser` id — never the supplier's login address, and never the temp
-    # password (which is emailed, but must not be written into an append-only,
-    # WORM-shipped store).
+    # `VendorUser` id — never the supplier's login address, and never the
+    # set-password link (which is emailed, but must not be written into an
+    # append-only, WORM-shipped store).
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),
@@ -2340,47 +2352,36 @@ async def invite_vendor_portal_user(
         details={"vendor_user_id": str(vu.id)},
     )
 
-    # The welcome email is now the ONLY channel the temp password travels on,
-    # so it is a required step rather than a best-effort one. Sent before the
-    # commit: if it fails we raise and the transaction unwinds, so we never
-    # leave a portal account whose credential was never delivered.
-    email_adapter = get_email_adapter()
-    # Real tenant portal URL, resolved through the one `tenant_base_url`
-    # resolver the signup welcome email and the supplier-chat portal-link email
-    # also use — so a white-label tenant's supplier is invited to the tenant's
-    # own vanity host, never a placeholder domain. Nothing configured -> no URL
-    # line rather than a fabricated one.
+    # The email is the ONLY channel the set-password link travels on, so it is
+    # a required step. Minted and sent before the commit: a failure raises and
+    # the transaction unwinds, so we never leave a portal account whose link
+    # was never delivered. The portal URL comes from the one `tenant_base_url`
+    # resolver, so a white-label tenant's supplier lands on the tenant's own
+    # vanity host.
     template_base = tenant_base_url(org.slug, org.settings)
     portal_url = f"{template_base}/portal" if template_base else None
-    try:
-        await email_adapter.send(
-            EmailMessage(
-                to=body.email,
-                subject=f"You've been invited to {org.name}'s supplier portal",
-                body_text=(
-                    f"Hi {body.full_name},\n\n"
-                    f"{org.name} has set up a supplier-portal account for "
-                    f"{vendor.name}. Use it to submit invoices and track "
-                    f"payment status.\n\n"
-                    + (f"  URL:      {portal_url}\n" if portal_url else "")
-                    + f"  Email:    {body.email}\n"
-                    f"  Password: {temp_password}\n\n"
-                    "You'll be asked to change your password on first sign-in.\n"
-                ),
-                links=(portal_url,) if portal_url else (),
-                preheader="Your supplier-portal sign-in details are inside.",
-            )
-        )
-    except Exception as exc:  # noqa: BLE001
-        # PII guard: the vendor id only — never the supplier's login address.
-        logger.exception("Portal-user welcome email failed (vendor=%s)", vendor.id)
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Could not deliver the portal invitation email, so no account "
-                "was created. Check the email provider configuration and retry."
+    link = await mint_portal_link(org.slug, org.settings, vu.id, set_password=True)
+    await send_set_password_email(
+        EmailMessage(
+            to=vu.email,
+            subject=f"You've been invited to {org.name}'s supplier portal",
+            body_text=(
+                f"Hi {body.full_name},\n\n"
+                f"{org.name} has set up a supplier-portal account for "
+                f"{vendor.name}. Use it to submit invoices and track "
+                "payment status. Choose your password with this link:\n\n"
+                f"  {link}\n\n"
+                + expiry_sentence()
+                + f" If it has expired, ask {org.name} to send a new one.\n\n"
+                + (f"  URL:      {portal_url}\n" if portal_url else "")
+                + f"  Email:    {vu.email}\n"
             ),
-        ) from exc
+            links=(link, portal_url) if portal_url else (link,),
+            preheader="Use the link in this email to set your supplier-portal password.",
+        ),
+        # PII guard: ids only — never the supplier's login address.
+        log_ref=f"vendor={vendor.id}",
+    )
 
     await db.commit()
     return PortalInviteResponse(user=_vendor_user_response(vu), portal_url=portal_url)
@@ -2449,22 +2450,20 @@ async def reset_vendor_portal_user_password(
     their password was AP deleting and re-inviting them — a new `VendorUser.id`
     that breaks anything referencing the old one (chat authorship, audit rows,
     the notification-preferences row) and forces the vendor to re-learn a new
-    login. This mints a fresh temp password onto the SAME row instead: same
-    permission gate as invite/delete (admin/ap_manager), the SHARED
-    `utils/passwords.generate_temp_password()` (never a local one — see
-    `backend/CLAUDE.md` § Passwords), and forces a change on next login via
-    the existing `must_change_password` flag (mirrors `invite_vendor_portal_user`).
-    Overwriting `hashed_password` immediately invalidates the old password —
-    there is no separate "revoke" step.
+    login. This resets the SAME row instead: same permission gate as
+    invite/delete (admin/ap_manager). The password is cleared — the old one
+    stops working at once, with no separate "revoke" step — every portal
+    session of the supplier is ended, and a single-use, expiring set-password
+    link bound to this tenant is mailed to the portal user's own stored
+    address (`docs/decisions.md` §283). Nothing credential-bearing is in the
+    response.
 
-    Like invite, the new password is **emailed to the portal user's own stored
-    address and not returned in the response**, and the reset re-stamps
-    `VendorUser.provisioned_by_user_id` with the resetting AP actor. Reset is
-    the *other* way an AP actor can come to hold a working supplier credential
-    — it is how the bank-redirect attack works against an already-existing
-    portal identity — so it has to leave the same record invite does. Delivery
-    failure rolls the reset back so a working credential is never replaced by
-    one nobody received.
+    The reset re-stamps `VendorUser.provisioned_by_user_id` with the resetting
+    AP actor. Reset is the other way an AP actor can steer a supplier
+    credential — it is how the bank-redirect attack works against an
+    already-existing portal identity — so it leaves the same record invite
+    does. Delivery failure rolls the reset back, so a working password is never
+    cleared for a link nobody received.
     """
     await ensure_in_entity_scope(
         db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
@@ -2480,12 +2479,21 @@ async def reset_vendor_portal_user_password(
     if not vu:
         raise HTTPException(status_code=404, detail="Portal user not found")
 
-    temp_password = generate_temp_password()
-    vu.hashed_password = await hash_password(temp_password)
-    vu.must_change_password = True
+    require_link_base(org.slug, org.settings)
+
+    vu.hashed_password = None
+    vu.must_change_password = False
     vu.provisioned_by_user_id = user.id
     await db.flush()
     await db.refresh(vu)
+
+    # Any earlier invite / reset link for this supplier dies with the old
+    # password — a 72-hour link must not outlive the reset.
+    try:
+        await password_reset.revoke_outstanding_portal(vu.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Could not supersede earlier portal links (vendor_user=%s)", vu.id)
+        raise link_unavailable() from exc
 
     await dispatch_audit(
         db,
@@ -2495,42 +2503,44 @@ async def reset_vendor_portal_user_password(
         action="vendor_portal_user.password_reset",
         entity_type="vendor_user",
         entity_id=vu.id,
-        details={"vendor_id": str(vendor_id)},
+        details={"vendor_id": str(vendor_id), "delivery": "set_password_link"},
     )
 
     template_base = tenant_base_url(org.slug, org.settings)
     portal_url = f"{template_base}/portal" if template_base else None
-    try:
-        await get_email_adapter().send(
-            EmailMessage(
-                to=vu.email,
-                subject=f"Your {org.name} supplier-portal password was reset",
-                body_text=(
-                    f"Hi {vu.full_name},\n\n"
-                    f"{org.name} has reset the supplier-portal password for "
-                    f"{vendor.name}.\n\n"
-                    + (f"  URL:      {portal_url}\n" if portal_url else "")
-                    + f"  Email:    {vu.email}\n"
-                    f"  Password: {temp_password}\n\n"
-                    "You'll be asked to change your password on first sign-in.\n"
-                ),
-                links=(portal_url,) if portal_url else (),
-                preheader="Your new supplier-portal sign-in details are inside.",
-            )
-        )
-    except Exception as exc:  # noqa: BLE001
-        # PII guard: ids only — never the supplier's login address.
-        logger.exception("Portal-user password-reset email failed (vendor=%s)", vendor.id)
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Could not deliver the new password, so the reset was not "
-                "applied and the existing password still works. Check the "
-                "email provider configuration and retry."
+    link = await mint_portal_link(org.slug, org.settings, vu.id, set_password=False)
+    await send_set_password_email(
+        EmailMessage(
+            to=vu.email,
+            subject=f"Your {org.name} supplier-portal password was reset",
+            body_text=(
+                f"Hi {vu.full_name},\n\n"
+                f"{org.name} has reset the supplier-portal password for "
+                f"{vendor.name}. Choose a new password with this link:\n\n"
+                f"  {link}\n\n"
+                + expiry_sentence()
+                + f" If it has expired, ask {org.name} to send a new one.\n\n"
+                + (f"  URL:      {portal_url}\n" if portal_url else "")
+                + f"  Email:    {vu.email}\n"
             ),
-        ) from exc
+            links=(link, portal_url) if portal_url else (link,),
+            preheader="Use the link in this email to set a new supplier-portal password.",
+        ),
+        # PII guard: ids only — never the supplier's login address.
+        log_ref=f"vendor={vendor.id}",
+    )
 
     await db.commit()
+
+    # After the commit: a reset exists to cut off whoever holds the old
+    # password, and a portal session minted under it would otherwise live until
+    # its token expired. A Redis failure here must not 500 a reset that has
+    # already happened and been mailed — logged, and the old sessions die with
+    # their token's expiry.
+    try:
+        await revoke_user_sessions(vu.id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Portal session revoke after reset failed (vendor_user=%s)", vu.id)
 
     return PortalInviteResponse(user=_vendor_user_response(vu), portal_url=portal_url)
 

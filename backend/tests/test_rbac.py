@@ -465,6 +465,16 @@ ALTERNATE_AUTH: dict[tuple[str, str], AlternateGate] = {
         "dummy_verify timing equalisation as employee login.",
         symbols=("verify_password", "dummy_verify"),
     ),
+    ("POST", "/portal/auth/reset-password"): AlternateGate(
+        "The single-use emailed portal set-password token IS the credential, "
+        "bound to its tenant; consume_portal_reset_token GETDELs it atomically.",
+        symbols=("consume_portal_reset_token",),
+    ),
+    ("POST", "/portal/auth/reset-password/check"): AlternateGate(
+        "The same portal token, read without consuming it; the 400 the "
+        "redemption would answer for any token it would refuse.",
+        symbols=("peek_portal_reset_token",),
+    ),
     ("POST", "/portal/auth/logout"): AlternateGate(
         "Bearer token read off the header and validated by decode_token.",
         symbols=("decode_token",),

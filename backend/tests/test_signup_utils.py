@@ -7,9 +7,7 @@ import pytest
 
 from app.utils.hcaptcha import CAPTCHA_FAILED, CAPTCHA_REQUIRED, CAPTCHA_UNAVAILABLE
 from app.utils.passwords import (
-    MIN_LENGTH,
     PasswordError,
-    generate_temp_password,
     validate_password_complexity,
 )
 from app.utils.slug import (
@@ -123,18 +121,6 @@ def test_reserved_slugs_include_common_infra_names():
 
 
 # ---------- password --------------------------------------------------------
-
-
-def test_generate_temp_password_is_sufficient_length():
-    """Temp password must be long enough to pass the complexity check."""
-    pw = generate_temp_password()
-    # token_urlsafe(12) produces ~16 chars — safely over the MIN_LENGTH floor.
-    assert len(pw) >= MIN_LENGTH
-
-
-def test_generate_temp_password_is_unique():
-    """Different calls produce different tokens (crypto RNG)."""
-    assert generate_temp_password() != generate_temp_password()
 
 
 def test_validate_password_complexity_accepts_strong():

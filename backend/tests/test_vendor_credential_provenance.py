@@ -1,4 +1,4 @@
-"""Drift guard: every route that hands an AP actor a supplier password stamps it.
+"""Drift guard: every route that lets an AP actor steer a supplier credential stamps it.
 
 The vendor bank-change dual control refuses an approval when
 ``vendor_change_requests.requester_provisioned_by_user_id`` — frozen at staging
@@ -7,9 +7,11 @@ allowed to be NULL, and NULL is treated as *permissive*: a request from a portal
 identity nobody in AP provisioned is approved normally.
 
 That is only safe because of an **exhaustiveness claim**: an AP actor cannot come
-to know a supplier's password without passing through a route that stamps the
+to control a supplier's password without passing through a route that stamps the
 column. Today the claim holds — ``POST /vendors/{id}/portal-users`` (invite) and
 ``POST .../portal-users/{id}/reset-password`` are the only two, and both stamp.
+Neither hands out a password any more (each mails a set-password link, decisions
+§283), but the AP actor chooses the invited address, so the stamp stays.
 
 The claim is a property of the whole ``app/`` tree, not of any one file, so
 nothing about adding a third one would fail. A new "resend credentials" or
@@ -41,6 +43,13 @@ EXEMPT_PASSWORD_WRITES: dict[str, str] = {
     # has, so clearing here would be a one-request bypass of the whole control.
     "api/portal_auth.py::portal_change_password": (
         "the supplier's own change-password; must NOT clear the stamp"
+    ),
+    # The holder of the emailed set-password link choosing the password. The
+    # link went to an address the stamped invite / reset already recorded, so
+    # this hands nothing new to an AP actor — and, like change-password, must
+    # NOT clear the stamp (the provisioner may be the one holding the link).
+    "api/portal_auth.py::portal_reset_password": (
+        "the set-password link's holder; must NOT clear the stamp"
     ),
     # GDPR erasure sets the hash to None — it destroys the credential rather
     # than handing one out, so nobody gains access.

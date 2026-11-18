@@ -5,10 +5,11 @@ tenant already parented to its own org in one step (the new-tenant counterpart o
 `attach_child`, which adopts an *existing* consenting org).
 
   * Happy path — provisioning creates the org + tenant DB, stamps
-    `parent_org_id = caller org`, returns the child summary + one-time temp
-    credentials, and shows up under the partner's overview.
+    `parent_org_id = caller org`, returns the child summary with NO credential
+    (the child admin is emailed a set-password link instead, decisions §283),
+    and shows up under the partner's overview.
   * Audit — `partner.child_provisioned` on the partner's trail (PII-free: org id
-    + slug only, never the admin email / password) + `partner.parent_linked` on
+    + slug only, never the admin email / link) + `partner.parent_linked` on
     the child's.
   * **The authorization headline** — there is no `parent_org_id` input; the new
     tenant is ALWAYS parented to the caller. A partner can't provision under a
@@ -38,6 +39,7 @@ from app.models.organization import Organization
 from app.models.user import User, UserRole
 from app.models.workflow import AuditLog
 from app.services.tenant_provisioning import _parse_maintenance_dsn
+from tests.set_password_mail import capture_outbox, link_mode, link_token, set_password_link
 
 
 def _unique_slug(prefix: str = "pchild") -> str:
@@ -95,7 +97,8 @@ async def _audit_rows(realdb, tenant_key: str, action: str) -> list:
 
 
 @pytest.mark.asyncio
-async def test_provision_creates_child_stamped_to_caller(realdb):
+async def test_provision_creates_child_stamped_to_caller(realdb, monkeypatch):
+    sent = capture_outbox(monkeypatch)
     slug = _unique_slug()
     try:
         async with realdb.client(key="a", role="admin") as c:
@@ -112,9 +115,27 @@ async def test_provision_creates_child_stamped_to_caller(realdb):
         assert body["slug"] == slug
         assert body["name"] == "Provisioned Co"
         assert body["admin_email"] == f"admin@{slug}.test"
-        # One-time temp credential is returned (and looks like a real password).
-        assert body["temp_password"]
-        assert len(body["temp_password"]) >= 12
+        # No credential reaches the partner: the child's admin is mailed a
+        # set-password link to the child's own host, and has no password yet.
+        assert "temp_password" not in body
+        assert body["set_password_email_sent"] is True
+        assert body["set_password_link_expires_at"]
+        assert len(sent) == 1
+        assert sent[0].to == f"admin@{slug}.test"
+        assert f"//{slug}." in set_password_link(sent[0])
+        assert link_mode(sent[0]) == "set"
+        token = link_token(sent[0])
+        assert token not in resp.text
+        async with realdb.control_sessionmaker()() as s:
+            admin = (
+                await s.execute(select(User).where(User.email == f"admin@{slug}.test"))
+            ).scalar_one()
+        assert admin.hashed_password is None
+        assert admin.must_change_password is False
+        async with realdb.client(key="a", role=None) as anon:
+            check = await anon.post("/api/auth/reset-password/check", json={"token": token})
+        assert check.status_code == 200, check.text
+        assert check.json()["email"] == f"admin@{slug}.test"
 
         # The new org is parented to the caller (org "a").
         assert await _parent_of(realdb, slug) == realdb.info("a").org_id
@@ -129,7 +150,8 @@ async def test_provision_creates_child_stamped_to_caller(realdb):
 
 
 @pytest.mark.asyncio
-async def test_provision_audits_both_trails_pii_free(realdb):
+async def test_provision_audits_both_trails_pii_free(realdb, monkeypatch):
+    sent = capture_outbox(monkeypatch)
     slug = _unique_slug()
     try:
         async with realdb.client(key="a", role="admin") as c:
@@ -142,10 +164,10 @@ async def test_provision_audits_both_trails_pii_free(realdb):
                 },
             )
         assert resp.status_code == 201, resp.text
-        temp_password = resp.json()["temp_password"]
+        token = link_token(sent[0])
 
         # Partner trail: child_provisioned, with the child org id + slug, never
-        # the admin email or temp password.
+        # the admin email or the set-password link.
         a_rows = await _audit_rows(realdb, "a", "partner.child_provisioned")
         assert a_rows
         details = a_rows[-1].details
@@ -153,7 +175,8 @@ async def test_provision_audits_both_trails_pii_free(realdb):
         assert "child_org_id" in details
         blob = str(details)
         assert f"founder@{slug}.test" not in blob
-        assert temp_password not in blob
+        assert token not in blob
+        assert details.get("set_password_email_sent") is True
 
         # Child trail: parent_linked points back at the partner.
         child_db = f"{settings.tenant_db_prefix}{slug}"
@@ -256,5 +279,56 @@ async def test_provision_invalid_email_is_422(realdb):
         assert resp.status_code == 422
         # No tenant created.
         assert await _parent_of(realdb, slug) is None
+    finally:
+        await _drop_provisioned(realdb, slug)
+
+
+# ---------------------------------------------------------------------------
+# The child admin's set-password link
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_provision_reports_an_undelivered_link_instead_of_failing(realdb, monkeypatch):
+    """The tenant already exists when the link is mailed and cannot be unwound
+    here, so a failed send is reported (`set_password_email_sent: false`) — the
+    admin's way in is then Forgot password — rather than a 5xx over a tenant
+    that was in fact created."""
+    capture_outbox(monkeypatch, fail=True)
+    slug = _unique_slug()
+    try:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(
+                "/api/partner/children/provision",
+                json={"name": "Mail Down Co", "slug": slug, "admin_email": f"a@{slug}.test"},
+            )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["set_password_email_sent"] is False
+        assert body["set_password_link_expires_at"] is None
+        assert await _parent_of(realdb, slug) == realdb.info("a").org_id
+    finally:
+        await _drop_provisioned(realdb, slug)
+
+
+@pytest.mark.asyncio
+async def test_provision_without_a_tenant_url_is_refused_before_creating(realdb, monkeypatch):
+    """No base URL → neither the link nor forgot-password could reach the
+    admin, so nothing is provisioned (no orphan database)."""
+    monkeypatch.setattr(settings, "tenant_url_template", "", raising=True)
+    slug = _unique_slug()
+    try:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(
+                "/api/partner/children/provision",
+                json={"name": "Nowhere Co", "slug": slug, "admin_email": f"a@{slug}.test"},
+            )
+        assert resp.status_code == 503, resp.text
+        assert resp.json()["detail"]["code"] == "set_password_link_unavailable"
+        async with realdb.control_sessionmaker()() as s:
+            created = (
+                await s.execute(select(Organization).where(Organization.slug == slug))
+            ).scalar_one_or_none()
+        assert created is None
     finally:
         await _drop_provisioned(realdb, slug)

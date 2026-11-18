@@ -187,18 +187,17 @@ async def _make_vendor(realdb, key: str, name: str) -> uuid.UUID:
 
 
 @pytest.mark.asyncio
-async def test_invite_portal_user_audits_without_the_email_or_temp_password(realdb, monkeypatch):
+async def test_invite_portal_user_audits_without_the_email_or_the_link(realdb, monkeypatch):
     """Minting a supplier credential is the provisioning half of the
     segregation-of-duties chain: this account can submit invoices and stage
     bank-detail changes. `vendor_user.deleted` already audited the revoke, so
     without this the trail recorded the end of a credential's life but not its
     start. The row names the actor, the vendor and the new VendorUser — never
-    the login address, and never the temp password.
+    the login address, and never the set-password link.
 
-    The password is read out of the DELIVERED EMAIL rather than the response:
-    the response no longer carries it at all (see
-    `test_vendor_bank_change_provisioner_sod.py`), and the audit row must stay
-    clear of the credential wherever it travelled.
+    The link is read out of the DELIVERED EMAIL rather than the response: the
+    response never carries it (see `test_vendor_bank_change_provisioner_sod.py`),
+    and the audit row must stay clear of the credential wherever it travelled.
     """
     vendor_id = await _make_vendor(realdb, "a", "Portal Invite Co")
     info = realdb.info("a")
@@ -221,11 +220,9 @@ async def test_invite_portal_user_audits_without_the_email_or_temp_password(real
     assert resp.status_code == 201, resp.text
     payload = resp.json()
     assert "temp_password" not in payload
-    temp_password = next(
-        line.split("Password:", 1)[1].strip()
-        for line in outbox[0].body_text.splitlines()
-        if line.strip().startswith("Password:")
-    )
+    from tests.set_password_mail import link_token
+
+    token = link_token(outbox[0])
     vendor_user_id = payload["user"]["id"]
 
     rows = await _audit_rows(realdb, "a", "vendor_user.invited")
@@ -237,7 +234,7 @@ async def test_invite_portal_user_audits_without_the_email_or_temp_password(real
     assert row.details == {"vendor_user_id": vendor_user_id}
 
     blob = _blob(row)
-    assert temp_password not in blob, "the temp password must never enter the audit trail"
+    assert token not in blob, "the set-password link must never enter the audit trail"
     assert supplier_email not in blob
     assert "Sam Supplier" not in blob
 
