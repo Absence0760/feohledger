@@ -6,6 +6,30 @@ import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 
+/// What a record-as-paid call came back with. [ok] or not; on a refusal,
+/// [message] is the server's English sentence and [detail] its raw decoded
+/// `detail` — a coded refusal (`{code, message, params}`) the screen states in
+/// the reader's language through `localizeCodedRefusal`, with [message] as the
+/// fallback. [paymentCount] is how many payments a run-level record booked.
+class RecordOutcome {
+  final bool ok;
+  final String? message;
+  final Object? detail;
+  final int? paymentCount;
+
+  const RecordOutcome._(this.ok, this.message, this.detail, this.paymentCount);
+
+  const RecordOutcome.recorded({int? paymentCount})
+      : this._(true, null, null, paymentCount);
+
+  factory RecordOutcome.failed(Object error) => RecordOutcome._(
+        false,
+        describeApiError(error),
+        error is ApiException ? error.detail : null,
+        null,
+      );
+}
+
 /// Payment queue + summary + runs. Holds the approved-invoice queue, the
 /// per-row selection (checkbox + chosen [PaymentMethod]), the KPI summary, and
 /// the payment-run list. Drives "create a draft run from the selection" and
@@ -25,6 +49,7 @@ class PaymentQueueStore extends ChangeNotifier {
   bool _loading = false;
   String? _error;
   bool _fromCache = false;
+  String? _executionMode;
 
   // Per-invoice selection state. Absent ⇒ unselected. Present ⇒ selected with
   // the chosen method (defaults to ACH the first time a row is ticked).
@@ -36,6 +61,21 @@ class PaymentQueueStore extends ChangeNotifier {
   bool get loading => _loading;
   String? get error => _error;
   bool get fromCache => _fromCache;
+
+  /// The tenant's payment execution mode as the server last stated it
+  /// (`processor` / `record_only`), or `null` while unknown — not yet read,
+  /// the read failed, offline. Never cached: a stale mode is exactly the
+  /// signal that must not outlive its source.
+  String? get executionMode => _executionMode;
+
+  /// Whether Execute may be offered. Fails closed on an unknown mode — see
+  /// [canDispatchPayments].
+  bool get canDispatch => canDispatchPayments(_executionMode);
+
+  /// A CONFIRMED record-only tenant. An unknown mode hides the send controls
+  /// (fail closed) but is not evidence of this, so the banner reads this, not
+  /// `!canDispatch`.
+  bool get isRecordOnly => _executionMode == kExecutionModeRecordOnly;
 
   bool isSelected(String invoiceId) => _selection.containsKey(invoiceId);
 
@@ -63,6 +103,7 @@ class PaymentQueueStore extends ChangeNotifier {
     _loading = false;
     _error = null;
     _fromCache = false;
+    _executionMode = null;
     _selection.clear();
   }
 
@@ -110,11 +151,17 @@ class PaymentQueueStore extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
+    // Read beside the queue, and on its own failure path: the mode only
+    // decides which controls are OFFERED (the server enforces it on every
+    // dispatching call), so a failed read hides Execute rather than taking
+    // the queue down with it.
+    final mode = _loadExecutionMode();
     try {
       final results = await Future.wait([
         PaymentApi.queue(),
         PaymentApi.summary(),
       ]);
+      await mode;
       _queue = results[0] as List<PaymentQueueItem>;
       _summary = results[1] as PaymentSummary;
       _fromCache = false;
@@ -129,6 +176,7 @@ class PaymentQueueStore extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
+      await mode;
       try {
         final cached = await OfflineStore.instance.get('payment_queue');
         if (cached != null) {
@@ -150,6 +198,21 @@ class PaymentQueueStore extends ChangeNotifier {
       _error = describeApiError(e);
       notifyListeners();
     }
+  }
+
+  /// `GET /api/payments/execution-mode`. Any failure — offline, a 403, a
+  /// payload without a string `mode` — leaves the mode unknown, which
+  /// [canDispatch] reads as record-only. Never throws.
+  Future<void> _loadExecutionMode() async {
+    String? mode;
+    try {
+      final data = await PaymentApi.executionMode();
+      final raw = data['mode'];
+      mode = raw is String ? raw : null;
+    } catch (_) {
+      mode = null;
+    }
+    _executionMode = mode;
   }
 
   /// Re-derive the selection against the queue that was just loaded.
@@ -269,6 +332,64 @@ class PaymentQueueStore extends ChangeNotifier {
     }
   }
 
+  /// Record [item] as paid outside FeohLedger — `POST
+  /// /api/payments/record-outside`. On success the row leaves the queue, so
+  /// the queue + summary are re-read (and the selection reconciled, dropping
+  /// it if it was ticked). On a refusal nothing is re-read: the sheet states
+  /// it beside the form.
+  ///
+  /// [method] is a raw code from [kExternalPaymentMethods]; [paidOn] is
+  /// `YYYY-MM-DD`.
+  Future<RecordOutcome> recordOutside(
+    PaymentQueueItem item, {
+    required String method,
+    required String reference,
+    required String paidOn,
+  }) async {
+    try {
+      await PaymentApi.recordOutside(
+        invoiceId: item.id,
+        method: method,
+        reference: reference.trim(),
+        paidOn: paidOn,
+      );
+    } catch (e) {
+      return RecordOutcome.failed(e);
+    }
+    _selection.remove(item.id);
+    await fetch();
+    return const RecordOutcome.recorded();
+  }
+
+  /// A run's detail with the caller's verdict on recording it. Throws on a
+  /// failed read; the sheet then offers nothing (fail closed).
+  Future<PaymentRunRecordDetail> loadRunRecordDetail(String runId) =>
+      PaymentApi.runDetail(runId);
+
+  /// Record a whole run as paid by the customer's own bank — `POST
+  /// /api/payments/runs/{id}/record-outside`. On success the queue, summary
+  /// and runs are re-read; [RecordOutcome.paymentCount] is what it booked.
+  Future<RecordOutcome> recordRunOutside(
+    String runId, {
+    required String reference,
+    required String paidOn,
+  }) async {
+    final Map<String, dynamic> result;
+    try {
+      result = await PaymentApi.recordRunOutside(
+        runId,
+        reference: reference.trim(),
+        paidOn: paidOn,
+      );
+    } catch (e) {
+      return RecordOutcome.failed(e);
+    }
+    await fetch();
+    await fetchRuns();
+    final count = result['payment_count'];
+    return RecordOutcome.recorded(paymentCount: count is int ? count : null);
+  }
+
   Map<String, dynamic> _queueItemToJson(PaymentQueueItem i) => {
         'id': i.id,
         'invoice_number': i.invoiceNumber,
@@ -289,5 +410,9 @@ class PaymentQueueStore extends ChangeNotifier {
         'blocked': i.blocked,
         'blocked_reason': i.blockedReason,
         'required_method': i.requiredMethodCode,
+        // The record verdict too, so an offline row a recording would be
+        // refused on still shows the action disabled with its reason.
+        'record_outside_refusal': i.recordOutsideRefusal,
+        'payable_amount': i.payableAmountDisplay,
       };
 }

@@ -5922,6 +5922,312 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Checking what you can do here…'**
   String get reviewVerdictsChecking;
+
+  /// Pay tab banner on a tenant whose payments FeohLedger records but never sends (GET /api/payments/execution-mode = record_only).
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger records your organization\'s payments but never sends them. Pay suppliers from your bank or ERP, then record each payment here, or build a run, download its bank file and record the run as paid.'**
+  String get payRecordOnlyBanner;
+
+  /// Queue-row button: record this invoice as paid outside FeohLedger.
+  ///
+  /// In en, this message translates to:
+  /// **'Record as paid'**
+  String get payRecordAction;
+
+  /// Screen-reader label of the queue-row Record as paid button.
+  ///
+  /// In en, this message translates to:
+  /// **'Record as paid — invoice {invoice}'**
+  String payRecordActionLabel(String invoice);
+
+  /// No description provided for @payRecordTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Record a payment made outside FeohLedger'**
+  String get payRecordTitle;
+
+  /// No description provided for @payRecordIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Use this when you have already paid the supplier from your own bank or ERP. FeohLedger records the payment and marks the invoice paid. It doesn\'t send any money.'**
+  String get payRecordIntro;
+
+  /// No description provided for @payRecordAmountOwed.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount owed'**
+  String get payRecordAmountOwed;
+
+  /// No description provided for @payRecordAmountHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The full amount owed is recorded, net of applied credit memos and any accepted early-payment discount still open on the paid-on date. Partial payments can\'t be recorded.'**
+  String get payRecordAmountHint;
+
+  /// No description provided for @payRecordMethod.
+  ///
+  /// In en, this message translates to:
+  /// **'How you paid'**
+  String get payRecordMethod;
+
+  /// No description provided for @payRecordReference.
+  ///
+  /// In en, this message translates to:
+  /// **'Reference'**
+  String get payRecordReference;
+
+  /// No description provided for @payRecordReferenceHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The cheque number or your bank\'s confirmation number. Bank reconciliation matches on it.'**
+  String get payRecordReferenceHint;
+
+  /// No description provided for @payRecordPaidOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid on'**
+  String get payRecordPaidOn;
+
+  /// No description provided for @payRecordSubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Record as paid'**
+  String get payRecordSubmit;
+
+  /// No description provided for @payRecordSubmitting.
+  ///
+  /// In en, this message translates to:
+  /// **'Recording…'**
+  String get payRecordSubmitting;
+
+  /// No description provided for @payRecordRecorded.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice {invoice} recorded as paid'**
+  String payRecordRecorded(String invoice);
+
+  /// No description provided for @payRecordFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not record the payment'**
+  String get payRecordFailed;
+
+  /// Fallback reason a queue row cannot be recorded as paid, when its refusal code is unknown to this build.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice can\'t be recorded as paid yet.'**
+  String get payRecordUnavailable;
+
+  /// No description provided for @payMethodBacs.
+  ///
+  /// In en, this message translates to:
+  /// **'BACS'**
+  String get payMethodBacs;
+
+  /// No description provided for @payMethodFasterPayments.
+  ///
+  /// In en, this message translates to:
+  /// **'Faster Payments'**
+  String get payMethodFasterPayments;
+
+  /// No description provided for @payMethodChaps.
+  ///
+  /// In en, this message translates to:
+  /// **'CHAPS'**
+  String get payMethodChaps;
+
+  /// A payment card used outside FeohLedger's own card programme.
+  ///
+  /// In en, this message translates to:
+  /// **'Card (outside FeohLedger)'**
+  String get payMethodCardOutside;
+
+  /// Run menu item: record the whole run as paid outside FeohLedger.
+  ///
+  /// In en, this message translates to:
+  /// **'Record run as paid…'**
+  String get payRunActionRecord;
+
+  /// No description provided for @payRunRecordTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Record run as paid'**
+  String get payRunRecordTitle;
+
+  /// No description provided for @payRunRecordIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Once your bank has taken the payments, record them here. Every payment in the run is marked completed and its invoice paid. Nothing is sent.'**
+  String get payRunRecordIntro;
+
+  /// No description provided for @payRunRecordReference.
+  ///
+  /// In en, this message translates to:
+  /// **'Bank batch reference'**
+  String get payRunRecordReference;
+
+  /// No description provided for @payRunRecordReferenceHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The confirmation number your bank gave the batch. Bank reconciliation matches on it.'**
+  String get payRunRecordReferenceHint;
+
+  /// No description provided for @payRunRecordSubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Record as paid · {amount}'**
+  String payRunRecordSubmit(String amount);
+
+  /// No description provided for @payRunRecordRecorded.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} payment recorded as paid} other {{count} payments recorded as paid}}'**
+  String payRunRecordRecorded(int count);
+
+  /// No description provided for @payRunRecordFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not record the run'**
+  String get payRunRecordFailed;
+
+  /// No description provided for @payRunRecordLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load payment run'**
+  String get payRunRecordLoadFailed;
+
+  /// Payment-run status: its bank (NACHA) file was downloaded and it awaits recording.
+  ///
+  /// In en, this message translates to:
+  /// **'Exported'**
+  String get payRunStatusExported;
+
+  /// No description provided for @codedRefusalPaymentsRecordOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'FeohLedger does not send payments for this organization. Pay the supplier from your bank or ERP, then record the payment as paid outside FeohLedger.'**
+  String get codedRefusalPaymentsRecordOnly;
+
+  /// No description provided for @codedRefusalExternalPaymentForInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice {invoice}: {reason}'**
+  String codedRefusalExternalPaymentForInvoice(String invoice, String reason);
+
+  /// No description provided for @codedRefusalExternalPaymentNotPayable.
+  ///
+  /// In en, this message translates to:
+  /// **'Only an approved invoice that has not been paid can be recorded as paid (this one is {status}).'**
+  String codedRefusalExternalPaymentNotPayable(String status);
+
+  /// No description provided for @codedRefusalExternalPaymentSegregation.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: you created or shaped this invoice, so a different user must record its payment.'**
+  String get codedRefusalExternalPaymentSegregation;
+
+  /// No description provided for @codedRefusalExternalPaymentCardLive.
+  ///
+  /// In en, this message translates to:
+  /// **'A live virtual card is issued against this invoice. Cancel the card before recording a payment made another way.'**
+  String get codedRefusalExternalPaymentCardLive;
+
+  /// No description provided for @codedRefusalExternalPaymentCreditConflict.
+  ///
+  /// In en, this message translates to:
+  /// **'An applied credit memo no longer matches this invoice\'s vendor or currency, so the amount owed can\'t be stated. Correct the invoice first.'**
+  String get codedRefusalExternalPaymentCreditConflict;
+
+  /// No description provided for @codedRefusalExternalPaymentNothingToPay.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice is fully covered by applied credit memos, so there is nothing to record as paid.'**
+  String get codedRefusalExternalPaymentNothingToPay;
+
+  /// No description provided for @codedRefusalExternalPaymentPaymentLive.
+  ///
+  /// In en, this message translates to:
+  /// **'A payment for this invoice is already in progress or settled ({status}). Void it before recording a payment made another way.'**
+  String codedRefusalExternalPaymentPaymentLive(String status);
+
+  /// No description provided for @codedRefusalExternalPaymentInRun.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice is in payment run {run}. Record the whole run as paid outside FeohLedger, or cancel the run first.'**
+  String codedRefusalExternalPaymentInRun(String run);
+
+  /// No description provided for @codedRefusalExternalPaymentAmountMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'The amount must equal what the invoice owes ({amount}), net of applied credit memos and any accepted early-payment discount. Partial payments can\'t be recorded.'**
+  String codedRefusalExternalPaymentAmountMismatch(String amount);
+
+  /// No description provided for @codedRefusalExternalPaymentAmountChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'What this invoice owes has changed since the run was staged ({staged} staged, {amount} owed now) because of a credit memo or an early-payment discount. Resolve the difference with the supplier, then record the invoice on its own.'**
+  String codedRefusalExternalPaymentAmountChanged(String staged, String amount);
+
+  /// No description provided for @codedRefusalExternalPaymentErpSplit.
+  ///
+  /// In en, this message translates to:
+  /// **'The ERP reports this invoice paid with more than one payment method. Record it from its exception, which keeps how the payment was split.'**
+  String get codedRefusalExternalPaymentErpSplit;
+
+  /// No description provided for @codedRefusalExternalPaymentErpSplitInRun.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice is in payment run {run}, and the ERP reports it paid with more than one payment method, which only its exception can record. Cancel the run first, then record the invoice from its exception.'**
+  String codedRefusalExternalPaymentErpSplitInRun(String run);
+
+  /// No description provided for @codedRefusalExternalPaymentPaidOnFuture.
+  ///
+  /// In en, this message translates to:
+  /// **'The paid-on date can\'t be in the future.'**
+  String get codedRefusalExternalPaymentPaidOnFuture;
+
+  /// No description provided for @codedRefusalPaymentRunSegregation.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: the user who created this payment run cannot also approve or execute it. A different user must.'**
+  String get codedRefusalPaymentRunSegregation;
+
+  /// No description provided for @codedRefusalPaymentRunSegregationRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: the user who created this payment run cannot also record it as paid. A different user must.'**
+  String get codedRefusalPaymentRunSegregationRecord;
+
+  /// No description provided for @codedRefusalPaymentRunSegregationExport.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: the user who created this payment run cannot also export its bank file. A different user must.'**
+  String get codedRefusalPaymentRunSegregationExport;
+
+  /// No description provided for @codedRefusalPaymentRunAwaitingCfo.
+  ///
+  /// In en, this message translates to:
+  /// **'This run exceeds the organization\'s CFO-approval threshold and is awaiting sign-off from a user with the CFO role.'**
+  String get codedRefusalPaymentRunAwaitingCfo;
+
+  /// No description provided for @codedRefusalPaymentRunNotRecordable.
+  ///
+  /// In en, this message translates to:
+  /// **'Only a draft run, or one whose bank file was exported, can be recorded as paid.'**
+  String get codedRefusalPaymentRunNotRecordable;
+
+  /// No description provided for @codedRefusalPaymentRunNothingToRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'This run has no payments left to record.'**
+  String get codedRefusalPaymentRunNothingToRecord;
+
+  /// The type is not named here: the queue row's blocked chip already names it.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice has an unresolved payment-blocking exception. Resolve it before recording the invoice as paid.'**
+  String get codedRefusalExternalPaymentBlockingException;
 }
 
 class _AppLocalizationsDelegate

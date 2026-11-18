@@ -1,3 +1,4 @@
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 
 /// Convert a JSON money value (the backend emits these dict responses with
@@ -61,6 +62,23 @@ class PaymentQueueItem {
   /// parse, because a code this build can't name must not be guessed.
   final String? requiredMethodCode;
 
+  /// The coded refusal `POST /api/payments/record-outside` would answer for
+  /// this row whoever records it (`external_payment_*`), or `null` when
+  /// "Record as paid" may be offered. The server computes it from the gates
+  /// that endpoint applies (`external_payment.record_outside_refusals`), so
+  /// the app reads it rather than restating them — and deliberately NOT
+  /// [blocked], which is the RUN builder's verdict (a run refuses an
+  /// unverified vendor; recording money already sent does not, #566).
+  /// Segregation of duties is not folded in: it depends on who records, so the
+  /// server's 403 states it.
+  final String? recordOutsideRefusal;
+
+  /// What recording would book: the amount owed today, net of applied credit
+  /// memos and an accepted early-payment discount still open
+  /// (`payment_runs.payable_amounts`). Display only — the server binds the
+  /// recorded figure itself. `null` from a backend that predates the field.
+  final String? payableAmountDisplay;
+
   PaymentQueueItem({
     required this.id,
     required this.invoiceNumber,
@@ -77,6 +95,8 @@ class PaymentQueueItem {
     this.blocked = false,
     this.blockedReason,
     this.requiredMethodCode,
+    this.recordOutsideRefusal,
+    this.payableAmountDisplay,
   });
 
   /// The single rail this row may be paid on, or `null` for "any".
@@ -133,6 +153,10 @@ class PaymentQueueItem {
       blocked: json['blocked'] == true,
       blockedReason: json['blocked_reason'] as String?,
       requiredMethodCode: json['required_method'] as String?,
+      recordOutsideRefusal: json['record_outside_refusal'] as String?,
+      payableAmountDisplay: json['payable_amount'] == null
+          ? null
+          : moneyToDisplay(json['payable_amount']),
     );
   }
 }
@@ -239,6 +263,64 @@ class PaymentRun {
 
   /// Only `draft` runs can be executed (or cancelled) from the app.
   bool get isExecutable => status == 'draft';
+}
+
+/// `GET /api/payments/execution-mode`'s `mode`: whether FeohLedger SENDS this
+/// tenant's payments (`processor`) or only RECORDS payments the customer made
+/// from its own bank or ERP (`record_only`) — the no-rail pilot, backend
+/// decisions §251. The server resolves it (`services/payment_execution_mode`)
+/// and every dispatching endpoint enforces it; the app only mirrors it so a
+/// record-only tenant is never offered a control that can only 409.
+const kExecutionModeProcessor = 'processor';
+const kExecutionModeRecordOnly = 'record_only';
+
+/// Whether the app may offer the controls that SEND money (Execute).
+///
+/// **Fails closed**, like the web `canDispatchPayments`: an unknown mode —
+/// still loading, the read failed, offline, or a value this build predates —
+/// reads as record-only, so the worst a slow or failed read costs is a hidden
+/// button, never a send control on a tenant whose server would refuse it.
+/// Recording is offered in both modes, so nothing is stranded.
+bool canDispatchPayments(String? mode) => mode == kExecutionModeProcessor;
+
+/// The rails a payment made outside FeohLedger can be recorded on — every
+/// rail except `virtual_card`, which is FeohLedger's own card programme and
+/// never a way to pay around it (`schemas/payment.py::
+/// RecordErpReportedPaymentRequest._not_card`). Raw codes, in the web
+/// dialog's order (`EXTERNAL_PAYMENT_METHODS`); [PaymentMethod] is the run
+/// builder's set and deliberately not widened, so the run dropdown is
+/// unchanged.
+const kExternalPaymentMethods = <String>[
+  'ach',
+  'wire',
+  'check',
+  'bacs',
+  'faster_payments',
+  'chaps',
+  'card',
+];
+
+/// A run's detail, as far as recording it outside FeohLedger needs:
+/// `GET /api/payments/runs/{id}`. [recordOutside] is the CALLER's verdict on
+/// `POST /runs/{id}/record-outside` (`run_action_refusals`, from the gate the
+/// endpoint raises from — issue #575), so the sheet offers the control from it
+/// and never restates maker-checker, CFO sign-off or the run's status.
+class PaymentRunRecordDetail {
+  final PaymentRun run;
+  final ActionVerdict recordOutside;
+
+  const PaymentRunRecordDetail({required this.run, required this.recordOutside});
+
+  factory PaymentRunRecordDetail.fromJson(Map<String, dynamic> json) {
+    final actions = json['actions'];
+    return PaymentRunRecordDetail(
+      run: PaymentRun.fromJson(json),
+      recordOutside: actions is Map
+          ? ActionVerdict.fromVerdicts(
+              Map<String, dynamic>.from(actions), 'record_outside')
+          : ActionVerdict.unanswered,
+    );
+  }
 }
 
 /// Selection passed to `POST /api/payments/runs` — one invoice + chosen method.

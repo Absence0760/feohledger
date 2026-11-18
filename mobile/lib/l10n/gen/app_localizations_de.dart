@@ -2,6 +2,7 @@
 
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4041,4 +4042,211 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get reviewVerdictsChecking =>
       'Es wird geprüft, was Sie hier tun dürfen …';
+
+  @override
+  String get payRecordOnlyBanner =>
+      'FeohLedger erfasst die Zahlungen Ihrer Organisation, versendet sie aber nie. Bezahlen Sie Lieferanten über Ihre Bank oder Ihr ERP und erfassen Sie jede Zahlung hier – oder erstellen Sie einen Lauf, laden Sie seine Bankdatei herunter und erfassen Sie den Lauf als bezahlt.';
+
+  @override
+  String get payRecordAction => 'Als bezahlt erfassen';
+
+  @override
+  String payRecordActionLabel(String invoice) {
+    return 'Als bezahlt erfassen — Rechnung $invoice';
+  }
+
+  @override
+  String get payRecordTitle =>
+      'Außerhalb von FeohLedger geleistete Zahlung erfassen';
+
+  @override
+  String get payRecordIntro =>
+      'Verwenden Sie dies, wenn Sie den Lieferanten bereits über Ihre eigene Bank oder Ihr ERP bezahlt haben. FeohLedger erfasst die Zahlung und markiert die Rechnung als bezahlt. Es wird kein Geld versendet.';
+
+  @override
+  String get payRecordAmountOwed => 'Offener Betrag';
+
+  @override
+  String get payRecordAmountHint =>
+      'Erfasst wird der volle offene Betrag, abzüglich angewendeter Gutschriften und eines angenommenen Skontos, das am Zahlungsdatum noch gilt. Teilzahlungen können nicht erfasst werden.';
+
+  @override
+  String get payRecordMethod => 'Zahlungsart';
+
+  @override
+  String get payRecordReference => 'Referenz';
+
+  @override
+  String get payRecordReferenceHint =>
+      'Die Schecknummer oder die Bestätigungsnummer Ihrer Bank. Der Bankabgleich ordnet darüber zu.';
+
+  @override
+  String get payRecordPaidOn => 'Bezahlt am';
+
+  @override
+  String get payRecordSubmit => 'Als bezahlt erfassen';
+
+  @override
+  String get payRecordSubmitting => 'Wird erfasst…';
+
+  @override
+  String payRecordRecorded(String invoice) {
+    return 'Rechnung $invoice als bezahlt erfasst';
+  }
+
+  @override
+  String get payRecordFailed => 'Die Zahlung konnte nicht erfasst werden';
+
+  @override
+  String get payRecordUnavailable =>
+      'Diese Rechnung kann noch nicht als bezahlt erfasst werden.';
+
+  @override
+  String get payMethodBacs => 'BACS';
+
+  @override
+  String get payMethodFasterPayments => 'Faster Payments';
+
+  @override
+  String get payMethodChaps => 'CHAPS';
+
+  @override
+  String get payMethodCardOutside => 'Karte (außerhalb von FeohLedger)';
+
+  @override
+  String get payRunActionRecord => 'Lauf als bezahlt erfassen…';
+
+  @override
+  String get payRunRecordTitle => 'Lauf als bezahlt erfassen';
+
+  @override
+  String get payRunRecordIntro =>
+      'Sobald Ihre Bank die Zahlungen angenommen hat, erfassen Sie sie hier. Jede Zahlung des Laufs wird als abgeschlossen und ihre Rechnung als bezahlt markiert. Es wird nichts versendet.';
+
+  @override
+  String get payRunRecordReference => 'Referenz des Bankauftrags';
+
+  @override
+  String get payRunRecordReferenceHint =>
+      'Die Bestätigungsnummer, die Ihre Bank für den Auftrag vergeben hat. Der Bankabgleich ordnet darüber zu.';
+
+  @override
+  String payRunRecordSubmit(String amount) {
+    return 'Als bezahlt erfassen · $amount';
+  }
+
+  @override
+  String payRunRecordRecorded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Zahlungen als bezahlt erfasst',
+      one: '$count Zahlung als bezahlt erfasst',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunRecordFailed => 'Der Lauf konnte nicht erfasst werden';
+
+  @override
+  String get payRunRecordLoadFailed =>
+      'Zahlungslauf konnte nicht geladen werden';
+
+  @override
+  String get payRunStatusExported => 'Exportiert';
+
+  @override
+  String get codedRefusalPaymentsRecordOnly =>
+      'FeohLedger versendet für diese Organisation keine Zahlungen. Bezahlen Sie den Lieferanten über Ihre Bank oder Ihr ERP und erfassen Sie die Zahlung dann als außerhalb von FeohLedger bezahlt.';
+
+  @override
+  String codedRefusalExternalPaymentForInvoice(String invoice, String reason) {
+    return 'Rechnung $invoice: $reason';
+  }
+
+  @override
+  String codedRefusalExternalPaymentNotPayable(String status) {
+    return 'Nur eine freigegebene, noch nicht bezahlte Rechnung kann als bezahlt erfasst werden (diese hat den Status $status).';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentSegregation =>
+      'Funktionstrennung: Sie haben diese Rechnung erstellt oder mitgestaltet, daher muss ein anderer Benutzer ihre Zahlung erfassen.';
+
+  @override
+  String get codedRefusalExternalPaymentCardLive =>
+      'Für diese Rechnung ist eine aktive virtuelle Karte ausgestellt. Stornieren Sie die Karte, bevor Sie eine anders geleistete Zahlung erfassen.';
+
+  @override
+  String get codedRefusalExternalPaymentCreditConflict =>
+      'Eine angewendete Gutschrift passt nicht mehr zum Lieferanten oder zur Währung dieser Rechnung, daher lässt sich der offene Betrag nicht bestimmen. Korrigieren Sie zuerst die Rechnung.';
+
+  @override
+  String get codedRefusalExternalPaymentNothingToPay =>
+      'Diese Rechnung ist vollständig durch angewendete Gutschriften gedeckt, es gibt also nichts als bezahlt zu erfassen.';
+
+  @override
+  String codedRefusalExternalPaymentPaymentLive(String status) {
+    return 'Für diese Rechnung läuft bereits eine Zahlung oder sie ist abgeschlossen ($status). Stornieren Sie sie, bevor Sie eine anders geleistete Zahlung erfassen.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentInRun(String run) {
+    return 'Diese Rechnung ist Teil des Zahlungslaufs $run. Erfassen Sie den ganzen Lauf als außerhalb von FeohLedger bezahlt oder stornieren Sie den Lauf zuerst.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountMismatch(String amount) {
+    return 'Der Betrag muss dem offenen Betrag der Rechnung entsprechen ($amount), abzüglich angewendeter Gutschriften und eines angenommenen Skontos. Teilzahlungen können nicht erfasst werden.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountChanged(
+    String staged,
+    String amount,
+  ) {
+    return 'Der offene Betrag dieser Rechnung hat sich seit dem Anlegen des Laufs geändert ($staged im Lauf, jetzt $amount offen), wegen einer Gutschrift oder eines Skontos. Klären Sie die Differenz mit dem Lieferanten und erfassen Sie die Rechnung dann einzeln.';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentErpSplit =>
+      'Laut ERP wurde diese Rechnung mit mehr als einer Zahlungsart bezahlt. Erfassen Sie sie über ihre Ausnahme, die die Aufteilung der Zahlung beibehält.';
+
+  @override
+  String codedRefusalExternalPaymentErpSplitInRun(String run) {
+    return 'Diese Rechnung ist Teil des Zahlungslaufs $run, und laut ERP wurde sie mit mehr als einer Zahlungsart bezahlt, was nur ihre Ausnahme erfassen kann. Stornieren Sie zuerst den Lauf und erfassen Sie die Rechnung dann über ihre Ausnahme.';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentPaidOnFuture =>
+      'Das Zahlungsdatum darf nicht in der Zukunft liegen.';
+
+  @override
+  String get codedRefusalPaymentRunSegregation =>
+      'Funktionstrennung: Wer diesen Zahlungslauf erstellt hat, darf ihn nicht auch genehmigen oder ausführen. Das muss eine andere Person tun.';
+
+  @override
+  String get codedRefusalPaymentRunSegregationRecord =>
+      'Funktionstrennung: Wer diesen Zahlungslauf erstellt hat, darf ihn nicht auch als bezahlt erfassen. Das muss eine andere Person tun.';
+
+  @override
+  String get codedRefusalPaymentRunSegregationExport =>
+      'Funktionstrennung: Wer diesen Zahlungslauf erstellt hat, darf nicht auch seine Bankdatei exportieren. Das muss eine andere Person tun.';
+
+  @override
+  String get codedRefusalPaymentRunAwaitingCfo =>
+      'Dieser Lauf überschreitet die CFO-Freigabeschwelle der Organisation und wartet auf die Freigabe durch einen Benutzer mit der CFO-Rolle.';
+
+  @override
+  String get codedRefusalPaymentRunNotRecordable =>
+      'Nur ein Lauf im Entwurf oder einer, dessen Bankdatei exportiert wurde, kann als bezahlt erfasst werden.';
+
+  @override
+  String get codedRefusalPaymentRunNothingToRecord =>
+      'Dieser Lauf hat keine Zahlungen mehr, die erfasst werden könnten.';
+
+  @override
+  String get codedRefusalExternalPaymentBlockingException =>
+      'Für diese Rechnung besteht eine ungelöste Ausnahme, die die Zahlung sperrt. Lösen Sie sie, bevor Sie die Rechnung als bezahlt erfassen.';
 }
