@@ -2532,6 +2532,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Es posible que un intento anterior ya haya creado la factura en el ERP; compruébelo allí antes de que alguien la pague.';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'Esta factura no tiene una moneda válida. Indique su moneda antes de enviarla al ERP.';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'A este envío no le quedaban intentos, así que esta vez no se intentó. Vuelva a intentarlo para enviarlo con intentos nuevos.';
 

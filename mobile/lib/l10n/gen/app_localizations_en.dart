@@ -2506,6 +2506,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'An earlier attempt may already have created the bill in the ERP; check there before anyone pays it.';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'This invoice has no valid currency. Set its currency before sending it to the ERP.';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'This push had no attempts left, so no attempt was made this time. Retry to send it with a fresh set of attempts.';
 

@@ -2532,6 +2532,10 @@ class AppLocalizationsPt extends AppLocalizations {
       'Uma tentativa anterior pode já ter criado a fatura no ERP; verifique lá antes que alguém a pague.';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'Esta fatura não tem uma moeda válida. Defina a moeda antes de enviá-la ao ERP.';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'Este envio não tinha mais tentativas, então nenhuma tentativa foi feita desta vez. Tente novamente para enviá-lo com novas tentativas.';
 
@@ -6843,6 +6847,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get erpRefusalVendorHoldPossiblyPosted =>
       'Uma tentativa anterior pode já ter criado a fatura no ERP; verifique lá antes que alguém a pague.';
+
+  @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'Esta fatura não tem uma moeda válida. Defina a moeda antes de enviá-la ao ERP.';
 
   @override
   String get erpRefusalRetriesExhausted =>
