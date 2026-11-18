@@ -225,6 +225,26 @@ export const SETUP_GUIDES: Guide[] = [
 						text: 'Every quarter or so, admins and CFOs should check [[page:/admin/access-review]] for people whose elevated access has gone unused. See [[guide:audit-and-compliance|Audit and compliance]].'
 					}
 				]
+			},
+			{
+				heading: 'Sign someone out without removing access',
+				blocks: [
+					{
+						type: 'p',
+						text: 'When a laptop is lost or a shared password has just been changed, you can end every session a person holds and leave their account as it is. They keep their roles and can sign straight back in.'
+					},
+					{
+						type: 'steps',
+						items: [
+							'Find the person on the {ui:nav.users} tab.',
+							'Click {ui:admin.users.row.revokeSessions}, then {ui:admin.users.row.confirm}. A message says how many sessions were ended.'
+						]
+					},
+					{
+						type: 'p',
+						text: 'Deactivating, resetting a password and changing roles already sign the person out, so you only need this when nothing else about the account should change. The sign-out is recorded in the [[audit-trail]].'
+					}
+				]
 			}
 		],
 		terms: ['role', 'permission', 'segregation-of-duties', 'access-review', 'audit-trail'],

@@ -35,6 +35,11 @@
 		minute: '2-digit'
 	};
 	let confirmDeleteId = $state<string | null>(null);
+	// Same two-click arm as Delete: signing someone out everywhere is harmless to
+	// the account but interrupts whatever they are doing, so a stray click must
+	// not do it.
+	let confirmRevokeId = $state<string | null>(null);
+	let revokingId = $state<string | null>(null);
 
 	// Bulk-select state
 	let selectedIds = $state<Set<string>>(new Set());
@@ -296,6 +301,19 @@
 		}
 	}
 
+	async function handleRevokeSessions(user: AdminUser) {
+		revokingId = user.id;
+		try {
+			const { revoked } = await adminStore.revokeUserSessions(user.id);
+			toast(m('admin.users.toast.sessionsRevoked', { n: revoked, name: user.full_name }), 'success');
+			confirmRevokeId = null;
+		} catch (err) {
+			toast(err instanceof Error ? err.message : m('admin.users.toast.revokeFailed'), 'error');
+		} finally {
+			revokingId = null;
+		}
+	}
+
 	function toggleRole(role: string, list: string[]): string[] {
 		return list.includes(role) ? list.filter((r) => r !== role) : [...list, role];
 	}
@@ -314,8 +332,9 @@
 	}
 
 	function handleWindowClick(e: MouseEvent) {
-		if (confirmDeleteId && !(e.target as HTMLElement).closest('.row-action')) {
+		if (!(e.target as HTMLElement).closest('.row-action')) {
 			confirmDeleteId = null;
+			confirmRevokeId = null;
 		}
 	}
 
@@ -423,6 +442,27 @@
 					<RowAction onclick={() => toggleActive(user)}>
 						{user.is_active ? m('admin.users.row.deactivate') : m('admin.users.row.activate')}
 					</RowAction>
+					<!-- Not on yourself (that is Sign out) nor on an inactive account
+					     (deactivating already ended its sessions). The panel only
+					     mounts for `user.manage`, the route's own permission. -->
+					{#if !isSelf(user.id) && user.is_active}
+						<RowAction
+							variant="danger"
+							armed={confirmRevokeId === user.id}
+							disabled={revokingId === user.id}
+							onclick={(e) => {
+								e.stopPropagation();
+								if (confirmRevokeId === user.id) {
+									handleRevokeSessions(user);
+								} else {
+									confirmDeleteId = null;
+									confirmRevokeId = user.id;
+								}
+							}}
+						>
+							{confirmRevokeId === user.id ? m('admin.users.row.confirm') : m('admin.users.row.revokeSessions')}
+						</RowAction>
+					{/if}
 					{#if !isSelf(user.id)}
 						<RowAction
 							variant="danger"
@@ -432,6 +472,7 @@
 								if (confirmDeleteId === user.id) {
 									handleDelete(user.id);
 								} else {
+									confirmRevokeId = null;
 									confirmDeleteId = user.id;
 								}
 							}}
