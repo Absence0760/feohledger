@@ -384,6 +384,9 @@ export const messages = {
 
 	// Dashboard
 	'dashboard.title': 'Panel',
+	'dashboard.greeting.morning': 'Buenos días, {name}',
+	'dashboard.greeting.afternoon': 'Buenas tardes, {name}',
+	'dashboard.greeting.evening': 'Buenas noches, {name}',
 	'dashboard.kpi.invoices': 'Facturas',
 	'dashboard.kpi.totalAmount': 'Importe total (todas las facturas)',
 	'dashboard.kpi.paid': 'Pagadas',

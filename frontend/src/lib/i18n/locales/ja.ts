@@ -377,6 +377,9 @@ export const messages = {
 
 	// Dashboard
 	'dashboard.title': 'ダッシュボード',
+	'dashboard.greeting.morning': 'おはようございます、{name}さん',
+	'dashboard.greeting.afternoon': 'こんにちは、{name}さん',
+	'dashboard.greeting.evening': 'こんばんは、{name}さん',
 	'dashboard.kpi.invoices': '請求書',
 	'dashboard.kpi.totalAmount': '合計金額(全請求書)',
 	'dashboard.kpi.paid': '支払済み',
