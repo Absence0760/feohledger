@@ -895,6 +895,7 @@ order the gates run; the catalogue is `card_issuance.CARD_SKIP_MESSAGES`:
 | `card_skip_blocked` | unresolved payment-blocking exception | `exception_type` |
 | `card_skip_vendor_not_payable` | vendor not `active` | `vendor_status` |
 | `card_skip_live_payment` | a live payment on another rail | — |
+| `card_skip_currency_unknown` | the invoice records no currency (blank / whitespace); never read as USD, refused before credit netting, the compliance screen and the provider | — |
 | `card_skip_credit_conflict` | an applied credit no longer pairs (§214) | — |
 | `card_skip_nothing_owed` | applied credits cover the invoice | — |
 | `card_skip_vendor_unscreenable` | no vendor record to screen | — |

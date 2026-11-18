@@ -1050,6 +1050,33 @@ async def test_a_provider_that_issues_nothing_is_named(realdb, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "   "])
+async def test_an_invoice_with_no_currency_is_named_before_the_provider(realdb, monkeypatch, blank):
+    """A blank currency (the invoice PATCH's legacy "no currency") is refused by
+    its own code before the provider is called — not read as USD, and not the
+    generic `card_skip_issue_failed` that `issue_card_for_invoice`'s backstop
+    could only report it as."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    invoice_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number=f"NOCCY{len(blank)}"
+    )
+    async with mk() as s:
+        inv = await s.get(Invoice, invoice_id)
+        inv.currency = blank
+        await s.commit()
+    calls = _count_card_mints(monkeypatch)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    assert _skips(resp.json()) == {str(invoice_id): ("card_skip_currency_unknown", {})}
+    assert calls == []
+    assert await _cards_for(mk, invoice_id) == []
+
+
+@pytest.mark.asyncio
 async def test_a_payable_invoice_the_lock_left_out_is_a_moved_vendor(realdb):
     """`lock_invoices_for_mint` drops a payable, in-scope invoice only when its
     vendor changed between the unlocked read and the lock. That window cannot
