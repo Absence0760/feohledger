@@ -4279,6 +4279,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'This run exceeds the organization\'s CFO-approval threshold and is awaiting sign-off from a user with the CFO role.';
 
   @override
+  String get codedRefusalMfaCodeInvalid =>
+      'That code is not valid. Check your authenticator app and try again.';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       'Only a draft run, or one whose bank file was exported, can be recorded as paid.';
 

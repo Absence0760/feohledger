@@ -235,6 +235,17 @@ lifecycle with no second human. The control mirrors the invoice-approval
 than an explicit `false` keeps the secure default). A legacy run with a NULL
 `initiated_by` is never blocked (nothing to compare against).
 
+**The refusal is coded on the wire.** Maker-checker (403
+`payment_run_segregation`, `params.step` on the record / bank-file steps) and
+the CFO-approval wait (403 `payment_run_awaiting_cfo`) answer every POST that
+raises them — approve, execute, resume, retry-failed, record-outside, the NACHA
+export — with `detail = {code, message, params}`, the same object the run
+dialog's `actions` verdict carries, so the web toast and the mobile Pay tab
+state it in the reader's language (`docs/decisions.md` §NEW-R1). A standalone
+`POST /api/payments` above the CFO threshold, booked by someone without the CFO
+role, answers 403 `payment_cfo_required` the same way. Every client renders a
+code it does not know by its English `message`.
+
 ### A standalone payment can't be injected into a run
 
 `POST /api/payments` used to accept a `payment_run_id` in the body and write it

@@ -48,6 +48,7 @@ class PaymentQueueStore extends ChangeNotifier {
   PaymentSummary? _summary;
   bool _loading = false;
   String? _error;
+  Object? _runActionErrorDetail;
   bool _fromCache = false;
   String? _executionMode;
 
@@ -60,6 +61,13 @@ class PaymentQueueStore extends ChangeNotifier {
   PaymentSummary? get summary => _summary;
   bool get loading => _loading;
   String? get error => _error;
+
+  /// The raw decoded `detail` of the last refused [approveRun] /
+  /// [executeRun] — maker-checker and the CFO-approval wait answer with a
+  /// coded refusal (`payment_run_segregation` / `payment_run_awaiting_cfo`)
+  /// the screen states through `localizeCodedRefusal`, with [error] as the
+  /// fallback. `null` after a success or a transport failure.
+  Object? get runActionErrorDetail => _runActionErrorDetail;
   bool get fromCache => _fromCache;
 
   /// The tenant's payment execution mode as the server last stated it
@@ -288,12 +296,14 @@ class PaymentQueueStore extends ChangeNotifier {
   /// maker-checker check: the run's creator can't approve their own run) — so
   /// [error] carries the server's own `detail` sentence via [describeApiError].
   Future<String?> approveRun(String runId) async {
+    _runActionErrorDetail = null;
     try {
       final result = await PaymentApi.approveRun(runId);
       await fetchRuns();
       return result['message'] as String? ?? 'Run approved by CFO';
     } catch (e) {
       _error = describeApiError(e);
+      _runActionErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return null;
     }
@@ -306,6 +316,7 @@ class PaymentQueueStore extends ChangeNotifier {
   /// server's own `detail` sentence (see [describeApiError]), never the raw
   /// JSON body it arrived in.
   Future<String?> executeRun(String runId) async {
+    _runActionErrorDetail = null;
     try {
       final result = await PaymentApi.executeRun(runId);
       await fetch();
@@ -313,6 +324,7 @@ class PaymentQueueStore extends ChangeNotifier {
       return result['message'] as String? ?? 'Payment run executed';
     } catch (e) {
       _error = describeApiError(e);
+      _runActionErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return null;
     }

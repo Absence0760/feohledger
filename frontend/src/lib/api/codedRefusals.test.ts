@@ -106,6 +106,8 @@ describe('codedRefusalText', () => {
 		[INVOICE_STALE_EDIT, 'refusal.invoiceStaleEdit'],
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
 		['mfa_code_invalid', 'refusal.mfaCodeInvalid'],
+		['payment_run_awaiting_cfo', 'refusal.paymentRunAwaitingCfo'],
+		['payment_cfo_required', 'refusal.paymentCfoRequired'],
 		['erp_not_connected', 'erpRefusal.notConnected'],
 		['invoice_due_before_date', 'refusal.invoiceDueBeforeDate'],
 		['sso_email_in_other_workspace', 'refusal.ssoEmailInOtherWorkspace'],

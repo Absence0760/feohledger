@@ -415,6 +415,9 @@ const BUILDERS: Record<string, Builder> = {
 		return t('refusal.paymentRunSegregation');
 	},
 	payment_run_awaiting_cfo: fixed('refusal.paymentRunAwaitingCfo'),
+	// `api/payments.py::create_payment` — a single payment above the CFO
+	// threshold booked outside a run by someone without the CFO role.
+	payment_cfo_required: fixed('refusal.paymentCfoRequired'),
 	payment_run_nothing_to_retry: fixed('refusal.paymentRunNothingToRetry'),
 	payment_run_nothing_settled: fixed('refusal.paymentRunNothingSettled'),
 	payment_run_not_recordable: fixed('refusal.paymentRunNotRecordable'),

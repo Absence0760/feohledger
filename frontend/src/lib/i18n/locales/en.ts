@@ -4266,6 +4266,7 @@ export const en = {
 	'refusal.cardBlocksRecall': "A virtual card has been issued to pay this invoice. Cancel the card before recalling the approval.",
 	'refusal.paymentRunSegregation': "Segregation of duties: the user who created this payment run cannot also approve or execute it. A different user must.",
 	'refusal.paymentRunAwaitingCfo': "This run exceeds the organization's CFO-approval threshold and is awaiting sign-off from a user with the CFO role.",
+	'refusal.paymentCfoRequired': "This payment is above your organization's CFO sign-off threshold. Book it through a payment run for CFO approval, or ask a CFO to create it.",
 	'refusal.paymentRunNothingToRetry': "None of this run's failed payments can be sent again safely: each may have reached the payment processor. Check each one with the processor, then void it or record what happened.",
 	'refusal.vendorChangeSelfRequested': "You cannot approve a bank-detail change you requested.",
 	'refusal.vendorChangeSelfProvisioned': "You cannot approve a change submitted by a supplier-portal login you provisioned. Another approver must review it.",

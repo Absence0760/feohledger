@@ -6288,6 +6288,12 @@ abstract class AppLocalizations {
   /// **'This run exceeds the organization\'s CFO-approval threshold and is awaiting sign-off from a user with the CFO role.'**
   String get codedRefusalPaymentRunAwaitingCfo;
 
+  /// No description provided for @codedRefusalMfaCodeInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'That code is not valid. Check your authenticator app and try again.'**
+  String get codedRefusalMfaCodeInvalid;
+
   /// No description provided for @codedRefusalPaymentRunNotRecordable.
   ///
   /// In en, this message translates to:

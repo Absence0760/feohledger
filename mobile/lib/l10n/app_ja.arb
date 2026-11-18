@@ -1194,6 +1194,7 @@
   "codedRefusalPaymentRunSegregationRecord": "職務分掌: この支払いランを作成したユーザーは、支払済みとして記録することはできません。別のユーザーが行う必要があります。",
   "codedRefusalPaymentRunSegregationExport": "職務分掌: この支払いランを作成したユーザーは、その銀行ファイルをエクスポートすることはできません。別のユーザーが行う必要があります。",
   "codedRefusalPaymentRunAwaitingCfo": "このランは組織のCFO承認しきい値を超えているため、CFOロールを持つユーザーの承認を待っています。",
+  "codedRefusalMfaCodeInvalid": "このコードは無効です。認証アプリを確認して、もう一度お試しください。",
   "codedRefusalPaymentRunNotRecordable": "支払済みとして記録できるのは、下書きのランか、銀行ファイルをエクスポートしたランだけです。",
   "codedRefusalPaymentRunNothingToRecord": "このランには記録する支払いが残っていません。",
   "codedRefusalExternalPaymentBlockingException": "この請求書には、支払いをブロックする未解決の例外があります。支払済みとして記録する前に解決してください。"

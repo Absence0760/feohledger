@@ -4305,6 +4305,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Dieser Lauf überschreitet die CFO-Freigabeschwelle der Organisation und wartet auf die Freigabe durch einen Benutzer mit der CFO-Rolle.';
 
   @override
+  String get codedRefusalMfaCodeInvalid =>
+      'Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       'Nur ein Lauf im Entwurf oder einer, dessen Bankdatei exportiert wurde, kann als bezahlt erfasst werden.';
 

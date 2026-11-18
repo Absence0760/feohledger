@@ -4107,6 +4107,9 @@ class AppLocalizationsJa extends AppLocalizations {
       'このランは組織のCFO承認しきい値を超えているため、CFOロールを持つユーザーの承認を待っています。';
 
   @override
+  String get codedRefusalMfaCodeInvalid => 'このコードは無効です。認証アプリを確認して、もう一度お試しください。';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       '支払済みとして記録できるのは、下書きのランか、銀行ファイルをエクスポートしたランだけです。';
 

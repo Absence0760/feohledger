@@ -4092,6 +4092,7 @@ export const messages = {
 	'refusal.cardBlocksRecall': "Une carte virtuelle a été émise pour payer cette facture. Annulez la carte avant de retirer l'approbation.",
 	'refusal.paymentRunSegregation': "Séparation des tâches : l'utilisateur qui a créé ce lot de paiements ne peut pas aussi l'approuver ou l'exécuter. Un autre utilisateur doit le faire.",
 	'refusal.paymentRunAwaitingCfo': "Ce lot dépasse le seuil d'approbation CFO de l'organisation et attend la validation d'un utilisateur ayant le rôle CFO.",
+	'refusal.paymentCfoRequired': "Ce paiement dépasse le seuil de validation CFO de votre organisation. Passez-le dans un lot de paiement pour approbation par le CFO, ou demandez à un CFO de le créer.",
 	'refusal.paymentRunNothingToRetry': "Aucun des paiements en échec de ce lot ne peut être renvoyé en toute sécurité : chacun a peut-être atteint le prestataire de paiement. Vérifiez chacun auprès du prestataire, puis annulez-le ou enregistrez ce qui s'est passé.",
 	'refusal.vendorChangeSelfRequested': "Vous ne pouvez pas approuver une modification de coordonnées bancaires que vous avez demandée.",
 	'refusal.vendorChangeSelfProvisioned': "Vous ne pouvez pas approuver une modification soumise par un accès au portail fournisseur que vous avez créé. Un autre approbateur doit l'examiner.",

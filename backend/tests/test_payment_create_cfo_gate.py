@@ -112,7 +112,8 @@ async def test_above_threshold_non_cfo_actor_is_refused(realdb):
                 json={"invoice_id": str(inv_id), "amount": "500.00", "method": "ach"},
             )
         assert resp.status_code == 403, resp.text
-        assert "CFO" in resp.json()["detail"]
+        assert resp.json()["detail"]["code"] == "payment_cfo_required"
+        assert "CFO" in resp.json()["detail"]["message"]
     finally:
         await _set_cfo_threshold(realdb, org_id=org_id, value=None)
 
@@ -180,7 +181,8 @@ async def test_foreign_currency_below_threshold_at_face_value_still_needs_cfo(re
                 json={"invoice_id": str(inv_id), "amount": "9000.00", "method": "ach"},
             )
         assert resp.status_code == 403, resp.text
-        assert "CFO" in resp.json()["detail"]
+        assert resp.json()["detail"]["code"] == "payment_cfo_required"
+        assert "CFO" in resp.json()["detail"]["message"]
     finally:
         await _set_cfo_threshold(realdb, org_id=org_id, value=None)
 

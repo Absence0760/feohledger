@@ -3277,6 +3277,7 @@
   "codedRefusalPaymentRunSegregationRecord": "Segregation of duties: the user who created this payment run cannot also record it as paid. A different user must.",
   "codedRefusalPaymentRunSegregationExport": "Segregation of duties: the user who created this payment run cannot also export its bank file. A different user must.",
   "codedRefusalPaymentRunAwaitingCfo": "This run exceeds the organization's CFO-approval threshold and is awaiting sign-off from a user with the CFO role.",
+  "codedRefusalMfaCodeInvalid": "That code is not valid. Check your authenticator app and try again.",
   "codedRefusalPaymentRunNotRecordable": "Only a draft run, or one whose bank file was exported, can be recorded as paid.",
   "codedRefusalPaymentRunNothingToRecord": "This run has no payments left to record.",
   "codedRefusalExternalPaymentBlockingException": "This invoice has an unresolved payment-blocking exception. Resolve it before recording the invoice as paid.",

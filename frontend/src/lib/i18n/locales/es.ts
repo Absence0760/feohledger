@@ -4083,6 +4083,7 @@ export const messages = {
 	'refusal.cardBlocksRecall': "Se ha emitido una tarjeta virtual para pagar esta factura. Cancele la tarjeta antes de retirar la aprobación.",
 	'refusal.paymentRunSegregation': "Segregación de funciones: el usuario que creó esta remesa de pagos no puede también aprobarla ni ejecutarla. Debe hacerlo otro usuario.",
 	'refusal.paymentRunAwaitingCfo': "Esta remesa supera el umbral de aprobación del CFO de la organización y espera la aprobación de un usuario con el rol de CFO.",
+	'refusal.paymentCfoRequired': "Este pago supera el umbral de aprobación del CFO de su organización. Regístrelo mediante una remesa de pagos para que lo apruebe el CFO, o pida a un CFO que lo cree.",
 	'refusal.paymentRunNothingToRetry': "Ninguno de los pagos fallidos de esta remesa puede reenviarse con seguridad: cada uno pudo haber llegado al procesador de pagos. Verifique cada uno con el procesador y luego anúlelo o registre lo que ocurrió.",
 	'refusal.vendorChangeSelfRequested': "No puede aprobar un cambio de datos bancarios que usted solicitó.",
 	'refusal.vendorChangeSelfProvisioned': "No puede aprobar un cambio enviado desde un acceso al portal de proveedores que usted creó. Otro aprobador debe revisarlo.",

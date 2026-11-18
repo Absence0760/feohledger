@@ -4308,6 +4308,10 @@ class AppLocalizationsPt extends AppLocalizations {
       'Este lote excede o limite de aprovação do CFO da organização e aguarda a aprovação de um usuário com a função de CFO.';
 
   @override
+  String get codedRefusalMfaCodeInvalid =>
+      'Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       'Só um lote em rascunho, ou um cujo arquivo bancário foi exportado, pode ser registrado como pago.';
 
@@ -8619,6 +8623,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get codedRefusalPaymentRunAwaitingCfo =>
       'Este lote excede o limite de aprovação do CFO da organização e aguarda a aprovação de um usuário com a função de CFO.';
+
+  @override
+  String get codedRefusalMfaCodeInvalid =>
+      'Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.';
 
   @override
   String get codedRefusalPaymentRunNotRecordable =>

@@ -1194,6 +1194,7 @@
   "codedRefusalPaymentRunSegregationRecord": "Segregação de funções: o usuário que criou este lote de pagamentos não pode também registrá-lo como pago. Outro usuário precisa fazer isso.",
   "codedRefusalPaymentRunSegregationExport": "Segregação de funções: o usuário que criou este lote de pagamentos não pode também exportar o arquivo bancário dele. Outro usuário precisa fazer isso.",
   "codedRefusalPaymentRunAwaitingCfo": "Este lote excede o limite de aprovação do CFO da organização e aguarda a aprovação de um usuário com a função de CFO.",
+  "codedRefusalMfaCodeInvalid": "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
   "codedRefusalPaymentRunNotRecordable": "Só um lote em rascunho, ou um cujo arquivo bancário foi exportado, pode ser registrado como pago.",
   "codedRefusalPaymentRunNothingToRecord": "Este lote não tem mais pagamentos a registrar.",
   "codedRefusalExternalPaymentBlockingException": "Esta fatura tem uma exceção não resolvida que bloqueia o pagamento. Resolva-a antes de registrar a fatura como paga."

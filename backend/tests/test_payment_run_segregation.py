@@ -46,7 +46,8 @@ def test_check_raises_when_actor_created_the_run():
     with pytest.raises(HTTPException) as ei:
         check_run_segregation(actor, actor, {}, action="execute")
     assert ei.value.status_code == 403
-    assert "execute" in ei.value.detail
+    assert ei.value.detail["code"] == "payment_run_segregation"
+    assert "execute" in ei.value.detail["message"]
 
 
 def test_check_passes_for_a_different_actor():
@@ -68,7 +69,8 @@ def test_action_verb_appears_in_message():
     actor = uuid.uuid4()
     with pytest.raises(HTTPException) as ei:
         check_run_segregation(actor, actor, {}, action="approve")
-    assert "approve" in ei.value.detail
+    assert ei.value.detail["code"] == "payment_run_segregation"
+    assert "approve" in ei.value.detail["message"]
 
 
 # ── Endpoint wiring (realdb) ──────────────────────────────────────────
@@ -166,7 +168,8 @@ async def test_execute_refuses_the_user_who_created_the_run(realdb):
                 run_id=run_id, db=db, org=_org(org_id), user=_user(creator), entity_id=None
             )
     assert ei.value.status_code == 403
-    assert "execute" in ei.value.detail
+    assert ei.value.detail["code"] == "payment_run_segregation"
+    assert "execute" in ei.value.detail["message"]
 
     # Nothing moved: the run is still draft.
     async with mk() as s:
@@ -242,7 +245,8 @@ async def test_cfo_approve_refuses_the_user_who_created_the_run(realdb):
                 run_id=run_id, db=db, org=_org(org_id), user=_user(creator), entity_id=None
             )
     assert ei.value.status_code == 403
-    assert "approve" in ei.value.detail
+    assert ei.value.detail["code"] == "payment_run_segregation"
+    assert "approve" in ei.value.detail["message"]
 
 
 @pytest.mark.asyncio
@@ -272,7 +276,8 @@ async def test_resume_refuses_the_user_who_created_the_run(realdb):
                 run_id=run_id, db=db, org=_org(org_id), user=_user(creator), entity_id=None
             )
     assert ei.value.status_code == 403
-    assert "execute" in ei.value.detail
+    assert ei.value.detail["code"] == "payment_run_segregation"
+    assert "execute" in ei.value.detail["message"]
 
     # Nothing moved: the payment is still pending, the run still executing.
     async with mk() as s:

@@ -110,6 +110,14 @@ void main() {
       localizeCodedRefusal(de, refusal('invoice_stale_approval')),
       de.codedRefusalInvoiceStaleApproval,
     );
+    expect(
+      localizeCodedRefusal(de, refusal('mfa_code_invalid')),
+      de.codedRefusalMfaCodeInvalid,
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('payment_run_awaiting_cfo')),
+      de.codedRefusalPaymentRunAwaitingCfo,
+    );
   });
 
   test('the CFO gate names both figures and what was measured', () {

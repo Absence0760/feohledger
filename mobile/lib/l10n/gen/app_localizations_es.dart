@@ -4306,6 +4306,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Esta remesa supera el umbral de aprobación del CFO de la organización y espera la aprobación de un usuario con el rol de CFO.';
 
   @override
+  String get codedRefusalMfaCodeInvalid =>
+      'Ese código no es válido. Compruebe su aplicación de autenticación e inténtelo de nuevo.';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       'Solo una remesa en borrador, o una cuyo archivo bancario se exportó, puede registrarse como pagada.';
 

@@ -337,13 +337,18 @@ async def test_verify_mfa_failure_writes_audit_action():
         _patch.object(auth_mod, "dispatch_auth_audit", _fake_audit),
         _patch.object(auth_mod.settings, "mfa_enabled", True),
     ):
-        with pytest.raises(HTTPException):
+        with pytest.raises(HTTPException) as exc:
             await auth_mod.verify_mfa(
                 MFAVerifyRequest(challenge_token=challenge, code="000000", method="totp"),
                 _mfa_request(),
                 db,
             )
 
+    # The sign-in challenge's wrong code is coded so the login page states it
+    # in the reader's language, and stays a 401: no session exists to end
+    # (decisions §NEW-R1).
+    assert exc.value.status_code == 401
+    assert exc.value.detail == {"code": "mfa_code_invalid", "message": "Invalid code", "params": {}}
     assert "auth.mfa.verify.failure" in audit_calls
     assert "auth.mfa.verify.success" not in audit_calls
     assert "auth.login.success" not in audit_calls

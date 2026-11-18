@@ -964,7 +964,7 @@ async def verify_mfa(
                 entity_id=user.id,
                 details={"method": "totp", "ip": ip},
             )
-            raise HTTPException(status_code=401, detail="Invalid code")
+            raise HTTPException(status_code=401, detail=MFA_CODE_INVALID_DETAIL)
     elif body.method == "email":
         if not await mfa.verify_email_otp(user.id, body.code):
             await record_auth_failure(
