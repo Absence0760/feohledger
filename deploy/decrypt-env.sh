@@ -155,12 +155,12 @@ FINGERPRINT_KEY_VALUE=$(env_value FEOH_PAYEE_FINGERPRINT_KEY)
 	die "FEOH_PAYEE_FINGERPRINT_KEY equals FEOH_SECRET_KEY — it must be its own key, or every JWT rotation flags old voids (docs/secrets-rotation.md)."
 
 # The app refuses to boot with the console email adapter in a deployed env
-# (config.py _refuse_console_email_in_deployed_envs): it logs every temporary
-# password, reset link and sign-in code instead of sending them. The presence
+# (config.py _refuse_console_email_in_deployed_envs): it logs every
+# set-password link, reset link and sign-in code instead of sending them. The presence
 # loop above already refuses the var unset (the app's default is console).
 EMAIL_PROVIDER_VALUE=$(grep -E '^FEOH_EMAIL_PROVIDER=' .env.tmp | tail -1 | cut -d= -f2- | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]' || true)
 [ "$EMAIL_PROVIDER_VALUE" != console ] ||
-	die "FEOH_EMAIL_PROVIDER=console would log every temporary password, reset link and sign-in code instead of sending them — set it to ses."
+	die "FEOH_EMAIL_PROVIDER=console would log every set-password link, reset link and sign-in code instead of sending them — set it to ses."
 
 # Invoice extraction is the one adapter with no mock fallback in a deployed env
 # (services/extraction.py resolve_platform_provider): with neither var set,
