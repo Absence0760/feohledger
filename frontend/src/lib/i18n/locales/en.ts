@@ -2054,6 +2054,7 @@ export const en = {
 	'cfo.kpi.committed': 'Committed',
 	'cfo.kpi.pipeline': 'Pipeline (pending)',
 	'cfo.kpi.discountIfEarly': 'Discount if paid early',
+	'cfo.kpi.overdue': 'Overdue (owed now)',
 	'cfo.chart.projectedOutflows': 'Projected outflows ({granularity})',
 	'cfo.chart.barAria': 'Committed {committed}, pending {pending}',
 	'cfo.chart.barAriaOverdue': 'Overdue {overdue}, committed {committed}, pending {pending}',
@@ -2073,6 +2074,7 @@ export const en = {
 	'cfo.whatif.netOutflow': 'net outflow',
 	'cfo.whatif.discountCaptured': '+{amount} discount captured',
 	'cfo.whatif.daysToPay': '~{days} days to pay',
+	'cfo.whatif.overdueIncluded': 'incl. {amount} already overdue',
 	'cfo.position.title': 'Cash position',
 	'cfo.position.enterOpening': 'Enter an opening bank balance above to project the running cash position.',
 	'cfo.position.breach': '{n, plural, one {⚠ # period projects below your minimum-balance alert.} other {⚠ # periods project below your minimum-balance alert.}}',
@@ -2139,6 +2141,7 @@ export const en = {
 	'cfo.position.colOpening': 'Opening',
 	'cfo.position.colOutflow': 'Outflow',
 	'cfo.position.colClosing': 'Closing',
+	'cfo.position.overdueIncluded': 'incl. {amount} overdue, owed now',
 	'cfo.position.belowMinimum': 'Below minimum',
 	'cfo.position.empty': 'No outflows projected in this window.',
 

@@ -1909,6 +1909,7 @@ export const messages = {
 	'cfo.kpi.committed': 'Zugesagt',
 	'cfo.kpi.pipeline': 'Pipeline (ausstehend)',
 	'cfo.kpi.discountIfEarly': 'Rabatt bei früher Zahlung',
+	'cfo.kpi.overdue': 'Überfällig (jetzt fällig)',
 	'cfo.chart.projectedOutflows': 'Prognostizierte Abflüsse ({granularity})',
 	'cfo.chart.barAria': 'Zugesagt {committed}, ausstehend {pending}',
 	'cfo.chart.barAriaOverdue': 'Überfällig {overdue}, zugesagt {committed}, ausstehend {pending}',
@@ -1928,6 +1929,7 @@ export const messages = {
 	'cfo.whatif.netOutflow': 'Nettoabfluss',
 	'cfo.whatif.discountCaptured': '+{amount} Rabatt erfasst',
 	'cfo.whatif.daysToPay': '~{days} Tage bis zur Zahlung',
+	'cfo.whatif.overdueIncluded': 'inkl. {amount} bereits überfällig',
 	'cfo.position.title': 'Liquiditätsposition',
 	'cfo.position.enterOpening': 'Geben Sie oben ein Anfangs-Bankguthaben ein, um die laufende Liquiditätsposition zu projizieren.',
 	'cfo.position.breach': '{n, plural, one {⚠ # Periode liegt voraussichtlich unter Ihrem Mindestguthaben-Alarm.} other {⚠ # Perioden liegen voraussichtlich unter Ihrem Mindestguthaben-Alarm.}}',
@@ -1991,6 +1993,7 @@ export const messages = {
 	'cfo.position.colOpening': 'Anfang',
 	'cfo.position.colOutflow': 'Abfluss',
 	'cfo.position.colClosing': 'Ende',
+	'cfo.position.overdueIncluded': 'inkl. {amount} überfällig, jetzt fällig',
 	'cfo.position.belowMinimum': 'Unter Mindestguthaben',
 	'cfo.position.empty': 'Keine prognostizierten Abflüsse in diesem Zeitraum.',
 

@@ -1115,6 +1115,13 @@ The rule now:
   `overdue_amount` / `overdue_count`, since re-timing cannot make it on time.
 - The `cashflow_forecast` CSV appends `overdue_amount`, `overdue_count` after
   `count` (positional readers keep the first eight columns).
+- `/cfo` shows it everywhere a total includes it, so the visible parts always
+  sum: an "Overdue (owed now)" KPI card beside Committed and Pipeline (only
+  when `overdue_count > 0`), a note under the first cash-position row's
+  outflow, and an "incl. … already overdue" line on each what-if card. In the
+  bar chart the overdue segment is hatched and every adjacent pair of segments
+  is split by a 2px `--surface` rule, because `--danger` against `--accent` is
+  only 1.13:1 dark / 1.02:1 light (each segment is >= 5.5:1 against the rule).
 
 Guards: `tests/test_cashflow_forecast_api.py` (the probe, across the three
 endpoints), `tests/test_analytics.py` (pure bucketing / what-if / position),

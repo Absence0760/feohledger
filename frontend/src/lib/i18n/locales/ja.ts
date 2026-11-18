@@ -1868,6 +1868,7 @@ export const messages = {
 	'cfo.kpi.committed': '確定済み',
 	'cfo.kpi.pipeline': 'パイプライン（保留中）',
 	'cfo.kpi.discountIfEarly': '早期支払時の割引',
+	'cfo.kpi.overdue': '期日超過（支払義務あり）',
 	'cfo.chart.projectedOutflows': '予測される支出（{granularity}）',
 	'cfo.chart.barAria': '確定済み {committed}、保留中 {pending}',
 	'cfo.chart.barAriaOverdue': '期日超過 {overdue}、確定済み {committed}、保留中 {pending}',
@@ -1887,6 +1888,7 @@ export const messages = {
 	'cfo.whatif.netOutflow': '正味支出',
 	'cfo.whatif.discountCaptured': '+{amount} の割引を獲得',
 	'cfo.whatif.daysToPay': '支払まで約{days}日',
+	'cfo.whatif.overdueIncluded': 'うち期日超過 {amount}',
 	'cfo.position.title': '現金ポジション',
 	'cfo.position.enterOpening': '上に期初の銀行残高を入力すると、現金ポジションの推移を予測できます。',
 	'cfo.position.breach': '{n, plural, other {⚠ # 期間が最低残高アラートを下回る見込みです。}}',
@@ -1949,6 +1951,7 @@ export const messages = {
 	'cfo.position.colOpening': '期初',
 	'cfo.position.colOutflow': '支出',
 	'cfo.position.colClosing': '期末',
+	'cfo.position.overdueIncluded': 'うち期日超過 {amount}（現時点で支払義務あり）',
 	'cfo.position.belowMinimum': '最低残高未満',
 	'cfo.position.empty': 'この期間に予測される支出はありません。',
 

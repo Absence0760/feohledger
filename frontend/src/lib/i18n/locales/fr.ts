@@ -1909,6 +1909,7 @@ export const messages = {
 	'cfo.kpi.committed': 'Engagé',
 	'cfo.kpi.pipeline': 'Pipeline (en attente)',
 	'cfo.kpi.discountIfEarly': 'Remise si payé tôt',
+	'cfo.kpi.overdue': 'En retard (dû maintenant)',
 	'cfo.chart.projectedOutflows': 'Sorties projetées ({granularity})',
 	'cfo.chart.barAria': 'Engagé {committed}, en attente {pending}',
 	'cfo.chart.barAriaOverdue': 'En retard {overdue}, engagé {committed}, en attente {pending}',
@@ -1928,6 +1929,7 @@ export const messages = {
 	'cfo.whatif.netOutflow': 'sortie nette',
 	'cfo.whatif.discountCaptured': '+{amount} de remise capturée',
 	'cfo.whatif.daysToPay': '~{days} jours avant paiement',
+	'cfo.whatif.overdueIncluded': 'dont {amount} déjà en retard',
 	'cfo.position.title': 'Position de trésorerie',
 	'cfo.position.enterOpening': 'Saisissez un solde bancaire d\'ouverture ci-dessus pour projeter la position de trésorerie courante.',
 	'cfo.position.breach': '{n, plural, one {⚠ # période projette en dessous de votre alerte de solde minimum.} other {⚠ # périodes projettent en dessous de votre alerte de solde minimum.}}',
@@ -1991,6 +1993,7 @@ export const messages = {
 	'cfo.position.colOpening': 'Ouverture',
 	'cfo.position.colOutflow': 'Sortie',
 	'cfo.position.colClosing': 'Clôture',
+	'cfo.position.overdueIncluded': 'dont {amount} en retard, dû maintenant',
 	'cfo.position.belowMinimum': 'Sous le minimum',
 	'cfo.position.empty': 'Aucune sortie projetée dans cette fenêtre.',
 
