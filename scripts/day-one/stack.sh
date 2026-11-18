@@ -223,17 +223,15 @@ cmd_provision() {
 	write_env
 	# shellcheck source=deploy/lib.sh
 	. deploy/lib.sh
-	# No --admin-password: the operator's path in #566, a generated temporary
-	# password whose change is forced at first login.
-	feoh_tenant_argv "$SLUG" "$TENANT_NAME" "$ADMIN_EMAIL" "" || die "could not build the provisioning command."
+	# add-tenant's default path: the admin gets no password, and the
+	# set-password link goes by email to Mailpit, where the journey reads it.
+	feoh_tenant_argv "$SLUG" "$TENANT_NAME" "$ADMIN_EMAIL"
 	docker exec "$API_CONTAINER" "${FEOH_TENANT_ARGV[@]}"
-	[ "$FEOH_TENANT_FORCED" = 1 ] || die "add-tenant's default path should force a password change."
 	(
 		umask 077
 		jq -n --arg slug "$SLUG" --arg name "$TENANT_NAME" --arg email "$ADMIN_EMAIL" \
-			--arg password "$FEOH_TENANT_PASSWORD" \
 			--arg mailpit "http://127.0.0.1:${MAILPIT_PORT}" \
-			'{slug: $slug, name: $name, admin_email: $email, admin_temp_password: $password, mailpit_url: $mailpit}' \
+			'{slug: $slug, name: $name, admin_email: $email, mailpit_url: $mailpit}' \
 			>"$STATE_DIR/tenant.json"
 	)
 	echo "==> tenant '${SLUG}' provisioned; admin login written to ${STATE_DIR}/tenant.json"

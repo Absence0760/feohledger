@@ -294,36 +294,31 @@ feoh_pg_run() {
 
 # ── Provisioning a tenant ────────────────────────────────────────────────────
 #
-# feoh_tenant_argv <slug> <name> <admin-email> [<admin-password>] builds the
-# command that provisions a tenant inside the api container, without running
-# it. add-tenant.sh execs it into the running api; CI's day-one job
+# feoh_tenant_argv <slug> <name> <admin-email> [print-link] builds the command
+# that provisions a tenant inside the api container, without running it.
+# add-tenant.sh execs it into the running api; CI's day-one job
 # (scripts/day-one/stack.sh) execs the same array into its api container, so
 # the rehearsal provisions exactly as production does (#575). It sets:
 #
 #   FEOH_TENANT_ARGV      the scripts/create_tenant.py command line
-#   FEOH_TENANT_PASSWORD  the admin's password: the one given, or a generated
-#                         temporary one
-#   FEOH_TENANT_FORCED    1 when the password was generated, which also forces
-#                         a change at first login; 0 otherwise
+#
+# The admin is created with NO password and emailed a single-use set-password
+# link, the one "Invite User" sends (docs/decisions.md §283): the operator never
+# holds the customer's credential. A fourth argument of 1 adds --print-link,
+# which prints the link to the operator's terminal instead of emailing it, for
+# a tenant whose mail does not work yet.
 #
 # --skip-existing makes add-tenant.sh re-runnable: a second run for a tenant
 # that already exists skips provisioning cleanly instead of tripping the
 # deliberate duplicate-slug error.
 feoh_tenant_argv() {
-	local slug=$1 name=$2 email=$3 password=${4:-}
-	FEOH_TENANT_FORCED=0
-	if [ -z "$password" ]; then
-		# Prefix guarantees the app's complexity rules (12+ chars, upper/lower/digit).
-		password="Aa1-$(openssl rand -hex 12)" || return 1
-		FEOH_TENANT_FORCED=1
-	fi
-	FEOH_TENANT_PASSWORD=$password
+	local slug=$1 name=$2 email=$3 print_link=${4:-0}
 	FEOH_TENANT_ARGV=(python scripts/create_tenant.py
 		--name "$name" --slug "$slug"
-		--admin-email "$email" --admin-password "$password"
+		--admin-email "$email"
 		--skip-existing)
-	if [ "$FEOH_TENANT_FORCED" = 1 ]; then
-		FEOH_TENANT_ARGV+=(--force-password-change)
+	if [ "$print_link" = 1 ]; then
+		FEOH_TENANT_ARGV+=(--print-link)
 	fi
 }
 

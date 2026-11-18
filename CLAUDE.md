@@ -160,7 +160,7 @@ repo — never in any `.env*`, and never in this repo.
 - **Control plane DB** (`feohledger`): organizations, users, roles
 - **Tenant DBs** (`feoh_<slug>`): invoices, vendors, payments, workflows, etc.
 - Frontend extracts subdomain → sends `X-Tenant-Slug` header → backend resolves tenant DB
-- Provision: `python scripts/create_tenant.py --name "Corp" --slug corp --admin-email admin@corp.com --admin-password changeme`
+- Provision: `python scripts/create_tenant.py --name "Corp" --slug corp --admin-email admin@corp.com --admin-password changeme` (`--admin-password` is local-dev only; without it the admin is emailed a set-password link, or `--print-link` prints it — the deployed path, `deploy/README.md` § Tenants)
 
 ## Architecture overview
 
