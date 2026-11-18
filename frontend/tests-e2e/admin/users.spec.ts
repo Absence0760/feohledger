@@ -81,10 +81,14 @@ test.describe('/admin user lifecycle', () => {
 			createdId = body.id;
 			expect(body.email).toBe(email);
 
-			// "User Created" credentials modal appears after successful create.
-			const credModal = page.locator('div.modal[role="dialog"][aria-label="User created"]');
-			await expect(credModal).toBeVisible();
-			await credModal.getByRole('button', { name: /^Done$/ }).click();
+			// The invite emails a set-password link (decisions §443): the
+			// confirmation names the address and never shows a credential.
+			expect(body).not.toHaveProperty('temporary_password');
+			const sentModal = page.locator('div.modal[role="dialog"][aria-label="Invitation sent"]');
+			await expect(sentModal).toBeVisible();
+			await expect(sentModal).toContainText(`We emailed ${email} a link to set their password.`);
+			await expect(sentModal.locator('code, input')).toHaveCount(0);
+			await sentModal.getByRole('button', { name: /^Done$/ }).click();
 
 			// Table grew by one row, and the new email appears.
 			await expect(page.locator('table tbody tr')).toHaveCount(before + 1);

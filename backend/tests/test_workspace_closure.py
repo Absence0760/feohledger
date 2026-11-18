@@ -1211,6 +1211,11 @@ class _ScanningRedis:
     async def getdel(self, key):
         return self.inner.strings.pop(key, None)
 
+    async def incr(self, key):
+        value = int(self.inner.strings.get(key, b"0")) + 1
+        self.inner.strings[key] = str(value).encode("utf-8")
+        return value
+
     async def scan_iter(self, match: str):
         import fnmatch
 
@@ -1241,6 +1246,9 @@ async def test_a_closure_clears_the_deleted_accounts_redis_keys(realdb, trial, m
     await fake.zadd(_session_key(uid), {"jti-old": 1.0})
     await fake.hset(_session_meta_key(uid), "jti-old", "{}")
     await fake.setex(f"{PENDING_ENROLL_PREFIX}{uid}", 900, "secret")
+    # An admin reset bumps the generation before minting, so the stored value
+    # carries `#<generation>` and a counter key names the account too.
+    await password_reset.revoke_outstanding(uid)
     reset_token = await password_reset.issue_reset_token(uid)
     other = await password_reset.issue_reset_token(uuid.uuid4())
 
@@ -1249,6 +1257,9 @@ async def test_a_closure_clears_the_deleted_accounts_redis_keys(realdb, trial, m
     assert _session_key(uid) not in fake.inner.zsets
     assert _session_meta_key(uid) not in fake.inner.hashes
     assert f"{PENDING_ENROLL_PREFIX}{uid}" not in fake.inner.strings
+    # The link itself is deleted, not merely superseded, and so is the counter.
+    assert password_reset._reset_key(reset_token) not in fake.inner.strings
+    assert password_reset.generation_key(uid) not in fake.inner.strings
     assert await password_reset.peek_reset_token(reset_token) is None
     # Someone else's link is untouched.
     assert await password_reset.peek_reset_token(other) is not None

@@ -60,11 +60,13 @@ async def forget_users(user_ids: list[uuid.UUID]) -> int:
             removed += await r.delete(key)
 
     async for key in r.scan_iter(match=f"{password_reset.PASSWORD_RESET_PREFIX}*"):
-        value = await r.get(key)
-        if value is None:
+        if password_reset.is_generation_key(key):
             continue
-        owner = value.decode() if isinstance(value, bytes) else str(value)
-        if owner in wanted:
+        value = await r.get(key)
+        if password_reset.stored_owner(value) in wanted:
             removed += await r.delete(key)
+    # The per-user generation counters go too: they name the deleted account.
+    for uid in user_ids:
+        removed += await r.delete(password_reset.generation_key(uid))
     logger.info("[credential-cleanup] cleared %d key(s) for %d user(s)", removed, len(user_ids))
     return removed
