@@ -1713,7 +1713,7 @@ export const messages = {
 	'recurring.skip.reason.missingAmount': 'sin importe definido',
 	'recurring.skip.reason.missingVendor': 'sin proveedor definido',
 	'recurring.skip.reason.missingBoth': 'sin proveedor ni importe definidos',
-	'recurring.glOffChart.pill': 'Recodificar cuenta',
+	'recurring.glOffChart.pill': 'Recodificar cuenta {code}',
 	'recurring.glOffChart.title':
 		'La cuenta {code} no es una cuenta activa del plan de esta plantilla, por lo que sus facturas se generan sin cuenta contable. Recodifique la plantilla.',
 	'recurring.glFilter.all': 'Cualquier cuenta contable',

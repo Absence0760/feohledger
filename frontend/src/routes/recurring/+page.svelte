@@ -482,12 +482,19 @@
 								</Badge>
 							{/if}
 							{#if template.gl_account_off_chart}
+								<!-- The dropped code is in the visible pill text and the why in
+								     a visually-hidden span: a `title` alone reaches neither a
+								     keyboard, a touch screen nor a screen reader. The tooltip
+								     stays for the pointer user. -->
 								<Badge
 									tone="warning"
 									variant="gl-off-chart"
 									title={m('recurring.glOffChart.title', { code: template.gl_account ?? '—' })}
 								>
-									{m('recurring.glOffChart.pill')}
+									{m('recurring.glOffChart.pill', { code: template.gl_account ?? '—' })}<span
+										class="visually-hidden"
+										> {m('recurring.glOffChart.title', { code: template.gl_account ?? '—' })}</span
+									>
 								</Badge>
 							{/if}
 						</span>

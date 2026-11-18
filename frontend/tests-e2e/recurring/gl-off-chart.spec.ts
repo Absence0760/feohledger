@@ -1,3 +1,5 @@
+import type { Page } from '@playwright/test';
+
 import { expect, test } from '../fixtures/helpers';
 
 /**
@@ -49,9 +51,8 @@ function template(n: number, glOffChart: boolean) {
 	};
 }
 
-test('a template coded to an account the chart dropped is badged and filterable', async ({
-	page
-}) => {
+/** Stub the list + summary, honouring `gl_off_chart`; returns the list queries seen. */
+async function stubRecurring(page: Page): Promise<URLSearchParams[]> {
 	const listQueries: URLSearchParams[] = [];
 	await page.route('**/api/recurring**', async (route) => {
 		const url = new URL(route.request().url());
@@ -87,18 +88,27 @@ test('a template coded to an account the chart dropped is badged and filterable'
 		}
 		return route.continue();
 	});
+	return listQueries;
+}
+
+test('a template coded to an account the chart dropped is badged and filterable', async ({
+	page
+}) => {
+	const listQueries = await stubRecurring(page);
 
 	await page.goto('/recurring');
 
 	const stale = page.locator('tr').filter({ hasText: 'E2E GL Template 1' });
 	const live = page.locator('tr').filter({ hasText: 'E2E GL Template 2' });
-	await expect(stale.locator('.badge.gl-off-chart')).toHaveText(
-		'Needs GL re-coding'
+	// The dropped code is in the badge's own text, and the why in a
+	// visually-hidden span — not only in a `title` tooltip, which a keyboard,
+	// a touch screen and a screen reader never reach.
+	const badge = stale.locator('.badge.gl-off-chart');
+	await expect(badge).toContainText('GL 6800 needs re-coding');
+	await expect(badge.locator('.visually-hidden')).toHaveText(
+		/GL 6800 is not an active account in this template’s chart/
 	);
-	await expect(stale.locator('.badge.gl-off-chart')).toHaveAttribute(
-		'title',
-		/6800/
-	);
+	await expect(badge).toHaveAttribute('title', /6800/);
 	await expect(live).toBeVisible();
 	await expect(live.locator('.badge.gl-off-chart')).toHaveCount(0);
 
@@ -112,4 +122,21 @@ test('a template coded to an account the chart dropped is badged and filterable'
 	await expect(stale).toBeVisible();
 	await expect(page).toHaveURL(/[?&]gl=off_chart/);
 	expect(listQueries.at(-1)?.get('gl_off_chart')).toBe('true');
+});
+
+test('a deep link to /recurring?gl=off_chart arrives filtered', async ({ page }) => {
+	const listQueries = await stubRecurring(page);
+
+	// A fresh load — no click — must read the filter from the URL: the chip
+	// pressed, the server asked for the narrowed set, only that set listed.
+	await page.goto('/recurring?gl=off_chart');
+
+	const stale = page.locator('tr').filter({ hasText: 'E2E GL Template 1' });
+	await expect(stale).toBeVisible();
+	await expect(page.locator('tr').filter({ hasText: 'E2E GL Template 2' })).toHaveCount(0);
+	const chip = page.getByRole('button', { name: /Needs GL re-coding/ });
+	await expect(chip).toHaveAttribute('aria-pressed', 'true');
+	await expect(page).toHaveURL(/[?&]gl=off_chart/);
+	expect(listQueries.length).toBeGreaterThan(0);
+	expect(listQueries.every((q) => q.get('gl_off_chart') === 'true')).toBe(true);
 });

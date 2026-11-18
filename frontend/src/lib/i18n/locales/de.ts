@@ -1715,7 +1715,7 @@ export const messages = {
 	'recurring.skip.reason.missingAmount': 'kein Betrag hinterlegt',
 	'recurring.skip.reason.missingVendor': 'kein Lieferant hinterlegt',
 	'recurring.skip.reason.missingBoth': 'kein Lieferant und kein Betrag hinterlegt',
-	'recurring.glOffChart.pill': 'Sachkonto neu zuordnen',
+	'recurring.glOffChart.pill': 'Sachkonto {code} neu zuordnen',
 	'recurring.glOffChart.title':
 		'Sachkonto {code} ist kein aktives Konto im Kontenplan dieser Vorlage, daher werden ihre Rechnungen ohne Sachkonto erstellt. Kontieren Sie die Vorlage neu.',
 	'recurring.glFilter.all': 'Jedes Sachkonto',
