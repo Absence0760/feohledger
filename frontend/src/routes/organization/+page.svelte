@@ -540,7 +540,12 @@
 				cardsCustomerHashId = (cards.customer_hash_id as string) || '';
 				cardsWalletHashId = (cards.wallet_hash_id as string) || '';
 				cardsExpiryDays = (cards.default_expiry_days as number) || 30;
-				cardsSandbox = (cards.sandbox as boolean) ?? true;
+				// A stored block with no `sandbox` key runs LIVE: the card adapters
+				// read `config.get("sandbox", False)`. Showing it as testing made the
+				// next save silently move the block to sandbox (and, since §NEW-S1,
+				// drop its keys). A block never configured keeps the declared
+				// default above.
+				cardsSandbox = typeof cards.sandbox === 'boolean' ? cards.sandbox : false;
 			}
 			// Security (MFA enforcement)
 			const mfaCfg = (data.settings as unknown as Record<string, unknown>).mfa as
