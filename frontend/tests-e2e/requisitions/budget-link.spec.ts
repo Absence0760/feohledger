@@ -154,7 +154,8 @@ test.describe('/requisitions budget link', () => {
 				'Over budget, counting this requisition: -$50.00 of $100.00 left.'
 			);
 			await expect(detail.getByTestId('requisition-budget-overspend')).toHaveCount(0);
-			await expect(detail.getByTestId('requisition-budget-status')).toHaveCount(0);
+			// No pre-check on a submitted requisition: its idle status region is empty.
+			await expect(detail.getByTestId('requisition-budget-status')).toBeHidden();
 		} finally {
 			cleanup([usd.id, eur.id], [number]);
 		}
