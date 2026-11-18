@@ -2292,8 +2292,25 @@ operator override keeps a plain client. Every adapter's host class is in
 ```bash
 pnpm erp:up      # start fake-erp (compose profile erp, :12112); erp:down / erp:logs too
 pnpm dev         # backend picks up the .env.development fake-erp base URLs
-pnpm test:erp    # Playwright suite frontend/tests-e2e/erp/ (merge-dev / netsuite / dynamics specs)
+pnpm test:erp    # Playwright suite frontend/tests-e2e/erp/ (one spec per adapter, plus webhooks and fake-erp hardening)
 ```
+
+**OAuth connects, two ways.** The Xero, Sage Business Cloud Accounting and
+Blackbaud FE NXT specs connect in `beforeEach` through the API: the
+`/authorize` call, then the fake's authorize 302 and the callback fetched by
+hand. Each also has one test that connects **in the browser**
+(`connectOAuthThroughPanel`, `tests-e2e/erp/helpers.ts`): Organization → ERP,
+choose the ERP, type its required fields (Blackbaud's AP account and ledger
+currency), click Connect, and let the page navigate to fake-erp's authorize
+endpoint, the 302 to `/api/erp/oauth/callback`, and the 302 back to the
+tenant's `/organization`. It asserts those hops in order, the panel's
+"is now connected" message and the company it names, then posts a bill. That
+is the only coverage of the browser-only parts of the flow: the
+`SameSite=None; Secure` nonce cookie crossing from `<slug>.localhost` to the
+API host on loopback, and the callback finding it on a top-level navigation
+(`erp_oauth.browser_cookie_attributes`). The landing address comes from
+`FEOH_TENANT_URL_TEMPLATE`, so a backend serving a non-default web origin must
+set it to match (`frontend/tests-e2e/README.md` § Ports).
 
 Coverage per spec: `test_connection`, PO sync (`list_pos`), GL-account sync
 (`list_gl_accounts`), vendor sync (`list_vendors` — Merge.dev asserts the
