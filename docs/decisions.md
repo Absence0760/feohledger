@@ -22969,3 +22969,14 @@ plan-driven run should cap how overdue an invoice may be is an open product
 question for the operator. A cap would be a `settings.cash_flow` integer
 applied before staging, folded into the plan's derivation so the plan and the
 run agree, with the forecast's overdue slice left uncapped.
+
+## §NEW-L5. A split's currency mismatch with a malformed invoice code names every leg's code (amends §445, round 16, 2026-11-18)
+
+A split whose legs' codes disagree is `different` even when the invoice's own
+code is malformed (§445), and `po_currency_mismatch` then read "Invoice is in
+ but PO … is in EUR": a blank, and one leg's code standing for the whole PO.
+That is its own code, `po_currency_mismatch_invoice_currency_unknown` (with a
+PO-match issue twin), not a fallback word in a param: a word in a sentence
+selects the code (`backend/docs/invoice-warnings.md`). It names every code the
+legs record, in one `text` param (`poCurrencies`, "USD, EUR"), because no
+single code is honest about a split that spans several. The hold is unchanged.

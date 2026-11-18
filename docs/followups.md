@@ -1824,13 +1824,6 @@ user-visible halves still open.
       CI (pinned 2.10 by the lock) passes. **Durable fix:** a `TOTP_SECRET` of
       at least 16 base32 characters in that test. **Trigger:** the next pyotp
       bump.
-- [ ] **(c) A malformed invoice currency prints a blank in the split currency
-      warning.** When an invoice's own code is malformed and a split's legs
-      disagree (§445), `po_currency_mismatch` reads "Invoice is in  but PO …
-      is in EUR". It needs a stored malformed code, which the NOT NULL column
-      with a USD default makes rare. **Durable fix:** a variant sentence for
-      an unknown invoice currency. **Trigger:** the next change to the warning
-      catalogue.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

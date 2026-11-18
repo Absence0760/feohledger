@@ -38,16 +38,28 @@ accounts, left uncoded").
 
 ## One code per SENTENCE, not per type
 
-`po_mismatch` is seven different sentences (no PO, an amount variance, an amount
-variance against a PO that records no currency, a currency mismatch, a partial
-receipt, an over-receipt, an unquantified over-receipt) and `quality_hold` is
-five more. The two currency codes (`po_amount_variance_po_currency_unknown`,
+`po_mismatch` is a dozen different sentences (no PO, a cancelled or unissued
+PO, an unverifiable PO total, an amount variance, an amount variance against a
+PO that records no currency, a currency mismatch, a currency mismatch on a
+split whose invoice records no valid code, a partial receipt, an over-receipt,
+an unquantified over-receipt, …) and `quality_hold` is five more. The two currency codes (`po_amount_variance_po_currency_unknown`,
 `po_currency_mismatch` — `docs/decisions.md` §197) show why a `money` kind is not
 always right for a money figure: a warning has ONE `currency` param to format
 its money with, so a PO total whose currency is unknown rides a `number` param
 and renders unlabelled, and two codes that are the finding itself ride `text`. A label keyed on `type` could only ever name one of them, which is
 why `decisions.md` §155 filed this as needing a *parameterized* catalogue
 rather than a label map.
+
+A currency mismatch whose invoice code is malformed has its own code,
+`po_currency_mismatch_invoice_currency_unknown` (and its PO-match panel twin
+`po_match.issue.currency_mismatch_invoice_currency_unknown`). Only a multi-PO
+split reaches it: a single PO compares as `unknown` when either code is
+missing, but a split whose legs' own codes disagree is `different` whatever the
+invoice says (`docs/decisions.md` §445). "Invoice is in {invoiceCurrency}"
+then had nothing to print, and `poCurrency` named one leg as if it were the
+whole PO, so the variant names every code the legs record in one `text` param,
+`poCurrencies` ("USD, EUR"). `po_currency_mismatch` itself is only ever built
+with both codes known.
 
 `app/services/invoice_warning_catalog.py` is that catalogue. It declares, per
 code: the `type` it belongs to, the English template, and each placeholder's
