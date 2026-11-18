@@ -1775,15 +1775,19 @@ user-visible halves still open.
 
 ### Surfaced by round 15 (2026-11-18, round PR #731, decisions §445–§453)
 
-- [ ] **(c) The invoice PATCH still writes `""` as "no currency".**
-      `invoices.currency` is NOT NULL, so a blanked currency lands as `""`
-      rather than NULL. Every money path now refuses it (`/draft-run` skips it,
-      §453; the run builder, the payment queue, `POST /api/payments` and
-      dispatch refuse it as `currency_unknown`, round 16), but each reader has
-      to know that `""` means unknown. **Durable fix:** stop the PATCH writing
-      `""` at all (refuse a blank, or make the column nullable with an
-      explicit unknown), with a migration for rows already blank. **Trigger:**
-      the next change to the invoice PATCH's currency handling or the
+- [ ] **(c) Invoices already holding `""` as "no currency" stay blank.**
+      `invoices.currency` is NOT NULL, so a currency blanked before round 17
+      landed as `""` rather than NULL. The PATCH no longer writes it: a blank,
+      `null` or malformed `currency` is a coded 422 (decisions §NEW-R2), and
+      create, CSV import and approve-with-corrections never could. What is
+      left is the rows already blank: every money path refuses them (`/draft-run`
+      skips them, §453; the run builder, the payment queue, `POST
+      /api/payments` and dispatch refuse them as `currency_unknown`, §457), but
+      each reader still has to know that `""` means unknown, and the PATCH lets
+      a blank row be edited without naming a currency. **Durable fix:** the
+      nullable column of the "currency unknown" entry above, with a tenant
+      migration turning `""` into NULL so the one explicit unknown replaces the
+      sentinel. **Trigger:** that entry's migration, or the next change to the
       `invoices.currency` column.
 
 ## (a) Blocked on external credentials, accounts, or hardware
