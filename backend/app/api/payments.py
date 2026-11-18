@@ -5315,7 +5315,8 @@ async def export_run_nacha(
             raise _refuse(
                 NACHA_PAYMENT_NOT_ACH, "only ACH payments can go in a NACHA file.", invoice
             )
-        if (invoice.currency or "").upper() != "USD":
+        # The run builder's own predicate: " usd" is USD, a blank is no currency.
+        if payable_currency_code(invoice.currency) != "USD":
             raise _refuse(NACHA_CURRENCY_NOT_USD, "a NACHA file carries USD only.", invoice)
         if payment.amount > NACHA_MAX_ENTRY_AMOUNT:
             raise _refuse(

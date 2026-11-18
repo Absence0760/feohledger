@@ -23315,3 +23315,54 @@ connection reads as "reconnect" (`erp_oauth` treats a missing refresh token as
 not connected). The organization page has no per-block "remove all" control to
 attach this to, since each secret field has its own "remove the stored value",
 so the action is API-only for now; the button is tracked in `docs/followups.md`.
+
+## §NEW-T3. An invoice with no currency clears no approval limit and matches no contract (round 19, 2026-11-18)
+
+Rounds 16 and 17 (§453, §457, §460, §462) stopped the payment rails, the ERP
+push and the invoice PATCH from reading a blank currency as USD. The approval
+gates still did it in two places. `currency_conversion.reporting_amount_at_locked_rate`
+read `currency or reporting_currency`, so a NULL code was treated as already in
+the reporting currency and compared against `max_invoice_amount` and
+`require_cfo_above` at face value. `review._enforce_approval_thresholds` also
+substituted `"USD"` for its structuring aggregate, summing the vendor's USD
+spend against a figure in an unknown currency. That is §196's substitution
+inside an approval gate.
+
+**Decision.** The locked-rate helper judges the code with the shared predicate,
+`payment_runs.payable_currency_code`, so NULL, blank, whitespace-only and
+malformed codes all mean "no currency". Such an amount is `unconverted`. Every
+consumer already reads that as fail-closed (§160's `GateAmount`): both approval
+gates fire, auto-approve does not, chain bands apply every level, and the
+payment-run and standalone-payment CFO gates demand a CFO. Fixing the one helper
+covers all of them, rather than adding a check at each of ten call sites. The
+refusal reuses the existing coded shape (`approval_max_amount_exceeded` /
+`approval_cfo_required`, `params.expressible: false`, `params.currency: null`).
+Its English note now says the invoice "records no currency", because "could not
+be expressed in USD" invites the reader to look for a missing FX rate. The
+structuring aggregate and the extraction auto-approve aggregate are skipped for
+a code-less invoice. There is no currency to scope them to, and the gate fails
+closed regardless.
+
+**Contract compliance.** A code-less invoice matches no contract currency, so
+it is not summed into a USD contract's spend or measured against its limit.
+That leaves no finding to warn on, which already happens to an invoice whose
+currency differs from the contract's. A dedicated finding for both cases needs
+a new warning code across six web locales and the mobile catalogue, so it is
+tracked in `docs/followups.md`. The approval gate and the payment rails both
+refuse a code-less invoice, so it cannot be paid in the meantime.
+
+**Displays.** Assignment and escalation notifications, chat messages, vendor
+notices, the audit summary (template and LLM prompt) and the LLM fraud adapters
+state the figure bare and pass `null` to a model, never `USD`. That matches
+`formatMoney`, which renders a missing code as a bare number. `InvoiceContext`
+and `ChatMessage` now default `currency` to `None`. The old `"USD"` default
+silently dollarised any caller that omitted it.
+
+**NACHA.** The file preflight's USD check now uses the same predicate, so
+` usd ` is USD there as it is in the run builder.
+
+**Left alone.** Reporting-currency defaults (`cashflow`, `budget_service`,
+`adaptive_workflows`, `tax_1099`) read the org's reporting currency, not an
+invoice's. `adaptive_workflows` does call the locked-rate helper, and its
+code-less rows now come back `unconverted`. That keeps them out of the
+threshold statistics, which is the direction its docstring asks for.
