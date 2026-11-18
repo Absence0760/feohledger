@@ -757,6 +757,20 @@ describe('the ERP send refused because of the vendor', () => {
 	});
 });
 
+describe('the ERP send refused for an invoice with no payable currency', () => {
+	it('states the 409 the send doors answer with', () => {
+		expect(localizeApiDetail(detail('currency_blocks_erp_export', {}), enT)).toBe(
+			EN_ALL['erpRefusal.currencyBlocksExport']
+		);
+		expect(codedRefusalText('currency_blocks_erp_export', {}, deT)).toBe(
+			de['erpRefusal.currencyBlocksExport']
+		);
+		expect(codedRefusalText('currency_blocks_erp_export', { possibly_posted: true }, enT)).toBe(
+			`${EN_ALL['erpRefusal.currencyBlocksExport']} ${EN_ALL['erpRefusal.vendorHoldPossiblyPosted']}`
+		);
+	});
+});
+
 describe('the ERP send refused for an open duplicate or fraud exception (§286)', () => {
 	it('states the 409 the send doors answer with, in the reader’s language', () => {
 		expect(

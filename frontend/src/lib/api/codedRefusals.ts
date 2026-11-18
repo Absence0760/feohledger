@@ -58,6 +58,7 @@ import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRef
 import { authRefusalText } from '#lib/api/authRefusals.ts';
 import { ownWorkspaceSignInUrl } from '#lib/api/sessionRejection.ts';
 import {
+	CURRENCY_BLOCKS_ERP_EXPORT,
 	ERP_CALL_BUDGET_EXHAUSTED,
 	EXCEPTION_BLOCKS_ERP_EXPORT,
 	PAYMENT_BLOCKS_ERP_EXPORT,
@@ -592,6 +593,9 @@ const BUILDERS: Record<string, Builder> = {
 	// sanctions-held, rejected), the same way.
 	[VENDOR_BLOCKS_ERP_EXPORT]: (p, t) =>
 		erpRefusalText({ code: VENDOR_BLOCKS_ERP_EXPORT, params: p }, t),
+	// ...and for an invoice with no payable currency, the same way.
+	[CURRENCY_BLOCKS_ERP_EXPORT]: (p, t) =>
+		erpRefusalText({ code: CURRENCY_BLOCKS_ERP_EXPORT, params: p }, t),
 	// `api/refusals.py::erp_pull_failure` — a chart / vendor / PO sync whose
 	// OAuth connection is gone (the ERP panel's own "not connected" sentence),
 	// or whose listing could not be read whole, so nothing synced.

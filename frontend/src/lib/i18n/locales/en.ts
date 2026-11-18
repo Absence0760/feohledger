@@ -5610,6 +5610,7 @@ export const en = {
 	'erpRefusal.vendorRejected': "This invoice's vendor has been rejected. Link the invoice to the correct vendor before sending it to the ERP.",
 	'erpRefusal.vendorStatusUnknown': "This invoice's vendor has a status that cannot be sent to the ERP. Set the vendor to active before sending the invoice to the ERP.",
 	'erpRefusal.vendorHoldPossiblyPosted': "An earlier attempt may already have created the bill in the ERP; check there before anyone pays it.",
+	'erpRefusal.currencyBlocksExport': "This invoice has no valid currency. Set its currency before sending it to the ERP.",
 	'erpRefusal.cardBlocksExport': "A virtual card has been issued to pay this invoice. Cancel the card before sending the invoice to the ERP.",
 	'erpRefusal.cardBlocksExportPossiblyPosted': "A virtual card has been issued to pay this invoice, and an earlier attempt may already have created the bill in the ERP. Check the ERP and make sure nobody pays the bill there as well.",
 	'glAccounts.toast.synced': "Synced {created} new and {updated} updated accounts.",

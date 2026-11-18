@@ -352,6 +352,8 @@ ERP_REFUSAL_CODES: frozenset[str] = frozenset(
         "payment_blocks_erp_export",
         # `services/erp_export_gate`: the vendor is blocked, sanctions-held or rejected
         "vendor_blocks_erp_export",
+        # `services/erp_export_gate`: the invoice has no payable currency
+        "currency_blocks_erp_export",
         # `services/erp` itself: the invoice is due before it is dated
         "invoice_due_before_date",
         # `services/erp` itself: a push with no attempts left, and one stranded

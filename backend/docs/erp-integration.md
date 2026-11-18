@@ -1591,6 +1591,25 @@ re-screen it, or re-link the invoice to the right vendor, then send again.
 Tests: `tests/test_erp_export_blocking_exceptions.py` (each state × each door,
 `_call_erp`, the shared-read parity with the run gate).
 
+### An invoice with no payable currency refuses the push
+
+The payload used to say `invoice.currency or "USD"`, so an invoice whose
+currency was blank, whitespace-only or malformed was booked in the ERP as a
+USD bill, payable there in a currency nobody chose, past the run gate's
+`currency_unknown` refusal (decisions §457). The gate now judges the column
+with the run gate's own predicate, `payment_runs.payable_currency_code`
+(`erp_export_gate.erp_export_currency_unknown`), and `_build_payload` carries
+that predicate's normalised code (trimmed, upper-cased) with no fallback.
+
+Code `currency_blocks_erp_export`, no params beyond `possibly_posted: true` on
+the same terms as above (the stored value is free text and is never echoed);
+checked last, after the vendor hold, at the same places (409 at `/complete`,
+`/send-to-erp`, `/retry-erp`; `failed` on the first attempt at `_call_erp`,
+before any adapter). What the user does: set the invoice's currency, then send
+again. Tests: `tests/test_erp_export_blocking_exceptions.py` (each door ×
+blank / whitespace / malformed, a normalisable code still books, `_call_erp`,
+the payload).
+
 ## GL accounts and vendors are linked by the ERP's unique key
 
 A bill posts on `gl_accounts.erp_account_id` (§ above), so which ERP account a

@@ -23126,3 +23126,29 @@ Rejected: a `settings.cash_flow` cap left off by default, which adds a setting
 with no case that the existing holds do not cover better; and a 90-day default,
 which would change behaviour for every tenant to hide its oldest debts. The
 operator delegated the call to the round coordinator.
+
+## §NEW-R5. The ERP push refuses an invoice with no payable currency (round 17, 2026-11-18)
+
+**Problem.** `services/erp._build_payload` sent `currency=invoice.currency or
+"USD"`. An invoice whose currency was blank, whitespace-only or malformed was
+booked in the ERP as a USD bill, where a bookkeeper can pay it directly. §457
+removed that substitution from every payment surface (`currency_unknown`), but
+the ERP export gate (§286, §309, and the vendor hold) did not judge the
+currency, so the ERP was a way round it.
+
+**Decision.** The export gate refuses such an invoice with the coded refusal
+`currency_blocks_erp_export`, judged by `payment_runs.payable_currency_code`,
+the same predicate the run gate uses, so the two cannot disagree about what a
+payable currency is. It runs where the other export refusals run: in
+`erp._call_erp` before any adapter is built (so a push queued by the workflow's
+own advance is stopped too) and at `/complete`, `/send-to-erp` and
+`/retry-erp` with a 409 before their transition. It is checked last, so the
+earlier refusals keep their precedence. The payload carries the predicate's
+normalised code and never substitutes one. Params carry only
+`possibly_posted`; the stored value is free text and is never echoed.
+
+**Rejected.** Defaulting to the org's base currency instead of USD: still a
+guess about which currency the debt is in, and it books a liability in it.
+Letting the adapter refuse (QuickBooks already answers an unknown code with
+`currency_unknown`): not every adapter checks, and the bill is then refused
+only after an ERP round trip.
