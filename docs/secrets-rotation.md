@@ -176,10 +176,21 @@ row still names it (`SELECT DISTINCT key_id FROM provider_credentials`).
 
 **A row that can no longer be opened** (its KMS key disabled or deleted, or in
 dev a changed `FEOH_SECRET_KEY`) makes every save of that block a `503`, because
-a save merges into the stored value. A tenant admin clears it with
-`DELETE /api/organization/credentials/{block}`, which removes the row without
-opening it (audited, reason `reset_without_opening`), then types each key again.
-There is no button for it yet; it is API-only.
+a save merges into the stored value. That `503` is coded
+`credential_block_unopenable` with `params.block` naming the block, from both
+`PUT /api/organization/credentials/{block}` and a `PATCH /api/organization` that
+drops a rail's keys. A seal failure (KMS unreachable) stays an uncoded `503`: it
+is retried, never answered by removing keys.
+
+On the coded refusal, the block's panel on `/organization` (Payments, Virtual
+cards, AI extraction, ERP, Commerce) shows the admin a **Clear stored
+credentials** prompt (`components/organization/CredentialResetPrompt.svelte`).
+Its confirm says that every stored secret of the block is removed and must be
+entered again, and it then calls `DELETE
+/api/organization/credentials/{block}`, which removes the row without opening it
+(audited, reason `reset_without_opening`). The admin then types each key again.
+For `erp` that also removes the OAuth tokens sealed in the same row, so the
+connection reads as "reconnect". The DELETE can also be called directly.
 
 ### Per-subscription outbound-webhook signing secret
 
