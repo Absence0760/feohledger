@@ -1619,21 +1619,6 @@ scope (§260) — do not fold them into any of these.
 
 ### Surfaced by measuring the page-change glitch (2026-10-22, `tests-e2e/reactivity/layout-stability.spec.ts`)
 
-- [ ] **(c) A white-labelled tenant's accent flashes the platform default on
-      every cold load.** `stores/brand.svelte.ts` reads
-      `GET /api/organization/branding` only after `/auth/me` resolves, and
-      applies `--accent` / `--accent-strong` when it lands — so after a sign-in
-      or a reload the active sidebar row, the primary buttons and the pressed
-      chips paint in the default blue for a round trip and then turn the
-      tenant's colour (measured: blue → the acme seed's dark red on the first
-      page after login). Not per navigation — the store loads once a session —
-      but it is the first thing a branded tenant sees. **Durable fix:** cache
-      the two applied accent values per workspace (keyed by
-      `getTenantStorageKey()`, never the shared theme cookie) and apply them in `app.html`'s pre-paint script beside the theme, letting the
-      fetched branding correct a stale cache; clear the entry in
-      `brand.reset()`. **Trigger:** the first tenant that sets a brand accent,
-      or any white-label sale (the same trigger as the per-theme accent entry
-      above).
 - [ ] **(c) Tables without `fixed` re-flow their columns when their rows
       land.** `DataTable` uses `table-layout: auto` unless the page passes
       `fixed`, so the header cells are sized against the one "Loading…" row

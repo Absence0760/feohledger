@@ -216,3 +216,54 @@ test.describe('supplier portal brand mark', () => {
 		await expect(card.locator('img.brand-mark')).toHaveCount(0);
 	});
 });
+
+/**
+ * A branded tenant's accent before the branding read lands
+ * (docs/decisions.md §NEW-S2). The first load caches the fetched accent per
+ * workspace; on the reload the read is held open, and the accent must already
+ * be on <html> — painted by app.html's accent-boot script, not the store.
+ */
+test.describe('white-label accent before first paint', () => {
+	test('a reload paints the cached tenant accent while the branding read is in flight', async ({
+		page
+	}) => {
+		const ACCENT = '#c0392b';
+		const STRONG = '#7b1d14';
+		await stubJson(page, BRANDING, { accent_color: ACCENT, accent_strong_color: STRONG });
+		await page.goto('/');
+		const accentOnRoot = () =>
+			page.evaluate(() => document.documentElement.style.getPropertyValue('--accent'));
+		await expect.poll(accentOnRoot).toBe(ACCENT);
+
+		await page.unroute(`**${BRANDING}*`);
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		let requested!: () => void;
+		const seen = new Promise<void>((resolve) => (requested = resolve));
+		await page.route(`**${BRANDING}*`, async (route: Route) => {
+			if (new URL(route.request().url()).pathname !== BRANDING) {
+				await route.continue();
+				return;
+			}
+			requested();
+			await held;
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ accent_color: ACCENT, accent_strong_color: STRONG })
+			});
+		});
+
+		await page.reload();
+		await seen;
+		// The read is still held: only the cache can have put these here.
+		expect(await accentOnRoot()).toBe(ACCENT);
+		expect(
+			await page.evaluate(() =>
+				document.documentElement.style.getPropertyValue('--accent-strong')
+			)
+		).toBe(STRONG);
+		release();
+		await expect.poll(accentOnRoot).toBe(ACCENT);
+	});
+});

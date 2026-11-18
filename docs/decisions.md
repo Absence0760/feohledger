@@ -23156,3 +23156,36 @@ Rejected: making the column nullable here. That is the larger "currency
 unknown" follow-up (a tenant migration, the upload creating rows with NULL, and
 every reader failing closed on NULL), and it stays in `docs/followups.md` along
 with the rows already blank.
+
+## §NEW-S2. A white-label accent is cached per workspace and painted before first paint (round 18, 2026-11-18)
+
+**Problem.** `brand.svelte.ts` reads `GET /api/organization/branding` only after
+`/auth/me`, so after a sign-in or reload a branded tenant's primary buttons,
+active sidebar row and pressed chips painted the platform blue for a round trip.
+
+**Decision.** Cache the two applied values (`--accent`, `--accent-strong`) in
+the origin's `localStorage` under `feoh_brand_accent:<getTenantStorageKey()>`
+(`stores/brandAccentCache.ts`), apply them from `app.html`'s
+`<script id="accent-boot">` beside the theme script, and again in
+`ensureLoaded()` for the in-app sign-in that runs no pre-paint script. The
+fetched branding is authoritative: it overwrites or removes the entry.
+`reset()` clears it.
+
+- **Not the shared theme cookie.** That cookie is scoped to the platform apex so
+  every workspace sees it; one tenant's colour would paint another's.
+- **How the inline script finds the key without `PUBLIC_PLATFORM_DOMAINS`.**
+  `getTenantStorageKey()` is the slug, which `classifyHost` always takes from
+  the hostname's first label, or the whole hostname on a vanity host. The script
+  tries both. Storage is per origin and only the store writes it, with the
+  origin's own key, so at most one of the two can exist; there is no need to
+  repeat `classifyHost` in the inline script or template the domains into it.
+- **Validated on read, twice.** Storage is writable by anything on the origin
+  and the value lands in a CSS custom property, so the store and the script
+  each accept only the two props and only 3- or 6-digit hex literals.
+  `brandAccentCache.test.ts` runs the script against the store's reads.
+- **Written only after a successful read; a failed read keeps it.** Writing
+  before the first read would cache the empty default and erase a good entry on
+  a transient failure, and wiping the painted colour on a failed read would
+  bring back the flash this removes.
+- **No CSP hash to update:** the frontend ships no CSP (`infra/frontend.tf`,
+  SvelteKit hydration uses inline scripts).
