@@ -888,10 +888,26 @@ void main() {
       await tester.pumpWidget(_localized(const PaymentQueueScreen()));
       await _pumpUntil(tester, find.text('Vendor 1'));
 
-      expect(find.byKey(const Key('record-only-banner')), findsOneWidget);
+      final banner = find.byKey(const Key('record-only-banner'));
+      expect(banner, findsOneWidget);
+      // It leads the tab's own list, so it scrolls away with the rows rather
+      // than holding height above both tabs at a large text size, and it
+      // sends the reader to the web for a run's bank file.
+      expect(find.ancestor(of: banner, matching: find.byType(ListView)),
+          findsOneWidget);
+      expect(
+        find.text("FeohLedger records payments but never sends them: pay "
+            "from your bank or ERP, then record each one here (a run's bank "
+            "file is on the web app)."),
+        findsOneWidget,
+      );
       expect(find.text('Record as paid'), findsOneWidget);
 
       await openRunMenu(tester);
+      // The Runs tab leads with it too.
+      expect(banner, findsOneWidget);
+      expect(find.ancestor(of: banner, matching: find.byType(ListView)),
+          findsOneWidget);
       expect(find.text('Execute'), findsNothing);
       expect(find.text('Record run as paid…'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);

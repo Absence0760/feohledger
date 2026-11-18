@@ -14,6 +14,7 @@ import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/models/notification.dart';
+import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/models/vendor.dart';
 import 'package:feohledger_mobile/screens/adaptive_screen.dart';
 import 'package:feohledger_mobile/screens/admin_users_screen.dart';
@@ -57,6 +58,7 @@ import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/notification_bell.dart';
 import 'package:feohledger_mobile/widgets/notification_list_tile.dart';
 import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
+import 'package:feohledger_mobile/widgets/record_payment_dialog.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';
@@ -1467,6 +1469,77 @@ void main() {
           findsOneWidget);
       expect(find.bySemanticsLabel('Record as paid — invoice INV-2'),
           findsOneWidget);
+      handle.dispose();
+    });
+  });
+
+  group('Record-as-paid dialog', () {
+    setUp(() {
+      PaymentQueueStore.instance.reset();
+      FlutterSecureStorage.setMockInitialValues({});
+    });
+
+    testWidgets(
+        'a refusal is announced exactly once, and the line is not also a '
+        'live region (WCAG 4.1.3 without the echo)', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => http.Response(
+              jsonEncode({
+                'detail': {
+                  'code': 'external_payment_segregation',
+                  'message': 'server english',
+                  'params': null,
+                },
+              }),
+              403,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+      final item = PaymentQueueItem.fromJson({
+        'id': 'inv1',
+        'invoice_number': 'INV-1',
+        'vendor_name': 'Acme Supplies',
+        'amount': '100.00',
+        'currency': 'USD',
+        'status': 'approved',
+      });
+      await tester.pumpWidget(_host(Builder(
+        builder: (context) => TextButton(
+          onPressed: () => showRecordInvoicePaymentDialog(context, item),
+          child: const Text('open'),
+        ),
+      )));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byKey(const Key('record-reference')), 'CHK-1');
+      await tester.pump();
+      tester.takeAnnouncements(); // anything before the submit is not ours
+      await tester.tap(find.byKey(const Key('record-submit')));
+      await tester.pumpAndSettle();
+
+      const refusal = 'Segregation of duties: you created or shaped this '
+          'invoice, so a different user must record its payment.';
+      expect(find.text(refusal), findsOneWidget);
+      final spoken = tester
+          .takeAnnouncements()
+          .where((a) => a.message == refusal)
+          .toList();
+      expect(spoken, hasLength(1));
+      // The second voice was a `Semantics(liveRegion: true)` around the line:
+      // no live region anywhere in the dialog.
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byWidgetPredicate(
+              (w) => w is Semantics && w.properties.liveRegion == true),
+        ),
+        findsNothing,
+      );
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
       handle.dispose();
     });
   });
