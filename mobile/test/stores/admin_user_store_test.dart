@@ -181,7 +181,7 @@ void main() {
   });
 
   group('createUser', () {
-    test('POSTs the body, returns the temp password, and refreshes', () async {
+    test('POSTs the body, returns the link expiry, and refreshes', () async {
       Map<String, dynamic>? body;
       var listCalls = 0;
       ApiClient().debugConfigure(
@@ -191,7 +191,7 @@ void main() {
             return http.Response(
               jsonEncode({
                 ..._userJson('9', name: 'Ada', roles: ['ap_clerk']),
-                'temporary_password': 'Hunter2-temp-xyz',
+                'set_password_link_expires_at': '2026-11-20T12:00:00Z',
               }),
               201,
               headers: {'content-type': 'application/json'},
@@ -211,7 +211,7 @@ void main() {
       );
 
       expect(result, isNotNull);
-      expect(result!.temporaryPassword, 'Hunter2-temp-xyz');
+      expect(result!.setPasswordLinkExpiresAt, '2026-11-20T12:00:00Z');
       expect(body!['email'], 'ada@example.com');
       expect(body!['full_name'], 'Ada Lovelace');
       expect(body!['role_names'], ['ap_clerk']);

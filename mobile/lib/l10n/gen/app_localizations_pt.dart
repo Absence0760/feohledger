@@ -1615,21 +1615,13 @@ class AppLocalizationsPt extends AppLocalizations {
   String get adminUsersCreating => 'A criar…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name criado';
+  String adminUsersInvited(String name, String email) {
+    return '$name convidado. Enviámos para $email uma ligação para definir a palavra-passe.';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'Falha ao criar o utilizador: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'Utilizador criado';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'Partilhe esta palavra-passe de uso único com $name. Ser-lhe-á pedido que a altere no primeiro início de sessão. Não será mostrada novamente.';
   }
 
   @override
@@ -5651,21 +5643,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get adminUsersCreating => 'Criando…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name criado';
+  String adminUsersInvited(String name, String email) {
+    return '$name convidado. Enviamos para $email um link para definir a senha.';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'Falha ao criar o usuário: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'Usuário criado';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'Compartilhe esta senha de uso único com $name. Será solicitado que a altere no primeiro login. Ela não será mostrada novamente.';
   }
 
   @override

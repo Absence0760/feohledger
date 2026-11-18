@@ -1615,21 +1615,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get adminUsersCreating => 'Creando…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name creado';
+  String adminUsersInvited(String name, String email) {
+    return '$name invitado. Enviamos a $email un enlace para establecer su contraseña.';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'No se pudo crear el usuario: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'Usuario creado';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'Comparte esta contraseña de un solo uso con $name. Se le pedirá que la cambie al iniciar sesión por primera vez. No se mostrará de nuevo.';
   }
 
   @override
