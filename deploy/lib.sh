@@ -318,6 +318,19 @@ feoh_tenant_argv() {
 		--skip-existing)
 }
 
+# feoh_tenant_resend_argv <slug> <admin-email> builds the command that emails
+# an existing tenant's admin a fresh set-password link (add-tenant.sh
+# --resend-link), for an admin whose first link never arrived. It supersedes
+# every earlier link, prints only a masked address, and is refused for an admin
+# who already has a password (docs/decisions.md §452 and its follow-up). Sets
+# FEOH_TENANT_ARGV, like feoh_tenant_argv.
+feoh_tenant_resend_argv() {
+	local slug=$1 email=$2
+	FEOH_TENANT_ARGV=(python scripts/create_tenant.py
+		--slug "$slug" --admin-email "$email"
+		--resend-link)
+}
+
 # ── Source: which commit the deploy builds ───────────────────────────────────
 #
 # feoh_sync_source <repo-root> [<sha>] brings the checkout to the commit to

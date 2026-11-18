@@ -165,3 +165,57 @@ def test_the_day_one_stack_provisions_through_the_shared_function() -> None:
     add_tenant = (DEPLOY / "add-tenant.sh").read_text()
     assert "create_tenant.py" not in add_tenant
     assert '"${FEOH_TENANT_ARGV[@]}"' in add_tenant
+
+
+_RESEND_ARGV = [
+    "python",
+    "scripts/create_tenant.py",
+    "--slug",
+    "acme",
+    "--admin-email",
+    "a@acme.example",
+    "--resend-link",
+]
+
+
+def test_resend_argv_names_only_the_tenant_and_its_admin() -> None:
+    result = _lib(
+        'feoh_tenant_resend_argv acme a@acme.example\nprintf "%s\\n" "${FEOH_TENANT_ARGV[@]}"'
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == _RESEND_ARGV
+
+
+def test_add_tenant_resend_link_execs_the_resend_argv(
+    deploy_dir: tuple[Path, Path, Path],
+) -> None:
+    """`--resend-link` re-sends rather than provisions: the one command it
+    runs is the resend argv, and no `--name` is needed."""
+    root, bin_dir, log = deploy_dir
+    result = subprocess.run(
+        ["bash", str(root / "add-tenant.sh"), "acme", "--admin-email", "a@acme.example"]
+        + ["--resend-link"],
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+            "STUB_LOG": str(log),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    runs = [c for c in _calls(log) if "scripts/create_tenant.py" in c]
+    assert runs == [
+        ["compose", "-f", "compose.prod.yml", "--profile", "localdb", "exec", "-T", "api"]
+        + _RESEND_ARGV
+    ]
+    assert "tenant ready" not in result.stdout
+
+
+def test_add_tenant_resend_link_refuses_a_name(deploy_dir: tuple[Path, Path, Path]) -> None:
+    """`--name` with `--resend-link` is ambiguous (provision or re-send?), so
+    it is a usage error and nothing runs."""
+    root, bin_dir, log = deploy_dir
+    result = _add_tenant(root, bin_dir, log, "--resend-link")
+    assert result.returncode != 0
+    assert "usage:" in result.stderr
+    assert not log.exists() or not [c for c in _calls(log) if "scripts/create_tenant.py" in c]

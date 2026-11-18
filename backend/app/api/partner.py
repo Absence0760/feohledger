@@ -34,11 +34,11 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.api.deps import ROLE_ADMIN, require_roles
 from app.api.organization import _resolve_brand
 from app.api.set_password_links import (
-    expiry_sentence,
     link_expires_at,
     mint_employee_link,
     require_link_base,
     send_set_password_email,
+    workspace_admin_email,
 )
 from app.config import settings
 from app.database import get_control_db
@@ -46,7 +46,6 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.organization import BrandConfig
 from app.services.audit_dispatch import dispatch_auth_audit
-from app.services.email_adapters import EmailMessage
 from app.services.partner_link_token import build_link_code, verify_link_code
 from app.services.tenant_provisioning import provision_tenant
 from app.tenant import get_tenant, lock_organization
@@ -504,20 +503,8 @@ async def _send_child_admin_link(
     try:
         link = await mint_employee_link(child.slug, child.settings, user_id, set_password=True)
         await send_set_password_email(
-            EmailMessage(
-                to=admin_email,
-                subject=f"Your {child.name} FeohLedger workspace is ready",
-                body_text=(
-                    f"Hi {admin_name},\n\n"
-                    f"A FeohLedger workspace has been set up for {child.name}, "
-                    "with you as its administrator. Choose your password with "
-                    "this link:\n\n"
-                    f"  {link}\n\n"
-                    + expiry_sentence()
-                    + " If it has expired, use Forgot password on the sign-in page.\n"
-                ),
-                links=(link,),
-                preheader="Use the link in this email to set your password.",
+            workspace_admin_email(
+                org_name=child.name, admin_name=admin_name, admin_email=admin_email, link=link
             ),
             log_ref=f"child_org={child.id}",
         )
