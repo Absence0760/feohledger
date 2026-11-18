@@ -1851,6 +1851,8 @@ export const messages = {
 		'Este plano já tem um lote rascunho — {n, plural, one {# pagamento} other {# pagamentos}} totalizando {amount}.',
 	'cashFlow.plan.actions.cfoApprovalNote':
 		'Requer aprovação do CFO antes de poder ser executado.',
+	'cashFlow.plan.actions.skippedCurrencyUnknown': "{n, plural, one {# fatura foi deixada de fora} other {# faturas foram deixadas de fora}} porque não há moeda registrada na fatura. Defina-a para pagar pela fila de pagamentos.",
+	'cashFlow.plan.actions.skippedOtherCurrency': "{n, plural, one {# fatura em outra moeda foi deixada de fora} other {# faturas em outras moedas foram deixadas de fora}} deste lote em {currency}. Pague-as pela fila de pagamentos.",
 	'cashFlow.plan.actions.captureResult':
 		'{n, plural, one {# desconto capturado.} other {# descontos capturados.}}',
 	'cashFlow.plan.actions.captureNoneNew':
@@ -4101,6 +4103,8 @@ export const messages = {
 	'refusal.creditMemoNotEditable': "Só é possível editar uma nota de crédito em aberto que nunca foi aplicada (esta está com status {status}).",
 	'refusal.creditMemoNotApplicable': "Não é possível aplicar uma nota de crédito com status {status}.",
 	'refusal.creditMemoExceedsBalance': "O valor da nota de crédito excede o saldo creditável restante da fatura ({remaining}).",
+	'refusal.draftRunNoRunCurrency': "Um lote de pagamentos tem uma única moeda e nenhum dos compromissos a pagar deste plano está em {currency} (encontradas: {found}). Prepare-os pela fila de pagamentos.",
+	'refusal.draftRunCurrencyUnknown': "{count, plural, one {# fatura a pagar deste plano não tem} other {# faturas a pagar deste plano não têm}} moeda registrada e não pode ser paga até que ela seja definida na fatura.",
 	'refusal.expenseReportNotOwner': "Somente o proprietário do relatório pode alterar suas linhas ou enviá-lo.",
 	'refusal.expenseNotCreator': "Somente quem criou esta despesa pode alterá-la ou excluí-la.",
 	'refusal.expenseReportForeignLine': "Esta despesa foi criada por outra pessoa. Somente quem a criou pode adicioná-la a um relatório.",

@@ -41,6 +41,19 @@ export interface DraftRunResult {
 	total_amount: string;
 	payment_count: number;
 	requires_cfo_approval: boolean;
+	/** The one currency the run pays in (the org's reporting currency). */
+	run_currency: string;
+	excluded_currency_count: number;
+	/** Payable invoices in the plan that were NOT staged, with a coded reason:
+	 *  `currency_unknown` (no currency recorded — never read as the run's) or
+	 *  `currency_not_run_currency` (`params.currency` differs from the run's). */
+	skipped: DraftRunSkip[];
+}
+
+export interface DraftRunSkip {
+	invoice_id: string;
+	code: 'currency_unknown' | 'currency_not_run_currency';
+	params: Record<string, string>;
 }
 
 export interface CaptureDiscountsResult {

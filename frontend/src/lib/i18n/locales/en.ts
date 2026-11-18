@@ -1995,6 +1995,8 @@ export const en = {
 	'cashFlow.plan.actions.draftRunExisting':
 		'This plan already has a draft run — {n, plural, one {# payment} other {# payments}} totaling {amount}.',
 	'cashFlow.plan.actions.cfoApprovalNote': 'Requires CFO approval before it can be executed.',
+	'cashFlow.plan.actions.skippedCurrencyUnknown': "{n, plural, one {# invoice was} other {# invoices were}} left out because no currency is recorded on the invoice. Set it to pay from the payments queue.",
+	'cashFlow.plan.actions.skippedOtherCurrency': "{n, plural, one {# invoice in another currency was} other {# invoices in other currencies were}} left out of this {currency} run. Pay them from the payments queue.",
 	'cashFlow.plan.actions.captureResult':
 		'{n, plural, one {Captured # discount offer.} other {Captured # discount offers.}}',
 	'cashFlow.plan.actions.captureNoneNew':
@@ -4280,6 +4282,8 @@ export const en = {
 	'refusal.creditMemoNotEditable': "Only an open credit memo that has never been applied can be edited (this one is {status}).",
 	'refusal.creditMemoNotApplicable': "A credit memo that is {status} cannot be applied.",
 	'refusal.creditMemoExceedsBalance': "The credit memo amount exceeds the invoice's remaining creditable balance ({remaining}).",
+	'refusal.draftRunNoRunCurrency': "A payment run is single-currency and none of this plan's payable commitments are in {currency} (found: {found}). Stage them from the payments queue instead.",
+	'refusal.draftRunCurrencyUnknown': "{count, plural, one {# payable invoice in this plan has} other {# payable invoices in this plan have}} no recorded currency and can't be paid until one is set on the invoice.",
 	'refusal.expenseReportNotOwner': "Only the report's owner can change its lines or submit it.",
 	'refusal.expenseNotCreator': "Only the person who created this expense can change or delete it.",
 	'refusal.expenseReportForeignLine': "This expense was created by someone else. Only its creator can put it on a report.",

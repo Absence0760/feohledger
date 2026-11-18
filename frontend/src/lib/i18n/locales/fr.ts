@@ -1850,6 +1850,8 @@ export const messages = {
 		'Ce plan a déjà un lot brouillon — {n, plural, one {# paiement} other {# paiements}} pour un total de {amount}.',
 	'cashFlow.plan.actions.cfoApprovalNote':
 		'Nécessite l’approbation du directeur financier avant de pouvoir être exécuté.',
+	'cashFlow.plan.actions.skippedCurrencyUnknown': "{n, plural, one {# facture a été écartée} other {# factures ont été écartées}} car aucune devise n’est enregistrée sur la facture. Renseignez-la pour payer depuis la file des paiements.",
+	'cashFlow.plan.actions.skippedOtherCurrency': "{n, plural, one {# facture dans une autre devise a été écartée} other {# factures dans d’autres devises ont été écartées}} de ce lot en {currency}. Payez-les depuis la file des paiements.",
 	'cashFlow.plan.actions.captureResult':
 		'{n, plural, one {# remise capturée.} other {# remises capturées.}}',
 	'cashFlow.plan.actions.captureNoneNew':
@@ -4106,6 +4108,8 @@ export const messages = {
 	'refusal.creditMemoNotEditable': "Seul un avoir ouvert et jamais appliqué peut être modifié (celui-ci est au statut {status}).",
 	'refusal.creditMemoNotApplicable': "Un avoir au statut {status} ne peut pas être appliqué.",
 	'refusal.creditMemoExceedsBalance': "Le montant de l'avoir dépasse le solde créditable restant de la facture ({remaining}).",
+	'refusal.draftRunNoRunCurrency': "Un lot de paiements est mono-devise et aucun des engagements payables de ce plan n’est en {currency} (trouvées : {found}). Préparez-les plutôt depuis la file des paiements.",
+	'refusal.draftRunCurrencyUnknown': "{count, plural, one {# facture payable de ce plan n’a} other {# factures payables de ce plan n’ont}} aucune devise enregistrée et ne peut être payée tant qu’elle n’est pas renseignée sur la facture.",
 	'refusal.expenseReportNotOwner': "Seul le propriétaire de la note de frais peut modifier ses lignes ou la soumettre.",
 	'refusal.expenseNotCreator': "Seule la personne qui a créé cette dépense peut la modifier ou la supprimer.",
 	'refusal.expenseReportForeignLine': "Cette dépense a été créée par quelqu’un d’autre. Seule la personne qui l’a créée peut l’ajouter à une note de frais.",
