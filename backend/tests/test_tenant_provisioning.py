@@ -1393,6 +1393,8 @@ def _resend_cli(monkeypatch, argv: list[str] | None = None):
     monkeypatch.setattr(cli, "mint_employee_link", AsyncMock(side_effect=_mint))
     monkeypatch.setattr(cli, "send_set_password_email", AsyncMock())
     monkeypatch.setattr(cli, "dispatch_auth_audit", AsyncMock())
+    # Every engine is disposed, the tenant engine the audit row opened included.
+    monkeypatch.setattr(cli, "dispose_all_engines", AsyncMock())
     monkeypatch.setattr(
         cli, "provision_tenant", AsyncMock(side_effect=AssertionError("provisioned anyway"))
     )
@@ -1421,13 +1423,14 @@ async def test_resend_link_supersedes_earlier_links_and_emails_a_fresh_one(monke
     audit = cli.dispatch_auth_audit.await_args.kwargs
     assert audit["action"] == "user.set_password_link_resent"
     assert audit["entity_id"] == target.user_id
+    assert audit["details"] == {"via": "operator_cli", "delivered": True}
     assert "tok-secret" not in repr(audit) and "admin@acme.test" not in repr(audit)
     captured = capsys.readouterr()
     assert "sent to a***@acme.test" in captured.out
     # Neither the link nor the whole address reaches the terminal.
     assert "tok-secret" not in captured.out + captured.err
     assert "admin@acme.test" not in captured.out + captured.err
-    cli.control_engine.dispose.assert_awaited()
+    cli.dispose_all_engines.assert_awaited()
 
 
 @pytest.mark.parametrize(
@@ -1454,7 +1457,7 @@ async def test_resend_link_refusals_exit_2_and_touch_no_link(monkeypatch, capsys
     cli.mint_employee_link.assert_not_awaited()
     cli.send_set_password_email.assert_not_awaited()
     assert code in capsys.readouterr().err
-    cli.control_engine.dispose.assert_awaited()
+    cli.dispose_all_engines.assert_awaited()
 
 
 async def test_resend_link_exits_3_when_the_email_fails(monkeypatch, capsys):
@@ -1471,7 +1474,11 @@ async def test_resend_link_exits_3_when_the_email_fails(monkeypatch, capsys):
         await cli.main()
 
     assert exc_info.value.code == cli.EXIT_LINK_NOT_DELIVERED == 3
-    cli.dispatch_auth_audit.assert_not_awaited()
+    # The earlier links were revoked before the send failed, and that
+    # revocation is on the tenant's trail, marked undelivered.
+    audit = cli.dispatch_auth_audit.await_args.kwargs
+    assert audit["action"] == "user.set_password_link_resent"
+    assert audit["details"] == {"via": "operator_cli", "delivered": False}
     captured = capsys.readouterr()
     assert "set_password_email_failed" in captured.err
     assert "tok-secret" not in captured.out + captured.err
@@ -1488,6 +1495,8 @@ async def test_resend_link_exits_3_when_earlier_links_cannot_be_superseded(monke
 
     assert exc_info.value.code == 3
     cli.mint_employee_link.assert_not_awaited()
+    # Nothing was revoked, so there is nothing to record.
+    cli.dispatch_auth_audit.assert_not_awaited()
     assert "set_password_link_unavailable" in capsys.readouterr().err
 
 

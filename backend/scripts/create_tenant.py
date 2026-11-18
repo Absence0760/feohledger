@@ -49,7 +49,7 @@ from app.api.set_password_links import (
     workspace_admin_email,
 )
 from app.config import settings
-from app.database import control_engine
+from app.database import control_engine, dispose_all_engines
 from app.services import password_reset
 from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.tenant_provisioning import (
@@ -105,6 +105,7 @@ async def _resend_set_password_link(slug: str, admin_email: str) -> None:
         )
         raise SystemExit(EXIT_BAD_ARGS)
 
+    revoked = False
     try:
         # Every earlier link dies first, as `POST /admin/users/{id}/reset-password`
         # does: the one this sends is the only one that works.
@@ -112,6 +113,7 @@ async def _resend_set_password_link(slug: str, admin_email: str) -> None:
             await password_reset.revoke_outstanding(target.user_id)
         except Exception as exc:  # noqa: BLE001
             raise link_unavailable() from exc
+        revoked = True
         link = await mint_employee_link(
             target.slug, target.org_settings, target.user_id, set_password=True
         )
@@ -126,6 +128,17 @@ async def _resend_set_password_link(slug: str, admin_email: str) -> None:
             log_ref=f"tenant={target.slug} user={target.user_id}",
         )
     except HTTPException as exc:
+        if revoked:
+            # The earlier links are dead even though no new one arrived: that
+            # revocation belongs on the tenant's trail too.
+            await dispatch_auth_audit(
+                organization_id=target.organization_id,
+                actor_id=None,
+                action="user.set_password_link_resent",
+                entity_type="user",
+                entity_id=target.user_id,
+                details={"via": "operator_cli", "delivered": False},
+            )
         code = exc.detail.get("code") if isinstance(exc.detail, dict) else exc.status_code
         print(
             f"error: the set-password link for tenant '{slug}' was not delivered ({code}). "
@@ -142,7 +155,7 @@ async def _resend_set_password_link(slug: str, admin_email: str) -> None:
         action="user.set_password_link_resent",
         entity_type="user",
         entity_id=target.user_id,
-        details={"via": "operator_cli"},
+        details={"via": "operator_cli", "delivered": True},
     )
     print(
         f"Set-password link for tenant '{target.slug}' sent to {mask_address(target.admin_email)}."
@@ -202,7 +215,9 @@ async def main():
         try:
             await _resend_set_password_link(args.slug, args.admin_email)
         finally:
-            await control_engine.dispose()
+            # Every engine, not just the control plane's: the audit row is
+            # written through a cached tenant engine (local audit mode).
+            await dispose_all_engines()
         return
     if args.name is None:
         parser.error("--name is required to provision a tenant.")
