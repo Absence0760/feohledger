@@ -366,7 +366,7 @@ async def test_an_edit_cannot_clear_or_garble_the_currency(realdb):
     """`invoices.currency` is NOT NULL, so a blanked currency used to land as
     `""`, a "no currency" every money path then had to recognise (decisions
     §457). An edit may change the currency, never erase it; and a row already
-    blank stays editable for everything else (decisions §NEW-R2)."""
+    blank stays editable for everything else (decisions §460)."""
     body = {
         "vendor": "Currency Edit Co",
         "invoice_number": "CUR-EDIT-001",

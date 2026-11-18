@@ -111,7 +111,7 @@ class InvoiceUpdate(BaseModel):
     amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
     # Raw on purpose: the handler shape-checks it through
     # `api/refusals.invoice_currency`, so a blank or malformed code is a coded
-    # 422 a client can state, not Pydantic's list (decisions §NEW-R2).
+    # 422 a client can state, not Pydantic's list (decisions §460).
     currency: str | None = None
     invoice_date: date | None = None
     received_date: date | None = None

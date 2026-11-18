@@ -23127,7 +23127,7 @@ with no case that the existing holds do not cover better; and a 90-day default,
 which would change behaviour for every tenant to hide its oldest debts. The
 operator delegated the call to the round coordinator.
 
-## §NEW-R2. An invoice edit may change the currency, never clear it (extends §457, round 17, 2026-11-18)
+## 460. An invoice edit may change the currency, never clear it (extends §457, round 17, 2026-11-18)
 
 `PATCH /api/invoices/{id}` took `currency` as `BlankableCurrencyCode`, which
 kept a blank as `""` and wrote it to the NOT NULL column as "no currency". §457
@@ -23157,7 +23157,7 @@ unknown" follow-up (a tenant migration, the upload creating rows with NULL, and
 every reader failing closed on NULL), and it stays in `docs/followups.md` along
 with the rows already blank.
 
-## §NEW-R1. Payment-run SoD / CFO sign-off and the sign-in MFA wrong code are coded refusals (round 17, 2026-11-18)
+## 461. Payment-run SoD / CFO sign-off and the sign-in MFA wrong code are coded refusals (round 17, 2026-11-18)
 
 **Context.** §238 coded the refusals a user acts on, but three stayed English
 (`docs/followups.md`). Two are closed here. The payment run's maker-checker
@@ -23202,7 +23202,7 @@ here.
 (`api/invoices._skip_reason`) and the email-OTP miss ("Invalid or expired
 code") stay in `docs/followups.md`.
 
-## §NEW-R5. The ERP push refuses an invoice with no payable currency (round 17, 2026-11-18)
+## 462. The ERP push refuses an invoice with no payable currency (round 17, 2026-11-18)
 
 **Problem.** `services/erp._build_payload` sent `currency=invoice.currency or
 "USD"`. An invoice whose currency was blank, whitespace-only or malformed was

@@ -3373,7 +3373,7 @@ async def create_payment(
         has_cfo = any(r.name == ROLE_CFO for r in (user.roles or ()))
         if not has_cfo:
             # Coded: the reader acts on it by routing the payment elsewhere,
-            # so it is stated in their language (decisions §NEW-R1).
+            # so it is stated in their language (decisions §461).
             raise HTTPException(
                 status_code=403,
                 detail=coded_refusal(

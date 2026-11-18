@@ -17,7 +17,7 @@ Pick the type by what blank means for the field:
 
 The invoice PATCH uses none of these: it takes the raw string and checks it
 through ``api/refusals.invoice_currency``, so a blank or malformed code is a
-coded 422 rather than written as ``""`` (decisions §NEW-R2).
+coded 422 rather than written as ``""`` (decisions §460).
 """
 
 from typing import Annotated

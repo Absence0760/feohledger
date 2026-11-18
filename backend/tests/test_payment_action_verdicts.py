@@ -113,7 +113,7 @@ def _assert_parity(verdict, resp, label):
     # Most endpoints answer in plain text and the verdict carries the SAME
     # sentence under a code (`role_not_permitted` for the dependency's
     # refusal). Maker-checker and the CFO wait answer with the coded detail
-    # itself (decisions §NEW-R1) — the verdict, exactly.
+    # itself (decisions §461) — the verdict, exactly.
     detail = resp.json()["detail"]
     if verdict["code"] in CODED_ON_THE_WIRE:
         assert detail == verdict, (label, verdict, resp.text)

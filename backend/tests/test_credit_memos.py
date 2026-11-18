@@ -2284,7 +2284,7 @@ async def test_invoice_edit_cannot_change_the_currency_under_an_applied_credit(r
             "to EUR, or the credit would be netted across currencies"
         )
         # Blanking it is refused before the credit guard is reached: an edit
-        # may never clear the currency (decisions §NEW-R2).
+        # may never clear the currency (decisions §460).
         blank = await c.patch(f"/api/invoices/{invoice_id}", json={"currency": ""})
         assert blank.status_code == 422, blank.text
         assert blank.json()["detail"]["code"] == "invoice_currency_required"

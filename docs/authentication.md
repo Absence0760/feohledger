@@ -936,7 +936,7 @@ carries the same coded detail but stays a `401`: there is no session yet, so
 nobody is signed out by it — neither web client bounces a 401 on a call that
 carried no token, mobile ends a session on a 401 only when it presented one, and
 the per-account MFA failure budget counts the miss whatever the status
-(`docs/decisions.md` §NEW-R1). The email-OTP miss ("Invalid or expired code") is
+(`docs/decisions.md` §461). The email-OTP miss ("Invalid or expired code") is
 still plain text.
 
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`

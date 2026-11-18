@@ -1709,7 +1709,7 @@ async def update_invoice(
         )
     # An edit may change the currency, never clear it: a blank, a `null` or a
     # malformed code is a coded 422, never `""` written to the NOT NULL column
-    # as "no currency" (decisions §457, §NEW-R2). Only when the edit names it,
+    # as "no currency" (decisions §457, §460). Only when the edit names it,
     # so a legacy row already holding `""` stays editable for everything else.
     if "currency" in update_data:
         update_data["currency"] = invoice_currency(update_data["currency"])

@@ -95,7 +95,7 @@ def _run_segregation_message(action: str) -> str:
 # except maker-checker and the CFO sign-off wait, the two a user acts on by
 # handing the run to someone else: their POST answers with the coded detail
 # too, so the refusal toast is stated in the reader's language (decisions
-# §NEW-R1). Both web and mobile render a coded detail by its `message` when
+# §461). Both web and mobile render a coded detail by its `message` when
 # they cannot localize it.
 
 RUN_NOT_DRAFT = "payment_run_not_draft"

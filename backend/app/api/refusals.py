@@ -110,7 +110,7 @@ def refusal_of(exc: HTTPException, *, fallback_code: str) -> dict:
 #: session yet, so a 401 is the truth and nobody is signed out by it — neither
 #: web client bounces an anonymous 401, mobile ends a session on a 401 only when
 #: it presented a token, and the per-account MFA failure budget counts the
-#: attempt either way (decisions §NEW-R1).
+#: attempt either way (decisions §461).
 MFA_CODE_INVALID_DETAIL = coded_refusal("mfa_code_invalid", "Invalid code")
 
 

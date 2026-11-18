@@ -369,7 +369,7 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
     case 'payment_run_nothing_to_record':
       return l.codedRefusalPaymentRunNothingToRecord;
     // `api/auth.py::verify_mfa` — a wrong authenticator code at sign-in (the
-    // MFA screen; backend decisions §NEW-R1).
+    // MFA screen; backend decisions §461).
     case 'mfa_code_invalid':
       return l.codedRefusalMfaCodeInvalid;
   }

@@ -346,7 +346,7 @@ async def test_verify_mfa_failure_writes_audit_action():
 
     # The sign-in challenge's wrong code is coded so the login page states it
     # in the reader's language, and stays a 401: no session exists to end
-    # (decisions §NEW-R1).
+    # (decisions §461).
     assert exc.value.status_code == 401
     assert exc.value.detail == {"code": "mfa_code_invalid", "message": "Invalid code", "params": {}}
     assert "auth.mfa.verify.failure" in audit_calls

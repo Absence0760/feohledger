@@ -241,7 +241,7 @@ the CFO-approval wait (403 `payment_run_awaiting_cfo`) answer every POST that
 raises them — approve, execute, resume, retry-failed, record-outside, the NACHA
 export — with `detail = {code, message, params}`, the same object the run
 dialog's `actions` verdict carries, so the web toast and the mobile Pay tab
-state it in the reader's language (`docs/decisions.md` §NEW-R1). A standalone
+state it in the reader's language (`docs/decisions.md` §461). A standalone
 `POST /api/payments` above the CFO threshold, booked by someone without the CFO
 role, answers 403 `payment_cfo_required` the same way. Every client renders a
 code it does not know by its English `message`.
