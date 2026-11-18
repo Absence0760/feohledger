@@ -1355,11 +1355,14 @@ block above is Modern Treasury's set. **The secret keys — `api_key`,
 envelope-encrypted in `provider_credentials`, written only through the audited
 `PUT /api/organization/credentials/payments` and merged back for the adapter by
 `provider_credentials.provider_config` (`backend/docs/erp-integration.md`
-§ Where the credentials live has the mechanism). **`program_type` and `sandbox` are not
-read by any payment adapter** — they belong to the card and extraction
-families. Both appeared here until 2026-09-17 and had propagated into
-`docs/founder-runbooks/payment-rails-onboarding.md` as live settings. Modern
-Treasury selects sandbox by credential set, not by flag.
+§ Where the credentials live has the mechanism). **`program_type` is not read by
+any payment adapter** — it belongs to the card and extraction families. **`sandbox`
+picks the host** for Column, Increase, Dwolla and Checkeeper (default `true`);
+Modern Treasury and Stripe select sandbox by credential set, not by flag. A save
+that changes `provider` or `sandbox` (or removes a `providers[]` entry, or
+changes its `sandbox`) drops the sealed keys it strands, audited, so a key is
+never sent to a provider or environment it was not typed for
+(`provider_credentials.rail_secrets_to_drop`, decisions §NEW-S1).
 
 `tests/test_payment_adapter_doc_drift.py` pins the Methods column of the table
 above to each adapter's `supported_methods`, so a rail added or dropped in code
