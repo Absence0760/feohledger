@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Payment, PaymentMethod, PaymentStatus } from '#lib/types/payment.ts';
+	import { queueBlockedReasonKey } from '#lib/types/paymentQueue.ts';
 	import {
 		PAYMENT_STATUSES,
 		paymentStatusLabelKey,
@@ -423,41 +424,11 @@
 
 	/** Localised sentence for why a run would refuse — or constrain — a row.
 	 *
-	 *  Maps the backend's fixed reason vocabulary; an unrecognised or missing
-	 *  code falls back to the generic reason rather than rendering a raw
-	 *  identifier at the operator. */
+	 *  Maps the backend's fixed reason vocabulary (`QUEUE_BLOCKED_REASON_KEYS`);
+	 *  an unrecognised or missing code falls back to the generic reason rather
+	 *  than rendering a raw identifier at the operator. */
 	function blockedReason(item: QueueItem): string {
-		switch (item.blocked_reason) {
-			case 'duplicate':
-				return m('payments.queue.blocked.duplicate');
-			case 'fraud_flag':
-				return m('payments.queue.blocked.fraudFlag');
-			case 'line_total_mismatch':
-				return m('payments.queue.blocked.lineTotalMismatch');
-			case 'payment_reconciliation':
-				// The fourth member of PAYMENT_BLOCKING_EXCEPTION_TYPES, and the
-				// one this switch was missing — so a row held because an earlier
-				// payment's fate at the rail is unknown fell through to the
-				// generic string and told the operator nothing actionable. The
-				// default arm stays for codes this build genuinely doesn't know.
-				return m('payments.queue.blocked.paymentReconciliation');
-			case 'quality_hold':
-				return m('payments.queue.blocked.qualityHold');
-			case 'po_mismatch':
-				return m('payments.queue.blocked.poMismatch');
-			case 'vendor_not_active':
-				return m('payments.queue.blocked.vendorNotActive');
-			case 'applied_credit_mismatch':
-				return m('payments.queue.blocked.appliedCreditMismatch');
-			case 'fully_credited':
-				return m('payments.queue.blocked.fullyCredited');
-			case 'live_virtual_card':
-				// Not a block — the row is pinned to the card rail. Its own
-				// sentence says so, rather than the "can't be paid" generic.
-				return m('payments.queue.blocked.liveVirtualCard');
-			default:
-				return m('payments.queue.blocked.generic');
-		}
+		return m(queueBlockedReasonKey(item.blocked_reason));
 	}
 
 	// The rows a payment run could actually be built from. Everything that

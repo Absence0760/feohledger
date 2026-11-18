@@ -228,6 +228,35 @@ async def test_an_out_of_scope_invoice_is_an_opaque_404(realdb):
     assert exc.value.status_code == 404
 
 
+async def test_an_invoice_with_no_currency_is_refused_not_quoted_as_usd(realdb):
+    """A blank currency is no currency: pricing it as USD would rank routes for
+    a payment the run builder refuses (`currency_unknown`). No adapter is asked."""
+    from sqlalchemy import update
+
+    from app.api.payments import CorridorQuoteRequest, compare_corridor_quotes
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    invoice_id = await _seed_invoice(mk, info.org_id)
+    async with mk() as s:
+        await s.execute(update(Invoice).where(Invoice.id == invoice_id).values(currency=""))
+        await s.commit()
+
+    async with mk() as db:
+        with patch("app.services.corridor_quotes.get_payment_adapter") as get_adapter:
+            with pytest.raises(HTTPException) as exc:
+                await compare_corridor_quotes(
+                    body=CorridorQuoteRequest(invoice_id=invoice_id),
+                    db=db,
+                    org=_org(info.org_id, [{"provider": "column"}]),
+                    user=_user(info.users["admin"]),
+                    entity_id=None,
+                )
+    assert exc.value.status_code == 409
+    assert exc.value.detail.startswith("currency_unknown:")
+    get_adapter.assert_not_called()
+
+
 # --------------------------------------------------------------------------- #
 # The auction survives one unconstructable provider config
 # --------------------------------------------------------------------------- #

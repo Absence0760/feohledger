@@ -627,6 +627,14 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
     mismatch_id = await _seed_invoice(mk, org_id, number="Q-SQL-MISMATCH")
     unverified_id = await _seed_invoice(mk, org_id, number="Q-SQL-UNVERIFIED")
     active_id = await _seed_invoice(mk, org_id, number="Q-SQL-ACTIVE-VENDOR")
+    # Blank and whitespace-only both read as "no currency" on both sides; a
+    # lower-case code is a currency, not a blank.
+    blank_id = await _seed_invoice(mk, org_id, number="Q-SQL-NOCUR")
+    spaces_id = await _seed_invoice(mk, org_id, number="Q-SQL-NOCUR-SPACES")
+    lower_id = await _seed_invoice(mk, org_id, number="Q-SQL-LOWER-CUR")
+    await _set_currency(mk, blank_id, "")
+    await _set_currency(mk, spaces_id, " \t ")
+    await _set_currency(mk, lower_id, "usd")
     await _link_vendor(mk, org_id, unverified_id, status="unverified")
     await _link_vendor(mk, org_id, active_id, status="active")
     await _add_exception(mk, org_id, exc_id, exception_type="fraud_flag")
@@ -647,6 +655,9 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
         mismatch_id,
         unverified_id,
         active_id,
+        blank_id,
+        spaces_id,
+        lower_id,
     ]
     async with mk() as db:
         invoices = (
@@ -663,13 +674,26 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
     assert verdicts[live_id].reason == "live_payment"
     assert verdicts[mismatch_id].reason == "applied_credit_mismatch"
     assert verdicts[unverified_id].reason == "vendor_not_active"
+    assert verdicts[blank_id].reason == "currency_unknown"
+    assert verdicts[spaces_id].reason == "currency_unknown"
     assert clean_id not in verdicts
     assert active_id not in verdicts
+    assert lower_id not in verdicts
 
     # SQL: the selectable set is exactly the rows with no refusal.
     assert str(clean_id) in selectable
     assert str(active_id) in selectable
-    for refused in (exc_id, credited_id, card_id, live_id, mismatch_id, unverified_id):
+    assert str(lower_id) in selectable
+    for refused in (
+        exc_id,
+        credited_id,
+        card_id,
+        live_id,
+        mismatch_id,
+        unverified_id,
+        blank_id,
+        spaces_id,
+    ):
         assert str(refused) not in selectable, refused
 
 
@@ -683,6 +707,7 @@ async def test_every_queue_reason_code_is_one_the_run_builder_can_actually_raise
 
     non_exception = {
         payment_runs.REFUSAL_VENDOR_NOT_ACTIVE,
+        payment_runs.REFUSAL_CURRENCY_UNKNOWN,
         payment_runs.REFUSAL_LIVE_VIRTUAL_CARD,
         payment_runs.REFUSAL_APPLIED_CREDIT_MISMATCH,
         payment_runs.REFUSAL_FULLY_CREDITED,
@@ -948,6 +973,23 @@ async def test_a_not_active_vendor_outranks_the_card_rail_pin(realdb):
     row = next(i for i in result["items"] if i["invoice_number"] == "Q-VND-CARD")
     assert row["blocked"] is True
     assert row["blocked_reason"] == "vendor_not_active"
+    assert row["required_method"] is None
+
+
+async def test_a_missing_currency_outranks_the_card_rail_pin(realdb):
+    """No rail can pay an invoice that records no currency, the converging card
+    rail included, so the row reads `blocked` with `currency_unknown` rather
+    than pinned to `virtual_card`."""
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    inv_id = await _seed_invoice(mk, org_id, number="Q-NOCUR-CARD")
+    await _mint_card(mk, org_id, inv_id)
+    await _set_currency(mk, inv_id, "")
+
+    result = await _queue_result(realdb, mk)
+    row = next(i for i in result["items"] if i["invoice_number"] == "Q-NOCUR-CARD")
+    assert row["blocked"] is True
+    assert row["blocked_reason"] == "currency_unknown"
     assert row["required_method"] is None
 
 

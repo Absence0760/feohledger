@@ -1775,20 +1775,6 @@ user-visible halves still open.
 
 ### Surfaced by round 15 (2026-11-18, round PR #731, decisions §445–§453)
 
-- [ ] **(c) A blank invoice currency still reads as USD in the run builder and
-      at execution.** `services/payment_runs.create_payment_run_for_invoices`
-      computes `invoices[iid].currency or "USD"` and `api/payments.py` builds
-      the payment with `(invoice.currency or "USD")`, so a manual `POST
-      /api/payments/runs` (or an invoice blanked by a concurrent PATCH between
-      `/draft-run`'s read and the builder's lock) still stages and pays a
-      currency-less invoice as USD — the substitution §453 removed from
-      `/draft-run`. **Durable fix:** a `currency_unknown` reason in
-      `run_refusal_reasons`, reaching the builder's 409 and the queue's
-      `blocked_reason` together, labelled on web `/payments` and mobile
-      `payment_queue_screen.dart` (six locales + ARB), and drop both `or
-      "USD"`s; longer term, stop the invoice PATCH writing `""` at all.
-      **Trigger:** the next change to the payment-run builder or queue
-      refusals.
 - [ ] **(c) A malformed invoice currency prints a blank in the split currency
       warning.** When an invoice's own code is malformed and a split's legs
       disagree (§445), `po_currency_mismatch` reads "Invoice is in  but PO …

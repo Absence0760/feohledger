@@ -676,6 +676,27 @@ void main() {
     expect(find.text('Create Run'), findsNothing);
   });
 
+  testWidgets('a row with no recorded currency names that, not the generic',
+      (tester) async {
+    await loginThen(
+      ['ap_manager'],
+      _screenClient(queue: [
+        _queueItem('1', blocked: true, blockedReason: 'currency_unknown'),
+      ]),
+    );
+
+    await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+    await _pumpUntil(tester, find.text('Vendor 1'));
+
+    expect(
+      find.text('No currency recorded on this invoice — set its currency first'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('currency_unknown'), findsNothing);
+    final checkbox = tester.widget<Checkbox>(find.byType(Checkbox));
+    expect(checkbox.onChanged, isNull, reason: 'blocked checkbox is disabled');
+  });
+
   testWidgets('an unresolved-exception row renders its own reason',
       (tester) async {
     await loginThen(

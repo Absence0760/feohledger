@@ -340,6 +340,7 @@
   "payQueueBlockedQualityHold": "Blocage qualité — marchandises refusées ou inspection en attente",
   "payQueueBlockedPoMismatch": "Ne correspond pas au bon de commande — non résolu",
   "payQueueBlockedVendorNotActive": "Fournisseur non vérifié ou inactif — vérifiez d’abord le fournisseur",
+  "payQueueBlockedCurrencyUnknown": "Aucune devise n'est enregistrée sur cette facture — renseignez d'abord sa devise",
   "payQueueBlockedAppliedCreditMismatch": "Un avoir imputé ne correspond plus au fournisseur ou à la devise de cette facture — corrigez d'abord la facture",
   "payQueueBlockedFullyCredited": "Entièrement couverte par des avoirs — rien à payer",
   "payQueueBlockedLiveVirtualCard": "Une carte virtuelle active couvre cette facture — payez-la par carte",
