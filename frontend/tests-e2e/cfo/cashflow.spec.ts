@@ -1,4 +1,4 @@
-import type { CashPosition } from '#lib/types/analytics.ts';
+import type { CashflowForecast, CashPosition } from '#lib/types/analytics.ts';
 import { expect, signInAndWait, test } from '../fixtures/helpers';
 
 /**
@@ -100,6 +100,7 @@ test.describe('/cfo (admin)', () => {
 							inflow: '0.00',
 							closing: '-50.00',
 							below_threshold: false,
+							overdue_amount: '0.00',
 							unconverted_count: 0
 						}
 					];
@@ -130,6 +131,53 @@ test.describe('/cfo (admin)', () => {
 		await expect(rows.first()).toContainText('Below minimum');
 		// Only the breaching row says so.
 		await expect(region.getByText('Below minimum')).toHaveCount(1);
+	});
+
+	test('overdue AP is named in words and drawn as its own bar segment', async ({ page }) => {
+		// The real response with an overdue slice put on its first period: what
+		// is under test is how the page tells a CFO that part of the first
+		// period is AP already late, not whether the seed happens to hold any.
+		await page.route(
+			(url) => url.pathname === '/api/analytics/cashflow_forecast',
+			async (route) => {
+				const res = await route.fetch();
+				const body = (await res.json()) as CashflowForecast;
+				body.periods = [
+					{
+						period: '2026-06-08',
+						period_start: '2026-06-08',
+						period_end: '2026-06-14',
+						scheduled_amount: '1200.00',
+						committed_amount: '200.00',
+						pending_amount: '0.00',
+						overdue_amount: '1000.00',
+						discount_eligible_amount: '0.00',
+						count: 2,
+						overdue_count: 1,
+						unconverted_count: 0
+					}
+				];
+				body.totals = {
+					...body.totals,
+					scheduled_amount: '1200.00',
+					committed_amount: '200.00',
+					pending_amount: '0.00',
+					overdue_amount: '1000.00',
+					count: 2,
+					overdue_count: 1
+				};
+				await route.fulfill({ response: res, json: body });
+			}
+		);
+		await page.goto('/cfo');
+
+		const note = page.getByTestId('overdue-outflows');
+		await expect(note).toBeVisible({ timeout: 10_000 });
+		await expect(note).toContainText('1 invoice totalling');
+		await expect(note).toContainText('already past due');
+		await expect(page.locator('.cf-bar.overdue')).toHaveCount(1);
+		await expect(page.getByRole('img', { name: /^Overdue .*, committed .*, pending / })).toHaveCount(1);
+		await expect(page.locator('.cf-legend')).toContainText('Overdue (owed now)');
 	});
 
 	test('Export CSV triggers a download', async ({ page }) => {
