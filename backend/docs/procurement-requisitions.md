@@ -193,6 +193,11 @@ rollup, so `GET /budgets/{id}/spend` reported `committed: 0` and
 for. The pair is re-checked on `PATCH` when `currency` changes alone, so a
 currency edit can't orphan an existing link either.
 
+The form links a budget through `ui/BudgetPicker`, which lists only budgets in
+the requisition's currency, and runs `GET /budgets/check` on the draft's total
+before save — an overspend is a warning, a currency mismatch blocks the save.
+See `backend/docs/procurement-budgets.md` § `GET /budgets/check` contract.
+
 Existence was checked; **the entity boundary was not**. All three targets carry
 `EntityMixin`, and the org-scoped-only lookup accepted a sibling subsidiary's
 row on every one of them — the same defect `api/intake.py::_resolve_vendor_id`
@@ -243,8 +248,10 @@ delete / submit / cancel): `admin` / `ap_manager` / `ap_clerk`. Approve / reject
   may reject a requisition and may **not** reopen one, so the button is absent
   for them rather than a control that can only 403.
 - `frontend/src/lib/components/modals/RequisitionModal.svelte` — create / detail
-  / edit dialog over the shared `Modal`, with an editable line-item grid and a
-  live computed total.
+  / edit dialog over the shared `Modal`, with an editable line-item grid, a
+  live computed total, and (admin | ap_manager | cfo — the budget readers) a
+  `ui/BudgetPicker` with the debounced `GET /budgets/check` overspend warning
+  under it (`utils/budgetPicker.ts`; e2e `tests-e2e/requisitions/budget-link.spec.ts`).
 - `frontend/src/lib/api/requisitions.ts` + `frontend/src/lib/types/requisition.ts`
   — typed API helpers + types.
 
