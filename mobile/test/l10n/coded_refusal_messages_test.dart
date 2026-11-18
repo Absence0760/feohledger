@@ -413,4 +413,31 @@ void main() {
     expect(localizeCodedRefusal(de, refusal('payment_run_nothing_to_record')),
         de.codedRefusalPaymentRunNothingToRecord);
   });
+
+  // `services/goods_receipts.py` — the mobile receipt form.
+  test('the goods-receipt refusals are stated, and a missing param is null',
+      () {
+    expect(
+      localizeCodedRefusal(
+        de,
+        refusal('goods_receipt_po_cancelled', {'poNumber': 'PO-9'}),
+      ),
+      de.codedRefusalGoodsReceiptPoCancelled('PO-9'),
+    );
+    expect(
+      localizeCodedRefusal(
+        en,
+        refusal('goods_receipt_number_taken', {'grNumber': 'DN-7'}),
+      ),
+      en.codedRefusalGoodsReceiptNumberTaken('DN-7'),
+    );
+    expect(
+      localizeCodedRefusal(en, refusal('goods_receipt_nothing_received')),
+      en.codedRefusalGoodsReceiptNothingReceived,
+    );
+    expect(
+      localizeCodedRefusal(en, refusal('goods_receipt_po_cancelled')),
+      isNull,
+    );
+  });
 }

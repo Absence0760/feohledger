@@ -248,9 +248,13 @@ class ApiClient {
     return _handleListResponse(response);
   }
 
+  /// [headers] carries the few per-request headers a write needs of its own —
+  /// today the `Idempotency-Key` on recording a goods receipt. They are added
+  /// to, never replace, the auth + tenant headers.
   Future<Map<String, dynamic>> post(
     String path, [
     Map<String, dynamic>? body,
+    Map<String, String>? headers,
   ]) async {
     final uri = _uri(path);
     debugPrint('[API] POST $uri');
@@ -258,7 +262,7 @@ class ApiClient {
       final response = await _http
           .post(
             uri,
-            headers: _headers,
+            headers: headers == null ? _headers : {...headers, ..._headers},
             body: body != null ? jsonEncode(body) : null,
           )
           .timeout(_timeout);

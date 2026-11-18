@@ -121,10 +121,24 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   admin / ap_manager only. Reached from **Settings → Procurement**. QMS sync is
   deliberately web-only — it is an operator action against org-level config that
   409s unless `settings.qms` is set. Not offline-cached: a stale pass/fail is a
-  wrong answer about whether an invoice can be paid. **Recording a goods
-  receipt** (`POST /api/goods-receipts`, web `/goods-receipts` → Record receipt)
-  is web-only for now — there is no receipts screen on mobile; tracked in
-  `docs/followups.md`
+  wrong answer about whether an invoice can be paid.
+- Goods-receipt entry (3-way matching) — `GoodsReceiptRecordScreen` +
+  `GoodsReceiptStore`, the mobile half of the web `/goods-receipts` → Record
+  receipt form, on the same endpoints with no backend change: a debounced PO
+  search + picker (`GET /api/purchase-orders`), the picked PO's lines with
+  ordered / received so far / outstanding (`GET /api/purchase-orders/{id}`),
+  outstanding pre-filled and a fully received line left blank (a pre-filled 0
+  would claim a shortfall), free-text lines for a PO synced with none, an
+  over-receipt note beside a line, received date and an optional delivery-note
+  number, then `POST /api/goods-receipts` with one `Idempotency-Key` per opened
+  form (a retry replays, never books twice). Quantities are kept as typed text
+  and sent as **strings**; outstanding is worked in ten-thousandths, never a
+  `double`. The `goods_receipt_*` coded refusals are stated in the reader's
+  language; the form also says up front that the receiver cannot approve
+  invoices on the PO (`approval_segregation_receiver` at the approval door,
+  decisions §267, §389). Reached from **Settings → Procurement → Record
+  receipt**, shown to admin / ap_manager / ap_clerk (`RECEIPT_ENTRY_ROLES`).
+  The receipts list, detail and cancel stay on the web. Not offline-cached.
 - Adaptive AI workflows (read-first) — `AdaptiveScreen` + `AdaptiveStore` over
   `GET /api/adaptive/{suggestions,approval-patterns,anomalies}`, three tabs each
   with its own loading / error / empty state and its own request sequence (a

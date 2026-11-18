@@ -152,6 +152,12 @@ class AuthStore extends ChangeNotifier {
   // role can read the queue and only these two get the record affordance —
   // the same split the web /goods-receipts Inspections tab applies.
   bool get canRecordInspection => isAdmin || isManager;
+  // Recording a goods receipt — mirrors `RECEIPT_ENTRY_ROLES`
+  // (require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)) on
+  // POST /api/goods-receipts. A CFO is not offered the form: receiving is a
+  // duty segregated from approval (backend decisions §267).
+  bool get canRecordGoodsReceipt =>
+      isAdmin || isManager || (_user?.hasRole('ap_clerk') ?? false);
 
   /// Drop all in-memory state. Called on logout / forced logout through
   /// `SessionManager.endSession` — this is a process-lifetime singleton, so

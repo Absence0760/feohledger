@@ -3292,5 +3292,210 @@
   "codedRefusalPaymentRunNotRecordable": "Only a draft run, or one whose bank file was exported, can be recorded as paid.",
   "codedRefusalPaymentRunNothingToRecord": "This run has no payments left to record.",
   "codedRefusalExternalPaymentBlockingException": "This invoice has an unresolved payment-blocking exception. Resolve it before recording the invoice as paid.",
-  "@codedRefusalExternalPaymentBlockingException": {"description": "The type is not named here: the queue row's blocked chip already names it."}
+  "@codedRefusalExternalPaymentBlockingException": {"description": "The type is not named here: the queue row's blocked chip already names it."},
+  "grRecordTitle": "Record goods receipt",
+  "@grRecordTitle": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.title`."
+  },
+  "grRecordIntro": "Record what arrived against a purchase order. Invoices that quote the PO are matched again as soon as you save.",
+  "@grRecordIntro": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.intro`."
+  },
+  "grRecordSearchPo": "Find PO",
+  "@grRecordSearchPo": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.searchPo`."
+  },
+  "grRecordSearchPlaceholder": "PO number",
+  "@grRecordSearchPlaceholder": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.searchPlaceholder`."
+  },
+  "grRecordPo": "Purchase order",
+  "@grRecordPo": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.po`."
+  },
+  "grRecordNoPos": "No matching purchase orders",
+  "@grRecordNoPos": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.noPos`."
+  },
+  "grRecordLoadPosFailed": "Failed to load purchase orders",
+  "@grRecordLoadPosFailed": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.loadPosFailed`."
+  },
+  "grRecordLoadPoFailed": "Failed to load the purchase order",
+  "@grRecordLoadPoFailed": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.loadPoFailed`."
+  },
+  "grRecordPoCancelled": "Purchase order {number} is cancelled, so nothing can be received against it.",
+  "@grRecordPoCancelled": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.poCancelled`.",
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "grRecordOrdered": "Ordered",
+  "@grRecordOrdered": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.ordered`."
+  },
+  "grRecordAlreadyReceived": "Received so far",
+  "@grRecordAlreadyReceived": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.alreadyReceived`."
+  },
+  "grRecordOutstanding": "Outstanding",
+  "@grRecordOutstanding": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.outstanding`."
+  },
+  "grRecordThisDelivery": "This delivery",
+  "@grRecordThisDelivery": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.thisDelivery`."
+  },
+  "grRecordQuantityFor": "Quantity received for {line}",
+  "@grRecordQuantityFor": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.quantityFor`.",
+    "placeholders": {
+      "line": {
+        "type": "String"
+      }
+    }
+  },
+  "grRecordOverReceipt": "More than is outstanding. Matching will flag this as an over-receipt.",
+  "@grRecordOverReceipt": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.overReceipt`."
+  },
+  "grRecordLinesHint": "Leave a line blank if it wasn't part of this delivery. Enter 0 to record that it was expected but didn't arrive.",
+  "@grRecordLinesHint": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.linesHint`."
+  },
+  "grRecordNoPoLines": "This purchase order has no lines, so describe what arrived.",
+  "@grRecordNoPoLines": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.noPoLines`."
+  },
+  "grRecordAddLine": "Add line",
+  "@grRecordAddLine": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.addLine`."
+  },
+  "grRecordRemoveLine": "Remove line {n}",
+  "@grRecordRemoveLine": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.removeLine`.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "grRecordLineDescription": "Description, line {n}",
+  "@grRecordLineDescription": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.lineDescription`.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "grRecordLineQuantity": "Quantity received, line {n}",
+  "@grRecordLineQuantity": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.lineQuantity`.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "grRecordReceivedDate": "Received on",
+  "@grRecordReceivedDate": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.receivedDate`."
+  },
+  "grRecordNumber": "Delivery note number",
+  "@grRecordNumber": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.number`."
+  },
+  "grRecordNumberHint": "Optional. The supplier's packing slip or delivery note number.",
+  "@grRecordNumberHint": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.numberHint`."
+  },
+  "grRecordNumberPlaceholder": "Blank: GR-{po}-n",
+  "@grRecordNumberPlaceholder": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.numberPlaceholder`.",
+    "placeholders": {
+      "po": {
+        "type": "String"
+      }
+    }
+  },
+  "grRecordSaving": "Recording…",
+  "@grRecordSaving": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.saving`."
+  },
+  "grRecordSubmit": "Record receipt",
+  "@grRecordSubmit": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.submit`."
+  },
+  "grRecordRecorded": "Recorded goods receipt {number}",
+  "@grRecordRecorded": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.toast.recorded`.",
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "grRecordFailed": "Failed to record the goods receipt",
+  "@grRecordFailed": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.toast.recordFailed`."
+  },
+  "settingsGoodsReceipt": "Record receipt",
+  "@settingsGoodsReceipt": {
+    "description": "Goods-receipt record form; mirrors web `goodsReceipts.record.action`."
+  },
+  "codedRefusalGoodsReceiptPoCancelled": "Purchase order {poNumber} is cancelled; nothing can be received against it.",
+  "@codedRefusalGoodsReceiptPoCancelled": {
+    "description": "Goods-receipt record form; mirrors web `refusal.goodsReceiptPoCancelled`.",
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "codedRefusalGoodsReceiptNumberTaken": "A goods receipt numbered {grNumber} already exists.",
+  "@codedRefusalGoodsReceiptNumberTaken": {
+    "description": "Goods-receipt record form; mirrors web `refusal.goodsReceiptNumberTaken`.",
+    "placeholders": {
+      "grNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "codedRefusalGoodsReceiptLineNotOnPo": "Every received line must be one of this purchase order's lines.",
+  "@codedRefusalGoodsReceiptLineNotOnPo": {
+    "description": "Goods-receipt record form; mirrors web `refusal.goodsReceiptLineNotOnPo`."
+  },
+  "codedRefusalGoodsReceiptLineDuplicated": "A purchase-order line can appear only once on a receipt.",
+  "@codedRefusalGoodsReceiptLineDuplicated": {
+    "description": "Goods-receipt record form; mirrors web `refusal.goodsReceiptLineDuplicated`."
+  },
+  "codedRefusalGoodsReceiptLineRequired": "Describe what was received on each line.",
+  "@codedRefusalGoodsReceiptLineRequired": {
+    "description": "Goods-receipt record form; mirrors web `refusal.goodsReceiptLineRequired`."
+  },
+  "codedRefusalGoodsReceiptNothingReceived": "A receipt must record at least one unit received.",
+  "@codedRefusalGoodsReceiptNothingReceived": {
+    "description": "Goods-receipt record form; mirrors web `refusal.goodsReceiptNothingReceived`."
+  },
+  "codedRefusalGoodsReceiptIdempotencyReused": "This request was already used for a different purchase order. Reopen the form and try again.",
+  "@codedRefusalGoodsReceiptIdempotencyReused": {
+    "description": "Goods-receipt record form; mirrors web `refusal.goodsReceiptIdempotencyReused`."
+  },
+  "settingsGoodsReceiptHint": "Count a delivery in against a purchase order",
+  "@settingsGoodsReceiptHint": {
+    "description": "Settings → Procurement: subtitle of the record-goods-receipt entry."
+  },
+  "grRecordSegregationNote": "Segregation of duties: once you record this receipt, you can't approve an invoice billed against this purchase order, and a receipt you record after approving one doesn't release it.",
+  "@grRecordSegregationNote": {
+    "description": "Note on the goods-receipt form: the receiver may not approve invoices on this PO (backend decisions §267, §389)."
+  },
+  "grRecordReceiveLines": "Enter a quantity on at least one line",
+  "@grRecordReceiveLines": {
+    "description": "Goods-receipt form: shown when submit is tried with no positive quantity on any line."
+  }
 }

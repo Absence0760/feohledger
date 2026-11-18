@@ -1101,14 +1101,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 Three separate PRs, in this order. Inventory tracking and selling are out of
 scope (§260) — do not fold them into any of these.
 
-- [ ] **(c) Mobile has no goods-receipt entry.** `/goods-receipts` → Record
-      receipt is web-only; mobile reads receipts only for the inspection
-      picker. A warehouse or shop-floor user would naturally record a delivery
-      on a phone. **Durable fix:** a receipts screen with the same PO picker,
-      per-line outstanding quantities and the endpoints the web form uses (no
-      backend change), quantities sent as strings, widget tests and ARB strings
-      in every locale. **Trigger:** the first tenant receiving goods without a
-      desk, or the next mobile procurement change.
 - [ ] **(c) No adapter pulls goods receipts, and the enterprise ERPs still
       ride Merge.dev.** The US + South Africa set is now direct (QuickBooks
       Online, Xero, Sage Accounting and its SA API, Sage Intacct, SYSPRO,

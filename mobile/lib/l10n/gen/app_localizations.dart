@@ -6329,6 +6329,246 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This invoice has an unresolved payment-blocking exception. Resolve it before recording the invoice as paid.'**
   String get codedRefusalExternalPaymentBlockingException;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.title`.
+  ///
+  /// In en, this message translates to:
+  /// **'Record goods receipt'**
+  String get grRecordTitle;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.intro`.
+  ///
+  /// In en, this message translates to:
+  /// **'Record what arrived against a purchase order. Invoices that quote the PO are matched again as soon as you save.'**
+  String get grRecordIntro;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.searchPo`.
+  ///
+  /// In en, this message translates to:
+  /// **'Find PO'**
+  String get grRecordSearchPo;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.searchPlaceholder`.
+  ///
+  /// In en, this message translates to:
+  /// **'PO number'**
+  String get grRecordSearchPlaceholder;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.po`.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase order'**
+  String get grRecordPo;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.noPos`.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching purchase orders'**
+  String get grRecordNoPos;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.loadPosFailed`.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load purchase orders'**
+  String get grRecordLoadPosFailed;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.loadPoFailed`.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load the purchase order'**
+  String get grRecordLoadPoFailed;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.poCancelled`.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase order {number} is cancelled, so nothing can be received against it.'**
+  String grRecordPoCancelled(String number);
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.ordered`.
+  ///
+  /// In en, this message translates to:
+  /// **'Ordered'**
+  String get grRecordOrdered;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.alreadyReceived`.
+  ///
+  /// In en, this message translates to:
+  /// **'Received so far'**
+  String get grRecordAlreadyReceived;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.outstanding`.
+  ///
+  /// In en, this message translates to:
+  /// **'Outstanding'**
+  String get grRecordOutstanding;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.thisDelivery`.
+  ///
+  /// In en, this message translates to:
+  /// **'This delivery'**
+  String get grRecordThisDelivery;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.quantityFor`.
+  ///
+  /// In en, this message translates to:
+  /// **'Quantity received for {line}'**
+  String grRecordQuantityFor(String line);
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.overReceipt`.
+  ///
+  /// In en, this message translates to:
+  /// **'More than is outstanding. Matching will flag this as an over-receipt.'**
+  String get grRecordOverReceipt;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.linesHint`.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave a line blank if it wasn\'t part of this delivery. Enter 0 to record that it was expected but didn\'t arrive.'**
+  String get grRecordLinesHint;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.noPoLines`.
+  ///
+  /// In en, this message translates to:
+  /// **'This purchase order has no lines, so describe what arrived.'**
+  String get grRecordNoPoLines;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.addLine`.
+  ///
+  /// In en, this message translates to:
+  /// **'Add line'**
+  String get grRecordAddLine;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.removeLine`.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove line {n}'**
+  String grRecordRemoveLine(int n);
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.lineDescription`.
+  ///
+  /// In en, this message translates to:
+  /// **'Description, line {n}'**
+  String grRecordLineDescription(int n);
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.lineQuantity`.
+  ///
+  /// In en, this message translates to:
+  /// **'Quantity received, line {n}'**
+  String grRecordLineQuantity(int n);
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.receivedDate`.
+  ///
+  /// In en, this message translates to:
+  /// **'Received on'**
+  String get grRecordReceivedDate;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.number`.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery note number'**
+  String get grRecordNumber;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.numberHint`.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional. The supplier\'s packing slip or delivery note number.'**
+  String get grRecordNumberHint;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.numberPlaceholder`.
+  ///
+  /// In en, this message translates to:
+  /// **'Blank: GR-{po}-n'**
+  String grRecordNumberPlaceholder(String po);
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.saving`.
+  ///
+  /// In en, this message translates to:
+  /// **'Recording…'**
+  String get grRecordSaving;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.submit`.
+  ///
+  /// In en, this message translates to:
+  /// **'Record receipt'**
+  String get grRecordSubmit;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.toast.recorded`.
+  ///
+  /// In en, this message translates to:
+  /// **'Recorded goods receipt {number}'**
+  String grRecordRecorded(String number);
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.toast.recordFailed`.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to record the goods receipt'**
+  String get grRecordFailed;
+
+  /// Goods-receipt record form; mirrors web `goodsReceipts.record.action`.
+  ///
+  /// In en, this message translates to:
+  /// **'Record receipt'**
+  String get settingsGoodsReceipt;
+
+  /// Goods-receipt record form; mirrors web `refusal.goodsReceiptPoCancelled`.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase order {poNumber} is cancelled; nothing can be received against it.'**
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber);
+
+  /// Goods-receipt record form; mirrors web `refusal.goodsReceiptNumberTaken`.
+  ///
+  /// In en, this message translates to:
+  /// **'A goods receipt numbered {grNumber} already exists.'**
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber);
+
+  /// Goods-receipt record form; mirrors web `refusal.goodsReceiptLineNotOnPo`.
+  ///
+  /// In en, this message translates to:
+  /// **'Every received line must be one of this purchase order\'s lines.'**
+  String get codedRefusalGoodsReceiptLineNotOnPo;
+
+  /// Goods-receipt record form; mirrors web `refusal.goodsReceiptLineDuplicated`.
+  ///
+  /// In en, this message translates to:
+  /// **'A purchase-order line can appear only once on a receipt.'**
+  String get codedRefusalGoodsReceiptLineDuplicated;
+
+  /// Goods-receipt record form; mirrors web `refusal.goodsReceiptLineRequired`.
+  ///
+  /// In en, this message translates to:
+  /// **'Describe what was received on each line.'**
+  String get codedRefusalGoodsReceiptLineRequired;
+
+  /// Goods-receipt record form; mirrors web `refusal.goodsReceiptNothingReceived`.
+  ///
+  /// In en, this message translates to:
+  /// **'A receipt must record at least one unit received.'**
+  String get codedRefusalGoodsReceiptNothingReceived;
+
+  /// Goods-receipt record form; mirrors web `refusal.goodsReceiptIdempotencyReused`.
+  ///
+  /// In en, this message translates to:
+  /// **'This request was already used for a different purchase order. Reopen the form and try again.'**
+  String get codedRefusalGoodsReceiptIdempotencyReused;
+
+  /// Settings → Procurement: subtitle of the record-goods-receipt entry.
+  ///
+  /// In en, this message translates to:
+  /// **'Count a delivery in against a purchase order'**
+  String get settingsGoodsReceiptHint;
+
+  /// Note on the goods-receipt form: the receiver may not approve invoices on this PO (backend decisions §267, §389).
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: once you record this receipt, you can\'t approve an invoice billed against this purchase order, and a receipt you record after approving one doesn\'t release it.'**
+  String get grRecordSegregationNote;
+
+  /// Goods-receipt form: shown when submit is tried with no positive quantity on any line.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a quantity on at least one line'**
+  String get grRecordReceiveLines;
 }
 
 class _AppLocalizationsDelegate

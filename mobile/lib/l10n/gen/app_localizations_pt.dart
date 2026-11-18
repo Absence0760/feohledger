@@ -4335,6 +4335,157 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get codedRefusalExternalPaymentBlockingException =>
       'Esta fatura tem uma exceção não resolvida que bloqueia o pagamento. Resolva-a antes de registrar a fatura como paga.';
+
+  @override
+  String get grRecordTitle => 'Registrar recebimento de mercadorias';
+
+  @override
+  String get grRecordIntro =>
+      'Registre o que chegou de um pedido de compra. As faturas que citam o pedido são conciliadas novamente assim que você salvar.';
+
+  @override
+  String get grRecordSearchPo => 'Buscar pedido';
+
+  @override
+  String get grRecordSearchPlaceholder => 'Número do pedido';
+
+  @override
+  String get grRecordPo => 'Pedido de compra';
+
+  @override
+  String get grRecordNoPos => 'Nenhum pedido de compra correspondente';
+
+  @override
+  String get grRecordLoadPosFailed => 'Falha ao carregar os pedidos de compra';
+
+  @override
+  String get grRecordLoadPoFailed => 'Falha ao carregar o pedido de compra';
+
+  @override
+  String grRecordPoCancelled(String number) {
+    return 'O pedido de compra $number está cancelado, então nada pode ser recebido nele.';
+  }
+
+  @override
+  String get grRecordOrdered => 'Pedido';
+
+  @override
+  String get grRecordAlreadyReceived => 'Recebido até agora';
+
+  @override
+  String get grRecordOutstanding => 'Pendente';
+
+  @override
+  String get grRecordThisDelivery => 'Esta entrega';
+
+  @override
+  String grRecordQuantityFor(String line) {
+    return 'Quantidade recebida para $line';
+  }
+
+  @override
+  String get grRecordOverReceipt =>
+      'Mais do que o pendente. A conciliação vai sinalizar um recebimento excedente.';
+
+  @override
+  String get grRecordLinesHint =>
+      'Deixe uma linha em branco se ela não fez parte desta entrega. Digite 0 se era esperada mas não chegou.';
+
+  @override
+  String get grRecordNoPoLines =>
+      'Este pedido de compra não tem linhas, então descreva o que chegou.';
+
+  @override
+  String get grRecordAddLine => 'Adicionar linha';
+
+  @override
+  String grRecordRemoveLine(int n) {
+    return 'Remover a linha $n';
+  }
+
+  @override
+  String grRecordLineDescription(int n) {
+    return 'Descrição, linha $n';
+  }
+
+  @override
+  String grRecordLineQuantity(int n) {
+    return 'Quantidade recebida, linha $n';
+  }
+
+  @override
+  String get grRecordReceivedDate => 'Recebido em';
+
+  @override
+  String get grRecordNumber => 'Número da nota de entrega';
+
+  @override
+  String get grRecordNumberHint =>
+      'Opcional. O número da nota de entrega ou romaneio do fornecedor.';
+
+  @override
+  String grRecordNumberPlaceholder(String po) {
+    return 'Em branco: GR-$po-n';
+  }
+
+  @override
+  String get grRecordSaving => 'Registrando…';
+
+  @override
+  String get grRecordSubmit => 'Registrar recebimento';
+
+  @override
+  String grRecordRecorded(String number) {
+    return 'Recebimento $number registrado';
+  }
+
+  @override
+  String get grRecordFailed => 'Falha ao registrar o recebimento';
+
+  @override
+  String get settingsGoodsReceipt => 'Registrar recebimento';
+
+  @override
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber) {
+    return 'O pedido de compra $poNumber está cancelado; nada pode ser recebido nele.';
+  }
+
+  @override
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber) {
+    return 'Já existe um recebimento com o número $grNumber.';
+  }
+
+  @override
+  String get codedRefusalGoodsReceiptLineNotOnPo =>
+      'Cada linha recebida deve ser uma das linhas deste pedido de compra.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineDuplicated =>
+      'Uma linha do pedido de compra só pode aparecer uma vez em um recebimento.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineRequired =>
+      'Descreva o que foi recebido em cada linha.';
+
+  @override
+  String get codedRefusalGoodsReceiptNothingReceived =>
+      'Um recebimento deve registrar pelo menos uma unidade recebida.';
+
+  @override
+  String get codedRefusalGoodsReceiptIdempotencyReused =>
+      'Esta solicitação já foi usada para outro pedido de compra. Abra o formulário de novo e tente outra vez.';
+
+  @override
+  String get settingsGoodsReceiptHint =>
+      'Registrar uma entrega de um pedido de compra';
+
+  @override
+  String get grRecordSegregationNote =>
+      'Segregação de funções: depois de registrar este recebimento, você não poderá aprovar uma fatura emitida contra este pedido de compra, e um recebimento registrado depois de aprovar uma fatura não a libera.';
+
+  @override
+  String get grRecordReceiveLines =>
+      'Informe uma quantidade em pelo menos uma linha';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -8665,4 +8816,155 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get codedRefusalExternalPaymentBlockingException =>
       'Esta fatura tem uma exceção não resolvida que bloqueia o pagamento. Resolva-a antes de registrar a fatura como paga.';
+
+  @override
+  String get grRecordTitle => 'Registrar recebimento de mercadorias';
+
+  @override
+  String get grRecordIntro =>
+      'Registre o que chegou de um pedido de compra. As faturas que citam o pedido são conciliadas novamente assim que você salvar.';
+
+  @override
+  String get grRecordSearchPo => 'Buscar pedido';
+
+  @override
+  String get grRecordSearchPlaceholder => 'Número do pedido';
+
+  @override
+  String get grRecordPo => 'Pedido de compra';
+
+  @override
+  String get grRecordNoPos => 'Nenhum pedido de compra correspondente';
+
+  @override
+  String get grRecordLoadPosFailed => 'Falha ao carregar os pedidos de compra';
+
+  @override
+  String get grRecordLoadPoFailed => 'Falha ao carregar o pedido de compra';
+
+  @override
+  String grRecordPoCancelled(String number) {
+    return 'O pedido de compra $number está cancelado, então nada pode ser recebido nele.';
+  }
+
+  @override
+  String get grRecordOrdered => 'Pedido';
+
+  @override
+  String get grRecordAlreadyReceived => 'Recebido até agora';
+
+  @override
+  String get grRecordOutstanding => 'Pendente';
+
+  @override
+  String get grRecordThisDelivery => 'Esta entrega';
+
+  @override
+  String grRecordQuantityFor(String line) {
+    return 'Quantidade recebida para $line';
+  }
+
+  @override
+  String get grRecordOverReceipt =>
+      'Mais do que o pendente. A conciliação vai sinalizar um recebimento excedente.';
+
+  @override
+  String get grRecordLinesHint =>
+      'Deixe uma linha em branco se ela não fez parte desta entrega. Digite 0 se era esperada mas não chegou.';
+
+  @override
+  String get grRecordNoPoLines =>
+      'Este pedido de compra não tem linhas, então descreva o que chegou.';
+
+  @override
+  String get grRecordAddLine => 'Adicionar linha';
+
+  @override
+  String grRecordRemoveLine(int n) {
+    return 'Remover a linha $n';
+  }
+
+  @override
+  String grRecordLineDescription(int n) {
+    return 'Descrição, linha $n';
+  }
+
+  @override
+  String grRecordLineQuantity(int n) {
+    return 'Quantidade recebida, linha $n';
+  }
+
+  @override
+  String get grRecordReceivedDate => 'Recebido em';
+
+  @override
+  String get grRecordNumber => 'Número da nota de entrega';
+
+  @override
+  String get grRecordNumberHint =>
+      'Opcional. O número da nota de entrega ou romaneio do fornecedor.';
+
+  @override
+  String grRecordNumberPlaceholder(String po) {
+    return 'Em branco: GR-$po-n';
+  }
+
+  @override
+  String get grRecordSaving => 'Registrando…';
+
+  @override
+  String get grRecordSubmit => 'Registrar recebimento';
+
+  @override
+  String grRecordRecorded(String number) {
+    return 'Recebimento $number registrado';
+  }
+
+  @override
+  String get grRecordFailed => 'Falha ao registrar o recebimento';
+
+  @override
+  String get settingsGoodsReceipt => 'Registrar recebimento';
+
+  @override
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber) {
+    return 'O pedido de compra $poNumber está cancelado; nada pode ser recebido nele.';
+  }
+
+  @override
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber) {
+    return 'Já existe um recebimento com o número $grNumber.';
+  }
+
+  @override
+  String get codedRefusalGoodsReceiptLineNotOnPo =>
+      'Cada linha recebida deve ser uma das linhas deste pedido de compra.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineDuplicated =>
+      'Uma linha do pedido de compra só pode aparecer uma vez em um recebimento.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineRequired =>
+      'Descreva o que foi recebido em cada linha.';
+
+  @override
+  String get codedRefusalGoodsReceiptNothingReceived =>
+      'Um recebimento deve registrar pelo menos uma unidade recebida.';
+
+  @override
+  String get codedRefusalGoodsReceiptIdempotencyReused =>
+      'Esta solicitação já foi usada para outro pedido de compra. Abra o formulário de novo e tente outra vez.';
+
+  @override
+  String get settingsGoodsReceiptHint =>
+      'Registrar uma entrega de um pedido de compra';
+
+  @override
+  String get grRecordSegregationNote =>
+      'Segregação de funções: depois de registrar este recebimento, você não poderá aprovar uma fatura emitida contra este pedido de compra, e um recebimento registrado depois de aprovar uma fatura não a libera.';
+
+  @override
+  String get grRecordReceiveLines =>
+      'Informe uma quantidade em pelo menos uma linha';
 }

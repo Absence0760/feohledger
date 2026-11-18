@@ -4344,4 +4344,156 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get codedRefusalExternalPaymentBlockingException =>
       'Cette facture comporte une exception non résolue qui bloque le paiement. Résolvez-la avant d\'enregistrer la facture comme payée.';
+
+  @override
+  String get grRecordTitle => 'Enregistrer une réception de marchandises';
+
+  @override
+  String get grRecordIntro =>
+      'Enregistrez ce qui a été livré au titre d\'un bon de commande. Les factures qui citent ce bon sont rapprochées à nouveau dès l\'enregistrement.';
+
+  @override
+  String get grRecordSearchPo => 'Rechercher un bon';
+
+  @override
+  String get grRecordSearchPlaceholder => 'Numéro de bon de commande';
+
+  @override
+  String get grRecordPo => 'Bon de commande';
+
+  @override
+  String get grRecordNoPos => 'Aucun bon de commande correspondant';
+
+  @override
+  String get grRecordLoadPosFailed =>
+      'Échec du chargement des bons de commande';
+
+  @override
+  String get grRecordLoadPoFailed => 'Échec du chargement du bon de commande';
+
+  @override
+  String grRecordPoCancelled(String number) {
+    return 'Le bon de commande $number est annulé ; rien ne peut être réceptionné à son titre.';
+  }
+
+  @override
+  String get grRecordOrdered => 'Commandé';
+
+  @override
+  String get grRecordAlreadyReceived => 'Déjà reçu';
+
+  @override
+  String get grRecordOutstanding => 'Restant';
+
+  @override
+  String get grRecordThisDelivery => 'Cette livraison';
+
+  @override
+  String grRecordQuantityFor(String line) {
+    return 'Quantité reçue pour $line';
+  }
+
+  @override
+  String get grRecordOverReceipt =>
+      'Plus que le restant. Le rapprochement signalera une surlivraison.';
+
+  @override
+  String get grRecordLinesHint =>
+      'Laissez une ligne vide si elle ne faisait pas partie de cette livraison. Saisissez 0 si elle était attendue mais n\'est pas arrivée.';
+
+  @override
+  String get grRecordNoPoLines =>
+      'Ce bon de commande n\'a pas de lignes : décrivez ce qui a été livré.';
+
+  @override
+  String get grRecordAddLine => 'Ajouter une ligne';
+
+  @override
+  String grRecordRemoveLine(int n) {
+    return 'Supprimer la ligne $n';
+  }
+
+  @override
+  String grRecordLineDescription(int n) {
+    return 'Description, ligne $n';
+  }
+
+  @override
+  String grRecordLineQuantity(int n) {
+    return 'Quantité reçue, ligne $n';
+  }
+
+  @override
+  String get grRecordReceivedDate => 'Reçu le';
+
+  @override
+  String get grRecordNumber => 'Numéro du bon de livraison';
+
+  @override
+  String get grRecordNumberHint =>
+      'Facultatif. Le numéro du bon de livraison ou du bordereau du fournisseur.';
+
+  @override
+  String grRecordNumberPlaceholder(String po) {
+    return 'Vide : GR-$po-n';
+  }
+
+  @override
+  String get grRecordSaving => 'Enregistrement…';
+
+  @override
+  String get grRecordSubmit => 'Enregistrer la réception';
+
+  @override
+  String grRecordRecorded(String number) {
+    return 'Réception $number enregistrée';
+  }
+
+  @override
+  String get grRecordFailed => 'Échec de l\'enregistrement de la réception';
+
+  @override
+  String get settingsGoodsReceipt => 'Enregistrer une réception';
+
+  @override
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber) {
+    return 'Le bon de commande $poNumber est annulé ; rien ne peut être réceptionné à son titre.';
+  }
+
+  @override
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber) {
+    return 'Une réception portant le numéro $grNumber existe déjà.';
+  }
+
+  @override
+  String get codedRefusalGoodsReceiptLineNotOnPo =>
+      'Chaque ligne reçue doit être une ligne de ce bon de commande.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineDuplicated =>
+      'Une ligne de bon de commande ne peut figurer qu\'une fois sur une réception.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineRequired =>
+      'Décrivez ce qui a été reçu sur chaque ligne.';
+
+  @override
+  String get codedRefusalGoodsReceiptNothingReceived =>
+      'Une réception doit enregistrer au moins une unité reçue.';
+
+  @override
+  String get codedRefusalGoodsReceiptIdempotencyReused =>
+      'Cette demande a déjà servi pour un autre bon de commande. Rouvrez le formulaire et réessayez.';
+
+  @override
+  String get settingsGoodsReceiptHint =>
+      'Réceptionner une livraison au titre d\'un bon de commande';
+
+  @override
+  String get grRecordSegregationNote =>
+      'Séparation des tâches : une fois cette réception enregistrée, vous ne pouvez pas approuver une facture émise au titre de ce bon de commande, et une réception enregistrée après avoir approuvé une facture ne la libère pas.';
+
+  @override
+  String get grRecordReceiveLines =>
+      'Saisissez une quantité sur au moins une ligne';
 }
