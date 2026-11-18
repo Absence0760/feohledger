@@ -179,6 +179,9 @@ test.describe('/organization provider credentials', () => {
 			).toHaveAttribute('data-toast-type', 'error');
 			await expect(page.locator('[data-testid="toast"][data-toast-type="success"]')).toHaveCount(0);
 			await expect(field).toHaveValue(BYOK_SECRET);
+			// An uncoded 503 (KMS down: retried later) offers no reset — only
+			// `credential_block_unopenable` does.
+			await expect(page.getByTestId('credential-reset-extraction')).toHaveCount(0);
 			await page.unroute(putUrl);
 
 			const patch = saved();
@@ -257,6 +260,144 @@ test.describe('/organization provider credentials', () => {
 			expect((await credentialStatus(page)).extraction).toEqual(['api_key']);
 				} finally {
 			await resetExtraction(page);
+		}
+	});
+
+	test('a block whose stored value will not open offers clearing it, after a confirm', async ({
+		page
+	}) => {
+		// Every save of such a block answers this 503 (the writer must open the
+		// stored value to merge into it); DELETE removes it unopened (decisions
+		// §464). Both are stubbed: the server side is pytest's.
+		const credsUrl = `${API_BASE}/api/organization/credentials`;
+		const putUrl = `${credsUrl}/payments`;
+		await page.route(credsUrl, (route) =>
+			route.request().method() === 'GET'
+				? route.fulfill({
+						json: { erp: [], payments: ['api_key'], cards: [], commerce: [], extraction: [] }
+					})
+				: route.fallback()
+		);
+		const deletes: string[] = [];
+		await page.route(putUrl, (route) => {
+			const method = route.request().method();
+			if (method === 'PUT') {
+				return route.fulfill({
+					status: 503,
+					json: {
+						detail: {
+							code: 'credential_block_unopenable',
+							message: 'The stored credentials for this section can no longer be opened.',
+							params: { block: 'payments' }
+						}
+					}
+				});
+			}
+			if (method === 'DELETE') {
+				deletes.push(route.request().url());
+				return route.fulfill({
+					json: { erp: [], payments: [], cards: [], commerce: [], extraction: [] }
+				});
+			}
+			return route.fallback();
+		});
+
+		const loaded = Promise.all([
+			page.waitForResponse(
+				(r) => r.url().endsWith('/api/organization') && r.request().method() === 'GET'
+			),
+			page.waitForResponse(
+				(r) =>
+					r.url().endsWith('/api/organization/credentials') && r.request().method() === 'GET'
+			)
+		]);
+		await page.goto('/organization?section=payments');
+		await loaded;
+		const save = page.getByRole('button', { name: 'Save Payment Settings' });
+		const field = page.getByTestId('payments-api-key');
+		const prompt = page.getByTestId('credential-reset-payments');
+		try {
+			await expect(save).toBeVisible();
+			await page
+				.getByRole('combobox', { name: 'Provider', exact: true })
+				.selectOption('modern_treasury');
+			await expect(field).toHaveAttribute('placeholder', KEEP);
+			await expect(prompt).toHaveCount(0);
+			await field.fill(SECRET);
+
+			const refused = page.waitForResponse(
+				(r) => r.url() === putUrl && r.request().method() === 'PUT'
+			);
+			await save.click();
+			expect((await refused).status()).toBe(503);
+			await expect(
+				page.getByTestId('toast').filter({
+					hasText:
+						'The stored credentials for this section can no longer be opened, so nothing was saved.'
+				})
+			).toHaveAttribute('data-toast-type', 'error');
+			await expect(prompt).toBeVisible();
+
+			// Opening the prompt asks first and says what goes; cancelling
+			// removes nothing.
+			await page.getByTestId('credential-reset-open-payments').click();
+			const dialog = page.getByRole('dialog', { name: 'Clear stored credentials?' });
+			await expect(dialog).toContainText(
+				'Every stored secret in this section (API keys, client secrets, webhook signing secrets, and for an ERP its sign-in tokens) is removed without being opened. Each one must be entered again before this integration works.'
+			);
+			await dialog.getByRole('button', { name: 'Cancel' }).click();
+			await expect(dialog).toHaveCount(0);
+			expect(deletes).toEqual([]);
+
+			await page.getByTestId('credential-reset-open-payments').click();
+			const cleared = page.waitForResponse(
+				(r) => r.url() === putUrl && r.request().method() === 'DELETE'
+			);
+			await page.getByTestId('credential-reset-confirm-payments').click();
+			expect((await cleared).status()).toBe(200);
+			expect(deletes).toEqual([putUrl]);
+			await expect(
+				page.getByTestId('toast').filter({
+					hasText: 'Stored credentials cleared. Enter each one again.'
+				})
+			).toHaveAttribute('data-toast-type', 'success');
+			await expect(prompt).toHaveCount(0);
+			// Nothing is stored now, so the field no longer offers "keep".
+			await expect(field).not.toHaveAttribute('placeholder', KEEP);
+		} finally {
+			await page.unroute(putUrl);
+			await page.unroute(credsUrl);
+			await reset(page);
+		}
+	});
+
+	test('a stored card block with no sandbox key reads as live', async ({ page }) => {
+		// The card adapters run such a block LIVE (`config.get("sandbox",
+		// False)`); the page once showed it as testing, so the next save moved
+		// it to sandbox and, since §464, dropped its keys. Stubbed: no tenant
+		// state changes.
+		const orgUrl = `${API_BASE}/api/organization`;
+		await page.route(orgUrl, async (route) => {
+			if (route.request().method() !== 'GET') return route.fallback();
+			const resp = await route.fetch();
+			const body = await resp.json();
+			body.settings = {
+				...body.settings,
+				cards: { enabled: true, program_type: 'byok', provider: 'lithic', region: 'US' }
+			};
+			return route.fulfill({ response: resp, json: body });
+		});
+		const loaded = page.waitForResponse(
+			(r) => r.url() === orgUrl && r.request().method() === 'GET'
+		);
+		try {
+			await page.goto('/organization?section=cards');
+			await loaded;
+			const mode = page.getByRole('combobox', { name: 'Sandbox Mode', exact: true });
+			await expect(mode).toBeVisible();
+			await expect(mode.locator('option:checked')).toHaveText('Production');
+		} finally {
+			await page.unroute(orgUrl);
 		}
 	});
 });
