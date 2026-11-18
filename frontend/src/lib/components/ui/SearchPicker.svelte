@@ -554,7 +554,7 @@
 
 	.sp-input {
 		width: 100%;
-		padding: 7px 30px 7px 9px;
+		padding: 7px 34px 7px 9px;
 		border-radius: 5px;
 		border: 1px solid var(--border);
 		background: var(--bg);
@@ -564,7 +564,7 @@
 	}
 
 	.compact .sp-input {
-		padding: 6px 26px 6px 8px;
+		padding: 6px 32px 6px 8px;
 		font-size: 0.82rem;
 	}
 
@@ -576,12 +576,14 @@
 	.sp-clear {
 		position: absolute;
 		top: 50%;
-		right: 6px;
+		right: 4px;
 		transform: translateY(-50%);
 		display: grid;
 		place-items: center;
-		width: 20px;
-		height: 20px;
+		/* 24px: WCAG 2.2 AA 2.5.8 target size. The input's right padding
+		   leaves room for it, so the text never runs under the button. */
+		width: 24px;
+		height: 24px;
 		padding: 0;
 		border: none;
 		border-radius: 4px;
