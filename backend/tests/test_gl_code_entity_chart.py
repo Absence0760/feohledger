@@ -1064,6 +1064,42 @@ async def test_list_flags_and_filters_templates_whose_code_left_the_chart(realdb
     assert summary_f.json()["gl_off_chart"] == 1
 
 
+async def test_write_responses_carry_the_off_chart_flag_a_reload_would(realdb, chart):
+    """The page replaces a row in place from a PATCH or lifecycle response
+    (`_respond`), so each must carry `gl_account_off_chart` exactly as the list
+    reads it: kept through a cosmetic edit and pause / resume / end, and
+    cleared by the re-code that fixes it."""
+    entity_a, _ = chart
+    headers = {"X-Entity-ID": str(entity_a)}
+    tid = await _seed_template(realdb, entity_a, A_RETIRED, name="Stale rent")
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        cosmetic = await c.patch(f"/api/recurring/{tid}", json={"notes": "n"}, headers=headers)
+        paused = await c.post(f"/api/recurring/{tid}/pause", headers=headers)
+        resumed = await c.post(f"/api/recurring/{tid}/resume", headers=headers)
+        recoded = await c.patch(
+            f"/api/recurring/{tid}", json={"gl_account": SHARED}, headers=headers
+        )
+        filtered = await c.get("/api/recurring", params={"gl_off_chart": "true"}, headers=headers)
+        ended = await c.post(f"/api/recurring/{tid}/end", headers=headers)
+
+        # A second stale template, ended while still off the chart.
+        stale = await _seed_template(realdb, entity_a, A_RETIRED, name="Other stale")
+        ended_stale = await c.post(f"/api/recurring/{stale}/end", headers=headers)
+
+    for resp, flag in (
+        (cosmetic, True),
+        (paused, True),
+        (resumed, True),
+        (recoded, False),
+        (ended, False),
+        (ended_stale, True),
+    ):
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["gl_account_off_chart"] is flag, resp.request.url
+    assert recoded.json()["gl_account"] == SHARED
+    assert [t["id"] for t in filtered.json()["items"]] == []
+
+
 # ---------------------------------------------------------------------------
 # GET /api/gl-accounts?chart_entity_id= — what the invoice pickers offer
 # ---------------------------------------------------------------------------
