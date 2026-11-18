@@ -396,6 +396,17 @@ const BUILDERS: Record<string, Builder> = {
 	},
 	invoice_still_extracting: fixed('refusal.invoiceStillExtracting'),
 	invoice_recall_one_at_a_time: fixed('refusal.invoiceRecallOneAtATime'),
+	// A row a service or the engine refused without a code (decisions §NEW-T1):
+	// `params.status` is the target it could not reach, named by its label; an
+	// unknown one falls back to the server's sentence.
+	invoice_bulk_refused: (params, t) => {
+		const status = str(params, 'status');
+		return status === null
+			? null
+			: t('refusal.invoiceBulkRefused', {
+					status: statusLabel(status, invoiceStatusLabelKey, t)
+				});
+	},
 	// `api/workflow.close_refusals` — `/complete` closing to `done`, and a
 	// `POST /bulk/status → done` row's skip, refused while a live payment or
 	// virtual card holds the invoice (decisions §357). `params.claim` names
@@ -619,6 +630,8 @@ const BUILDERS: Record<string, Builder> = {
 	},
 	// `api/auth.py` + `api/portal_auth.py` — a signed-in factor change
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
+	// The sign-in challenge's emailed code missed: wrong, expired or spent.
+	mfa_email_code_invalid: fixed('refusal.mfaEmailCodeInvalid'),
 	// `api/auth.py::_refuse_other_workspace` — signing in on another
 	// workspace's page. `sign_in_url` is the account's own sign-in page, query
 	// string (`?email=`) included; the sentence names only its host, which is
