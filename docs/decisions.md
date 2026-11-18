@@ -22931,12 +22931,15 @@ failure is logged by vendor-user id and the response stands.
 emails the same link "Invite User" sends, printing only the address and
 expiry. It refuses before creating anything when there is no tenant URL to
 build the link on. If the tenant exists but the email failed it exits 3 and
-says the admin can use Forgot password once mail works. `--print-link` prints
-the link to the operator's own terminal and sends nothing, for a tenant with
-no working mail; that is the operator's channel, not a response body.
+says the admin can use Forgot password once mail works. There is
+deliberately no option to print the link instead: the CLI runs on the VM,
+often through SSM, whose output is retained, so a printed link would be a live
+single-use credential in a log (CodeQL `py/clear-text-logging-sensitive-data`).
+A tenant whose mail does not work yet waits for mail; an operator re-send is
+tracked in `docs/followups.md`.
 
 `deploy/add-tenant.sh` no longer generates or prints a password and refuses
-`--admin-password`. `create_tenant.py` keeps `--admin-password` for local dev,
+`--admin-password` and `--print-link`. `create_tenant.py` keeps `--admin-password` for local dev,
 because the documented setup uses it, and refuses it in a deployed
 environment. The day-one rehearsal reads the admin's link from Mailpit.
 
