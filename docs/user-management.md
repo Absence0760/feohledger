@@ -266,7 +266,7 @@ Invited (active) --> Deactivated --> Reactivated --> ...
 - **Deactivated**: Cannot log in. Account preserved for audit trail. Can be reactivated.
 - **Deleted**: Permanently removed. Use for users who were created by mistake. Prefer deactivation for users who have activity in the system.
 
-**Forced logout is not a lifecycle state.** A role change, a password reset and deactivation each drop the target's live sessions as a side effect. When you want *only* that — a stolen laptop, a shared credential you've just rotated — use `POST /api/admin/users/:id/revoke-sessions`; deactivating and reactivating to achieve it locks the user out for the duration and leaves a suspension in the audit trail that never happened. See [`authentication.md`](authentication.md) § Session management.
+**Forced logout is not a lifecycle state.** A role change, a password reset and deactivation each drop the target's live sessions as a side effect. When you want *only* that — a stolen laptop, a shared credential you've just rotated — use **Sign out everywhere** on the user's row in `/admin` (click, then **Confirm**; a toast reports how many sessions ended), which calls `POST /api/admin/users/:id/revoke-sessions` (`user.manage`, and the same out-rank guard as every other mutation). The action is not offered on your own row or on an inactive account, whose sessions deactivation already ended. Deactivating and reactivating to achieve it locks the user out for the duration and leaves a suspension in the audit trail that never happened. See [`authentication.md`](authentication.md) § Session management.
 
 ## Self-Service
 

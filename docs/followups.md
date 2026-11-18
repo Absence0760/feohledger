@@ -989,12 +989,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       locale's tenants passing a share of active users worth the review cost.
 - [ ] **(c) Settings with a backend and no screen.** Approval delegation,
       per-vendor / per-GL match tolerance, exception-agent autonomy level, the
-      SCIM bearer token, an admin revoking another user's sessions, and the
-      line-total-mismatch on/off switch (`settings.fraud_rules`) all
-      exist in the API with no UI, so help can describe their effect but can't
-      tell anyone where to change them. **Durable fix:** a panel each in
-      `/organization` (or the user row's actions for sessions), each with its
-      own help guide step. **Trigger:** the first customer asking to change
+      SCIM bearer token, and the line-total-mismatch on/off switch
+      (`settings.fraud_rules`) all exist in the API with no UI, so help can
+      describe their effect but can't tell anyone where to change them.
+      **Durable fix:** a panel each in `/organization`, each with its own help
+      guide step. **Trigger:** the first customer asking to change
       one, or SCIM onboarding for an enterprise tenant.
 - [ ] **(c) Help for the mobile app and the supplier portal.** The help centre
       covers the employee web app. Mobile users and suppliers get none.
