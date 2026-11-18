@@ -1803,6 +1803,7 @@ export const messages = {
 	'cashFlow.title': 'Cashflow-Copilot',
 	'cashFlow.newChat': 'Neuer Chat',
 	'cashFlow.tips.heading': 'Tipps',
+	'cashFlow.rail.toggle': 'Pläne, Optionen und Tipps',
 	'cashFlow.tips.body':
 		'Fragen Sie nach Ihrer Liquidität, anstehenden Abflüssen, Abwägungen zum Zahlungszeitpunkt oder welche Skonti sich lohnen.',
 	'cashFlow.empty.heading': 'Fragen Sie zu Ihrer Liquidität',
@@ -3803,6 +3804,7 @@ export const messages = {
 	'assistant.newChat': '+ Neuer Chat',
 	'assistant.noConversations': 'Noch keine Unterhaltungen.',
 	'assistant.recent': 'Zuletzt',
+	'assistant.rail.toggle': 'Unterhaltungen und Nutzung',
 	'assistant.role.assistant': 'Assistent',
 	'assistant.role.you': 'Sie',
 	'assistant.send': 'Senden',

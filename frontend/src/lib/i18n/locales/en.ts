@@ -1948,6 +1948,7 @@ export const en = {
 	'cashFlow.title': 'Cash-Flow Copilot',
 	'cashFlow.newChat': 'New chat',
 	'cashFlow.tips.heading': 'Tips',
+	'cashFlow.rail.toggle': 'Plans, options and tips',
 	'cashFlow.tips.body':
 		'Ask about your cash position, upcoming outflows, payment-timing trade-offs, or which early-payment discounts are worth capturing.',
 	'cashFlow.empty.heading': 'Ask about your cash',
@@ -3976,6 +3977,7 @@ export const en = {
 	'assistant.newChat': '+ New chat',
 	'assistant.noConversations': 'No conversations yet.',
 	'assistant.recent': 'Recent',
+	'assistant.rail.toggle': 'Conversations and usage',
 	'assistant.role.assistant': 'Assistant',
 	'assistant.role.you': 'You',
 	'assistant.send': 'Send',

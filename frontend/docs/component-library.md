@@ -222,6 +222,13 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   passes its own four prompts and `cashFlow.empty.*` strings (already
   localized). Both chat pages render this one component — don't restyle a
   local prompt-chip copy.
+- `ChatLayout.svelte` — the two-column chat workspace both chat pages render:
+  side rail + chat pane (scrolling `role="log"` region, then notices and the
+  composer). `<ChatLayout railLabel railId busy bind:scrollEl>` with `rail`,
+  `log` and `footer` snippets. Below 720px the rail collapses behind a one-line
+  disclosure button (`aria-expanded`, before the rail in the DOM so focus order
+  matches) and the log is capped to the viewport, so the composer is on a
+  phone's first screen (`tests-e2e/layout/above-the-fold.spec.ts`).
 - `UsageMeter.svelte` — AI token usage bar over `GET /api/assistant/usage`
   (`data-testid="usage-meter"`). Budget `0` = unlimited (running total, no bar);
   amber ≥80%, red at/over budget.
