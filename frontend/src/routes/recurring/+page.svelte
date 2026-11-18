@@ -23,6 +23,7 @@
 	import type { RecurringTemplateSummary } from '#lib/types/recurring.ts';
 	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import ExplainedBadge from '#lib/components/ui/ExplainedBadge.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
@@ -468,34 +469,29 @@
 							<Badge tone={STATUS_TONES[template.status]} variant={template.status}>
 								{statusLabel(template.status)}
 							</Badge>
+							<!-- Each pill names the problem and carries its why as text — a
+							     visually-hidden span, with the tooltip kept for the pointer
+							     user — because a `title` alone reaches neither a keyboard, a
+							     touch screen nor a screen reader (decisions §442, §NEW-L4). -->
 							{#if template.last_skip}
-								<Badge
+								<ExplainedBadge
 									tone="warning"
 									variant="skipped"
-									title={m('recurring.skip.title', {
+									label={m('recurring.skip.pill')}
+									explanation={m('recurring.skip.title', {
 										n: template.last_skip.consecutive,
 										period: template.last_skip.period_key ?? '—',
 										reason: skipReason(template.last_skip.reason)
 									})}
-								>
-									{m('recurring.skip.pill')}
-								</Badge>
+								/>
 							{/if}
 							{#if template.gl_account_off_chart}
-								<!-- The dropped code is in the visible pill text and the why in
-								     a visually-hidden span: a `title` alone reaches neither a
-								     keyboard, a touch screen nor a screen reader. The tooltip
-								     stays for the pointer user. -->
-								<Badge
+								<ExplainedBadge
 									tone="warning"
 									variant="gl-off-chart"
-									title={m('recurring.glOffChart.title', { code: template.gl_account ?? '—' })}
-								>
-									{m('recurring.glOffChart.pill', { code: template.gl_account ?? '—' })}<span
-										class="visually-hidden"
-										> {m('recurring.glOffChart.title', { code: template.gl_account ?? '—' })}</span
-									>
-								</Badge>
+									label={m('recurring.glOffChart.pill', { code: template.gl_account ?? '—' })}
+									explanation={m('recurring.glOffChart.title', { code: template.gl_account ?? '—' })}
+								/>
 							{/if}
 						</span>
 					</td>
