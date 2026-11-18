@@ -18,12 +18,17 @@ export interface BudgetListParams {
 	dimension?: string;
 	period?: string;
 	search?: string;
+	/** ISO 4217 code: only budgets denominated in it. The requisition form's
+	 *  picker asks for exactly the set it may link (a requisition links only a
+	 *  budget in its own currency; the backend 422s any other). */
+	currency?: string;
 	page?: number;
 	page_size?: number;
 }
 
 export function listBudgets(params: BudgetListParams = {}): Promise<BudgetListResponse> {
 	const qs = new URLSearchParams();
+	if (params.currency) qs.set('currency', params.currency);
 	if (params.dimension) qs.set('dimension', params.dimension);
 	if (params.period) qs.set('period', params.period);
 	if (params.search) qs.set('search', params.search);

@@ -145,14 +145,25 @@ def _budget_list_filters(
     dimension: str | None,
     period: str | None,
     search: str | None,
+    currency: str | None = None,
 ):
-    """Apply the budget-list ``dimension`` / ``period`` / free-text filters.
+    """Apply the budget-list ``dimension`` / ``period`` / ``currency`` /
+    free-text filters.
 
     Shared by ``GET /api/budgets`` and ``GET /api/budgets/summary`` so the KPI
     rollup can never describe a different set than the rows it sits above — the
     page-scoped-KPI drift the summary endpoint closes. Entity scope is applied
     by the caller, because the two build their ``select()`` differently.
+
+    ``currency`` exists for the requisition form's budget picker: a requisition
+    can only link a budget in its own currency (``api/requisitions._resolve_links``
+    422s the rest, since the budget legs never convert), so the picker asks for
+    exactly the linkable set. Filtering it client-side instead would make the
+    picker's "showing N of M" count describe budgets it then hides. Compared
+    case-insensitively, as the summary groups.
     """
+    if currency and currency.strip():
+        query = query.where(func.upper(Budget.currency) == currency.strip().upper())
     if dimension:
         query = query.where(Budget.dimension == dimension)
     if period:
@@ -172,6 +183,7 @@ async def list_budgets(
     dimension: str | None = Query(None),
     period: str | None = Query(None),
     search: str | None = Query(None),
+    currency: str | None = Query(None, max_length=3),
     pagination: PaginationParams = Depends(pagination_params),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -180,6 +192,7 @@ async def list_budgets(
         dimension=dimension,
         period=period,
         search=search,
+        currency=currency,
     )
 
     total = int((await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0)
@@ -253,6 +266,7 @@ async def budget_summary(
     dimension: str | None = Query(None),
     period: str | None = Query(None),
     search: str | None = Query(None),
+    currency: str | None = Query(None, max_length=3),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Whole-set count + per-currency allocation totals for the budgets KPI row.
@@ -282,6 +296,7 @@ async def budget_summary(
                 dimension=dimension,
                 period=period,
                 search=search,
+                currency=currency,
             )
             .group_by(currency_key)
             .order_by(currency_key)

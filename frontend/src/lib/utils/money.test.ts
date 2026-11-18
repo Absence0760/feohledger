@@ -9,7 +9,8 @@ import {
 	moneyInputText,
 	parseMoneyForLayout,
 	scaleMoney,
-	sumMoney
+	sumMoney,
+	sumMoneyExact
 } from './money';
 import { getActiveFormatLocale, setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
@@ -23,6 +24,31 @@ afterEach(() => {
 // string to a binary float before adding, which can drift off the exact
 // cent value for the same reason `0.1 + 0.2 !== 0.3` in JS — even though
 // every individual amount is an exact Decimal.
+
+describe('sumMoneyExact', () => {
+	it('keeps the total an exact decimal string, never a float', () => {
+		expect(sumMoneyExact(['0.1', '0.2'])).toBe('0.30');
+		// Past 2^53 a float total would already have lost the cents.
+		expect(sumMoneyExact(['90071992547409.91', '0.02'])).toBe('90071992547409.93');
+	});
+
+	it('carries the widest scale seen, minimum two places', () => {
+		expect(sumMoneyExact(['1.5', '2.25'])).toBe('3.75');
+		expect(sumMoneyExact(['1.0001', '2'])).toBe('3.0001');
+		expect(sumMoneyExact(['10'])).toBe('10.00');
+	});
+
+	it('skips what sumMoney skips, and an empty set is zero', () => {
+		expect(sumMoneyExact([null, undefined, '', 'abc', '4.10'])).toBe('4.10');
+		expect(sumMoneyExact([])).toBe('0.00');
+	});
+
+	it('signs a negative total and never writes -0.00', () => {
+		expect(sumMoneyExact(['-5.25', '1'])).toBe('-4.25');
+		expect(sumMoneyExact(['-0.5', '0.5'])).toBe('0.00');
+		expect(sumMoneyExact(['-0.05'])).toBe('-0.05');
+	});
+});
 
 describe('sumMoney', () => {
 	it('sums plain decimal strings without float drift', () => {

@@ -294,6 +294,7 @@ export const VENDOR_GUIDES: Guide[] = [
 						items: [
 							'Open [[page:/requisitions]] and select {ui:requisitions.action.new}.',
 							'Give it a title, then add {ui:requisitions.modal.lineItems} with quantities, unit prices and GL accounts. The total is always calculated from the lines. Select {ui:requisitions.modal.create}.',
+							'To count it against a [[budget]], choose one in {ui:requisitions.modal.field.budget} before you save. Only budgets in the requisition\'s currency are listed. If the total would take the budget past its allocation, the form warns you, but you can still save. The requisition counts toward the budget\'s {ui:budgets.modal.kpi.committed} figure once it is submitted. Admins, AP managers and CFOs can link a budget.',
 							'Select {ui:requisitions.row.submit}. The requisition moves to {ui:requisitions.status.pendingApproval} and is locked, so nobody can change the amount while it is being approved.',
 							'An approver selects {ui:requisitions.row.approve} or {ui:requisitions.row.reject}. If it is rejected, {ui:requisitions.row.reopen} takes it back to {ui:requisitions.status.draft} so you can rework it.',
 							'Once it is approved, an admin or AP manager selects {ui:requisitions.row.convertToPo}. The purchase order is numbered after the requisition, and the requisition moves to {ui:requisitions.status.converted}.'
