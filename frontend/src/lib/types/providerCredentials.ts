@@ -1,5 +1,6 @@
 /**
- * Tenant provider credentials (`/organization` → ERP, Payments, Virtual cards, Commerce),
+ * Tenant provider credentials (`/organization` → ERP, Payments, Virtual cards, Commerce,
+ * AI extraction's bring-your-own key),
  * over `GET /api/organization/credentials` and
  * `PUT /api/organization/credentials/{block}`
  * (`backend/app/api/organization_credentials.py`).
@@ -11,7 +12,7 @@
  * of `services/provider_credentials.SECRET_FIELDS` — keep the two in step.
  */
 
-export type CredentialBlock = 'erp' | 'payments' | 'cards' | 'commerce';
+export type CredentialBlock = 'erp' | 'payments' | 'cards' | 'commerce' | 'extraction';
 
 /** Which secret paths are stored, per block. Names only. */
 export interface ProviderCredentialStatus {
@@ -19,6 +20,7 @@ export interface ProviderCredentialStatus {
 	payments: string[];
 	cards: string[];
 	commerce: string[];
+	extraction: string[];
 }
 
 export interface ProviderCredentialUpdate {

@@ -147,7 +147,7 @@
 	let defaultGl = $state('');
 	let defaultCostCenter = $state('');
 	// Provider credentials are write-only (`/api/organization/credentials`). Each
-	// secret input on the payments and cards panels (the ERP panel keeps its own,
+	// secret input on the payments, cards and extraction panels (the ERP panel keeps its own,
 	// `ErpConnectionPanel`) starts EMPTY and holds
 	// only what the admin types — a blank one keeps the stored value. `creds`
 	// lists which paths the server holds (names only); `secretClear` is each
@@ -159,7 +159,9 @@
 		'payments.api_key': false,
 		'payments.webhook_secret': false,
 		'cards.api_key': false,
-		'cards.client_secret': false
+		'cards.client_secret': false,
+		'extraction.api_key': false,
+		'extraction.aws_secret_access_key': false
 	});
 	const isStored = (block: CredentialBlock, path: string): boolean =>
 		creds?.[block].includes(path) ?? false;
@@ -550,9 +552,9 @@
 			if (extraction) {
 				extractionProgramType = (extraction.program_type as string) || 'platform';
 				extractionProvider = (extraction.provider as string) || 'claude_vision';
-				extractionApiKey = (extraction.api_key as string) || '';
+				// The BYOK key / AWS secret are sealed and never read back: their
+				// fields start empty ("leave blank to keep"), like every SecretField.
 				extractionAwsKeyId = (extraction.aws_access_key_id as string) || '';
-				extractionAwsSecret = (extraction.aws_secret_access_key as string) || '';
 				extractionAwsRegion = (extraction.aws_region as string) || 'us-east-1';
 				extractionOllamaUrl = (extraction.base_url as string) || 'http://localhost:11434';
 				extractionOllamaModel = (extraction.model as string) || 'llama3.2-vision:11b';
@@ -830,18 +832,27 @@
 	async function saveExtraction() {
 		savingExtraction = true;
 		try {
+			// Configuration first: a save that switches provider drops the old
+			// provider's sealed key server-side, so the key typed for the new one
+			// must be written after it.
 			await patchSettings(m('org.section.extractionSaved'), {
 				extraction: {
 					program_type: extractionProgramType,
 					provider: extractionProvider,
-					api_key: extractionApiKey,
 					aws_access_key_id: extractionAwsKeyId,
-					aws_secret_access_key: extractionAwsSecret,
 					aws_region: extractionAwsRegion,
 					base_url: extractionOllamaUrl,
 					model: extractionOllamaModel,
 				},
 			});
+			// …and the panel re-reads what is stored, since that save may have
+			// dropped a key the page still believes is there.
+			await loadCredentials();
+			await saveSecrets('extraction', {
+				api_key: extractionApiKey,
+				aws_secret_access_key: extractionAwsSecret
+			});
+			extractionApiKey = extractionAwsSecret = '';
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -2427,16 +2438,15 @@
 								<p class="card-hint" style="margin-top: 10px;">{m('org.extraction.platformHint')}</p>
 							{:else if extractionProvider === 'claude_vision' || extractionProvider === 'openai_vision'}
 								<div class="form-grid" style="margin-top: 14px;">
-									<label>
-										<span>{extractionProvider === 'claude_vision' ? m('org.extraction.anthropicKey') : m('org.extraction.openaiKey')}</span>
-										<input
-											type="password"
-											bind:value={extractionApiKey}
-											placeholder="sk-..."
-											autocomplete="new-password"
-											spellcheck="false"
-										/>
-									</label>
+									<SecretField
+										id="extraction-api-key"
+										label={extractionProvider === 'claude_vision' ? m('org.extraction.anthropicKey') : m('org.extraction.openaiKey')}
+										bind:value={extractionApiKey}
+										bind:clear={secretClear['extraction.api_key']}
+										configured={isStored('extraction', 'api_key')}
+										placeholder="sk-..."
+										testId="extraction-api-key"
+									/>
 								</div>
 							{:else if extractionProvider === 'aws_textract'}
 								<div class="form-grid" style="margin-top: 14px;">
@@ -2449,15 +2459,14 @@
 											spellcheck="false"
 										/>
 									</label>
-									<label>
-										<span>{m('org.extraction.awsSecret')}</span>
-										<input
-											type="password"
-											bind:value={extractionAwsSecret}
-											autocomplete="new-password"
-											spellcheck="false"
-										/>
-									</label>
+									<SecretField
+										id="extraction-aws-secret"
+										label={m('org.extraction.awsSecret')}
+										bind:value={extractionAwsSecret}
+										bind:clear={secretClear['extraction.aws_secret_access_key']}
+										configured={isStored('extraction', 'aws_secret_access_key')}
+										testId="extraction-aws-secret"
+									/>
 									<label>
 										<span>{m('org.extraction.awsRegion')}</span>
 										<input type="text" bind:value={extractionAwsRegion} placeholder="us-east-1" />
