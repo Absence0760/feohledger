@@ -41,10 +41,17 @@ class AuthStore extends ChangeNotifier {
   User? _user;
   bool _loading = false;
   String? _error;
+  Object? _errorDetail;
 
   User? get user => _user;
   bool get loading => _loading;
   String? get error => _error;
+
+  /// The raw decoded `detail` behind [error] when the server coded it — the
+  /// sign-in challenge's wrong code (`mfa_code_invalid`), which the code
+  /// screen states through `localizeCodedRefusal` with [error] as the
+  /// fallback. Cleared with [error].
+  Object? get errorDetail => _errorDetail;
   bool get loggedIn => _user != null;
 
   bool get isAdmin => _user?.isAdmin ?? false;
@@ -154,6 +161,7 @@ class AuthStore extends ChangeNotifier {
     _user = null;
     _loading = false;
     _error = null;
+    _errorDetail = null;
     notifyListeners();
   }
 
@@ -196,6 +204,7 @@ class AuthStore extends ChangeNotifier {
   Future<LoginResult> login(String email, String password, String tenant) async {
     _loading = true;
     _error = null;
+    _errorDetail = null;
     notifyListeners();
 
     try {
@@ -239,6 +248,7 @@ class AuthStore extends ChangeNotifier {
   }) async {
     _loading = true;
     _error = null;
+    _errorDetail = null;
     notifyListeners();
 
     try {
@@ -260,6 +270,7 @@ class AuthStore extends ChangeNotifier {
               ? 'Invalid or expired code. Please try again.'
               : 'Could not verify the code. Please try again.')
           : 'Connection failed: $e';
+      _errorDetail = e is ApiException && e.statusCode == 401 ? e.detail : null;
       notifyListeners();
       return const LoginResult(LoginOutcome.failure);
     }
@@ -270,6 +281,7 @@ class AuthStore extends ChangeNotifier {
   /// code screen can show a retry affordance.
   Future<bool> requestEmailOtp(String challengeToken) async {
     _error = null;
+    _errorDetail = null;
     try {
       await AuthApi.requestEmailOtp(challengeToken);
       return true;

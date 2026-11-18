@@ -12,7 +12,8 @@
 /// skipped row of a bulk status change (the invoices list), and resolving /
 /// dismissing an exception (the detail screen and the queue swipe), and
 /// recording a payment made outside FeohLedger (the Pay tab's queue row and
-/// run, backend decisions §251). Only those
+/// run, backend decisions §251), approving or executing a run (the Pay tab's
+/// run actions), and a wrong code at the sign-in MFA step. Only those
 /// codes are mapped here; the web registry
 /// covers the surfaces mobile does not ship (credit memos, expense reports,
 /// the invoice stale-edit prompt).
@@ -266,6 +267,8 @@ const codedRefusalCodes = <String>{
   'payment_run_awaiting_cfo',
   'payment_run_not_recordable',
   'payment_run_nothing_to_record',
+  // The sign-in challenge's wrong code (`api/auth.py::verify_mfa`).
+  'mfa_code_invalid',
 };
 
 /// The localized refusal for [detail] (a decoded error `detail`), or `null`
@@ -365,6 +368,10 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
       return l.codedRefusalPaymentRunNotRecordable;
     case 'payment_run_nothing_to_record':
       return l.codedRefusalPaymentRunNothingToRecord;
+    // `api/auth.py::verify_mfa` — a wrong authenticator code at sign-in (the
+    // MFA screen; backend decisions §NEW-R1).
+    case 'mfa_code_invalid':
+      return l.codedRefusalMfaCodeInvalid;
   }
   if (code.startsWith('external_payment_')) {
     return _forInvoice(l, params, _externalPayment(l, code, params));

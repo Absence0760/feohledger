@@ -1028,6 +1028,7 @@
   "codedRefusalPaymentRunSegregationRecord": "Funktionstrennung: Wer diesen Zahlungslauf erstellt hat, darf ihn nicht auch als bezahlt erfassen. Das muss eine andere Person tun.",
   "codedRefusalPaymentRunSegregationExport": "Funktionstrennung: Wer diesen Zahlungslauf erstellt hat, darf nicht auch seine Bankdatei exportieren. Das muss eine andere Person tun.",
   "codedRefusalPaymentRunAwaitingCfo": "Dieser Lauf überschreitet die CFO-Freigabeschwelle der Organisation und wartet auf die Freigabe durch einen Benutzer mit der CFO-Rolle.",
+  "codedRefusalMfaCodeInvalid": "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
   "codedRefusalPaymentRunNotRecordable": "Nur ein Lauf im Entwurf oder einer, dessen Bankdatei exportiert wurde, kann als bezahlt erfasst werden.",
   "codedRefusalPaymentRunNothingToRecord": "Dieser Lauf hat keine Zahlungen mehr, die erfasst werden könnten.",
   "codedRefusalExternalPaymentBlockingException": "Für diese Rechnung besteht eine ungelöste Ausnahme, die die Zahlung sperrt. Lösen Sie sie, bevor Sie die Rechnung als bezahlt erfassen."

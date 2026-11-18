@@ -1028,6 +1028,7 @@
   "codedRefusalPaymentRunSegregationRecord": "Segregación de funciones: el usuario que creó esta remesa de pagos no puede también registrarla como pagada. Debe hacerlo otro usuario.",
   "codedRefusalPaymentRunSegregationExport": "Segregación de funciones: el usuario que creó esta remesa de pagos no puede también exportar su archivo bancario. Debe hacerlo otro usuario.",
   "codedRefusalPaymentRunAwaitingCfo": "Esta remesa supera el umbral de aprobación del CFO de la organización y espera la aprobación de un usuario con el rol de CFO.",
+  "codedRefusalMfaCodeInvalid": "Ese código no es válido. Compruebe su aplicación de autenticación e inténtelo de nuevo.",
   "codedRefusalPaymentRunNotRecordable": "Solo una remesa en borrador, o una cuyo archivo bancario se exportó, puede registrarse como pagada.",
   "codedRefusalPaymentRunNothingToRecord": "Esta remesa no tiene pagos pendientes de registrar.",
   "codedRefusalExternalPaymentBlockingException": "Esta factura tiene una excepción sin resolver que bloquea el pago. Resuélvala antes de registrar la factura como pagada."
