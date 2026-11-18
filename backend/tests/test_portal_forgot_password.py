@@ -31,15 +31,14 @@ FORGOT = "/api/portal/auth/forgot-password"
 
 @pytest.fixture
 def fake_redis(monkeypatch):
-    """The zset+hash stand-in a real portal login needs, shared with the token
-    store so a test can read the TTL a token was minted with."""
+    """The zset+hash stand-in a real portal login needs (the token store keeps
+    the conftest autouse stub, which has the GET/GETDEL it uses)."""
     fake = FakeRedis()
 
     async def _get_redis():
         return fake
 
     monkeypatch.setattr("app.redis.get_redis", _get_redis)
-    monkeypatch.setattr("app.services.password_reset.get_redis", _get_redis)
     return fake
 
 
@@ -83,9 +82,19 @@ async def _login(client, email: str, password: str):
 
 @pytest.mark.asyncio
 async def test_forgot_password_mails_a_short_lived_link_that_works_once(
-    realdb, fake_redis, sent_mail
+    realdb, fake_redis, sent_mail, monkeypatch
 ):
+    from app.services import password_reset
+
     email, vu_id = await _supplier_with_password(realdb, TENANT, "Original-Chosen9", sent_mail)
+    stored_ttls: list[tuple[str, int]] = []
+    real_store = password_reset._store
+
+    async def _recording_store(key: str, value: str, ttl: int) -> None:
+        stored_ttls.append((key, ttl))
+        await real_store(key, value, ttl)
+
+    monkeypatch.setattr(password_reset, "_store", _recording_store)
 
     async with realdb.client(key=TENANT, role=None) as anon:
         resp = await anon.post(FORGOT, json={"email": email.upper()})
@@ -101,8 +110,7 @@ async def test_forgot_password_mails_a_short_lived_link_that_works_once(
         assert token not in resp.text
 
         # The forgot-password lifetime, not the 72-hour set-password one.
-        ttls = [ttl for key, ttl in fake_redis.ttls.items() if key.startswith("portal:pwreset:")]
-        assert settings.password_reset_ttl_minutes * 60 in ttls
+        assert [ttl for _, ttl in stored_ttls] == [settings.password_reset_ttl_minutes * 60]
 
         # Requesting a link changes nothing until it is used.
         assert (await _login(anon, email, "Original-Chosen9")).status_code == 200
