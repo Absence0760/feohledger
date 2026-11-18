@@ -455,9 +455,15 @@ async def test_bad_bodies_are_refused_without_echoing_the_value(realdb, body):
 
 @pytest.mark.asyncio
 async def test_unknown_block_is_404(realdb):
+    # A block outside CREDENTIAL_BLOCKS (and outside DEDICATED_WRITER_BLOCKS,
+    # pinned separately for `sso` below). `extraction` was this test's example
+    # until the BYOK keys were sealed (decisions §444) and it became a real block.
+    assert "nonexistent" not in provider_credentials.CREDENTIAL_BLOCKS
     async with realdb.client(key="a", role="admin") as c:
-        resp = await c.put(f"{URL}/extraction", json={"set": {"api_key": SECRET}})
+        resp = await c.put(f"{URL}/nonexistent", json={"set": {"api_key": SECRET}})
     assert resp.status_code == 404
+    assert SECRET not in resp.text
+    assert await _rows(realdb) == []
 
 
 @pytest.mark.asyncio

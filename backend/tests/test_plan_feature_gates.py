@@ -313,13 +313,20 @@ async def test_enabling_sso_needs_the_sso_feature(realdb):
 
 @pytest.mark.asyncio
 async def test_require_sso_needs_the_enforcement_feature(realdb):
+    # SSO-only needs an IdP block that resolves (§204), and the OIDC client
+    # secret is sealed (§444): `client_secret_configured` is only the stored
+    # marker, so the PUT carries the secret itself, as an admin's save does.
+    body = {
+        **{k: v for k, v in OIDC_READY.items() if k != "client_secret_configured"},
+        "client_secret": "not-a-real-secret",
+    }
     await realdb.subscribe("a", "growth")
     async with realdb.client(key="a") as c:
-        _assert_plan_refusal(await c.put(SSO_URL, json=OIDC_READY), FEATURE_SSO_ENFORCEMENT)
+        _assert_plan_refusal(await c.put(SSO_URL, json=body), FEATURE_SSO_ENFORCEMENT)
 
     await realdb.subscribe("a", "scale")
     async with realdb.client(key="a") as c:
-        resp = await c.put(SSO_URL, json=OIDC_READY)
+        resp = await c.put(SSO_URL, json=body)
     assert resp.status_code == 200, resp.text
     assert resp.json()["sso_only"] is True
     assert resp.json()["password_sign_in_closed"] is True
