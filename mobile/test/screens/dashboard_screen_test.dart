@@ -424,7 +424,7 @@ void main() {
       ]) {
         expect(
           tester.getSemantics(find.text(title)),
-          containsSemantics(label: title, isHeader: true),
+          isSemantics(label: title, isHeader: true),
         );
       }
       // A vendor row announces once, not as three fragments.
