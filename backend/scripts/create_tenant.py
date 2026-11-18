@@ -13,6 +13,7 @@ operator's terminal instead of emailing it, for a tenant whose mail does not
 work yet — the operator's own channel, handed on to the admin out of band.
 ``--admin-password`` sets a password directly and is local-dev only: a
 deployed environment (``FEOH_ENVIRONMENT``) refuses it.
+"""
 
 import argparse
 import asyncio

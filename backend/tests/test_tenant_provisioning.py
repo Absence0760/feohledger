@@ -1339,9 +1339,7 @@ async def test_create_tenant_refuses_a_password_where_it_does_not_belong(
 
 
 async def test_create_tenant_admin_password_still_works_locally(monkeypatch, capsys):
-    cli, _ = _link_cli(
-        monkeypatch, [*_LINK_CLI_ARGS, "--admin-password", "Aa1-not-used-000000"]
-    )
+    cli, _ = _link_cli(monkeypatch, [*_LINK_CLI_ARGS, "--admin-password", "Aa1-not-used-000000"])
     monkeypatch.setattr(settings, "environment", "development")
 
     await cli.main()
