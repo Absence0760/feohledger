@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/helpers';
+import { deletePaymentRunsWhere, expect, test } from '../fixtures/helpers';
 
 /**
  * /cash-flow — AI Cash-Flow Copilot (Phase 1: read-only cash Q&A; Phase 2:
@@ -110,15 +110,27 @@ test.describe('/cash-flow', () => {
 		const planCard = assistant.getByTestId('payment-plan-card');
 		await expect(planCard).toBeVisible({ timeout: 15_000 });
 
+		const enacted = page.waitForResponse(
+			(r) => r.url().endsWith('/draft-run') && r.request().method() === 'POST'
+		);
 		await planCard.getByRole('button', { name: 'Create draft run' }).click();
-
-		// Either it staged a draft run, or this plan's horizon had nothing
-		// currently payable to stage — either way the call completes and
-		// renders exactly one of the two feedback paragraphs (never hangs,
-		// never a raw unhandled error).
-		await expect(
-			planCard.locator('.plan-action-result, .plan-action-error')
-		).toBeVisible({ timeout: 15_000 });
+		const resp = await enacted;
+		// The run is staged over the tenant's SEEDED approved invoices, and its
+		// live payments keep them out of the payment queue until it goes. Take
+		// the id from the response itself (a 409 staged nothing) and remove the
+		// run whatever the assertion below does.
+		const runId = resp.ok() ? ((await resp.json()) as { run_id: string }).run_id : null;
+		try {
+			// Either it staged a draft run, or this plan's horizon had nothing
+			// currently payable to stage — either way the call completes and
+			// renders exactly one of the two feedback paragraphs (never hangs,
+			// never a raw unhandled error).
+			await expect(
+				planCard.locator('.plan-action-result, .plan-action-error')
+			).toBeVisible({ timeout: 15_000 });
+		} finally {
+			if (runId) deletePaymentRunsWhere(`id='${runId}'`);
+		}
 	});
 
 	test('typing a free-form cash question in the composer works', async ({ page }) => {

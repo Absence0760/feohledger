@@ -707,6 +707,51 @@ function deleteVirtualCardsWhere(predicate: string, slug?: string): void {
 }
 
 /**
+ * Delete the payment runs matching `predicate`, their payments, and everything
+ * referencing either.
+ *
+ * Seven specs each carried a private `deletePaymentRun(runId)` that deleted the
+ * run's payments and then the run — correct until a payment acquires a child
+ * (a matched bank transaction, a virtual card, a retry) or the run a Positive
+ * Pay file, and silent about any spec that never called it. One did not:
+ * `cash-flow/copilot.spec.ts` staged a draft run over SEEDED approved invoices
+ * on every pass and left it, and a draft run's live payments keep those
+ * invoices out of the payment queue — the cross-spec interference that broke
+ * `payments/execute.spec.ts`.
+ *
+ * The invoices are left alone: deleting a draft run's payments is what puts
+ * them back in the queue. A spec that changed an invoice's status (execute,
+ * void) still resets that itself.
+ *
+ * The last step deletes the payments and the runs in ONE statement, because
+ * `predicate` may be defined by the payments themselves (`deleteInvoicesWhere`
+ * selects the runs holding only its invoices' payments): run as two statements,
+ * the payment delete would empty the set before the run delete read it. Both
+ * foreign keys are NO ACTION, which Postgres checks at the end of the
+ * statement, so the order inside it does not matter.
+ */
+export function deletePaymentRunsWhere(predicate: string, slug?: string): void {
+	const runs = `SELECT id FROM payment_runs WHERE ${predicate}`;
+	const payments = `SELECT id FROM payments WHERE payment_run_id IN (${runs})`;
+
+	tenantPsql(`DELETE FROM bank_transactions WHERE matched_payment_id IN (${payments})`, slug);
+	deleteVirtualCardsWhere(`payment_id IN (${payments})`, slug);
+	// A retry outside the run may point at one of its payments.
+	tenantPsql(
+		`UPDATE payments SET retry_of_payment_id = NULL WHERE retry_of_payment_id IN (${payments})`,
+		slug
+	);
+	tenantPsql(`DELETE FROM positive_pay_files WHERE payment_run_id IN (${runs})`, slug);
+
+	tenantPsql(
+		`WITH doomed AS (${runs}), ` +
+			`gone AS (DELETE FROM payments WHERE payment_run_id IN (SELECT id FROM doomed)) ` +
+			`DELETE FROM payment_runs WHERE id IN (SELECT id FROM doomed)`,
+		slug
+	);
+}
+
+/**
  * Delete the invoices matching `predicate`, and everything that references them.
  *
  * `invoices` is referenced by 16 foreign keys and none of them cascade, so a
@@ -735,6 +780,15 @@ export function deleteInvoicesWhere(predicate: string, slug?: string): void {
 	);
 	tenantPsql(
 		`DELETE FROM bank_transactions WHERE matched_payment_id IN (SELECT id FROM payments WHERE invoice_id IN (${ids}))`,
+		slug
+	);
+	// A run holding ONLY these invoices' payments would be left an empty shell
+	// once they go, so it goes with them. A run that also pays another invoice
+	// keeps that invoice's payment and survives.
+	deletePaymentRunsWhere(
+		`id IN (SELECT payment_run_id FROM payments WHERE invoice_id IN (${ids})) ` +
+			`AND NOT EXISTS (SELECT 1 FROM payments other WHERE other.payment_run_id = payment_runs.id ` +
+			`AND other.invoice_id NOT IN (${ids}))`,
 		slug
 	);
 	// A card can hang off the payment or off the invoice, and carries children

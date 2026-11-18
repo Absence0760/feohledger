@@ -1,4 +1,4 @@
-import { API_BASE, authedTenantHeaders, deleteInvoicesWhere, expect, tenantPsql, test } from '../fixtures/helpers';
+import { API_BASE, authedTenantHeaders, deleteInvoicesWhere, deletePaymentRunsWhere, expect, tenantPsql, test } from '../fixtures/helpers';
 
 /**
  * Payment-run money-out path — the load-bearing invariants the existing
@@ -193,10 +193,10 @@ function completedPaymentCount(runId: string): number {
 }
 
 function hardDeleteInvoice(id: string): void {
-	tenantPsql(`DELETE FROM payments WHERE invoice_id='${id}'`);
-	tenantPsql(
-		`DELETE FROM payment_runs WHERE id IN (SELECT DISTINCT payment_run_id FROM payments WHERE invoice_id='${id}')`
-	);
+	// The invoice's payments, and any run holding only them, go with it in
+	// `deleteInvoicesWhere` below. (The two statements this replaced deleted the
+	// payments first, which emptied the subquery the run delete selected by, so
+	// every such run leaked as a draft.)
 	tenantPsql(
 		`DELETE FROM workflow_steps WHERE instance_id IN (SELECT id FROM workflow_instances WHERE invoice_id='${id}')`
 	);
@@ -220,8 +220,7 @@ function deletePaymentRun(runId: string): void {
 	// invariant. The orphaned rows reference removed run/payment ids, which
 	// is harmless (audit_log carries no FK) and each test counts rows for a
 	// freshly-created run id, so prior residue never inflates a count.
-	tenantPsql(`DELETE FROM payments WHERE payment_run_id='${runId}'`);
-	tenantPsql(`DELETE FROM payment_runs WHERE id='${runId}'`);
+	deletePaymentRunsWhere(`id='${runId}'`);
 }
 
 // ── Idempotency of execute under concurrent double-submit ──────────────
