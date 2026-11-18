@@ -5501,6 +5501,7 @@ export const en = {
 	'refusal.workspaceCloseActorNotAdmin': "Only an active administrator of this workspace can close it.",
 	'refusal.signupSlugHeld': "This workspace address belonged to a workspace that was closed recently, and is unavailable for a while. Choose a different address.",
 	'refusal.workspaceCloseInProgress': "This workspace is already being closed.",
+	'refusal.credentialBlockUnopenable': "The stored credentials for this section can no longer be opened, so nothing was saved. An administrator can clear them and enter each one again.",
 	'refusal.workspaceCloseAuditUnavailable': "The workspace could not be closed right now because its audit record could not be saved. Nothing was deleted. Try again in a few minutes.",
 	'refusal.workspaceCloseIncomplete': "Closing the workspace did not finish. Try again; if it fails again, contact support.",
 	'refusal.csvInvoiceNumberMatchesExisting': "Invoice number {number} is the same as existing invoice {existing} for this vendor once formatting is ignored, so it was not imported. Correct the number, or enter the invoice by hand if it really is a different one.",

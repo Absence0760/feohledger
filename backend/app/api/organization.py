@@ -15,6 +15,7 @@ from app.api.deps import (
     require_entitlement,
     require_roles,
 )
+from app.api.refusals import credential_block_unopenable_detail
 from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
@@ -44,6 +45,7 @@ from app.services.provider_credentials import (
     CREDENTIAL_BLOCKS,
     CREDENTIALS_UNAVAILABLE_DETAIL,
     SECRET_FIELDS,
+    StoredCredentialUnopenableError,
     config_for_connection_test,
     credential_status,
     extract_secrets,
@@ -635,6 +637,11 @@ async def update_organization(
 
             try:
                 await update_secrets(db, org.id, drop_block, {}, to_clear, before_write=_audit_drop)
+            except StoredCredentialUnopenableError:
+                await db.rollback()
+                raise HTTPException(
+                    status_code=503, detail=credential_block_unopenable_detail(drop_block)
+                ) from None
             except CredentialCryptoError:
                 await db.rollback()
                 raise HTTPException(

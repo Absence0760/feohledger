@@ -82,6 +82,13 @@ export const PLAN_FEATURE_REQUIRED = 'plan_feature_required';
  *  (`backend/app/api/invoice_version.py::INVOICE_STALE_EDIT`). */
 export const INVOICE_STALE_EDIT = 'invoice_stale_edit';
 
+/** A save of a credential block whose stored sealed value can no longer be
+ *  opened — a 503 whose `params.block` names the block
+ *  (`backend/app/api/refusals.py::CREDENTIAL_BLOCK_UNOPENABLE`). The
+ *  organization page branches on it to offer clearing the block
+ *  (`components/organization/CredentialResetPrompt.svelte`, decisions §464). */
+export const CREDENTIAL_BLOCK_UNOPENABLE = 'credential_block_unopenable';
+
 /** Approval's version check: the invoice changed after the approver loaded it
  *  (`backend/app/api/invoice_version.py::INVOICE_STALE_APPROVAL`). The invoice
  *  modal branches on it to drop the stale copy and reopen the current one. */
@@ -881,6 +888,8 @@ const BUILDERS: Record<string, Builder> = {
 	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
 	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
 	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete'),
+	// A credential block whose stored value will not open (decisions §464).
+	credential_block_unopenable: fixed('refusal.credentialBlockUnopenable'),
 	// A CSV invoice row whose number is the same payable as another once
 	// formatting is ignored (`services/csv_import`, decisions §77) — a row error.
 	csv_invoice_number_matches_existing: (p, t) => {

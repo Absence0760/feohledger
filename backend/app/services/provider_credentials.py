@@ -152,6 +152,18 @@ class CredentialPathError(ValueError):
     """A path names no secret slot of the block. The message names the path."""
 
 
+class StoredCredentialUnopenableError(credential_crypto.CredentialCryptoError):
+    """:func:`update_secrets` could not open the block's STORED row to merge into it.
+
+    A subclass, so every existing ``except CredentialCryptoError`` still catches
+    it. The writers tell it apart from a seal failure because the two have
+    different ways out: a seal failure (KMS unreachable) is retried later, while
+    a row that will not open (its KMS key disabled, a changed dev
+    `FEOH_SECRET_KEY`) keeps every save of the block failing until it is cleared
+    with :func:`reset_block` (decisions §464).
+    """
+
+
 def _context(org_id: uuid.UUID, block: str) -> dict[str, str]:
     return {
         "purpose": "feohledger/provider-credentials",
@@ -661,7 +673,10 @@ async def update_secrets(
     for path in [*to_set, *to_clear]:
         validate_path(block, path, service=True)
     row = await _row(db, org_id, block, for_update=True)
-    current = await _open_row(row) if row is not None else {}
+    try:
+        current = await _open_row(row) if row is not None else {}
+    except credential_crypto.CredentialCryptoError as exc:
+        raise StoredCredentialUnopenableError(str(exc)) from None
     merged = dict(current)
     changed: set[str] = set()
     for path, value in to_set.items():

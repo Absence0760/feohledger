@@ -36,6 +36,8 @@
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError } from '#lib/api.ts';
+	import { CREDENTIAL_BLOCK_UNOPENABLE } from '#lib/api/codedRefusals.ts';
+	import CredentialResetPrompt from '#lib/components/organization/CredentialResetPrompt.svelte';
 	import { getProviderCredentials, updateProviderCredentials } from '#lib/api/providerCredentials.ts';
 	import {
 		disconnectErpOAuth,
@@ -130,6 +132,9 @@
 	 *  present from the start: Svelte 5 refuses `bind:` of `undefined` to a prop
 	 *  that declares a fallback. */
 	let clear = $state<Record<string, boolean>>({});
+	// The stored `erp` row can no longer be opened, so every save answers 503
+	// `credential_block_unopenable` until it is cleared (decisions §464).
+	let unopenable = $state(false);
 	/** Which ERP secrets the server holds — names only, never a value. */
 	let storedNames = $state<string[]>([]);
 	/** Required fields a save or connect found empty (`aria-invalid`). */
@@ -552,7 +557,15 @@
 			toast(m('org.toast.sectionSaved', { section: m('org.section.erpSaved') }), 'success');
 			// Saving or removing an own app changes which app a connect uses.
 			if (p.auth === 'oauth') await loadOAuthStatus();
+			unopenable = false;
 		} catch (err) {
+			if (
+				err instanceof ApiError &&
+				err.code === CREDENTIAL_BLOCK_UNOPENABLE &&
+				err.params.block === 'erp'
+			) {
+				unopenable = true;
+			}
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
 			saving = false;
@@ -728,6 +741,20 @@
 		<HelpTip term="erp-sync" />
 	</div>
 	<p class="card-hint">{m('org.erp.hint')}</p>
+
+	{#if unopenable && !readOnly}
+		<!-- Clearing also removes the OAuth tokens sealed in the same row, so the
+		     connection then reads as "reconnect". -->
+		<CredentialResetPrompt
+			block="erp"
+			oncleared={(status) => {
+				unopenable = false;
+				storedNames = status.erp;
+				clear = freshClear(provider ?? undefined);
+				void loadOAuthStatus();
+			}}
+		/>
+	{/if}
 
 	{#if readOnly}
 		<p class="card-hint" data-testid="erp-admin-only">{m('org.readOnly.sectionAdminOnly')}</p>

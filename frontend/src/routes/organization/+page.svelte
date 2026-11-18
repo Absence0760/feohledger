@@ -7,6 +7,8 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import SecretReveal from '#lib/components/ui/SecretReveal.svelte';
 	import SecretField from '#lib/components/ui/SecretField.svelte';
+	import CredentialResetPrompt from '#lib/components/organization/CredentialResetPrompt.svelte';
+	import { CREDENTIAL_BLOCK_UNOPENABLE } from '#lib/api/codedRefusals.ts';
 	import {
 		getProviderCredentials,
 		updateProviderCredentials
@@ -192,6 +194,26 @@
 		if (!body) return;
 		creds = await updateProviderCredentials(block, body);
 		for (const path of Object.keys(typed)) secretClear[`${block}.${path}`] = false;
+	}
+	// A block whose stored value can no longer be opened: every save of it
+	// answers 503 `credential_block_unopenable` (the server must open it to
+	// merge), so its panel offers clearing it instead (`CredentialResetPrompt`,
+	// decisions §464). Set from the refusal's own `params.block` — a PATCH that
+	// drops a rail's keys names the block it could not open.
+	let unopenable = $state<Partial<Record<CredentialBlock, boolean>>>({});
+	function noteUnopenable(err: unknown): void {
+		if (!(err instanceof ApiError) || err.code !== CREDENTIAL_BLOCK_UNOPENABLE) return;
+		const block = err.params.block;
+		if (block === 'payments' || block === 'cards' || block === 'extraction') {
+			unopenable[block] = true;
+		}
+	}
+	function onCredentialsCleared(block: CredentialBlock, status: ProviderCredentialStatus): void {
+		creds = status;
+		unopenable[block] = false;
+		for (const key of Object.keys(secretClear)) {
+			if (key.startsWith(`${block}.`)) secretClear[key] = false;
+		}
 	}
 	// Extraction
 	let extractionProgramType = $state('platform');
@@ -913,7 +935,9 @@
 				m('org.toast.sectionSaved', { section: m('org.section.extractionSaved') }),
 				'success'
 			);
+			unopenable.extraction = false;
 		} catch (err) {
+			noteUnopenable(err);
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
 			savingExtraction = false;
@@ -939,7 +963,9 @@
 			await saveSecrets('cards', { api_key: cardsApiKey, client_secret: cardsClientSecret });
 			cardsApiKey = cardsClientSecret = '';
 			toast(m('org.toast.sectionSaved', { section: m('org.section.cardsSaved') }), 'success');
+			unopenable.cards = false;
 		} catch (err) {
+			noteUnopenable(err);
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
 			savingCards = false;
@@ -1044,7 +1070,9 @@
 			});
 			paymentsApiKey = paymentsWebhookSecret = '';
 			toast(m('org.toast.sectionSaved', { section: m('org.section.paymentsSaved') }), 'success');
+			unopenable.payments = false;
 		} catch (err) {
+			noteUnopenable(err);
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
 			savingPayments = false;
@@ -2571,6 +2599,12 @@
 								<p class="card-hint" style="margin-top: 8px;">{m('org.extraction.ollamaHint')} <code>brew install ollama && ollama pull {extractionOllamaModel}</code></p>
 							{/if}
 
+							{#if unopenable.extraction && auth.isAdmin}
+								<CredentialResetPrompt
+									block="extraction"
+									oncleared={(status) => onCredentialsCleared('extraction', status)}
+								/>
+							{/if}
 							<div class="erp-test-row">
 								<button class="btn-save-section" disabled={savingExtraction} onclick={saveExtraction}>
 									{savingExtraction ? m('org.common.saving') : m('org.extraction.save')}
@@ -2830,6 +2864,12 @@
 								<HelpTip term="reporting-currency" />
 							</p>
 
+							{#if unopenable.payments && auth.isAdmin}
+								<CredentialResetPrompt
+									block="payments"
+									oncleared={(status) => onCredentialsCleared('payments', status)}
+								/>
+							{/if}
 							<div class="section-footer">
 								<button class="btn-save-section" disabled={savingPayments} onclick={savePayments}>
 									{savingPayments ? m('org.common.saving') : m('org.payments.save')}
@@ -2962,6 +3002,12 @@
 								{/if}
 							{/if}
 
+							{#if unopenable.cards && auth.isAdmin}
+								<CredentialResetPrompt
+									block="cards"
+									oncleared={(status) => onCredentialsCleared('cards', status)}
+								/>
+							{/if}
 							<div class="section-footer">
 								<button class="btn-save-section" disabled={savingCards} onclick={saveCards}>
 									{savingCards ? m('org.common.saving') : m('org.cards.save')}

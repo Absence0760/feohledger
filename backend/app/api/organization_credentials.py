@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ROLE_ADMIN, require_roles
+from app.api.refusals import credential_block_unopenable_detail
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.models.user import User
@@ -38,6 +39,7 @@ from app.services.credential_crypto import CredentialCryptoError
 from app.services.provider_credentials import (
     CREDENTIAL_BLOCKS,
     CredentialPathError,
+    StoredCredentialUnopenableError,
     credential_status,
     reset_block,
     update_secrets,
@@ -171,6 +173,13 @@ async def update_provider_credentials(
 
     try:
         await update_secrets(db, locked.id, block, to_set, to_clear, before_write=_audit_first)
+    except StoredCredentialUnopenableError:
+        # The stored row will not open, so no save of this block can succeed
+        # until it is cleared — coded, so the page can offer the DELETE below.
+        await db.rollback()
+        raise HTTPException(
+            status_code=503, detail=credential_block_unopenable_detail(block)
+        ) from None
     except CredentialCryptoError:
         await db.rollback()
         raise HTTPException(

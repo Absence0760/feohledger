@@ -5313,6 +5313,7 @@ export const messages = {
 	'refusal.workspaceCloseActorNotAdmin': "Somente um administrador ativo deste espaço de trabalho pode encerrá-lo.",
 	'refusal.signupSlugHeld': "Este endereço pertencia a um espaço de trabalho encerrado recentemente e fica indisponível por um tempo. Escolha outro endereço.",
 	'refusal.workspaceCloseInProgress': "Este espaço de trabalho já está sendo encerrado.",
+	'refusal.credentialBlockUnopenable': "As credenciais salvas desta seção não podem mais ser abertas, então nada foi salvo. Um administrador pode apagá-las e inserir cada uma novamente.",
 	'refusal.workspaceCloseAuditUnavailable': "Não foi possível encerrar o espaço de trabalho agora porque o registro de auditoria dele não pôde ser salvo. Nada foi excluído. Tente novamente em alguns minutos.",
 	'refusal.workspaceCloseIncomplete': "O encerramento do espaço de trabalho não terminou. Tente novamente; se falhar de novo, entre em contato com o suporte.",
 	'refusal.csvInvoiceNumberMatchesExisting': "O número de fatura {number} é igual, ignorando a formatação, à fatura existente {existing} deste fornecedor, por isso não foi importado. Corrija o número ou lance a fatura manualmente se for mesmo outra.",

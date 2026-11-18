@@ -38,6 +38,9 @@
 	} from '#lib/api/commerce.ts';
 	import { listEntities } from '#lib/api/entities.ts';
 	import { updateProviderCredentials } from '#lib/api/providerCredentials.ts';
+	import { ApiError } from '#lib/api.ts';
+	import { CREDENTIAL_BLOCK_UNOPENABLE } from '#lib/api/codedRefusals.ts';
+	import CredentialResetPrompt from '#lib/components/organization/CredentialResetPrompt.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import SecretField from '#lib/components/ui/SecretField.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -82,6 +85,9 @@
 	 *  present from the start: Svelte 5 refuses `bind:` of `undefined` to a
 	 *  prop that declares a fallback. */
 	let clear = $state<Record<string, boolean>>({});
+	// The stored `commerce` row can no longer be opened, so every save answers
+	// 503 `credential_block_unopenable` until it is cleared (decisions §464).
+	let unopenable = $state(false);
 	let invalid = $state<readonly string[]>([]);
 	let saving = $state(false);
 	let testing = $state(false);
@@ -203,7 +209,15 @@
 			select(p.key);
 			toast(m('org.commerce.saved'), 'success');
 			await loadConnected();
+			unopenable = false;
 		} catch (err) {
+			if (
+				err instanceof ApiError &&
+				err.code === CREDENTIAL_BLOCK_UNOPENABLE &&
+				err.params.block === 'commerce'
+			) {
+				unopenable = true;
+			}
 			setStatus(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'failure');
 		} finally {
 			saving = false;
@@ -330,6 +344,17 @@
 <section class="card" data-testid="commerce-panel">
 	<h2>{m('org.section.commerce')}</h2>
 	<p class="card-hint">{m('org.commerce.hint')}</p>
+
+	{#if unopenable && !readOnly}
+		<CredentialResetPrompt
+			block="commerce"
+			oncleared={(status) => {
+				unopenable = false;
+				storedNames = status.commerce;
+				clear = Object.fromEntries(Object.keys(clear).map((k) => [k, false]));
+			}}
+		/>
+	{/if}
 
 	{#if readOnly}
 		<p class="card-hint" data-testid="commerce-admin-only">{m('org.readOnly.sectionAdminOnly')}</p>

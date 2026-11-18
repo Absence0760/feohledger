@@ -127,6 +127,7 @@ describe('codedRefusalText', () => {
 		['workspace_close_audit_unavailable', 'refusal.workspaceCloseAuditUnavailable'],
 		['workspace_close_incomplete', 'refusal.workspaceCloseIncomplete'],
 		['workspace_close_actor_not_admin', 'refusal.workspaceCloseActorNotAdmin'],
+		['credential_block_unopenable', 'refusal.credentialBlockUnopenable'],
 		['signup_slug_held', 'refusal.signupSlugHeld'],
 		['expense_report_not_owner', 'refusal.expenseReportNotOwner'],
 		['expense_report_self_reject', 'refusal.expenseReportSelfReject'],

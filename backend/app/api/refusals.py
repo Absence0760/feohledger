@@ -406,6 +406,25 @@ WORKSPACE_CLOSE_CONFIRMATION_MISMATCH_DETAIL = coded_refusal(
     "Type this workspace's address exactly as shown to confirm that it should be closed.",
 )
 
+#: A save of a credential block (`PUT /api/organization/credentials/{block}`,
+#: or `PATCH /api/organization` dropping a rail's keys) could not open the
+#: block's stored sealed value to merge into it: its KMS key is disabled, or in
+#: dev `FEOH_SECRET_KEY` changed. A 503 whose `params.block` names the block, so
+#: the organization page can offer `DELETE /api/organization/credentials/{block}`
+#: — the only way out (decisions §464). A seal failure is a different 503, with
+#: no code: it is retried, never answered by removing keys.
+CREDENTIAL_BLOCK_UNOPENABLE = "credential_block_unopenable"
+
+
+def credential_block_unopenable_detail(block: str) -> dict:
+    return coded_refusal(
+        CREDENTIAL_BLOCK_UNOPENABLE,
+        "The stored credentials for this section can no longer be opened, so nothing was "
+        "saved. An administrator can clear them and enter each one again.",
+        block=block,
+    )
+
+
 #: The workspace holds something a self-service closure must not destroy. A
 #: 409 whose `params.blockers` lists the stable codes
 #: (`services/workspace_closure.BLOCKERS`), so the page can say what each one
