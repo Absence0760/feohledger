@@ -495,9 +495,7 @@ async def draft_run_from_plan(
             f"commitments are in {run_currency}"
         )
         if found:
-            message += (
-                f" (found: {', '.join(found)}). Stage them from the payments queue instead."
-            )
+            message += f" (found: {', '.join(found)}). Stage them from the payments queue instead."
         else:
             message += "."
         if unknown_count:

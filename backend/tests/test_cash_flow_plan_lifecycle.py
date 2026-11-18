@@ -1841,9 +1841,7 @@ async def test_an_overdue_approved_invoice_is_staged_and_an_overdue_one_in_revie
 
     async with mk_a() as sa:
         payments = (await sa.execute(select(Payment))).scalars().all()
-    assert [(p.invoice_id, p.amount) for p in payments] == [
-        (late_approved_id, Decimal("1234.56"))
-    ]
+    assert [(p.invoice_id, p.amount) for p in payments] == [(late_approved_id, Decimal("1234.56"))]
 
 
 # ===========================================================================
