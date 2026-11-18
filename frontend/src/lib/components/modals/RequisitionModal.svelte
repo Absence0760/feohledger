@@ -626,10 +626,23 @@
 		color: var(--text-muted);
 	}
 
+	/* `minmax(0, 1fr)`, not `1fr`: a bare `1fr` track never shrinks below its
+	   widest item's min-content (a date input, the budget combobox), so at
+	   phone width the grid grew past the dialog and the full-width budget
+	   warning ran off its right edge. One column under 480px, where two
+	   half-width inputs cannot hold a date. */
 	.form-grid {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 12px;
+	}
+	.form-grid > * {
+		min-width: 0;
+	}
+	@media (max-width: 480px) {
+		.form-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
 	}
 	.form-grid label {
 		display: flex;
