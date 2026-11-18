@@ -1048,8 +1048,16 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	place-items: center;
 	z-index: 100;
 	backdrop-filter: blur(6px);
-	padding: 20px;
+	--backdrop-pad: 20px;
+	padding: var(--backdrop-pad);
 	animation: fl-fade-in 0.16s ease-out;
+}
+/* A phone keeps the dialog's vw width and gives up gutter instead: at 320px
+   the invoice form needs the full 95vw (304px). */
+@media (max-width: 480px) {
+	.backdrop {
+		--backdrop-pad: 8px;
+	}
 }
 /* --surface stays the dialog's fill for the same reason as the table's: the
    Badge tints inside a modal are calibrated over it. The entrance is a short
@@ -1060,11 +1068,11 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	border: 1px solid var(--border-soft);
 	border-radius: var(--radius-lg);
 	width: min(480px, 92vw);
-	/* Never wider than the backdrop's content box (its 20px padding each
-	   side). Every vw width below exceeds it on a phone — 95vw at 390px is
-	   370.5px in a 350px box — and the grid start-aligns the overflow, so the
-	   dialog ran off the right edge. Caps the per-modal width overrides too. */
-	max-width: calc(100vw - 40px);
+	/* Never wider than the backdrop's content box. With the desktop 20px
+	   padding, 95vw at 390px is 370.5px in a 350px box, and the grid
+	   start-aligns the overflow, so the dialog ran off the right edge. Caps
+	   the per-modal width overrides too. */
+	max-width: calc(100vw - 2 * var(--backdrop-pad, 20px));
 	max-height: 90vh;
 	overflow-y: auto;
 	padding: 24px;
