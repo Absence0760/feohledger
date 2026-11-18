@@ -41,7 +41,7 @@ class InvoiceContext:
     amount: Decimal | None = None
     # The invoice's own code (``payment_runs.payable_currency_code``), or None
     # when it records none: the figure is then stated bare, never as dollars
-    # (decisions §160 / §196 / §NEW-T3).
+    # (decisions §160 / §196 / §466).
     currency: str | None = None
     reason: str | None = None  # e.g. rejection reason — free text, no PII expected
     # Short, PII-free chat snippet (e.g. an author label like "from supplier").

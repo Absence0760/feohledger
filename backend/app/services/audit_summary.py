@@ -167,7 +167,7 @@ def _invoice_payload(invoice) -> dict:
         "vendor_name": invoice.vendor_name or "",
         "amount": str(invoice.amount) if invoice.amount is not None else None,
         # None (JSON null) when the invoice records no currency — never a
-        # guessed "USD" the model would then repeat as fact (decisions §NEW-T3).
+        # guessed "USD" the model would then repeat as fact (decisions §466).
         "currency": _invoice_currency(invoice),
         "status": str(invoice.status.value if hasattr(invoice.status, "value") else invoice.status),
     }
@@ -397,7 +397,7 @@ def build_template_summary(
 
     head = f"Invoice {inv_no} from {vendor}"
     if amount is not None:
-        # A code-less figure is stated bare, never as dollars (decisions §NEW-T3).
+        # A code-less figure is stated bare, never as dollars (decisions §466).
         head += f" for {amount} {currency}" if currency else f" for {amount}"
 
     phrases: list[tuple[str, bool]] = []

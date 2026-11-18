@@ -175,7 +175,7 @@ and every consumer fails CLOSED. A code-less invoice is never read as the
 reporting currency: a USD 100 invoice clears a USD 50,000 cap, the same figure
 with no code does not, and the refusal says the invoice "records no currency"
 (`params.currency` null). It also gets no structuring aggregate, since there is
-no currency to scope the vendor's other spend to (decisions §NEW-T3):
+no currency to scope the vendor's other spend to (decisions §466):
 
 | Site | Fail-closed behaviour |
 |---|---|

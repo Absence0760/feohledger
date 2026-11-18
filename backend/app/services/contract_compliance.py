@@ -108,7 +108,7 @@ async def evaluate_contract_compliance(
     # contract's — it can't be validly added to a same-currency prior sum
     # and compared against a limit denominated in yet another currency. An
     # invoice recording no currency matches no contract: reading its blank as
-    # USD measured a code-less figure against a USD limit (decisions §NEW-T3).
+    # USD measured a code-less figure against a USD limit (decisions §466).
     from app.services.payment_runs import payable_currency_code
 
     invoice_currency = payable_currency_code(invoice.currency)

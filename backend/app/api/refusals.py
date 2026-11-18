@@ -117,7 +117,7 @@ MFA_CODE_INVALID_DETAIL = coded_refusal("mfa_code_invalid", "Invalid code")
 #: spent (``POST /api/auth/mfa/verify`` with ``method=email``, and the portal's
 #: ``/mfa/challenge``). Its own code because its sentence differs from the TOTP
 #: one above — an emailed code also expires — and, like it, folds a wrong code
-#: and an expired one together. A 401 for the same reason (decisions §NEW-T1).
+#: and an expired one together. A 401 for the same reason (decisions §465).
 MFA_EMAIL_CODE_INVALID_DETAIL = coded_refusal("mfa_email_code_invalid", "Invalid or expired code")
 
 

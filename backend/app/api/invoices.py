@@ -2722,7 +2722,7 @@ INVOICE_RECALL_ONE_AT_A_TIME = "invoice_recall_one_at_a_time"
 
 #: A row a service or the engine refused with an uncoded ``detail``;
 #: ``params.status`` is the target the row could not be moved to. The English
-#: ``reason`` keeps the refusal's own sentence (decisions §NEW-T1).
+#: ``reason`` keeps the refusal's own sentence (decisions §465).
 INVOICE_BULK_REFUSED = "invoice_bulk_refused"
 
 
@@ -2743,7 +2743,7 @@ def _refused_skip(
     stringified dict) or ``fallback`` as the English ``reason``. Every refusal
     those services raise today is coded, so this is the backstop that keeps a
     new uncoded one from landing English-only in a translated list
-    (decisions §NEW-T1).
+    (decisions §465).
     """
     detail = exc.detail
     if (

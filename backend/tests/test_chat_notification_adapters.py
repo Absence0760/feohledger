@@ -452,7 +452,7 @@ def test_chat_message_amount_str_absent():
 
 
 def test_chat_message_states_a_code_less_amount_bare():
-    """No currency: the figure is stated bare, never as dollars (decisions §NEW-T3)."""
+    """No currency: the figure is stated bare, never as dollars (decisions §466)."""
     from app.services.chat_notification_adapters.base import render_chat_message
 
     msg = render_chat_message(

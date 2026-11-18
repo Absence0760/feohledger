@@ -345,7 +345,7 @@ def reporting_amount_at_locked_rate(
     or malformed, judged by `payment_runs.payable_currency_code` — is
     `unconverted` too. Reading it as the reporting currency compared a code-less
     figure against a reporting-currency limit at face value, the §196
-    substitution inside an approval gate (decisions §NEW-T3).
+    substitution inside an approval gate (decisions §466).
 
     Returns `(reporting_amount, unconverted)`.
     """

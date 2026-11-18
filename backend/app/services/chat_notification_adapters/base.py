@@ -34,7 +34,7 @@ class ChatMessage:
     status: str  # human-readable status word, e.g. "approved"
     amount: Decimal | None = None
     # The invoice's own code, or None when it records none: the figure is then
-    # stated bare, never as dollars (decisions §160 / §196 / §NEW-T3).
+    # stated bare, never as dollars (decisions §160 / §196 / §466).
     currency: str | None = None
     link: str | None = None  # deep link into the app (no secrets)
     # Optional signed Approve/Reject action tokens for an interactive message —

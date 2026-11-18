@@ -60,7 +60,7 @@ class HistoricalInvoice:
     invoice_date: str | None
     amount: Decimal
     # None when the invoice records no currency: the model is told it is
-    # unknown (JSON null), never that it is USD (decisions §NEW-T3).
+    # unknown (JSON null), never that it is USD (decisions §466).
     currency: str | None
     description: str | None
     payment_method: str | None
@@ -76,7 +76,7 @@ class CandidateInvoice:
     invoice_date: str | None
     amount: Decimal
     # None when the invoice records no currency: the model is told it is
-    # unknown (JSON null), never that it is USD (decisions §NEW-T3).
+    # unknown (JSON null), never that it is USD (decisions §466).
     currency: str | None
     description: str | None
     payment_method: str | None

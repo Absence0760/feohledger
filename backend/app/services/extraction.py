@@ -532,7 +532,7 @@ async def resolve_gate_aggregate(
         return amount
     # A code-less invoice has no currency to scope the vendor's other spend to;
     # its auto-approve gates fail closed on the unknown currency regardless
-    # (`currency_conversion.reporting_amount_at_locked_rate`, decisions §NEW-T3).
+    # (`currency_conversion.reporting_amount_at_locked_rate`, decisions §466).
     from app.services.payment_runs import payable_currency_code
 
     currency = payable_currency_code(getattr(invoice, "currency", None))

@@ -201,7 +201,7 @@ def test_no_pii_in_any_template():
 
 
 def test_a_code_less_invoice_is_never_notified_in_dollars():
-    """No currency on the context: the figure is stated bare (decisions §NEW-T3)."""
+    """No currency on the context: the figure is stated bare (decisions §466)."""
     from app.models.notification import EVENT_INVOICE_ASSIGNED
 
     ctx = InvoiceContext(invoice_number="INV-9", vendor_name="Globex", amount=Decimal("1234.56"))

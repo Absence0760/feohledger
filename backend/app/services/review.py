@@ -167,7 +167,7 @@ async def _enforce_approval_thresholds(
     # The invoice's OWN currency, or None when it records none (NULL, blank,
     # whitespace-only or malformed — the shared run-path predicate). Never a
     # "USD" stand-in: a code-less amount compared against a limit as dollars is
-    # the §196 substitution inside the approval gate (decisions §NEW-T3). The
+    # the §196 substitution inside the approval gate (decisions §466). The
     # gate below cannot express a None-currency figure in the limit's currency,
     # so both money gates fire for it (fail-closed), and the refusal's typed
     # params and English message state the figure bare (decisions §160 / §196).

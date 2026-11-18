@@ -213,7 +213,7 @@ async def test_human_approval_is_unchanged_for_a_domestic_invoice_under_both_gat
 
 
 # ---------------------------------------------------------------------------
-# An invoice recording no currency (decisions §NEW-T3). The gate used to read a
+# An invoice recording no currency (decisions §466). The gate used to read a
 # NULL / blank code as the reporting currency and compare the bare figure to the
 # limit at face value — the §196 substitution inside the approval gate. It is
 # now inexpressible, so both money gates fire however small the figure.

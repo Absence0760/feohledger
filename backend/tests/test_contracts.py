@@ -1173,7 +1173,7 @@ async def test_create_po_from_cancelled_contract_409(realdb):
 
 
 # ---------------------------------------------------------------------------
-# An invoice recording no currency matches no contract (decisions §NEW-T3).
+# An invoice recording no currency matches no contract (decisions §466).
 # ---------------------------------------------------------------------------
 
 

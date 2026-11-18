@@ -352,7 +352,7 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
           : l.codedRefusalInvoiceStatusImmutable(status);
     case 'invoice_recall_one_at_a_time':
       return l.codedRefusalInvoiceRecallOneAtATime;
-    // A row refused without a code of its own (backend decisions §NEW-T1):
+    // A row refused without a code of its own (backend decisions §465):
     // `params.status` is the target it could not reach.
     case 'invoice_bulk_refused':
       final target = _status(l, params, 'status');

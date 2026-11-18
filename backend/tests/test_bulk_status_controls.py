@@ -900,7 +900,7 @@ def test_every_skip_the_bulk_endpoint_writes_itself_is_coded():
 async def test_an_uncoded_refusal_is_still_a_coded_skip(realdb, monkeypatch, detail, reason):
     """A refusal a service raises without `{code, message, params}` is reported
     as `invoice_bulk_refused` naming the target, with the refusal's English as
-    `reason` — never an English-only row in a translated list (decisions §NEW-T1).
+    `reason` — never an English-only row in a translated list (decisions §465).
     Every refusal those services raise today is coded, so the fake stands in for
     the next one that is not."""
     from fastapi import HTTPException

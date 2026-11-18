@@ -357,7 +357,7 @@ async def test_verify_mfa_failure_writes_audit_action():
 @pytest.mark.asyncio
 async def test_verify_mfa_email_code_miss_is_coded():
     """The emailed code's miss carries its own code (its sentence also covers an
-    expired code, unlike the TOTP one) and stays a 401 (decisions §NEW-T1)."""
+    expired code, unlike the TOTP one) and stays a 401 (decisions §465)."""
     from unittest.mock import patch as _patch
 
     from fastapi import HTTPException

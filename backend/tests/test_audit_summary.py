@@ -561,7 +561,7 @@ def test_every_invoice_audit_action_is_summarized_or_deliberately_skipped():
 @pytest.mark.parametrize("currency", [None, "", "  ", "US"])
 def test_a_code_less_invoice_is_never_summarised_in_dollars(currency):
     """The template states the figure bare and the prompt tells the model the
-    currency is unknown (null), never a guessed USD (decisions §NEW-T3)."""
+    currency is unknown (null), never a guessed USD (decisions §466)."""
     import json as _json
 
     from app.services.audit_summary import _invoice_payload

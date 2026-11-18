@@ -21,7 +21,7 @@ from fastapi import HTTPException
 
 def _make_invoice(amount: float, currency: str | None = "USD"):
     # Every real Invoice carries a currency. A stub without one used to be read
-    # as USD by the gate; it now fails closed (decisions §NEW-T3), so the code-
+    # as USD by the gate; it now fails closed (decisions §466), so the code-
     # less case is opted into explicitly with `currency=None`.
     return SimpleNamespace(
         id=uuid.uuid4(),

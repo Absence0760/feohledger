@@ -940,7 +940,7 @@ the per-account MFA failure budget counts the miss whatever the status
 `mfa_email_code_invalid` ("Invalid or expired code",
 `api/refusals.MFA_EMAIL_CODE_INVALID_DETAIL`) — its own code because its
 sentence also covers an expired code — and is a `401` for the same reason
-(§NEW-T1).
+(§465).
 
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from

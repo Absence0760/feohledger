@@ -1530,7 +1530,7 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 	});
 
 	it('invoice_bulk_refused names the target by its label, in every shipped locale', () => {
-		// The backstop for a refusal a service raised without a code (§NEW-T1).
+		// The backstop for a refusal a service raised without a code (§465).
 		for (const [locale, messages] of LOCALES) {
 			const text = codedRefusalText(
 				'invoice_bulk_refused',

@@ -23316,7 +23316,7 @@ not connected). The organization page has no per-block "remove all" control to
 attach this to, since each secret field has its own "remove the stored value",
 so the action is API-only for now; the button is tracked in `docs/followups.md`.
 
-## §NEW-T1. Every bulk-status skip is coded, and the email-OTP miss too (round 19, 2026-11-18)
+## 465. Every bulk-status skip is coded, and the email-OTP miss too (round 19, 2026-11-18)
 
 **Context.** The last English-only refusals entry in `docs/followups.md` (§238,
 narrowed by §387 and §461) named the bulk status change's per-row skips and the
@@ -23359,7 +23359,7 @@ translated list.
 `codedRefusals.test.ts` (the reverse pin now counts five endpoint codes, plus
 the label test) and the mobile `coded_refusal_messages_test.dart`.
 
-## §NEW-T3. An invoice with no currency clears no approval limit and matches no contract (round 19, 2026-11-18)
+## 466. An invoice with no currency clears no approval limit and matches no contract (round 19, 2026-11-18)
 
 Rounds 16 and 17 (§453, §457, §460, §462) stopped the payment rails, the ERP
 push and the invoice PATCH from reading a blank currency as USD. The approval

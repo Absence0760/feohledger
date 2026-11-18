@@ -400,7 +400,7 @@ def test_invoice_to_candidate_handles_none_optionals():
     assert candidate.invoice_number == ""
     assert candidate.invoice_date is None
     assert candidate.amount == Decimal("0")
-    # Unknown, never a guessed "USD" the model would reason from (decisions §NEW-T3).
+    # Unknown, never a guessed "USD" the model would reason from (decisions §466).
     assert candidate.currency is None
     assert candidate.vendor_name == ""
 

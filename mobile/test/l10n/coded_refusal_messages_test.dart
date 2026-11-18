@@ -280,7 +280,7 @@ void main() {
     );
     expect(localizeCodedRefusal(en, refusal('invoice_status_immutable')),
         isNull);
-    // A row refused without a code of its own names its target (§NEW-T1).
+    // A row refused without a code of its own names its target (§465).
     expect(
       localizeCodedRefusal(
           en, refusal('invoice_bulk_refused', {'status': 'new'})),

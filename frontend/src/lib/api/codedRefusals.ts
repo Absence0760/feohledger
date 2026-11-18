@@ -403,7 +403,7 @@ const BUILDERS: Record<string, Builder> = {
 	},
 	invoice_still_extracting: fixed('refusal.invoiceStillExtracting'),
 	invoice_recall_one_at_a_time: fixed('refusal.invoiceRecallOneAtATime'),
-	// A row a service or the engine refused without a code (decisions §NEW-T1):
+	// A row a service or the engine refused without a code (decisions §465):
 	// `params.status` is the target it could not reach, named by its label; an
 	// unknown one falls back to the server's sentence.
 	invoice_bulk_refused: (params, t) => {
