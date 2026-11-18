@@ -478,9 +478,7 @@ async def test_forced_change_password_writes_a_pii_free_audit_row(realdb):
 
     info = realdb.info("a")
     async with realdb.client(key="a", role="admin") as c:
-        user_id, temp_password, mint = await _throwaway_user(
-            c, realdb, must_change_password=True
-        )
+        user_id, temp_password, mint = await _throwaway_user(c, realdb, must_change_password=True)
         try:
             resp = await c.post(
                 "/api/auth/change-password",
