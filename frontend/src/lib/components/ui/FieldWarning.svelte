@@ -45,6 +45,9 @@
 		margin: 6px 0 0;
 		font-size: 0.8rem;
 		line-height: 1.4;
+		/* A long localized amount must wrap inside a narrow field, never push
+		   the warning past its container. */
+		overflow-wrap: anywhere;
 		/* --danger is the text-on-dark token; --danger-strong is the fill
 		   behind white text and would be far too dark to read here. */
 		color: var(--danger);
