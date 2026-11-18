@@ -624,7 +624,7 @@ export const messages = {
 	'admin.users.toast.createFailed': 'ユーザーの作成に失敗しました',
 	'admin.users.toast.deleteFailed': 'ユーザーの削除に失敗しました',
 	'admin.users.toast.singleDeleted': 'ユーザーを削除しました',
-	'admin.users.toast.sessionsRevoked': '{n, plural, =0 {{name} はどこにもサインインしていませんでした} other {{name} を # 件のセッションからサインアウトしました}}',
+	'admin.users.toast.sessionsRevoked': '{n, plural, =0 {{name} はどこにもサインインしていませんでした} one {{name} を # 件のセッションからサインアウトしました} other {{name} を # 件のセッションからサインアウトしました}}',
 	'admin.users.toast.revokeFailed': 'ユーザーをサインアウトできませんでした',
 	'admin.users.fail.self': '自分自身は削除できません',
 	'admin.users.fail.notFound': 'ユーザーが見つかりません',
