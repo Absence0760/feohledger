@@ -55,7 +55,7 @@ mobile/
 │   │   ├── locale_store.dart    # Per-device display-language choice (i18n) → MaterialApp.locale; persisted via secure storage, never account-roamed
 │   │   ├── vendor_store.dart    # Vendor list, filter/search, verify/reject, ERP sync (offline cached)
 │   │   ├── workflow_store.dart  # Workflow-definition list (read-only) — load + loading/error; NOT offline-cached (privileged admin read, no mutators)
-│   │   └── payment_queue_store.dart # Payment queue + summary + runs; per-row method selection; create/execute/cancel runs
+│   │   └── payment_queue_store.dart # Payment queue + summary + runs; per-row method selection; create/execute/cancel runs; execution mode + record-as-paid (row + run)
 │   ├── utils/
 │   │   ├── money.dart           # THE money formatter — formatMoney (num) / formatMoneyString (exact decimal) / formatMoneyCompact + normalizeCurrencyCode; a figure is formatted with the currency its own payload names, and renders BARE when none can be proven (never a substituted `$`)
 │   │   ├── a11y.dart            # A11y.announce — screen-reader live-region announcements (SemanticsService, Directionality-aware)
@@ -80,7 +80,7 @@ mobile/
 │   │   ├── capture_screen.dart   # Camera/gallery capture + file picker (PDF/PNG/JPG/TIFF) → upload → extract
 │   │   ├── payments_screen.dart  # Payment history
 │   │   ├── vendors_screen.dart   # Vendor management — list + search/status filters, swipe/sheet verify+reject (unverified only), ERP-sync app-bar action (all admin/ap_manager-gated)
-│   │   ├── payment_queue_screen.dart # Pay — Queue tab (select approved invoices + per-row method → Create Run) + Runs tab (execute/cancel drafts), KPI summary bar
+│   │   ├── payment_queue_screen.dart # Pay — Queue tab (select approved invoices + per-row method → Create Run) + Runs tab (execute/cancel drafts, record a run as paid), KPI summary bar, record-only banner
 │   │   ├── workflows_screen.dart # Admin — read-only workflow list (name, active/default status, step count) → tap-through; reached from Settings → Administration
 │   │   ├── workflow_detail_screen.dart # Read-only workflow detail — steps (number, type, name, enabled) + per-step config summary; fetches GET /api/workflows/{id} on open
 │   │   ├── inspections_screen.dart # Quality inspections — list + server-side outcome chips, pull-to-refresh, record-inspection FAB (admin/ap_manager); tap a row → detail
@@ -100,6 +100,7 @@ mobile/
 │       ├── invoice_edit_sheet.dart # Modal bottom-sheet edit form (vendor, invoice #, amount, PO, GL, description, due date); returns the partial diff; amount sent as string-Decimal; vendor + amount render read-only (with a lock notice) and are stripped from the diff once the invoice is financially locked
 │       ├── inspection_list_tile.dart  # Inspection row — number + outcome badge, goods receipt (or "Not linked"), inspected date; one merged Semantics label
 │       ├── inspection_result_badge.dart # Colored inspection-outcome chip (pass/fail/partial/unknown) + the shared localized `inspectionResultLabel`
+│       ├── record_payment_dialog.dart # Record as paid outside FeohLedger (no-rail pilot, decisions §251) — the queue row's dialog (rail / reference / paid-on → POST /payments/record-outside) and the run's (reads GET /runs/{id} actions.record_outside before offering a form → POST /runs/{id}/record-outside)
 │       ├── record_inspection_sheet.dart # Modal bottom-sheet record form — receipt picker (required), suggested number, outcome segmented control + consequence, string quantities, date / inspector / notes; returns an InspectionDraft
 │       ├── contract_list_tile.dart    # Contract row with number/title, vendor, value, status
 │       ├── contract_status_badge.dart # Colored contract status chip (draft/active/expired/terminated/cancelled)

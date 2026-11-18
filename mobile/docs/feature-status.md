@@ -67,6 +67,28 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   failed payments*): mobile has no run-detail surface, and the runs list it
   reads (`GET /api/payments/runs/`) carries no `actions` verdict to offer the
   control from — only `GET /runs/{id}` does.
+  **Record-only mode** (the no-rail pilot, issue #517, backend decisions §251)
+  reads the same three server signals as the web payments page, and restates
+  none of them. `PaymentQueueStore` reads `GET /api/payments/execution-mode`
+  beside the queue; Execute is offered only on `processor` and **fails closed**
+  while the mode is unknown (loading, a failed read, offline, a value this
+  build predates — `canDispatchPayments`), and a confirmed `record_only` tenant
+  gets a banner saying FeohLedger records but never sends. **Record as paid**
+  is offered in both modes, as on the web, to holders of
+  `payment.record_external` (`AuthStore.canRecordExternalPayment`): per queue
+  row from the row's own `record_outside_refusal` (deliberately not `blocked`,
+  the run builder's verdict — #566), shown disabled with its localized reason
+  when refused; the dialog (`widgets/record_payment_dialog.dart`) takes the
+  rail (every rail but `virtual_card`), reference and paid-on date (capped at
+  the reader's today) and posts `POST /api/payments/record-outside` with no
+  `amount`, so the server binds the figure owed. Per run, a draft or exported
+  run's menu carries **Record run as paid…**, whose dialog reads `GET
+  /runs/{id}`'s `actions.record_outside` verdict before it offers a form and
+  posts `POST /runs/{id}/record-outside`. Refusals (`external_payment_*`,
+  `payment_run_*`, `payments_record_only`) are stated through
+  `l10n/coded_refusal_messages.dart`. Still web-only: the NACHA bank file
+  (download, verify, void), pre-filling the dialog from an ERP-reported
+  payment, and booking an ERP split through its exception's one-click.
   Money is rendered as server-supplied display strings — the device never does float arithmetic on money (totals are server-computed)
 - Quality inspections (4-way matching) — `InspectionsScreen` + `InspectionStore`
   over `GET /api/inspections` with **server-side** outcome chips (`?result=`;
