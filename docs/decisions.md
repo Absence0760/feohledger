@@ -22969,3 +22969,32 @@ plan-driven run should cap how overdue an invoice may be is an open product
 question for the operator. A cap would be a `settings.cash_flow` integer
 applied before staging, folded into the plan's derivation so the plan and the
 run agree, with the forecast's overdue slice left uncapped.
+
+## §NEW-L1. A payment run refuses an invoice that records no currency, on every surface (extends §453, round 16, 2026-11-18)
+
+§453 stopped `/draft-run` staging an invoice whose currency is blank, but the
+run builder (`invoices[iid].currency or "USD"`) and dispatch
+(`normalize_currency_code(...) or "USD"`) still read the blank as USD. A manual
+`POST /api/payments/runs`, or an invoice blanked by a PATCH while a draft run
+waited for sign-off, was staged and paid in a currency nobody recorded.
+
+A blank currency is now a per-invoice refusal, `currency_unknown`, in
+`payment_runs.run_refusal_reasons`, so the builder's 409 (prefixed
+`currency_unknown:`) and the queue's `blocked_reason` come from one predicate,
+and the queue's SQL selectable set has its twin (`_queue_currency_unknown`).
+It is refused on every rail, so it ranks with `vendor_not_active`, above the
+card-rail pin. The mixed-currency 422 leaves a blank out rather than counting
+it as a second currency. `dispatch_preflight` refuses it before the processor
+call (retry-safe), which covers rail dispatch, the NACHA export and
+paid-outside close-out; `/retry-failed` skips it; `POST /api/payments` 409s;
+`/corridor-quotes` refuses to price it; and the card mint refuses it before the
+provider call. Both `or "USD"`s are gone, and the adapter payload carries the
+normalised code.
+
+Rejected: reading the blank as the org's home or reporting currency, which is
+the same substitution with a different default; and fixing only the builder,
+which leaves the window between booking and dispatch open. Stopping the
+invoice PATCH writing `""` at all is the longer-term fix and stays in
+`docs/followups.md`. The builder's refusals are still plain strings rather
+than `{code, params}` bodies; the code travels as the detail's prefix and as
+the queue's `blocked_reason`, which is what the web and mobile queues label.

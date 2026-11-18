@@ -1775,20 +1775,16 @@ user-visible halves still open.
 
 ### Surfaced by round 15 (2026-11-18, round PR #731, decisions §445–§453)
 
-- [ ] **(c) A blank invoice currency still reads as USD in the run builder and
-      at execution.** `services/payment_runs.create_payment_run_for_invoices`
-      computes `invoices[iid].currency or "USD"` and `api/payments.py` builds
-      the payment with `(invoice.currency or "USD")`, so a manual `POST
-      /api/payments/runs` (or an invoice blanked by a concurrent PATCH between
-      `/draft-run`'s read and the builder's lock) still stages and pays a
-      currency-less invoice as USD — the substitution §453 removed from
-      `/draft-run`. **Durable fix:** a `currency_unknown` reason in
-      `run_refusal_reasons`, reaching the builder's 409 and the queue's
-      `blocked_reason` together, labelled on web `/payments` and mobile
-      `payment_queue_screen.dart` (six locales + ARB), and drop both `or
-      "USD"`s; longer term, stop the invoice PATCH writing `""` at all.
-      **Trigger:** the next change to the payment-run builder or queue
-      refusals.
+- [ ] **(c) The invoice PATCH still writes `""` as "no currency".**
+      `invoices.currency` is NOT NULL, so a blanked currency lands as `""`
+      rather than NULL. Every money path now refuses it (`/draft-run` skips it,
+      §453; the run builder, the payment queue, `POST /api/payments` and
+      dispatch refuse it as `currency_unknown`, round 16), but each reader has
+      to know that `""` means unknown. **Durable fix:** stop the PATCH writing
+      `""` at all (refuse a blank, or make the column nullable with an
+      explicit unknown), with a migration for rows already blank. **Trigger:**
+      the next change to the invoice PATCH's currency handling or the
+      `invoices.currency` column.
 - [ ] **(c) The employee forgot-password reveals whether an account exists by
       response time.** `POST /api/auth/forgot-password` (`api/auth.py`) awaits
       the reset-token mint and `dispatch_auth_audit` only on the known-address
