@@ -16,6 +16,11 @@ Coverage:
     is a no-op; the audit manifest is PII-free; and the matcher re-verifies in
     the same transaction — an invoice in another currency gets its
     `po_currency_mismatch` hold, an unpaid one only.
+  * Multi-PO splits — a leg stamped in another currency re-matches the split
+    invoice (found by `split_po_ids`, not its combined reference) and raises
+    the hold in the same run; the dry run counts it (decisions §433, §437).
+  * Matching only — the re-match never re-runs the org's LLM anomaly check
+    (or any other non-PO rule); the PO match is the only thing a stamp moves.
 """
 
 from __future__ import annotations
@@ -338,6 +343,148 @@ async def test_stamp_re_verifies_matching_and_raises_a_currency_hold(realdb):
             )
         ).all()
     assert dict(holds) == {ids["other"]: 1}
+
+
+@pytest.mark.asyncio
+async def test_stamping_a_split_leg_re_matches_the_split_invoice(realdb):
+    """A multi-PO split cites "PO-A,PO-B", which equals neither number; it is
+    found by the legs it recorded. Stamping ONE leg EUR on a USD split raises
+    the currency hold in the same run, and the dry run counts the invoice."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity(s)
+        leg_a = await _po(s, org_id, ent, "SPLIT-A", currency="USD")
+        leg_b = await _po(s, org_id, ent, "SPLIT-B")  # records no currency
+        split = Invoice(
+            invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
+            vendor_name="Acme",
+            amount=Decimal("2000.00"),
+            currency="USD",
+            po_number="SPLIT-A,SPLIT-B",
+            split_po_ids=[str(leg_a), str(leg_b)],
+            status=InvoiceStatus.ready_for_review,
+            organization_id=org_id,
+            entity_id=ent,
+        )
+        s.add(split)
+        await s.commit()
+        split_id = split.id
+        before = await match_invoice_to_po(s, split)
+        assert before.match_type == "multi-po-split"
+        assert before.currency_check == "unknown"
+
+    scope = BackfillScope(po_prefix="SPLIT-B")
+    dry = await _run(mk, org_id, currency="EUR", scope=scope, apply=False)
+    assert dry.candidates == 1
+    assert dry.invoices_rematched == 1
+
+    result = await _run(mk, org_id, currency="EUR", scope=scope)
+    assert result.stamped_po_ids == [str(leg_b)]
+    assert result.invoices_rematched == 1
+
+    async with mk() as s:
+        inv = await s.get(Invoice, split_id)
+        assert inv.po_match["currency_check"] == "different"
+        assert "po_currency_mismatch" in [w.get("code") for w in (inv.warnings or [])]
+        holds = (
+            await s.execute(
+                select(func.count()).where(
+                    APException.invoice_id == split_id,
+                    APException.exception_type == "po_mismatch",
+                    APException.status.in_(["open", "escalated"]),
+                )
+            )
+        ).scalar()
+    assert holds == 1
+
+
+@pytest.mark.asyncio
+async def test_rematch_is_matching_only_and_never_calls_the_llm(realdb, monkeypatch):
+    """The stamp moves only the PO side of the match, so the re-match runs only
+    the PO match: an org that opted into the LLM anomaly check pays no LLM call
+    per re-matched invoice, and a warning the PO match does not own survives."""
+    from app.models.vendor import Vendor
+    from app.services import invoice_warnings
+    from app.services.invoice_warning_catalog import warning
+
+    calls: list[uuid.UUID] = []
+
+    async def _recording_llm_check(db, invoice, *args, **kwargs):
+        calls.append(invoice.id)
+
+    monkeypatch.setattr(invoice_warnings, "_llm_anomaly_check", _recording_llm_check)
+    settings = {"fraud_rules": {"llm_anomaly_enabled": True}}
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity(s)
+        vendor = Vendor(name="Acme", organization_id=org_id, entity_id=ent)
+        s.add(vendor)
+        await s.flush()
+        await _po(s, org_id, ent, "PO-LLM")
+        inv = Invoice(
+            invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
+            vendor_name="Acme",
+            vendor_id=vendor.id,
+            amount=Decimal("1000.00"),
+            currency="EUR",
+            po_number="PO-LLM",
+            status=InvoiceStatus.ready_for_review,
+            organization_id=org_id,
+            entity_id=ent,
+            # A finding no PO match writes: a matching-only refresh keeps it.
+            warnings=[warning("past_due", "warning")],
+        )
+        s.add(inv)
+        await s.commit()
+        inv_id = inv.id
+
+        # The premise: this invoice is one the full refresh WOULD ask the LLM about.
+        await invoice_warnings.refresh_warnings(s, inv, org_settings=settings)
+        assert calls == [inv_id]
+        await s.rollback()
+    calls.clear()
+
+    result = await _run(mk, org_id, currency="USD", settings=settings)
+
+    assert result.invoices_rematched == 1
+    assert calls == []
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        codes = [w.get("code") for w in (inv.warnings or [])]
+    assert "po_currency_mismatch" in codes
+    assert "past_due" in codes
+
+
+def test_matching_only_refresh_rebuilds_exactly_the_po_match_warnings():
+    """`refresh_po_match_only` drops and rebuilds the warnings typed
+    `po_mismatch` / `quality_hold`; that must be exactly the codes
+    `_refresh_po_match` writes, or it would erase another rule's finding (a
+    code typed so elsewhere) or keep a stale PO one (a PO code typed otherwise)."""
+    import ast
+    import inspect
+    import textwrap
+
+    from app.services import invoice_warnings
+    from app.services.invoice_warning_catalog import WARNING_SPECS
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(invoice_warnings._refresh_po_match)))
+    written = {
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", None) == "warning"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+    }
+    typed = {
+        spec.code
+        for spec in WARNING_SPECS
+        if spec.type in invoice_warnings.PO_MATCH_EXCEPTION_TYPES
+    }
+    assert written == typed
 
 
 @pytest.mark.asyncio

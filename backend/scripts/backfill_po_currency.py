@@ -301,9 +301,7 @@ async def backfill_tenant(
 
 async def _count_citing(db: AsyncSession, organization_id: uuid.UUID, po_numbers: set[str]) -> int:
     """The dry run's count: exactly the set :func:`_rematch` would re-match."""
-    sub = (
-        await invoices_citing_pos(db, organization_id, po_numbers, skip_settled=True)
-    ).subquery()
+    sub = (await invoices_citing_pos(db, organization_id, po_numbers, skip_settled=True)).subquery()
     return int((await db.execute(select(func.count()).select_from(sub))).scalar() or 0)
 
 
