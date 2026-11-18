@@ -780,12 +780,12 @@ async def _mint_one_locked(
         persist_card,
     )
     from app.services.compliance import check_payment_compliance
-    from app.services.international_payments import normalize_currency_code
     from app.services.payment_runs import (
         blocking_exception_types,
         inactive_vendor_statuses,
         live_payment_invoices,
         net_payable_amounts,
+        payable_currency_code,
     )
 
     # Idempotency: an invoice with a LIVE (non-cancelled) card is skipped, so a
@@ -820,7 +820,7 @@ async def _mint_one_locked(
     # here by name, before the credit netting and the compliance screen would
     # misread a missing code, rather than left to `issue_card_for_invoice`'s
     # backstop, where it could only read as `card_skip_issue_failed`.
-    if normalize_currency_code(inv.currency) is None:
+    if payable_currency_code(inv.currency) is None:
         return card_skip(inv.id, ci.CARD_SKIP_CURRENCY_UNKNOWN)
     # The card is minted for the invoice net of applied credit memos: a card is
     # spendable up to its limit, so one minted at the gross overpays the credit.
