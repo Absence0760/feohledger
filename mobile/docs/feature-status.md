@@ -67,6 +67,40 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   failed payments*): mobile has no run-detail surface, and the runs list it
   reads (`GET /api/payments/runs/`) carries no `actions` verdict to offer the
   control from — only `GET /runs/{id}` does.
+  **Record-only mode** (the no-rail pilot, issue #517, backend decisions §251)
+  reads the same three server signals as the web payments page, and restates
+  none of them. `PaymentQueueStore` reads `GET /api/payments/execution-mode`
+  beside the queue; Execute is offered only on `processor` and **fails closed**
+  while the mode is unknown (loading, a failed read, offline, a value this
+  build predates — `canDispatchPayments`), and a confirmed `record_only` tenant
+  gets a one-sentence note saying FeohLedger records but never sends and that a
+  run's bank file is on the web app; it leads each tab's scroll list rather than
+  sitting above both tabs. **Record as paid**
+  is offered in both modes, as on the web, to holders of
+  `payment.record_external` (`AuthStore.canRecordExternalPayment`): per queue
+  row from the row's own `record_outside_refusal` (deliberately not `blocked`,
+  the run builder's verdict — #566), shown disabled with its localized reason
+  when refused; the dialog (`widgets/record_payment_dialog.dart`) takes the
+  rail (every rail but `virtual_card`), reference and paid-on date (capped at
+  the reader's today) and posts `POST /api/payments/record-outside` with no
+  `amount`, so the server binds the figure owed. A row carrying
+  `erp_reported_payment` (a live `paid_not_recorded` exception) opens the
+  dialog pre-filled from it, as the web's `erpPrefill` does: the rail only when
+  it is one a payment outside FeohLedger can be recorded on (otherwise left
+  unchosen, and submit waits for a choice), the reference, and the ERP's date
+  unless missing or in the future (then today). It shows the ERP's stated
+  figure and, when the breakdown spans more than one rail, the split with the
+  server's verdict on it; where `split_stands` is true the rail picker gives
+  way to "split across the methods above" and the record posts to the
+  exception's one-click, `POST /api/exceptions/{id}/record-erp-payment`, with
+  no rail (decisions §426). A refusal is announced once (`A11y.announce`); the
+  error line is not also a live region. Per run, a draft or exported
+  run's menu carries **Record run as paid…**, whose dialog reads `GET
+  /runs/{id}`'s `actions.record_outside` verdict before it offers a form and
+  posts `POST /runs/{id}/record-outside`. Refusals (`external_payment_*`,
+  `payment_run_*`, `payments_record_only`) are stated through
+  `l10n/coded_refusal_messages.dart`. Still web-only: the NACHA bank file
+  (download, verify, void), which hands over bank account numbers.
   Money is rendered as server-supplied display strings — the device never does float arithmetic on money (totals are server-computed)
 - Quality inspections (4-way matching) — `InspectionsScreen` + `InspectionStore`
   over `GET /api/inspections` with **server-side** outcome chips (`?result=`;
@@ -188,9 +222,9 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   offline-cached (privileged admin read).
 - **Admin user management** — `AdminUsersScreen` over `/api/admin/*`: list/search
   users, **create a user** (a FAB opens a validated form sheet — full name +
-  email + system-role pick → `POST /api/admin/users`; the server-generated
-  one-time temporary password is surfaced in a dialog for the admin to hand
-  over, then the list refreshes), edit a user's roles (system roles only —
+  email + system-role pick → `POST /api/admin/users`; the user is emailed a
+  single-use set-password link and the screen confirms it in a snackbar — no
+  credential is ever shown, decisions §283 — then the list refreshes), edit a user's roles (system roles only —
   the mobile role editor offers only the four SYSTEM roles — custom roles are created and granted on the web (`/admin?tab=roles`). Custom roles DO confer access: effective permissions are the union over a user's roles, custom ones via the `roles.permissions` JSONB column (migration 0062) — see `backend/app/api/permissions.py`), activate/deactivate, and **delete a
   user** (an armed/confirmed destructive action in the per-user sheet →
   `DELETE /api/admin/users/{id}`; self-delete is disabled client-side and the

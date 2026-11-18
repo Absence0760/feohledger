@@ -146,6 +146,66 @@ Covered by `backend/tests/test_po_matching_algorithm.py` (the guard),
 `test_po_matching_critical_path.py::test_realdb_currency_guard_against_recorded_po_currencies`
 and the three agent test files.
 
+### A PO that records no currency
+
+`unknown` is honest, but for a PO with no source left to ask it is permanent:
+migration 0099 copied the requisition's code and nothing else, there is no
+`PATCH /api/purchase-orders/{id}`, and only an ERP re-sync that states a code
+ever writes one. Until then every invoice matched against that PO carries the
+face-value note, and the three agents above escalate on it — so a tenant on
+pre-0099 POs (seeded, contract-spawned, or from an ERP that states no code)
+loses agent autonomy on exactly the invoices that used to auto-resolve.
+
+**When to run the backfill:** a tenant's agents stop auto-resolving PO
+mismatches with "the PO records no currency", or a support request asks to
+label legacy POs — and someone who knows the answer can say "these orders were
+all USD". `scripts/backfill_po_currency.py` takes that assertion; it never
+infers one (the org-currency proxy is what §197 rejected):
+
+```bash
+# from backend/ — dry run (the default): what would be stamped, what the set already records
+python scripts/backfill_po_currency.py --tenant acme --currency USD
+# narrow the set: an entity (slug or id), a po_number prefix, created strictly before a date
+python scripts/backfill_po_currency.py --tenant acme --currency EUR \
+    --entity acme-de --po-prefix DE- --created-before 2026-09-22
+# write, and keep the PII-free manifest (counts + PO ids)
+python scripts/backfill_po_currency.py --tenant acme --currency USD --apply --manifest po-currency-acme.json
+```
+
+- **Only NULL rows are written**, by a compare-and-swap `UPDATE … WHERE currency
+  IS NULL`; a PO whose source stated a code keeps it. The dry run lists the codes
+  the named set *already* records and warns when one differs from the assertion —
+  the sign the set is drawn wider than the orders you know about.
+- **The code must be a real ISO 4217 currency** (shape via
+  `utils.currency_code`, membership via `e_invoice.codelists.ISO_4217_CURRENCIES`);
+  the no-currency and testing codes are refused.
+- **Matching re-verifies in the same transaction.** Every invoice citing a
+  stamped PO that is not `paid` / `done` is re-matched with the org's settings
+  through `refresh_invoices_citing_pos` — the lookup a goods receipt uses, so a
+  multi-PO split is found by its legs (`split_po_ids`) as well as by number, and
+  each invoice is locked `FOR UPDATE` as a receipt locks it, so an approval
+  racing the stamp lands on one side of it (decisions §267, §389). The dry run's
+  "would re-match" count reads the same lookup. Only the PO match re-runs
+  (`invoice_warnings.refresh_po_match_only`): the stamp moved nothing else an
+  invoice's warnings read, so duplicate detection, the vendor-history fraud
+  rules and an opted-in LLM anomaly check are not repeated per invoice, and the
+  warnings they wrote stay as they were. An invoice in the asserted currency now reads `same`, so the note
+  goes and the agents can act; one in another currency reads `different` and gets
+  its `po_currency_mismatch` warning and payment-blocking `po_mismatch` hold with
+  the stamp. A stamp cannot make a finding disappear (`unknown` already compared
+  at face value, which is what `same` compares), so this raises holds and
+  closes none that a refresh would not close anyway. Paid / done invoices are
+  skipped, as the ERP PO sync skips them: a hold on money already paid stops
+  nothing.
+- **Audited:** one `purchase_order.currency_backfilled` row per applied run (no
+  actor — a tool run by an operator), carrying the asserted code, the scope,
+  the counts and the stamped PO ids; never a PO number, vendor or amount.
+
+A wrong assertion is a wrong label that looks right, which is worse than the
+bare figure it replaces — check it against the source (the ERP's base currency,
+the contract, the requisitions) before `--apply`. Covered by
+`backend/tests/test_po_currency_backfill.py`.
+
 ### The sync refreshes a PO's lines, never just its total
 
 The receipt-value check scales the PO total by received / ordered quantity, so
@@ -436,6 +496,61 @@ would substitute one masking bug for another (shipment 2 passed, so shipment 1
 reads inspected). Covered by
 `backend/tests/test_po_matching_critical_path.py` § 4-way leg.
 
+### A multi-PO split is matched against its legs
+
+The split agent (`multi_po_split_v1`) links one consolidated invoice to several
+POs by writing a combined `po_number` ("PO-A,PO-B") and the legs' ids in
+`invoices.split_po_ids` (decisions §433). The combined reference resolves to no
+single PO, so the matcher used to read `no_po` on the next refresh after any
+edit and raise again the `po_mismatch` the agent had just resolved. Now
+`match_invoice_to_po` reads the split from its legs (`_split_legs`), on one
+condition: **the reference still names them.** Every number in `po_number`
+must resolve to a PO in `split_po_ids` under the single-PO lookup's own filters
+(the invoice's entity, strictly; its vendor when it has one; the newest row
+per number). A reference someone edited — to one PO, or to a number the set
+does not hold — is matched as written, so it resolves or reads `no_po` like
+any other. A PO in the (append-only) set that the reference no longer names is
+not a leg.
+
+A split is matched as `_match_split` describes:
+
+- **2-way on the combined total** of the legs. Any leg cancelled, unissued or
+  with an unverifiable total holds the invoice, as that PO would alone. Any leg
+  in another currency from the invoice — or two legs whose own codes disagree,
+  even when the invoice's is absent — is a currency mismatch (`different`, held
+  as `po_currency_mismatch`), and the combined `po_total` is `null`: USD 600 +
+  EUR 400 is not 1,000 of anything, and stored as a total it rendered as
+  "€1,000.00". Each leg keeps its own `po_total` and `po_currency` in
+  `details["legs"]`. A split whose legs are `{code, NULL}` (one leg in the
+  invoice's currency, one recording none) is §197's rule extended to a sum: the
+  combined total is compared at face value and the result reads `unknown`, and
+  `multi_po_split_v1` refuses such a set — it never links or approves a split
+  it cannot prove is in one currency.
+- **3-way and 4-way per leg, then combined.** Quantities are never pooled
+  before they are judged, because an over-receipt on one leg would hide a short
+  receipt on another. A short leg is worth the share of its total its receipts
+  cover; every other leg its whole total (a leg with no receipt is a 2-way leg).
+  The invoice bills beyond receipt when it asks for more than that sum.
+  `ordered_quantity` / `received_quantity` are the legs' sums, or `null` when
+  one leg is short and another over. Each leg's inspection is read: a `fail`
+  is the representative verdict, then a required inspection missing on any
+  leg (`inspection_result` `null`), then a `partial`.
+- The result names the split: `po_ids` lists the legs, `po_number` is the
+  invoice's own reference and `po_id` is `null`. `inspection_ids` lists every
+  inspection read. The auto-close vets every leg's hand-entered receipts
+  (`receipts_clear_hold` over `MatchResult.matched_po_ids()`) and every
+  inspection (`_inspection_clears_hold`), and a receipt or inspection on one
+  leg re-matches the split (`refresh_invoices_citing_pos` also finds invoices
+  whose `split_po_ids` hold a PO of that number).
+
+The agent now re-matches through the matcher too, the way `missing_po_v1`
+does, and approves only on a clean `matched` read as the split it linked; so
+the `po_match` it leaves is the one every later refresh writes. A split with a
+leg short-received escalates instead of being approved.
+
+Covered by `backend/tests/test_po_match_exception_reconciliation.py` § A
+multi-PO split and `backend/tests/test_exception_agents_multi_po_split.py`.
+
 ### Recording a goods receipt
 
 `POST /api/goods-receipts` (`services/goods_receipts.py`) is the one in-app
@@ -496,7 +611,8 @@ MatchResult:
     po_id, po_number, po_total
     po_currency: str | None     # the PO's own code — labels po_total
     currency_check: "same" | "different" | "unknown" | None  # None = no PO found
-    gr_id  # if 3-way
+    gr_id  # if 3-way (the newest live receipt across a split's legs)
+    po_ids: list[str]           # a multi-PO split's legs; [] for a single PO
     amount_variance: Decimal | None      # invoice - PO; None on a currency mismatch
     amount_variance_pct: Decimal | None  # as percentage; None on a currency mismatch
     within_tolerance: bool
@@ -504,6 +620,7 @@ MatchResult:
     inspection_result: "pass" | "fail" | "partial" | None
     inspection_accepted_quantity: float | None  # partial acceptance qty
     inspection_required: bool              # require_inspection on + inspection missing
+    inspection_ids: list[str]              # every inspection read (one per inspected leg)
     over_receipt: bool          # 3-way: received quantity EXCEEDS ordered
     issues: list[dict]          # {code, params, message} — po_match.issue.* findings
     details: dict               # full match data for audit (has_inspection, inspection_result)

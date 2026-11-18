@@ -1,3 +1,4 @@
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 
 /// Convert a JSON money value (the backend emits these dict responses with
@@ -61,6 +62,29 @@ class PaymentQueueItem {
   /// parse, because a code this build can't name must not be guessed.
   final String? requiredMethodCode;
 
+  /// The coded refusal `POST /api/payments/record-outside` would answer for
+  /// this row whoever records it (`external_payment_*`), or `null` when
+  /// "Record as paid" may be offered. The server computes it from the gates
+  /// that endpoint applies (`external_payment.record_outside_refusals`), so
+  /// the app reads it rather than restating them — and deliberately NOT
+  /// [blocked], which is the RUN builder's verdict (a run refuses an
+  /// unverified vendor; recording money already sent does not, #566).
+  /// Segregation of duties is not folded in: it depends on who records, so the
+  /// server's 403 states it.
+  final String? recordOutsideRefusal;
+
+  /// What recording would book: the amount owed today, net of applied credit
+  /// memos and an accepted early-payment discount still open
+  /// (`payment_runs.payable_amounts`). Display only — the server binds the
+  /// recorded figure itself. `null` from a backend that predates the field.
+  final String? payableAmountDisplay;
+
+  /// What the ERP reported paying on this invoice, when it holds a live
+  /// `paid_not_recorded` exception (`api/payments.py::
+  /// _queue_erp_reported_payments`) — the record dialog starts from it, as the
+  /// web's does. `null` otherwise.
+  final QueueErpReportedPayment? erpReportedPayment;
+
   PaymentQueueItem({
     required this.id,
     required this.invoiceNumber,
@@ -77,6 +101,9 @@ class PaymentQueueItem {
     this.blocked = false,
     this.blockedReason,
     this.requiredMethodCode,
+    this.recordOutsideRefusal,
+    this.payableAmountDisplay,
+    this.erpReportedPayment,
   });
 
   /// The single rail this row may be paid on, or `null` for "any".
@@ -133,8 +160,165 @@ class PaymentQueueItem {
       blocked: json['blocked'] == true,
       blockedReason: json['blocked_reason'] as String?,
       requiredMethodCode: json['required_method'] as String?,
+      recordOutsideRefusal: json['record_outside_refusal'] as String?,
+      payableAmountDisplay: json['payable_amount'] == null
+          ? null
+          : moneyToDisplay(json['payable_amount']),
+      erpReportedPayment:
+          QueueErpReportedPayment.fromJson(json['erp_reported_payment']),
     );
   }
+}
+
+/// One part of the ERP's breakdown of a reported payment: a rail a payment
+/// made outside FeohLedger can be recorded on, or `null` for "not stated",
+/// and its exact amount string (never parsed).
+class ErpRailPart {
+  final String? rail;
+  final String amount;
+  const ErpRailPart({required this.rail, required this.amount});
+}
+
+/// What a "record this payment" form starts from. [method] is `null` when the
+/// ERP named no rail a payment made outside FeohLedger can be recorded on, so
+/// the person must choose — never a guessed default.
+class RecordPrefill {
+  final String? method;
+  final String reference;
+  final DateTime paidOn;
+  const RecordPrefill({
+    required this.method,
+    required this.reference,
+    required this.paidOn,
+  });
+}
+
+/// A queue row's `erp_reported_payment`: the ERP's report on a live
+/// `paid_not_recorded` exception, flattened for the record dialog. The mobile
+/// mirror of the web's `QueueErpReportedPayment` + `erpPrefill` /
+/// `erpPaymentParts` / `spansSeveralRails` (`frontend/src/lib/types/
+/// erpReport.ts`), reading the same server fields.
+class QueueErpReportedPayment {
+  /// The exception whose one-click (`POST /api/exceptions/{id}/
+  /// record-erp-payment`) books a split that stands.
+  final String exceptionId;
+
+  /// The ERP's product name, or `null` when the adapter has none.
+  final String? erpName;
+  final String? method;
+  final String? reference;
+
+  /// As the server sent it (`YYYY-MM-DD`); [prefill] validates it.
+  final String? paidOn;
+
+  /// The cash the ERP states and the code it stated it in. Display only.
+  final String? amount;
+  final String? amountCurrency;
+
+  /// The breakdown as the server keeps it; empty when there is none or it is
+  /// malformed (never a partial list that would look like the whole).
+  final List<ErpRailPart> parts;
+
+  /// The server's verdict on [parts] (`erp_status_sync.kept_split_stands`):
+  /// true stands, false dropped, null not judged.
+  final bool? splitStands;
+
+  const QueueErpReportedPayment({
+    required this.exceptionId,
+    this.erpName,
+    this.method,
+    this.reference,
+    this.paidOn,
+    this.amount,
+    this.amountCurrency,
+    this.parts = const [],
+    this.splitStands,
+  });
+
+  static final _isoDay = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+
+  static String? _str(Object? v) => v is String ? v : null;
+
+  /// `null` for an absent or malformed report: with no exception id there is
+  /// nothing the dialog could book a split through.
+  static QueueErpReportedPayment? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['exception_id'];
+    if (id is! String || id.isEmpty) return null;
+    final amount = raw['amount'];
+    return QueueErpReportedPayment(
+      exceptionId: id,
+      erpName: _str(raw['erp_name']),
+      method: _str(raw['method']),
+      reference: _str(raw['reference']),
+      paidOn: _str(raw['paid_on']),
+      amount: amount == null ? null : moneyToDisplay(amount),
+      amountCurrency: _str(raw['amount_currency']),
+      parts: _parts(raw['payment_parts']),
+      splitStands: raw['split_stands'] is bool ? raw['split_stands'] as bool : null,
+    );
+  }
+
+  /// The breakdown part by part, as the server books it: a rail that cannot be
+  /// recorded outside FeohLedger (`virtual_card`, an unknown string) reads as
+  /// not stated; a part with no exact amount string makes the whole breakdown
+  /// read as none (`payment_methods.rail_parts_from_json`).
+  static List<ErpRailPart> _parts(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <ErpRailPart>[];
+    for (final part in raw) {
+      if (part is! Map) return const [];
+      final amount = part['amount'];
+      if (amount is! String || amount.trim().isEmpty) return const [];
+      final rail = part['method'] is String
+          ? (part['method'] as String).trim().toLowerCase()
+          : '';
+      out.add(ErpRailPart(
+        rail: kExternalPaymentMethods.contains(rail) ? rail : null,
+        amount: amount,
+      ));
+    }
+    return out;
+  }
+
+  /// Does the breakdown span more than one rail? A part with no rail counts
+  /// as one of its own, as the server counts it. Only then is it shown: one
+  /// rail is just the method the form pre-fills.
+  bool get showsSplit => parts.map((p) => p.rail).toSet().length > 1;
+
+  /// The split is the record whatever rail is picked: `record-outside` would
+  /// refuse it (`external_payment_erp_split`), so the dialog books through
+  /// the exception's one-click and names no rail (decisions §426).
+  bool get splitIsTheRecord => showsSplit && splitStands == true;
+
+  /// The form pre-filled from the report. A rail it did not state, or one
+  /// that cannot be recorded outside FeohLedger, is left unchosen; a missing,
+  /// malformed or future date falls back to [today].
+  RecordPrefill prefill(DateTime today) {
+    final m = (method ?? '').trim().toLowerCase();
+    final day = (paidOn ?? '').length >= 10 ? paidOn!.substring(0, 10) : '';
+    final parsed = _isoDay.hasMatch(day) ? DateTime.tryParse(day) : null;
+    return RecordPrefill(
+      method: kExternalPaymentMethods.contains(m) ? m : null,
+      reference: (reference ?? '').trim(),
+      paidOn: parsed != null && !parsed.isAfter(today) ? parsed : today,
+    );
+  }
+
+  /// For the offline cache round-trip (`PaymentQueueStore._queueItemToJson`).
+  Map<String, dynamic> toJson() => {
+        'exception_id': exceptionId,
+        'erp_name': erpName,
+        'method': method,
+        'reference': reference,
+        'paid_on': paidOn,
+        'amount': amount,
+        'amount_currency': amountCurrency,
+        'payment_parts': [
+          for (final p in parts) {'method': p.rail, 'amount': p.amount},
+        ],
+        'split_stands': splitStands,
+      };
 }
 
 /// Payment-page KPI bar, from `GET /api/payments/summary`. Each value is a
@@ -239,6 +423,64 @@ class PaymentRun {
 
   /// Only `draft` runs can be executed (or cancelled) from the app.
   bool get isExecutable => status == 'draft';
+}
+
+/// `GET /api/payments/execution-mode`'s `mode`: whether FeohLedger SENDS this
+/// tenant's payments (`processor`) or only RECORDS payments the customer made
+/// from its own bank or ERP (`record_only`) — the no-rail pilot, backend
+/// decisions §251. The server resolves it (`services/payment_execution_mode`)
+/// and every dispatching endpoint enforces it; the app only mirrors it so a
+/// record-only tenant is never offered a control that can only 409.
+const kExecutionModeProcessor = 'processor';
+const kExecutionModeRecordOnly = 'record_only';
+
+/// Whether the app may offer the controls that SEND money (Execute).
+///
+/// **Fails closed**, like the web `canDispatchPayments`: an unknown mode —
+/// still loading, the read failed, offline, or a value this build predates —
+/// reads as record-only, so the worst a slow or failed read costs is a hidden
+/// button, never a send control on a tenant whose server would refuse it.
+/// Recording is offered in both modes, so nothing is stranded.
+bool canDispatchPayments(String? mode) => mode == kExecutionModeProcessor;
+
+/// The rails a payment made outside FeohLedger can be recorded on — every
+/// rail except `virtual_card`, which is FeohLedger's own card programme and
+/// never a way to pay around it (`schemas/payment.py::
+/// RecordErpReportedPaymentRequest._not_card`). Raw codes, in the web
+/// dialog's order (`EXTERNAL_PAYMENT_METHODS`); [PaymentMethod] is the run
+/// builder's set and deliberately not widened, so the run dropdown is
+/// unchanged.
+const kExternalPaymentMethods = <String>[
+  'ach',
+  'wire',
+  'check',
+  'bacs',
+  'faster_payments',
+  'chaps',
+  'card',
+];
+
+/// A run's detail, as far as recording it outside FeohLedger needs:
+/// `GET /api/payments/runs/{id}`. [recordOutside] is the CALLER's verdict on
+/// `POST /runs/{id}/record-outside` (`run_action_refusals`, from the gate the
+/// endpoint raises from — issue #575), so the sheet offers the control from it
+/// and never restates maker-checker, CFO sign-off or the run's status.
+class PaymentRunRecordDetail {
+  final PaymentRun run;
+  final ActionVerdict recordOutside;
+
+  const PaymentRunRecordDetail({required this.run, required this.recordOutside});
+
+  factory PaymentRunRecordDetail.fromJson(Map<String, dynamic> json) {
+    final actions = json['actions'];
+    return PaymentRunRecordDetail(
+      run: PaymentRun.fromJson(json),
+      recordOutside: actions is Map
+          ? ActionVerdict.fromVerdicts(
+              Map<String, dynamic>.from(actions), 'record_outside')
+          : ActionVerdict.unanswered,
+    );
+  }
 }
 
 /// Selection passed to `POST /api/payments/runs` — one invoice + chosen method.

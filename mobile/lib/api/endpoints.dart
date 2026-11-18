@@ -393,6 +393,23 @@ class ExceptionApi {
         .toList();
   }
 
+  /// Record the payment an ERP reported, from the `paid_not_recorded`
+  /// exception that holds it — `POST /api/exceptions/{id}/record-erp-payment`
+  /// (`payment.record_external`). The payment queue's record dialog uses it
+  /// only where the ERP's split stands, so it names no rail: the split is the
+  /// record. Idempotent on reference + date (a replay answers 200); refusals
+  /// arrive coded (`external_payment_*`).
+  static Future<Map<String, dynamic>> recordErpPayment(
+    String id, {
+    required String reference,
+    required String paidOn,
+  }) async {
+    return _api.post('/exceptions/$id/record-erp-payment', {
+      'reference': reference,
+      'paid_on': paidOn,
+    });
+  }
+
   /// `GET /api/exceptions/{id}` — single-exception detail (+ its invoice), for
   /// the detail screen. Same `_exception_dict` shape as the list rows, with the
   /// detail-only fields (resolved_by/at, due_at, time_to_resolution) populated.
@@ -667,6 +684,64 @@ class PaymentApi {
   static Future<Map<String, dynamic>> cancelRun(String id) async {
     return _api.post('/payments/runs/$id/cancel');
   }
+
+  // ── The no-rail pilot (issue #517, backend decisions §251) ──────────────
+  // A tenant's payments are either SENT by FeohLedger (`processor`) or only
+  // RECORDED here after the customer paid from its own bank or ERP
+  // (`record_only`). The same endpoints the web payments page calls; none of
+  // them moves money. Recording is `payment.record_external`; the mode read
+  // admits any of execute / void / record_external.
+
+  /// `GET /api/payments/execution-mode` → `{mode, reason}`.
+  static Future<Map<String, dynamic>> executionMode() async {
+    return _api.get('/payments/execution-mode');
+  }
+
+  /// Record one invoice as paid outside FeohLedger —
+  /// `POST /api/payments/record-outside`. Offered in BOTH modes (a processor
+  /// tenant can still pay one invoice by cheque). No `amount`: the server binds
+  /// it to what the invoice owes on [paidOn], net of credits and of an accepted
+  /// discount only while its pay-by date holds, so sending the queue's figure
+  /// would 422 a legitimate payment dated after the discount lapsed.
+  /// Idempotent on reference + date. Refusals arrive coded
+  /// (`external_payment_*`).
+  static Future<Map<String, dynamic>> recordOutside({
+    required String invoiceId,
+    required String method,
+    required String reference,
+    required String paidOn,
+  }) async {
+    return _api.post('/payments/record-outside', {
+      'invoice_id': invoiceId,
+      'method': method,
+      'reference': reference,
+      'paid_on': paidOn,
+    });
+  }
+
+  /// A run's detail, carrying the caller's `actions` verdicts —
+  /// `GET /api/payments/runs/{id}`.
+  static Future<PaymentRunRecordDetail> runDetail(String id) async {
+    final data = await _api.get('/payments/runs/$id');
+    return PaymentRunRecordDetail.fromJson(data);
+  }
+
+  /// Record a whole `draft` or `exported` run as paid by the customer's own
+  /// bank — `POST /api/payments/runs/{id}/record-outside` →
+  /// `{id, status, payment_count, total_amount}`. One refusal refuses the
+  /// whole run (nothing is recorded) and names the invoice in
+  /// `params.invoice_number`; maker-checker and CFO sign-off apply exactly as
+  /// they do to Execute.
+  static Future<Map<String, dynamic>> recordRunOutside(
+    String id, {
+    required String reference,
+    required String paidOn,
+  }) async {
+    return _api.post('/payments/runs/$id/record-outside', {
+      'reference': reference,
+      'paid_on': paidOn,
+    });
+  }
 }
 
 /// Admin user-management surface (`/api/admin/*`, admin-only on the backend).
@@ -720,10 +795,10 @@ class AdminApi {
   static Future<AdminUser> setActive(String id, bool active) =>
       updateUser(id, {'is_active': active});
 
-  /// `POST /api/admin/users` — create a user. The backend generates a
-  /// temporary password (the user is forced to change it on first login) and
-  /// returns it EXACTLY once in the response, so the result carries it for the
-  /// admin to hand over. 409 if the email is already in use.
+  /// `POST /api/admin/users` — create a user. The backend gives the user no
+  /// password and emails them a single-use set-password link (decisions §283);
+  /// the response carries only when that link expires, never a credential.
+  /// 409 if the email is already in use.
   static Future<CreateUserResult> createUser({
     required String email,
     required String fullName,

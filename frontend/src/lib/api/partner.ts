@@ -50,7 +50,7 @@ export function attachChild(linkCode: string): Promise<ChildTenant> {
 /** Provision a brand-NEW child tenant already parented to the caller's partner
  *  org (the new-tenant counterpart of `attachChild`, which adopts an existing
  *  one). Admin-only; the new tenant is ALWAYS parented to the caller — no parent
- *  id is sent. Returns the child + a one-time temp password for the new admin.
+ *  id is sent. Returns the child; its admin is emailed a set-password link.
  *  422 on an invalid slug/email, 409 on a slug already taken. */
 export function provisionChild(body: ProvisionChildRequest): Promise<ProvisionedChild> {
 	return api.post<ProvisionedChild>('/api/partner/children/provision', body);

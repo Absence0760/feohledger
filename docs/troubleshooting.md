@@ -192,3 +192,22 @@ UPDATE organizations SET settings = settings #- '{erp,legacy_link_realm}'
 WHERE settings->'erp'->>'type' = 'quickbooks_online'
   AND coalesce(settings->'erp'->>'integration_method', 'merge_dev') <> 'merge_dev';
 ```
+
+## Invoices on a legacy PO say "the PO records no currency", and the agents escalate them
+
+The PO has a NULL `purchase_orders.currency` — it predates migration 0099 with
+no requisition behind it, came from a contract, or came from an ERP that states
+no code (decisions §197). The matcher compares it at face value and says so,
+and `amount_mismatch_v1` / `missing_po_v1` / `multi_po_split_v1` escalate
+rather than make a currency claim nobody recorded. No PO edit route exists, so
+if an ERP re-sync cannot supply the code, an operator who knows it asserts it:
+
+```bash
+cd backend
+python scripts/backfill_po_currency.py --tenant <slug> --currency USD            # dry run
+python scripts/backfill_po_currency.py --tenant <slug> --currency USD --apply
+```
+
+Narrow the set with `--entity`, `--po-prefix` or `--created-before`; only NULL
+rows are written, and the unpaid invoices citing them are re-matched in the same
+run. Details: `backend/docs/po-matching.md` § A PO that records no currency.

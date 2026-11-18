@@ -278,6 +278,17 @@ PUBLIC_BY_DESIGN: tuple[PublicProbe, ...] = (
         needs_db=True,
     ),
     PublicProbe(
+        "POST",
+        "/portal/auth/forgot-password",
+        "/api/portal/auth/forgot-password",
+        "Supplier self-service password recovery — reachable by a supplier who "
+        "cannot sign in. Tenant-scoped by X-Tenant-Slug; answers identically for "
+        "a known and an unknown address. The RESET is gated by the single-use "
+        "emailed portal token (see ALTERNATE_AUTH).",
+        body={"email": _UNKNOWN_EMAIL},
+        needs_db=True,
+    ),
+    PublicProbe(
         "GET",
         "/portal/branding",
         "/api/portal/branding",
@@ -464,6 +475,16 @@ ALTERNATE_AUTH: dict[tuple[str, str], AlternateGate] = {
         "The VendorUser's password, through the same shared pwd_context + "
         "dummy_verify timing equalisation as employee login.",
         symbols=("verify_password", "dummy_verify"),
+    ),
+    ("POST", "/portal/auth/reset-password"): AlternateGate(
+        "The single-use emailed portal set-password token IS the credential, "
+        "bound to its tenant; consume_portal_reset_token GETDELs it atomically.",
+        symbols=("consume_portal_reset_token",),
+    ),
+    ("POST", "/portal/auth/reset-password/check"): AlternateGate(
+        "The same portal token, read without consuming it; the 400 the "
+        "redemption would answer for any token it would refuse.",
+        symbols=("peek_portal_reset_token",),
     ),
     ("POST", "/portal/auth/logout"): AlternateGate(
         "Bearer token read off the header and validated by decode_token.",

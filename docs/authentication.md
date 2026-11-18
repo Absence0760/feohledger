@@ -497,15 +497,15 @@ Action names:
 | Logout | `auth.logout` |
 | Self-service session revoke (one, or everywhere else) | `auth.session.revoked` — PII-free, records only `{scope: "single"\|"others", revoked: <count>}` |
 | Admin force-logout of another user | `user.sessions_revoked` — PII-free, records only the revoked count |
-| Admin reset of another user's password (`POST /api/admin/users/{id}/reset-password`) | `user.password_reset` — PII-free, records `{changed_fields: ["password"], must_change_password: true, sessions_revoked: <count>}` (`null` when the forced logout failed — the reset still returns its temp, with `sessions_revoked: false` on the response); never the temp |
+| Admin reset of another user's password (`POST /api/admin/users/{id}/reset-password`) | `user.password_reset` — PII-free, records `{changed_fields: ["password"], delivery: "set_password_link", sessions_revoked: <count>}` (`null` when the forced logout failed — the reset still answers 200, with `sessions_revoked: false` on the response); never the link or token. The link's redemption writes the ordinary `auth.password_reset.completed` |
 | Admin edit of a user (`PATCH /api/admin/users/{id}`) | `user.updated` — `changed_fields` names only fields whose value actually changed (the Edit form resends every field; a resent unchanged value is neither applied nor named — #566). Each changed field is recorded **before and after**: `previous_role_names` / `role_names`, `previous_is_active` / `is_active`, `previous_email` / `email` (the address, like the `auth.*` rows record it). `full_name` is named but its value never recorded. Built by `services/user_audit.user_updated_details`, shared with SCIM |
 | Admin delete of a user (`DELETE /api/admin/users/{id}`, `POST /api/admin/users/bulk-delete`) | `user.deleted` — `{email, role_names, was_active}` captured before the row goes, since afterwards nothing else says who the id was. Written **before** the delete commits with `record_auth_audit_or_raise`: a failed write refuses the delete (`503` on the single route; `audit_unavailable` for that row of a bulk delete, inside a savepoint, the rest of the batch still landing) |
 | Admin invite (`POST /api/admin/users`) | `user.created` — `{role_names}` |
 | SCIM create / rename / deactivate (`POST`, `PUT`, `PATCH`, `DELETE /api/scim/v2/Users…`) | `user.created` / `user.updated` with `via: "scim"` and a null `actor_id` (the IdP's bearer token is not a user). Same shapes as the admin rows, plus `operation` (`put` \| `patch` \| `delete`), `previous_external_id` / `external_id` when that changed, and on a deactivation `sessions_revoked` (`null` when the forced logout failed — the deprovision still answers 2xx). An unchanged write records nothing |
 | SCIM deprovision of the org's last active admin, refused | `user.deactivation_refused` — `{via: "scim", operation, reason: "last_active_admin"}` |
 | SCIM group change that would strip `admin` from the last active admin, refused | `auth.scim.role_revoke_refused` — `{role: "admin", source: "scim_group", reason: "last_active_admin"}`, `entity_type: "organization"` |
-| Self-service password change (`POST /auth/change-password`, incl. the forced first-login change; `PATCH /auth/me` with `password`) | `auth.password.changed` — PII-free, records `{via: "change_password" \| "profile", forced: <bool>}`; `forced` is true when it replaced an admin-issued temp (signup issues none — decisions §283). Written before the `auth.session.revoked` row the same change's forced logout writes, which is a side effect and not the event |
-| Supplier-portal password change (`POST /portal/auth/change-password`, incl. the forced first sign-in change) | `portal.password.changed` — the portal twin of `auth.password.changed`: PII-free, records `{via: "change_password", forced: <bool>}` (`forced` = it replaced the temp the AP team issued), identifies the account by `actor_id`/`entity_id`, never by address. Written before the `portal.session.revoked` side-effect row |
+| Self-service password change (`POST /auth/change-password`, incl. the forced first-login change; `PATCH /auth/me` with `password`) | `auth.password.changed` — PII-free, records `{via: "change_password" \| "profile", forced: <bool>}`; `forced` is true when it replaced a temporary password — no flow issues one any more (decisions §283), so only an account still holding a pre-§283 temp, or a CLI-provisioned tenant admin, can be forced. Written before the `auth.session.revoked` row the same change's forced logout writes, which is a side effect and not the event |
+| Supplier-portal password change (`POST /portal/auth/change-password`, incl. the forced first sign-in change) | `portal.password.changed` — the portal twin of `auth.password.changed`: PII-free, records `{via: "change_password", forced: <bool>}` (`forced` = it replaced a temp the AP team issued before the set-password links; a link redemption writes `{via: "set_password_link", forced: false}`), identifies the account by `actor_id`/`entity_id`, never by address. Written before the `portal.session.revoked` side-effect row |
 | Forgot-password link requested / redeemed (`POST /auth/forgot-password`, `POST /auth/reset-password`) | `auth.password_reset.requested` (`actor_id` null — the requester is unauthenticated) · `auth.password_reset.completed` (`actor_id` = the account) — both PII-free, recording only `{ip}`; never the token or the new password. `requested` is written only for an existing, active account with a tenant to route to |
 | MFA challenge issued during login | `auth.mfa.challenge_issued` |
 | Successful MFA verify | `auth.mfa.verify.success` |
@@ -515,6 +515,7 @@ Action names:
 | TOTP turned off (`/mfa/disable`) | `auth.mfa.disabled` (employee) · `portal.mfa.disabled` (supplier portal) — PII-free, records `{factor: "totp"}` |
 | Passkey registered (`/mfa/passkey/register/verify`) | `auth.mfa.passkey.registered` — PII-free, records `{factor: "passkey", credential, name, rp_id}`. `credential` is the API-visible passkey id (`webauthn_credentials.id`), never the authenticator's credential handle or its public key |
 | Passkey removed (`DELETE /mfa/passkey/{id}`) | `auth.mfa.passkey.removed` — same shape, so the removal row joins to the registration row on `credential` |
+| Supplier-portal reset link requested (`POST /portal/auth/forgot-password`) | `portal.password_reset.requested` — the portal twin of `auth.password_reset.requested`: `actor_id` null, `{ip}` only, `entity_id` the vendor user; written only for an existing, active account in the requesting tenant. The redemption is the existing `portal.password.changed` `{via: "set_password_link"}` |
 | Failed supplier-portal password login | `portal.login.failure` — records `{ip, reason}` (`bad_password` \| `no_password` \| `inactive`) and identifies the account by `entity_id`, never by address (a supplier contact's email is third-party PII we don't restate on every guess). Queued off the response path, like its employee twin |
 | Successful supplier-portal password login | `portal.login.success` — PII-free, records `{ip, method: "password"}` and identifies the account by `actor_id`/`entity_id`, never by address (same rule as the failure row). **Awaited**, unlike the failure row: the account provably exists by then, so the tenant-DB round trip cannot become the account-existence oracle `queue_auth_audit` avoids. Written on BOTH sign-in paths: the password-only one, and `/portal/auth/mfa/challenge` once a second factor is enrolled (as `password+mfa:{factor}`, beside that stage's own `portal.mfa.verify.success`). One action is therefore the whole population — an earlier version wrote it only on the password path, which made the action a biased sample rather than a gap, silently omitting exactly the best-protected accounts. Mirrors the employee twin, which writes `auth.login.success` alongside `auth.mfa.verify.success` |
 | Supplier-portal second factor verified / rejected (`/portal/auth/mfa/challenge`) | `portal.mfa.verify.success` · `portal.mfa.verify.failure` — PII-free, records `{method, ip}` where `method` is `totp` \| `email`. The portal twin of `auth.mfa.verify.*`; see [the note below](#the-supplier-portals-second-factor-stage-is-on-the-trail-issuing-a-backup-code-is-not) for why issuing an email backup code has no row of its own |
@@ -1005,11 +1006,23 @@ went, with no audit row.
 The PUT states the whole IdP configuration, and a key it leaves out is removed,
 with three exceptions:
 
-- **The client secret is write-only.** Omitted or blank keeps the stored one;
-  `clear_client_secret: true` removes it. No response carries it —
-  `GET /api/organization` drops `sso.client_secret` for every role
-  (`services/org_settings_view.ALWAYS_REDACTED`), and the SSO view reports
-  `client_secret_configured` only.
+- **The client secret is write-only and sealed.** Omitted or blank keeps the
+  stored one; `clear_client_secret: true` removes it. It is not in the JSONB:
+  the save seals it in `provider_credentials` (block `sso`, envelope-encrypted
+  under the app KMS key, the store the ERP / payment / card secrets use) and
+  writes only a `client_secret_configured: true` marker into `settings.sso`,
+  in the same transaction. The sign-in completeness check reads the marker, so
+  it stays local and never unseals; the OIDC callback opens the sealed value
+  (`services/sso.load_client_secret`) only after consuming its single-use
+  `state`, and refuses before contacting the IdP when none is stored (400,
+  audit reason `client_secret_missing`) or the store cannot open it (503,
+  `credentials_unavailable`). A rotation behind an unchanged marker still
+  audits `client_secret` in `changed`, and a store that cannot seal answers
+  503 with nothing saved. No response carries the value —
+  `GET /api/organization` still drops a stray `sso.client_secret` for every
+  role (`services/org_settings_view.ALWAYS_REDACTED`), and the SSO view
+  reports `client_secret_configured` only. Migration `0135_seal_extraction_sso`
+  moved every existing plaintext value and wrote the marker.
 - **The SCIM state is carried.** `scim_bearer_hash` and `scim_groups` belong to
   the SCIM machinery and survive every save; `scim_group_role_map` survives
   unless the request names one, and a named map must reference roles the org
@@ -1067,7 +1080,18 @@ admin_password=None)`), with no temporary password and `must_change_password`
 false: they choose their first password through a single-use **set-password
 link**, which is a forgot-password reset token with a longer life
 (`FEOH_SIGNUP_SET_PASSWORD_TTL_HOURS`, default 72) redeemed by the ordinary
-`/login/reset-password` page and `POST /api/auth/reset-password`. Until then no
+`/login/reset-password` page and `POST /api/auth/reset-password`. So does every
+other account nobody chose a password for: an admin-invited user
+(`POST /api/admin/users`), a partner-provisioned child admin
+(`POST /api/partner/children/provision`), an operator-provisioned first admin
+(`deploy/add-tenant.sh` → `scripts/create_tenant.py`, which prints only the
+address and has no option to print the link, since its output is often retained
+by SSM),
+and an admin-reset user, whose
+password the reset clears (`POST /api/admin/users/{id}/reset-password`) — each
+emailed the same link, with its own lifetime `FEOH_SET_PASSWORD_LINK_TTL_HOURS`
+(default 72). The link is never returned to the admin or partner who triggered
+it (`api/set_password_links.py`). Until then no
 password signs in to the account, so it never reaches `/profile` in that state.
 The reset page reads its token first with `POST /api/auth/reset-password/check`,
 which never consumes it — a mail scanner prefetching the link, or a reload,
@@ -1330,11 +1354,11 @@ exactly as before.
     subset of the caller's own effective permissions. Otherwise a custom role
     scoped to only `user.manage` could assign itself `admin` and take over the
     org.
-  - **An admin never sets another user's password.** The reset is
-    `POST /api/admin/users/{id}/reset-password`: a temp from the shared
-    generator (so it satisfies `validate_password_complexity`),
-    `must_change_password=True`, every target session revoked, returned once
-    and emailed best-effort, audited `user.password_reset`. The earlier
+  - **An admin never sets — or sees — another user's password.** The reset is
+    `POST /api/admin/users/{id}/reset-password`: the password is cleared,
+    every target session revoked, and a single-use set-password link emailed
+    to the user's own address (never returned; a failed send is a `502` that
+    changes nothing), audited `user.password_reset` (decisions §283). The earlier
     admin-typed `password` on `PATCH /api/admin/users/{id}` let the admin keep
     knowing the value with no forced change, and the Edit form's password input
     took the admin's OWN password from browser autofill, so saving a rename
@@ -1481,9 +1505,10 @@ The approve path now refuses on **both** axes an AP actor can be the proposer:
 | `vendor_change_requests.requester_provisioned_by_user_id` | frozen at staging from `vendor_users.provisioned_by_user_id` | approver == the AP actor who minted that portal identity's password |
 
 `vendor_users.provisioned_by_user_id` is stamped by invite AND by
-`POST .../reset-password` — the only two routes that hand an AP actor a working
-supplier credential — and is deliberately NOT cleared when the supplier changes
-their own password (that route needs the *current* password, which the
+`POST .../reset-password` — the only two routes through which an AP actor can
+steer a supplier credential (neither hands out a password any more, but the
+invite's set-password link goes to an address the AP actor chose) — and is
+deliberately NOT cleared when the supplier changes or sets their own password (that route needs the *current* password, which the
 provisioner has, so clearing there would be a one-request bypass). NULL means
 no AP actor has ever held this credential, which is correctly permissive: a
 self-managed supplier's request approves normally. Migration `0095`, tenant DBs.
@@ -2025,7 +2050,7 @@ A single OIDC flow supports both Okta and Entra because they're both OIDC-compli
     "provider": "okta",
     "discovery_url": "https://acme.okta.com/.well-known/openid-configuration",
     "client_id": "...",
-    "client_secret": "...",
+    "client_secret_configured": true,
     "scim_bearer_hash": "<sha256 hex>",
     "allowed_email_domains": ["acme.com"]
   }
@@ -2409,7 +2434,7 @@ A "live factor" here means an enabled TOTP secret **or** at least one registered
 
 Neither field is required for a **first** enrollment: an account with no factor has nothing to protect, so onboarding stays frictionless. A missing or wrong step-up is a `400` with a generic message that reveals nothing about the account (in an SSO-only tenant the message names only the code and passkey proofs, which reveals nothing `/auth/{sso,saml}/config` does not already publish).
 
-An SSO-only account — no password, no TOTP secret — has no *stateless* credential to be challenged on, and is still never **exempted**: exempting it would let a stolen JWT plant an attacker-controlled passkey on an account the attacker never proved control of. Instead, if it holds a registered passkey, that passkey **is** the challenge: `POST /api/auth/mfa/step-up/passkey` mints an assertion challenge bound to the operation, and the signed response goes back as `assertion`. That is what makes a passwordless SSO deployment able to enroll, rotate and remove its own factors at all; before it, such an account was locked out of factor management and recovered only via an admin password reset (which cannot help in an SSO-only tenant, where the password is no step-up proof) — `POST /api/admin/users/{user_id}/reset-password`, a generated temp the user must change (`app/api/admin.py`; still the fallback for an account with *no* factor of any kind, which genuinely has nothing to prove). The password / TOTP checks stay pure in `services/mfa.step_up_verified`; the assertion path is `api/auth._step_up_satisfied` because it needs the DB and Redis.
+An SSO-only account — no password, no TOTP secret — has no *stateless* credential to be challenged on, and is still never **exempted**: exempting it would let a stolen JWT plant an attacker-controlled passkey on an account the attacker never proved control of. Instead, if it holds a registered passkey, that passkey **is** the challenge: `POST /api/auth/mfa/step-up/passkey` mints an assertion challenge bound to the operation, and the signed response goes back as `assertion`. That is what makes a passwordless SSO deployment able to enroll, rotate and remove its own factors at all; before it, such an account was locked out of factor management and recovered only via an admin password reset (which cannot help in an SSO-only tenant, where the password is no step-up proof) — `POST /api/admin/users/{user_id}/reset-password`, which emails the user a set-password link (`app/api/admin.py`; still the fallback for an account with *no* factor of any kind, which genuinely has nothing to prove). The password / TOTP checks stay pure in `services/mfa.step_up_verified`; the assertion path is `api/auth._step_up_satisfied` because it needs the DB and Redis.
 
 Every step-up check is **throttled and audited**: 5 attempts per minute keyed on the *account* (not the client IP — the attacker already holds the victim's token and can rotate IPs), and a failure writes a PII-free `auth.mfa.step_up.failure` / `portal.mfa.step_up.failure` audit row carrying only the operation name. Without that, a credential-management endpoint that checks a password is an unlimited, silent password oracle. The same throttle + audit covers `/mfa/disable` on both surfaces.
 
@@ -2767,6 +2792,7 @@ parked here.
 | `GET /auth/saml/metadata` | SP `EntityDescriptor` XML an IdP admin registers. No secrets — only the public SP cert when AuthnRequest signing is on. |
 | `GET /signup/slug-check`, `POST /signup/start` | Self-service tenant signup: there is no account to authenticate yet. Abuse is bounded by the per-IP / per-email rate limits and the captcha, not by a credential. |
 | `POST /auth/forgot-password` | **Self-service password recovery.** It has to be reachable by a user who — by definition — cannot log in; requiring a credential to ask for a password reset would be circular. It is not an unguarded surface: it answers *identically* for a known and an unknown address (the email is dispatched on a detached task, so response time can't enumerate accounts either), and it is throttled on two axes — per IP (5/hour) and per submitted address (3/hour), so an attacker rotating IPs still can't email-bomb one victim's inbox with reset links. The state-changing half of the flow is **not** public: `POST /auth/reset-password` is gated by the single-use emailed token (see below). |
+| `POST /portal/auth/forgot-password` | **The supplier-portal twin**, tenant-scoped by `X-Tenant-Slug` / Host. The same identical answer and detached send; budgets per IP (5/hour) and per (tenant, address) (3/hour, tenant-scoped like the portal login's failure budget so one tenant's traffic never throttles another's supplier). It changes nothing on the account; the reset itself is gated by the single-use portal token (below). |
 | `GET /portal/branding` | White-label brand read for the **unauthenticated** supplier-portal login page. Tenant resolved by the `get_tenant` chokepoint; returns only the whitelisted `BrandConfig` fields. See `white-label.md`. |
 
 #### `ALTERNATE_AUTH` — gated by something other than the JWT
@@ -2794,6 +2820,7 @@ behavioural suites cover (`test_slack_approvals`, `test_webhook_security`,
 | `POST /portal/auth/mfa/challenge[/email]` | The portal's own `typ=vendor_mfa_challenge` token — distinct from the employee one so neither crosses the AP/vendor boundary. |
 | `POST /auth/reset-password` | The single-use emailed reset token IS the credential; `consume_reset_token` GETDELs it atomically, so a replay 400s exactly like an expiry. |
 | `POST /auth/reset-password/check` | The same token, read without consuming it (`peek_reset_token`): the same opaque 400 for any token the reset would refuse, otherwise the account email the link already resets. Its own per-IP budget (20/min), so loading the page never spends the submit's. |
+| `POST /portal/auth/reset-password`, `POST /portal/auth/reset-password/check` | The supplier-portal twin (its link comes from the AP team's invite / reset, or the supplier's own `POST /portal/auth/forgot-password`): the single-use set-password token the AP team's portal invite / reset emails (`portal:pwreset:` prefix, so neither family redeems the other's), bound to the tenant that minted it — presented on another tenant's host it is the same opaque 400 and is **not** spent. Same per-IP budgets (10/min, 20/min). Redemption ends every portal session of the supplier. |
 | `POST /auth/sso/callback` | Server-minted single-use `state`, then the IdP's signed, nonce-bound ID token. |
 | `POST /auth/saml/acs`, `POST /auth/saml/exchange` | Server-minted single-use RelayState + python3-saml's signed-assertion verification; the exchange leg consumes a one-time handoff code. |
 | `POST /signup/complete` | The emailed `EmailVerification` token, taken `FOR UPDATE` and consumed so two calls can't double-provision a tenant. |

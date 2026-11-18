@@ -1,12 +1,8 @@
-"""Two credential mints in the admin surface, held to the platform's own rules.
+"""Credential mints in the admin surface, held to the platform's own rules.
 
-* **Admin-created users get a policy-compliant temp password.** `POST
-  /api/admin/users` used a LOCAL 12-character generator over
-  `ascii_letters + digits` with no guarantee of case mix or a digit — so the
-  credential the platform itself issues could be one
-  `validate_password_complexity` would refuse. Signup and partner provisioning
-  already used the shared `utils.passwords.generate_temp_password`, which is
-  constructed to satisfy the policy deterministically; admin now does too.
+(Admin-created users used to get a generated temporary password, pinned here to
+the complexity policy. No flow mints one any more — invites send a set-password
+link, `tests/test_admin_create_user_email.py`, decisions §283.)
 
 * **Minting a SCIM bearer token is audited.** That token is a tenant-wide
   user-provisioning credential — whoever holds it can create, rename and
@@ -19,16 +15,12 @@
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 
 from app.models.organization import Organization
-from app.models.user import User, UserRole
 from app.models.workflow import AuditLog
-from app.utils.passwords import MIN_LENGTH, validate_password_complexity
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,34 +45,6 @@ async def scim_hash_restored(realdb):
             update(Organization).where(Organization.id == org_id).values(scim_bearer_hash=before)
         )
         await s.commit()
-
-
-async def test_admin_created_user_temp_password_satisfies_the_policy(realdb):
-    suffix = uuid.uuid4().hex[:8]
-    async with realdb.client(key="a", role="admin") as c:
-        resp = await c.post(
-            "/api/admin/users",
-            json={
-                "email": f"temppw-{suffix}@acme.test",
-                "full_name": "Temp Password Probe",
-                "role_names": ["ap_clerk"],
-            },
-        )
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    try:
-        temp = body["temporary_password"]
-        assert len(temp) >= MIN_LENGTH
-        # The policy every other password on the platform must satisfy — the
-        # credential the platform issues must not be the one exception.
-        validate_password_complexity(temp)
-    finally:
-        mk = realdb.control_sessionmaker()
-        user_id = uuid.UUID(body["id"])
-        async with mk() as s:
-            await s.execute(delete(UserRole).where(UserRole.user_id == user_id))
-            await s.execute(delete(User).where(User.id == user_id))
-            await s.commit()
 
 
 @pytest.mark.plan("scale")  # minting a SCIM token is a Scale feature (decisions §258)

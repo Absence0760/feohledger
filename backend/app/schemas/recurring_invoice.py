@@ -126,6 +126,12 @@ class RecurringTemplateResponse(BaseModel):
     notes: str | None
     #: Set while the template's last due period could not be generated.
     last_skip: GenerationSkip | None = None
+    #: True when ``gl_account`` is no longer a code the template entity's chart
+    #: would accept on a new write — retired, unknown, or another entity's
+    #: (``services/gl_chart.gl_code_off_chart``). Generation then raises the
+    #: invoice uncoded with a ``gl_codes_not_in_chart`` warning rather than
+    #: stamp it; the flag is how the operator finds the template to re-code.
+    gl_account_off_chart: bool = False
     created_at: str
     updated_at: str | None
 
@@ -153,7 +159,7 @@ class RecurringTemplateResponse(BaseModel):
         )
 
     @classmethod
-    def from_db(cls, t) -> RecurringTemplateResponse:
+    def from_db(cls, t, *, gl_account_off_chart: bool = False) -> RecurringTemplateResponse:
         return cls(
             id=str(t.id),
             name=t.name,
@@ -181,6 +187,7 @@ class RecurringTemplateResponse(BaseModel):
             variance_tolerance_pct=t.variance_tolerance_pct,
             notes=t.notes,
             last_skip=cls._skip_from_meta(getattr(t, "meta", None)),
+            gl_account_off_chart=gl_account_off_chart,
             created_at=t.created_at.isoformat() if t.created_at else None,
             updated_at=t.updated_at.isoformat() if t.updated_at else None,
         )
@@ -222,6 +229,10 @@ class RecurringTemplateSummaryResponse(BaseModel):
     # Earliest `next_run_on` across ACTIVE templates in the filtered set (ISO
     # date), or null when none is scheduled.
     soonest_next_run: str | None = None
+    # Templates in the filtered set whose `gl_account` the chart no longer
+    # accepts (`gl_account_off_chart` on a row) — the count behind the page's
+    # "needs re-coding" filter, over the whole set rather than the loaded page.
+    gl_off_chart: int = 0
 
 
 class ScheduleOccurrence(BaseModel):

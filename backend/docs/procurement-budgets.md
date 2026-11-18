@@ -188,7 +188,7 @@ Every list/read is entity-scoped (`X-Entity-ID`) and tenant-isolated
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/budgets` | Paginated, entity-scoped list. Filters: `dimension`, `period`; `search` (ILIKE on name + dimension_value). |
+| GET | `/budgets` | Paginated, entity-scoped list. Filters: `dimension`, `period`, `currency` (case-insensitive ISO code — the requisition form's budget picker asks for exactly the budgets its currency may link); `search` (ILIKE on name + dimension_value). `/summary` takes the same filters. |
 | GET | `/budgets/summary` | Whole-set KPI rollup — count + per-currency allocation totals (exact decimal strings, never a cross-currency SUM, never FX-converted). Shares `_budget_list_filters` with the list so the `/budgets` "Total allocated" card can't describe a different set than the table. Groups are ordered by currency code, and each page headlines the first one with the rest on a sub-line — so which currency headlines is alphabetical, never largest-total. |
 | POST | `/budgets` | Create. Audited `budget.created`. |
 | GET | `/budgets/rollup` | **Org-wide budget vs actual** — whole-set allocated / committed / actual / remaining, grouped by currency, computed on read. Shares `_budget_list_filters` + the entity scope with the list. Money is exact decimal strings; never summed across currencies, never FX-converted on a read. Rendered on `/cfo`. |
@@ -292,6 +292,20 @@ GET /api/budgets/check?budget_id=<uuid>&amount=1500.00
 decides whether to warn or hard-stop. All math is `Decimal`; an unknown
 `budget_id` is a 404.
 
+The requisition form (`RequisitionModal`) calls it — through
+`lib/api/budgets.ts::checkBudget` — while a draft is being edited, debounced
+300 ms behind the chosen budget and the line total, with the total sent as an
+exact decimal string (`utils/money.ts::sumMoneyExact`, never the display
+float). It warns and does not block: an overspend renders as a `FieldWarning`
+and the save still goes through. Only a draft is checked, since a draft is not
+yet in `committed` and a submitted requisition already is. The check takes no
+currency, so the form never reads its answer across currencies: the picker
+lists only budgets in the requisition's currency (`?currency=`), and if the
+currency field later moves off the linked budget's, or the check answers in
+another currency, the form says so and refuses to save (the backend would
+422) rather than comparing the two at face value
+(`utils/budgetPicker.ts::budgetCheckView`).
+
 ## Frontend
 
 **`/cfo` — org-wide budget vs actual.** A `Budget vs actual` card over
@@ -312,3 +326,11 @@ budgets. Clicking a row opens `BudgetModal`, which loads the per-budget spend
 rollup (`GET /{id}/spend`) and renders it as KPI cards + a utilization bar
 (green < 80% / amber ≥ 80% / red ≥ 100%) over the allocated/committed/actual/
 remaining breakdown. Create/edit/delete are gated to admin/cfo.
+
+**`/requisitions` — linking a requisition to a budget.** The requisition form
+carries a `ui/BudgetPicker` (a `SearchPicker` over `GET /budgets?currency=`)
+and the overspend pre-check above. It is offered to admin / ap_manager / cfo,
+the roles that may read budgets; an `ap_clerk` gets no picker, and their save
+never sends `budget_id`, so a link a manager made survives a clerk's edit. On
+an edit, `budget_id` is sent only when the picker changed it. e2e:
+`tests-e2e/requisitions/budget-link.spec.ts`.

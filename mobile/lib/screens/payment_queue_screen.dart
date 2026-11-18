@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
@@ -10,6 +11,7 @@ import 'package:feohledger_mobile/utils/a11y.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
+import 'package:feohledger_mobile/widgets/record_payment_dialog.dart';
 
 /// Format a server-supplied money display string in [currency].
 ///
@@ -112,6 +114,7 @@ String _verdictAnnounce(AppLocalizations l, PaymentQueueItem item) {
 /// to the server-supplied value capitalized (mirrors the old behaviour).
 String _runStatusLabel(AppLocalizations l, String status) => switch (status) {
       'draft' => l.payRunStatusDraft,
+      'exported' => l.payRunStatusExported,
       'completed' => l.payRunStatusCompleted,
       'submitted' => l.payRunStatusSubmitted,
       'partial' => l.payRunStatusPartial,
@@ -126,6 +129,16 @@ String _runStatusLabel(AppLocalizations l, String status) => switch (status) {
 /// picks a method per row, and creates a draft run. Tab 2 lists the runs and
 /// executes / cancels drafts. A KPI summary bar (total paid / pending /
 /// rebates / queue) sits above both. Gated to admin / ap_manager / cfo.
+///
+/// **Record-only tenants** (the no-rail pilot, backend decisions §251): the
+/// server's execution mode (`GET /api/payments/execution-mode`) decides
+/// whether Execute is offered at all — failing closed while unknown — and a
+/// confirmed record-only tenant gets a one-sentence note saying so, as the
+/// first item of each tab's list (so it scrolls away rather than holding
+/// height above both tabs at large text sizes). "Record as paid" is
+/// offered in BOTH modes, as on the web: per queue row from the row's own
+/// `record_outside_refusal`, and per run from the run detail's
+/// `actions.record_outside` verdict.
 class PaymentQueueScreen extends StatefulWidget {
   const PaymentQueueScreen({super.key});
 
@@ -237,6 +250,44 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     );
   }
 
+  /// Shown only on a CONFIRMED record-only tenant: an unresolved mode hides
+  /// the send controls (fail closed) but is not evidence of this, so it says
+  /// nothing. A status, not an alert — it describes the page. `null` when
+  /// there is nothing to say; each tab's list leads with it otherwise, so it
+  /// scrolls with the rows. Its one sentence points at the web app for a
+  /// run's bank file, which mobile does not download.
+  Widget? _recordOnlyBanner() {
+    if (!PaymentQueueStore.instance.isRecordOnly) return null;
+    final l = AppLocalizations.of(context);
+    return Container(
+          key: const Key('record-only-banner'),
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.blueGrey.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ExcludeSemantics(
+                child: Icon(Icons.info_outline,
+                    size: 20, color: Colors.blueGrey.shade800),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  l.payRecordOnlyBanner,
+                  // Darkened for AA contrast over the pale tint.
+                  style: TextStyle(color: Colors.blueGrey.shade900, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        );
+  }
+
   // ── Queue tab ──────────────────────────────────────────────────────
   Widget _queueTab() {
     return ListenableBuilder(
@@ -251,20 +302,32 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
         if (store.error != null && store.queue.isEmpty) {
           return _errorState(store.error!, store.fetch);
         }
+        final banner = _recordOnlyBanner();
         if (store.queue.isEmpty) {
-          return Center(child: Text(l.payQueueEmpty));
+          return ListView(
+            children: [
+              ?banner,
+              const SizedBox(height: 120),
+              Center(child: Text(l.payQueueEmpty)),
+            ],
+          );
         }
 
+        final lead = banner == null ? 0 : 1;
         return Column(
           children: [
             Expanded(
               child: RefreshIndicator(
                 onRefresh: store.fetch,
                 child: ListView.separated(
-                  itemCount: store.queue.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) =>
-                      _queueRow(store.queue[index]),
+                  itemCount: store.queue.length + lead,
+                  // No rule between the note and the first row.
+                  separatorBuilder: (_, index) => index < lead
+                      ? const SizedBox.shrink()
+                      : const Divider(height: 1),
+                  itemBuilder: (context, index) => index < lead
+                      ? banner!
+                      : _queueRow(store.queue[index - lead]),
                 ),
               ),
             ),
@@ -298,7 +361,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
         l.payQueueDiscount(_money(item.discountAmountDisplay!, item.currency)),
     ];
 
-    return Semantics(
+    final row = Semantics(
       label: '${item.vendorName}, '
           '${_money(item.amountDisplay, item.currency)}, '
           '${subtitleParts.join(', ')}'
@@ -385,6 +448,66 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
             : null,
       ),
     );
+    // The record action sits OUTSIDE the row's merged announcement: inside an
+    // `excludeSemantics` it would be unreachable to a screen reader.
+    if (!AuthStore.instance.canRecordExternalPayment) return row;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [row, _recordAction(item)],
+    );
+  }
+
+  /// "Record as paid" for one row — for `payment.record_external`, in either
+  /// execution mode. Gated on the row's `record_outside_refusal` (the gates
+  /// `POST /record-outside` itself applies), deliberately NOT on `blocked`,
+  /// the run builder's verdict, which also refuses an unverified vendor that
+  /// recording does not (#566). A refused row shows the action disabled with
+  /// its reason, never hidden, so the operator learns what to clear.
+  Widget _recordAction(PaymentQueueItem item) {
+    final l = AppLocalizations.of(context);
+    final code = item.recordOutsideRefusal;
+    final String? why = code == null
+        ? null
+        : localizeCodedRefusal(l, {
+              'code': code,
+              'params': {'status': item.status},
+            }) ??
+            l.payRecordUnavailable;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          TextButton.icon(
+            key: Key('record-outside-${item.id}'),
+            onPressed: why == null ? () => _recordInvoice(item) : null,
+            icon: const Icon(Icons.task_alt, size: 18),
+            label: Text(
+              l.payRecordAction,
+              semanticsLabel: l.payRecordActionLabel(item.invoiceNumber),
+            ),
+          ),
+          if (why != null) ...[
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                why,
+                style: TextStyle(color: Colors.grey.shade800, fontSize: 12),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _recordInvoice(PaymentQueueItem item) async {
+    final l = AppLocalizations.of(context);
+    final recorded = await showRecordInvoicePaymentDialog(context, item);
+    if (!mounted || recorded != true) return;
+    final text = l.payRecordRecorded(item.invoiceNumber);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    A11y.announce(context, text);
   }
 
   /// The rail a pinned row will be paid on. Read-only by design: it is the one
@@ -520,23 +643,30 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       builder: (context, _) {
         final l = AppLocalizations.of(context);
         final store = PaymentQueueStore.instance;
+        final banner = _recordOnlyBanner();
         if (store.runs.isEmpty) {
           return RefreshIndicator(
             onRefresh: store.fetchRuns,
             child: ListView(
               children: [
+                ?banner,
                 const SizedBox(height: 120),
                 Center(child: Text(l.payRunsEmpty)),
               ],
             ),
           );
         }
+        final lead = banner == null ? 0 : 1;
         return RefreshIndicator(
           onRefresh: store.fetchRuns,
           child: ListView.separated(
-            itemCount: store.runs.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) => _runRow(store.runs[index]),
+            itemCount: store.runs.length + lead,
+            separatorBuilder: (_, index) => index < lead
+                ? const SizedBox.shrink()
+                : const Divider(height: 1),
+            itemBuilder: (context, index) => index < lead
+                ? banner!
+                : _runRow(store.runs[index - lead]),
           ),
         );
       },
@@ -576,29 +706,48 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
             style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
           ),
         ),
-        trailing: _canManage && run.isExecutable
-            ? Semantics(
-                label: l.payRunActions,
-                button: true,
-                child: PopupMenuButton<String>(
-                  onSelected: (v) => _runMenuAction(run, v),
-                  itemBuilder: (_) => [
-                    // CFO sign-off. Offered only to the one role the backend
-                    // accepts (`require_roles(ROLE_CFO)`) and only while the
-                    // run is actually waiting on it — otherwise the person
-                    // reading "needs CFO approval" is the person who can't
-                    // act on it, which is exactly the gap this closes.
-                    if (_canApproveRun(run))
-                      PopupMenuItem(
-                          value: 'approve', child: Text(l.payRunActionApprove)),
-                    PopupMenuItem(
-                        value: 'execute', child: Text(l.payRunActionExecute)),
-                    PopupMenuItem(
-                        value: 'cancel', child: Text(l.payRunActionCancel)),
-                  ],
-                ),
-              )
-            : null,
+        trailing: _runMenu(run),
+      ),
+    );
+  }
+
+  /// The run's action menu, or `null` when it would hold nothing.
+  Widget? _runMenu(PaymentRun run) {
+    final l = AppLocalizations.of(context);
+    final store = PaymentQueueStore.instance;
+    final manageDraft = _canManage && run.isExecutable;
+    final items = <PopupMenuEntry<String>>[
+      // CFO sign-off. Offered only to the one role the backend accepts
+      // (`require_roles(ROLE_CFO)`) and only while the run is actually waiting
+      // on it — otherwise the person reading "needs CFO approval" is the
+      // person who can't act on it, which is exactly the gap this closes.
+      if (manageDraft && _canApproveRun(run))
+        PopupMenuItem(value: 'approve', child: Text(l.payRunActionApprove)),
+      // Execute only where FeohLedger SENDS payments — the server's execution
+      // mode, failing closed while it is unknown. On a record-only tenant the
+      // endpoint answers `payments_record_only`, so the control could only
+      // ever be refused; the record path below replaces it.
+      if (manageDraft && store.canDispatch)
+        PopupMenuItem(value: 'execute', child: Text(l.payRunActionExecute)),
+      if (manageDraft)
+        PopupMenuItem(value: 'cancel', child: Text(l.payRunActionCancel)),
+      // Record the run as paid outside FeohLedger, in either mode. The menu
+      // entry appears for the two stored statuses a run can hold an open
+      // record decision in (a draft, or one whose bank file was exported on
+      // the web); whether THIS reader may record it is the run detail's
+      // `actions.record_outside` verdict, which the dialog reads before it
+      // offers a form.
+      if (AuthStore.instance.canRecordExternalPayment &&
+          (run.status == 'draft' || run.status == 'exported'))
+        PopupMenuItem(value: 'record', child: Text(l.payRunActionRecord)),
+    ];
+    if (items.isEmpty) return null;
+    return Semantics(
+      label: l.payRunActions,
+      button: true,
+      child: PopupMenuButton<String>(
+        onSelected: (v) => _runMenuAction(run, v),
+        itemBuilder: (_) => items,
       ),
     );
   }
@@ -631,6 +780,12 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       if (!mounted) return;
       final text = message ??
           l.payRunApproveFailed('${PaymentQueueStore.instance.error}');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+      A11y.announce(context, text);
+    } else if (action == 'record') {
+      final count = await showRecordRunPaymentDialog(context, run);
+      if (!mounted || count == null) return;
+      final text = l.payRunRecordRecorded(count);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
       A11y.announce(context, text);
     } else if (action == 'execute') {
@@ -689,6 +844,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     // Darkened foreground for AA contrast over the pale tint (≥4.5:1).
     final (color, textColor) = switch (status) {
       'draft' => (Colors.blueGrey, Colors.blueGrey.shade800),
+      'exported' => (Colors.indigo, Colors.indigo.shade800),
       'completed' => (Colors.green, Colors.green.shade900),
       'submitted' => (Colors.blue, Colors.blue.shade800),
       'partial' => (Colors.orange, Colors.brown.shade800),

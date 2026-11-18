@@ -44,10 +44,12 @@ class VendorUser(Base, TimestampMixin):
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # The control-plane `User.id` who last handed out a working password for
-    # this credential — stamped by `POST /api/vendors/{id}/portal-users` and
-    # re-stamped by `.../reset-password`, the ONLY two routes that mint a
-    # supplier password an AP actor gets to see.
+    # The control-plane `User.id` who last steered this credential — stamped by
+    # `POST /api/vendors/{id}/portal-users` and re-stamped by
+    # `.../reset-password`, the ONLY two routes that put a supplier credential
+    # in motion on an AP actor's say-so. Neither hands out a password any more
+    # (each mails a set-password link, decisions §283), but the invite's link
+    # goes to an address the AP actor chose, so the actor may hold it.
     #
     # This is a segregation-of-duties record, not a bookkeeping nicety. Without
     # it one `ap_manager` could complete a BEC bank redirect alone: provision a
@@ -63,10 +65,11 @@ class VendorUser(Base, TimestampMixin):
     # correctly permissive, because an AP actor cannot sign in as that identity
     # without going through invite or reset, both of which stamp the column.
     #
-    # Deliberately NOT cleared when the supplier changes their own password
-    # (`POST /api/portal/auth/change-password`): the attacker holds the temp
-    # password, so clearing on self-change would be a one-request bypass of the
-    # very control this column exists to enforce. The stamp is durable
+    # Deliberately NOT cleared when the supplier changes or sets their own
+    # password (`POST /api/portal/auth/change-password`, `.../reset-password`):
+    # an attacker who chose the invited address holds the link and then the
+    # password, so clearing there would be a one-request bypass of the very
+    # control this column exists to enforce. The stamp is durable
     # provenance, not a "who knows the password right now" flag.
     provisioned_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True

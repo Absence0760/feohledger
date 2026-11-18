@@ -1885,6 +1885,14 @@ converted, which is precisely what `unconverted_count` exists to prevent
 `tests/test_payment_queue_reporting_lock.py`, whose last case fails if the
 queue ever restates the rule inline again.
 
+**One schedule per invoice.** The page and the savings rollup both join
+`services/payment_schedules.latest_schedules()` — each invoice's current
+schedule row, by the same `LATEST_SCHEDULE_ORDER` the cash forecast and the
+discount engine read — never the `payment_schedules` table. Joined to the
+table, an invoice carrying two schedule rows was listed twice (pushing the next
+invoice off its page, while `total` still counted it once) and its discount was
+summed twice in `total_savings`.
+
 **The row and the rollup round the same way.** Both compute
 `invoice.amount * discount_percent / 100` from the same `PaymentSchedule` row,
 so they have to agree to the cent. They did not: the per-row figure used
@@ -2210,8 +2218,11 @@ On a record-only tenant every dispatching endpoint — `/runs/{id}/execute`,
 claimed: the run stays `draft`, nothing is dispatched. The refusal lives in
 `api/payments._require_payment_adapter`, the chokepoint every dispatcher already
 resolves its adapter through (`tests/test_payment_execution_mode.py` pins that
-each one does). `GET /api/payments/execution-mode` tells the SPA which controls
-to show.
+each one does). `GET /api/payments/execution-mode` tells the SPA and the mobile
+app's Pay tab which controls to show; both hide Execute unless the mode reads
+`processor`, failing closed while it is unknown, and both offer "Record as paid"
+(the row's `record_outside_refusal`, the run detail's `actions.record_outside`)
+in either mode (`mobile/docs/feature-status.md` § Payment queue + runs).
 
 ### Recording a payment made outside FeohLedger
 

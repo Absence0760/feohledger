@@ -340,6 +340,38 @@ export function sumMoney(amounts: Iterable<MoneyAmount>): number {
 }
 
 /**
+ * `sumMoney`, but the answer stays an exact decimal STRING — for a total that
+ * goes back to the server (a query-string amount, a request body) rather than
+ * onto the screen. `sumMoney`'s single closing `number` conversion is lossless
+ * enough to display; it is still a float hop, and a figure on its way to a
+ * `Decimal` endpoint should never take one.
+ *
+ * Same skipping rules as `sumMoney`. The result carries the widest fraction
+ * length seen (minimum 2), so `["1.5", "2.25"]` is `"3.75"` and `[]` is
+ * `"0.00"`.
+ */
+export function sumMoneyExact(amounts: Iterable<MoneyAmount>): MoneyString {
+	let scale = 2;
+	const parsed: { negative: boolean; digits: bigint; scale: number }[] = [];
+	for (const raw of amounts) {
+		const p = parseDecimal(raw);
+		if (p === null) continue;
+		if (p.scale > scale) scale = p.scale;
+		parsed.push(p);
+	}
+	let total = 0n;
+	for (const p of parsed) {
+		const v = p.digits * 10n ** BigInt(scale - p.scale);
+		total += p.negative ? -v : v;
+	}
+	const negative = total < 0n;
+	const digits = (negative ? -total : total).toString().padStart(scale + 1, '0');
+	const whole = digits.slice(0, digits.length - scale);
+	const frac = digits.slice(digits.length - scale);
+	return `${negative ? '-' : ''}${whole}.${frac}`;
+}
+
+/**
  * Multiply a money amount by a non-money factor, exactly.
  *
  * `sumMoney` handles addition losslessly, but several previews scale money by

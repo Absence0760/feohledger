@@ -823,7 +823,7 @@ String? _localizeWarningCode(
         expected,
         total,
       );
-    // AI suggested GL code(s) not in active chart: {codes}
+    // GL code(s) not in the active chart of accounts, left uncoded: {codes}
     case 'gl_codes_not_in_chart':
       final codes = _text(p['codes'], currency);
       if (codes == null) return null;

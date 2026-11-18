@@ -18,6 +18,7 @@ import uuid
 import pytest_asyncio
 
 from app.models.vendor import Vendor
+from tests.set_password_mail import capture_outbox
 
 TENANT = "a"
 
@@ -85,23 +86,22 @@ async def test_portal_invite_email_uses_real_tenant_url(realdb, monkeypatch):
     assert msg.to == "buyer@supplier.example"
     assert expected_url in msg.body_text
     assert "app.com" not in msg.body_text
+    # The set-password link lands on the same real host.
+    assert f"{expected_url}/reset-password?token=" in msg.body_text
 
 
-async def test_portal_invite_email_omits_url_line_without_template(realdb, monkeypatch):
-    """No `FEOH_TENANT_URL_TEMPLATE` configured -> no URL is fabricated
-    (never falls back to the old hardcoded placeholder domain)."""
+async def test_portal_invite_without_a_tenant_url_is_refused_before_creating(realdb, monkeypatch):
+    """No `FEOH_TENANT_URL_TEMPLATE` configured -> there is nowhere to point the
+    supplier's set-password link, so the invite is refused (503) before a
+    portal account exists that nobody could ever sign in to — and no URL is
+    fabricated from a placeholder domain."""
+    from sqlalchemy import select
+
     from app.config import settings as cfg
+    from app.models.vendor_user import VendorUser
 
     monkeypatch.setattr(cfg, "tenant_url_template", "", raising=True)
-
-    sent: list = []
-
-    async def _fake_send(self, message):  # noqa: ANN001
-        sent.append(message)
-
-    from app.services.email_adapters.console_adapter import ConsoleAdapter
-
-    monkeypatch.setattr(ConsoleAdapter, "send", _fake_send, raising=True)
+    sent = capture_outbox(monkeypatch)
 
     mk = realdb.sessionmaker(TENANT)
     org_id = realdb.info(TENANT).org_id
@@ -112,14 +112,33 @@ async def test_portal_invite_email_omits_url_line_without_template(realdb, monke
             f"/api/vendors/{vendor_id}/portal-users",
             json={"email": "buyer2@supplier.example", "full_name": "Portal User 2"},
         )
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["portal_url"] is None
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "set_password_link_unavailable"
+    assert sent == []
+    async with mk() as s:
+        rows = (await s.execute(select(VendorUser).where(VendorUser.vendor_id == vendor_id))).all()
+    assert rows == []
 
-    assert len(sent) == 1
-    msg = sent[0]
-    assert "app.com" not in msg.body_text
-    assert "URL:" not in msg.body_text
+
+async def test_portal_invite_email_failure_creates_no_account(realdb, monkeypatch):
+    from sqlalchemy import select
+
+    from app.models.vendor_user import VendorUser
+
+    capture_outbox(monkeypatch, fail=True)
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id = await _add_vendor(mk, realdb.info(TENANT).org_id, name="Mail Down Co")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post(
+            f"/api/vendors/{vendor_id}/portal-users",
+            json={"email": "buyer3@supplier.example", "full_name": "Portal User 3"},
+        )
+    assert resp.status_code == 502, resp.text
+    assert resp.json()["detail"]["code"] == "set_password_email_failed"
+    async with mk() as s:
+        rows = (await s.execute(select(VendorUser).where(VendorUser.vendor_id == vendor_id))).all()
+    assert rows == []
 
 
 async def test_deleting_a_portal_user_writes_an_audit_row(realdb):

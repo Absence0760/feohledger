@@ -15,10 +15,14 @@
 	 */
 	let {
 		show = false,
+		busy = false,
 		message,
 		testId
 	}: {
 		show?: boolean;
+		/** The message is stale and a fresh one is on its way: `aria-busy`
+		 *  holds the announcement until the caller settles it. */
+		busy?: boolean;
 		/** Already-localized text — this component is i18n-agnostic. */
 		message: string;
 		/** `data-testid` for an e2e selector; the class is Svelte-scoped. */
@@ -27,7 +31,7 @@
 </script>
 
 {#if show}
-	<p class="field-warning" role="status" data-testid={testId}>
+	<p class="field-warning" role="status" aria-busy={busy || undefined} data-testid={testId}>
 		<span aria-hidden="true">⚠</span>
 		{message}
 	</p>
@@ -41,6 +45,9 @@
 		margin: 6px 0 0;
 		font-size: 0.8rem;
 		line-height: 1.4;
+		/* A long localized amount must wrap inside a narrow field, never push
+		   the warning past its container. */
+		overflow-wrap: anywhere;
 		/* --danger is the text-on-dark token; --danger-strong is the fill
 		   behind white text and would be far too dark to read here. */
 		color: var(--danger);

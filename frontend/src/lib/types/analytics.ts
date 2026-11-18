@@ -31,8 +31,16 @@ export interface CashflowForecastPeriod {
 	scheduled_amount: MoneyString;
 	committed_amount: MoneyString;
 	pending_amount: MoneyString;
+	/**
+	 * AP already past due, carried into the FIRST period (it is owed now).
+	 * Inside `scheduled_amount`, outside `committed_amount` / `pending_amount`:
+	 * `scheduled = committed + pending + overdue`.
+	 */
+	overdue_amount: MoneyString;
 	discount_eligible_amount: MoneyString;
 	count: number;
+	/** A count, not money: how many of `count` are already past due. */
+	overdue_count: number;
 	/**
 	 * A COUNT, not money: invoices included at face value because no exchange
 	 * rate into the reporting currency could be established. Non-zero means the
@@ -51,8 +59,10 @@ export interface CashflowForecast {
 		scheduled_amount: MoneyString;
 		committed_amount: MoneyString;
 		pending_amount: MoneyString;
+		overdue_amount: MoneyString;
 		discount_eligible_amount: MoneyString;
 		count: number;
+		overdue_count: number;
 		unconverted_count: number;
 	};
 }
@@ -65,11 +75,15 @@ export interface WhatIfScenario {
 	weighted_avg_pay_date_days: number;
 	/** A count, not money — see `CashflowForecastPeriod.unconverted_count`. */
 	unconverted_count: number;
+	/** The slice of `total_outflow` already past due — the same in every scenario. */
+	overdue_amount: MoneyString;
+	overdue_count: number;
 	periods: Array<{
 		period: string;
 		period_start: string;
 		period_end: string;
 		scheduled_amount: MoneyString;
+		overdue_amount: MoneyString;
 		unconverted_count: number;
 	}>;
 }
@@ -94,6 +108,8 @@ export interface CashPositionPeriod {
 	inflow: MoneyString;
 	closing: MoneyString;
 	below_threshold: boolean;
+	/** The part of `outflow` that is AP already past due (first period only). */
+	overdue_amount: MoneyString;
 	unconverted_count: number;
 }
 
@@ -130,6 +146,9 @@ export interface CashPosition {
 	 * carries forward, so one such row poisons the tail.
 	 */
 	unconverted_count: number;
+	/** AP already past due, inside the first period's `outflow` (owed now). */
+	overdue_amount: MoneyString;
+	overdue_count: number;
 	/** `null` means no threshold is set — deliberately not `"0"`. */
 	threshold: MoneyString | null;
 	periods: CashPositionPeriod[];

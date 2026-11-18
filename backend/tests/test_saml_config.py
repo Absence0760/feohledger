@@ -164,7 +164,7 @@ def test_oidc_resolver_unchanged_when_protocol_absent():
             "provider": "okta",
             "discovery_url": "https://acme.okta.com/.well-known/openid-configuration",
             "client_id": "cid",
-            "client_secret": "secret",
+            "client_secret_configured": True,
         }
     }
     cfg = resolve_sso_config(oidc)

@@ -16,8 +16,9 @@ import { expectNoA11yViolations } from './axe-helper';
  *
  * Pattern: reuses the per-worker `e2e<N>` tenant + storage-state fixtures from
  * `fixtures/helpers.ts` exactly like every other spec — the authenticated specs
- * inherit the default admin storage state; the two unauthenticated surfaces
- * (the AP login page and the supplier portal login) opt out of it.
+ * inherit the default admin storage state; the unauthenticated surfaces
+ * (the AP and supplier-portal sign-in and password-recovery pages, the legal
+ * pages) opt out of it.
  *
  * It is auto-discovered by the normal `pnpm test:e2e` run (the config's
  * `testDir: '.'` walks recursively), so CI catches a11y regressions on every
@@ -349,6 +350,28 @@ test.describe('accessibility — unauthenticated surfaces (WCAG 2.2 AA)', () => 
 	test('supplier portal login (/portal/login) has no axe violations', async ({ page }) => {
 		await page.goto('/portal/login');
 		await expect(page.locator('input[type="email"]')).toBeVisible();
+		await expectNoA11yViolations(page);
+	});
+
+	test('supplier portal forgot password (/portal/forgot-password) has no axe violations', async ({
+		page
+	}) => {
+		await page.goto('/portal/forgot-password');
+		await expect(page.locator('input[type="email"]')).toBeVisible();
+		await expectNoA11yViolations(page);
+	});
+
+	test('supplier portal set-password link (/portal/reset-password) has no axe violations', async ({
+		page
+	}) => {
+		// A real token needs the invite email (backend tests mint one); a
+		// stubbed check renders the live form, the state with the most to scan.
+		await page.route(
+			(url) => url.pathname === '/api/portal/auth/reset-password/check',
+			(route) => route.fulfill({ json: { email: 'supplier@vendor.example' } })
+		);
+		await page.goto('/portal/reset-password?token=axe-scan-token');
+		await expect(page.locator('input[type="password"]').first()).toBeVisible();
 		await expectNoA11yViolations(page);
 	});
 

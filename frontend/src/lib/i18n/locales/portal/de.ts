@@ -54,6 +54,9 @@ export const messages = {
 	'portal.changePassword.save': 'Passwort speichern',
 	'portal.changePassword.saving': 'Wird gespeichert...',
 	'portal.changePassword.failed': 'Änderung fehlgeschlagen',
+	'portal.resetPassword.expiredHint':
+		'Links zum Festlegen des Passworts funktionieren nur einmal und laufen ab. Fordern Sie unten einen neuen an oder bitten Sie die Kreditorenbuchhaltung Ihres Kunden darum.',
+	'portal.resetPassword.backToSignIn': 'Zurück zur Anmeldung',
 	'portal.invoices.title': 'Meine Rechnungen',
 	'portal.invoices.submit': 'Rechnung einreichen',
 	'portal.invoices.submitting': 'Wird eingereicht...',

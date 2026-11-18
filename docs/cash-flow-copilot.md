@@ -142,9 +142,19 @@ entity-scoped, money as **exact Decimal → JSON string** (never `float`).
 
 | Tool | Params (clamped) | Returns |
 |------|------------------|---------|
-| `get_cashflow_forecast` | `granularity∈{day,week,month}`, `horizon_days∈[7,730]`, `include_pending` | periods `[{period, scheduled, committed, pending, discount_eligible}]` + totals |
-| `get_cash_position` | + `opening_balance?`, `min_balance_threshold?` | running-balance periods + `first_shortfall_period` + flagged periods |
-| `run_payment_whatif` | + `grace_days∈[0,90]` | `{early, on_time, late}` each `{total_outflow, discount_captured, weighted_avg_days_to_pay}` |
+| `get_cashflow_forecast` | `granularity∈{day,week,month}`, `horizon_days∈[7,730]`, `include_pending` | periods `[{period, scheduled, committed, pending, overdue, overdue_count, discount_eligible}]` + totals (incl. `total_overdue`, `overdue_count`) |
+| `get_cash_position` | + `opening_balance?`, `min_balance_threshold?` | running-balance periods (each with `overdue`) + `first_shortfall_period` + flagged periods + `overdue_amount` / `overdue_count` |
+| `run_payment_whatif` | + `grace_days∈[0,90]` | `{early, on_time, late}` each `{total_outflow, discount_captured, weighted_avg_days_to_pay}` + `overdue_amount` / `overdue_count` |
+
+**Overdue AP is in every answer.** An open invoice already past its due date is
+owed now, so the commitment rows carry it into the **first** period on its own
+`overdue` figure (`scheduled = committed + pending + overdue`) rather than
+dropping it, which made every tool — and the plan a user can enact, and the
+shortfall alert — overstate cash by exactly the AP the business was already
+late paying. No scenario times it before today. The rule and its reasoning:
+`backend/docs/analytics.md` § Overdue AP is carried into the first period. The
+general assistant's `get_payment_forecast` reads the same rows and reports the
+same `overdue` slice.
 | `optimize_discount_capture` | `cash_budget?`, `cost_of_capital_pct?` | ranked recommendations `[{offer_id, vendor, apr, savings, pay_by, selected}]` + `total_savings_selected` |
 
 **Role gating per tool.** The five cash tools (the four §4 planning tools plus
@@ -205,7 +215,9 @@ overclaiming precision on the curve).
      re-derives the SAME commitment rows the plan used (`_commitment_rows`),
      narrows them to invoices that are ACTUALLY payable right now
      (`PAYABLE_INVOICE_STATUSES` — a plan's horizon also includes
-     pre-approval pipeline invoices, which can't be staged), and creates a
+     pre-approval pipeline invoices, which can't be staged — and, since the
+     rows carry past-due AP, an approved invoice that is already late is
+     staged with the rest rather than left out of the run), and creates a
      **draft** `PaymentRun` via `services.payment_runs.create_payment_run_for_invoices`
      — the exact function `POST /api/payments/runs` uses (same payable-status
      gate, financial-integrity exception block, credit-memo netting, and
@@ -290,7 +302,15 @@ random `uuid4`) the plan's own RESOLVED defining inputs — `org_id`,
 `cash_budget`, `cost_of_capital_pct` — plus the calendar **date** (not a
 timestamp: "today" determines which commitments are in-horizon, so a plan
 computed yesterday and an identical-params plan computed today are, correctly,
-two different plans).
+two different plans) — plus `PLAN_DERIVATION_VERSION`, the version of the rule
+that turns those inputs into commitment rows. When that rule changes, the same
+inputs on the same date are a different plan, so ids minted under the old rule
+stop matching: `/draft-run` cannot hand back a run staged from the old set, and
+`/save` cannot freeze a curve the user was never shown. It was bumped to
+`v2-overdue-in-first-period` when past-due AP started being carried into the
+first period; a plan proposed before that deploy and enacted after it gets the
+ordinary stale-plan 409 and is re-proposed. Bump it whenever `_commitment_rows`
+or `bucket_outflows` changes which rows a plan includes or when they leave.
 
 `propose_payment_plan` computes this once and returns it as `plan_id` on the
 tool result (`PaymentPlanResult`, which also echoes the resolved
@@ -704,6 +724,25 @@ silently. Those invoices remain payable from the normal queue. When the horizon
 holds nothing in the reporting currency the 409 names the currencies that ARE
 there: the actionable version of the old 422. `excluded_currency_count` is 0
 for every single-currency tenant, so nothing changes for them.
+
+**An invoice with no recorded currency is never staged.** The invoice PATCH
+keeps `""` as its legacy "no currency" value, and `(currency or run_currency)`
+used to read that as the reporting currency, so such an invoice was staged into
+the run and paid in a currency nobody recorded — the "missing currency becomes
+the default" pattern decisions §160 / §196 / §200 reject. Each payable invoice
+the route leaves out is now listed in `skipped` with a code: `currency_unknown`
+(no currency recorded) or `currency_not_run_currency` (`params.currency`). The
+plan card states both counts after a successful stage. When nothing is left to
+stage, the 409 is the coded refusal `draft_run_no_run_currency` (`params`:
+`run_currency`, the other `currencies` found, and `unknown_count`), stated in
+the reader's language by `frontend/src/lib/api/codedRefusals.ts`.
+
+**Overdue approved invoices are staged.** Decisions §440 keeps past-due AP in
+the plan's commitment rows, so `/draft-run` stages an approved invoice that is
+already late; a late invoice still in review is in the plan's overdue slice but
+is not payable and is never staged. Whether long-overdue AP belongs in a
+plan-driven run is an open operator call (pinned in
+`test_cash_flow_plan_lifecycle.py`).
 
 ## Capture-discounts row-locks each offer
 

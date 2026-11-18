@@ -917,7 +917,7 @@ Stored in `Organization.settings`:
                "vat_registration_number", "companies_house_number" },
   "invoice_defaults": { "currency", "payment_terms", "number_prefix", "default_gl_account", "default_cost_center" },
   "erp": { "type", "integration_method", "base_url", "client_id", ... },   // secrets: see below
-  "extraction": { "program_type": "platform"|"byok", "provider", "api_key", "model" },
+  "extraction": { "program_type": "platform"|"byok", "provider", "aws_access_key_id", "model" },  // key: sealed
   "cards": { "enabled": true|false, "program_type": "platform"|"byok", "provider", "region": "US"|"EU"|...,
              "default_expiry_days": 30, ... },
   "payments": { "provider", "org_id", "originating_account_id", "cfo_approval_above": Decimal,
@@ -926,14 +926,15 @@ Stored in `Organization.settings`:
   "mfa": { "required": true|false },
   "chat_notifications": { "enabled": true|false, "provider": "slack"|"teams"|"mock",
                           "webhook_url": "...", "events": { "invoice_approved": true, ... } },
-  "sso": { ... },
+  "sso": { ..., "client_secret_configured": true },   // the secret itself: sealed
   "fraud_rules": { ... },
   "exception_agents": { "autonomy_level": "conservative"|"balanced"|"aggressive", "amount_tolerance_pct": 2.5 }
 }
 ```
 
 **Provider secrets are not in this JSONB.** The secret keys of `erp`, `payments`,
-`cards` and `commerce` (API keys, OAuth client secrets, account tokens and the three
+`cards`, `commerce` and `extraction` (API keys, OAuth client secrets, account tokens,
+a BYOK extraction key or AWS secret, and the three
 `webhook_*_secret` HMAC keys — catalogue `services/provider_credentials.SECRET_FIELDS`)
 are envelope-encrypted under the app KMS key in the control-plane
 `provider_credentials` table. Read them ONLY through
@@ -943,8 +944,15 @@ holds anything. Write them only through `PUT /api/organization/credentials/{bloc
 `PATCH /api/organization` refuses them. A mock-DB test opts into the
 `provider_store_from_settings` fixture; a realdb test seals what it needs with
 `realdb.store_provider_secrets`. See `docs/erp-integration.md` § Where the
-credentials live. `extraction.api_key` and `sso.client_secret` are still plain
-JSONB (write-only for SSO).
+credentials live. A BYOK extraction key is read ONLY through
+`provider_credentials.byok_extraction_config` (platform orgs never open the
+store), and a `PATCH` that switches `extraction.provider` drops the sealed key.
+The OIDC client secret is sealed too (block `sso`, migration 0135), but its only
+writer is `PUT /api/organization/sso` — the generic credentials door refuses
+the block (`DEDICATED_WRITER_BLOCKS`) — and its only reader is the OIDC
+callback (`services/sso.load_client_secret`). The block keeps a
+`client_secret_configured: true` marker, written in the same transaction, which
+is what the sync sign-in completeness check (`is_sso_only`) reads.
 
 ## Exception types
 
@@ -967,6 +975,7 @@ Severity: `error`, `warning`, `info`. Auto-detected by `invoice_warnings.py`. `e
 | `scripts/delete_tenant.py` | CLI wrapper around `services.tenant_deletion.delete_tenant` — deletes one tenant completely (tenant DB, object-storage prefix, control-plane rows), in that order (decisions §306). `--dry-run` inventories; otherwise it needs `--confirm <slug>` or `--yes`. Exits 4 when no organisation has the slug (the one failure `remove-tenant.sh` reads as already deleted), 2 on any other refusal, 3 without confirmation. Driven by `deploy/remove-tenant.sh`, which adds the Caddy and backup legs. The deletion `/legal/dpa` § 13 promises. |
 | `scripts/workspace_closures.py` | The operator's half of a self-service workspace closure (decisions §306): `list` prints completed closures whose backup dumps are still owed (the API cannot reach the backup bucket; the DPA promises 60 days), `list` also shows closures that began and never finished; `mark-cleared <organization-id> --operator <handle>` records who removed them and when (exit 4 when nothing was owed). The slug stays unavailable to every provisioning path until then AND for `utils/slug.CLOSED_SLUG_COOLDOWN` (90 days) from the closure. Procedure: `../docs/founder-runbooks/workspace-closure.md` |
 | `scripts/sso_break_glass.py` | CLI wrapper around `services.sso_break_glass.lift_sso_only` — clears `settings.sso.sso_only` (and nothing else) for one SSO-only tenant whose IdP has stopped working, after writing an `organization.sso_only_lifted` audit row; refuses to change anything if the row cannot be written. `--slug`, optional `--reason` (ticket ref, no PII). Procedure: `../docs/founder-runbooks/sso-break-glass.md` |
+| `scripts/backfill_po_currency.py` | Operator-asserted `purchase_orders.currency` for POs that record none (pre-0099, contract-spawned, an ERP that states no code): `--tenant`, `--currency` (a real ISO 4217 code), narrowed by `--entity` / `--po-prefix` / `--created-before`. Dry run by default; `--apply` stamps NULL rows only (compare-and-swap), re-matches the unpaid invoices citing them in the same transaction, and writes one PII-free `purchase_order.currency_backfilled` audit row (`--manifest` writes it to a file too). `docs/po-matching.md` § A PO that records no currency |
 | `scripts/init_control_plane.py` | Builds an EMPTY control-plane database — `CONTROL_TABLES` via `create_all`, the four system roles and Alembic's version row at head, in one transaction. On an initialised one it only restores any system role that has gone missing, since `provision_tenant` refuses to provision without the system `admin` role. Alembic's chain has no step that creates the control plane, so `deploy/deploy.sh` runs this before `alembic upgrade head`; it refuses (exit 2) a database Alembic stamped while empty. `services/control_plane_bootstrap.py` |
 | `scripts/record_qbo_contract_fixtures.py` | `pnpm gen:qbo-recordings` — records real QuickBooks payment shapes (bills paid by cheque / card / in part / by vendor credit / by our write-back, a void, a deleted bill, CDC, a webhook body) from a SANDBOX company connected to a local tenant, scrubbed by allowlist, into `tools/fake-erp/fixtures/qbo_recorded/` for `tests/test_qbo_recorded_replay.py`. Writes to that sandbox company and refuses any other; operator-run, never CI (`docs/quickbooks-online-adapter.md` § Recorded payment shapes, `../docs/decisions.md` §318) |
 | `scripts/migrate_all_tenants.py` | Runs `alembic upgrade head` on every tenant DB; exits non-zero if any tenant failed (every tenant is still attempted) |
@@ -992,7 +1001,7 @@ Two-step flow under `/api/signup`:
 - `services/rate_limit.py` — Redis sliding-window limiter, keyed on `(endpoint, subject)` where `subject` defaults to client IP but can be an explicit value (e.g. email). Signup uses three limits: per-IP `/start` + `/complete` (`FEOH_SIGNUP_RATE_LIMIT_PER_HOUR`, default 5), per-email `/start` (`FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR`, default 3, anti email-bombing), and per-IP `/slug-check` (`FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR`, default 120, anti-enumeration).
 - `utils/slug.py` — regex + reserved-word blocklist + DB uniqueness check. `provision_tenant` runs `validate_slug_format` itself, before any DB work, so every provisioning path gets it — including `scripts/create_tenant.py` / `deploy/add-tenant.sh`, which pass an operator-typed slug straight through.
 - `utils/hcaptcha.py` — server-side siteverify. Skips when `FEOH_HCAPTCHA_SECRET` is empty (local dev).
-- `utils/passwords.py` — `generate_temp_password()` + `validate_password_complexity()` (min 12 chars, upper/lower/digit).
+- `utils/passwords.py` — `validate_password_complexity()` (min 12 chars, upper/lower/digit). There is no temporary-password generator: every invite and admin reset emails a single-use set-password link through `api/set_password_links.py` (`services/password_reset` tokens; decisions §283).
 
 The captcha sitekey is exposed to the frontend via `GET /api/public-config` so the SvelteKit build doesn't need to bake it in, alongside `signup_enabled`.
 

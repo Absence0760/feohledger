@@ -4,9 +4,12 @@
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
-	let email = $state('');
+	// Prefilled from `?email=` — the set-password page's "Go to sign in" link
+	// passes the account it just set a password for.
+	let email = $state(page.url.searchParams.get('email') ?? '');
 	let password = $state('');
 	let error = $state('');
 	let loading = $state(false);
@@ -213,6 +216,7 @@
 			<button type="submit" disabled={loading}>
 				{loading ? m('portal.login.signingIn') : m('portal.login.signIn')}
 			</button>
+			<a class="forgot-link" href="/portal/forgot-password">{m('auth.login.forgotPassword')}</a>
 		</form>
 	{/if}
 </div>
@@ -384,6 +388,13 @@
 		color: var(--text-muted);
 		font-weight: 400;
 		font-size: 0.82rem;
+	}
+	.forgot-link {
+		align-self: center;
+		margin-top: -4px;
+		font-size: 0.82rem;
+		color: var(--accent-strong);
+		text-decoration: underline;
 	}
 	.secondary {
 		margin-top: 0;

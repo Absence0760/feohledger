@@ -250,6 +250,7 @@ class GLCodingResolver(ExceptionResolver):
         verb = "Corrected" if current_gl else "Coded"
         rationale = await build_rationale(
             org_settings,
+            organization_id=invoice.organization_id,
             template=(
                 f"{verb} GL account to {gl.value} from the vendor's dominant "
                 f"historical coding ({gl.evidence}) and approved."

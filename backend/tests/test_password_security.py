@@ -24,7 +24,6 @@ import pytest
 from app.utils.passwords import (
     MIN_LENGTH,
     PasswordError,
-    generate_temp_password,
     validate_password_complexity,
 )
 
@@ -100,23 +99,17 @@ def test_password_with_unicode_and_symbols_is_accepted():
 
 
 # ---------------------------------------------------------------------------
-# Generated temp passwords already pass the complexity check
+# No flow generates a temporary password any more
 # ---------------------------------------------------------------------------
 
 
-def test_generated_temp_password_passes_complexity():
-    """The temp password an admin invite or reset emails must itself
-    satisfy complexity — otherwise the user's first login is immediately
-    bounced to /change-password with a confusing error.
+def test_no_temporary_password_generator_exists():
+    """Every invite and admin reset sends a set-password link instead
+    (`api/set_password_links.py`, decisions §283). The generator is gone so
+    nothing can start minting a temporary credential again by importing it."""
+    import app.utils.passwords as passwords
 
-    generate_temp_password constructs the password to guarantee an uppercase
-    letter, a lowercase letter, and a digit at >= MIN_LENGTH, so EVERY sample
-    must pass — no statistical tolerance. (It previously used token_urlsafe,
-    which relied on random-byte distribution and failed intermittently.)
-    """
-    for _ in range(200):
-        # Raises PasswordError if any generated password fails complexity.
-        validate_password_complexity(generate_temp_password())
+    assert not hasattr(passwords, "generate_temp_password")
 
 
 # ---------------------------------------------------------------------------
@@ -299,16 +292,24 @@ async def test_apply_new_password_enforces_complexity_and_clears_the_forced_flag
 # ---------------------------------------------------------------------------
 
 
-async def _throwaway_user(client):
-    """Create a disposable user and return (id, temp_password, token).
+async def _throwaway_user(client, realdb, *, must_change_password: bool = False):
+    """Create a disposable user and return (id, password, token).
 
     A throwaway keeps the seeded logins' passwords intact — control-plane user
     rows are not reset between tests, so changing a seeded password would leak
-    into every later test in the session.
+    into every later test in the session. The invite gives the user no password
+    (it emails a set-password link, decisions §283), so one is set on the row.
+    ``must_change_password`` puts it in the state a legacy temporary-password
+    account (or a CLI-provisioned tenant admin) is in — no invite sets it any
+    more (decisions §443), so a forced change needs it set here.
     """
     import uuid
 
+    from sqlalchemy import update
+
     from app.api.deps import create_access_token
+    from app.models.user import User
+    from app.utils.passwords import hash_password
 
     suffix = uuid.uuid4().hex[:8]
     resp = await client.post(
@@ -321,7 +322,18 @@ async def _throwaway_user(client):
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    return body["id"], body["temporary_password"], create_access_token
+    password = "Known-Start-Pass9"
+    async with realdb.control_sessionmaker()() as s:
+        await s.execute(
+            update(User)
+            .where(User.id == uuid.UUID(body["id"]))
+            .values(
+                hashed_password=await hash_password(password),
+                must_change_password=must_change_password,
+            )
+        )
+        await s.commit()
+    return body["id"], password, create_access_token
 
 
 @pytest.mark.asyncio
@@ -337,7 +349,7 @@ async def test_change_password_revokes_the_callers_other_sessions(realdb, monkey
 
     info = realdb.info("a")
     async with realdb.client(key="a", role="admin") as c:
-        user_id, temp_password, mint = await _throwaway_user(c)
+        user_id, temp_password, mint = await _throwaway_user(c, realdb)
         try:
             token = mint(uuid.UUID(user_id), info.org_id)
             resp = await c.post(
@@ -366,7 +378,7 @@ async def test_patch_me_password_enforces_complexity_and_revokes_other_sessions(
 
     info = realdb.info("a")
     async with realdb.client(key="a", role="admin") as c:
-        user_id, temp_password, mint = await _throwaway_user(c)
+        user_id, temp_password, mint = await _throwaway_user(c, realdb)
         auth = {"Authorization": f"Bearer {mint(uuid.UUID(user_id), info.org_id)}"}
         try:
             # Long enough for the schema, but no uppercase and no digit — the
@@ -415,7 +427,7 @@ async def test_patch_me_without_a_password_does_not_touch_sessions(realdb, monke
 
     info = realdb.info("a")
     async with realdb.client(key="a", role="admin") as c:
-        user_id, _temp, mint = await _throwaway_user(c)
+        user_id, _temp, mint = await _throwaway_user(c, realdb)
         try:
             resp = await c.patch(
                 "/api/auth/me",
@@ -466,7 +478,7 @@ async def test_forced_change_password_writes_a_pii_free_audit_row(realdb):
 
     info = realdb.info("a")
     async with realdb.client(key="a", role="admin") as c:
-        user_id, temp_password, mint = await _throwaway_user(c)
+        user_id, temp_password, mint = await _throwaway_user(c, realdb, must_change_password=True)
         try:
             resp = await c.post(
                 "/api/auth/change-password",
@@ -477,7 +489,7 @@ async def test_forced_change_password_writes_a_pii_free_audit_row(realdb):
             rows = await _password_changed_rows(realdb, user_id)
             assert len(rows) == 1
             assert rows[0].actor_id == uuid.UUID(user_id)
-            # The invite temp carried must_change_password — this was the forced change.
+            # The account carried must_change_password — this was the forced change.
             assert rows[0].details == {"via": "change_password", "forced": True}
             assert "BrandNewPass123" not in str(rows[0].details)
             assert temp_password not in str(rows[0].details)
@@ -491,7 +503,7 @@ async def test_voluntary_profile_password_change_is_audited_not_forced(realdb):
 
     info = realdb.info("a")
     async with realdb.client(key="a", role="admin") as c:
-        user_id, temp_password, mint = await _throwaway_user(c)
+        user_id, temp_password, mint = await _throwaway_user(c, realdb)
         auth = {"Authorization": f"Bearer {mint(uuid.UUID(user_id), info.org_id)}"}
         try:
             first = await c.post(

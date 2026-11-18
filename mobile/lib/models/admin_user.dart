@@ -44,23 +44,25 @@ class AdminUser {
       fullName.isNotEmpty ? fullName[0].toUpperCase() : '?';
 }
 
-/// The result of `POST /api/admin/users` — the created user plus the
-/// server-generated `temporaryPassword`. The backend returns the temp password
-/// EXACTLY once (the user must change it on first login), so the create flow
-/// surfaces it to the admin to hand over.
+/// The result of `POST /api/admin/users` — the created user and when the
+/// set-password link they were emailed stops working. There is no credential:
+/// the server emails the new user a single-use link to choose their own
+/// password and never returns it (decisions §283), so there is nothing for the
+/// admin to see or hand over.
 class CreateUserResult {
   final AdminUser user;
-  final String temporaryPassword;
+  final String setPasswordLinkExpiresAt;
 
   const CreateUserResult({
     required this.user,
-    required this.temporaryPassword,
+    required this.setPasswordLinkExpiresAt,
   });
 
   factory CreateUserResult.fromJson(Map<String, dynamic> json) {
     return CreateUserResult(
       user: AdminUser.fromJson(json),
-      temporaryPassword: json['temporary_password'] as String? ?? '',
+      setPasswordLinkExpiresAt:
+          json['set_password_link_expires_at'] as String? ?? '',
     );
   }
 }

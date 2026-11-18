@@ -968,23 +968,17 @@
   "adminUsersValidationEmailInvalid": "Enter a valid email address",
   "adminUsersCreateSubmit": "Create",
   "adminUsersCreating": "Creating…",
-  "adminUsersCreated": "Created {name}",
-  "@adminUsersCreated": {
+  "adminUsersInvited": "Invited {name}. We emailed {email} a link to set their password.",
+  "@adminUsersInvited": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": { "type": "String" },
+      "email": { "type": "String" }
     }
   },
   "adminUsersCreateFailed": "Failed to create user: {error}",
   "@adminUsersCreateFailed": {
     "placeholders": {
       "error": { "type": "String" }
-    }
-  },
-  "adminUsersTempPasswordTitle": "User created",
-  "adminUsersTempPasswordBody": "Share this one-time password with {name}. They'll be asked to change it on first sign-in. It won't be shown again.",
-  "@adminUsersTempPasswordBody": {
-    "placeholders": {
-      "name": { "type": "String" }
     }
   },
   "adminUsersDelete": "Delete user",
@@ -1155,6 +1149,26 @@
   "cashFlowPendingAmount": "pending {amount}",
   "@cashFlowPendingAmount": {
     "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "cashFlowOverdueAmount": "overdue {amount}",
+  "cashFlowOverdueSuffix": ", {amount} already past due",
+  "cashFlowForecastOverdue": "{amount} across {count, plural, one {{count} invoice} other {{count} invoices}} is already past due. Owed now, so counted in the first period.",
+  "@cashFlowOverdueAmount": {
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "@cashFlowOverdueSuffix": {
+    "description": "Appended to a forecast row's screen-reader label when part of the period is already past due.",
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "@cashFlowForecastOverdue": {
+    "placeholders": {
+      "count": { "type": "int" },
       "amount": { "type": "String" }
     }
   },
@@ -2561,7 +2575,7 @@
       }
     }
   },
-  "invoiceWarningGlCodesNotInChart": "AI suggested GL code(s) not in active chart: {codes}",
+  "invoiceWarningGlCodesNotInChart": "GL code(s) not in the active chart of accounts, left uncoded: {codes}",
   "@invoiceWarningGlCodesNotInChart": {
     "placeholders": {
       "codes": {
@@ -3160,5 +3174,91 @@
   "reviewVerdictsChecking": "Checking what you can do here…",
   "@reviewVerdictsChecking": {
     "description": "Placeholder in the invoice detail action bar while the server's verdict on Approve / Reject is loading."
-  }
+  },
+
+  "payRecordOnlyBanner": "FeohLedger records payments but never sends them: pay from your bank or ERP, then record each one here (a run's bank file is on the web app).",
+  "payRecordPrefilledFromErp": "Filled in from the payment {erp} reported. Check the details before you record it.",
+  "@payRecordPrefilledFromErp": {"description": "Record-as-paid dialog note when the queue row's erp_reported_payment pre-filled the form.", "placeholders": {"erp": {"type": "String"}}},
+  "payRecordErpAmount": "Amount {erp} reports paid",
+  "@payRecordErpAmount": {"description": "Label for the cash the ERP states was paid, beside the amount owed.", "placeholders": {"erp": {"type": "String"}}},
+  "payRecordSplitTitle": "How {erp} says it was paid",
+  "@payRecordSplitTitle": {"description": "Heading over the ERP's rail-by-rail payment breakdown.", "placeholders": {"erp": {"type": "String"}}},
+  "payRecordRailNotStated": "Method not stated",
+  "@payRecordRailNotStated": {"description": "A breakdown part whose rail the ERP did not state (or cannot be recorded outside FeohLedger)."},
+  "payRecordSplitMethod": "Split across the methods above",
+  "@payRecordSplitMethod": {"description": "Stands in for the method picker when the ERP's split is the record (split_stands true)."},
+  "payRecordSplitStands": "This payment was made with more than one method, so it is recorded with this split. One method cannot describe it.",
+  "@payRecordSplitStands": {"description": "Note under the split: the server judged it stands (decisions §413)."},
+  "payRecordSplitDropped": "These parts do not add up to the amount paid, so the split is not kept. The method you choose is recorded for the whole payment.",
+  "@payRecordSplitDropped": {"description": "Note under the split: judged and does not add up."},
+  "payRecordSplitUnjudged": "Whether this split is kept is decided when the payment is recorded. If it is not kept, the method you choose is recorded for the whole payment.",
+  "@payRecordSplitUnjudged": {"description": "Note under the split: not judged."},
+  "@payRecordOnlyBanner": {"description": "Pay tab banner on a tenant whose payments FeohLedger records but never sends (GET /api/payments/execution-mode = record_only)."},
+  "payRecordAction": "Record as paid",
+  "@payRecordAction": {"description": "Queue-row button: record this invoice as paid outside FeohLedger."},
+  "payRecordActionLabel": "Record as paid — invoice {invoice}",
+  "@payRecordActionLabel": {"description": "Screen-reader label of the queue-row Record as paid button.", "placeholders": {"invoice": {"type": "String"}}},
+  "payRecordTitle": "Record a payment made outside FeohLedger",
+  "payRecordIntro": "Use this when you have already paid the supplier from your own bank or ERP. FeohLedger records the payment and marks the invoice paid. It doesn't send any money.",
+  "payRecordAmountOwed": "Amount owed",
+  "payRecordAmountHint": "The full amount owed is recorded, net of applied credit memos and any accepted early-payment discount still open on the paid-on date. Partial payments can't be recorded.",
+  "payRecordMethod": "How you paid",
+  "payRecordReference": "Reference",
+  "payRecordReferenceHint": "The cheque number or your bank's confirmation number. Bank reconciliation matches on it.",
+  "payRecordPaidOn": "Paid on",
+  "payRecordSubmit": "Record as paid",
+  "payRecordSubmitting": "Recording…",
+  "payRecordRecorded": "Invoice {invoice} recorded as paid",
+  "@payRecordRecorded": {"placeholders": {"invoice": {"type": "String"}}},
+  "payRecordFailed": "Could not record the payment",
+  "payRecordUnavailable": "This invoice can't be recorded as paid yet.",
+  "@payRecordUnavailable": {"description": "Fallback reason a queue row cannot be recorded as paid, when its refusal code is unknown to this build."},
+  "payMethodBacs": "BACS",
+  "payMethodFasterPayments": "Faster Payments",
+  "payMethodChaps": "CHAPS",
+  "payMethodCardOutside": "Card (outside FeohLedger)",
+  "@payMethodCardOutside": {"description": "A payment card used outside FeohLedger's own card programme."},
+  "payRunActionRecord": "Record run as paid…",
+  "@payRunActionRecord": {"description": "Run menu item: record the whole run as paid outside FeohLedger."},
+  "payRunRecordTitle": "Record run as paid",
+  "payRunRecordIntro": "Once your bank has taken the payments, record them here. Every payment in the run is marked completed and its invoice paid. Nothing is sent.",
+  "payRunRecordReference": "Bank batch reference",
+  "payRunRecordReferenceHint": "The confirmation number your bank gave the batch. Bank reconciliation matches on it.",
+  "payRunRecordSubmit": "Record as paid · {amount}",
+  "@payRunRecordSubmit": {"placeholders": {"amount": {"type": "String"}}},
+  "payRunRecordRecorded": "{count, plural, one {{count} payment recorded as paid} other {{count} payments recorded as paid}}",
+  "@payRunRecordRecorded": {"placeholders": {"count": {"type": "int"}}},
+  "payRunRecordFailed": "Could not record the run",
+  "payRunRecordLoadFailed": "Failed to load payment run",
+  "payRunStatusExported": "Exported",
+  "@payRunStatusExported": {"description": "Payment-run status: its bank (NACHA) file was downloaded and it awaits recording."},
+  "codedRefusalPaymentsRecordOnly": "FeohLedger does not send payments for this organization. Pay the supplier from your bank or ERP, then record the payment as paid outside FeohLedger.",
+  "codedRefusalExternalPaymentForInvoice": "Invoice {invoice}: {reason}",
+  "@codedRefusalExternalPaymentForInvoice": {"placeholders": {"invoice": {"type": "String"}, "reason": {"type": "String"}}},
+  "codedRefusalExternalPaymentNotPayable": "Only an approved invoice that has not been paid can be recorded as paid (this one is {status}).",
+  "@codedRefusalExternalPaymentNotPayable": {"placeholders": {"status": {"type": "String"}}},
+  "codedRefusalExternalPaymentSegregation": "Segregation of duties: you created or shaped this invoice, so a different user must record its payment.",
+  "codedRefusalExternalPaymentCardLive": "A live virtual card is issued against this invoice. Cancel the card before recording a payment made another way.",
+  "codedRefusalExternalPaymentCreditConflict": "An applied credit memo no longer matches this invoice's vendor or currency, so the amount owed can't be stated. Correct the invoice first.",
+  "codedRefusalExternalPaymentNothingToPay": "This invoice is fully covered by applied credit memos, so there is nothing to record as paid.",
+  "codedRefusalExternalPaymentPaymentLive": "A payment for this invoice is already in progress or settled ({status}). Void it before recording a payment made another way.",
+  "@codedRefusalExternalPaymentPaymentLive": {"placeholders": {"status": {"type": "String"}}},
+  "codedRefusalExternalPaymentInRun": "This invoice is in payment run {run}. Record the whole run as paid outside FeohLedger, or cancel the run first.",
+  "@codedRefusalExternalPaymentInRun": {"placeholders": {"run": {"type": "String"}}},
+  "codedRefusalExternalPaymentAmountMismatch": "The amount must equal what the invoice owes ({amount}), net of applied credit memos and any accepted early-payment discount. Partial payments can't be recorded.",
+  "@codedRefusalExternalPaymentAmountMismatch": {"placeholders": {"amount": {"type": "String"}}},
+  "codedRefusalExternalPaymentAmountChanged": "What this invoice owes has changed since the run was staged ({staged} staged, {amount} owed now) because of a credit memo or an early-payment discount. Resolve the difference with the supplier, then record the invoice on its own.",
+  "@codedRefusalExternalPaymentAmountChanged": {"placeholders": {"staged": {"type": "String"}, "amount": {"type": "String"}}},
+  "codedRefusalExternalPaymentErpSplit": "The ERP reports this invoice paid with more than one payment method. Record it from its exception, which keeps how the payment was split.",
+  "codedRefusalExternalPaymentErpSplitInRun": "This invoice is in payment run {run}, and the ERP reports it paid with more than one payment method, which only its exception can record. Cancel the run first, then record the invoice from its exception.",
+  "@codedRefusalExternalPaymentErpSplitInRun": {"placeholders": {"run": {"type": "String"}}},
+  "codedRefusalExternalPaymentPaidOnFuture": "The paid-on date can't be in the future.",
+  "codedRefusalPaymentRunSegregation": "Segregation of duties: the user who created this payment run cannot also approve or execute it. A different user must.",
+  "codedRefusalPaymentRunSegregationRecord": "Segregation of duties: the user who created this payment run cannot also record it as paid. A different user must.",
+  "codedRefusalPaymentRunSegregationExport": "Segregation of duties: the user who created this payment run cannot also export its bank file. A different user must.",
+  "codedRefusalPaymentRunAwaitingCfo": "This run exceeds the organization's CFO-approval threshold and is awaiting sign-off from a user with the CFO role.",
+  "codedRefusalPaymentRunNotRecordable": "Only a draft run, or one whose bank file was exported, can be recorded as paid.",
+  "codedRefusalPaymentRunNothingToRecord": "This run has no payments left to record.",
+  "codedRefusalExternalPaymentBlockingException": "This invoice has an unresolved payment-blocking exception. Resolve it before recording the invoice as paid.",
+  "@codedRefusalExternalPaymentBlockingException": {"description": "The type is not named here: the queue row's blocked chip already names it."}
 }

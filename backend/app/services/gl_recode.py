@@ -92,7 +92,9 @@ async def recode_gl_with_ai(
     if not invoice.file_key:
         raise AiRecodeRefused("no document to read")
 
-    config = _resolve_extraction_config(org_settings, announce=False)
+    config = await _resolve_extraction_config(
+        org_settings, organization_id=invoice.organization_id, announce=False
+    )
     file_bytes, _content_type = await _get_object(invoice.file_key)
     if _detect_structured_format(file_bytes, invoice.file_key) is not None:
         # A structured e-invoice carries no model suggestion to re-read.

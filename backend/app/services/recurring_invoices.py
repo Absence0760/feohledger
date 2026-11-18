@@ -83,6 +83,7 @@ from app.models.recurring_invoice import (
     RecurringInvoiceTemplate,
 )
 from app.services.audit_dispatch import dispatch_audit
+from app.services.gl_chart import load_invoice_chart
 from app.services.invoice_warning_catalog import warning
 from app.services.sweep_health import SWEEP_RECURRING_INVOICES, run_sweep_loop
 from app.services.workflow_engine import create_workflow_instance
@@ -461,6 +462,47 @@ def _generated_invoice_number(period_key: str) -> str:
     return f"REC-{period_key}-{uuid.uuid4().hex[:6]}"
 
 
+async def _gl_code_for_generation(
+    db: AsyncSession, template: RecurringInvoiceTemplate
+) -> tuple[str | None, list[dict] | None]:
+    """The GL code a generated invoice may carry, and the warning when it may not.
+
+    §199 refuses a retired or unknown code on every write that SETS one —
+    including the template's own create and a PATCH that changes it — but a
+    template keeps its code while the chart moves on underneath it: an account
+    retired a year after the template was written would otherwise be stamped
+    onto every invoice it raises, which then reached approval and the ERP push
+    carrying a code the tenant's chart no longer offers. So the code is judged
+    afresh, here, against the chart the invoice lands in (the template's own
+    entity: shared ∪ that entity's), by the same ``gl_chart`` rule a manual
+    write meets.
+
+    A code the chart refuses is NOT stamped: the invoice is raised uncoded and
+    carries ``gl_codes_not_in_chart`` — the warning extraction raises when it
+    drops an automated code for the same reason — so the reviewer picks an
+    active account before approving. Generation is never refused over it:
+    the sweep has no human to ask, and a missed rent invoice is the worse
+    failure. The template keeps its code; ``GET /api/recurring`` flags it
+    (``gl_account_off_chart``) so the operator can re-code it once rather than
+    every period.
+    """
+    code = template.gl_account
+    if not code:
+        return code, None
+    chart = await load_invoice_chart(db, template.organization_id, template.entity_id, [code])
+    if not chart.judge([code]):
+        return code, None
+    return None, [
+        {
+            # Same shape as extraction's: GL codes are identifiers, so the
+            # sentence param is the plain code (`decisions.md` §148) and
+            # `codes` carries the list for a reader that wants it structured.
+            **warning("gl_codes_not_in_chart", "warning", codes=code),
+            "codes": [code],
+        }
+    ]
+
+
 async def generate_one(
     db: AsyncSession,
     template: RecurringInvoiceTemplate,
@@ -526,6 +568,8 @@ async def generate_one(
     period_key = period_key_for(template.cadence, run_on)
     correlation_id = uuid.uuid4()
 
+    gl_account, gl_warnings = await _gl_code_for_generation(db, template)
+
     # Resolved once, so the two segregation columns below cannot disagree about
     # who the uploader is — `implicated_actor_ids` subtracts exactly the id that
     # lands in `uploaded_by_id`.
@@ -544,7 +588,8 @@ async def generate_one(
         invoice_date=run_on,
         payment_terms=template.payment_terms,
         po_number=template.po_number,
-        gl_account=template.gl_account,
+        gl_account=gl_account,
+        warnings=gl_warnings,
         cost_center=template.cost_center,
         department=template.department,
         project=template.project,
@@ -619,6 +664,10 @@ async def generate_one(
             "recurring_template_id": str(template.id),
             "period_key": period_key,
             "status": InvoiceStatus.ready_for_review.value,
+            # The template's code, when the chart no longer offers it and the
+            # invoice was raised uncoded instead — a chart-of-accounts code,
+            # not PII, and the one fact the warning alone does not date.
+            **({"gl_account_not_in_chart": template.gl_account} if gl_warnings else {}),
         },
     )
     await dispatch_audit(

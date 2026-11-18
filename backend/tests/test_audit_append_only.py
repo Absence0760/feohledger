@@ -244,6 +244,10 @@ _TENANT_MUTATORS_WITHOUT_DIRECT_AUDIT: dict[tuple[str, str], str] = {
     ("app.api.workflow_definitions", "simulate_workflow"): (
         "dry-run of a definition against a synthetic invoice — persists nothing"
     ),
+    ("app.api.portal_auth", "portal_check_reset_token"): (
+        "peeks a set-password link without spending it — persists nothing; the "
+        "redemption (`portal_reset_password`) is the audited write"
+    ),
     # -- the caller's own record / a derived cache, not tenant business state -
     # The assistant + copilot persist only the caller's own chat transcript;
     # the access itself is metered (`extraction_usage` / token budget) and

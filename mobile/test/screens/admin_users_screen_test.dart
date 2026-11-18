@@ -156,7 +156,7 @@ void main() {
           created = true;
           return _json({
             ..._userJson('9', name: 'Ada', roles: ['ap_clerk']),
-            'temporary_password': 'Temp-Pass-1234',
+            'set_password_link_expires_at': '2026-11-20T12:00:00Z',
           }, 201);
         }
         if (req.url.path.endsWith('/admin/roles')) return _roles();
@@ -197,10 +197,13 @@ void main() {
     expect(postBody!['full_name'], 'Ada Lovelace');
     expect((postBody!['role_names'] as List), ['ap_clerk']);
 
-    // The one-time temp password is surfaced for the admin to hand over.
-    expect(find.text('Temp-Pass-1234'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, 'Close'));
-    await tester.pumpAndSettle();
+    // No credential is shown: the user was emailed a set-password link, and
+    // the confirmation says so — never a password dialog to hand over.
+    expect(
+      find.text('Invited Ada 9. We emailed u9@example.com a link to set their password.'),
+      findsOneWidget,
+    );
+    expect(find.byType(AlertDialog), findsNothing);
 
     // The list refreshed and now shows the new user.
     expect(find.text('Ada 9'), findsOneWidget);

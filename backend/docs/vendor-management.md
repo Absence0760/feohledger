@@ -414,8 +414,8 @@ written. Provisioning a supplier credential is the segregation-of-duties half
 that used to leave no trace: an account that can submit invoices and stage
 bank-detail changes could be created, used and deleted, and the trail would show
 only the deletion. `details` is `{"vendor_user_id": ...}` — never the supplier's
-login address, and never the temp password the invite email carries (the
-response body no longer carries one at all).
+login address, and never the set-password link the invite email carries (the
+response body carries no credential at all).
 
 The invite also stamps `vendor_users.provisioned_by_user_id` with the AP actor,
 and `POST /api/vendors/{id}/portal-users/{vendor_user_id}/reset-password`

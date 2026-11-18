@@ -2,6 +2,7 @@
 
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -1489,21 +1490,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get adminUsersCreating => '作成中…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name を作成しました';
+  String adminUsersInvited(String name, String email) {
+    return '$name を招待しました。$email にパスワード設定用のリンクを送信しました。';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'ユーザーの作成に失敗しました: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'ユーザーを作成しました';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'このワンタイムパスワードを $name に共有してください。初回サインイン時に変更を求められます。再表示されません。';
   }
 
   @override
@@ -1762,6 +1755,26 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String cashFlowPendingAmount(String amount) {
     return '保留中 $amount';
+  }
+
+  @override
+  String cashFlowOverdueAmount(String amount) {
+    return '期日超過 $amount';
+  }
+
+  @override
+  String cashFlowOverdueSuffix(String amount) {
+    return '、うち $amount は期日超過';
+  }
+
+  @override
+  String cashFlowForecastOverdue(int count, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '請求書 $_temp0（合計 $amount）はすでに支払期日を過ぎています。現時点で支払義務があるため、最初の期間に計上しています。';
   }
 
   @override
@@ -3296,7 +3309,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'AI が提案した勘定科目が有効な勘定科目表にありません: $codes';
+    return '有効な勘定科目表にない勘定科目のため未設定: $codes';
   }
 
   @override
@@ -3852,4 +3865,236 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get reviewVerdictsChecking => 'ここで実行できる操作を確認しています…';
+
+  @override
+  String get payRecordOnlyBanner =>
+      'FeohLedger は支払いを記録するだけで送金は行わないため、銀行または ERP から支払い、ここで各支払いを記録してください（バッチの銀行ファイルは Web アプリにあります）。';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return '$erp が報告した支払いの内容を入力済みです。記録する前に内容を確認してください。';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return '$erp が報告した支払額';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return '$erp による支払方法';
+  }
+
+  @override
+  String get payRecordRailNotStated => '支払方法の記載なし';
+
+  @override
+  String get payRecordSplitMethod => '上記の支払方法に分割';
+
+  @override
+  String get payRecordSplitStands =>
+      'この支払いは複数の支払方法で行われたため、この内訳のまま記録されます。1 つの支払方法では表せません。';
+
+  @override
+  String get payRecordSplitDropped =>
+      'これらの内訳の合計が支払額と一致しないため、内訳は保持されません。選択した支払方法が支払い全体に記録されます。';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'この内訳を保持するかどうかは、支払いを記録するときに判断されます。保持されない場合は、選択した支払方法が支払い全体に記録されます。';
+
+  @override
+  String get payRecordAction => '支払済みとして記録';
+
+  @override
+  String payRecordActionLabel(String invoice) {
+    return '支払済みとして記録 — 請求書 $invoice';
+  }
+
+  @override
+  String get payRecordTitle => 'FeohLedger 外で行った支払いを記録';
+
+  @override
+  String get payRecordIntro =>
+      '自社の銀行または ERP からすでに仕入先に支払った場合に使用します。FeohLedger は支払いを記録し、請求書を支払済みにします。送金は行いません。';
+
+  @override
+  String get payRecordAmountOwed => '支払額';
+
+  @override
+  String get payRecordAmountHint =>
+      '適用済みクレジットメモと、支払日時点で有効な承諾済みの早期支払割引を差し引いた支払額の全額が記録されます。一部支払いは記録できません。';
+
+  @override
+  String get payRecordMethod => '支払方法';
+
+  @override
+  String get payRecordReference => '参照番号';
+
+  @override
+  String get payRecordReferenceHint => '小切手番号、または銀行の確認番号です。銀行照合はこの番号で突き合わせます。';
+
+  @override
+  String get payRecordPaidOn => '支払日';
+
+  @override
+  String get payRecordSubmit => '支払済みとして記録';
+
+  @override
+  String get payRecordSubmitting => '記録中…';
+
+  @override
+  String payRecordRecorded(String invoice) {
+    return '請求書 $invoice を支払済みとして記録しました';
+  }
+
+  @override
+  String get payRecordFailed => '支払いを記録できませんでした';
+
+  @override
+  String get payRecordUnavailable => 'この請求書はまだ支払済みとして記録できません。';
+
+  @override
+  String get payMethodBacs => 'BACS';
+
+  @override
+  String get payMethodFasterPayments => 'Faster Payments';
+
+  @override
+  String get payMethodChaps => 'CHAPS';
+
+  @override
+  String get payMethodCardOutside => 'カード (FeohLedger 外)';
+
+  @override
+  String get payRunActionRecord => 'バッチを支払済みとして記録…';
+
+  @override
+  String get payRunRecordTitle => 'バッチを支払済みとして記録';
+
+  @override
+  String get payRunRecordIntro =>
+      '銀行が支払いを受け付けたら、ここで記録してください。バッチ内の各支払いは完了となり、請求書は支払済みになります。送金は行われません。';
+
+  @override
+  String get payRunRecordReference => '銀行バッチ参照番号';
+
+  @override
+  String get payRunRecordReferenceHint => '銀行がバッチに付けた確認番号です。銀行照合はこの番号で突き合わせます。';
+
+  @override
+  String payRunRecordSubmit(String amount) {
+    return '支払済みとして記録 · $amount';
+  }
+
+  @override
+  String payRunRecordRecorded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件の支払いを支払済みとして記録しました',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunRecordFailed => 'バッチを記録できませんでした';
+
+  @override
+  String get payRunRecordLoadFailed => '支払バッチの読み込みに失敗しました';
+
+  @override
+  String get payRunStatusExported => 'エクスポート済み';
+
+  @override
+  String get codedRefusalPaymentsRecordOnly =>
+      'この組織では FeohLedger は支払いを送金しません。銀行または ERP から仕入先に支払い、その後 FeohLedger 外で支払済みとして記録してください。';
+
+  @override
+  String codedRefusalExternalPaymentForInvoice(String invoice, String reason) {
+    return '請求書 $invoice：$reason';
+  }
+
+  @override
+  String codedRefusalExternalPaymentNotPayable(String status) {
+    return '支払済みとして記録できるのは、承認済みで未払いの請求書だけです（この請求書のステータスは $status です）。';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentSegregation =>
+      '職務分掌：あなたはこの請求書を作成または編集したため、支払いの記録は別のユーザーが行う必要があります。';
+
+  @override
+  String get codedRefusalExternalPaymentCardLive =>
+      'この請求書には有効なバーチャルカードが発行されています。別の方法による支払いを記録する前に、カードをキャンセルしてください。';
+
+  @override
+  String get codedRefusalExternalPaymentCreditConflict =>
+      '適用済みのクレジットメモがこの請求書の仕入先または通貨と一致しなくなったため、支払額を確定できません。先に請求書を修正してください。';
+
+  @override
+  String get codedRefusalExternalPaymentNothingToPay =>
+      'この請求書は適用済みのクレジットメモで全額相殺されているため、支払済みとして記録するものはありません。';
+
+  @override
+  String codedRefusalExternalPaymentPaymentLive(String status) {
+    return 'この請求書の支払いはすでに処理中または決済済みです（$status）。別の方法による支払いを記録する前に無効にしてください。';
+  }
+
+  @override
+  String codedRefusalExternalPaymentInRun(String run) {
+    return 'この請求書は支払バッチ $run に含まれています。バッチ全体を FeohLedger 外で支払済みとして記録するか、先にバッチをキャンセルしてください。';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountMismatch(String amount) {
+    return '金額は、適用済みクレジットメモと承諾済みの早期支払割引を差し引いた請求書の支払額（$amount）と一致している必要があります。一部支払いは記録できません。';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountChanged(
+    String staged,
+    String amount,
+  ) {
+    return 'クレジットメモまたは早期支払割引により、バッチ作成後にこの請求書の支払額が変わりました（バッチ上 $staged、現在の支払額 $amount）。仕入先と差額を解消してから、請求書を個別に記録してください。';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentErpSplit =>
+      'ERP によると、この請求書は複数の支払方法で支払われています。支払いの内訳を保持する例外から記録してください。';
+
+  @override
+  String codedRefusalExternalPaymentErpSplitInRun(String run) {
+    return 'この請求書は支払バッチ $run に含まれており、ERP によると複数の支払方法で支払われています。これはその例外からしか記録できません。先にバッチをキャンセルしてから、例外から請求書を記録してください。';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentPaidOnFuture => '支払日に未来の日付は指定できません。';
+
+  @override
+  String get codedRefusalPaymentRunSegregation =>
+      '職務分掌: この支払いランを作成したユーザーは、承認または実行することはできません。別のユーザーが行う必要があります。';
+
+  @override
+  String get codedRefusalPaymentRunSegregationRecord =>
+      '職務分掌: この支払いランを作成したユーザーは、支払済みとして記録することはできません。別のユーザーが行う必要があります。';
+
+  @override
+  String get codedRefusalPaymentRunSegregationExport =>
+      '職務分掌: この支払いランを作成したユーザーは、その銀行ファイルをエクスポートすることはできません。別のユーザーが行う必要があります。';
+
+  @override
+  String get codedRefusalPaymentRunAwaitingCfo =>
+      'このランは組織のCFO承認しきい値を超えているため、CFOロールを持つユーザーの承認を待っています。';
+
+  @override
+  String get codedRefusalPaymentRunNotRecordable =>
+      '支払済みとして記録できるのは、下書きのランか、銀行ファイルをエクスポートしたランだけです。';
+
+  @override
+  String get codedRefusalPaymentRunNothingToRecord => 'このランには記録する支払いが残っていません。';
+
+  @override
+  String get codedRefusalExternalPaymentBlockingException =>
+      'この請求書には、支払いをブロックする未解決の例外があります。支払済みとして記録する前に解決してください。';
 }

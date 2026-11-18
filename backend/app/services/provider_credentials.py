@@ -1,8 +1,9 @@
 """Tenant provider credentials: the one accessor, the one writer, the catalogue.
 
-The ERP, payment-rail and card-issuer blocks of `Organization.settings` each
-mix configuration (which provider, base URL, sandbox flag) with secrets (API
-keys, OAuth client secrets, account tokens, webhook signing secrets). The
+The ERP, payment-rail, card-issuer, commerce and BYOK-extraction blocks of
+`Organization.settings` each mix configuration (which provider, base URL,
+sandbox flag) with secrets (API keys, OAuth client secrets, account tokens,
+webhook signing secrets). The
 configuration stays in the JSONB. The secrets live sealed in
 `provider_credentials` (`models/provider_credential.py`, envelope-encrypted by
 `services/credential_crypto`) and are:
@@ -11,9 +12,12 @@ configuration stays in the JSONB. The secrets live sealed in
   exactly as the adapters always received it, secrets merged back in. Any
   secret-named key still sitting in the JSONB is ignored, so a stray plaintext
   value can never be what an adapter authenticates with.
-* **written through one writer** — :func:`update_secrets`, called only by the
-  audited `PUT /api/organization/credentials/{block}`. `PATCH
-  /api/organization` refuses a non-blank secret in these blocks.
+* **written through one writer** — :func:`update_secrets`, called by the
+  audited `PUT /api/organization/credentials/{block}` for
+  :data:`CREDENTIAL_BLOCKS` (`PATCH /api/organization` refuses a non-blank
+  secret in these blocks), and by a block's own audited endpoint for
+  :data:`DEDICATED_WRITER_BLOCKS` — the OIDC client secret, whose only writer
+  is `PUT /api/organization/sso`.
 * **never read back** — :func:`credential_status` reports which paths are set,
   by name, and nothing else.
 
@@ -40,8 +44,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.provider_credential import ProviderCredential
 from app.services import credential_crypto
 
-# The settings blocks whose secrets live here (`commerce`: decisions §273).
-CREDENTIAL_BLOCKS: tuple[str, ...] = ("erp", "payments", "cards", "commerce")
+# The settings blocks whose secrets live here and are written through the
+# generic `PUT /api/organization/credentials/{block}` (`commerce`: decisions
+# §273; `extraction`: the BYOK keys).
+CREDENTIAL_BLOCKS: tuple[str, ...] = ("erp", "payments", "cards", "commerce", "extraction")
+
+# Sealed here too, but NOT reachable through the generic credentials endpoint
+# or reported by its status: the block has its own audited writer that owns the
+# rest of the block's shape. `sso`: `PUT /api/organization/sso` (`client_secret`;
+# `GET /api/organization/sso` reports `client_secret_configured`).
+DEDICATED_WRITER_BLOCKS: tuple[str, ...] = ("sso",)
 
 # Per block: the keys that are secrets. Everything else in the block is
 # configuration and stays in the JSONB. Identifiers that are not secret on their
@@ -81,6 +93,19 @@ SECRET_FIELDS: dict[str, frozenset[str]] = {
             "webhook_signing_secret",  # inbound card webhook HMAC key
         }
     ),
+    # A bring-your-own-key extraction org's provider secret. `aws_access_key_id`
+    # is an identifier and stays configuration, like an OAuth client id. Read
+    # by `services/extraction` (and the three side features that may reuse a
+    # `claude_vision` key) through :func:`byok_extraction_config`.
+    "extraction": frozenset(
+        {
+            "api_key",  # claude_vision (Anthropic) / openai_vision (OpenAI)
+            "aws_secret_access_key",  # aws_textract
+        }
+    ),
+    # The OIDC client secret (`services/sso`). Written only by
+    # `PUT /api/organization/sso`, read only by the OIDC callback.
+    "sso": frozenset({"client_secret"}),
     # Every field a commerce provider's spec marks `secret`
     # (`commerce_adapters/<key>.py`, decisions §273); `tests/test_commerce_adapters.py`
     # fails when a registered provider's secret is missing here. A new provider
@@ -371,12 +396,59 @@ async def config_for_connection_test(
 
         public = commerce_catalog.merge_commerce_update(saved, public)
         same = commerce_catalog.same_connection(saved, public)
+    elif block == "extraction":
+        # The form posts its whole panel — every provider's fields, never
+        # `program_type` — so the generic comparison would never match and a
+        # saved key could not be tested. What decides where an extraction key
+        # is sent is the provider alone (no adapter takes a key to a
+        # configurable host), so the stored key joins only for the saved one.
+        same = _extraction_provider(saved) is not None and _extraction_provider(
+            saved
+        ) == _extraction_provider(public)
     else:
         same = _comparable(block, request_cfg) == _comparable(block, saved)
     if same:
         stored = await load_secrets(org.id, block, db=db)
         return inject_secrets(block, public, {**stored, **own})
     return inject_secrets(block, public, own)
+
+
+def _extraction_provider(cfg: object) -> str | None:
+    """The block's ``provider``, stripped, or ``None`` when it names none."""
+    if not isinstance(cfg, Mapping):
+        return None
+    value = cfg.get("provider")
+    return (value.strip() or None) if isinstance(value, str) else None
+
+
+def extraction_secrets_to_drop(before: object, after: object) -> bool:
+    """Does a save of ``settings.extraction`` leave the stored key with a new provider?
+
+    ``claude_vision`` and ``openai_vision`` share the one ``api_key`` slot, so a
+    save that switches provider and keeps the stored key would post an OpenAI
+    secret to Anthropic (or the reverse) on the next extraction. `PATCH
+    /api/organization` drops the block's sealed secrets in the same
+    transaction when this is true; the admin types the new provider's key.
+    """
+    return _extraction_provider(before) != _extraction_provider(after)
+
+
+async def byok_extraction_config(
+    org_id: uuid.UUID, settings: Mapping | None, *, db: AsyncSession | None = None
+) -> dict | None:
+    """The BYOK extraction block with its sealed secrets, or ``None`` when not BYOK.
+
+    THE read path for a tenant's own extraction key: `services/extraction`
+    (adapter config) and the side features that may reuse a `claude_vision` key
+    (`audit_summary`, `llm_fraud_detection`, the exception-agent rationale).
+    A platform-mode org needs no tenant secret, so it costs no control-plane
+    read and no unseal. A secret-named key left in the JSONB is ignored, as in
+    :func:`resolve_block`.
+    """
+    extraction = (settings or {}).get("extraction")
+    if not isinstance(extraction, Mapping) or extraction.get("program_type") != "byok":
+        return None
+    return await resolve_block(org_id, settings, "extraction", db=db) or {}
 
 
 async def settings_with_secrets(org, *blocks: str, db: AsyncSession | None = None) -> dict:
@@ -477,12 +549,18 @@ async def update_secrets(
     """Apply a validated write and return the changed path NAMES.
 
     The caller has validated (:func:`validate_update`) and taken the org row
-    lock; it commits. Every caller takes that lock first, so one holding it may
-    read the current values (:func:`load_secrets`) and decide on them — the ERP
-    token refresher's compare-and-swap does. The callers: the audited endpoint,
-    `PATCH /api/organization` dropping an ERP's secrets when the save points
-    them at a new destination, and `services/erp_oauth` (consent, refresh,
-    disconnect) — the only writer of :data:`SERVICE_SECRET_FIELDS`.
+    lock. This function never commits: it writes and flushes inside the
+    caller's transaction, and the CALLER commits — or rolls back, which is how
+    `PUT /api/organization/sso` undoes a secret it could not audit. Every
+    caller takes that lock first, so one holding it may read the current values
+    (:func:`load_secrets`) and decide on them — the ERP token refresher's
+    compare-and-swap does. The callers: the audited endpoint,
+    `PATCH /api/organization` dropping an ERP's (or a BYOK extraction
+    provider's) secrets when the save points them somewhere new,
+    `PUT /api/organization/sso` (the OIDC client secret, which audits after
+    this returns and rolls the write back if it cannot), and
+    `services/erp_oauth` (consent, refresh, disconnect) — the only writer of
+    :data:`SERVICE_SECRET_FIELDS`.
 
     ``before_write`` receives the changed names once they are known and the new
     value is sealed, and before anything is persisted — every person-driven

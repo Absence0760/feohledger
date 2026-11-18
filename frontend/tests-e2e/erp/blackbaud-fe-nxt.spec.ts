@@ -13,6 +13,7 @@ import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
 	ERP_OAUTH_CALLBACK,
 	FAKE_ERP_BASE,
+	connectOAuthThroughPanel,
 	createApprovedInvoice,
 	deleteInvoice,
 	erpFailureFromAudit,
@@ -46,6 +47,10 @@ import {
  *      approved invoice posts through the SKY background process; the invoice read back FROM THE FAKE carries the exact amount
  *      and the synced vendor (the fake refuses distributions whose debits and
  *      credits do not both equal the amount).
+ *   2b. Connect in the browser — Organization → ERP → Connect: the page's
+ *      consent redirect, the callback, the panel naming the environment, with the AP
+ *      account and ledger currency typed into the panel,
+ *      then the same send (`connectOAuthThroughPanel`).
  *   3. Fail closed — an unlinked vendor is refused before anything is posted,
  *      and so is any send while the org has not stated the FE NXT ledger's
  *      currency (the API reports none) or the invoice is in another one.
@@ -142,6 +147,32 @@ async function blackbaudInvoice(request: APIRequestContext, id: string) {
 	return resp.json();
 }
 
+/** Sync the vendors and accounts, post an approved invoice through the SKY
+ *  background process and read it back FROM THE FAKE: amount and vendor. The
+ *  ledger config (AP account, currency) must already be saved. */
+async function sendBillAndReadBack(page: Page, request: APIRequestContext): Promise<void> {
+	await syncErpVendors(page);
+	await syncErpGlAccounts(page);
+	const inv = await createApprovedInvoice(page, {
+		prefix: 'E2E-BB',
+		invoiceDate: '2026-10-01',
+		dueDate: '2026-10-31',
+		amount: '1234.56',
+		currency: 'USD',
+		vendor: SUPPLIER,
+		glAccount: '01-5000-00'
+	});
+	try {
+		expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+		const posted = await blackbaudInvoice(request, await erpReferenceFromAudit(page, inv.id));
+		expect(posted.vendor_id).toBe(136);
+		expect(posted.amount).toBe(1234.56);
+		expect(posted.balance).toBe(1234.56);
+	} finally {
+		await deleteInvoice(page, inv.id);
+	}
+}
+
 test.describe('/erp blackbaud_fe_nxt adapter against fake-erp', () => {
 	test.beforeEach(async ({ page }) => {
 		await skipUnlessReachable(SERVICES.fakeErp);
@@ -176,26 +207,23 @@ test.describe('/erp blackbaud_fe_nxt adapter against fake-erp', () => {
 		request
 	}) => {
 		await setLedgerConfig(page, 'USD');
-		await syncErpVendors(page);
-		await syncErpGlAccounts(page);
-		const inv = await createApprovedInvoice(page, {
-			prefix: 'E2E-BB',
-			invoiceDate: '2026-10-01',
-			dueDate: '2026-10-31',
-			amount: '1234.56',
-			currency: 'USD',
-			vendor: SUPPLIER,
-			glAccount: '01-5000-00'
+		await sendBillAndReadBack(page, request);
+	});
+
+	test('connect through the Organization page, ledger stated there, then an invoice posts', async ({
+		page,
+		request
+	}) => {
+		// The two fields FE NXT requires are typed into the panel, and Connect
+		// saves them before the consent: no setLedgerConfig here.
+		await connectOAuthThroughPanel(page, {
+			provider: PROVIDER,
+			label: 'Blackbaud Financial Edge NXT',
+			consentPath: '/blackbaud/oauth2/authorization',
+			company: TENANT,
+			fill: { 'AP account number': '01-2000-00', 'Ledger currency': 'USD' }
 		});
-		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
-			const posted = await blackbaudInvoice(request, await erpReferenceFromAudit(page, inv.id));
-			expect(posted.vendor_id).toBe(136);
-			expect(posted.amount).toBe(1234.56);
-			expect(posted.balance).toBe(1234.56);
-		} finally {
-			await deleteInvoice(page, inv.id);
-		}
+		await sendBillAndReadBack(page, request);
 	});
 
 	test('an invoice whose vendor never synced is refused, not posted', async ({ page }) => {

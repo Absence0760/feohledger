@@ -1,8 +1,9 @@
 """Tenant provider credentials — their one sanctioned, audited writer.
 
 Mounted at `/api/organization/credentials`. The secrets of the `erp`, `commerce`,
-`payments` and `cards` settings blocks (API keys, OAuth client secrets, account
-tokens, webhook signing secrets — the catalogue is
+`payments`, `cards` and `extraction` settings blocks (API keys, OAuth client
+secrets, account tokens, webhook signing secrets, a BYOK extraction key — the
+catalogue is
 `services/provider_credentials.SECRET_FIELDS`) are stored sealed in
 `provider_credentials`, not in `Organization.settings`. This router is the only
 way to set or remove one, and no endpoint returns one:
@@ -50,6 +51,7 @@ class ProviderCredentialStatus(BaseModel):
     payments: list[str]
     cards: list[str]
     commerce: list[str] = []
+    extraction: list[str] = []
 
 
 class UpdateProviderCredentialsRequest(BaseModel):
@@ -85,7 +87,11 @@ async def get_provider_credentials(
     user: User = Depends(require_roles(ROLE_ADMIN)),
     db: AsyncSession = Depends(get_control_db),
 ):
-    """Which ERP / payment / card secrets are stored. Admin only; names only."""
+    """Which ERP / payment / card / commerce / extraction secrets are stored.
+
+    Admin only; names only. The OIDC client secret is sealed in the same store
+    but reported by `GET /api/organization/sso` (`client_secret_configured`).
+    """
     return ProviderCredentialStatus(**await credential_status(db, org.id))
 
 

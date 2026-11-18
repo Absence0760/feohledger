@@ -139,7 +139,7 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'self_correction_currency_mixed': 'invoices.warning.selfCorrectionCurrencyMixed',
 	// Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.
 	'self_correction_line_item_math': 'invoices.warning.selfCorrectionLineItemMath',
-	// AI suggested GL code(s) not in active chart: {codes}
+	// GL code(s) not in the active chart of accounts, left uncoded: {codes}
 	'gl_codes_not_in_chart': 'invoices.warning.glCodesNotInChart',
 	// Cached vendor GL code '{code}' is no longer in the active chart of accounts.
 	'gl_code_stale_prior': 'invoices.warning.glCodeStalePrior',

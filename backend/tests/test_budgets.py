@@ -322,6 +322,32 @@ async def test_summary_groups_by_currency_and_honours_filters(realdb):
         assert [r["currency"] for r in filtered["by_currency"]] == ["EUR"]
 
 
+async def test_list_and_summary_filter_by_currency(realdb):
+    """The requisition form's budget picker lists only the budgets a requisition
+    in its currency can link (`_resolve_links` 422s the rest). The filter is
+    case-insensitive, its `total` counts only the matching set (the picker's
+    "showing N of M" line reads it), and the summary honours it the same way."""
+    usd = await _mk_budget_row(realdb, amount="1000.00", currency="USD")
+    eur = await _mk_budget_row(realdb, amount="400.00", currency="EUR")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        res = await c.get("/api/budgets", params={"currency": "eur"})
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert [b["id"] for b in body["items"]] == [str(eur)]
+        assert body["total"] == 1
+
+        res = await c.get("/api/budgets", params={"currency": "USD"})
+        assert [b["id"] for b in res.json()["items"]] == [str(usd)]
+
+        summary = (await c.get("/api/budgets/summary", params={"currency": "EUR"})).json()
+        assert summary["total"] == 1
+        assert [r["currency"] for r in summary["by_currency"]] == ["EUR"]
+
+        # Not a currency code at all — refused, not silently matched against nothing.
+        assert (await c.get("/api/budgets", params={"currency": "EURO"})).status_code == 422
+
+
 async def test_summary_read_gate_matches_list(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         assert (await c.get("/api/budgets/summary")).status_code == 200

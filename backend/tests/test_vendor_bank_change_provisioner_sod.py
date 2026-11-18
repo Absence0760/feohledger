@@ -5,7 +5,9 @@ fixed:
 
 1. ``POST /api/vendors/{id}/portal-users`` is ``require_roles(ADMIN, AP_MANAGER)``
    and used to return the plaintext ``temp_password`` for a **caller-supplied**
-   address — so one AP user could mint a supplier login they controlled.
+   address — so one AP user could mint a supplier login they controlled. (It
+   now mails a set-password link to that address, which the same AP user can
+   still redeem when the address is theirs — hence the stamp below.)
 2. Signing in as that identity and staging a bank change fills
    ``requested_by_vendor_user_id`` and leaves ``requested_by_user_id`` NULL.
 3. ``approve_change_request`` compared only ``requested_by_user_id``, so a NULL
@@ -33,6 +35,7 @@ from app.api.deps import create_vendor_access_token
 from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
 from app.models.vendor_user import VendorUser
+from tests.set_password_mail import link_token
 from tests.test_session_management import FakeRedis
 
 TENANT = "a"
@@ -64,7 +67,7 @@ def fake_redis(monkeypatch):
 def sent_mail(monkeypatch):
     """Capture what the (dev-default `console`) email adapter would send.
 
-    Doubles as the attacker's mailbox: the temp password is no longer in the
+    Doubles as the attacker's mailbox: the set-password link is never in the
     HTTP response, so a test that wants to *use* the credential has to read it
     where a real caller-supplied-address attacker would.
     """
@@ -79,11 +82,17 @@ def sent_mail(monkeypatch):
     return outbox
 
 
-def _password_from(message) -> str:
-    for line in message.body_text.splitlines():
-        if line.strip().startswith("Password:"):
-            return line.split("Password:", 1)[1].strip()
-    raise AssertionError("no password line in the delivered message")
+ATTACKER_PASSWORD = "Attacker-Chosen-Pass9"
+
+
+async def _redeem(realdb, message, password: str = ATTACKER_PASSWORD) -> None:
+    """Spend the mailed set-password link as its recipient would."""
+    async with realdb.client(key=TENANT, role=None) as anon:
+        resp = await anon.post(
+            "/api/portal/auth/reset-password",
+            json={"token": link_token(message), "new_password": password},
+        )
+    assert resp.status_code == 200, resp.text
 
 
 async def _create_vendor(mk, org_id, *, name: str) -> uuid.UUID:
@@ -153,13 +162,14 @@ async def test_provisioner_cannot_approve_the_bank_change_they_engineered(
     invited = await _invite(realdb, vendor_id, role="ap_manager", email=email)
     vendor_user_id = uuid.UUID(invited["user"]["id"])
 
-    # The attacker really does hold a working credential — read from the
-    # mailbox they chose, since the response no longer carries it.
+    # The attacker really can take the identity over — the set-password link
+    # lands in the mailbox they chose, though the response never carries it.
     assert len(sent_mail) == 1
+    await _redeem(realdb, sent_mail[0])
     async with realdb.client(key=TENANT, role=None) as anon:
         login = await anon.post(
             "/api/portal/auth/login",
-            json={"email": email, "password": _password_from(sent_mail[0])},
+            json={"email": email, "password": ATTACKER_PASSWORD},
         )
     assert login.status_code == 200, login.text
 
@@ -272,7 +282,7 @@ async def test_deleting_the_portal_user_cannot_erase_the_evidence(realdb, mk, se
 
 @pytest.mark.asyncio
 async def test_admin_password_reset_stamps_the_resetting_actor(realdb, mk, sent_mail):
-    """Reset is the OTHER way an AP actor comes to hold a supplier credential —
+    """Reset is the OTHER way an AP actor can steer a supplier credential —
     it is how the attack runs against an identity that already exists — so it
     has to leave the same record invite does. A legacy row's NULL provisioner
     is only safe because taking it over goes through here."""
@@ -318,7 +328,8 @@ async def test_supplier_changing_their_own_password_does_not_clear_the_stamp(
     realdb, mk, sent_mail, fake_redis
 ):
     """`POST /api/portal/auth/change-password` requires the CURRENT password —
-    which the provisioner has. Clearing the stamp there would therefore be a
+    which the provisioner has, once they have spent the link they mailed to
+    themselves. Clearing the stamp there would therefore be a
     one-request bypass of this whole control, so it is deliberately durable
     provenance rather than a "who knows the password right now" flag."""
     org_id = realdb.info(TENANT).org_id
@@ -326,12 +337,13 @@ async def test_supplier_changing_their_own_password_does_not_clear_the_stamp(
     email = f"selfchange-{uuid.uuid4().hex[:8]}@mailbox.test"
     invited = await _invite(realdb, vendor_id, role="ap_manager", email=email)
     vendor_user_id = uuid.UUID(invited["user"]["id"])
+    await _redeem(realdb, sent_mail[0])
 
     async with _portal_client(realdb, vendor_user_id, vendor_id) as portal:
         changed = await portal.post(
             "/api/portal/auth/change-password",
             json={
-                "current_password": _password_from(sent_mail[0]),
+                "current_password": ATTACKER_PASSWORD,
                 "new_password": "Brand-New-Passphrase-1234",
             },
         )
@@ -357,8 +369,8 @@ async def test_supplier_changing_their_own_password_does_not_clear_the_stamp(
 
 @pytest.mark.asyncio
 async def test_invite_returns_no_plaintext_credential(realdb, mk, sent_mail):
-    """The response must carry no password for the caller-supplied address —
-    the credential travels only on the email adapter."""
+    """The response must carry no credential for the caller-supplied address —
+    the set-password link travels only on the email adapter."""
     org_id = realdb.info(TENANT).org_id
     vendor_id = await _create_vendor(mk, org_id, name="No Echo Co")
     email = f"noecho-{uuid.uuid4().hex[:8]}@supplier.test"
@@ -368,14 +380,14 @@ async def test_invite_returns_no_plaintext_credential(realdb, mk, sent_mail):
     assert set(body) <= {"user", "portal_url"}
     # And nothing password-shaped smuggled through another field.
     assert len(sent_mail) == 1
-    assert _password_from(sent_mail[0]) not in str(body)
+    assert link_token(sent_mail[0]) not in str(body)
     assert sent_mail[0].to == email
 
 
 @pytest.mark.asyncio
 async def test_invite_rolls_back_when_the_credential_cannot_be_delivered(realdb, mk, monkeypatch):
-    """Email is the only channel now, so a delivery failure must not leave a
-    portal account whose password nobody holds — it 502s and creates nothing."""
+    """Email is the link's only channel, so a delivery failure must not leave a
+    portal account nobody can sign in to — it 502s and creates nothing."""
     from app.services.email_adapters.console_adapter import ConsoleAdapter
 
     async def _boom(self, message):  # noqa: ANN001
@@ -406,7 +418,7 @@ async def test_reset_rolls_back_when_the_new_password_cannot_be_delivered(
     realdb, mk, sent_mail, monkeypatch
 ):
     """Same shape for reset, where the stakes are higher: a failed delivery
-    must not replace a working supplier credential with one nobody received."""
+    must not clear a working supplier password for a link nobody received."""
     org_id = realdb.info(TENANT).org_id
     vendor_id = await _create_vendor(mk, org_id, name="Reset Undeliverable Co")
     invited = await _invite(
@@ -416,11 +428,13 @@ async def test_reset_rolls_back_when_the_new_password_cannot_be_delivered(
         email=f"resetfail-{uuid.uuid4().hex[:8]}@supplier.test",
     )
     vendor_user_id = uuid.UUID(invited["user"]["id"])
+    await _redeem(realdb, sent_mail[0])
     async with mk() as s:
         before = (
             await s.execute(select(VendorUser).where(VendorUser.id == vendor_user_id))
         ).scalar_one()
         original_hash = before.hashed_password
+    assert original_hash is not None
 
     from app.services.email_adapters.console_adapter import ConsoleAdapter
 

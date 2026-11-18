@@ -544,6 +544,29 @@ const BUILDERS: Record<string, Builder> = {
 		const remaining = invoiceMoney(p, 'remaining', 'currency');
 		return remaining === null ? null : t('refusal.creditMemoExceedsBalance', { remaining });
 	},
+	// `api/cash_flow.py` — `/draft-run` when nothing in the plan can be staged
+	// into a run in the reporting currency: the other currencies found, and how
+	// many payable invoices record no currency at all (never read as the run's).
+	draft_run_no_run_currency: (p, t) => {
+		const runCurrency = currency(p, 'run_currency');
+		const found = p.currencies;
+		const count = p.unknown_count;
+		if (runCurrency === null || !Array.isArray(found)) return null;
+		if (!found.every((c) => typeof c === 'string' && /^[A-Za-z]{3}$/.test(c))) return null;
+		if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) return null;
+		if (found.length === 0 && count === 0) return null;
+		const parts: string[] = [];
+		if (found.length > 0) {
+			parts.push(
+				t('refusal.draftRunNoRunCurrency', {
+					currency: runCurrency,
+					found: formatList((found as string[]).map((c) => c.toUpperCase()))
+				})
+			);
+		}
+		if (count > 0) parts.push(t('refusal.draftRunCurrencyUnknown', { count }));
+		return parts.join(' ');
+	},
 	// `api/invoices.py` / `api/workflow.py`
 	[INVOICE_STALE_EDIT]: fixed('refusal.invoiceStaleEdit'),
 	[INVOICE_STALE_APPROVAL]: fixed('refusal.invoiceStaleApproval'),
@@ -785,6 +808,10 @@ const BUILDERS: Record<string, Builder> = {
 	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
 	// The admin path's other-workspace budget is spent (`api/admin.py`).
 	email_check_throttled: fixed('refusal.emailCheckThrottled'),
+	// An invite or admin reset that could not mint or mail its set-password
+	// link, so nothing was changed (`api/set_password_links.py`, decisions §283).
+	set_password_link_unavailable: fixed('refusal.setPasswordLinkUnavailable'),
+	set_password_email_failed: fixed('refusal.setPasswordEmailFailed'),
 	// Any 429 from the shared limiter (`services/rate_limit.py`).
 	[RATE_LIMITED]: rateLimited,
 	// A refused vendor merge (`services/vendor_merge.py`; the malformed-id 422

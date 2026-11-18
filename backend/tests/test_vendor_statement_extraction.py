@@ -14,6 +14,7 @@ that and is tested separately):
 
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from decimal import Decimal
 
@@ -47,8 +48,14 @@ class _StubAdapter(ExtractionAdapter):
         return self._result
 
 
+ORG = uuid.UUID("00000000-0000-0000-0000-0000000000b2")
+
+
 def _use(monkeypatch, adapter):
-    monkeypatch.setattr(vse, "resolve_statement_adapter", lambda org_settings: adapter)
+    async def resolve(org_settings, *, organization_id):
+        return adapter
+
+    monkeypatch.setattr(vse, "resolve_statement_adapter", resolve)
     return adapter
 
 
@@ -191,7 +198,7 @@ async def test_extract_statement_lines_happy_path(monkeypatch):
         _StubAdapter(_ok([StatementLineExtraction("INV-1", "2026-01-15", "1200.00")])),
     )
     lines, meta = await vse.extract_statement_lines(
-        org_settings={}, file_bytes=b"%PDF-1.4", file_key="k.pdf"
+        org_settings={}, organization_id=ORG, file_bytes=b"%PDF-1.4", file_key="k.pdf"
     )
     assert [ln.amount for ln in lines] == [Decimal("1200.00")]
     assert meta == {
@@ -215,7 +222,9 @@ async def test_extract_statement_lines_carries_the_ambiguous_skip_count(monkeypa
     result = _ok([StatementLineExtraction("INV-1", "2026-01-15", "1200.00")])
     result.skipped_ambiguous = 3
     _use(monkeypatch, _StubAdapter(result))
-    _lines, meta = await vse.extract_statement_lines(org_settings={}, file_bytes=b"%PDF-1.4")
+    _lines, meta = await vse.extract_statement_lines(
+        org_settings={}, organization_id=ORG, file_bytes=b"%PDF-1.4"
+    )
     assert meta["line_count"] == 1
     assert meta["skipped_ambiguous"] == 3
 
@@ -228,7 +237,9 @@ async def test_unsupported_provider_refuses_instead_of_creating_an_empty_run(mon
         ),
     )
     with pytest.raises(vse.StatementExtractionError) as exc:
-        await vse.extract_statement_lines(org_settings={}, file_bytes=b"%PDF-1.4")
+        await vse.extract_statement_lines(
+            org_settings={}, organization_id=ORG, file_bytes=b"%PDF-1.4"
+        )
     assert exc.value.reason == STATEMENT_REASON_NOT_SUPPORTED
     assert "CSV" in exc.value.message
 
@@ -248,7 +259,9 @@ async def test_provider_error_text_never_reaches_the_user_message(monkeypatch, c
     )
     with caplog.at_level("WARNING"):
         with pytest.raises(vse.StatementExtractionError) as exc:
-            await vse.extract_statement_lines(org_settings={}, file_bytes=b"%PDF-1.4")
+            await vse.extract_statement_lines(
+                org_settings={}, organization_id=ORG, file_bytes=b"%PDF-1.4"
+            )
     assert "x-api-key" not in exc.value.message
     assert exc.value.reason == STATEMENT_REASON_PROVIDER_ERROR
     # It IS logged — the operator needs it, the caller must not see it.
@@ -260,7 +273,9 @@ async def test_adapter_exception_is_contained(monkeypatch):
     never a 500 on the upload."""
     _use(monkeypatch, _StubAdapter(raises=RuntimeError("boom")))
     with pytest.raises(vse.StatementExtractionError) as exc:
-        await vse.extract_statement_lines(org_settings={}, file_bytes=b"%PDF-1.4")
+        await vse.extract_statement_lines(
+            org_settings={}, organization_id=ORG, file_bytes=b"%PDF-1.4"
+        )
     assert exc.value.reason == STATEMENT_REASON_PROVIDER_ERROR
     assert "boom" not in exc.value.message
 
@@ -273,7 +288,9 @@ async def test_scan_with_no_text_layer_surfaces_an_actionable_message(monkeypatc
         ),
     )
     with pytest.raises(vse.StatementExtractionError) as exc:
-        await vse.extract_statement_lines(org_settings={}, file_bytes=b"%PDF-1.4")
+        await vse.extract_statement_lines(
+            org_settings={}, organization_id=ORG, file_bytes=b"%PDF-1.4"
+        )
     assert exc.value.reason == STATEMENT_REASON_NO_TEXT_LAYER
     assert "scan" in exc.value.message.lower()
 
@@ -284,7 +301,9 @@ async def test_success_with_only_unusable_rows_is_a_refusal_not_an_empty_run(mon
     "we owe them nothing"."""
     _use(monkeypatch, _StubAdapter(_ok([StatementLineExtraction(None, None, "n/a")])))
     with pytest.raises(vse.StatementExtractionError) as exc:
-        await vse.extract_statement_lines(org_settings={}, file_bytes=b"%PDF-1.4")
+        await vse.extract_statement_lines(
+            org_settings={}, organization_id=ORG, file_bytes=b"%PDF-1.4"
+        )
     assert exc.value.reason == STATEMENT_REASON_NO_LINES
 
 
@@ -293,24 +312,49 @@ async def test_success_with_only_unusable_rows_is_a_refusal_not_an_empty_run(mon
 # --------------------------------------------------------------------------- #
 
 
-def test_resolve_uses_the_orgs_byok_provider():
-    adapter = vse.resolve_statement_adapter(
-        {"extraction": {"program_type": "byok", "provider": "mock"}}
+async def test_resolve_uses_the_orgs_byok_provider(monkeypatch):
+    from app.services import provider_credentials
+
+    async def no_sealed_secrets(org_id, block, *, db=None):
+        return {}
+
+    monkeypatch.setattr(provider_credentials, "load_secrets", no_sealed_secrets)
+    adapter = await vse.resolve_statement_adapter(
+        {"extraction": {"program_type": "byok", "provider": "mock"}}, organization_id=ORG
     )
     assert adapter.provider_name == "mock"
 
 
-def test_resolve_defaults_to_the_platform_provider(monkeypatch):
+async def test_resolve_fails_closed_when_the_sealed_key_cannot_be_opened(monkeypatch):
+    """A BYOK org whose sealed key the store cannot open gets the statement
+    422 path (nothing sent, no 500), and the message names no value."""
+    from app.services import provider_credentials
+    from app.services.credential_crypto import CredentialCryptoError
+
+    async def broken_store(org_id, block, *, db=None):
+        raise CredentialCryptoError("credential store unavailable")
+
+    monkeypatch.setattr(provider_credentials, "load_secrets", broken_store)
+    with pytest.raises(vse.StatementExtractionError) as exc:
+        await vse.resolve_statement_adapter(
+            {"extraction": {"program_type": "byok", "provider": "claude_vision"}},
+            organization_id=ORG,
+        )
+    assert exc.value.reason == STATEMENT_REASON_PROVIDER_ERROR
+    assert exc.value.message == provider_credentials.CREDENTIALS_UNAVAILABLE_DETAIL
+
+
+async def test_resolve_defaults_to_the_platform_provider(monkeypatch):
     """Platform mode with a key resolves to the platform adapter, as it always has."""
     from app.services import extraction as ext
 
     monkeypatch.setattr(ext.settings, "extraction_provider", "")
     monkeypatch.setattr(ext.settings, "anthropic_api_key", "sk-ant-real-key")
-    adapter = vse.resolve_statement_adapter({})
+    adapter = await vse.resolve_statement_adapter({}, organization_id=ORG)
     assert adapter.provider_name == "claude_vision"
 
 
-def test_resolve_falls_back_to_the_offline_reader_on_a_keyless_dev_box(monkeypatch):
+async def test_resolve_falls_back_to_the_offline_reader_on_a_keyless_dev_box(monkeypatch):
     """The local-first half: no platform key locally → the offline text reader.
 
     This is what makes a PDF statement upload work on a fresh clone; before it,
@@ -322,5 +366,5 @@ def test_resolve_falls_back_to_the_offline_reader_on_a_keyless_dev_box(monkeypat
     monkeypatch.setattr(ext.settings, "extraction_provider", "")
     monkeypatch.setattr(ext.settings, "anthropic_api_key", "")
     monkeypatch.setattr(ext.settings, "environment", "development")
-    adapter = vse.resolve_statement_adapter({})
+    adapter = await vse.resolve_statement_adapter({}, organization_id=ORG)
     assert adapter.provider_name == "mock"

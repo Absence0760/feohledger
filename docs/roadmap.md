@@ -113,8 +113,8 @@ Flutter app at `mobile/` with login, dashboard, invoice list, approve/reject, pa
   `InvoiceStore` selection state. See `mobile/CLAUDE.md`.
 - [x] Admin user management — `AdminUsersScreen` + `AdminUserStore` over
   `/api/admin/*`: list/search users, **create a user** (validated form sheet →
-  `POST /api/admin/users`; the server-generated one-time temporary password is
-  surfaced for the admin to hand over, then the list refreshes), edit roles
+  `POST /api/admin/users`; the user is emailed a set-password link and the
+  screen confirms it, then the list refreshes), edit roles
   (system roles only), activate / deactivate, and **delete a user** (armed /
   confirmed destructive action → `DELETE /api/admin/users/{id}`; self-delete
   disabled client-side, the backend's 409 self / still-referenced reason

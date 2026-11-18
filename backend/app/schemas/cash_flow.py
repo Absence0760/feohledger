@@ -48,6 +48,15 @@ class CashFlowPlanReplay(BaseModel):
     cost_of_capital_pct: Decimal | None = Field(default=None, ge=0, le=100)
 
 
+class DraftRunSkip(BaseModel):
+    invoice_id: uuid.UUID
+    #: `currency_unknown` — the invoice records no currency, so no run can
+    #: name what it would pay; `currency_not_run_currency` — it is in another
+    #: currency than the run's (`params.currency`).
+    code: Literal["currency_unknown", "currency_not_run_currency"]
+    params: dict[str, str] = Field(default_factory=dict)
+
+
 class DraftRunResponse(BaseModel):
     plan_id: str
     # False when this call returned an ALREADY-EXISTING draft run for this
@@ -65,6 +74,12 @@ class DraftRunResponse(BaseModel):
     # every single-currency tenant.
     run_currency: str = "USD"
     excluded_currency_count: int = 0
+    # Payable invoices in the plan's horizon that were NOT staged, each with
+    # the coded reason the client states (`DRAFT_RUN_SKIP_*` in
+    # `api/cash_flow.py`). An invoice whose currency is not recorded is never
+    # read as the run's currency — it is listed here instead (decisions §160 /
+    # §196 / §200: a missing currency never becomes the default).
+    skipped: list[DraftRunSkip] = Field(default_factory=list)
 
 
 class CaptureDiscountsResponse(BaseModel):

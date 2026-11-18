@@ -324,12 +324,17 @@ async def _split_invoice(realdb, received_by: str | None = "ap_manager"):
 
 
 async def _refresh(realdb, invoice_id):
-    """Run the warning refresh any later edit runs; it rewrites `po_match`."""
+    """Run the warning refresh any later edit runs — it rewrites `po_match` —
+    and then strip the PO set from what it wrote. Since the matcher reads a
+    split from its legs the refresh names them again, but `po_match` is a
+    snapshot any future rewrite (a re-extract, a new match shape) may drop
+    them from; the segregation sets must hold without it (decisions §433)."""
     from app.services.invoice_warnings import refresh_warnings
 
     async with realdb.sessionmaker(TENANT)() as s:
         inv = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
         await refresh_warnings(s, inv, org_settings={})
+        inv.po_match = {k: v for k, v in inv.po_match.items() if k != "po_ids"}
         await s.commit()
 
 
@@ -344,16 +349,15 @@ async def test_a_multi_po_split_counts_every_po_it_linked(realdb):
 
 async def test_a_split_legs_receiver_is_refused_after_a_refresh_rewrote_po_match(realdb):
     """The hole §433 closes: any later edit runs `refresh_warnings`, which
-    rewrites `po_match` (the combined reference matches no PO, so it becomes
-    `no_po` and names no PO ids). The receiver of one leg is still refused,
-    and someone else may still approve."""
+    rewrites `po_match`; a rewrite that names no PO ids (see `_refresh`) still
+    leaves the receiver of one leg refused, and someone else may still
+    approve."""
     inv_id, (po_a, po_b), _ = await _split_invoice(realdb)
     await _refresh(realdb, inv_id)
 
     async with realdb.sessionmaker(TENANT)() as s:
         inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
-        # The premise: the refresh dropped the snapshot's PO set...
-        assert inv.po_match["status"] == "no_po"
+        # The premise: the rewritten snapshot names no PO set...
         assert "po_ids" not in inv.po_match
         # ...and the split's own record of it survived.
         assert set(inv.split_po_ids) == {str(po_a), str(po_b)}

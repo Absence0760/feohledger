@@ -40,7 +40,7 @@ OIDC_SSO_ONLY = {
     "provider": "entra",
     "discovery_url": "https://login.example.com/.well-known/openid-configuration",
     "client_id": "feoh",
-    "client_secret": SECRET,
+    "client_secret_configured": True,
     "scim_bearer_hash": "cd" * 32,
     "scim_groups": {"g1": {"displayName": "Finance", "members": []}},
     "scim_group_role_map": {"Finance": "cfo"},

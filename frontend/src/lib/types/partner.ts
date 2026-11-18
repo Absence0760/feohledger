@@ -36,11 +36,14 @@ export interface ProvisionChildRequest {
 	admin_email: string;
 }
 
-/** The newly provisioned child + its one-time first-login credentials.
- *  `temp_password` is returned EXACTLY once — show it, then drop it. */
+/** The newly provisioned child. No credential: its admin is emailed a
+ *  single-use set-password link (decisions §283). `set_password_email_sent` is
+ *  false when that email could not be sent after the tenant already existed —
+ *  the admin then uses Forgot password on the workspace sign-in page. */
 export interface ProvisionedChild extends ChildTenant {
 	admin_email: string;
-	temp_password: string;
+	set_password_email_sent: boolean;
+	set_password_link_expires_at: string | null;
 }
 
 /** A child tenant's white-label branding (same shape as the org's own brand). */

@@ -510,7 +510,11 @@ never an open redirect. The registered set defaults to
 `http://{localhost,127.0.0.1}:{8000-8009}/api/erp/oauth/callback` (the
 backend's ERP OAuth callback on the dev API port and the worktree offsets);
 set `FAKE_ERP_OAUTH_REDIRECT_URIS` (comma-separated) to replace it. The same
-registered set guards the Xero authorize route.
+registered set guards every `FakeOAuthApp` authorize route (Xero, Sage,
+Blackbaud). None of them shows a consent screen, so a real browser sent there
+passes straight through to the backend callback: `connectOAuthThroughPanel`
+(`frontend/tests-e2e/erp/helpers.ts`) clicks Connect on the Organization page
+and follows exactly that chain for each of the three.
 
 **Status sync-back and BillPayment write-back** (decisions §295): bills carry
 `LinkedTxn` and `MetaData.LastUpdatedTime` like QuickBooks'. A payment is

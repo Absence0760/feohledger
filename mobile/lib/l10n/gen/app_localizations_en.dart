@@ -2,6 +2,7 @@
 
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -1599,21 +1600,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminUsersCreating => 'Creating…';
 
   @override
-  String adminUsersCreated(String name) {
-    return 'Created $name';
+  String adminUsersInvited(String name, String email) {
+    return 'Invited $name. We emailed $email a link to set their password.';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'Failed to create user: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'User created';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'Share this one-time password with $name. They\'ll be asked to change it on first sign-in. It won\'t be shown again.';
   }
 
   @override
@@ -1875,6 +1868,27 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String cashFlowPendingAmount(String amount) {
     return 'pending $amount';
+  }
+
+  @override
+  String cashFlowOverdueAmount(String amount) {
+    return 'overdue $amount';
+  }
+
+  @override
+  String cashFlowOverdueSuffix(String amount) {
+    return ', $amount already past due';
+  }
+
+  @override
+  String cashFlowForecastOverdue(int count, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    return '$amount across $_temp0 is already past due. Owed now, so counted in the first period.';
   }
 
   @override
@@ -3455,7 +3469,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'AI suggested GL code(s) not in active chart: $codes';
+    return 'GL code(s) not in the active chart of accounts, left uncoded: $codes';
   }
 
   @override
@@ -4018,4 +4032,242 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get reviewVerdictsChecking => 'Checking what you can do here…';
+
+  @override
+  String get payRecordOnlyBanner =>
+      'FeohLedger records payments but never sends them: pay from your bank or ERP, then record each one here (a run\'s bank file is on the web app).';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return 'Filled in from the payment $erp reported. Check the details before you record it.';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return 'Amount $erp reports paid';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return 'How $erp says it was paid';
+  }
+
+  @override
+  String get payRecordRailNotStated => 'Method not stated';
+
+  @override
+  String get payRecordSplitMethod => 'Split across the methods above';
+
+  @override
+  String get payRecordSplitStands =>
+      'This payment was made with more than one method, so it is recorded with this split. One method cannot describe it.';
+
+  @override
+  String get payRecordSplitDropped =>
+      'These parts do not add up to the amount paid, so the split is not kept. The method you choose is recorded for the whole payment.';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'Whether this split is kept is decided when the payment is recorded. If it is not kept, the method you choose is recorded for the whole payment.';
+
+  @override
+  String get payRecordAction => 'Record as paid';
+
+  @override
+  String payRecordActionLabel(String invoice) {
+    return 'Record as paid — invoice $invoice';
+  }
+
+  @override
+  String get payRecordTitle => 'Record a payment made outside FeohLedger';
+
+  @override
+  String get payRecordIntro =>
+      'Use this when you have already paid the supplier from your own bank or ERP. FeohLedger records the payment and marks the invoice paid. It doesn\'t send any money.';
+
+  @override
+  String get payRecordAmountOwed => 'Amount owed';
+
+  @override
+  String get payRecordAmountHint =>
+      'The full amount owed is recorded, net of applied credit memos and any accepted early-payment discount still open on the paid-on date. Partial payments can\'t be recorded.';
+
+  @override
+  String get payRecordMethod => 'How you paid';
+
+  @override
+  String get payRecordReference => 'Reference';
+
+  @override
+  String get payRecordReferenceHint =>
+      'The cheque number or your bank\'s confirmation number. Bank reconciliation matches on it.';
+
+  @override
+  String get payRecordPaidOn => 'Paid on';
+
+  @override
+  String get payRecordSubmit => 'Record as paid';
+
+  @override
+  String get payRecordSubmitting => 'Recording…';
+
+  @override
+  String payRecordRecorded(String invoice) {
+    return 'Invoice $invoice recorded as paid';
+  }
+
+  @override
+  String get payRecordFailed => 'Could not record the payment';
+
+  @override
+  String get payRecordUnavailable =>
+      'This invoice can\'t be recorded as paid yet.';
+
+  @override
+  String get payMethodBacs => 'BACS';
+
+  @override
+  String get payMethodFasterPayments => 'Faster Payments';
+
+  @override
+  String get payMethodChaps => 'CHAPS';
+
+  @override
+  String get payMethodCardOutside => 'Card (outside FeohLedger)';
+
+  @override
+  String get payRunActionRecord => 'Record run as paid…';
+
+  @override
+  String get payRunRecordTitle => 'Record run as paid';
+
+  @override
+  String get payRunRecordIntro =>
+      'Once your bank has taken the payments, record them here. Every payment in the run is marked completed and its invoice paid. Nothing is sent.';
+
+  @override
+  String get payRunRecordReference => 'Bank batch reference';
+
+  @override
+  String get payRunRecordReferenceHint =>
+      'The confirmation number your bank gave the batch. Bank reconciliation matches on it.';
+
+  @override
+  String payRunRecordSubmit(String amount) {
+    return 'Record as paid · $amount';
+  }
+
+  @override
+  String payRunRecordRecorded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count payments recorded as paid',
+      one: '$count payment recorded as paid',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunRecordFailed => 'Could not record the run';
+
+  @override
+  String get payRunRecordLoadFailed => 'Failed to load payment run';
+
+  @override
+  String get payRunStatusExported => 'Exported';
+
+  @override
+  String get codedRefusalPaymentsRecordOnly =>
+      'FeohLedger does not send payments for this organization. Pay the supplier from your bank or ERP, then record the payment as paid outside FeohLedger.';
+
+  @override
+  String codedRefusalExternalPaymentForInvoice(String invoice, String reason) {
+    return 'Invoice $invoice: $reason';
+  }
+
+  @override
+  String codedRefusalExternalPaymentNotPayable(String status) {
+    return 'Only an approved invoice that has not been paid can be recorded as paid (this one is $status).';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentSegregation =>
+      'Segregation of duties: you created or shaped this invoice, so a different user must record its payment.';
+
+  @override
+  String get codedRefusalExternalPaymentCardLive =>
+      'A live virtual card is issued against this invoice. Cancel the card before recording a payment made another way.';
+
+  @override
+  String get codedRefusalExternalPaymentCreditConflict =>
+      'An applied credit memo no longer matches this invoice\'s vendor or currency, so the amount owed can\'t be stated. Correct the invoice first.';
+
+  @override
+  String get codedRefusalExternalPaymentNothingToPay =>
+      'This invoice is fully covered by applied credit memos, so there is nothing to record as paid.';
+
+  @override
+  String codedRefusalExternalPaymentPaymentLive(String status) {
+    return 'A payment for this invoice is already in progress or settled ($status). Void it before recording a payment made another way.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentInRun(String run) {
+    return 'This invoice is in payment run $run. Record the whole run as paid outside FeohLedger, or cancel the run first.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountMismatch(String amount) {
+    return 'The amount must equal what the invoice owes ($amount), net of applied credit memos and any accepted early-payment discount. Partial payments can\'t be recorded.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountChanged(
+    String staged,
+    String amount,
+  ) {
+    return 'What this invoice owes has changed since the run was staged ($staged staged, $amount owed now) because of a credit memo or an early-payment discount. Resolve the difference with the supplier, then record the invoice on its own.';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentErpSplit =>
+      'The ERP reports this invoice paid with more than one payment method. Record it from its exception, which keeps how the payment was split.';
+
+  @override
+  String codedRefusalExternalPaymentErpSplitInRun(String run) {
+    return 'This invoice is in payment run $run, and the ERP reports it paid with more than one payment method, which only its exception can record. Cancel the run first, then record the invoice from its exception.';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentPaidOnFuture =>
+      'The paid-on date can\'t be in the future.';
+
+  @override
+  String get codedRefusalPaymentRunSegregation =>
+      'Segregation of duties: the user who created this payment run cannot also approve or execute it. A different user must.';
+
+  @override
+  String get codedRefusalPaymentRunSegregationRecord =>
+      'Segregation of duties: the user who created this payment run cannot also record it as paid. A different user must.';
+
+  @override
+  String get codedRefusalPaymentRunSegregationExport =>
+      'Segregation of duties: the user who created this payment run cannot also export its bank file. A different user must.';
+
+  @override
+  String get codedRefusalPaymentRunAwaitingCfo =>
+      'This run exceeds the organization\'s CFO-approval threshold and is awaiting sign-off from a user with the CFO role.';
+
+  @override
+  String get codedRefusalPaymentRunNotRecordable =>
+      'Only a draft run, or one whose bank file was exported, can be recorded as paid.';
+
+  @override
+  String get codedRefusalPaymentRunNothingToRecord =>
+      'This run has no payments left to record.';
+
+  @override
+  String get codedRefusalExternalPaymentBlockingException =>
+      'This invoice has an unresolved payment-blocking exception. Resolve it before recording the invoice as paid.';
 }

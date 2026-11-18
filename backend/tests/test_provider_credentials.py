@@ -208,6 +208,9 @@ def test_extract_strip_inject_round_trip():
         ("erp", "token_secret"),
         ("payments", "providers.column.api_key"),
         ("cards", "api_key"),
+        ("extraction", "api_key"),
+        ("extraction", "aws_secret_access_key"),
+        ("sso", "client_secret"),
     ],
 )
 def test_validate_path_accepts_secret_slots(block, path):
@@ -222,7 +225,9 @@ def test_validate_path_accepts_secret_slots(block, path):
         ("cards", "providers.x.api_key"),
         ("payments", "providers.Bad Name.api_key"),
         ("payments", "providers.column.base_url"),
-        ("extraction", "api_key"),
+        # An identifier, not a secret: it stays configuration.
+        ("extraction", "aws_access_key_id"),
+        ("sso", "client_id"),
     ],
 )
 def test_validate_path_refuses_everything_else(block, path):
@@ -332,6 +337,7 @@ async def test_put_seals_audits_and_never_reads_back(realdb):
             "payments": [],
             "cards": [],
             "commerce": [],
+            "extraction": [],
         }
         assert SECRET not in resp.text
         status = await c.get(URL)
@@ -449,9 +455,15 @@ async def test_bad_bodies_are_refused_without_echoing_the_value(realdb, body):
 
 @pytest.mark.asyncio
 async def test_unknown_block_is_404(realdb):
+    # A block outside CREDENTIAL_BLOCKS (and outside DEDICATED_WRITER_BLOCKS,
+    # pinned separately for `sso` below). `extraction` was this test's example
+    # until the BYOK keys were sealed (decisions §444) and it became a real block.
+    assert "nonexistent" not in provider_credentials.CREDENTIAL_BLOCKS
     async with realdb.client(key="a", role="admin") as c:
-        resp = await c.put(f"{URL}/extraction", json={"set": {"api_key": SECRET}})
+        resp = await c.put(f"{URL}/nonexistent", json={"set": {"api_key": SECRET}})
     assert resp.status_code == 404
+    assert SECRET not in resp.text
+    assert await _rows(realdb) == []
 
 
 @pytest.mark.asyncio
@@ -663,3 +675,352 @@ async def test_stored_secret_paths_names_only_this_block_and_never_unseals(reald
     assert any("webhook_signing_secret" in p for p in erp)
     assert not any("api_key" in p for p in erp)
     assert any("api_key" in p for p in cards)
+
+
+# ---------- BYOK extraction keys + the OIDC client secret (migration 0135) ------
+
+
+async def test_extraction_connection_test_joins_the_stored_key_only_for_the_saved_provider(
+    monkeypatch,
+):
+    """The form posts every provider's fields and never `program_type`, so the
+    stored key joins on the provider alone — never for another provider, which
+    would send one vendor's secret to the other."""
+    org = SimpleNamespace(
+        id=uuid.uuid4(),
+        settings={"extraction": {"program_type": "byok", "provider": "openai_vision"}},
+    )
+
+    async def _stored(org_id, block, *, db=None):
+        assert block == "extraction"
+        return {"api_key": SECRET}
+
+    monkeypatch.setattr(provider_credentials, "load_secrets", _stored)
+    form = {"provider": "openai_vision", "api_key": "", "base_url": "http://localhost:11434"}
+    same = await config_for_connection_test(org, "extraction", form)
+    assert same["api_key"] == SECRET
+
+    other = await config_for_connection_test(
+        org, "extraction", {**form, "provider": "claude_vision"}
+    )
+    assert "api_key" not in other
+
+    typed = await config_for_connection_test(
+        org, "extraction", {**form, "provider": "claude_vision", "api_key": SECRET_2}
+    )
+    assert typed["api_key"] == SECRET_2
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "drop"),
+    [
+        ({"provider": "openai_vision"}, {"provider": "openai_vision"}, False),
+        ({"provider": "openai_vision"}, {"provider": " openai_vision "}, False),
+        ({"provider": "openai_vision"}, {"provider": "claude_vision"}, True),
+        ({"provider": "aws_textract"}, {}, True),
+        (None, {"provider": "claude_vision"}, True),
+    ],
+)
+def test_extraction_secrets_follow_the_provider(before, after, drop):
+    assert provider_credentials.extraction_secrets_to_drop(before, after) is drop
+
+
+@pytest.mark.asyncio
+async def test_extraction_key_is_written_and_reported_through_the_credentials_door(realdb):
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.put(f"{URL}/extraction", json={"set": {"aws_secret_access_key": SECRET}})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["extraction"] == ["aws_secret_access_key"]
+        assert SECRET not in resp.text
+        org_resp = await c.get("/api/organization")
+    assert SECRET not in org_resp.text
+    (audit,) = await _audit(realdb, "organization.credentials_updated")
+    assert audit.details["block"] == "extraction"
+    assert SECRET not in json.dumps(audit.details)
+
+
+@pytest.mark.asyncio
+async def test_the_sso_secret_is_not_reachable_through_the_generic_door(realdb):
+    """`sso` is sealed in the same store but has its own writer
+    (`PUT /api/organization/sso`); the generic door neither writes nor reports it."""
+    await realdb.store_provider_secrets("a", "sso", {"client_secret": SECRET})
+    async with realdb.client(key="a", role="admin") as c:
+        put = await c.put(f"{URL}/sso", json={"set": {"client_secret": SECRET_2}})
+        status = await c.get(URL)
+    assert put.status_code == 404
+    assert "sso" not in status.json()
+    async with realdb.control_sessionmaker()() as s:
+        sealed = await provider_credentials.load_secrets(realdb.info("a").org_id, "sso", db=s)
+    assert sealed == {"client_secret": SECRET}
+
+
+@pytest.mark.asyncio
+async def test_patch_refuses_an_extraction_key_and_names_the_endpoint(realdb):
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch(
+            "/api/organization",
+            json={
+                "settings": {
+                    "extraction": {
+                        "program_type": "byok",
+                        "provider": "claude_vision",
+                        "api_key": SECRET,
+                    }
+                }
+            },
+        )
+    assert resp.status_code == 422
+    assert "/api/organization/credentials/extraction" in resp.json()["detail"]
+    assert SECRET not in resp.text
+    assert (await _org(realdb)).settings.get("extraction") is None
+
+
+@pytest.mark.asyncio
+async def test_patch_keeps_the_key_for_the_same_provider_and_drops_it_for_another(realdb):
+    """A blank key field keeps the sealed key while the provider is unchanged;
+    switching provider drops it (audited) so it is never sent to the new one."""
+    form = {"program_type": "byok", "provider": "openai_vision", "api_key": ""}
+    await _set_settings(realdb, {"extraction": {k: v for k, v in form.items() if v}})
+    await realdb.store_provider_secrets("a", "extraction", {"api_key": SECRET})
+    async with realdb.client(key="a", role="admin") as c:
+        same = await c.patch("/api/organization", json={"settings": {"extraction": form}})
+        assert same.status_code == 200, same.text
+        org = await _org(realdb)
+        byok = await provider_credentials.byok_extraction_config(org.id, org.settings)
+        assert byok["api_key"] == SECRET
+        assert "api_key" not in org.settings["extraction"]
+
+        switched = await c.patch(
+            "/api/organization",
+            json={"settings": {"extraction": {**form, "provider": "claude_vision"}}},
+        )
+        assert switched.status_code == 200, switched.text
+    org = await _org(realdb)
+    byok = await provider_credentials.byok_extraction_config(org.id, org.settings)
+    assert byok == {"program_type": "byok", "provider": "claude_vision"}
+    drops = [
+        a.details
+        for a in await _audit(realdb, "organization.credentials_updated")
+        if a.details.get("reason") == "extraction_provider_changed"
+    ]
+    assert drops[-1] == {
+        "block": "extraction",
+        "changed": ["api_key"],
+        "cleared": ["api_key"],
+        "reason": "extraction_provider_changed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_byok_accessor_ignores_a_plaintext_key_and_skips_platform_orgs(realdb, monkeypatch):
+    org = await _org(realdb)
+    stray = {"extraction": {"program_type": "byok", "provider": "claude_vision", "api_key": "x"}}
+    assert await provider_credentials.byok_extraction_config(org.id, stray) == {
+        "program_type": "byok",
+        "provider": "claude_vision",
+    }
+
+    def _no_read(*_a, **_k):
+        raise AssertionError("a platform org must not open the sealed store")
+
+    monkeypatch.setattr(provider_credentials, "load_secrets", _no_read)
+    platform = {"extraction": {"program_type": "platform"}}
+    assert await provider_credentials.byok_extraction_config(org.id, platform) is None
+    assert await provider_credentials.byok_extraction_config(org.id, {}) is None
+
+
+def _migration_0135():
+    path = _MIGRATION / "0135_seal_extraction_sso.py"
+    spec = importlib.util.spec_from_file_location("_mig_0135", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_revision_chain_0135():
+    mig = _migration_0135()
+    assert mig.revision == "0135_seal_extraction_sso"
+    assert mig.down_revision == "0134_expense_creator"
+    assert len(mig.revision) <= 32
+
+
+async def _run_0135(realdb, step: str) -> None:
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mig = _migration_0135()
+
+    def _go(sync_conn):
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            getattr(mig, step)()
+
+    async with realdb.control_sessionmaker()() as s:
+        conn = await s.connection()
+        await conn.run_sync(_go)
+        await s.commit()
+
+
+async def _set_settings(realdb, settings_: dict, key: str = "a") -> None:
+    async with realdb.control_sessionmaker()() as s:
+        await s.execute(
+            text("UPDATE organizations SET settings = CAST(:s AS jsonb) WHERE id = :id"),
+            {"s": json.dumps(settings_), "id": realdb.info(key).org_id},
+        )
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_migration_0135_seals_extraction_and_sso_plaintext(realdb):
+    from app.services.sso import is_sso_only
+
+    sso = {
+        "enabled": True,
+        "sso_only": True,
+        "discovery_url": "https://idp.example.com/.well-known/openid-configuration",
+        "client_id": "feoh",
+        "client_secret": SECRET,
+        "scim_bearer_hash": "ab" * 32,
+    }
+    legacy = {
+        "extraction": {
+            "program_type": "byok",
+            "provider": "aws_textract",
+            "aws_access_key_id": "AKIAEXAMPLE",
+            "aws_secret_access_key": SECRET_2,
+            "api_key": "",
+        },
+        "sso": sso,
+        "company": {"address": "1 Main St"},
+    }
+    await _set_settings(realdb, legacy)
+    # Org b: an SSO block with no secret gains no marker; a sealed row wins.
+    await _set_settings(
+        realdb,
+        {"extraction": {"program_type": "byok", "provider": "claude_vision", "api_key": "old"}},
+        key="b",
+    )
+    await realdb.store_provider_secrets("b", "extraction", {"api_key": "newer"})
+
+    await _run_0135(realdb, "upgrade")
+    await _run_0135(realdb, "upgrade")  # idempotent: nothing left to move
+
+    org = await _org(realdb)
+    flat = json.dumps(org.settings)
+    assert SECRET not in flat and SECRET_2 not in flat
+    assert org.settings["extraction"] == {
+        "program_type": "byok",
+        "provider": "aws_textract",
+        "aws_access_key_id": "AKIAEXAMPLE",
+    }
+    assert org.settings["sso"] == {
+        **{k: v for k, v in sso.items() if k != "client_secret"},
+        "client_secret_configured": True,
+    }
+    assert org.settings["company"] == {"address": "1 Main St"}
+    # The sign-in verdict is unchanged across the move.
+    assert is_sso_only(org.settings) is True
+    byok = await provider_credentials.byok_extraction_config(org.id, org.settings)
+    assert byok["aws_secret_access_key"] == SECRET_2
+    async with realdb.control_sessionmaker()() as s:
+        sealed = await provider_credentials.load_secrets(org.id, "sso", db=s)
+    assert sealed == {"client_secret": SECRET}
+
+    org_b = await _org(realdb, key="b")
+    assert "api_key" not in org_b.settings["extraction"]
+    byok_b = await provider_credentials.byok_extraction_config(org_b.id, org_b.settings)
+    assert byok_b["api_key"] == "newer"
+
+    await _run_0135(realdb, "downgrade")
+    org = await _org(realdb)
+    assert org.settings["sso"]["client_secret"] == SECRET
+    assert "client_secret_configured" not in org.settings["sso"]
+    assert org.settings["extraction"]["aws_secret_access_key"] == SECRET_2
+    assert {r.block for r in await _rows(realdb)} == set()
+
+
+async def _run_0135_on_tenant(realdb, step: str, key: str = "a") -> bool:
+    """Run one 0135 step against a TENANT database; return what its gate said."""
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mig = _migration_0135()
+    verdict: list[bool] = []
+
+    def _go(sync_conn):
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            verdict.append(mig._is_control_db())
+            getattr(mig, step)()
+
+    async with realdb.sessionmaker(key)() as s:
+        conn = await s.connection()
+        await conn.run_sync(_go)
+        await s.commit()
+    return verdict[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("step", ["upgrade", "downgrade"])
+async def test_migration_0135_is_a_no_op_on_a_tenant_db(realdb, step):
+    """`migrate_all_tenants.py` runs every revision on every tenant DB, which
+    has neither `organizations` nor `provider_credentials`: the gate must say
+    "not the control plane" and the step must return without touching
+    anything (an ungated run would fail on the missing table)."""
+    plaintext = {"extraction": {"program_type": "byok", "api_key": SECRET}}
+    await _set_settings(realdb, plaintext)
+
+    assert await _run_0135_on_tenant(realdb, step) is False
+
+    # Nothing on the control plane moved either.
+    assert (await _org(realdb)).settings == plaintext
+    assert await _rows(realdb) == []
+
+
+@pytest.mark.asyncio
+async def test_migration_0135_gate_recognises_the_control_plane(realdb):
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mig = _migration_0135()
+    verdict: list[bool] = []
+
+    def _go(sync_conn):
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            verdict.append(mig._is_control_db())
+
+    async with realdb.control_sessionmaker()() as s:
+        conn = await s.connection()
+        await conn.run_sync(_go)
+    assert verdict == [True]
+
+
+@pytest.mark.asyncio
+async def test_migration_0135_kms_error_rolls_back_leaving_plaintext_in_place(realdb, fake_kms):
+    """A KMS failure part-way through raises and the transaction unwinds: the
+    block sealed before the failure leaves no row, and every plaintext value is
+    still where the running code reads it — never a secret in neither place."""
+    legacy = {
+        "extraction": {"program_type": "byok", "provider": "claude_vision", "api_key": SECRET},
+        "sso": {"enabled": True, "client_id": "feoh", "client_secret": SECRET_2},
+    }
+    await _set_settings(realdb, legacy)
+
+    real_generate = fake_kms.generate_data_key
+    generated = 0
+
+    def _second_call_fails(**kwargs):
+        nonlocal generated
+        generated += 1
+        if generated > 1:
+            raise RuntimeError("KMSInternalException")
+        return real_generate(**kwargs)
+
+    fake_kms.generate_data_key = _second_call_fails
+
+    with pytest.raises(CredentialCryptoError) as exc:
+        await _run_0135(realdb, "upgrade")
+    assert SECRET not in str(exc.value) and SECRET_2 not in str(exc.value)
+    # The first block was sealed before the failure — the rollback is real.
+    assert generated == 2
+
+    assert (await _org(realdb)).settings == legacy
+    assert await _rows(realdb) == []

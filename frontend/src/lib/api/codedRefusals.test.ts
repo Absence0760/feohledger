@@ -117,6 +117,8 @@ describe('codedRefusalText', () => {
 		['email_in_this_workspace', 'refusal.emailInThisWorkspace'],
 		['email_in_other_workspace', 'refusal.emailInOtherWorkspace'],
 		['email_check_throttled', 'refusal.emailCheckThrottled'],
+		['set_password_link_unavailable', 'refusal.setPasswordLinkUnavailable'],
+		['set_password_email_failed', 'refusal.setPasswordEmailFailed'],
 		['workspace_close_confirmation_mismatch', 'refusal.workspaceCloseConfirmationMismatch'],
 		['workspace_close_in_progress', 'refusal.workspaceCloseInProgress'],
 		['workspace_close_audit_unavailable', 'refusal.workspaceCloseAuditUnavailable'],
@@ -1559,5 +1561,51 @@ describe('the hand-made vendor ERP link refusals (`services/vendor_erp_manual_li
 			expect(text, locale).toBe(messages[key]);
 			expect(text, locale).toBeTruthy();
 		}
+	});
+});
+
+describe('/draft-run with nothing stageable in the run currency', () => {
+	const LOCALES = [
+		['en', en],
+		['de', de],
+		['fr', fr],
+		['es', es],
+		['pt-BR', ptBR],
+		['ja', ja]
+	] as const;
+
+	it('names the currencies found and the invoices with none, in every locale', () => {
+		const params = { run_currency: 'USD', currencies: ['EUR', 'GBP'], unknown_count: 2 };
+		for (const [locale, messages] of LOCALES) {
+			const t = translator(messages as Record<string, string>, locale);
+			const text = codedRefusalText('draft_run_no_run_currency', params, t);
+			expect(text, locale).not.toBeNull();
+			expect(text, locale).toContain('USD');
+			expect(text, locale).toContain('EUR');
+			expect(text, locale).toContain('GBP');
+			expect(text, locale).toContain('2');
+			expect(text, locale).not.toMatch(/[{}#]/);
+		}
+	});
+
+	it('states only the unknown-currency sentence when no other currency is there', () => {
+		const text = codedRefusalText(
+			'draft_run_no_run_currency',
+			{ run_currency: 'USD', currencies: [], unknown_count: 1 },
+			enT
+		);
+		expect(text).toBe(
+			interpolate(en['refusal.draftRunCurrencyUnknown'], { count: 1 }, 'en')
+		);
+	});
+
+	it.each([
+		[{ run_currency: 'USD', currencies: [], unknown_count: 0 }],
+		[{ run_currency: 'dollars', currencies: ['EUR'], unknown_count: 0 }],
+		[{ run_currency: 'USD', currencies: 'EUR', unknown_count: 0 }],
+		[{ run_currency: 'USD', currencies: ['EUR'], unknown_count: -1 }],
+		[{ run_currency: 'USD', currencies: ['EUR'] }]
+	] as [Record<string, unknown>][])('params %j fall back to the server English', (params) => {
+		expect(codedRefusalText('draft_run_no_run_currency', params, enT)).toBeNull();
 	});
 });

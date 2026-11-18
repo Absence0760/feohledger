@@ -14,6 +14,7 @@ import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/models/notification.dart';
+import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/models/vendor.dart';
 import 'package:feohledger_mobile/screens/adaptive_screen.dart';
 import 'package:feohledger_mobile/screens/admin_users_screen.dart';
@@ -57,6 +58,7 @@ import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/notification_bell.dart';
 import 'package:feohledger_mobile/widgets/notification_list_tile.dart';
 import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
+import 'package:feohledger_mobile/widgets/record_payment_dialog.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';
@@ -1385,6 +1387,164 @@ void main() {
         find.bySemanticsLabel(RegExp('Pay by Virtual Card')),
         findsOneWidget,
       );
+      handle.dispose();
+    });
+
+    testWidgets(
+        'record-only: the banner, a recordable row and a refused one meet '
+        'tap-target + label + contrast', (tester) async {
+      final handle = tester.ensureSemantics();
+      // Tall enough that both rows and their record actions are on screen —
+      // an off-screen node is not in the semantics tree the guidelines walk.
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      http.Response j(Object body) => http.Response(jsonEncode(body), 200,
+          headers: {'content-type': 'application/json'});
+      Map<String, dynamic> row(String id, String vendor, String? refusal) => {
+            'id': id,
+            'invoice_number': 'INV-$id',
+            'vendor_name': vendor,
+            'amount': 900.0,
+            'currency': 'USD',
+            'due_date': '2026-02-05',
+            'status': 'approved',
+            'is_overdue': false,
+            'discount_eligible': false,
+            'blocked': false,
+            'blocked_reason': null,
+            'required_method': null,
+            'record_outside_refusal': refusal,
+          };
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          final path = req.url.path;
+          if (path == '/api/auth/login') return j({'access_token': 'tok'});
+          if (path.endsWith('/auth/me')) {
+            return j({
+              'id': 'u1',
+              'email': 'demo@acme.com',
+              'full_name': 'Demo User',
+              'organization_id': 'org1',
+              'roles': ['ap_manager'],
+              'permissions': ['payment.record_external'],
+            });
+          }
+          if (path.endsWith('/payments/execution-mode')) {
+            return j({'mode': 'record_only', 'reason': 'configured'});
+          }
+          if (path.endsWith('/payments/queue')) {
+            return j({
+              'items': [
+                row('1', 'Acme Supplies', null),
+                row('2', 'Beta Ltd', 'external_payment_card_live'),
+              ],
+              'total': 2,
+            });
+          }
+          if (path.endsWith('/payments/summary')) {
+            return j({
+              'total_paid': 1000.0,
+              'total_pending': 200.0,
+              'payment_count': 5,
+              'total_rebates': 12.0,
+              'queue_count': 2,
+            });
+          }
+          return j({'items': [], 'total': 0});
+        }),
+      );
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+      await tester.pumpWidget(_screenHost(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Acme Supplies'));
+
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+      // The action names its invoice, so two "Record as paid" buttons are
+      // told apart by a screen reader.
+      expect(find.bySemanticsLabel('Record as paid — invoice INV-1'),
+          findsOneWidget);
+      expect(find.bySemanticsLabel('Record as paid — invoice INV-2'),
+          findsOneWidget);
+      handle.dispose();
+    });
+  });
+
+  group('Record-as-paid dialog', () {
+    setUp(() {
+      PaymentQueueStore.instance.reset();
+      FlutterSecureStorage.setMockInitialValues({});
+    });
+
+    testWidgets(
+        'a refusal is announced exactly once, and the line is not also a '
+        'live region (WCAG 4.1.3 without the echo)', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => http.Response(
+              jsonEncode({
+                'detail': {
+                  'code': 'external_payment_segregation',
+                  'message': 'server english',
+                  'params': null,
+                },
+              }),
+              403,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+      final item = PaymentQueueItem.fromJson({
+        'id': 'inv1',
+        'invoice_number': 'INV-1',
+        'vendor_name': 'Acme Supplies',
+        'amount': '100.00',
+        'currency': 'USD',
+        'status': 'approved',
+      });
+      await tester.pumpWidget(_host(Builder(
+        builder: (context) => TextButton(
+          onPressed: () => showRecordInvoicePaymentDialog(context, item),
+          child: const Text('open'),
+        ),
+      )));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byKey(const Key('record-reference')), 'CHK-1');
+      await tester.pump();
+      tester.takeAnnouncements(); // anything before the submit is not ours
+      await tester.tap(find.byKey(const Key('record-submit')));
+      await tester.pumpAndSettle();
+
+      const refusal = 'Segregation of duties: you created or shaped this '
+          'invoice, so a different user must record its payment.';
+      expect(find.text(refusal), findsOneWidget);
+      final spoken = tester
+          .takeAnnouncements()
+          .where((a) => a.message == refusal)
+          .toList();
+      expect(spoken, hasLength(1));
+      // The second voice was a `Semantics(liveRegion: true)` around the line:
+      // nothing wrapping or inside the refusal line is a live region. Scoped
+      // to the line, not the whole dialog: the framework's own TextField
+      // counter (`maxLength`) is a live region while the field has focus.
+      bool isLive(Widget w) => w is Semantics && w.properties.liveRegion == true;
+      final line = find.byKey(const Key('record-error'));
+      expect(line, findsOneWidget);
+      expect(
+        find.ancestor(of: line, matching: find.byWidgetPredicate(isLive)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: line, matching: find.byWidgetPredicate(isLive)),
+        findsNothing,
+      );
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
       handle.dispose();
     });
   });

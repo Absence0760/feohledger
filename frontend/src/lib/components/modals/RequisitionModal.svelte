@@ -1,5 +1,7 @@
 <script lang="ts">
 	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
+	import BudgetPicker from '#lib/components/ui/BudgetPicker.svelte';
+	import FieldWarning from '#lib/components/ui/FieldWarning.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type {
 		Requisition,
@@ -20,6 +22,7 @@
 		formatMoney,
 		scaleMoney,
 		sumMoney,
+		sumMoneyExact,
 		type MoneyString
 	} from '#lib/utils/money.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -28,6 +31,18 @@
 	import type { GlAccountOption } from '#lib/api/expenses.ts';
 	import { glAccountOptionLabel } from '#lib/types/glAccount.ts';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
+	import { checkBudget, getBudget, getBudgetSpend } from '#lib/api/budgets.ts';
+	import type { Budget, BudgetSpend } from '#lib/types/budget.ts';
+	import {
+		budgetCheckDisplay,
+		budgetHeadroomView,
+		budgetOptionLabel,
+		sameCurrency,
+		type BudgetCheckAnswer,
+		type BudgetCheckView,
+		type BudgetHeadroomView
+	} from '#lib/utils/budgetPicker.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 	let {
 		requisition,
@@ -64,7 +79,9 @@
 		quantity: number | null;
 		// Raw decimal TEXT, not a float. parseFloat-ing on every keystroke and
 		// sending the result is how an exact price reaches the wire rounded;
-		// it is validated once at save and refused, never repaired.
+		// it is validated once at save and refused, never repaired. Written from
+		// the input's own `.value` string: `bind:value` on a `type="number"`
+		// input writes a NUMBER, which broke save with `.trim is not a function`.
 		unit_price: string;
 		gl_account_id: string;
 		uom: string;
@@ -94,6 +111,10 @@
 		void orgCurrency.ensureLoaded();
 	});
 	let notes = $state(requisition?.notes ?? '');
+	// The linked budget's uuid, `''` for none. Seeded from the row, so an
+	// existing link is shown and — unless the user changes it — never re-sent.
+	const initialBudgetId = requisition?.budget_id ?? '';
+	let budgetId = $state(initialBudgetId);
 	let lines = $state<LineRow[]>(
 		(requisition?.line_items ?? []).map(toRow)
 	);
@@ -121,6 +142,107 @@
 	}
 
 	const computedTotal = $derived(sumMoney(lines.map(lineTotal)));
+	// The same total as an exact decimal STRING — what the overspend pre-check
+	// sends. `computedTotal` is a display number and must not ride a query.
+	const commitAmount = $derived(sumMoneyExact(lines.map(lineTotal)));
+
+	// ── Budget link ──────────────────────────────────────────────────────────
+	// `GET /api/budgets` and `/budgets/check` are admin / ap_manager / cfo, so
+	// the picker is offered to exactly those roles. An `ap_clerk` keeps creating
+	// requisitions without one, and a link someone else made is never touched
+	// by their save (`budget_id` is only sent when the picker changed it).
+	const canLinkBudget = $derived(auth.hasAnyRole('admin', 'ap_manager', 'cfo'));
+	// The chosen budget's currency and label when the form knows them: from the
+	// option the user picked, or — for a link the row opened with — from one
+	// `GET /api/budgets/{id}`. While that read is in flight both are `null`;
+	// the check's own `currency` then guards the comparison.
+	let budgetCurrency = $state<string | null>(null);
+	let budgetLabel = $state<string | null>(null);
+
+	$effect(() => {
+		if (!initialBudgetId || !canLinkBudget) return;
+		getBudget(initialBudgetId)
+			.then((b) => {
+				if (budgetId !== initialBudgetId) return; // the user moved on
+				budgetCurrency = b.currency;
+				budgetLabel = budgetOptionLabel(b);
+			})
+			.catch(() => {
+				/* the picker names an unresolvable link itself (`unresolvedSelection`) */
+			});
+	});
+
+	function onBudgetSelect(b: Budget | null) {
+		budgetCurrency = b?.currency ?? null;
+		budgetLabel = b ? budgetOptionLabel(b) : null;
+	}
+
+	// The overspend pre-check, debounced 300ms behind the total and the budget,
+	// and sequenced so a slow answer for an earlier total never lands over a
+	// newer one. Only for a draft the user can still edit: a submitted
+	// requisition is already inside the budget's Committed figure, so checking
+	// it again would count it twice.
+	let checkAnswer = $state<BudgetCheckAnswer | null>(null);
+	const checkSequence = createRequestSequencer();
+	let checkTimer: ReturnType<typeof setTimeout>;
+
+	// `checkAnswer` keeps the last SETTLED answer while the next is in flight
+	// (no `loading` write): `budgetCheckDisplay` holds it, busy, so the live
+	// region is not flipped to "Checking…" and back on every typing pause.
+	async function runBudgetCheck(id: string, amount: MoneyString) {
+		const token = checkSequence.start();
+		try {
+			const result = await checkBudget(id, amount);
+			if (!checkSequence.canCommit(token)) return;
+			checkAnswer = { budgetId: id, amount, status: 'ready', result };
+		} catch {
+			if (!checkSequence.canCommit(token)) return;
+			checkAnswer = { budgetId: id, amount, status: 'failed', result: null };
+		}
+	}
+
+	$effect(() => {
+		const id = budgetId;
+		const amount = commitAmount;
+		const cur = currency;
+		const known = budgetCurrency;
+		clearTimeout(checkTimer);
+		if (!canLinkBudget || !editable || !id) return;
+		// Another currency's headroom is no answer for this requisition — the
+		// view says so without asking.
+		if (known && !sameCurrency(known, cur)) return;
+		checkTimer = setTimeout(() => void runBudgetCheck(id, amount), 300);
+		return () => clearTimeout(checkTimer);
+	});
+
+	const checkDisplay = $derived<{ view: BudgetCheckView; busy: boolean }>(
+		canLinkBudget && editable
+			? budgetCheckDisplay({ budgetId, budgetCurrency, currency, amount: commitAmount, answer: checkAnswer })
+			: { view: { kind: 'none' }, busy: false }
+	);
+	const checkView = $derived(checkDisplay.view);
+	const budgetCurrencyMismatch = $derived(checkView.kind === 'mismatch');
+
+	// The approver's side of the overspend warning. Once submitted, the
+	// requisition is inside the budget's Committed figure, so its headroom is
+	// read from `/budgets/{id}/spend` as it stands — never re-checked through
+	// `/budgets/check` with this total, which would count it twice. Only for
+	// the statuses the spend legs count (`OPEN_COMMITMENT_REQ_STATUSES`).
+	const COMMITTED_STATUSES = new Set(['submitted', 'pending_approval', 'approved']);
+	let linkedSpend = $state<BudgetSpend | null>(null);
+	$effect(() => {
+		if (!canLinkBudget || !initialBudgetId || !COMMITTED_STATUSES.has(status)) return;
+		getBudgetSpend(initialBudgetId)
+			.then((s) => (linkedSpend = s))
+			.catch(() => {
+				/* advisory: no line rather than a wrong one */
+			});
+	});
+	const headroom = $derived<BudgetHeadroomView>(
+		!editable && budgetId === initialBudgetId
+			? budgetHeadroomView(linkedSpend, currency)
+			: { kind: 'none' }
+	);
 
 	function addLine() {
 		lines = [...lines, { description: '', quantity: null, unit_price: '', gl_account_id: '', uom: '' }];
@@ -153,11 +275,11 @@
 	}
 
 	async function handleSave() {
-		if (!requisition_number.trim()) return;
+		if (!requisition_number.trim() || budgetCurrencyMismatch) return;
 		saving = true;
 		try {
 			const lineItems: RequisitionLineItemInput[] = lines
-				.filter((l) => l.description.trim() || l.quantity != null || l.unit_price != null)
+				.filter((l) => l.description.trim() || l.quantity != null || l.unit_price.trim())
 				.map((l, i) => ({
 					line_number: i + 1,
 					description: l.description.trim() || null,
@@ -186,7 +308,8 @@
 					justification: justification.trim() || null,
 					currency: currency.trim() || DEFAULT_CURRENCY,
 					notes: notes.trim() || null,
-					line_items: lineItems
+					line_items: lineItems,
+					...(canLinkBudget && budgetId ? { budget_id: budgetId } : {})
 				});
 			} else {
 				saved = await updateRequisition(requisition!.id, {
@@ -197,7 +320,10 @@
 					justification: justification.trim() || null,
 					currency: currency.trim() || DEFAULT_CURRENCY,
 					notes: notes.trim() || null,
-					line_items: lineItems
+					line_items: lineItems,
+					...(canLinkBudget && budgetId !== initialBudgetId
+						? { budget_id: budgetId || null }
+						: {})
 				});
 			}
 			toast(isCreate ? m('requisitions.modal.toast.created') : m('requisitions.modal.toast.saved'), 'success');
@@ -258,6 +384,95 @@
 				<span>{m('requisitions.modal.field.currency')}</span>
 				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} disabled={!editable} testid="requisition-currency" />
 			</label>
+			{#if canLinkBudget}
+				<div class="full-width budget-field">
+					<BudgetPicker
+						bind:value={budgetId}
+						{currency}
+						label={m('requisitions.modal.field.budget')}
+						hint={editable ? m('requisitions.modal.budget.hint') : undefined}
+						selectedLabel={budgetLabel}
+						disabled={!editable}
+						fullWidth
+						testid="requisition-budget"
+						onselect={onBudgetSelect}
+					/>
+					{#if checkView.kind === 'mismatch'}
+						<FieldWarning
+							show
+							testId="requisition-budget-mismatch"
+							message={m('requisitions.modal.budget.currencyMismatch', {
+								budgetCurrency: checkView.budgetCurrency,
+								currency: currency.trim().toUpperCase()
+							})}
+						/>
+					{:else if checkView.kind === 'overspend'}
+						<FieldWarning
+							show
+							busy={checkDisplay.busy}
+							testId="requisition-budget-overspend"
+							message={m('requisitions.modal.budget.overspend', {
+								remainingAfter: formatMoney(checkView.check.remaining_after, { currency: checkView.check.currency }),
+								allocated: formatMoney(checkView.check.allocated, { currency: checkView.check.currency })
+							})}
+						/>
+					{:else}
+						<p
+							class="budget-status"
+							role="status"
+							aria-busy={checkDisplay.busy || undefined}
+							data-testid="requisition-budget-status"
+						>
+							{#if checkView.kind === 'failed'}
+								{m('requisitions.modal.budget.checkFailed')}
+							{:else if checkView.kind === 'within'}
+								{m('requisitions.modal.budget.within', {
+									remainingAfter: formatMoney(checkView.check.remaining_after, { currency: checkView.check.currency }),
+									allocated: formatMoney(checkView.check.allocated, { currency: checkView.check.currency })
+								})}
+							{/if}
+						</p>
+						{#if checkView.kind === 'checking'}
+							<!-- Outside the live region: only a settled result is announced. -->
+							<p class="budget-status" data-testid="requisition-budget-checking">
+								{m('requisitions.modal.budget.checking')}
+							</p>
+						{/if}
+					{/if}
+					{#if headroom.kind === 'over'}
+						<FieldWarning
+							show
+							testId="requisition-budget-headroom"
+							message={m('requisitions.modal.budget.headroomOver', {
+								remaining: formatMoney(headroom.spend.remaining, { currency: headroom.spend.currency }),
+								allocated: formatMoney(headroom.spend.allocated, { currency: headroom.spend.currency })
+							})}
+						/>
+					{:else if headroom.kind === 'within'}
+						<p class="budget-status" data-testid="requisition-budget-headroom">
+							{m('requisitions.modal.budget.headroomWithin', {
+								remaining: formatMoney(headroom.spend.remaining, { currency: headroom.spend.currency }),
+								allocated: formatMoney(headroom.spend.allocated, { currency: headroom.spend.currency })
+							})}
+						</p>
+					{/if}
+					{#if headroom.kind !== 'none' && headroom.spend.excluded_row_count > 0}
+						<p class="budget-status" data-testid="requisition-budget-headroom-excluded">
+							{m('requisitions.modal.budget.headroomExcluded', { count: headroom.spend.excluded_row_count })}
+						</p>
+					{/if}
+					{#if headroom.kind !== 'none' && headroom.spend.unverifiable_po_count > 0}
+						<p class="budget-status" data-testid="requisition-budget-headroom-unverified">
+							{m('requisitions.modal.budget.unverifiedPos', { count: headroom.spend.unverifiable_po_count })}
+						</p>
+					{/if}
+					{#if (checkView.kind === 'overspend' || checkView.kind === 'within') && checkView.check.unverifiable_po_count > 0}
+						<p class="budget-status" data-testid="requisition-budget-unverified">
+							{m('requisitions.modal.budget.unverifiedPos', { count: checkView.check.unverifiable_po_count })}
+						</p>
+					{/if}
+				</div>
+			{/if}
 			<label class="full-width">
 				<span>{m('requisitions.modal.field.justification')}</span>
 				<textarea bind:value={justification} rows="2" disabled={!editable}></textarea>
@@ -330,7 +545,8 @@
 											min="0"
 											class="num"
 											aria-label={m('requisitions.modal.line.unitPriceAria', { n: i + 1 })}
-											bind:value={l.unit_price}
+											value={l.unit_price}
+											oninput={(e) => (l.unit_price = e.currentTarget.value)}
 										/>
 									{:else}
 										{l.unit_price || '—'}
@@ -386,7 +602,11 @@
 		<div class="modal-footer">
 			<button type="button" class="btn-cancel" onclick={onclose}>{m('requisitions.modal.close')}</button>
 			{#if editable}
-				<button type="submit" class="btn-primary" disabled={saving || !requisition_number.trim()}>
+				<button
+					type="submit"
+					class="btn-primary"
+					disabled={saving || !requisition_number.trim() || budgetCurrencyMismatch}
+				>
 					{saving ? m('requisitions.modal.saving') : isCreate ? m('requisitions.modal.create') : m('requisitions.modal.save')}
 				</button>
 			{/if}
@@ -406,10 +626,23 @@
 		color: var(--text-muted);
 	}
 
+	/* `minmax(0, 1fr)`, not `1fr`: a bare `1fr` track never shrinks below its
+	   widest item's min-content (a date input, the budget combobox), so at
+	   phone width the grid grew past the dialog and the full-width budget
+	   warning ran off its right edge. One column under 480px, where two
+	   half-width inputs cannot hold a date. */
 	.form-grid {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 12px;
+	}
+	.form-grid > * {
+		min-width: 0;
+	}
+	@media (max-width: 480px) {
+		.form-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
 	}
 	.form-grid label {
 		display: flex;
@@ -418,8 +651,20 @@
 		font-size: 0.82rem;
 		color: var(--text-muted);
 	}
-	.form-grid label.full-width {
+	.form-grid label.full-width,
+	.form-grid .full-width {
 		grid-column: 1 / -1;
+	}
+	/* Muted on the modal's `--surface` clears 4.5:1; no `opacity`. `:empty`
+	   keeps an idle status region from taking a line. */
+	.budget-status {
+		margin: 6px 0 0;
+		font-size: 0.8rem;
+		line-height: 1.4;
+		color: var(--text-muted);
+	}
+	.budget-status:empty {
+		display: none;
 	}
 	.form-grid input,
 	.form-grid textarea {

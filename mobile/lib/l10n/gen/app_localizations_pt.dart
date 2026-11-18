@@ -2,6 +2,7 @@
 
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -1615,21 +1616,13 @@ class AppLocalizationsPt extends AppLocalizations {
   String get adminUsersCreating => 'A criar…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name criado';
+  String adminUsersInvited(String name, String email) {
+    return '$name convidado. Enviámos para $email uma ligação para definir a palavra-passe.';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'Falha ao criar o utilizador: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'Utilizador criado';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'Partilhe esta palavra-passe de uso único com $name. Ser-lhe-á pedido que a altere no primeiro início de sessão. Não será mostrada novamente.';
   }
 
   @override
@@ -1895,6 +1888,33 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String cashFlowPendingAmount(String amount) {
     return 'pendente $amount';
+  }
+
+  @override
+  String cashFlowOverdueAmount(String amount) {
+    return 'vencido $amount';
+  }
+
+  @override
+  String cashFlowOverdueSuffix(String amount) {
+    return ', dos quais $amount já vencido';
+  }
+
+  @override
+  String cashFlowForecastOverdue(int count, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'estão vencidas',
+      one: 'está vencida',
+    );
+    return '$_temp0 no total de $amount já $_temp1. Devido agora, por isso contado no primeiro período.';
   }
 
   @override
@@ -3475,7 +3495,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'Contas contábeis sugeridas pela IA que não estão no plano ativo: $codes';
+    return 'Contas contábeis fora do plano de contas ativo, não atribuídas: $codes';
   }
 
   @override
@@ -4040,6 +4060,245 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get reviewVerdictsChecking =>
       'Verificando o que você pode fazer aqui…';
+
+  @override
+  String get payRecordOnlyBanner =>
+      'O FeohLedger registra os pagamentos, mas nunca os envia: pague pelo seu banco ou ERP e registre cada pagamento aqui (o arquivo bancário de um lote está no aplicativo web).';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return 'Preenchido com o pagamento informado por $erp. Confira os dados antes de registrá-lo.';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return 'Valor pago segundo $erp';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return 'Como foi pago segundo $erp';
+  }
+
+  @override
+  String get payRecordRailNotStated => 'Forma não informada';
+
+  @override
+  String get payRecordSplitMethod => 'Dividido entre as formas acima';
+
+  @override
+  String get payRecordSplitStands =>
+      'Este pagamento foi feito com mais de uma forma de pagamento, por isso é registrado com esta divisão. Uma única forma não consegue descrevê-lo.';
+
+  @override
+  String get payRecordSplitDropped =>
+      'Estas partes não somam o valor pago, por isso a divisão não é mantida. A forma que você escolher é registrada para o pagamento inteiro.';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'Se esta divisão é mantida é decidido quando o pagamento é registrado. Se não for mantida, a forma que você escolher é registrada para o pagamento inteiro.';
+
+  @override
+  String get payRecordAction => 'Registrar como paga';
+
+  @override
+  String payRecordActionLabel(String invoice) {
+    return 'Registrar como paga — fatura $invoice';
+  }
+
+  @override
+  String get payRecordTitle =>
+      'Registrar um pagamento feito fora do FeohLedger';
+
+  @override
+  String get payRecordIntro =>
+      'Use quando você já pagou o fornecedor pelo seu próprio banco ou ERP. O FeohLedger registra o pagamento e marca a fatura como paga. Nenhum dinheiro é enviado.';
+
+  @override
+  String get payRecordAmountOwed => 'Valor devido';
+
+  @override
+  String get payRecordAmountHint =>
+      'É registrado o valor devido integral, descontadas as notas de crédito aplicadas e qualquer desconto por pagamento antecipado aceito ainda válido na data de pagamento. Pagamentos parciais não podem ser registrados.';
+
+  @override
+  String get payRecordMethod => 'Como você pagou';
+
+  @override
+  String get payRecordReference => 'Referência';
+
+  @override
+  String get payRecordReferenceHint =>
+      'O número do cheque ou o número de confirmação do seu banco. A conciliação bancária usa esse número.';
+
+  @override
+  String get payRecordPaidOn => 'Pago em';
+
+  @override
+  String get payRecordSubmit => 'Registrar como paga';
+
+  @override
+  String get payRecordSubmitting => 'Registrando…';
+
+  @override
+  String payRecordRecorded(String invoice) {
+    return 'Fatura $invoice registrada como paga';
+  }
+
+  @override
+  String get payRecordFailed => 'Não foi possível registrar o pagamento';
+
+  @override
+  String get payRecordUnavailable =>
+      'Esta fatura ainda não pode ser registrada como paga.';
+
+  @override
+  String get payMethodBacs => 'BACS';
+
+  @override
+  String get payMethodFasterPayments => 'Faster Payments';
+
+  @override
+  String get payMethodChaps => 'CHAPS';
+
+  @override
+  String get payMethodCardOutside => 'Cartão (fora do FeohLedger)';
+
+  @override
+  String get payRunActionRecord => 'Registrar o lote como pago…';
+
+  @override
+  String get payRunRecordTitle => 'Registrar o lote como pago';
+
+  @override
+  String get payRunRecordIntro =>
+      'Depois que o banco aceitar os pagamentos, registre-os aqui. Cada pagamento do lote é marcado como concluído e sua fatura como paga. Nada é enviado.';
+
+  @override
+  String get payRunRecordReference => 'Referência do lote bancário';
+
+  @override
+  String get payRunRecordReferenceHint =>
+      'O número de confirmação que o banco deu ao lote. A conciliação bancária usa esse número.';
+
+  @override
+  String payRunRecordSubmit(String amount) {
+    return 'Registrar como pago · $amount';
+  }
+
+  @override
+  String payRunRecordRecorded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pagamentos registrados como pagos',
+      one: '$count pagamento registrado como pago',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunRecordFailed => 'Não foi possível registrar o lote';
+
+  @override
+  String get payRunRecordLoadFailed => 'Falha ao carregar o lote de pagamento';
+
+  @override
+  String get payRunStatusExported => 'Exportado';
+
+  @override
+  String get codedRefusalPaymentsRecordOnly =>
+      'O FeohLedger não envia pagamentos para esta organização. Pague o fornecedor pelo seu banco ou ERP e depois registre o pagamento como pago fora do FeohLedger.';
+
+  @override
+  String codedRefusalExternalPaymentForInvoice(String invoice, String reason) {
+    return 'Fatura $invoice: $reason';
+  }
+
+  @override
+  String codedRefusalExternalPaymentNotPayable(String status) {
+    return 'Somente uma fatura aprovada e ainda não paga pode ser registrada como paga (esta está com status $status).';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentSegregation =>
+      'Segregação de funções: você criou ou alterou esta fatura, então outro usuário deve registrar o pagamento.';
+
+  @override
+  String get codedRefusalExternalPaymentCardLive =>
+      'Há um cartão virtual ativo emitido para esta fatura. Cancele o cartão antes de registrar um pagamento feito de outra forma.';
+
+  @override
+  String get codedRefusalExternalPaymentCreditConflict =>
+      'Uma nota de crédito aplicada não corresponde mais ao fornecedor ou à moeda desta fatura, então o valor devido não pode ser determinado. Corrija a fatura primeiro.';
+
+  @override
+  String get codedRefusalExternalPaymentNothingToPay =>
+      'Esta fatura está totalmente coberta por notas de crédito aplicadas, então não há nada a registrar como pago.';
+
+  @override
+  String codedRefusalExternalPaymentPaymentLive(String status) {
+    return 'Um pagamento desta fatura já está em andamento ou liquidado ($status). Anule-o antes de registrar um pagamento feito de outra forma.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentInRun(String run) {
+    return 'Esta fatura está no lote de pagamento $run. Registre o lote inteiro como pago fora do FeohLedger ou cancele o lote primeiro.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountMismatch(String amount) {
+    return 'O valor deve ser igual ao que a fatura deve ($amount), descontadas as notas de crédito aplicadas e qualquer desconto por pagamento antecipado aceito. Pagamentos parciais não podem ser registrados.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountChanged(
+    String staged,
+    String amount,
+  ) {
+    return 'O valor devido desta fatura mudou desde que o lote foi preparado ($staged no lote, $amount devido agora) por causa de uma nota de crédito ou de um desconto por pagamento antecipado. Resolva a diferença com o fornecedor e depois registre a fatura separadamente.';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentErpSplit =>
+      'O ERP informa que esta fatura foi paga com mais de uma forma de pagamento. Registre-a a partir da exceção, que mantém como o pagamento foi dividido.';
+
+  @override
+  String codedRefusalExternalPaymentErpSplitInRun(String run) {
+    return 'Esta fatura está no lote de pagamento $run e o ERP informa que ela foi paga com mais de uma forma de pagamento, o que só a exceção dela pode registrar. Cancele o lote primeiro e depois registre a fatura a partir da exceção.';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentPaidOnFuture =>
+      'A data de pagamento não pode estar no futuro.';
+
+  @override
+  String get codedRefusalPaymentRunSegregation =>
+      'Segregação de funções: o usuário que criou este lote de pagamentos não pode também aprová-lo ou executá-lo. Outro usuário deve fazê-lo.';
+
+  @override
+  String get codedRefusalPaymentRunSegregationRecord =>
+      'Segregação de funções: o usuário que criou este lote de pagamentos não pode também registrá-lo como pago. Outro usuário precisa fazer isso.';
+
+  @override
+  String get codedRefusalPaymentRunSegregationExport =>
+      'Segregação de funções: o usuário que criou este lote de pagamentos não pode também exportar o arquivo bancário dele. Outro usuário precisa fazer isso.';
+
+  @override
+  String get codedRefusalPaymentRunAwaitingCfo =>
+      'Este lote excede o limite de aprovação do CFO da organização e aguarda a aprovação de um usuário com a função de CFO.';
+
+  @override
+  String get codedRefusalPaymentRunNotRecordable =>
+      'Só um lote em rascunho, ou um cujo arquivo bancário foi exportado, pode ser registrado como pago.';
+
+  @override
+  String get codedRefusalPaymentRunNothingToRecord =>
+      'Este lote não tem mais pagamentos a registrar.';
+
+  @override
+  String get codedRefusalExternalPaymentBlockingException =>
+      'Esta fatura tem uma exceção não resolvida que bloqueia o pagamento. Resolva-a antes de registrar a fatura como paga.';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -5651,21 +5910,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get adminUsersCreating => 'Criando…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name criado';
+  String adminUsersInvited(String name, String email) {
+    return '$name convidado. Enviamos para $email um link para definir a senha.';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'Falha ao criar o usuário: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'Usuário criado';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'Compartilhe esta senha de uso único com $name. Será solicitado que a altere no primeiro login. Ela não será mostrada novamente.';
   }
 
   @override
@@ -5931,6 +6182,33 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String cashFlowPendingAmount(String amount) {
     return 'pendente $amount';
+  }
+
+  @override
+  String cashFlowOverdueAmount(String amount) {
+    return 'vencido $amount';
+  }
+
+  @override
+  String cashFlowOverdueSuffix(String amount) {
+    return ', dos quais $amount já vencido';
+  }
+
+  @override
+  String cashFlowForecastOverdue(int count, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'estão vencidas',
+      one: 'está vencida',
+    );
+    return '$_temp0 no total de $amount já $_temp1. Devido agora, por isso contado no primeiro período.';
   }
 
   @override
@@ -7511,7 +7789,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'Contas contábeis sugeridas pela IA que não estão no plano ativo: $codes';
+    return 'Contas contábeis fora do plano de contas ativo, não atribuídas: $codes';
   }
 
   @override
@@ -8076,4 +8354,243 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get reviewVerdictsChecking =>
       'Verificando o que você pode fazer aqui…';
+
+  @override
+  String get payRecordOnlyBanner =>
+      'O FeohLedger registra os pagamentos, mas nunca os envia: pague pelo seu banco ou ERP e registre cada pagamento aqui (o arquivo bancário de um lote está no aplicativo web).';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return 'Preenchido com o pagamento informado por $erp. Confira os dados antes de registrá-lo.';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return 'Valor pago segundo $erp';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return 'Como foi pago segundo $erp';
+  }
+
+  @override
+  String get payRecordRailNotStated => 'Forma não informada';
+
+  @override
+  String get payRecordSplitMethod => 'Dividido entre as formas acima';
+
+  @override
+  String get payRecordSplitStands =>
+      'Este pagamento foi feito com mais de uma forma de pagamento, por isso é registrado com esta divisão. Uma única forma não consegue descrevê-lo.';
+
+  @override
+  String get payRecordSplitDropped =>
+      'Estas partes não somam o valor pago, por isso a divisão não é mantida. A forma que você escolher é registrada para o pagamento inteiro.';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'Se esta divisão é mantida é decidido quando o pagamento é registrado. Se não for mantida, a forma que você escolher é registrada para o pagamento inteiro.';
+
+  @override
+  String get payRecordAction => 'Registrar como paga';
+
+  @override
+  String payRecordActionLabel(String invoice) {
+    return 'Registrar como paga — fatura $invoice';
+  }
+
+  @override
+  String get payRecordTitle =>
+      'Registrar um pagamento feito fora do FeohLedger';
+
+  @override
+  String get payRecordIntro =>
+      'Use quando você já pagou o fornecedor pelo seu próprio banco ou ERP. O FeohLedger registra o pagamento e marca a fatura como paga. Nenhum dinheiro é enviado.';
+
+  @override
+  String get payRecordAmountOwed => 'Valor devido';
+
+  @override
+  String get payRecordAmountHint =>
+      'É registrado o valor devido integral, descontadas as notas de crédito aplicadas e qualquer desconto por pagamento antecipado aceito ainda válido na data de pagamento. Pagamentos parciais não podem ser registrados.';
+
+  @override
+  String get payRecordMethod => 'Como você pagou';
+
+  @override
+  String get payRecordReference => 'Referência';
+
+  @override
+  String get payRecordReferenceHint =>
+      'O número do cheque ou o número de confirmação do seu banco. A conciliação bancária usa esse número.';
+
+  @override
+  String get payRecordPaidOn => 'Pago em';
+
+  @override
+  String get payRecordSubmit => 'Registrar como paga';
+
+  @override
+  String get payRecordSubmitting => 'Registrando…';
+
+  @override
+  String payRecordRecorded(String invoice) {
+    return 'Fatura $invoice registrada como paga';
+  }
+
+  @override
+  String get payRecordFailed => 'Não foi possível registrar o pagamento';
+
+  @override
+  String get payRecordUnavailable =>
+      'Esta fatura ainda não pode ser registrada como paga.';
+
+  @override
+  String get payMethodBacs => 'BACS';
+
+  @override
+  String get payMethodFasterPayments => 'Faster Payments';
+
+  @override
+  String get payMethodChaps => 'CHAPS';
+
+  @override
+  String get payMethodCardOutside => 'Cartão (fora do FeohLedger)';
+
+  @override
+  String get payRunActionRecord => 'Registrar o lote como pago…';
+
+  @override
+  String get payRunRecordTitle => 'Registrar o lote como pago';
+
+  @override
+  String get payRunRecordIntro =>
+      'Depois que o banco aceitar os pagamentos, registre-os aqui. Cada pagamento do lote é marcado como concluído e sua fatura como paga. Nada é enviado.';
+
+  @override
+  String get payRunRecordReference => 'Referência do lote bancário';
+
+  @override
+  String get payRunRecordReferenceHint =>
+      'O número de confirmação que o banco deu ao lote. A conciliação bancária usa esse número.';
+
+  @override
+  String payRunRecordSubmit(String amount) {
+    return 'Registrar como pago · $amount';
+  }
+
+  @override
+  String payRunRecordRecorded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pagamentos registrados como pagos',
+      one: '$count pagamento registrado como pago',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunRecordFailed => 'Não foi possível registrar o lote';
+
+  @override
+  String get payRunRecordLoadFailed => 'Falha ao carregar o lote de pagamento';
+
+  @override
+  String get payRunStatusExported => 'Exportado';
+
+  @override
+  String get codedRefusalPaymentsRecordOnly =>
+      'O FeohLedger não envia pagamentos para esta organização. Pague o fornecedor pelo seu banco ou ERP e depois registre o pagamento como pago fora do FeohLedger.';
+
+  @override
+  String codedRefusalExternalPaymentForInvoice(String invoice, String reason) {
+    return 'Fatura $invoice: $reason';
+  }
+
+  @override
+  String codedRefusalExternalPaymentNotPayable(String status) {
+    return 'Somente uma fatura aprovada e ainda não paga pode ser registrada como paga (esta está com status $status).';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentSegregation =>
+      'Segregação de funções: você criou ou alterou esta fatura, então outro usuário deve registrar o pagamento.';
+
+  @override
+  String get codedRefusalExternalPaymentCardLive =>
+      'Há um cartão virtual ativo emitido para esta fatura. Cancele o cartão antes de registrar um pagamento feito de outra forma.';
+
+  @override
+  String get codedRefusalExternalPaymentCreditConflict =>
+      'Uma nota de crédito aplicada não corresponde mais ao fornecedor ou à moeda desta fatura, então o valor devido não pode ser determinado. Corrija a fatura primeiro.';
+
+  @override
+  String get codedRefusalExternalPaymentNothingToPay =>
+      'Esta fatura está totalmente coberta por notas de crédito aplicadas, então não há nada a registrar como pago.';
+
+  @override
+  String codedRefusalExternalPaymentPaymentLive(String status) {
+    return 'Um pagamento desta fatura já está em andamento ou liquidado ($status). Anule-o antes de registrar um pagamento feito de outra forma.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentInRun(String run) {
+    return 'Esta fatura está no lote de pagamento $run. Registre o lote inteiro como pago fora do FeohLedger ou cancele o lote primeiro.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountMismatch(String amount) {
+    return 'O valor deve ser igual ao que a fatura deve ($amount), descontadas as notas de crédito aplicadas e qualquer desconto por pagamento antecipado aceito. Pagamentos parciais não podem ser registrados.';
+  }
+
+  @override
+  String codedRefusalExternalPaymentAmountChanged(
+    String staged,
+    String amount,
+  ) {
+    return 'O valor devido desta fatura mudou desde que o lote foi preparado ($staged no lote, $amount devido agora) por causa de uma nota de crédito ou de um desconto por pagamento antecipado. Resolva a diferença com o fornecedor e depois registre a fatura separadamente.';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentErpSplit =>
+      'O ERP informa que esta fatura foi paga com mais de uma forma de pagamento. Registre-a a partir da exceção, que mantém como o pagamento foi dividido.';
+
+  @override
+  String codedRefusalExternalPaymentErpSplitInRun(String run) {
+    return 'Esta fatura está no lote de pagamento $run e o ERP informa que ela foi paga com mais de uma forma de pagamento, o que só a exceção dela pode registrar. Cancele o lote primeiro e depois registre a fatura a partir da exceção.';
+  }
+
+  @override
+  String get codedRefusalExternalPaymentPaidOnFuture =>
+      'A data de pagamento não pode estar no futuro.';
+
+  @override
+  String get codedRefusalPaymentRunSegregation =>
+      'Segregação de funções: o usuário que criou este lote de pagamentos não pode também aprová-lo ou executá-lo. Outro usuário deve fazê-lo.';
+
+  @override
+  String get codedRefusalPaymentRunSegregationRecord =>
+      'Segregação de funções: o usuário que criou este lote de pagamentos não pode também registrá-lo como pago. Outro usuário precisa fazer isso.';
+
+  @override
+  String get codedRefusalPaymentRunSegregationExport =>
+      'Segregação de funções: o usuário que criou este lote de pagamentos não pode também exportar o arquivo bancário dele. Outro usuário precisa fazer isso.';
+
+  @override
+  String get codedRefusalPaymentRunAwaitingCfo =>
+      'Este lote excede o limite de aprovação do CFO da organização e aguarda a aprovação de um usuário com a função de CFO.';
+
+  @override
+  String get codedRefusalPaymentRunNotRecordable =>
+      'Só um lote em rascunho, ou um cujo arquivo bancário foi exportado, pode ser registrado como pago.';
+
+  @override
+  String get codedRefusalPaymentRunNothingToRecord =>
+      'Este lote não tem mais pagamentos a registrar.';
+
+  @override
+  String get codedRefusalExternalPaymentBlockingException =>
+      'Esta fatura tem uma exceção não resolvida que bloqueia o pagamento. Resolva-a antes de registrar a fatura como paga.';
 }

@@ -80,15 +80,25 @@ def test_echoed_value_is_length_bounded():
 # --------------------------------------------------------------------------- #
 
 
-def test_statement_adapter_resolution_fails_closed():
+async def test_statement_adapter_resolution_fails_closed(monkeypatch):
+    import uuid
+
+    from app.services import provider_credentials
     from app.services.extraction_adapters.base import STATEMENT_REASON_PROVIDER_UNKNOWN
     from app.services.vendor_statement_extraction import (
         StatementExtractionError,
         resolve_statement_adapter,
     )
 
+    async def no_sealed_secrets(org_id, block, *, db=None):
+        return {}
+
+    monkeypatch.setattr(provider_credentials, "load_secrets", no_sealed_secrets)
     with pytest.raises(StatementExtractionError) as caught:
-        resolve_statement_adapter({"extraction": {"program_type": "byok", "provider": "openai"}})
+        await resolve_statement_adapter(
+            {"extraction": {"program_type": "byok", "provider": "openai"}},
+            organization_id=uuid.uuid4(),
+        )
     assert caught.value.reason == STATEMENT_REASON_PROVIDER_UNKNOWN
     # PII-free, actionable, and it does not echo the configured name.
     assert "openai" not in caught.value.message

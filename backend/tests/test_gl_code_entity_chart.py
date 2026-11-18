@@ -41,11 +41,15 @@ from app.models.gl_account import GLAccount
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.recurring_invoice import RecurringInvoiceTemplate
 from app.models.vendor import Vendor
+from app.models.workflow import AuditLog
+from app.services import recurring_invoices as recurring_svc
 from app.services.gl_chart import (
     GL_CODES_OUTSIDE_CHART,
     ChartOwnership,
     ChartRefusal,
     InvoiceChart,
+    gl_code_off_chart,
+    load_invoice_chart,
 )
 
 # Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
@@ -866,6 +870,234 @@ async def test_recurring_template_refuses_another_entitys_code(realdb, chart):
             )
         ).scalar_one()
     assert tpl.gl_account == SHARED
+
+
+# ---------------------------------------------------------------------------
+# /api/recurring — generation re-judges the template's code against TODAY's chart
+#
+# §199 refuses a bad code when a template is written; the chart moves on after.
+# `generate_one` judges the code again, through the same `load_invoice_chart`,
+# against the template's own entity — a code the chart refuses is not stamped:
+# the invoice is raised uncoded with `gl_codes_not_in_chart`, and the list
+# flags the template (`gl_account_off_chart`, the `gl_off_chart` filter) so the
+# operator re-codes it once. The list's SQL twin of the rule is pinned to
+# `InvoiceChart.judge` over the same verdict matrix the write paths use.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_template(realdb, entity_id, code, *, name="Chart rent") -> uuid.UUID:
+    """A template written straight to the table — the shape of one whose code
+    was acceptable when written and is judged now against a chart that moved."""
+    async with realdb.sessionmaker(TENANT)() as s:
+        t = RecurringInvoiceTemplate(
+            organization_id=realdb.info(TENANT).org_id,
+            entity_id=entity_id,
+            name=name,
+            vendor_name="Chart Vendor",
+            amount=Decimal("1000.00"),
+            currency="USD",
+            cadence="monthly",
+            day_of_period=1,
+            start_date=date.today().replace(day=1),
+            next_run_on=date.today(),
+            status="active",
+            gl_account=code,
+        )
+        s.add(t)
+        await s.commit()
+        return t.id
+
+
+async def _sql_off_chart(realdb, template_id) -> bool:
+    t = RecurringInvoiceTemplate
+    async with realdb.sessionmaker(TENANT)() as s:
+        return bool(
+            (
+                await s.execute(
+                    select(gl_code_off_chart(t.gl_account, t.entity_id, t.organization_id)).where(
+                        t.id == template_id
+                    )
+                )
+            ).scalar()
+        )
+
+
+async def _judged(realdb, entity_id, code) -> bool:
+    async with realdb.sessionmaker(TENANT)() as s:
+        chart = await load_invoice_chart(s, realdb.info(TENANT).org_id, entity_id, [code])
+    return bool(chart.judge([code]))
+
+
+@pytest.mark.parametrize("code,verdict", ACTIVE_CHART_VERDICTS)
+async def test_off_chart_sql_agrees_with_judge_on_an_active_chart(realdb, chart, code, verdict):
+    entity_a, _ = chart
+    tid = await _seed_template(realdb, entity_a, code)
+    assert await _judged(realdb, entity_a, code) is (verdict is not None)
+    assert await _sql_off_chart(realdb, tid) is (verdict is not None)
+
+
+@pytest.mark.parametrize("code,verdict", EMPTY_CHART_VERDICTS)
+async def test_off_chart_sql_agrees_with_judge_on_an_empty_chart(
+    realdb, empty_chart, code, verdict
+):
+    entity_a, _ = empty_chart
+    tid = await _seed_template(realdb, entity_a, code)
+    assert await _judged(realdb, entity_a, code) is (verdict is not None)
+    assert await _sql_off_chart(realdb, tid) is (verdict is not None)
+
+
+@pytest.mark.parametrize(
+    "code,off",
+    # A NULL-entity template sees the shared chart alone: every entity's own
+    # code is "another entity's" to it; a blank code is never off the chart.
+    [(SHARED, False), (A_OWN, True), (B_OWN, True), (UNKNOWN, True), ("", False), (None, False)],
+)
+async def test_off_chart_sql_agrees_with_judge_for_a_null_entity_template(realdb, chart, code, off):
+    tid = await _seed_template(realdb, None, code)
+    assert await _judged(realdb, None, code) is off
+    assert await _sql_off_chart(realdb, tid) is off
+
+
+async def _retire(realdb, code):
+    async with realdb.sessionmaker(TENANT)() as s:
+        for acct in (
+            (await s.execute(select(GLAccount).where(GLAccount.code == code))).scalars().all()
+        ):
+            acct.is_active = False
+        await s.commit()
+
+
+async def test_generate_now_raises_uncoded_with_a_warning_once_the_account_is_retired(
+    realdb, chart
+):
+    entity_a, _ = chart
+    headers = {"X-Entity-ID": str(entity_a)}
+    tid = await _seed_template(realdb, entity_a, A_OWN)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        before = await c.get(f"/api/recurring/{tid}", headers=headers)
+        assert before.json()["gl_account_off_chart"] is False
+        # The account is retired a year after the template was written.
+        await _retire(realdb, A_OWN)
+        gen = await c.post(f"/api/recurring/{tid}/generate-now", headers=headers)
+        detail = await c.get(f"/api/recurring/{tid}", headers=headers)
+    assert gen.status_code == 201, gen.text
+    inv = await _invoice(realdb, uuid.UUID(gen.json()["invoice_id"]))
+    assert inv.gl_account is None
+    assert [(w["code"], w["type"], w["params"]) for w in inv.warnings] == [
+        ("gl_codes_not_in_chart", "gl_account_invalid", {"codes": A_OWN})
+    ]
+    assert inv.warnings[0]["codes"] == [A_OWN]
+    # The template keeps its code — re-coding it is the operator's call — and
+    # says so on every read.
+    assert detail.json()["gl_account"] == A_OWN
+    assert detail.json()["gl_account_off_chart"] is True
+    async with realdb.sessionmaker(TENANT)() as s:
+        audit = (
+            await s.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "invoice.created", AuditLog.entity_id == inv.id
+                )
+            )
+        ).scalar_one()
+    assert audit.details["gl_account_not_in_chart"] == A_OWN
+
+
+async def test_generate_now_stamps_a_code_the_chart_still_offers(realdb, chart):
+    entity_a, _ = chart
+    headers = {"X-Entity-ID": str(entity_a)}
+    tid = await _seed_template(realdb, entity_a, A_OWN)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        gen = await c.post(f"/api/recurring/{tid}/generate-now", headers=headers)
+    assert gen.status_code == 201, gen.text
+    inv = await _invoice(realdb, uuid.UUID(gen.json()["invoice_id"]))
+    assert inv.gl_account == A_OWN
+    assert not inv.warnings
+
+
+async def test_sweep_raises_uncoded_with_a_warning_for_a_retired_account(realdb, chart):
+    entity_a, _ = chart
+    stale = await _seed_template(realdb, entity_a, A_RETIRED, name="Stale rent")
+    live = await _seed_template(realdb, entity_a, SHARED, name="Live rent")
+
+    outcome = await recurring_svc._sweep_tenant(realdb.info(TENANT).db_name, date.today())
+
+    assert outcome.generated == 2
+    assert outcome.template_failures == 0
+    async with realdb.sessionmaker(TENANT)() as s:
+        by_template = {
+            inv.recurring_template_id: inv
+            for inv in (
+                await s.execute(
+                    select(Invoice).where(Invoice.recurring_template_id.in_([stale, live]))
+                )
+            ).scalars()
+        }
+    assert by_template[stale].gl_account is None
+    assert [w["code"] for w in by_template[stale].warnings] == ["gl_codes_not_in_chart"]
+    assert by_template[live].gl_account == SHARED
+    assert not by_template[live].warnings
+
+
+async def test_list_flags_and_filters_templates_whose_code_left_the_chart(realdb, chart):
+    entity_a, _ = chart
+    headers = {"X-Entity-ID": str(entity_a)}
+    stale = await _seed_template(realdb, entity_a, A_RETIRED, name="Stale rent")
+    live = await _seed_template(realdb, entity_a, A_OWN, name="Live rent")
+    async with realdb.client(key=TENANT, role="ap_clerk") as c:
+        listed = await c.get("/api/recurring", headers=headers)
+        filtered = await c.get("/api/recurring", params={"gl_off_chart": "true"}, headers=headers)
+        summary = await c.get("/api/recurring/summary", headers=headers)
+        summary_f = await c.get(
+            "/api/recurring/summary", params={"gl_off_chart": "true"}, headers=headers
+        )
+    assert listed.status_code == 200, listed.text
+    flags = {t["id"]: t["gl_account_off_chart"] for t in listed.json()["items"]}
+    assert flags[str(stale)] is True
+    assert flags[str(live)] is False
+    assert filtered.status_code == 200, filtered.text
+    assert [t["id"] for t in filtered.json()["items"]] == [str(stale)]
+    assert filtered.json()["total"] == 1
+    assert summary.json()["gl_off_chart"] == 1
+    assert summary.json()["total"] == 2
+    # The filter narrows the summary the same way it narrows the list.
+    assert summary_f.json()["total"] == 1
+    assert summary_f.json()["gl_off_chart"] == 1
+
+
+async def test_write_responses_carry_the_off_chart_flag_a_reload_would(realdb, chart):
+    """The page replaces a row in place from a PATCH or lifecycle response
+    (`_respond`), so each must carry `gl_account_off_chart` exactly as the list
+    reads it: kept through a cosmetic edit and pause / resume / end, and
+    cleared by the re-code that fixes it."""
+    entity_a, _ = chart
+    headers = {"X-Entity-ID": str(entity_a)}
+    tid = await _seed_template(realdb, entity_a, A_RETIRED, name="Stale rent")
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        cosmetic = await c.patch(f"/api/recurring/{tid}", json={"notes": "n"}, headers=headers)
+        paused = await c.post(f"/api/recurring/{tid}/pause", headers=headers)
+        resumed = await c.post(f"/api/recurring/{tid}/resume", headers=headers)
+        recoded = await c.patch(
+            f"/api/recurring/{tid}", json={"gl_account": SHARED}, headers=headers
+        )
+        filtered = await c.get("/api/recurring", params={"gl_off_chart": "true"}, headers=headers)
+        ended = await c.post(f"/api/recurring/{tid}/end", headers=headers)
+
+        # A second stale template, ended while still off the chart.
+        stale = await _seed_template(realdb, entity_a, A_RETIRED, name="Other stale")
+        ended_stale = await c.post(f"/api/recurring/{stale}/end", headers=headers)
+
+    for resp, flag in (
+        (cosmetic, True),
+        (paused, True),
+        (resumed, True),
+        (recoded, False),
+        (ended, False),
+        (ended_stale, True),
+    ):
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["gl_account_off_chart"] is flag, resp.request.url
+    assert recoded.json()["gl_account"] == SHARED
+    assert [t["id"] for t in filtered.json()["items"]] == []
 
 
 # ---------------------------------------------------------------------------

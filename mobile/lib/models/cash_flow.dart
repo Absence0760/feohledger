@@ -22,6 +22,13 @@ class CashFlowForecastPeriod {
   final String discountEligibleAmountDisplay;
   final int count;
 
+  /// AP already past due that the backend carried into this period — the
+  /// first one, since it is owed now. Part of [scheduledAmountDisplay], NOT of
+  /// the committed / pending split (`scheduled = committed + pending +
+  /// overdue`). `0` against a backend older than the field.
+  final String overdueAmountDisplay;
+  final int overdueCount;
+
   CashFlowForecastPeriod({
     required this.period,
     required this.scheduledAmountDisplay,
@@ -29,6 +36,8 @@ class CashFlowForecastPeriod {
     required this.pendingAmountDisplay,
     required this.discountEligibleAmountDisplay,
     required this.count,
+    this.overdueAmountDisplay = '0',
+    this.overdueCount = 0,
   });
 
   factory CashFlowForecastPeriod.fromJson(Map<String, dynamic> json) {
@@ -40,6 +49,8 @@ class CashFlowForecastPeriod {
       discountEligibleAmountDisplay:
           moneyToDisplay(json['discount_eligible_amount']),
       count: (json['count'] as num?)?.toInt() ?? 0,
+      overdueAmountDisplay: moneyToDisplay(json['overdue_amount']),
+      overdueCount: (json['overdue_count'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -58,6 +69,12 @@ class CashFlowForecastTotals {
   /// currencies by that many rows.
   final int unconvertedCount;
 
+  /// AP already past due across the horizon (`totals.overdue_amount` /
+  /// `overdue_count`), all of it in the first period's outflow. Inside
+  /// [scheduledAmountDisplay], outside committed / pending.
+  final String overdueAmountDisplay;
+  final int overdueCount;
+
   CashFlowForecastTotals({
     required this.scheduledAmountDisplay,
     required this.committedAmountDisplay,
@@ -65,6 +82,8 @@ class CashFlowForecastTotals {
     required this.discountEligibleAmountDisplay,
     required this.count,
     this.unconvertedCount = 0,
+    this.overdueAmountDisplay = '0',
+    this.overdueCount = 0,
   });
 
   factory CashFlowForecastTotals.fromJson(Map<String, dynamic> json) {
@@ -76,6 +95,8 @@ class CashFlowForecastTotals {
           moneyToDisplay(json['discount_eligible_amount']),
       count: (json['count'] as num?)?.toInt() ?? 0,
       unconvertedCount: unconvertedCountOf(json['unconverted_count']),
+      overdueAmountDisplay: moneyToDisplay(json['overdue_amount']),
+      overdueCount: (json['overdue_count'] as num?)?.toInt() ?? 0,
     );
   }
 }
