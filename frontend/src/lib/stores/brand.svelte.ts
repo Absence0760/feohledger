@@ -7,6 +7,14 @@ import {
 	type Brand,
 	type BrandMarkChoice
 } from '#lib/stores/brandTheme.ts';
+import {
+	ACCENT_PROPS,
+	browserStorage,
+	clearAccentCache,
+	readAccentCache,
+	writeAccentCache
+} from '#lib/stores/brandAccentCache.ts';
+import { getTenantStorageKey } from '#lib/tenant.ts';
 
 /**
  * Per-tenant white-label branding (logo, product name, accent theme colors,
@@ -27,6 +35,11 @@ import {
  *
  * The pure theming helpers (`isValidHexColor`, `brandThemeVars`) live in the
  * runtime-free `brandTheme.ts` so they're unit-testable; re-exported here.
+ *
+ * The applied accent is cached per workspace (`brandAccentCache.ts`) so the
+ * next cold load paints it before first paint (`app.html`'s accent-boot
+ * script) and an in-app sign-in paints it before the read lands
+ * ({@link BrandStore.ensureLoaded}); the fetched branding always corrects it.
  */
 
 export type { Brand, BrandMarkChoice };
@@ -67,6 +80,7 @@ class BrandStore {
 	async ensureLoaded(): Promise<void> {
 		if (this.#loaded) return;
 		if (this.#inflight) return this.#inflight;
+		this.#applyCachedAccent();
 		this.#inflight = (async () => {
 			try {
 				const data = await api.get<Partial<Brand>>('/api/organization/branding');
@@ -91,22 +105,43 @@ class BrandStore {
 		if (typeof document === 'undefined') return;
 		const root = document.documentElement;
 		const vars = brandThemeVars(this.brand);
-		for (const prop of ['--accent', '--accent-strong']) {
+		for (const prop of ACCENT_PROPS) {
 			if (vars[prop]) root.style.setProperty(prop, vars[prop]);
 			else root.style.removeProperty(prop);
+		}
+		// Only fetched branding is authoritative enough to cache: before the
+		// first successful read `this.brand` is the empty default, and writing
+		// that would erase a good entry on a transient failure.
+		if (this.#loaded) writeAccentCache(browserStorage(), getTenantStorageKey(), vars);
+	}
+
+	/**
+	 * Paint the cached accent while the read is in flight — the in-app sign-in
+	 * path, where no reload runs `app.html`'s pre-paint script. Validated on
+	 * read; `applyTheme()` replaces it with the fetched values.
+	 */
+	#applyCachedAccent(): void {
+		if (typeof document === 'undefined') return;
+		const cached = readAccentCache(browserStorage(), getTenantStorageKey());
+		for (const prop of ACCENT_PROPS) {
+			const value = cached[prop];
+			if (value) document.documentElement.style.setProperty(prop, value);
 		}
 	}
 
 	/** Convenience: load (if needed) then apply the theme. */
 	async ensureLoadedAndApply(): Promise<void> {
 		await this.ensureLoaded();
-		this.applyTheme();
+		// A failed read leaves whatever the cache painted standing (the
+		// tenant's last-known colour) rather than wiping it to the default.
+		if (this.#loaded) this.applyTheme();
 	}
 
 	reset(): void {
 		this.brand = { ...EMPTY_BRAND };
 		this.#loaded = false;
 		this.#inflight = null;
+		clearAccentCache(browserStorage(), getTenantStorageKey());
 		if (typeof document !== 'undefined') {
 			document.documentElement.style.removeProperty('--accent');
 			document.documentElement.style.removeProperty('--accent-strong');
