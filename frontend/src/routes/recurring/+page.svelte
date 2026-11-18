@@ -76,6 +76,11 @@
 	// URL-backed filter state (mirrors the contracts page convention).
 	let search = $state(page.url.searchParams.get('search') ?? '');
 	let statusFilter = $state<string>(page.url.searchParams.get('status') ?? 'all');
+	// `gl=off_chart` narrows to templates whose GL code the chart no longer
+	// accepts — the ones generating uncoded invoices until someone re-codes them.
+	let glFilter = $state<string>(
+		page.url.searchParams.get('gl') === 'off_chart' ? 'off_chart' : 'all'
+	);
 
 	let templates = $state<RecurringTemplate[]>([]);
 	let total = $state(0);
@@ -97,8 +102,9 @@
 	// still reads the CURRENT value, so the request carries the live search
 	// term; it just stops the read registering as the caller's dependency.
 	function buildParams() {
-		const params: { status?: string; search?: string } = {};
+		const params: { status?: string; search?: string; gl_off_chart?: boolean } = {};
 		if (statusFilter !== 'all') params.status = statusFilter;
+		if (glFilter === 'off_chart') params.gl_off_chart = true;
 		const currentSearch = untrack(() => search);
 		if (currentSearch.trim()) params.search = currentSearch.trim();
 		return params;
@@ -122,6 +128,8 @@
 			else url.searchParams.delete('status');
 			if (search.trim()) url.searchParams.set('search', search.trim());
 			else url.searchParams.delete('search');
+			if (glFilter === 'off_chart') url.searchParams.set('gl', 'off_chart');
+			else url.searchParams.delete('gl');
 			replaceState(`${url.pathname}${url.search}`, {});
 		});
 	}
@@ -192,6 +200,7 @@
 
 	$effect(() => {
 		statusFilter;
+		glFilter;
 		syncUrl();
 		load();
 	});
@@ -351,6 +360,19 @@
 	}
 
 	const activeCount = $derived(recurringSummary?.by_status.active ?? 0);
+	const offChartCount = $derived(recurringSummary?.gl_off_chart ?? 0);
+	// Offered only while there is something to find (or the filter is already
+	// on, so it can always be turned back off).
+	const showGlFilter = $derived(offChartCount > 0 || glFilter === 'off_chart');
+	const GL_CHIPS = $derived([
+		{ key: 'all', label: m('recurring.glFilter.all') },
+		{
+			key: 'off_chart',
+			label: m('recurring.glFilter.offChart'),
+			count: offChartCount,
+			alert: offChartCount > 0
+		}
+	]);
 	const soonestNextRun = $derived(recurringSummary?.soonest_next_run ?? null);
 	const monthlyGroups = $derived(
 		formatCurrencyTotals(recurringSummary?.monthly_equivalent ?? [])
@@ -396,6 +418,9 @@
 		<SearchBox bind:value={search} placeholder={m('recurring.search.placeholder')} ariaLabel={m('recurring.search.aria')} />
 		<div class="help-row">
 			<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+			{#if showGlFilter}
+				<FilterChips chips={GL_CHIPS} bind:active={glFilter} />
+			{/if}
 			<HelpTip term="recurring-invoice" />
 		</div>
 	</div>
@@ -454,6 +479,15 @@
 									})}
 								>
 									{m('recurring.skip.pill')}
+								</Badge>
+							{/if}
+							{#if template.gl_account_off_chart}
+								<Badge
+									tone="warning"
+									variant="gl-off-chart"
+									title={m('recurring.glOffChart.title', { code: template.gl_account ?? '—' })}
+								>
+									{m('recurring.glOffChart.pill')}
 								</Badge>
 							{/if}
 						</span>

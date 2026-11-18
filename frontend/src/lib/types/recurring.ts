@@ -142,6 +142,11 @@ export interface RecurringTemplate {
 	variance_tolerance_pct: number | null;
 	notes: string | null;
 	last_skip: GenerationSkip | null;
+	/** True when `gl_account` is no longer a code the template entity's chart
+	 *  accepts (retired, unknown, or another entity's). Generation then raises
+	 *  the invoice uncoded with a `gl_codes_not_in_chart` warning; this flag is
+	 *  how the operator finds the template to re-code. */
+	gl_account_off_chart: boolean;
 	created_at: string;
 	updated_at: string | null;
 }
@@ -199,6 +204,9 @@ export interface RecurringTemplateSummary {
 	monthly_equivalent: RecurringCurrencyTotal[];
 	/** Earliest `next_run_on` across active templates in the set (ISO date), or null. */
 	soonest_next_run: string | null;
+	/** Templates in the set whose GL code the chart no longer accepts — the
+	 *  "needs GL re-coding" filter's count, over the whole set. NOT money. */
+	gl_off_chart: number;
 }
 
 // GET /api/recurring/{id}/upcoming-schedule

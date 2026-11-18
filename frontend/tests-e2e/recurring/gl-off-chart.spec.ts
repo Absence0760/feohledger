@@ -1,0 +1,115 @@
+import { expect, test } from '../fixtures/helpers';
+
+/**
+ * `/recurring` surfaces a template whose GL code the chart no longer accepts.
+ *
+ * Generation re-judges the template's `gl_account` against its entity's chart
+ * (`services/recurring_invoices._gl_code_for_generation`); a retired, unknown
+ * or another entity's code is not stamped — the invoice is raised uncoded with
+ * `gl_codes_not_in_chart`. The template keeps the code, so the list has to say
+ * which templates need re-coding: a per-row badge (`gl_account_off_chart`) and
+ * a whole-set filter (`gl_off_chart`, counted by `GET /api/recurring/summary`).
+ *
+ * The backend verdict is pinned by `backend/tests/test_gl_code_entity_chart.py`;
+ * responses are stubbed here so the assertion doesn't depend on the shard
+ * tenant's chart.
+ */
+
+function template(n: number, glOffChart: boolean) {
+	return {
+		id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+		name: `E2E GL Template ${n}`,
+		entity_id: null,
+		vendor_id: null,
+		vendor_name: 'Acme',
+		description: null,
+		amount: '1000.00',
+		currency: 'USD',
+		gl_account: glOffChart ? '6800' : '6000',
+		cost_center: null,
+		department: null,
+		project: null,
+		po_number: null,
+		payment_terms: null,
+		cadence: 'monthly',
+		day_of_period: 1,
+		start_date: '2026-01-01',
+		end_date: null,
+		next_run_on: '2026-12-01',
+		last_period_key: null,
+		last_generated_at: null,
+		generated_count: 0,
+		status: 'active',
+		variance_tolerance_pct: null,
+		notes: null,
+		last_skip: null,
+		gl_account_off_chart: glOffChart,
+		created_at: '2026-01-01T00:00:00Z',
+		updated_at: '2026-01-01T00:00:00Z'
+	};
+}
+
+test('a template coded to an account the chart dropped is badged and filterable', async ({
+	page
+}) => {
+	const listQueries: URLSearchParams[] = [];
+	await page.route('**/api/recurring**', async (route) => {
+		const url = new URL(route.request().url());
+		const offOnly = url.searchParams.get('gl_off_chart') === 'true';
+		if (url.pathname === '/api/recurring/summary') {
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					total: offOnly ? 1 : 2,
+					by_status: { active: offOnly ? 1 : 2 },
+					monthly_equivalent: [],
+					soonest_next_run: '2026-12-01',
+					gl_off_chart: 1
+				})
+			});
+		}
+		if (url.pathname === '/api/recurring') {
+			listQueries.push(url.searchParams);
+			const items = offOnly
+				? [template(1, true)]
+				: [template(1, true), template(2, false)];
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					items,
+					total: items.length,
+					page: 1,
+					page_size: 20
+				})
+			});
+		}
+		return route.continue();
+	});
+
+	await page.goto('/recurring');
+
+	const stale = page.locator('tr').filter({ hasText: 'E2E GL Template 1' });
+	const live = page.locator('tr').filter({ hasText: 'E2E GL Template 2' });
+	await expect(stale.locator('.badge.gl-off-chart')).toHaveText(
+		'Needs GL re-coding'
+	);
+	await expect(stale.locator('.badge.gl-off-chart')).toHaveAttribute(
+		'title',
+		/6800/
+	);
+	await expect(live).toBeVisible();
+	await expect(live.locator('.badge.gl-off-chart')).toHaveCount(0);
+
+	// The filter chip carries the whole-set count and asks the server for the
+	// set, rather than hiding rows of the loaded page.
+	const chip = page.getByRole('button', { name: /Needs GL re-coding/ });
+	await expect(chip.locator('.count')).toHaveText('1');
+	await chip.click();
+	await expect(chip).toHaveAttribute('aria-pressed', 'true');
+	await expect(live).toHaveCount(0);
+	await expect(stale).toBeVisible();
+	await expect(page).toHaveURL(/[?&]gl=off_chart/);
+	expect(listQueries.at(-1)?.get('gl_off_chart')).toBe('true');
+});
