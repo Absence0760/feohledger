@@ -294,7 +294,7 @@ feoh_pg_run() {
 
 # ── Provisioning a tenant ────────────────────────────────────────────────────
 #
-# feoh_tenant_argv <slug> <name> <admin-email> [print-link] builds the command
+# feoh_tenant_argv <slug> <name> <admin-email> builds the command
 # that provisions a tenant inside the api container, without running it.
 # add-tenant.sh execs it into the running api; CI's day-one job
 # (scripts/day-one/stack.sh) execs the same array into its api container, so
@@ -304,22 +304,18 @@ feoh_pg_run() {
 #
 # The admin is created with NO password and emailed a single-use set-password
 # link, the one "Invite User" sends (docs/decisions.md §283): the operator never
-# holds the customer's credential. A fourth argument of 1 adds --print-link,
-# which prints the link to the operator's terminal instead of emailing it, for
-# a tenant whose mail does not work yet.
+# holds the customer's credential. There is no way to print the link instead:
+# this runs on the VM, often through SSM, whose output is retained.
 #
 # --skip-existing makes add-tenant.sh re-runnable: a second run for a tenant
 # that already exists skips provisioning cleanly instead of tripping the
 # deliberate duplicate-slug error.
 feoh_tenant_argv() {
-	local slug=$1 name=$2 email=$3 print_link=${4:-0}
+	local slug=$1 name=$2 email=$3
 	FEOH_TENANT_ARGV=(python scripts/create_tenant.py
 		--name "$name" --slug "$slug"
 		--admin-email "$email"
 		--skip-existing)
-	if [ "$print_link" = 1 ]; then
-		FEOH_TENANT_ARGV+=(--print-link)
-	fi
 }
 
 # ── Source: which commit the deploy builds ───────────────────────────────────
