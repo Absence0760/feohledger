@@ -109,13 +109,13 @@
 	const showStatus = $derived(includeInactive);
 
 	const COLUMNS = $derived([
-		{ label: m('glAccounts.col.code') },
+		{ label: m('glAccounts.col.code'), class: 'col-code' },
 		{ label: m('glAccounts.col.name') },
-		{ label: m('glAccounts.col.type') },
-		{ label: m('glAccounts.col.parent') },
-		...(showScope ? [{ label: m('glAccounts.col.scope') }] : []),
-		{ label: m('glAccounts.col.erpId') },
-		...(showStatus ? [{ label: m('glAccounts.col.status') }] : []),
+		{ label: m('glAccounts.col.type'), class: 'col-type' },
+		{ label: m('glAccounts.col.parent'), class: 'col-parent' },
+		...(showScope ? [{ label: m('glAccounts.col.scope'), class: 'col-scope' }] : []),
+		{ label: m('glAccounts.col.erpId'), class: 'col-erp' },
+		...(showStatus ? [{ label: m('glAccounts.col.status'), class: 'col-status' }] : []),
 		...(canManage ? [{ class: 'actions-col' }] : [])
 	]);
 
@@ -416,7 +416,8 @@
 			onaction={canManage ? () => (showCreate = true) : undefined}
 		/>
 	{:else}
-		<DataTable columns={COLUMNS} isEmpty={accounts.length === 0} empty={emptyMessage}>
+		<div class="gl-table">
+		<DataTable fixed columns={COLUMNS} isEmpty={accounts.length === 0} empty={emptyMessage}>
 			{#snippet body()}
 				{#each accounts as acct (acct.id)}
 					<!-- `.row-muted` (not opacity) de-emphasises a retired account —
@@ -514,6 +515,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		</div>
 
 		{#if accounts.length > 0}
 			<!-- A plain count, never "Showing all N": the read is unpaginated, so
@@ -553,6 +555,30 @@
 {/if}
 
 <style>
+	/* Column widths. The chart is
+	   `table-layout: fixed` (DataTable's `fixed`): under `auto` the header
+	   cells were sized against the one "Loading…" row, then re-sized against
+	   the real rows, so every column slid sideways as the data landed. Fixed
+	   widths come from the header alone and hold from first paint. The
+	   predictable columns get widths sized to their widest content; the text
+	   column carries none and takes the rest. The `min-width` keeps it
+	   readable: past it the table scrolls inside its region, which is what a
+	   phone gets (frontend/docs/ui-patterns.md § Data tables). DataTable
+	   renders these `<th>` from `columns`, so the selectors go through
+	   `:global` under a page-owned wrapper (the /vendors pattern). */
+	.gl-table {
+		min-width: 0;
+	}
+	.gl-table :global(table) { min-width: 1330px; }
+	.gl-table :global(th.col-code) { width: 120px; }
+	.gl-table :global(th.col-type) { width: 140px; }
+	.gl-table :global(th.col-parent) { width: 120px; }
+	.gl-table :global(th.col-scope) { width: 160px; }
+	.gl-table :global(th.col-erp) { width: 170px; }
+	.gl-table :global(th.col-status) { width: 120px; }
+	/* Up to three actions (link to the ERP, Edit, Retire) on one line. */
+	.gl-table :global(th.actions-col) { width: 300px; }
+
 	.filter-row {
 		display: flex;
 		align-items: center;

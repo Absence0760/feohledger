@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**104 open: 74 (c) · 12 (a) · 18 (b)** — re-derived from the file, never carried
+**101 open: 71 (c) · 12 (a) · 18 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1532,22 +1532,6 @@ scope (§260) — do not fold them into any of these.
       customer #1, with the status-page work, or at once if Caddy's logs show
       a renewal failure.
 
-### Surfaced by measuring the page-change glitch (2026-10-22, `tests-e2e/reactivity/layout-stability.spec.ts`)
-
-- [ ] **(c) Tables without `fixed` re-flow their columns when their rows
-      land.** `DataTable` uses `table-layout: auto` unless the page passes
-      `fixed`, so the header cells are sized against the one "Loading…" row
-      and then re-sized against the real rows: every column slides sideways as
-      the data arrives (measured on /payments, /purchase-orders,
-      /gl-accounts — small layout-shift scores, but visible). /invoices passes
-      `fixed` with per-column widths and does not move. **Durable fix:** give
-      each list page's `DataTable` `fixed` plus `<th>` widths, as /invoices
-      does, page by page as each is next touched; extend
-      `tests-e2e/reactivity/layout-stability.spec.ts` with a header-cell
-      x-position check per converted page. **Trigger:** the next polish pass on
-      any of those pages, or a second report of pages "jumping" once the
-      vertical shifts fixed here have shipped.
-
 ### Surfaced by the 2026-10-22 production walkthrough (decisions §317–§318)
 
 The walkthrough found defects the suite could not see because each check
@@ -1555,20 +1539,19 @@ covered the one page or shape it was written for. #646 / §318 closed the
 QuickBooks half with recorded shapes and a live check; these are the
 user-visible halves still open.
 
-- [ ] **(c) The layout-shift budget covers three list pages.** #644's
-      `tests-e2e/reactivity/layout-stability.spec.ts` holds /invoices,
-      /payments and /exceptions' late responses behind a gate and asserts the
-      table does not move; /vendors, /purchase-orders, /gl-accounts,
-      /credit-memos, /expenses, /contracts, /bank-reconciliation and the
-      dashboard have no such check, and the measurement
-      showed small shifts on some of them. **Durable fix:** make the spec
-      table-driven over every main list page, with each page's late
-      responses delayed by a realistic latency (the 2026-10-22 production
-      timings, not zero), a cumulative layout-shift budget per page
-      (`PerformanceObserver` `layout-shift`, under 0.1, the Core Web Vitals
-      "good" line), and a new list page without a row failing the spec.
-      **Trigger:** the next list page added, or the next polish pass on any of
-      those pages.
+- [ ] **(c) The layout-shift budget covers eleven pages.**
+      `tests-e2e/reactivity/layout-stability.spec.ts` is table-driven
+      (`LIST_PAGES`): the dashboard and ten list pages are opened with every
+      API response delayed, held to a cumulative layout shift under 0.1, and
+      the six `fixed` tables also have their header columns' x positions
+      checked. The other list pages in the sidebar (screening, bank changes,
+      goods receipts, requisitions, intake, catalogs, budgets, discounts,
+      recurring, statements, Positive Pay, audit, workflows, experiments,
+      adaptive, 1099, and the admin lists) sit in `NOT_LIST_PAGES` as
+      "Unmeasured", unmeasured and not yet given `fixed` widths. **Durable
+      fix:** move each into `LIST_PAGES`, giving its `DataTable` `fixed` plus
+      `<th>` widths where its columns slide. **Trigger:** the next polish pass
+      on any of those pages.
 - [ ] **(c) No scripted "first customer" release rehearsal.** The 2026-10-22
       walkthrough — sign up, connect QuickBooks, sync the chart and vendors,
       enter an invoice, approve it, push it, pay the bill in QuickBooks, watch

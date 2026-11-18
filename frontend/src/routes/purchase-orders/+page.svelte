@@ -23,12 +23,12 @@
 	import { untrack } from 'svelte';
 
 	const COLUMNS = $derived([
-		{ label: m('purchaseOrders.col.poNumber') },
+		{ label: m('purchaseOrders.col.poNumber'), class: 'col-number' },
 		{ label: m('purchaseOrders.col.vendor') },
-		{ label: m('purchaseOrders.col.total'), class: 'right' },
-		{ label: m('purchaseOrders.col.status') },
-		{ label: m('purchaseOrders.col.lines') },
-		{ label: m('purchaseOrders.col.created') }
+		{ label: m('purchaseOrders.col.total'), class: 'right col-total' },
+		{ label: m('purchaseOrders.col.status'), class: 'col-status' },
+		{ label: m('purchaseOrders.col.lines'), class: 'col-lines' },
+		{ label: m('purchaseOrders.col.created'), class: 'col-created' }
 	]);
 
 	interface POLineItem {
@@ -362,7 +362,9 @@
 		<FilterChips chips={statusChips} bind:active={statusFilter} />
 	</div>
 
+	<div class="po-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={pos.length === 0}
 		empty={loading ? m('common.loading') : m('purchaseOrders.empty')}
@@ -401,6 +403,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 
 	{#if hasMore}
 		<div class="load-more-row">
@@ -519,6 +522,27 @@
 
 <style>
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
+
+	/* Column widths. The list is
+	   `table-layout: fixed` (DataTable's `fixed`): under `auto` the header
+	   cells were sized against the one "Loading…" row, then re-sized against
+	   the real rows, so every column slid sideways as the data landed. Fixed
+	   widths come from the header alone and hold from first paint. The
+	   predictable columns get widths sized to their widest content; the text
+	   column carries none and takes the rest. The `min-width` keeps it
+	   readable: past it the table scrolls inside its region, which is what a
+	   phone gets (frontend/docs/ui-patterns.md § Data tables). DataTable
+	   renders these `<th>` from `columns`, so the selectors go through
+	   `:global` under a page-owned wrapper (the /vendors pattern). */
+	.po-table {
+		min-width: 0;
+	}
+	.po-table :global(table) { min-width: 860px; }
+	.po-table :global(th.col-number) { width: 150px; }
+	.po-table :global(th.col-total) { width: 160px; }
+	.po-table :global(th.col-status) { width: 140px; }
+	.po-table :global(th.col-lines) { width: 80px; }
+	.po-table :global(th.col-created) { width: 130px; }
 	.btn-outline {
 		padding: 8px 16px;
 		border-radius: 6px;
