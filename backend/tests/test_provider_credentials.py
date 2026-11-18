@@ -988,9 +988,7 @@ async def test_migration_0135_gate_recognises_the_control_plane(realdb):
 
 
 @pytest.mark.asyncio
-async def test_migration_0135_kms_error_rolls_back_leaving_plaintext_in_place(
-    realdb, fake_kms
-):
+async def test_migration_0135_kms_error_rolls_back_leaving_plaintext_in_place(realdb, fake_kms):
     """A KMS failure part-way through raises and the transaction unwinds: the
     block sealed before the failure leaves no row, and every plaintext value is
     still where the running code reads it — never a secret in neither place."""
