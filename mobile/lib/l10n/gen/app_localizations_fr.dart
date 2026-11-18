@@ -140,9 +140,26 @@ class AppLocalizationsFr extends AppLocalizations {
   String get dashboardCachedBanner => 'Données en cache — serveur injoignable';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'Erreur : $error';
-  }
+  String get dashboardLoadError =>
+      'Impossible de charger le tableau de bord. Vérifiez votre connexion et appuyez sur Réessayer.';
+
+  @override
+  String get dashboardRefreshFailed =>
+      'Actualisation impossible : voici les derniers chiffres chargés. Tirez vers le bas pour réessayer.';
+
+  @override
+  String get dashboardNeedsAttention => 'Requiert votre attention';
+
+  @override
+  String get dashboardOverview => 'Vue d’ensemble';
+
+  @override
+  String get dashboardEmpty =>
+      'Aucune facture pour l’instant. Les factures capturées et importées apparaîtront ici.';
+
+  @override
+  String get dashboardTopVendorsEmpty =>
+      'Aucune dépense fournisseur pour l’instant.';
 
   @override
   String dashboardInvoiceCount(int count) {

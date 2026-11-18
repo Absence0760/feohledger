@@ -38,28 +38,46 @@ class DashboardStore extends ChangeNotifier {
       final result = await OfflineStore.instance.cachedFetch<DashboardData>(
         key: 'dashboard',
         fetch: DashboardApi.get,
+        // Cached in the WIRE shape `DashboardData.fromJson` reads, so the
+        // offline screen shows what the live one did. It used to drop the
+        // `reporting` block (figures lost their currency), every unconverted
+        // count (the face-value disclosures vanished offline), and the
+        // upcoming list (the Upcoming KPI read 0 / 0).
         toCache: (d) => {
           'total_invoices': d.totalInvoices,
           'total_amount': d.totalAmount,
+          'reporting': {
+            'reporting_currency': d.reportingCurrency,
+            'total_amount': d.totalAmount,
+            'unconverted_count': d.unconvertedCount,
+          },
           'pipeline': d.pipeline,
           'vendor_spend': d.topVendors
               .map((v) => {
                     'vendor': v.vendorName,
                     'amount': v.totalAmount,
                     'invoice_count': v.invoiceCount,
+                    'unconverted_count': v.unconvertedCount,
                   })
               .toList(),
-          'aging': {
+          'aging_reporting': {
             'current': d.aging.current,
             'days_30': d.aging.thirtyDays,
             'days_60': d.aging.sixtyDays,
             'days_90_plus': d.aging.ninetyPlus,
+            'unconverted_count': d.aging.unconvertedCount,
           },
           'monthly_trend': d.trends
               .map(
                   (t) => {'month': t.month, 'count': t.count, 'amount': t.amount})
               .toList(),
-          'upcoming_payments': [],
+          // fromJson counts the list; the rows themselves are not rendered.
+          'upcoming_payments': List<Map<String, dynamic>>.filled(
+            d.upcoming.count,
+            const <String, dynamic>{},
+          ),
+          'upcoming_total_amount_reporting': d.upcoming.totalAmount,
+          'upcoming_unconverted_count': d.upcoming.unconvertedCount,
         },
         fromCache: (json) =>
             DashboardData.fromJson(json as Map<String, dynamic>),

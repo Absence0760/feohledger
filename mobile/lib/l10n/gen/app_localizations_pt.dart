@@ -141,9 +141,25 @@ class AppLocalizationsPt extends AppLocalizations {
       'Dados em cache — não foi possível conectar ao servidor';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'Erro: $error';
-  }
+  String get dashboardLoadError =>
+      'Não foi possível carregar o painel. Verifique a ligação e toque em Tentar novamente.';
+
+  @override
+  String get dashboardRefreshFailed =>
+      'Não foi possível atualizar — estes são os últimos valores carregados. Puxe para baixo para tentar novamente.';
+
+  @override
+  String get dashboardNeedsAttention => 'Requer a sua atenção';
+
+  @override
+  String get dashboardOverview => 'Visão geral';
+
+  @override
+  String get dashboardEmpty =>
+      'Ainda não há faturas. As faturas capturadas e carregadas aparecerão aqui.';
+
+  @override
+  String get dashboardTopVendorsEmpty => 'Ainda não há despesa por fornecedor.';
 
   @override
   String dashboardInvoiceCount(int count) {
@@ -4471,9 +4487,25 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
       'Dados em cache — não foi possível conectar ao servidor';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'Erro: $error';
-  }
+  String get dashboardLoadError =>
+      'Não foi possível carregar o painel. Verifique sua conexão e toque em Tentar novamente.';
+
+  @override
+  String get dashboardRefreshFailed =>
+      'Não foi possível atualizar — estes são os últimos valores carregados. Puxe para baixo para tentar novamente.';
+
+  @override
+  String get dashboardNeedsAttention => 'Requer sua atenção';
+
+  @override
+  String get dashboardOverview => 'Visão geral';
+
+  @override
+  String get dashboardEmpty =>
+      'Ainda não há faturas. As faturas capturadas e enviadas aparecerão aqui.';
+
+  @override
+  String get dashboardTopVendorsEmpty => 'Ainda não há gastos por fornecedor.';
 
   @override
   String dashboardInvoiceCount(int count) {
