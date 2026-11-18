@@ -873,7 +873,7 @@ async def portal_mfa_challenge(
     else:
         if not await mfa.verify_totp(vu.mfa_secret, body.code):
             await _audit_verify_failure()
-            raise HTTPException(status_code=401, detail="Invalid code")
+            raise HTTPException(status_code=401, detail=MFA_CODE_INVALID_DETAIL)
 
     await clear_auth_failures("portal_mfa", mfa_identity)
 

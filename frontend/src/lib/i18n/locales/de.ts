@@ -4091,6 +4091,7 @@ export const messages = {
 	'refusal.cardBlocksRecall': "Für die Zahlung dieser Rechnung wurde eine virtuelle Karte ausgestellt. Stornieren Sie die Karte, bevor Sie die Genehmigung zurücknehmen.",
 	'refusal.paymentRunSegregation': "Funktionstrennung: Wer diesen Zahlungslauf erstellt hat, darf ihn nicht auch genehmigen oder ausführen. Das muss eine andere Person tun.",
 	'refusal.paymentRunAwaitingCfo': "Dieser Lauf überschreitet die CFO-Freigabeschwelle der Organisation und wartet auf die Freigabe durch einen Benutzer mit der CFO-Rolle.",
+	'refusal.paymentCfoRequired': "Diese Zahlung liegt über der CFO-Freigabeschwelle Ihrer Organisation. Buchen Sie sie über einen Zahlungslauf zur CFO-Freigabe oder bitten Sie einen CFO, sie anzulegen.",
 	'refusal.paymentRunNothingToRetry': "Keine der fehlgeschlagenen Zahlungen dieses Laufs kann sicher erneut gesendet werden: Jede könnte den Zahlungsdienstleister erreicht haben. Prüfen Sie jede beim Zahlungsdienstleister und stornieren Sie sie dann oder erfassen Sie, was passiert ist.",
 	'refusal.vendorChangeSelfRequested': "Sie können eine Bankdatenänderung, die Sie selbst beantragt haben, nicht genehmigen.",
 	'refusal.vendorChangeSelfProvisioned': "Sie können eine Änderung nicht genehmigen, die über einen von Ihnen eingerichteten Lieferantenportal-Zugang eingereicht wurde. Eine andere Person muss sie prüfen.",

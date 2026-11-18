@@ -4022,6 +4022,7 @@ export const messages = {
 	'refusal.cardBlocksRecall': "この請求書の支払いにバーチャルカードが発行されています。承認を取り消す前に、カードを取り消してください。",
 	'refusal.paymentRunSegregation': "職務分掌: この支払いランを作成したユーザーは、承認または実行することはできません。別のユーザーが行う必要があります。",
 	'refusal.paymentRunAwaitingCfo': "このランは組織のCFO承認しきい値を超えているため、CFOロールを持つユーザーの承認を待っています。",
+	'refusal.paymentCfoRequired': "この支払いは組織のCFO承認しきい値を超えています。CFO承認のために支払いランで登録するか、CFOに作成を依頼してください。",
 	'refusal.paymentRunNothingToRetry': "このランの失敗した支払いはいずれも安全に再送信できません。それぞれが決済プロセッサーに届いた可能性があります。決済プロセッサーでそれぞれを確認してから、無効にするか結果を記録してください。",
 	'refusal.vendorChangeSelfRequested': "ご自身が申請した銀行情報の変更は承認できません。",
 	'refusal.vendorChangeSelfProvisioned': "ご自身が発行したサプライヤーポータルのログインから提出された変更は承認できません。別の承認者が確認する必要があります。",

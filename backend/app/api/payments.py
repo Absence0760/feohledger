@@ -181,6 +181,11 @@ from app.utils.tenant_urls import tenant_base_url
 
 logger = logging.getLogger(__name__)
 
+
+#: A single payment ``POST /api/payments`` books outside a run, above the org's
+#: CFO-approval threshold, by someone without the CFO role.
+PAYMENT_CFO_REQUIRED = "payment_cfo_required"
+
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 # The invoice statuses a payment may be created against — i.e. an invoice that
@@ -3368,11 +3373,14 @@ async def create_payment(
     if requires_cfo:
         has_cfo = any(r.name == ROLE_CFO for r in (user.roles or ()))
         if not has_cfo:
+            # Coded: the reader acts on it by routing the payment elsewhere,
+            # so it is stated in their language (decisions §NEW-R1).
             raise HTTPException(
                 status_code=403,
-                detail=(
+                detail=coded_refusal(
+                    PAYMENT_CFO_REQUIRED,
                     "This payment requires CFO sign-off — book it through a payment "
-                    "run for CFO approval, or have a CFO create it directly"
+                    "run for CFO approval, or have a CFO create it directly",
                 ),
             )
 

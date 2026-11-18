@@ -4087,6 +4087,7 @@ export const messages = {
 	'refusal.cardBlocksRecall': "Um cartão virtual foi emitido para pagar esta fatura. Cancele o cartão antes de revogar a aprovação.",
 	'refusal.paymentRunSegregation': "Segregação de funções: o usuário que criou este lote de pagamentos não pode também aprová-lo ou executá-lo. Outro usuário deve fazê-lo.",
 	'refusal.paymentRunAwaitingCfo': "Este lote excede o limite de aprovação do CFO da organização e aguarda a aprovação de um usuário com a função de CFO.",
+	'refusal.paymentCfoRequired': "Este pagamento está acima do limite de aprovação do CFO da sua organização. Registre-o em um lote de pagamento para aprovação do CFO ou peça a um CFO que o crie.",
 	'refusal.paymentRunNothingToRetry': "Nenhum dos pagamentos com falha deste lote pode ser reenviado com segurança: cada um pode ter chegado ao processador de pagamentos. Verifique cada um com o processador e depois anule-o ou registre o que aconteceu.",
 	'refusal.vendorChangeSelfRequested': "Você não pode aprovar uma alteração de dados bancários que você solicitou.",
 	'refusal.vendorChangeSelfProvisioned': "Você não pode aprovar uma alteração enviada por um acesso ao portal de fornecedores que você criou. Outro aprovador deve revisá-la.",

@@ -5,7 +5,8 @@ the employee and supplier-portal auth routers (`api/auth.py`,
 `api/portal_auth.py`), the approval path (`services/approval_chain.py`,
 `services/review.py`), the exception queue's segregation refusal
 (`services/exception_lifecycle.py`), credit-memo application
-(`api/credit_memos.py`), expense reports and card reconciliation
+(`api/credit_memos.py`), payment-run maker-checker and CFO sign-off
+(`services/payment_controls.py`, `api/payments.py`), expense reports and card reconciliation
 (`services/expense_controls.py`, `api/expenses.py`), the invoice stale-edit 409
 (`api/invoices.py`), self-service signup
 (`api/signup.py`), vendor merge (`services/vendor_merge.py`) and the shared
@@ -104,8 +105,12 @@ def refusal_of(exc: HTTPException, *, fallback_code: str) -> dict:
 #: and both web clients read a 401 on an authenticated call as an expired
 #: session — they clear the token and bounce to the login page, so a mistyped
 #: code used to sign the user out. Exactly as specific as the "Invalid code" it
-#: replaces. The login challenge's own "Invalid code" stays a 401: there is no
-#: session yet, so a 401 is the truth and nobody is signed out by it.
+#: replaces. The login challenge's wrong TOTP code (``POST /api/auth/mfa/verify``
+#: and the portal's) carries the same detail but stays a 401: there is no
+#: session yet, so a 401 is the truth and nobody is signed out by it — neither
+#: web client bounces an anonymous 401, mobile ends a session on a 401 only when
+#: it presented a token, and the per-account MFA failure budget counts the
+#: attempt either way (decisions §NEW-R1).
 MFA_CODE_INVALID_DETAIL = coded_refusal("mfa_code_invalid", "Invalid code")
 
 
