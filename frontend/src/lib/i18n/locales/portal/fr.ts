@@ -55,7 +55,7 @@ export const messages = {
 	'portal.changePassword.saving': 'Enregistrement...',
 	'portal.changePassword.failed': 'Échec de la modification',
 	'portal.resetPassword.expiredHint':
-		'Les liens de définition du mot de passe ne fonctionnent qu\'une fois et expirent. Demandez à l\'équipe comptabilité fournisseurs de votre client de vous en envoyer un nouveau.',
+		'Les liens de définition du mot de passe ne fonctionnent qu\'une fois et expirent. Demandez-en un nouveau ci-dessous, ou demandez à l\'équipe comptabilité fournisseurs de votre client de vous l\'envoyer.',
 	'portal.resetPassword.backToSignIn': 'Retour à la connexion',
 	'portal.invoices.title': 'Mes factures',
 	'portal.invoices.submit': 'Soumettre une facture',

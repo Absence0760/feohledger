@@ -62,7 +62,7 @@ export const messages = {
 	'portal.changePassword.saving': 'Salvando...',
 	'portal.changePassword.failed': 'Falha na alteração',
 	'portal.resetPassword.expiredHint':
-		'Os links para definir a senha funcionam uma única vez e expiram. Peça à equipe de contas a pagar do seu cliente que envie um novo.',
+		'Os links para definir a senha funcionam uma única vez e expiram. Solicite um novo abaixo ou peça à equipe de contas a pagar do seu cliente que o envie.',
 	'portal.resetPassword.backToSignIn': 'Voltar para o login',
 
 	// Faturas do portal (routes/portal/invoices/+page.svelte)

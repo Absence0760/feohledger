@@ -62,7 +62,7 @@ export const messages = {
 	'portal.changePassword.saving': '保存しています...',
 	'portal.changePassword.failed': '変更に失敗しました',
 	'portal.resetPassword.expiredHint':
-		'パスワード設定リンクは一度だけ使用でき、有効期限があります。取引先の買掛金担当チームに新しいリンクの送信を依頼してください。',
+		'パスワード設定リンクは一度だけ使用でき、有効期限があります。下のリンクから新しいリンクを請求するか、取引先の買掛金担当チームに送信を依頼してください。',
 	'portal.resetPassword.backToSignIn': 'サインインに戻る',
 
 	// ポータルの請求書 (routes/portal/invoices/+page.svelte)
