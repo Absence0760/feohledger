@@ -1154,7 +1154,7 @@
   },
   "cashFlowOverdueAmount": "overdue {amount}",
   "cashFlowOverdueSuffix": ", {amount} already past due",
-  "cashFlowForecastOverdue": "{count, plural, one {{count} invoice} other {{count} invoices}} totalling {amount} {count, plural, one {is} other {are}} already past due. Owed now, so counted in the first period.",
+  "cashFlowForecastOverdue": "{amount} across {count, plural, one {{count} invoice} other {{count} invoices}} is already past due. Owed now, so counted in the first period.",
   "@cashFlowOverdueAmount": {
     "placeholders": {
       "amount": { "type": "String" }

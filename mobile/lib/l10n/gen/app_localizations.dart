@@ -3025,7 +3025,7 @@ abstract class AppLocalizations {
   /// No description provided for @cashFlowForecastOverdue.
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, one {{count} invoice} other {{count} invoices}} totalling {amount} {count, plural, one {is} other {are}} already past due. Owed now, so counted in the first period.'**
+  /// **'{amount} across {count, plural, one {{count} invoice} other {{count} invoices}} is already past due. Owed now, so counted in the first period.'**
   String cashFlowForecastOverdue(int count, String amount);
 
   /// No description provided for @cashFlowPosition.

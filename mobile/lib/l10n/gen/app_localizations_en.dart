@@ -1888,13 +1888,7 @@ class AppLocalizationsEn extends AppLocalizations {
       other: '$count invoices',
       one: '$count invoice',
     );
-    String _temp1 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: 'are',
-      one: 'is',
-    );
-    return '$_temp0 totalling $amount $_temp1 already past due. Owed now, so counted in the first period.';
+    return '$amount across $_temp0 is already past due. Owed now, so counted in the first period.';
   }
 
   @override

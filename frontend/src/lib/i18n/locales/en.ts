@@ -2059,7 +2059,7 @@ export const en = {
 	'cfo.chart.barAriaOverdue': 'Overdue {overdue}, committed {committed}, pending {pending}',
 	'cfo.chart.overdueTitle': 'Overdue {amount}',
 	'cfo.chart.overdueNote':
-		'{n, plural, one {# invoice} other {# invoices}} totalling {amount} {n, plural, one {is} other {are}} already past due. Owed now, so counted in the first period.',
+		'{amount} across {n, plural, one {# invoice} other {# invoices}} is already past due. Owed now, so counted in the first period.',
 	'cfo.chart.committedTitle': 'Committed {amount}',
 	'cfo.chart.pendingTitle': 'Pending {amount}',
 	'cfo.legend.committed': 'Committed',

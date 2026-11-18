@@ -1914,7 +1914,7 @@ export const messages = {
 	'cfo.chart.barAriaOverdue': 'Überfällig {overdue}, zugesagt {committed}, ausstehend {pending}',
 	'cfo.chart.overdueTitle': 'Überfällig {amount}',
 	'cfo.chart.overdueNote':
-		'{n, plural, one {# Rechnung} other {# Rechnungen}} über insgesamt {amount} {n, plural, one {ist} other {sind}} bereits überfällig. Jetzt geschuldet, daher in der ersten Periode berücksichtigt.',
+		'{amount} aus {n, plural, one {# Rechnung} other {# Rechnungen}} ist bereits überfällig. Jetzt geschuldet, daher in der ersten Periode berücksichtigt.',
 	'cfo.chart.committedTitle': 'Zugesagt {amount}',
 	'cfo.chart.pendingTitle': 'Ausstehend {amount}',
 	'cfo.legend.committed': 'Zugesagt',

@@ -1902,13 +1902,7 @@ class AppLocalizationsDe extends AppLocalizations {
       other: '$count Rechnungen',
       one: '$count Rechnung',
     );
-    String _temp1 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: 'sind',
-      one: 'ist',
-    );
-    return '$_temp0 über insgesamt $amount $_temp1 bereits überfällig. Jetzt geschuldet, daher in der ersten Periode berücksichtigt.';
+    return '$amount aus $_temp0 ist bereits überfällig. Jetzt geschuldet, daher in der ersten Periode berücksichtigt.';
   }
 
   @override

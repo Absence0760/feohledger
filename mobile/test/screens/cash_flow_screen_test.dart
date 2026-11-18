@@ -30,7 +30,7 @@ Map<String, dynamic> _forecastBody({int unconverted = 0}) => {
       'granularity': 'week',
       'horizon_days': 90,
       'periods': [
-        {
+        <String, dynamic>{
           'period': '2026-W26',
           'scheduled_amount': 3000.0,
           'committed_amount': 2000.0,
@@ -39,7 +39,7 @@ Map<String, dynamic> _forecastBody({int unconverted = 0}) => {
           'count': 4,
         },
       ],
-      'totals': {
+      'totals': <String, dynamic>{
         'scheduled_amount': 3000.0,
         'committed_amount': 2000.0,
         'pending_amount': 1000.0,
@@ -271,7 +271,7 @@ void main() {
     await tester.pumpWidget(_localized(const CashFlowScreen()));
     await _pumpUntil(tester, find.byType(KpiCard));
 
-    final note = find.textContaining('1 invoice totalling');
+    final note = find.textContaining('across 1 invoice');
     await tester.scrollUntilVisible(note, 200);
     expect(note, findsOneWidget);
     expect(find.textContaining('is already past due'), findsOneWidget);

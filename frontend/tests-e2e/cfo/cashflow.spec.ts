@@ -173,7 +173,7 @@ test.describe('/cfo (admin)', () => {
 
 		const note = page.getByTestId('overdue-outflows');
 		await expect(note).toBeVisible({ timeout: 10_000 });
-		await expect(note).toContainText('1 invoice totalling');
+		await expect(note).toContainText('across 1 invoice');
 		await expect(note).toContainText('already past due');
 		await expect(page.locator('.cf-bar.overdue')).toHaveCount(1);
 		await expect(page.getByRole('img', { name: /^Overdue .*, committed .*, pending / })).toHaveCount(1);
