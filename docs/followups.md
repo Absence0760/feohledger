@@ -1602,21 +1602,6 @@ covered the one page or shape it was written for. #646 / §318 closed the
 QuickBooks half with recorded shapes and a live check; these are the
 user-visible halves still open.
 
-- [ ] **(c) Key fields and primary actions are checked to be on screen only on
-      /login.** #642 added the check there (`tests-e2e/auth/login.spec.ts`:
-      the email and password fields in the viewport of a short window, no
-      scrolling) after a global class pushed them below the fold on every
-      screen. Every other spec fills fields and clicks buttons by locator,
-      and Playwright scrolls to them first, so a page whose search box,
-      filters or primary action ends up below the fold still passes.
-      **Durable fix:** one table-driven spec over every sidebar page and the
-      signup / set-password / supplier-portal entry pages, at 1280×720,
-      1366×768 and 390×844, asserting with `toBeInViewport()` (no scroll) the
-      page's heading, its primary action and its first input or filter;
-      each page's row names those three locators, and a new sidebar page
-      without a row fails the spec (the `lib/help/pages.ts` pattern).
-      **Trigger:** the next page added to the sidebar, or the next "I could
-      not find the button" report.
 - [ ] **(c) The layout-shift budget covers three list pages.** #644's
       `tests-e2e/reactivity/layout-stability.spec.ts` holds /invoices,
       /payments and /exceptions' late responses behind a gate and asserts the
