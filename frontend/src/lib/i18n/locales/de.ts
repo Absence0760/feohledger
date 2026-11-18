@@ -5318,6 +5318,7 @@ export const messages = {
 	'refusal.workspaceCloseActorNotAdmin': "Nur ein aktiver Administrator dieses Workspace kann ihn schließen.",
 	'refusal.signupSlugHeld': "Diese Workspace-Adresse gehörte zu einem Workspace, der kürzlich geschlossen wurde, und ist eine Zeit lang nicht verfügbar. Wählen Sie eine andere Adresse.",
 	'refusal.workspaceCloseInProgress': "Dieser Workspace wird bereits geschlossen.",
+	'refusal.credentialBlockUnopenable': "Die gespeicherten Zugangsdaten dieses Bereichs lassen sich nicht mehr öffnen, daher wurde nichts gespeichert. Ein Administrator kann sie löschen und jede erneut eingeben.",
 	'refusal.workspaceCloseAuditUnavailable': "Der Workspace konnte gerade nicht geschlossen werden, weil sein Prüfprotokolleintrag nicht gespeichert werden konnte. Es wurde nichts gelöscht. Versuchen Sie es in ein paar Minuten erneut.",
 	'refusal.workspaceCloseIncomplete': "Das Schließen des Workspace wurde nicht abgeschlossen. Versuchen Sie es erneut; wenn es wieder fehlschlägt, wenden Sie sich an den Support.",
 	'refusal.csvInvoiceNumberMatchesExisting': "Die Rechnungsnummer {number} entspricht ohne Formatierung der vorhandenen Rechnung {existing} dieses Lieferanten und wurde daher nicht importiert. Korrigieren Sie die Nummer oder erfassen Sie die Rechnung manuell, wenn es wirklich eine andere ist.",

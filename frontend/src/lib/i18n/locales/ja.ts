@@ -5226,6 +5226,7 @@ export const messages = {
 	'refusal.workspaceCloseActorNotAdmin': "このワークスペースを閉鎖できるのは、有効な管理者だけです。",
 	'refusal.signupSlugHeld': "このワークスペースアドレスは最近閉鎖されたワークスペースのもので、しばらくの間使用できません。別のアドレスを選択してください。",
 	'refusal.workspaceCloseInProgress': "このワークスペースは既に閉鎖処理中です。",
+	'refusal.credentialBlockUnopenable': "このセクションの保存済み認証情報を開けなくなったため、何も保存されませんでした。管理者が消去し、それぞれを再入力できます。",
 	'refusal.workspaceCloseAuditUnavailable': "監査記録を保存できなかったため、現在ワークスペースを閉鎖できませんでした。何も削除されていません。数分後にもう一度お試しください。",
 	'refusal.workspaceCloseIncomplete': "ワークスペースの閉鎖が完了しませんでした。もう一度お試しください。再び失敗する場合はサポートにお問い合わせください。",
 	'refusal.csvInvoiceNumberMatchesExisting': "請求書番号 {number} は、書式の違いを除くとこの仕入先の既存の請求書 {existing} と同じため、インポートされませんでした。番号を修正するか、本当に別の請求書であれば手動で入力してください。",
