@@ -126,7 +126,7 @@ describe('localizeInvoiceWarning', () => {
 		});
 	});
 
-	it('names a split's leg codes when the invoice records no valid currency', () => {
+	it("names a split's leg codes when the invoice records no valid currency", () => {
 		// decisions §445: no invoice code to print, so the sentence is its own
 		// code and the leg codes ride one text param, verbatim.
 		const localized = localizeInvoiceWarning({
