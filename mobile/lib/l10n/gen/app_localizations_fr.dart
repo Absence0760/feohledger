@@ -2533,6 +2533,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Une tentative précédente a peut-être déjà créé la facture dans l\'ERP ; vérifiez-y avant que quiconque la paie.';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'Cette facture n\'a pas de devise valide. Définissez sa devise avant de l\'envoyer à l\'ERP.';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'Cet envoi n\'avait plus de tentatives, donc aucune tentative n\'a été faite cette fois. Réessayez pour l\'envoyer avec de nouvelles tentatives.';
 

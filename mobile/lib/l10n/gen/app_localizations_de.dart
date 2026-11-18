@@ -2520,6 +2520,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Ein früherer Versuch hat die Rechnung möglicherweise bereits im ERP angelegt; prüfen Sie dort, bevor jemand sie bezahlt.';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'Diese Rechnung hat keine gültige Währung. Legen Sie ihre Währung fest, bevor Sie sie an das ERP senden.';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'Für diese Übertragung waren keine Versuche mehr übrig, daher wurde diesmal kein Versuch unternommen. Versuchen Sie es erneut, um sie mit neuen Versuchen zu senden.';
 

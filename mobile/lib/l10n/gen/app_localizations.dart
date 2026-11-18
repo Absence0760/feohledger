@@ -3879,6 +3879,12 @@ abstract class AppLocalizations {
   /// **'An earlier attempt may already have created the bill in the ERP; check there before anyone pays it.'**
   String get erpRefusalVendorHoldPossiblyPosted;
 
+  /// No description provided for @erpRefusalCurrencyBlocksExport.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice has no valid currency. Set its currency before sending it to the ERP.'**
+  String get erpRefusalCurrencyBlocksExport;
+
   /// No description provided for @erpRefusalRetriesExhausted.
   ///
   /// In en, this message translates to:

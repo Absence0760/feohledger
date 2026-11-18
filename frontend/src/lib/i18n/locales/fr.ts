@@ -5429,6 +5429,7 @@ export const messages = {
 	'erpRefusal.vendorRejected': "Le fournisseur de cette facture a été rejeté. Rattachez la facture au bon fournisseur avant de l'envoyer à l'ERP.",
 	'erpRefusal.vendorStatusUnknown': "Le fournisseur de cette facture a un statut qui ne permet pas de l'envoyer à l'ERP. Passez le fournisseur à actif avant d'envoyer la facture à l'ERP.",
 	'erpRefusal.vendorHoldPossiblyPosted': "Une tentative précédente a peut-être déjà créé la facture dans l'ERP ; vérifiez-y avant que quiconque la paie.",
+	'erpRefusal.currencyBlocksExport': "Cette facture n'a pas de devise valide. Définissez sa devise avant de l'envoyer à l'ERP.",
 	'erpRefusal.cardBlocksExport': "Une carte virtuelle a été émise pour payer cette facture. Annulez la carte avant d'envoyer la facture à l'ERP.",
 	'erpRefusal.cardBlocksExportPossiblyPosted': "Une carte virtuelle a été émise pour payer cette facture, et une tentative précédente a peut-être déjà créé la facture dans l'ERP. Vérifiez l'ERP et assurez-vous que personne ne la paie aussi là-bas.",
 	'glAccounts.toast.synced': "{created} nouveaux comptes et {updated} comptes mis à jour synchronisés.",

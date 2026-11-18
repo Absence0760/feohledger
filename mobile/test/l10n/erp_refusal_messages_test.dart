@@ -256,6 +256,18 @@ void main() {
         erpRefusalText(en, refusal('vendor_blocks_erp_export', {'hold': 'x'})),
         isNull,
       );
+      expect(
+        erpRefusalText(de, refusal('currency_blocks_erp_export', {})),
+        de.erpRefusalCurrencyBlocksExport,
+      );
+      expect(
+        erpRefusalText(
+          en,
+          refusal('currency_blocks_erp_export', {'possibly_posted': true}),
+        ),
+        '${en.erpRefusalCurrencyBlocksExport} '
+        '${en.erpRefusalVendorHoldPossiblyPosted}',
+      );
     });
 
     test('the call budget states whose allowance ran out', () {

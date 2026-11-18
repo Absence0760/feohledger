@@ -5338,6 +5338,7 @@ export const messages = {
 	'erpRefusal.vendorRejected': "この請求書の仕入先は却下されています。ERP に送信する前に、請求書を正しい仕入先に紐付けてください。",
 	'erpRefusal.vendorStatusUnknown': "この請求書の仕入先のステータスでは ERP に送信できません。ERP に送信する前に、仕入先を有効にしてください。",
 	'erpRefusal.vendorHoldPossiblyPosted': "以前の送信で ERP に請求書が既に作成されている可能性があります。誰かが支払う前に ERP を確認してください。",
+	'erpRefusal.currencyBlocksExport': "この請求書には有効な通貨がありません。ERP に送信する前に通貨を設定してください。",
 	'erpRefusal.cardBlocksExport': "この請求書の支払いにバーチャルカードが発行されています。ERP に送信する前に、カードを取り消してください。",
 	'erpRefusal.cardBlocksExportPossiblyPosted': "この請求書の支払いにバーチャルカードが発行されており、以前の送信で ERP に請求書が既に作成されている可能性があります。ERP を確認し、そちらでも支払われないようにしてください。",
 	'glAccounts.toast.synced': "新規 {created} 件、更新 {updated} 件の勘定科目を同期しました。",

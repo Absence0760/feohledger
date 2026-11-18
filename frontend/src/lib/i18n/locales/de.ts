@@ -5430,6 +5430,7 @@ export const messages = {
 	'erpRefusal.vendorRejected': "Der Lieferant dieser Rechnung wurde abgelehnt. Ordnen Sie die Rechnung dem richtigen Lieferanten zu, bevor Sie sie an das ERP senden.",
 	'erpRefusal.vendorStatusUnknown': "Der Lieferant dieser Rechnung hat einen Status, mit dem sie nicht an das ERP gesendet werden kann. Setzen Sie den Lieferanten auf aktiv, bevor Sie die Rechnung an das ERP senden.",
 	'erpRefusal.vendorHoldPossiblyPosted': "Ein früherer Versuch hat die Rechnung möglicherweise bereits im ERP angelegt; prüfen Sie dort, bevor jemand sie bezahlt.",
+	'erpRefusal.currencyBlocksExport': "Diese Rechnung hat keine gültige Währung. Legen Sie ihre Währung fest, bevor Sie sie an das ERP senden.",
 	'erpRefusal.cardBlocksExport': "Für die Zahlung dieser Rechnung wurde eine virtuelle Karte ausgestellt. Stornieren Sie die Karte, bevor Sie die Rechnung an das ERP senden.",
 	'erpRefusal.cardBlocksExportPossiblyPosted': "Für die Zahlung dieser Rechnung wurde eine virtuelle Karte ausgestellt, und ein früherer Versuch hat die Rechnung möglicherweise bereits im ERP angelegt. Prüfen Sie das ERP und stellen Sie sicher, dass niemand die Rechnung dort zusätzlich bezahlt.",
 	'glAccounts.toast.synced': "{created} neue und {updated} aktualisierte Konten synchronisiert.",

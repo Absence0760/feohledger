@@ -2384,6 +2384,10 @@ class AppLocalizationsJa extends AppLocalizations {
       '以前の送信で ERP に請求書が既に作成されている可能性があります。誰かが支払う前に ERP を確認してください。';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'この請求書には有効な通貨がありません。ERP に送信する前に通貨を設定してください。';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'この送信には残りの試行回数がなかったため、今回は試行されませんでした。再試行すると、新しい試行回数で送信します。';
 

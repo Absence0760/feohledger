@@ -259,6 +259,24 @@ describe('erpRefusalText', () => {
 		);
 	});
 
+	it('says the invoice has no payable currency, in every locale', () => {
+		const code = 'currency_blocks_erp_export';
+		const locales = { en, de, es, fr, ja, 'pt-BR': ptBR } as Record<
+			string,
+			Record<string, string>
+		>;
+		const key = 'erpRefusal.currencyBlocksExport';
+		const posted = 'erpRefusal.vendorHoldPossiblyPosted';
+		for (const [locale, messages] of Object.entries(locales)) {
+			const t = translator(messages, locale);
+			expect(messages[key], `${locale} ${key}`).toBeTruthy();
+			expect(erpRefusalText({ code, params: {} }, t)).toBe(messages[key]);
+			expect(erpRefusalText({ code, params: { possibly_posted: true } }, t)).toBe(
+				`${messages[key]} ${messages[posted]}`
+			);
+		}
+	});
+
 	it.each([
 		['no refusal recorded (a row from before coded refusals)', undefined],
 		['a vendor refusal with no hold', { code: 'vendor_blocks_erp_export', params: {} }],

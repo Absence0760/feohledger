@@ -654,6 +654,7 @@
   "erpRefusalVendorRejected": "Der Lieferant dieser Rechnung wurde abgelehnt. Ordnen Sie die Rechnung dem richtigen Lieferanten zu, bevor Sie sie an das ERP senden.",
   "erpRefusalVendorStatusUnknown": "Der Lieferant dieser Rechnung hat einen Status, mit dem sie nicht an das ERP gesendet werden kann. Setzen Sie den Lieferanten auf aktiv, bevor Sie die Rechnung an das ERP senden.",
   "erpRefusalVendorHoldPossiblyPosted": "Ein früherer Versuch hat die Rechnung möglicherweise bereits im ERP angelegt; prüfen Sie dort, bevor jemand sie bezahlt.",
+  "erpRefusalCurrencyBlocksExport": "Diese Rechnung hat keine gültige Währung. Legen Sie ihre Währung fest, bevor Sie sie an das ERP senden.",
   "erpRefusalRetriesExhausted": "Für diese Übertragung waren keine Versuche mehr übrig, daher wurde diesmal kein Versuch unternommen. Versuchen Sie es erneut, um sie mit neuen Versuchen zu senden.",
   "erpRefusalPushInterrupted": "Diese Übertragung wurde unterbrochen und nie abgeschlossen. Sie ist zu alt (oder älter als die aktuelle ERP-Verbindung), um sie ungeprüft erneut zu senden. Stellen Sie sicher, dass die Rechnung nicht schon im ERP ist, und versuchen Sie es dann erneut.",
   "erpRefusalCardBlocksExport": "Für die Zahlung dieser Rechnung wurde eine virtuelle Karte ausgestellt. Stornieren Sie die Karte, bevor Sie die Rechnung an das ERP senden.",
