@@ -896,9 +896,9 @@ void main() {
       expect(find.ancestor(of: banner, matching: find.byType(ListView)),
           findsOneWidget);
       expect(
-        find.text("FeohLedger records payments but never sends them: pay "
+        find.text('FeohLedger records payments but never sends them: pay '
             "from your bank or ERP, then record each one here (a run's bank "
-            "file is on the web app)."),
+            'file is on the web app).'),
         findsOneWidget,
       );
       expect(find.text('Record as paid'), findsOneWidget);

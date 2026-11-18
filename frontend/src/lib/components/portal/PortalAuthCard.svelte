@@ -89,7 +89,7 @@
 		gap: 4px;
 	}
 	.card :global(:where(.password-field input:not([type='checkbox']):not([type='radio']))),
-	.card :global(:where(form > label > input)) {
+	.card :global(:where(form > label > input:not([type='checkbox']):not([type='radio']))) {
 		width: 100%;
 		background: var(--bg);
 		border: 1px solid var(--border);
@@ -100,7 +100,7 @@
 		font-family: inherit;
 	}
 	.card :global(:where(.password-field input:not([type='checkbox']):not([type='radio']):focus)),
-	.card :global(:where(form > label > input:focus)) {
+	.card :global(:where(form > label > input:not([type='checkbox']):not([type='radio']):focus)) {
 		outline: none;
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
