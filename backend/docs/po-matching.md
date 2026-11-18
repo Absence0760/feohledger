@@ -180,9 +180,16 @@ python scripts/backfill_po_currency.py --tenant acme --currency USD --apply --ma
   `utils.currency_code`, membership via `e_invoice.codelists.ISO_4217_CURRENCIES`);
   the no-currency and testing codes are refused.
 - **Matching re-verifies in the same transaction.** Every invoice citing a
-  stamped PO number that is not `paid` / `done` goes back through
-  `refresh_warnings` with the org's settings — the refresh a goods receipt
-  triggers. An invoice in the asserted currency now reads `same`, so the note
+  stamped PO that is not `paid` / `done` is re-matched with the org's settings
+  through `refresh_invoices_citing_pos` — the lookup a goods receipt uses, so a
+  multi-PO split is found by its legs (`split_po_ids`) as well as by number, and
+  each invoice is locked `FOR UPDATE` as a receipt locks it, so an approval
+  racing the stamp lands on one side of it (decisions §267, §389). The dry run's
+  "would re-match" count reads the same lookup. Only the PO match re-runs
+  (`invoice_warnings.refresh_po_match_only`): the stamp moved nothing else an
+  invoice's warnings read, so duplicate detection, the vendor-history fraud
+  rules and an opted-in LLM anomaly check are not repeated per invoice, and the
+  warnings they wrote stay as they were. An invoice in the asserted currency now reads `same`, so the note
   goes and the agents can act; one in another currency reads `different` and gets
   its `po_currency_mismatch` warning and payment-blocking `po_mismatch` hold with
   the stamp. A stamp cannot make a finding disappear (`unknown` already compared
