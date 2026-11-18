@@ -19,16 +19,16 @@ import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 // Wraps a screen with the localization delegates it now needs. No explicit
 // `locale` → defaults to `en`, so the English assertions below still hold.
 Widget _localized(Widget home) => MaterialApp(
-      localizationsDelegates: appLocalizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: home,
-    );
+  localizationsDelegates: appLocalizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  home: home,
+);
 
 http.Response _json(Object body, [int status = 200]) => http.Response(
-      jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 /// A full dashboard payload, in the wire shape the API returns from
 /// GET /api/dashboard (consumed by DashboardData.fromJson).
@@ -53,56 +53,58 @@ Map<String, dynamic> _dashboardJson({
   int unconverted = 0,
   int agingUnconverted = 0,
   int upcomingUnconverted = 0,
-}) =>
-    {
-      'total_invoices': totalInvoices,
+}) => {
+  'total_invoices': totalInvoices,
+  'total_amount': totalAmount,
+  if (reportingCurrency != null)
+    'reporting': {
+      'reporting_currency': reportingCurrency,
       'total_amount': totalAmount,
-      if (reportingCurrency != null)
-        'reporting': {
-          'reporting_currency': reportingCurrency,
-          'total_amount': totalAmount,
-          'total_count': totalInvoices,
-          'unconverted_count': unconverted,
-          'by_currency': <Map<String, dynamic>>[],
-        },
-      if (reportingCurrency != null)
-        'aging_reporting': {
-          ...(aging ??
-              {
-                'current': 10000,
-                'days_30': 8000,
-                'days_60': 5000,
-                'days_90_plus': 2000,
-              }),
-          'unconverted_count': agingUnconverted,
-        },
-      if (reportingCurrency != null)
-        'upcoming_total_amount_reporting': upcomingTotalAmount,
-      if (reportingCurrency != null)
-        'upcoming_unconverted_count': upcomingUnconverted,
-      'pipeline': pipeline ?? {'ready_for_review': 3, 'approved': 5},
-      'vendor_spend': vendorSpend ??
-          [
-            {'vendor': 'Acme Corp', 'amount': 20000, 'invoice_count': 4},
-            {'vendor': 'Globex', 'amount': 15000, 'invoice_count': 3},
-          ],
-      'aging': aging ??
+      'total_count': totalInvoices,
+      'unconverted_count': unconverted,
+      'by_currency': <Map<String, dynamic>>[],
+    },
+  if (reportingCurrency != null)
+    'aging_reporting': {
+      ...(aging ??
           {
             'current': 10000,
             'days_30': 8000,
             'days_60': 5000,
             'days_90_plus': 2000,
-          },
-      'monthly_trend': <Map<String, dynamic>>[],
-      'upcoming_payments': upcomingPayments ??
-          [
-            {'amount': 1000},
-            {'amount': 2000},
-          ],
-      // Server-computed aggregate (see models/payment.dart) — the screen
-      // never folds upcoming_payments' amounts itself.
-      'upcoming_total_amount': upcomingTotalAmount,
-    };
+          }),
+      'unconverted_count': agingUnconverted,
+    },
+  if (reportingCurrency != null)
+    'upcoming_total_amount_reporting': upcomingTotalAmount,
+  if (reportingCurrency != null)
+    'upcoming_unconverted_count': upcomingUnconverted,
+  'pipeline': pipeline ?? {'ready_for_review': 3, 'approved': 5},
+  'vendor_spend':
+      vendorSpend ??
+      [
+        {'vendor': 'Acme Corp', 'amount': 20000, 'invoice_count': 4},
+        {'vendor': 'Globex', 'amount': 15000, 'invoice_count': 3},
+      ],
+  'aging':
+      aging ??
+      {
+        'current': 10000,
+        'days_30': 8000,
+        'days_60': 5000,
+        'days_90_plus': 2000,
+      },
+  'monthly_trend': <Map<String, dynamic>>[],
+  'upcoming_payments':
+      upcomingPayments ??
+      [
+        {'amount': 1000},
+        {'amount': 2000},
+      ],
+  // Server-computed aggregate (see models/payment.dart) — the screen
+  // never folds upcoming_payments' amounts itself.
+  'upcoming_total_amount': upcomingTotalAmount,
+};
 
 /// Pumps bounded fixed frames until [finder] appears or we run out of
 /// budget — never pumpAndSettle on a screen that may hold a spinner/ticker.
@@ -141,9 +143,7 @@ void main() {
   testWidgets('shows a spinner while the dashboard is loading', (tester) async {
     // Hold the response open so the screen stays in its loading state.
     final gate = Completer<http.Response>();
-    ApiClient().debugConfigure(
-      client: MockClient((req) async => gate.future),
-    );
+    ApiClient().debugConfigure(client: MockClient((req) async => gate.future));
 
     await tester.pumpWidget(_localized(const DashboardScreen()));
     // One frame to run the post-frame fetch + rebuild into loading.
@@ -170,8 +170,10 @@ void main() {
     // A localized sentence naming what happened and the next action — never
     // the exception's own text.
     expect(
-      find.text("Couldn't load the dashboard. Check your connection and tap "
-          'Retry.'),
+      find.text(
+        "Couldn't load the dashboard. Check your connection and tap "
+        'Retry.',
+      ),
       findsOneWidget,
     );
     expect(find.textContaining('offline'), findsNothing);
@@ -180,33 +182,36 @@ void main() {
     expect(find.byType(KpiCard), findsNothing);
   });
 
-  testWidgets('Retry re-issues the fetch and renders the dashboard on success',
-      (tester) async {
-    var failNext = true;
-    ApiClient().debugConfigure(
-      client: MockClient((req) async {
-        if (failNext) {
-          throw Exception('offline');
-        }
-        return _json(_dashboardJson());
-      }),
-    );
+  testWidgets(
+    'Retry re-issues the fetch and renders the dashboard on success',
+    (tester) async {
+      var failNext = true;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (failNext) {
+            throw Exception('offline');
+          }
+          return _json(_dashboardJson());
+        }),
+      );
 
-    await tester.pumpWidget(_localized(const DashboardScreen()));
-    await _pumpUntil(tester, find.text('Retry'));
-    expect(find.widgetWithText(FilledButton, 'Retry'), findsOneWidget);
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.text('Retry'));
+      expect(find.widgetWithText(FilledButton, 'Retry'), findsOneWidget);
 
-    // Next fetch will succeed.
-    failNext = false;
-    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
-    await _pumpUntil(tester, find.byType(KpiCard));
+      // Next fetch will succeed.
+      failNext = false;
+      await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+      await _pumpUntil(tester, find.byType(KpiCard));
 
-    expect(find.byType(KpiCard), findsNWidgets(4));
-    expect(find.text('Retry'), findsNothing);
-  });
+      expect(find.byType(KpiCard), findsNWidgets(4));
+      expect(find.text('Retry'), findsNothing);
+    },
+  );
 
-  testWidgets('renders KPI cards, aging buckets and top vendors once loaded',
-      (tester) async {
+  testWidgets('renders KPI cards, aging buckets and top vendors once loaded', (
+    tester,
+  ) async {
     ApiClient().debugConfigure(
       client: MockClient((req) async {
         if (req.url.path == '/api/dashboard') {
@@ -245,23 +250,29 @@ void main() {
     expect(find.text('60 Days'), findsOneWidget);
     expect(find.text('90+'), findsOneWidget);
 
-    // Top vendors section.
+    // Top vendors section — last on the screen since "Needs your attention"
+    // leads, so below the fold of the test viewport; the lazy list builds
+    // its rows only once they are scrolled into view.
+    await tester.scrollUntilVisible(find.text('Globex'), 200);
     expect(find.text('Top Vendors'), findsOneWidget);
     expect(find.text('Acme Corp'), findsOneWidget);
     expect(find.text('Globex'), findsOneWidget);
     expect(find.text('4 invoices'), findsOneWidget);
   });
 
-  testWidgets('missing pipeline keys fall back to 0 for For Review/Approved',
-      (tester) async {
+  testWidgets('missing pipeline keys fall back to 0 for For Review/Approved', (
+    tester,
+  ) async {
     ApiClient().debugConfigure(
       client: MockClient(
-        (req) async => _json(_dashboardJson(
-          pipeline: {},
-          vendorSpend: [
-            {'vendor': 'PipelineMarker', 'amount': 1, 'invoice_count': 1},
-          ],
-        )),
+        (req) async => _json(
+          _dashboardJson(
+            pipeline: {},
+            vendorSpend: [
+              {'vendor': 'PipelineMarker', 'amount': 1, 'invoice_count': 1},
+            ],
+          ),
+        ),
       ),
     );
 
@@ -292,9 +303,11 @@ void main() {
     );
 
     await tester.pumpWidget(_localized(const DashboardScreen()));
+    await _pumpUntil(tester, find.byType(KpiCard));
     // Key on a vendor unique to this payload so we assert against the fresh
-    // fetch, not a leaky prior `_data`.
-    await _pumpUntil(tester, find.text('Vendor 0'));
+    // fetch, not a leaky prior `_data`. Top vendors is the last section, below
+    // the fold, so it has to be scrolled to before its rows are built.
+    await tester.scrollUntilVisible(find.text('Vendor 0'), 200);
 
     expect(find.text('Vendor 0'), findsOneWidget);
     // Vendors render at the bottom of a lazy ListView, so the 5th capped row
@@ -306,8 +319,9 @@ void main() {
     expect(find.text('Vendor 5'), findsNothing);
   });
 
-  testWidgets('falls back to cached data when the network later fails',
-      (tester) async {
+  testWidgets('falls back to cached data when the network later fails', (
+    tester,
+  ) async {
     // Prime the offline cache with a successful fetch.
     ApiClient().debugConfigure(
       client: MockClient((req) async => _json(_dashboardJson())),
@@ -327,21 +341,26 @@ void main() {
     await _pumpUntil(tester, find.textContaining('Showing cached data'));
 
     expect(find.byType(KpiCard), findsNWidgets(4));
-    expect(find.text('Acme Corp'), findsOneWidget);
-    // The cached copy keeps what the live one showed: the Upcoming count and
-    // total (2, $3K) and the reporting currency. The cache used to drop the
-    // upcoming list and the `reporting` block, so offline read 0 / bare 3K.
-    expect(find.text('2'), findsOneWidget);
-    expect(find.text(r'$3K'), findsOneWidget);
-    expect(find.text(r'$45K'), findsOneWidget);
     // No error surface — cached data satisfies the screen.
     expect(find.byType(LoadErrorState), findsNothing);
     // ...but the user is told the data is stale.
     expect(find.textContaining('Showing cached data'), findsOneWidget);
+    // The cached copy keeps what the live one showed: the Upcoming count and
+    // total (2, $3K) and the reporting currency. The cache used to drop the
+    // upcoming list and the `reporting` block, so offline read 0 / bare 3K.
+    // Asserted top-down, in screen order: the list is lazy, so a row above
+    // the fold is disposed once the vendors scroll in.
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text(r'$3K'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text(r'$45K'), 200);
+    expect(find.text(r'$45K'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Acme Corp'), 200);
+    expect(find.text('Acme Corp'), findsOneWidget);
   });
 
-  testWidgets('does not show the cached-data banner on a live fetch',
-      (tester) async {
+  testWidgets('does not show the cached-data banner on a live fetch', (
+    tester,
+  ) async {
     ApiClient().debugConfigure(
       client: MockClient((req) async => _json(_dashboardJson())),
     );
@@ -352,8 +371,9 @@ void main() {
     expect(find.textContaining('Showing cached data'), findsNothing);
   });
 
-  testWidgets('money figures follow the org reporting currency, not a `\$`',
-      (tester) async {
+  testWidgets('money figures follow the org reporting currency, not a `\$`', (
+    tester,
+  ) async {
     // The dashboard's figures are rollups with no row to read a currency
     // from, so the payload names the one it denominated them in. This screen
     // used to declare `NumberFormat.compactCurrency(symbol: '\$')` at module
@@ -375,8 +395,9 @@ void main() {
     expect(find.textContaining(r'$'), findsNothing);
   });
 
-  testWidgets('a payload with no reporting block renders figures bare',
-      (tester) async {
+  testWidgets('a payload with no reporting block renders figures bare', (
+    tester,
+  ) async {
     // Degradation, not a fallback: without `reporting` the only figures on
     // offer are naive cross-currency sums, and there is no code that honestly
     // describes them.
@@ -505,9 +526,8 @@ void main() {
           localizationsDelegates: appLocalizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           builder: (context, child) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: const TextScaler.linear(2)),
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: const TextScaler.linear(2)),
             child: child!,
           ),
           home: const DashboardScreen(),
@@ -537,49 +557,58 @@ void main() {
         'ranking each say how many rows went in at face value', (tester) async {
       ApiClient().debugConfigure(
         client: MockClient(
-          (req) async => _json(_dashboardJson(
-            reportingCurrency: 'EUR',
-            unconverted: 3,
-            upcomingUnconverted: 1,
-            agingUnconverted: 2,
-            vendorSpend: [
-              {
-                'vendor': 'PartialCo',
-                'amount': 20000,
-                'invoice_count': 4,
-                'unconverted_count': 1,
-              },
-              {
-                'vendor': 'CleanCo',
-                'amount': 15000,
-                'invoice_count': 3,
-                'unconverted_count': 0,
-              },
-            ],
-          )),
+          (req) async => _json(
+            _dashboardJson(
+              reportingCurrency: 'EUR',
+              unconverted: 3,
+              upcomingUnconverted: 1,
+              agingUnconverted: 2,
+              vendorSpend: [
+                {
+                  'vendor': 'PartialCo',
+                  'amount': 20000,
+                  'invoice_count': 4,
+                  'unconverted_count': 1,
+                },
+                {
+                  'vendor': 'CleanCo',
+                  'amount': 15000,
+                  'invoice_count': 3,
+                  'unconverted_count': 0,
+                },
+              ],
+            ),
+          ),
         ),
       );
 
       await tester.pumpWidget(_localized(const DashboardScreen()));
       await _pumpUntil(tester, find.byType(KpiCard));
 
+      // In screen order (Upcoming, aging, the book, vendors), scrolling to
+      // each: the list is lazy, so a note is only built once it is near the
+      // viewport and disposed once it scrolls well past.
       expect(
-        find.text('Total Invoices: partial — 3 invoices with no exchange rate '
-            'into EUR, counted at face value, so the total mixes currencies '
-            'by that much.'),
+        find.text(
+          'Upcoming: partial — 1 invoice with no exchange rate into '
+          'EUR, counted at face value, so the total mixes currencies by '
+          'that much.',
+        ),
         findsOneWidget,
       );
-      expect(
-        find.text('Upcoming: partial — 1 invoice with no exchange rate into '
-            'EUR, counted at face value, so the total mixes currencies by '
-            'that much.'),
-        findsOneWidget,
+      final agingNote = find.text(
+        'Partial: 2 invoices with no exchange rate into EUR, counted '
+        'at face value — the bands below mix currencies by that much.',
       );
-      expect(
-        find.text('Partial: 2 invoices with no exchange rate into EUR, counted '
-            'at face value — the bands below mix currencies by that much.'),
-        findsOneWidget,
+      await tester.scrollUntilVisible(agingNote, 200);
+      expect(agingNote, findsOneWidget);
+      final bookNote = find.text(
+        'Total Invoices: partial — 3 invoices with no exchange rate '
+        'into EUR, counted at face value, so the total mixes currencies '
+        'by that much.',
       );
+      await tester.scrollUntilVisible(bookNote, 200);
+      expect(bookNote, findsOneWidget);
 
       final vendorNote = find.text(
         'Partial: 1 invoice with no exchange rate into EUR, counted at face '
@@ -600,29 +629,37 @@ void main() {
     testWidgets('a fully converted book says nothing', (tester) async {
       ApiClient().debugConfigure(
         client: MockClient(
-          (req) async => _json(_dashboardJson(
-            vendorSpend: [
-              {
-                'vendor': 'ConvertedCo',
-                'amount': 20000,
-                'invoice_count': 4,
-                'unconverted_count': 0,
-              },
-            ],
-          )),
+          (req) async => _json(
+            _dashboardJson(
+              vendorSpend: [
+                {
+                  'vendor': 'ConvertedCo',
+                  'amount': 20000,
+                  'invoice_count': 4,
+                  'unconverted_count': 0,
+                },
+              ],
+            ),
+          ),
         ),
       );
 
       await tester.pumpWidget(_localized(const DashboardScreen()));
-      await _pumpUntil(tester, find.text('ConvertedCo'));
+      await _pumpUntil(tester, find.byType(KpiCard));
 
+      // Checked at the top of the list and again at the bottom: the list is
+      // lazy, so one look covers only the rows built near the viewport.
+      expect(find.byType(PartialConversionNote), findsNothing);
+      expect(find.textContaining('face value'), findsNothing);
+      await tester.scrollUntilVisible(find.text('ConvertedCo'), 200);
       expect(find.byType(PartialConversionNote), findsNothing);
       expect(find.textContaining('face value'), findsNothing);
       expect(find.text('4 invoices'), findsOneWidget);
     });
 
-    testWidgets('the vendor note counts only the vendors it renders',
-        (tester) async {
+    testWidgets('the vendor note counts only the vendors it renders', (
+      tester,
+    ) async {
       // The list shows five; a sixth vendor's unconverted invoice is not part
       // of the ranking on screen, so a note about it would describe rows the
       // reader cannot find.
@@ -648,7 +685,7 @@ void main() {
       );
 
       await tester.pumpWidget(_localized(const DashboardScreen()));
-      await _pumpUntil(tester, find.text('Shown 0'));
+      await _pumpUntil(tester, find.byType(KpiCard));
       await tester.scrollUntilVisible(find.text('Shown 4'), 200);
 
       expect(find.byType(PartialConversionNote), findsNothing);
