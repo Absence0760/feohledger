@@ -3794,13 +3794,17 @@
 	/* Holds the status pill plus, on a blocked row, a wrapping reason chip and
 	   the link to its exception. */
 	.pay-table :global(th.col-queue-status) { width: 210px; }
-	.pay-table :global(th.col-routes) { width: 130px; }
-	.pay-queue :global(th.actions-col) { width: 170px; }
+	/* "Compare routes" and "Record as paid" are sized for their longest
+	   locale (fr: "Comparer les routes", "Enregistrer comme payée"): the
+	   RowAction never wraps, so a narrower column spills the button out of
+	   its cell. Label + 26px button chrome + 28px cell padding. */
+	.pay-table :global(th.col-routes) { width: 180px; }
+	.pay-queue :global(th.actions-col) { width: 215px; }
 	.pay-history :global(th.actions-col) { width: 260px; }
 	.pay-runs :global(th.actions-col) { width: 190px; }
 	.pay-rebates :global(th.actions-col) { width: 150px; }
 	.pay-cards :global(th.actions-col) { width: 130px; }
-	.pay-queue :global(table) { min-width: 1380px; }
+	.pay-queue :global(table) { min-width: 1475px; }
 	.pay-history :global(table) { min-width: 1250px; }
 	.pay-runs :global(table) { min-width: 960px; }
 	.pay-rebates :global(table) { min-width: 820px; }
