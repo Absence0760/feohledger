@@ -4035,7 +4035,40 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get payRecordOnlyBanner =>
-      'FeohLedger records your organization\'s payments but never sends them. Pay suppliers from your bank or ERP, then record each payment here, or build a run, download its bank file and record the run as paid.';
+      'FeohLedger records payments but never sends them: pay from your bank or ERP, then record each one here (a run\'s bank file is on the web app).';
+
+  @override
+  String payRecordPrefilledFromErp(String erp) {
+    return 'Filled in from the payment $erp reported. Check the details before you record it.';
+  }
+
+  @override
+  String payRecordErpAmount(String erp) {
+    return 'Amount $erp reports paid';
+  }
+
+  @override
+  String payRecordSplitTitle(String erp) {
+    return 'How $erp says it was paid';
+  }
+
+  @override
+  String get payRecordRailNotStated => 'Method not stated';
+
+  @override
+  String get payRecordSplitMethod => 'Split across the methods above';
+
+  @override
+  String get payRecordSplitStands =>
+      'This payment was made with more than one method, so it is recorded with this split. One method cannot describe it.';
+
+  @override
+  String get payRecordSplitDropped =>
+      'These parts do not add up to the amount paid, so the split is not kept. The method you choose is recorded for the whole payment.';
+
+  @override
+  String get payRecordSplitUnjudged =>
+      'Whether this split is kept is decided when the payment is recorded. If it is not kept, the method you choose is recorded for the whole payment.';
 
   @override
   String get payRecordAction => 'Record as paid';
