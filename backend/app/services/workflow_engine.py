@@ -460,6 +460,9 @@ async def _maybe_notify_transition(
         resolve_role_user_ids,
     )
     from app.services.notification_templates import InvoiceContext
+    from app.services.payment_runs import (
+        payable_currency_code as _payable_currency_code,
+    )
 
     event_type: str | None = None
     recipients: list[uuid.UUID] = []
@@ -515,7 +518,7 @@ async def _maybe_notify_transition(
         invoice_number=getattr(invoice, "invoice_number", ""),
         vendor_name=getattr(invoice, "vendor_name", ""),
         amount=getattr(invoice, "amount", None),
-        currency=getattr(invoice, "currency", None) or "USD",
+        currency=_payable_currency_code(getattr(invoice, "currency", None)),
         reason=(details or {}).get("reason"),
     )
     await notify_event(

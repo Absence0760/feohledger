@@ -59,7 +59,9 @@ class HistoricalInvoice:
     invoice_number: str
     invoice_date: str | None
     amount: Decimal
-    currency: str
+    # None when the invoice records no currency: the model is told it is
+    # unknown (JSON null), never that it is USD (decisions §NEW-T3).
+    currency: str | None
     description: str | None
     payment_method: str | None
     remit_to_address: str | None
@@ -73,7 +75,9 @@ class CandidateInvoice:
     invoice_number: str
     invoice_date: str | None
     amount: Decimal
-    currency: str
+    # None when the invoice records no currency: the model is told it is
+    # unknown (JSON null), never that it is USD (decisions §NEW-T3).
+    currency: str | None
     description: str | None
     payment_method: str | None
     remit_to_address: str | None
@@ -282,6 +286,13 @@ async def detect_anomaly(
     return parse_response(text)
 
 
+def _invoice_currency(invoice) -> str | None:
+    """The invoice's own code, or None when it records none."""
+    from app.services.payment_runs import payable_currency_code
+
+    return payable_currency_code(getattr(invoice, "currency", None))
+
+
 def invoice_to_candidate(invoice) -> CandidateInvoice:
     """Adapter from a SQLAlchemy `Invoice` (or test stub) to the
     LLM-ready dataclass."""
@@ -289,7 +300,7 @@ def invoice_to_candidate(invoice) -> CandidateInvoice:
         invoice_number=invoice.invoice_number or "",
         invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
         amount=invoice.amount if invoice.amount is not None else Decimal("0"),
-        currency=invoice.currency or "USD",
+        currency=_invoice_currency(invoice),
         description=invoice.description,
         payment_method=invoice.payment_method,
         remit_to_address=invoice.remit_to_address,
@@ -304,7 +315,7 @@ def invoice_to_history(invoice) -> HistoricalInvoice:
         invoice_number=invoice.invoice_number or "",
         invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
         amount=invoice.amount if invoice.amount is not None else Decimal("0"),
-        currency=invoice.currency or "USD",
+        currency=_invoice_currency(invoice),
         description=invoice.description,
         payment_method=invoice.payment_method,
         remit_to_address=invoice.remit_to_address,

@@ -341,10 +341,20 @@ def reporting_amount_at_locked_rate(
     corrected, reports `unconverted=True` — which the gate reads as fail-closed,
     never as a licence to compare bare numbers across currencies.
 
+    An invoice with no usable currency of its own — NULL, blank, whitespace-only
+    or malformed, judged by `payment_runs.payable_currency_code` — is
+    `unconverted` too. Reading it as the reporting currency compared a code-less
+    figure against a reporting-currency limit at face value, the §196
+    substitution inside an approval gate (decisions §NEW-T3).
+
     Returns `(reporting_amount, unconverted)`.
     """
+    from app.services.payment_runs import payable_currency_code
+
     tgt = (reporting_currency or "USD").strip().upper()
-    cur = (currency or tgt).strip().upper()
+    cur = payable_currency_code(currency)
+    if cur is None:
+        return _quantize_money(Decimal(str(amount))), True
 
     if cur == tgt:
         return _quantize_money(Decimal(str(amount))), False

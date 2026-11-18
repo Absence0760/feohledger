@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**106 open: 76 (c) · 12 (a) · 18 (b)** — re-derived from the file, never carried
+**107 open: 77 (c) · 12 (a) · 18 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -821,6 +821,21 @@ or is a sibling of a fix that needs its own pass.
       the refactor has a guard already waiting for it.
       **Trigger:** the next change that touches more than one panel of
       `frontend/src/routes/organization/+page.svelte`.
+
+### Surfaced by the currency-residue pass (round 19, 2026-11-18, decisions §NEW-T3)
+
+- [ ] **(c) A contract's spend limit says nothing about an invoice in another
+      currency, or in none.** `contract_compliance.evaluate_contract_compliance`
+      skips the cumulative-spend check when the invoice's currency
+      (`payment_runs.payable_currency_code`) is missing or differs from the
+      contract's, so a not-to-exceed contract raises no finding for that
+      invoice. A code-less invoice still cannot be approved or paid, because the
+      approval gate and every rail refuse it. A foreign-currency one can. **Durable
+      fix:** a `contract_currency_mismatch` warning (severity follows
+      `not_to_exceed`, as the spend-limit codes do) in
+      `invoice_warning_catalog`, its six web locales and the mobile ARB, then
+      `pnpm gen:warning-messages`. **Trigger:** the next change to contract
+      compliance, or the first multi-currency customer with contracts.
 
 ### Surfaced by the approval recall (2026-11-13, decisions §374)
 

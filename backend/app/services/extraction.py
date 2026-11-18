@@ -530,13 +530,21 @@ async def resolve_gate_aggregate(
     cfg = get_structuring_config(org_settings)
     if not cfg["enabled"]:
         return amount
+    # A code-less invoice has no currency to scope the vendor's other spend to;
+    # its auto-approve gates fail closed on the unknown currency regardless
+    # (`currency_conversion.reporting_amount_at_locked_rate`, decisions §NEW-T3).
+    from app.services.payment_runs import payable_currency_code
+
+    currency = payable_currency_code(getattr(invoice, "currency", None))
+    if currency is None:
+        return amount
     try:
         recent = await vendor_recent_spend(
             db,
             vendor_id=vendor_id,
             exclude_invoice_id=invoice.id,
             window_days=cfg["window_days"],
-            currency=getattr(invoice, "currency", None) or "USD",
+            currency=currency,
             entity_id=getattr(invoice, "entity_id", None),
         )
     except Exception:  # noqa: BLE001 — degrade to the single-invoice gate, never break

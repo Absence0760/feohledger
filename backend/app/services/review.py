@@ -164,20 +164,26 @@ async def _enforce_approval_thresholds(
     # exact-match duplicate check never fires" bypass. See services/structuring.py.
     aggregate_amount = amount
     recent_spend = Decimal(0)
-    invoice_currency = (getattr(invoice, "currency", None) or "").strip().upper() or "USD"
-    # The code the refusal's typed params name: the invoice's OWN currency, or
-    # None when it carries none. `invoice_currency`'s "USD" stand-in stays out
-    # of them — a typed field is formatted with a symbol by both clients, so a
-    # guessed code would render a code-less invoice as dollars (decisions
-    # §160 / §196); a None figure renders bare.
-    params_currency = (getattr(invoice, "currency", None) or "").strip().upper() or None
+    # The invoice's OWN currency, or None when it records none (NULL, blank,
+    # whitespace-only or malformed — the shared run-path predicate). Never a
+    # "USD" stand-in: a code-less amount compared against a limit as dollars is
+    # the §196 substitution inside the approval gate (decisions §NEW-T3). The
+    # gate below cannot express a None-currency figure in the limit's currency,
+    # so both money gates fire for it (fail-closed), and the refusal's typed
+    # params and English message state the figure bare (decisions §160 / §196).
+    from app.services.payment_runs import payable_currency_code
+
+    invoice_currency = payable_currency_code(getattr(invoice, "currency", None))
+    params_currency = invoice_currency
     # The same rule for the English `message`, which several surfaces show as-is
     # (the email-action page, bulk-status skip reasons, agent rationales): a
     # code-less invoice's figure is stated bare, never as dollars.
     message_currency = f" {params_currency}" if params_currency else ""
     vendor_id = getattr(invoice, "vendor_id", None)
     structuring_window_days = 0
-    if vendor_id is not None:
+    # No structuring aggregate for a code-less invoice: there is no currency to
+    # scope "this vendor's other spend" to, and its gates fail closed anyway.
+    if vendor_id is not None and invoice_currency is not None:
         from app.services.structuring import get_structuring_config, vendor_recent_spend
 
         s_cfg = get_structuring_config(org_settings)
@@ -188,7 +194,7 @@ async def _enforce_approval_thresholds(
                 vendor_id=vendor_id,
                 exclude_invoice_id=invoice.id,
                 window_days=structuring_window_days,
-                currency=getattr(invoice, "currency", None) or "USD",
+                currency=invoice_currency,
                 entity_id=getattr(invoice, "entity_id", None),
             )
             aggregate_amount = amount + recent_spend
@@ -231,6 +237,11 @@ async def _enforce_approval_thresholds(
 
     def _compared_note() -> str:
         """What was actually measured, when it isn't the billed figure."""
+        if not gate_amount.expressible and invoice_currency is None:
+            return (
+                " This invoice records no currency, so it cannot be cleared against a limit "
+                f"set in {gate_currency}."
+            )
         if not gate_amount.expressible:
             return (
                 f" This invoice could not be expressed in {gate_currency}, the currency the "
@@ -1222,6 +1233,7 @@ async def assign_reviewer(
     from app.models.notification import EVENT_INVOICE_ASSIGNED
     from app.services.notification_dispatch import notify_event
     from app.services.notification_templates import InvoiceContext
+    from app.services.payment_runs import payable_currency_code
 
     # `notify_event` swallows its own template/recipient/email failures, but its
     # per-recipient `db.add(...)` is unguarded; this outer guard is the final
@@ -1239,7 +1251,7 @@ async def assign_reviewer(
                 invoice_number=invoice.invoice_number,
                 vendor_name=invoice.vendor_name,
                 amount=invoice.amount,
-                currency=invoice.currency or "USD",
+                currency=payable_currency_code(invoice.currency),
             ),
             # The round too (decisions §379): a recall or an in-app reject
             # later retires this message's Approve link.

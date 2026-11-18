@@ -213,6 +213,110 @@ async def test_human_approval_is_unchanged_for_a_domestic_invoice_under_both_gat
 
 
 # ---------------------------------------------------------------------------
+# An invoice recording no currency (decisions §NEW-T3). The gate used to read a
+# NULL / blank code as the reporting currency and compare the bare figure to the
+# limit at face value — the §196 substitution inside the approval gate. It is
+# now inexpressible, so both money gates fire however small the figure.
+# ---------------------------------------------------------------------------
+
+_NO_CURRENCY = [None, "", "   ", "\t", "US", "U$D", "1234"]
+
+
+@pytest.mark.parametrize("currency", _NO_CURRENCY)
+def test_a_code_less_invoice_is_not_expressible_in_the_reporting_currency(currency):
+    # Even a row whose lock columns claim USD -> USD: the invoice itself names
+    # no currency, so nothing proves the figure is dollars.
+    inv = _invoice("100", currency, rate="1", source="USD")
+    gate = reporting_gate_amount(inv, org_settings=_USD)
+    assert gate.expressible is False
+    assert cfo_gate_applies("10000", gate) is True
+    assert max_amount_gate_applies("50000", gate) is True
+
+
+def test_a_padded_or_lowercase_code_is_still_its_currency():
+    for currency in (" usd ", "usd", "USD\n"):
+        gate = reporting_gate_amount(_invoice("100", currency), org_settings=_USD)
+        assert (gate.amount, gate.expressible) == (Decimal("100.00"), True), currency
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("currency", _NO_CURRENCY)
+async def test_a_code_less_invoice_does_not_clear_the_approval_limit(currency):
+    """USD 100 would clear a 50,000 cap; the same figure with no currency does
+    not, even for a CFO, and the refusal says the currency is missing."""
+    inv = _invoice("100", currency)
+    with pytest.raises(HTTPException) as exc:
+        await _enforce_approval_thresholds(
+            None, inv, {"cfo"}, org_settings=_USD, approval_config=_CONFIG
+        )
+    assert exc.value.status_code == 422
+    detail = exc.value.detail
+    assert detail["code"] == "approval_max_amount_exceeded"
+    assert detail["params"]["expressible"] is False
+    assert detail["params"]["currency"] is None
+    assert "records no currency" in detail["message"]
+    assert "100.00 USD" not in detail["message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("currency", _NO_CURRENCY)
+async def test_a_code_less_invoice_does_not_clear_the_cfo_gate(currency):
+    inv = _invoice("100", currency)
+    cfg = {"require_cfo_above": "10000"}
+    with pytest.raises(HTTPException) as exc:
+        await _enforce_approval_thresholds(
+            None, inv, {"ap_manager"}, org_settings=_USD, approval_config=cfg
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "approval_cfo_required"
+    assert exc.value.detail["params"]["currency"] is None
+    # A CFO is the human the fail-closed gate escalates to.
+    await _enforce_approval_thresholds(None, inv, {"cfo"}, org_settings=_USD, approval_config=cfg)
+
+
+@pytest.mark.asyncio
+async def test_a_code_less_invoice_skips_the_structuring_lookup():
+    """No currency to scope the vendor's other spend to: the aggregate is not
+    queried (it used to sum the vendor's USD invoices), and the gate still fires."""
+    import uuid
+
+    inv = _invoice("100", "", vendor_id=uuid.uuid4())
+    inv.id = uuid.uuid4()
+    inv.entity_id = None
+
+    class _NoDb:
+        async def execute(self, *_a, **_k):  # pragma: no cover - must not run
+            raise AssertionError("structuring aggregate queried for a code-less invoice")
+
+    with pytest.raises(HTTPException) as exc:
+        await _enforce_approval_thresholds(
+            _NoDb(),
+            inv,
+            {"ap_manager"},
+            org_settings={**_USD, "fraud_rules": {"structuring_enabled": True}},
+            approval_config={"require_cfo_above": "10000"},
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["params"]["recent_spend"] is None
+
+
+def test_the_payment_cfo_gate_reads_a_code_less_invoice_as_unconverted():
+    """The same helper prices the payment-run and standalone-payment CFO gates."""
+    from app.services.currency_conversion import reporting_amount_at_locked_rate
+
+    for currency in _NO_CURRENCY:
+        _, unconverted = reporting_amount_at_locked_rate(
+            amount=Decimal("100"),
+            currency=currency,
+            reporting_currency="USD",
+            persisted_reporting_currency="USD",
+            persisted_reporting_source_currency="USD",
+            persisted_fx_rate=Decimal("1"),
+        )
+        assert unconverted is True, currency
+
+
+# ---------------------------------------------------------------------------
 # The approval chain's per-level amount bands.
 # ---------------------------------------------------------------------------
 
