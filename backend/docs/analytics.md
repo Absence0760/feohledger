@@ -1051,7 +1051,10 @@ once Open POs went bare, to show one unlabelled sum across PO currencies (§197)
 Read-only, admin + CFO only. All three resolve the tenant DB through
 `get_tenant_db`. Source rows: open invoices `LEFT JOIN payment_schedules`
 on `invoice_id`, timed on the schedule's `due_date` (falling back to
-`Invoice.due_date`), bounded to `[today, today + horizon_days]`. Money is
+`Invoice.due_date`), bounded in SQL at the **future** edge only
+(`due <= today + horizon_days`; a row with no due date cannot be timed and is
+left out). AP already **past due** is kept — see
+[Overdue AP is carried into the first period](#overdue-ap-is-carried-into-the-first-period). Money is
 `Decimal` end-to-end and serialises as an **exact decimal string** (see
 [Money serialisation](#money-serialisation)). No writes, no audit rows, no new
 migration — pure aggregate math, like `forecast_variance`.
@@ -1066,8 +1069,52 @@ migration — pure aggregate math, like `forecast_variance`.
 
 `GET /cashflow_forecast?granularity=day|week|month&horizon_days=N&include_pending=bool`
 — per-period `{scheduled_amount, committed_amount, pending_amount,
-discount_eligible_amount, count, unconverted_count}` plus a `totals` rollup.
-Weeks are Monday-anchored. Default `granularity=week`, `horizon_days=90`.
+overdue_amount, discount_eligible_amount, count, overdue_count,
+unconverted_count}` plus a `totals` rollup. Weeks are Monday-anchored. Default
+`granularity=week`, `horizon_days=90`.
+
+### Overdue AP is carried into the first period
+
+An open invoice whose effective due date is already **before today** is the
+most certain outflow the business has: it is owed now. `_commitment_rows` used
+to drop it (`due < today → continue`), so the forecast, `/cash_position`'s
+curve, the what-if, every copilot planning tool, the `get_payment_forecast`
+assistant tool and the shortfall-alert sweep all overstated cash by exactly the
+AP the business was already late paying. Probed: USD 1,000 due yesterday + USD
+200 due in five days reported `committed_amount: "200.00"`, `count: 1`.
+
+The rule now:
+
+- `_commitment_rows` keeps the row, flags it `overdue: True` and leaves its real
+  `due_date` alone. The SQL bound is on the future edge only.
+- `services/analytics.bucket_outflows` times a flagged row on **today** — it
+  cannot leave in the past — so it lands in the period containing today, the
+  forecast's first. It counts in `scheduled_amount` and `count` and on its own
+  `overdue_amount` / `overdue_count`, **instead of** `committed_amount` /
+  `pending_amount`. So `scheduled = committed + pending + overdue`, and
+  `committed_amount` keeps meaning "firm AP falling due in this period": a late
+  thousand is named as late, not folded into a figure that implies it is on
+  schedule. Both committed and in-review invoices can be overdue;
+  `include_pending=false` drops the in-review ones with the rest of the
+  pipeline.
+- The flag is explicit rather than inferred from `due_date < today` because
+  the same function buckets **settled payments** by completion date for a
+  saved plan's variance (`api/cash_flow`), which must stay where they happened.
+- `/cash_position` subtracts it in the first period's `outflow` (and reports
+  `overdue_amount` per period and `overdue_amount` / `overdue_count` at the top),
+  so the curve starts from the cash left once the late bills are paid. The
+  shortfall sweep reads the same curve and can now alert on overdue AP alone.
+- `/cashflow_whatif` never times an overdue row before today: `on_time` and
+  `early` (whose window closed by the due date) pay it today; `late` pays it at
+  `max(due + grace_days, today)`. Each scenario reports the same
+  `overdue_amount` / `overdue_count`, since re-timing cannot make it on time.
+- The `cashflow_forecast` CSV appends `overdue_amount`, `overdue_count` after
+  `count` (positional readers keep the first eight columns).
+
+Guards: `tests/test_cashflow_forecast_api.py` (the probe, across the three
+endpoints), `tests/test_analytics.py` (pure bucketing / what-if / position),
+`tests/test_cash_flow_copilot.py`, `tests/test_cash_flow_alerts.py`,
+`tests/test_assistant.py`.
 
 ### One commitment row per invoice, whatever its schedule count
 
@@ -1209,7 +1256,7 @@ returning "no threshold" rather than raising.
 | `vendor_spend` | vendor_name, invoice_count, total_amount, currencies, unconverted_count |
 | `payment_register` | payment_id, invoice_id, invoice_number, vendor_name, amount, currency, method, status, provider, reference, submitted_at, completed_at |
 | `aging_snapshot` | as_of_date, current, days_30, days_60, days_90, days_90_plus, total, reporting_currency, unconverted_count. The bands are in the org's **reporting currency** — the rate locked on each invoice, else face value, with those face-value rows counted on `unconverted_count` (the dashboard `aging_reporting` rule, and the figure the CFO `reporting_accounts_payable_balance` they reconcile with uses). Both the export route and the emailed report call ONE builder, `api/analytics._aging_snapshot_buckets`; they used to be two hand-copied loops that summed raw `Invoice.amount` across currencies, so a ¥1,000,000 invoice sat in a band as "1000000.00" beside dollars in a file that names no currency. `as_of_date` defaults to `utc_today()` — neither caller passes `snapshot_date`, and both bucket against a UTC `today`, so a local-time default labelled the file with one date while the buckets were computed as of another |
-| `cashflow_forecast` | period, period_start, period_end, scheduled_amount, committed_amount, pending_amount, discount_eligible_amount, count |
+| `cashflow_forecast` | period, period_start, period_end, scheduled_amount, committed_amount, pending_amount, discount_eligible_amount, count, overdue_amount, overdue_count. The last two are the AP already past due, carried into the first period (inside `scheduled_amount`, outside committed / pending — see [Overdue AP](#overdue-ap-is-carried-into-the-first-period)); a caller reporting no overdue figure exports them blank, not `0` |
 | `expense_register` | date, merchant, category, amount, currency, gl_code, payment_method, status, report_number |
 
 `cashflow_forecast` is forward-looking — it takes `granularity` +

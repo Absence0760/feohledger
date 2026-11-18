@@ -771,6 +771,114 @@ def test_bucket_outflows_counts_unconvertible_rows():
     assert out[0]["scheduled_amount"] == Decimal("10001500.00")
 
 
+def test_bucket_outflows_carries_overdue_rows_into_the_first_period():
+    """The followups probe in pure form: USD 1,000 due yesterday + USD 200 due
+    in five days. The thousand is AP the business is already late paying — the
+    most certain outflow it has — so it is timed on `today` and named on the
+    first period's `overdue_amount`, never dropped and never folded into
+    `committed_amount` as if it were on schedule."""
+    today = date(2026, 6, 10)  # a Wednesday
+    rows = [
+        {**_commit(today - timedelta(days=1), "1000"), "overdue": True},
+        _commit(today + timedelta(days=5), "200"),
+    ]
+    by_day = bucket_outflows(rows, granularity="day", today=today)
+    assert [b["period"] for b in by_day] == ["2026-06-10", "2026-06-15"]
+    first, second = by_day
+    assert first["overdue_amount"] == Decimal("1000.00")
+    assert first["overdue_count"] == 1
+    assert first["committed_amount"] == Decimal("0.00")
+    assert first["scheduled_amount"] == Decimal("1000.00")
+    assert first["count"] == 1
+    assert second["committed_amount"] == Decimal("200.00")
+    assert second["overdue_amount"] == Decimal("0.00")
+    assert second["overdue_count"] == 0
+
+    # Same week: one period, the identity scheduled = committed + pending + overdue.
+    rows.append(_commit(today + timedelta(days=1), "40", committed=False))
+    week = bucket_outflows(rows, granularity="week", today=today)[0]
+    assert week["period"] == "2026-06-08"
+    assert week["overdue_amount"] == Decimal("1000.00")
+    assert week["committed_amount"] == Decimal("0.00")
+    assert week["pending_amount"] == Decimal("40.00")
+    assert week["scheduled_amount"] == (
+        week["committed_amount"] + week["pending_amount"] + week["overdue_amount"]
+    )
+
+
+def test_bucket_outflows_does_not_move_an_unflagged_past_row():
+    """Overdue is an explicit flag, not `due_date < today`: the plan-vs-actual
+    side buckets SETTLED payments by completion date through this same
+    function, and those must stay in the period they happened in."""
+    today = date(2026, 6, 10)
+    out = bucket_outflows([_commit(date(2026, 5, 20), "75")], granularity="week", today=today)
+    assert out[0]["period"] == "2026-05-18"
+    assert out[0]["overdue_amount"] == Decimal("0.00")
+    assert out[0]["committed_amount"] == Decimal("75.00")
+
+
+def test_cash_position_subtracts_overdue_in_the_first_period():
+    today = date(2026, 6, 10)
+    periods = bucket_outflows(
+        [
+            {**_commit(today - timedelta(days=30), "1000"), "overdue": True},
+            _commit(today + timedelta(days=5), "200"),
+        ],
+        granularity="day",
+        today=today,
+    )
+    rows = compute_cash_position(Decimal("1100"), periods, min_balance_threshold=Decimal("0"))
+    assert rows[0]["outflow"] == Decimal("1000.00")
+    assert rows[0]["overdue_amount"] == Decimal("1000.00")
+    assert rows[0]["closing"] == Decimal("100.00")
+    assert rows[1]["overdue_amount"] == Decimal("0.00")
+    assert rows[1]["closing"] == Decimal("-100.00")
+    assert rows[1]["below_threshold"] is True
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_pay_date"),
+    [
+        ("on_time", date(2026, 6, 10)),  # cannot pay in the past: today
+        ("early", date(2026, 6, 10)),  # window closed by the due date: today
+        ("late", date(2026, 6, 10)),  # due-3 + 2 grace is still past: today
+    ],
+)
+def test_whatif_never_times_an_overdue_row_in_the_past(scenario, expected_pay_date):
+    today = date(2026, 6, 10)
+    row = {
+        **_commit(
+            today - timedelta(days=3),
+            "1000",
+            discount_date=today - timedelta(days=13),
+            discount_percent=Decimal("2"),
+        ),
+        "overdue": True,
+    }
+    out = apply_payment_timing_scenario(
+        [row], scenario=scenario, granularity="day", grace_days=2, today=today
+    )
+    assert [p["period"] for p in out["periods"]] == [expected_pay_date.isoformat()]
+    assert out["total_outflow"] == Decimal("1000.00")
+    assert out["total_discount_captured"] == Decimal("0.00")
+    assert out["weighted_avg_pay_date_days"] == Decimal("0.0")
+    assert out["overdue_amount"] == Decimal("1000.00")
+    assert out["overdue_count"] == 1
+
+
+def test_whatif_late_keeps_a_grace_date_still_ahead():
+    """`late` pays `due + grace`; for an invoice only a day late with 15 days'
+    grace that is still in the future, and stays there — still reported as
+    overdue, since re-timing cannot make it on time."""
+    today = date(2026, 6, 10)
+    row = {**_commit(today - timedelta(days=1), "1000"), "overdue": True}
+    out = apply_payment_timing_scenario(
+        [row], scenario="late", granularity="day", grace_days=15, today=today
+    )
+    assert out["periods"][0]["period"] == "2026-06-24"
+    assert out["periods"][0]["overdue_amount"] == Decimal("1000.00")
+
+
 def test_cash_position_carries_the_unconvertible_count_through():
     """The caveat has to reach the curve, not stop at the buckets — the closing
     balance carries forward, so one unconvertible row poisons every later

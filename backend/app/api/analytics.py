@@ -136,9 +136,19 @@ async def _commitment_rows(
 
     Outflow timing comes from the `PaymentSchedule` row when present
     (`due_date` / `discount_date` / `discount_percent`); otherwise we fall
-    back to `Invoice.due_date` with no discount. Rows are bounded to
-    `[today, today + horizon_days]` on the effective due date so the query
-    doesn't scan the whole back-catalogue.
+    back to `Invoice.due_date` with no discount. Rows are bounded on the
+    effective due date at the FUTURE edge only (`due <= today + horizon_days`,
+    in SQL), and a row with no due date is left out because it cannot be timed.
+
+    **A row already past due is kept and flagged `overdue: True`.** It is the
+    most certain outflow the business has — the AP it is already late paying —
+    and dropping it made the forecast, the cash-position curve, the what-if,
+    every copilot planning tool and the shortfall sweep overstate cash by
+    exactly that amount. Its `due_date` stays the real one; it is
+    `services.analytics.bucket_outflows` that times a flagged row on `today`
+    (it cannot be paid in the past) and reports it on the first period's
+    `overdue_amount` / `overdue_count`, never silently inside the committed or
+    pending figure.
 
     **Every `amount` is expressed in the org's REPORTING currency**, via the
     rate locked on the invoice (`Invoice.reporting_amount`) — never the raw
@@ -187,6 +197,14 @@ async def _commitment_rows(
         .subquery()
     )
 
+    # The effective due date the loop below times each row on: the latest
+    # schedule's, else the invoice's own. Bounded here at the future edge only
+    # — no lower bound, because a past-due row is an overdue outflow, not one
+    # to drop — so a horizon's worth of open AP is what crosses the wire rather
+    # than every open invoice with a far-future date. A NULL effective due date
+    # fails `<=` and is excluded: it cannot be timed into any period.
+    effective_due = func.coalesce(latest_schedule.c.sched_due, Invoice.due_date)
+
     result = await db.execute(
         apply_entity_scope(
             select(
@@ -202,7 +220,8 @@ async def _commitment_rows(
                 Invoice.reporting_currency,
             )
             .outerjoin(latest_schedule, latest_schedule.c.invoice_id == Invoice.id)
-            .where(Invoice.status.in_(statuses)),
+            .where(Invoice.status.in_(statuses))
+            .where(effective_due <= horizon_end),
             Invoice,
             entity_id,
         )
@@ -225,7 +244,10 @@ async def _commitment_rows(
         rep_currency,
     ) in result.all():
         due = sched_due or inv_due
-        if due is None or due < today or due > horizon_end:
+        # The SQL bound above already excludes these; kept so the loop's own
+        # contract does not depend on the query's (a NULL due date cannot be
+        # timed, a date past the horizon is out of scope).
+        if due is None or due > horizon_end:
             continue
         status_value = status.value if hasattr(status, "value") else status
         # Same helper every sibling rollup in this module uses, so a cash
@@ -247,6 +269,9 @@ async def _commitment_rows(
                 "currency": target_currency,
                 "unconverted": unconverted,
                 "committed": status_value in committed_set,
+                # Past due as of `today`: carried into the first period as
+                # overdue (see the docstring), not dropped.
+                "overdue": due < today,
                 "discount_date": discount_date,
                 "discount_percent": discount_percent,
             }
@@ -376,7 +401,9 @@ async def get_cashflow_forecast(
     over the next `horizon_days`. Each period splits the scheduled total
     into firm `committed_amount` and lower-certainty `pending_amount`
     (the in-flight approval pipeline; drop it with `include_pending=false`)
-    and reports the discount-eligible slice."""
+    and reports the discount-eligible slice. AP already past due is carried
+    into the FIRST period on its own `overdue_amount` / `overdue_count`
+    (`scheduled = committed + pending + overdue`) — see `_commitment_rows`."""
     today = utc_today()
     rows = await _commitment_rows(
         db,
@@ -391,10 +418,12 @@ async def get_cashflow_forecast(
         "scheduled_amount": _money(sum((p["scheduled_amount"] for p in periods), Decimal("0"))),
         "committed_amount": _money(sum((p["committed_amount"] for p in periods), Decimal("0"))),
         "pending_amount": _money(sum((p["pending_amount"] for p in periods), Decimal("0"))),
+        "overdue_amount": _money(sum((p["overdue_amount"] for p in periods), Decimal("0"))),
         "discount_eligible_amount": _money(
             sum((p["discount_eligible_amount"] for p in periods), Decimal("0"))
         ),
         "count": sum(p["count"] for p in periods),
+        "overdue_count": sum(p["overdue_count"] for p in periods),
         # Rows counted at FACE VALUE because their reporting-currency figure
         # could not be established (see `_commitment_rows`). A count, not
         # money. Non-zero means the totals above mix currencies.
@@ -413,8 +442,10 @@ async def get_cashflow_forecast(
                 "scheduled_amount": _money(p["scheduled_amount"]),
                 "committed_amount": _money(p["committed_amount"]),
                 "pending_amount": _money(p["pending_amount"]),
+                "overdue_amount": _money(p["overdue_amount"]),
                 "discount_eligible_amount": _money(p["discount_eligible_amount"]),
                 "count": p["count"],
+                "overdue_count": p["overdue_count"],
                 "unconverted_count": p["unconverted_count"],
             }
             for p in periods
@@ -460,12 +491,17 @@ async def get_cashflow_whatif(
             # reporting-currency figure could not be established. Comparing
             # two scenarios' outflows only means something at 0.
             "unconverted_count": result["unconverted_count"],
+            # The slice of `total_outflow` already past due — identical across
+            # the three scenarios, which can re-time it but never un-late it.
+            "overdue_amount": _money(result["overdue_amount"]),
+            "overdue_count": result["overdue_count"],
             "periods": [
                 {
                     "period": p["period"],
                     "period_start": p["period_start"].isoformat(),
                     "period_end": p["period_end"].isoformat(),
                     "scheduled_amount": _money(p["scheduled_amount"]),
+                    "overdue_amount": _money(p["overdue_amount"]),
                     "unconverted_count": p["unconverted_count"],
                 }
                 for p in result["periods"]
@@ -534,7 +570,10 @@ async def get_cash_position(
     The alert threshold is the `min_balance_threshold` query param when supplied,
     else the org's persisted `settings.cashflow.min_balance_threshold` (managed
     via `GET/PUT /api/analytics/cash-position-settings`). Inflows (receivables)
-    aren't modelled — `closing = opening - outflow`."""
+    aren't modelled — `closing = opening - outflow`. AP already past due is
+    part of the first period's `outflow` (and named on its `overdue_amount`
+    and the top-level `overdue_amount` / `overdue_count`), so the curve
+    starts from the cash actually left once the late bills are paid."""
     today = utc_today()
     rows = await _commitment_rows(
         db,
@@ -583,6 +622,10 @@ async def get_cash_position(
         # every `closing` below is a mixed-currency number — the curve carries
         # the balance forward, so one unconvertible row poisons the tail.
         "unconverted_count": sum(p["unconverted_count"] for p in position),
+        # AP already past due, folded into the first period's `outflow` (it is
+        # owed now). Read off the buckets, not the position rows — same total.
+        "overdue_amount": _money(sum((p["overdue_amount"] for p in periods), Decimal("0"))),
+        "overdue_count": sum(p["overdue_count"] for p in periods),
         # `None` stays JSON null — "no threshold set" is not zero.
         "threshold": _money(threshold),
         "periods": [
@@ -595,6 +638,7 @@ async def get_cash_position(
                 "inflow": _money(p["inflow"]),
                 "closing": _money(p["closing"]),
                 "below_threshold": p["below_threshold"],
+                "overdue_amount": _money(p["overdue_amount"]),
                 "unconverted_count": p["unconverted_count"],
             }
             for p in position

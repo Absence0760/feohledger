@@ -113,6 +113,10 @@ class ForecastBucket(BaseModel):
     period: str
     amount: Decimal
     count: int
+    # The slice of `amount` already past due, carried into the first bucket
+    # (`services.analytics.bucket_outflows`). Part of `amount`, never extra.
+    overdue: Decimal = Decimal("0")
+    overdue_count: int = 0
 
 
 class ForecastResult(BaseModel):
@@ -120,6 +124,12 @@ class ForecastResult(BaseModel):
     horizon_label: str
     buckets: list[ForecastBucket]
     total: Decimal
+    # How much of `total` is AP already late — the assistant must name it
+    # rather than present the whole figure as falling due on schedule.
+    overdue: Decimal = Decimal("0")
+    overdue_count: int = 0
+    # Rows counted at face value in a currency we could not convert.
+    unconverted_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +172,11 @@ class CashflowPeriod(BaseModel):
     pending: Decimal
     discount_eligible: Decimal
     count: int
+    # AP already past due, carried into the FIRST period on its own line:
+    # `scheduled = committed + pending + overdue`. See
+    # `services.analytics.bucket_outflows`.
+    overdue: Decimal = Decimal("0")
+    overdue_count: int = 0
     # Rows in this period whose reporting-currency figure could not be
     # established, so they were counted at FACE VALUE in another currency.
     # See `services.analytics.bucket_outflows`.
@@ -176,6 +191,8 @@ class CashflowForecastResult(BaseModel):
     total_scheduled: Decimal
     total_committed: Decimal
     total_pending: Decimal
+    total_overdue: Decimal = Decimal("0")
+    overdue_count: int = 0
     # Non-zero means the totals above mix currencies — the copilot must say so
     # rather than answering with a number nobody can act on.
     unconverted_count: int = 0
@@ -194,6 +211,8 @@ class CashPositionPeriod(BaseModel):
     outflow: Decimal
     closing: Decimal
     below_threshold: bool
+    # The part of `outflow` that is AP already past due (first period only).
+    overdue: Decimal = Decimal("0")
     unconverted_count: int = 0
 
 
@@ -217,6 +236,10 @@ class CashPositionResult(BaseModel):
     min_balance_threshold: Decimal | None
     periods: list[CashPositionPeriod]
     first_shortfall_period: str | None
+    # AP already past due, inside the first period's outflow — the curve
+    # starts from the cash left once the late bills are paid.
+    overdue_amount: Decimal = Decimal("0")
+    overdue_count: int = 0
     # The OUTFLOW-side twin of `opening_balance_provider_skipped`: commitments
     # folded into the curve at face value in a currency we could not convert.
     # The balance carries forward, so one such row poisons every later period.
@@ -241,6 +264,10 @@ class PaymentWhatifResult(BaseModel):
     horizon_days: int
     grace_days: int
     scenarios: list[WhatifScenario]
+    # AP already past due inside every scenario's `total_outflow` — identical
+    # across them: re-timing can move a late bill, never make it on time.
+    overdue_amount: Decimal = Decimal("0")
+    overdue_count: int = 0
     # A property of the commitment set, not of a scenario: rows included at
     # face value in a currency we could not convert. Comparing two scenarios'
     # outflows only means something at 0.
@@ -329,6 +356,8 @@ class PaymentPlanPeriod(BaseModel):
     outflow: Decimal
     closing: Decimal
     below_threshold: bool
+    # The part of `outflow` that is AP already past due (first period only).
+    overdue: Decimal = Decimal("0")
     unconverted_count: int = 0
 
 
@@ -357,6 +386,10 @@ class PaymentPlanResult(BaseModel):
     cash_budget: Decimal | None
     periods: list[PaymentPlanPeriod]
     first_shortfall_period: str | None
+    # AP already past due, inside the plan curve's first-period outflow (and
+    # stageable by the draft-run enact path like any other payable invoice).
+    overdue_amount: Decimal = Decimal("0")
+    overdue_count: int = 0
     cost_of_capital_pct: Decimal
     total_savings_selected: Decimal
     total_outlay_selected: Decimal

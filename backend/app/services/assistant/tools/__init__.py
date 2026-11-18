@@ -117,8 +117,10 @@ TOOLS: dict[str, ToolSpec] = {
         description=(
             "Projected AP cash outflow over a horizon (7d/14d/30d/60d/90d), "
             "bucketed by day/week/month, with per-bucket totals and a grand "
-            "total. Use for 'cash due', 'upcoming payments', 'what do we owe', "
-            "payment-forecast questions."
+            "total. Invoices already past due are included in the first bucket "
+            "and reported as `overdue` — say how much is already late. Use for "
+            "'cash due', 'upcoming payments', 'what do we owe', payment-forecast "
+            "questions."
         ),
         param_model=schemas.ForecastParams,
         return_model=schemas.ForecastResult,
@@ -145,7 +147,8 @@ TOOLS: dict[str, ToolSpec] = {
         description=(
             "Projected AP cash outflow by period (day/week/month) over a horizon "
             "up to 730 days, split into committed (approved and later) vs pending "
-            "(pre-approval pipeline) vs discount-eligible amounts. Use for "
+            "(pre-approval pipeline) vs overdue (already past due, carried into "
+            "the first period and owed now) vs discount-eligible amounts. Use for "
             "detailed outflow-forecast questions ('what's our committed outflow "
             "next quarter', 'projected payables by month')."
         ),

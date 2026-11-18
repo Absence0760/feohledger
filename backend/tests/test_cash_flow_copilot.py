@@ -218,6 +218,108 @@ async def test_cashflow_forecast_money_is_exact_string_and_deterministic(realdb)
     assert res2.model_dump(mode="json") == dumped
 
 
+async def test_copilot_tools_carry_overdue_ap_into_the_first_period(realdb):
+    """The followups probe through the copilot: USD 1,000 due yesterday + USD
+    200 due in five days. Every planning tool reads `_commitment_rows`, so all
+    of them used to answer as if the late thousand did not exist — the
+    forecast, the running position the copilot narrates a shortfall from, the
+    what-if, and the plan a user can enact."""
+    from app.services.assistant.tools.cashflow import (
+        get_cash_position,
+        get_cashflow_forecast,
+        propose_payment_plan,
+        run_payment_whatif,
+    )
+    from app.services.assistant.tools.schemas import (
+        CashflowForecastParams,
+        CashPositionParams,
+        PaymentWhatifParams,
+        ProposePaymentPlanParams,
+    )
+    from app.utils.dates import utc_today
+
+    today = utc_today()
+    a = realdb.info("a")
+    mk_a = realdb.sessionmaker("a")
+    async with mk_a() as sa:
+        ent = await _default_entity_id(sa, a.org_id)
+        await _seed_invoice(
+            sa,
+            a.org_id,
+            ent,
+            number="OD-1",
+            vendor_name="LateCo",
+            amount="1000.00",
+            due_date=today - timedelta(days=1),
+        )
+        await _seed_invoice(
+            sa,
+            a.org_id,
+            ent,
+            number="OD-2",
+            vendor_name="SoonCo",
+            amount="200.00",
+            due_date=today + timedelta(days=5),
+        )
+        await sa.commit()
+
+    common = {"org_id": a.org_id, "entity_id": None, "current_user_id": a.users["admin"]}
+    ctrl_mk = realdb.control_sessionmaker()
+    async with mk_a() as sa, ctrl_mk() as ctrl:
+        forecast = await get_cashflow_forecast(
+            sa, control_db=ctrl, params=CashflowForecastParams(granularity="day"), **common
+        )
+        position = await get_cash_position(
+            sa,
+            control_db=ctrl,
+            params=CashPositionParams(
+                granularity="day",
+                opening_balance=Decimal("1100"),
+                min_balance_threshold=Decimal("0"),
+            ),
+            **common,
+        )
+        whatif = await run_payment_whatif(
+            sa, control_db=ctrl, params=PaymentWhatifParams(granularity="day"), **common
+        )
+        plan = await propose_payment_plan(
+            sa,
+            control_db=ctrl,
+            params=ProposePaymentPlanParams(
+                granularity="day",
+                opening_balance=Decimal("1100"),
+                min_balance_threshold=Decimal("0"),
+            ),
+            **common,
+        )
+
+    assert forecast.total_overdue == Decimal("1000.00")
+    assert forecast.overdue_count == 1
+    assert forecast.total_committed == Decimal("200.00")
+    assert forecast.total_scheduled == Decimal("1200.00")
+    assert forecast.periods[0].period == today.isoformat()
+    assert forecast.periods[0].overdue == Decimal("1000.00")
+    _assert_no_float(forecast.model_dump(mode="json"))
+
+    assert position.overdue_amount == Decimal("1000.00")
+    assert position.periods[0].outflow == Decimal("1000.00")
+    assert position.periods[0].overdue == Decimal("1000.00")
+    # 1100 − 1000 overdue − 200 → the copilot now sees the shortfall.
+    assert position.first_shortfall_period == (today + timedelta(days=5)).isoformat()
+
+    assert whatif.overdue_amount == Decimal("1000.00")
+    assert {s.scenario: s.total_outflow for s in whatif.scenarios} == {
+        "early": Decimal("1200.00"),
+        "on_time": Decimal("1200.00"),
+        "late": Decimal("1200.00"),
+    }
+
+    assert plan.overdue_amount == Decimal("1000.00")
+    assert plan.overdue_count == 1
+    assert plan.periods[0].overdue == Decimal("1000.00")
+    assert plan.first_shortfall_period == (today + timedelta(days=5)).isoformat()
+
+
 async def test_cash_position_money_is_exact_string(realdb):
     """Running-balance periods + opening balance serialise as exact strings; the
     shortfall flag is a bool; no float in the return path."""
