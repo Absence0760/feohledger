@@ -1775,13 +1775,6 @@ user-visible halves still open.
 
 ### Surfaced by round 15 (2026-11-18, round PR #731, decisions §445–§453)
 
-- [ ] **(c) A malformed invoice currency prints a blank in the split currency
-      warning.** When an invoice's own code is malformed and a split's legs
-      disagree (§445), `po_currency_mismatch` reads "Invoice is in  but PO …
-      is in EUR". It needs a stored malformed code, which the NOT NULL column
-      with a USD default makes rare. **Durable fix:** a variant sentence for
-      an unknown invoice currency. **Trigger:** the next change to the warning
-      catalogue.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

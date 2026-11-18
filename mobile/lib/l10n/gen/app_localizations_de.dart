@@ -3292,6 +3292,14 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return 'Die Rechnung enthält keine gültige Währung, und die Bestellungen hinter $poNumber lauten auf unterschiedliche Währungen ($poCurrencies) — die Beträge wurden nicht verglichen';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return 'Bestellung $poNumber ist storniert — die Rechnung wurde nicht mit ihr abgeglichen';
   }
@@ -3509,6 +3517,13 @@ class AppLocalizationsDe extends AppLocalizations {
     String poCurrency,
   ) {
     return 'Währungsabweichung: Rechnung in $invoiceCurrency, Bestellung in $poCurrency — Beträge nicht verglichen';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return 'Währungsabweichung: Rechnung ohne gültige Währung, Bestellungen in $poCurrencies — Beträge nicht verglichen';
   }
 
   @override

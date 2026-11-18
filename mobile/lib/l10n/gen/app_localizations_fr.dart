@@ -3307,6 +3307,14 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return 'La facture n’indique aucune devise valide et les commandes derrière $poNumber sont dans des devises différentes ($poCurrencies) — les montants n’ont pas été comparés';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return 'La commande $poNumber est annulée — la facture n’a pas été rapprochée avec elle';
   }
@@ -3524,6 +3532,13 @@ class AppLocalizationsFr extends AppLocalizations {
     String poCurrency,
   ) {
     return 'Devises différentes : facture en $invoiceCurrency, commande en $poCurrency — montants non comparés';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return 'Devises différentes : facture sans devise valide, commandes en $poCurrencies — montants non comparés';
   }
 
   @override

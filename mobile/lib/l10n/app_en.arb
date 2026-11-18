@@ -2261,6 +2261,17 @@
       }
     }
   },
+  "invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown": "The invoice records no valid currency and the POs behind {poNumber} are in different currencies ({poCurrencies}) — the amounts were not compared",
+  "@invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      },
+      "poCurrencies": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningPoCancelled": "PO {poNumber} is cancelled — the invoice was not matched against it",
   "@invoiceWarningPoCancelled": {
     "placeholders": {
@@ -2607,6 +2618,14 @@
         "type": "String"
       },
       "poCurrency": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown": "Currency mismatch: invoice records no valid currency, POs in {poCurrencies} — amounts not compared",
+  "@invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown": {
+    "placeholders": {
+      "poCurrencies": {
         "type": "String"
       }
     }

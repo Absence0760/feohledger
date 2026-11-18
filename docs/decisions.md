@@ -23100,3 +23100,14 @@ invoice PATCH writing `""` at all is the longer-term fix and stays in
 `docs/followups.md`. The builder's refusals are still plain strings rather
 than `{code, params}` bodies; the code travels as the detail's prefix and as
 the queue's `blocked_reason`, which is what the web and mobile queues label.
+
+## §NEW-L5. A split's currency mismatch with a malformed invoice code names every leg's code (amends §445, round 16, 2026-11-18)
+
+A split whose legs' codes disagree is `different` even when the invoice's own
+code is malformed (§445), and `po_currency_mismatch` then read "Invoice is in
+ but PO … is in EUR": a blank, and one leg's code standing for the whole PO.
+That is its own code, `po_currency_mismatch_invoice_currency_unknown` (with a
+PO-match issue twin), not a fallback word in a param: a word in a sentence
+selects the code (`backend/docs/invoice-warnings.md`). It names every code the
+legs record, in one `text` param (`poCurrencies`, "USD, EUR"), because no
+single code is honest about a split that spans several. The hold is unchanged.

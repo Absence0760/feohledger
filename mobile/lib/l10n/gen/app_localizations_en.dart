@@ -3271,6 +3271,14 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return 'The invoice records no valid currency and the POs behind $poNumber are in different currencies ($poCurrencies) — the amounts were not compared';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return 'PO $poNumber is cancelled — the invoice was not matched against it';
   }
@@ -3488,6 +3496,13 @@ class AppLocalizationsEn extends AppLocalizations {
     String poCurrency,
   ) {
     return 'Currency mismatch: invoice in $invoiceCurrency, PO in $poCurrency — amounts not compared';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return 'Currency mismatch: invoice records no valid currency, POs in $poCurrencies — amounts not compared';
   }
 
   @override

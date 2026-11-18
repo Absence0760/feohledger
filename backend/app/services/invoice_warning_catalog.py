@@ -328,6 +328,18 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         "the amounts were not compared",
         {"invoiceCurrency": "text", "poNumber": "text", "poCurrency": "text"},
     ),
+    # The same finding when the invoice's own code is malformed, which only a
+    # multi-PO split whose legs disagree with each other can reach (decisions
+    # §445): neither the invoice nor any one PO has a code to print, so the
+    # sentence names every code the legs record. `poCurrencies` is `text` like
+    # the two codes above.
+    WarningSpec(
+        "po_currency_mismatch_invoice_currency_unknown",
+        "po_mismatch",
+        "The invoice records no valid currency and the POs behind {poNumber} are in "
+        "different currencies ({poCurrencies}) — the amounts were not compared",
+        {"poNumber": "text", "poCurrencies": "text"},
+    ),
     # The PO was cancelled (or voided): it authorizes nothing, so the invoice
     # was not matched against it.
     WarningSpec(
@@ -628,6 +640,16 @@ PO_MATCH_ISSUE_SPECS: tuple[WarningSpec, ...] = (
         "Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} "
         "— amounts not compared",
         {"invoiceCurrency": "text", "poCurrency": "text"},
+    ),
+    # A multi-PO split whose legs disagree with each other while the invoice's
+    # own code is malformed (decisions §445): there is no invoice code to name,
+    # and no one PO code either, so the sentence names the legs' codes.
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "currency_mismatch_invoice_currency_unknown",
+        PO_MATCH_ISSUE_TYPE,
+        "Currency mismatch: invoice records no valid currency, POs in {poCurrencies} "
+        "— amounts not compared",
+        {"poCurrencies": "text"},
     ),
     WarningSpec(
         PO_MATCH_ISSUE_PREFIX + "po_cancelled",

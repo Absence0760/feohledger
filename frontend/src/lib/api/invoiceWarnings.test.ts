@@ -126,6 +126,20 @@ describe('localizeInvoiceWarning', () => {
 		});
 	});
 
+	it('names a split's leg codes when the invoice records no valid currency', () => {
+		// decisions §445: no invoice code to print, so the sentence is its own
+		// code and the leg codes ride one text param, verbatim.
+		const localized = localizeInvoiceWarning({
+			message: '',
+			code: 'po_currency_mismatch_invoice_currency_unknown',
+			params: { poNumber: 'PO-A,PO-B', poCurrencies: 'USD, EUR' }
+		});
+		expect(localized).toEqual({
+			key: 'invoices.warning.poCurrencyMismatchInvoiceCurrencyUnknown',
+			params: { poNumber: 'PO-A,PO-B', poCurrencies: 'USD, EUR' }
+		});
+	});
+
 	it('keeps the precision the backend measured, in both directions', () => {
 		// `98` has no decimals and no sign; `+20.0` has one of each. Re-deciding
 		// that here would either lose a digit or invent one.
