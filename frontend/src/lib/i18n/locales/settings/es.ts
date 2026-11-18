@@ -236,6 +236,10 @@ export const messages = {
 	'org.extraction.model': 'Modelo',
 	'org.extraction.ollamaHint': 'Se ejecuta localmente — ningún dato sale de su equipo. Instalación:',
 	'org.extraction.save': 'Guardar configuración de extracción',
+	'org.extraction.switchDropsKey':
+		'Al guardar se descarta la clave guardada; introduzca una para {provider}.',
+	'org.extraction.switchNeedsKey':
+		'Introduzca una clave para {provider}: cambiar de proveedor descarta la clave guardada.',
 	'org.section.erp': 'Integración ERP',
 	'org.section.commerce': "Comercio e inventario",
 	'org.section.erpSaved': 'Integración ERP',

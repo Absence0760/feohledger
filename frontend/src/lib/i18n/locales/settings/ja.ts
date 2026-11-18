@@ -235,6 +235,10 @@ export const messages = {
 	'org.extraction.model': 'モデル',
 	'org.extraction.ollamaHint': 'ローカルで実行されます — データはマシンから出ません。インストール:',
 	'org.extraction.save': '抽出設定を保存',
+	'org.extraction.switchDropsKey':
+		'保存すると保存済みのキーは破棄されます。{provider}のキーを入力してください。',
+	'org.extraction.switchNeedsKey':
+		'{provider}のキーを入力してください。プロバイダーを切り替えると保存済みのキーは破棄されます。',
 	'org.section.erp': 'ERP統合',
 	'org.section.commerce': "コマースと在庫",
 	'org.section.erpSaved': 'ERP統合',

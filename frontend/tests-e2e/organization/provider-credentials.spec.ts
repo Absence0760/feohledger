@@ -19,6 +19,7 @@ import type { ProviderCredentialStatus } from '#lib/types/providerCredentials.ts
 
 const SECRET = 'mt_e2e_api_key_never_rendered_0001';
 const BYOK_SECRET = 'sk-e2e-byok-key-never-rendered-0001';
+const OPENAI_SECRET = 'sk-e2e-openai-key-never-rendered-0001';
 const KEEP = 'Leave blank to keep the stored value';
 
 async function credentialStatus(
@@ -129,7 +130,7 @@ test.describe('/organization provider credentials', () => {
 		}
 	});
 
-	test('the BYOK extraction key is write-only and does not follow a provider switch', async ({
+	test('the BYOK extraction key is write-only, and a provider switch needs the new key', async ({
 		page
 	}) => {
 		const loaded = Promise.all([
@@ -161,6 +162,23 @@ test.describe('/organization provider credentials', () => {
 			await expect(field).toHaveValue('');
 			await field.fill(BYOK_SECRET);
 
+			// A refused credential PUT after a good PATCH is one error toast,
+			// not a success toast and an error toast for the one click.
+			const PUT_REFUSED = 'Credential store unavailable (e2e)';
+			const putUrl = `${API_BASE}/api/organization/credentials/extraction`;
+			await page.route(putUrl, (route) =>
+				route.request().method() === 'PUT'
+					? route.fulfill({ status: 503, json: { detail: PUT_REFUSED } })
+					: route.fallback()
+			);
+			const refusedPatch = saved();
+			await save.click();
+			await refusedPatch;
+			await expect(page.getByText(PUT_REFUSED)).toBeVisible();
+			await expect(page.getByText('AI Extraction saved')).toHaveCount(0);
+			await expect(field).toHaveValue(BYOK_SECRET);
+			await page.unroute(putUrl);
+
 			const patch = saved();
 			const put = page.waitForResponse(
 				(r) =>
@@ -171,26 +189,67 @@ test.describe('/organization provider credentials', () => {
 			await save.click();
 			expect(await (await patch).text()).not.toContain(BYOK_SECRET);
 			expect(await (await put).text()).not.toContain(BYOK_SECRET);
+			await expect(page.getByText('AI Extraction saved')).toHaveCount(1);
 			await expect(field).toHaveValue('');
 			await expect(field).toHaveAttribute('placeholder', KEEP);
 			expect((await credentialStatus(page)).extraction).toEqual(['api_key']);
 
-			// Another provider: the stored Anthropic key is dropped by the save,
-			// never kept to be sent to OpenAI.
+			// Another provider: the stored Anthropic key belongs to Claude, so the
+			// field stops saying a key is stored and says the save would drop it.
 			await page
 				.getByRole('combobox', { name: 'Provider', exact: true })
 				.selectOption('openai_vision');
+			await expect(field).not.toHaveAttribute('placeholder', KEEP);
+			await expect(field).toHaveAttribute('data-secret-saved', 'false');
+			await expect(page.getByTestId('extraction-api-key-clear')).toHaveCount(0);
+			const hint = page.getByTestId('extraction-switch-hint');
+			await expect(hint).toHaveText(
+				'Saving drops the stored key; enter one for GPT-4V (OpenAI).'
+			);
+			await expect(field).toHaveAttribute('aria-describedby', /extraction-switch-hint/);
+
+			// A blank save would leave BYOK keyless: refused before any request,
+			// the Claude key still stored, and the field marked.
+			const writes: string[] = [];
+			const onRequest = (r: import('@playwright/test').Request) => {
+				if (r.url().includes('/api/organization') && r.method() !== 'GET')
+					writes.push(`${r.method()} ${r.url()}`);
+			};
+			page.on('request', onRequest);
+			await save.click();
+			await expect(
+				page.getByText('Enter a key for GPT-4V (OpenAI): switching provider drops the stored key.')
+			).toBeVisible();
+			await expect(field).toHaveAttribute('aria-invalid', 'true');
+			await expect(field).toBeFocused();
+			page.off('request', onRequest);
+			expect(writes).toEqual([]);
+			expect((await credentialStatus(page)).extraction).toEqual(['api_key']);
+
+			// With the OpenAI key typed: one PATCH (dropping the Claude key),
+			// then the PUT, and a single success toast once both have settled.
+			await field.fill(OPENAI_SECRET);
+			await expect(field).not.toHaveAttribute('aria-invalid', 'true');
 			const switched = saved();
 			const reread = page.waitForResponse(
 				(r) =>
 					r.url().endsWith('/api/organization/credentials') && r.request().method() === 'GET'
 			);
+			const switchPut = page.waitForResponse(
+				(r) =>
+					r.url().endsWith('/api/organization/credentials/extraction') &&
+					r.request().method() === 'PUT' &&
+					r.status() === 200
+			);
 			await save.click();
 			await switched;
 			expect(await (await reread).json()).toMatchObject({ extraction: [] });
-			await expect(field).not.toHaveAttribute('placeholder', KEEP);
-			expect((await credentialStatus(page)).extraction).toEqual([]);
-		} finally {
+			expect(await (await switchPut).text()).not.toContain(OPENAI_SECRET);
+			await expect(field).toHaveValue('');
+			await expect(field).toHaveAttribute('placeholder', KEEP);
+			await expect(hint).toHaveCount(0);
+			expect((await credentialStatus(page)).extraction).toEqual(['api_key']);
+				} finally {
 			await resetExtraction(page);
 		}
 	});

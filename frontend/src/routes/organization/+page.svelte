@@ -201,6 +201,29 @@
 	let extractionAwsSecret = $state('');
 	let extractionAwsRegion = $state('us-east-1');
 	let savingExtraction = $state(false);
+	// The provider the stored key belongs to — as loaded, then as last saved
+	// (`null`: the block names none). A save that changes it drops the sealed
+	// key server-side (`extraction_secrets_to_drop`, decisions §444), so the
+	// key field reads "stored" only while the dropdown still shows this one.
+	let extractionSavedProvider = $state<string | null>(null);
+	let extractionKeyInvalid = $state(false);
+	const extractionProviderChanged = $derived(extractionProvider !== extractionSavedProvider);
+	const extractionKeyStored = (path: string): boolean =>
+		!extractionProviderChanged && isStored('extraction', path);
+	// A key is stored for the saved provider, and this save would drop it.
+	const extractionSwitchDropsKey = $derived(
+		extractionProviderChanged &&
+			(isStored('extraction', 'api_key') || isStored('extraction', 'aws_secret_access_key'))
+	);
+	/** The secret path a provider needs, or `null` (Ollama runs keyless). */
+	const extractionSecretPath = (provider: string): 'api_key' | 'aws_secret_access_key' | null =>
+		provider === 'aws_textract'
+			? 'aws_secret_access_key'
+			: provider === 'claude_vision' || provider === 'openai_vision'
+				? 'api_key'
+				: null;
+	const extractionProviderLabel = (provider: string): string =>
+		EXTRACTION_PROVIDERS.find((p) => p.value === provider)?.label ?? provider;
 	let testingExtraction = $state(false);
 	let extractionTestResult = $state<{ success: boolean; message: string } | null>(null);
 
@@ -552,6 +575,10 @@
 			if (extraction) {
 				extractionProgramType = (extraction.program_type as string) || 'platform';
 				extractionProvider = (extraction.provider as string) || 'claude_vision';
+				extractionSavedProvider =
+					typeof extraction.provider === 'string' && extraction.provider.trim()
+						? extraction.provider.trim()
+						: null;
 				// The BYOK key / AWS secret are sealed and never read back: their
 				// fields start empty ("leave blank to keep"), like every SecretField.
 				extractionAwsKeyId = (extraction.aws_access_key_id as string) || '';
@@ -762,12 +789,18 @@
 		}
 	}
 
-	async function patchSettings(section: string, partial: Record<string, unknown>) {
+	/** PATCH the org's settings. No toast: a save with a credential PUT after
+	 *  it toasts once, when both have settled. */
+	async function patchOrg(partial: Record<string, unknown>) {
 		const data = await api.patch<OrgResponse>('/api/organization', {
 			...(partial.company ? { name: name.trim() } : {}),
 			settings: partial,
 		});
 		org = data;
+	}
+
+	async function patchSettings(section: string, partial: Record<string, unknown>) {
+		await patchOrg(partial);
 		toast(m('org.toast.sectionSaved', { section }), 'success');
 	}
 
@@ -830,29 +863,51 @@
 	}
 
 	async function saveExtraction() {
+		const byok = extractionProgramType === 'byok';
+		// Platform mode hides the provider dropdown: resend the saved one, so a
+		// choice the admin can no longer see cannot drop the stored key.
+		const provider = byok ? extractionProvider : (extractionSavedProvider ?? extractionProvider);
+		// Refuse a switch that would leave BYOK keyless: the stored key goes
+		// with the old provider, so the new one's must be typed in this save.
+		const needed = byok ? extractionSecretPath(provider) : null;
+		const typed = { api_key: extractionApiKey, aws_secret_access_key: extractionAwsSecret };
+		if (extractionSwitchDropsKey && needed && typed[needed].trim() === '') {
+			extractionKeyInvalid = true;
+			toast(
+				m('org.extraction.switchNeedsKey', { provider: extractionProviderLabel(provider) }),
+				'error'
+			);
+			document
+				.getElementById(needed === 'api_key' ? 'extraction-api-key' : 'extraction-aws-secret')
+				?.focus();
+			return;
+		}
+		extractionKeyInvalid = false;
 		savingExtraction = true;
 		try {
 			// Configuration first: a save that switches provider drops the old
 			// provider's sealed key server-side, so the key typed for the new one
 			// must be written after it.
-			await patchSettings(m('org.section.extractionSaved'), {
+			await patchOrg({
 				extraction: {
 					program_type: extractionProgramType,
-					provider: extractionProvider,
+					provider,
 					aws_access_key_id: extractionAwsKeyId,
 					aws_region: extractionAwsRegion,
 					base_url: extractionOllamaUrl,
 					model: extractionOllamaModel,
 				},
 			});
+			extractionSavedProvider = provider;
 			// …and the panel re-reads what is stored, since that save may have
 			// dropped a key the page still believes is there.
 			await loadCredentials();
-			await saveSecrets('extraction', {
-				api_key: extractionApiKey,
-				aws_secret_access_key: extractionAwsSecret
-			});
+			await saveSecrets('extraction', typed);
 			extractionApiKey = extractionAwsSecret = '';
+			toast(
+				m('org.toast.sectionSaved', { section: m('org.section.extractionSaved') }),
+				'success'
+			);
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -863,7 +918,7 @@
 	async function saveCards() {
 		savingCards = true;
 		try {
-			await patchSettings(m('org.section.cardsSaved'), {
+			await patchOrg({
 				cards: {
 					enabled: cardsEnabled,
 					program_type: cardsProgramType,
@@ -878,6 +933,7 @@
 			});
 			await saveSecrets('cards', { api_key: cardsApiKey, client_secret: cardsClientSecret });
 			cardsApiKey = cardsClientSecret = '';
+			toast(m('org.toast.sectionSaved', { section: m('org.section.cardsSaved') }), 'success');
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -952,7 +1008,7 @@
 		const sendMode = paymentsModeStored !== null || paymentsMode !== 'processor';
 		savingPayments = true;
 		try {
-			await patchSettings(m('org.section.paymentsSaved'), {
+			await patchOrg({
 				payments: {
 					...paymentsExtras,
 					...(sendMode ? { mode: paymentsMode } : {}),
@@ -982,6 +1038,7 @@
 				webhook_secret: paymentsWebhookSecret
 			});
 			paymentsApiKey = paymentsWebhookSecret = '';
+			toast(m('org.toast.sectionSaved', { section: m('org.section.paymentsSaved') }), 'success');
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -2443,11 +2500,20 @@
 										label={extractionProvider === 'claude_vision' ? m('org.extraction.anthropicKey') : m('org.extraction.openaiKey')}
 										bind:value={extractionApiKey}
 										bind:clear={secretClear['extraction.api_key']}
-										configured={isStored('extraction', 'api_key')}
+										configured={extractionKeyStored('api_key')}
 										placeholder="sk-..."
 										testId="extraction-api-key"
+										required={extractionSwitchDropsKey}
+										invalid={extractionKeyInvalid}
+										oninput={() => (extractionKeyInvalid = false)}
+										describedBy={extractionSwitchDropsKey ? 'extraction-switch-hint' : undefined}
 									/>
 								</div>
+								{#if extractionSwitchDropsKey}
+									<p class="card-hint" id="extraction-switch-hint" data-testid="extraction-switch-hint">
+										{m('org.extraction.switchDropsKey', { provider: extractionProviderLabel(extractionProvider) })}
+									</p>
+								{/if}
 							{:else if extractionProvider === 'aws_textract'}
 								<div class="form-grid" style="margin-top: 14px;">
 									<label>
@@ -2464,14 +2530,23 @@
 										label={m('org.extraction.awsSecret')}
 										bind:value={extractionAwsSecret}
 										bind:clear={secretClear['extraction.aws_secret_access_key']}
-										configured={isStored('extraction', 'aws_secret_access_key')}
+										configured={extractionKeyStored('aws_secret_access_key')}
 										testId="extraction-aws-secret"
+										required={extractionSwitchDropsKey}
+										invalid={extractionKeyInvalid}
+										oninput={() => (extractionKeyInvalid = false)}
+										describedBy={extractionSwitchDropsKey ? 'extraction-switch-hint' : undefined}
 									/>
 									<label>
 										<span>{m('org.extraction.awsRegion')}</span>
 										<input type="text" bind:value={extractionAwsRegion} placeholder="us-east-1" />
 									</label>
 								</div>
+								{#if extractionSwitchDropsKey}
+									<p class="card-hint" id="extraction-switch-hint" data-testid="extraction-switch-hint">
+										{m('org.extraction.switchDropsKey', { provider: extractionProviderLabel(extractionProvider) })}
+									</p>
+								{/if}
 							{:else if extractionProvider === 'ollama'}
 								<div class="form-grid" style="margin-top: 14px;">
 									<label>

@@ -236,6 +236,10 @@ export const messages = {
 	'org.extraction.model': 'Modell',
 	'org.extraction.ollamaHint': 'Läuft lokal — keine Daten verlassen Ihren Rechner. Installation:',
 	'org.extraction.save': 'Extraktionseinstellungen speichern',
+	'org.extraction.switchDropsKey':
+		'Beim Speichern wird der gespeicherte Schlüssel verworfen; geben Sie einen für {provider} ein.',
+	'org.extraction.switchNeedsKey':
+		'Geben Sie einen Schlüssel für {provider} ein: Ein Anbieterwechsel verwirft den gespeicherten Schlüssel.',
 	'org.section.erp': 'ERP-Integration',
 	'org.section.commerce': "Commerce & Lagerbestand",
 	'org.section.erpSaved': 'ERP-Integration',
