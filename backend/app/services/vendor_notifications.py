@@ -122,11 +122,15 @@ async def notify_vendor_of_invoice_event(
 
     org_id = getattr(invoice, "organization_id", None)
 
+    from app.services.payment_runs import (
+        payable_currency_code as _payable_currency_code,
+    )
+
     ctx = InvoiceContext(
         invoice_number=getattr(invoice, "invoice_number", "") or "",
         vendor_name=getattr(invoice, "vendor_name", "") or "",
         amount=getattr(invoice, "amount", None),
-        currency=getattr(invoice, "currency", None) or "USD",
+        currency=_payable_currency_code(getattr(invoice, "currency", None)),
         reason=reason,
     )
 

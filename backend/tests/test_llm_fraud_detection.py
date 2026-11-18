@@ -400,7 +400,8 @@ def test_invoice_to_candidate_handles_none_optionals():
     assert candidate.invoice_number == ""
     assert candidate.invoice_date is None
     assert candidate.amount == Decimal("0")
-    assert candidate.currency == "USD"
+    # Unknown, never a guessed "USD" the model would reason from (decisions §NEW-T3).
+    assert candidate.currency is None
     assert candidate.vendor_name == ""
 
     inv2 = SimpleNamespace(
@@ -446,3 +447,24 @@ def test_invoice_to_history_isolates_only_the_fields_the_llm_needs():
     # construction. Verifying the dataclass shape is enough.
     assert not hasattr(h, "file_url")
     assert not hasattr(h, "notes")
+
+
+@pytest.mark.parametrize("currency", ["", "   ", "US"])
+def test_invoice_adapters_never_read_a_missing_currency_as_usd(currency):
+    from app.services.llm_fraud_detection import invoice_to_history
+
+    inv = SimpleNamespace(
+        invoice_number="INV-1",
+        invoice_date=None,
+        amount=Decimal("10"),
+        currency=currency,
+        description=None,
+        payment_method=None,
+        remit_to_address=None,
+        po_number=None,
+        vendor_name="V",
+    )
+    assert invoice_to_candidate(inv).currency is None
+    assert invoice_to_history(inv).currency is None
+    padded = SimpleNamespace(**{**vars(inv), "currency": " eur "})
+    assert invoice_to_history(padded).currency == "EUR"
