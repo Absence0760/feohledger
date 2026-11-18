@@ -472,7 +472,7 @@
 							<!-- Each pill names the problem and carries its why as text — a
 							     visually-hidden span, with the tooltip kept for the pointer
 							     user — because a `title` alone reaches neither a keyboard, a
-							     touch screen nor a screen reader (decisions §442, §NEW-L4). -->
+							     touch screen nor a screen reader (decisions §442, §455). -->
 							{#if template.last_skip}
 								<ExplainedBadge
 									tone="warning"

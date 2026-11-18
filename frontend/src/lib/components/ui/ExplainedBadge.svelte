@@ -11,7 +11,7 @@
 	 * the pointer user. A `title` alone reaches neither a keyboard, a touch
 	 * screen nor a screen reader, which is how `/recurring`'s "Not generating"
 	 * and "GL … needs re-coding" badges hid their reasons until decisions §442
-	 * and §NEW-L4.
+	 * and §455.
 	 *
 	 * The hidden span opens with a space so the pill text and the explanation
 	 * do not run together into one word when read as text. It is written as an

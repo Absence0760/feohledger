@@ -174,7 +174,7 @@ test('a template that is not generating says why in text, not only a tooltip', a
 	// The skipped-period count, the period and the reason are in the badge's
 	// text (a visually-hidden span), which a keyboard, a touch screen and a
 	// screen reader reach — a `title` alone reaches none of them. The tooltip
-	// stays for the pointer user. (decisions §NEW-L4)
+	// stays for the pointer user. (decisions §455)
 	const badge = skipped.locator('.badge.skipped');
 	await expect(badge).toHaveText(
 		'Not generating 2 periods skipped — last 2026-11: no amount set'

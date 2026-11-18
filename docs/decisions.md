@@ -22970,7 +22970,7 @@ question for the operator. A cap would be a `settings.cash_flow` integer
 applied before staging, folded into the plan's derivation so the plan and the
 run agree, with the forecast's overdue slice left uncapped.
 
-## §NEW-L3. The operator re-sends a first admin's set-password link, never to an account with a password (extends §452, round 16, 2026-11-18)
+## 454. The operator re-sends a first admin's set-password link, never to an account with a password (extends §452, round 16, 2026-11-18)
 
 `scripts/create_tenant.py --resend-link --slug <slug> --admin-email <addr>`
 (`deploy/add-tenant.sh <slug> --admin-email <addr> --resend-link`) provisions
@@ -23001,7 +23001,7 @@ tenant's oldest admin). The operator typed that address when provisioning, and
 naming it means a tenant with several admins cannot be sent the wrong one.
 Printing the link, for the reasons §452 gives.
 
-## §NEW-L4. A badge whose tooltip carries information says it in text too, through one component (round 16, 2026-11-18)
+## 455. A badge whose tooltip carries information says it in text too, through one component (round 16, 2026-11-18)
 
 `/recurring`'s "Not generating" badge put the skipped-period count, the period
 and the reason only in a `title`, which a keyboard, a touch screen and a screen
@@ -23028,7 +23028,7 @@ mouse, which is what WCAG 1.3.1 and 4.1.2 ask for. The i18n key keeps its name
 `recurring.skip.title`; renaming it in six locales would be churn with no
 reader-facing change.
 
-## §NEW-L2. Forgot-password work only a known address does runs detached, on both routes (round 16, 2026-11-18)
+## 456. Forgot-password work only a known address does runs detached, on both routes (round 16, 2026-11-18)
 
 `POST /api/auth/forgot-password` sent its email on a detached task but awaited
 the org lookup, the reset-token mint and the `auth.password_reset.requested`
@@ -23071,7 +23071,7 @@ in CI and failed in any fresh venv. `verify_totp` swallows the error, so on
 32 characters (160 bits, pyotp's `random_base32` default). The followup
 suggested 16 characters, which would not have been enough.
 
-## §NEW-L1. A payment run refuses an invoice that records no currency, on every surface (extends §453, round 16, 2026-11-18)
+## 457. A payment run refuses an invoice that records no currency, on every surface (extends §453, round 16, 2026-11-18)
 
 §453 stopped `/draft-run` staging an invoice whose currency is blank, but the
 run builder (`invoices[iid].currency or "USD"`) and dispatch
@@ -23101,7 +23101,7 @@ invoice PATCH writing `""` at all is the longer-term fix and stays in
 than `{code, params}` bodies; the code travels as the detail's prefix and as
 the queue's `blocked_reason`, which is what the web and mobile queues label.
 
-## §NEW-L5. A split's currency mismatch with a malformed invoice code names every leg's code (amends §445, round 16, 2026-11-18)
+## 458. A split's currency mismatch with a malformed invoice code names every leg's code (amends §445, round 16, 2026-11-18)
 
 A split whose legs' codes disagree is `different` even when the invoice's own
 code is malformed (§445), and `po_currency_mismatch` then read "Invoice is in
@@ -23111,3 +23111,18 @@ PO-match issue twin), not a fallback word in a param: a word in a sentence
 selects the code (`backend/docs/invoice-warnings.md`). It names every code the
 legs record, in one `text` param (`poCurrencies`, "USD, EUR"), because no
 single code is honest about a split that spans several. The hold is unchanged.
+
+## 459. A plan-driven run stages every approved overdue invoice; no age cap (closes §453's open question, round 16, 2026-11-18)
+
+§453 left open whether `/draft-run` should cap how overdue an approved invoice
+may be before a cash plan stages it. It does not. An approved invoice that is
+long past due is the one a payables team most needs to pay, and a cap would
+drop it from the plan silently, with no row saying why. A sum that should not be
+paid is a question for the controls that already state it: a payment-blocking
+exception, a vendor block, a compliance hold or a recall (§374), each audited
+and each shown on the queue. An age threshold is none of those.
+
+Rejected: a `settings.cash_flow` cap left off by default, which adds a setting
+with no case that the existing holds do not cover better; and a 90-day default,
+which would change behaviour for every tenant to hide its oldest debts. The
+operator delegated the call to the round coordinator.
