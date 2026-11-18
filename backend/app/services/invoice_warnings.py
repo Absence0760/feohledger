@@ -550,6 +550,42 @@ async def refresh_warnings(
     return warnings
 
 
+async def refresh_po_match_only(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    org_settings: dict | None = None,
+    erp_po_sync: dict | None = None,
+) -> list[dict]:
+    """Re-run the PO match, and only it, on one invoice.
+
+    For a caller whose change can move nothing but the PO side of the match — a
+    PO's own fields stamped in bulk (`scripts/backfill_po_currency.py`). The
+    full :func:`refresh_warnings` would also re-run duplicate detection, the
+    vendor-history fraud rules and, where an org opts in, an LLM call per
+    invoice; none of their inputs moved, so each would be cost with no new
+    answer.
+
+    Same contract as the PO-match step of :func:`refresh_warnings`: the
+    ``po_mismatch`` / ``quality_hold`` warnings (`PO_MATCH_EXCEPTION_TYPES`, the
+    catalogue's types for exactly the codes :func:`_refresh_po_match` writes)
+    are rebuilt, the holds they warrant are raised, and a hold the match no
+    longer finds is closed (or, with ``erp_po_sync``, only annotated). Every
+    other entry on ``invoice.warnings`` is kept as it is. A ``new`` draft gets
+    no match, as in the full refresh.
+    """
+    warnings: list[dict] = [
+        w for w in (invoice.warnings or []) if w.get("type") not in PO_MATCH_EXCEPTION_TYPES
+    ]
+    await _void_stale_finding_stamps(db, invoice)
+    if invoice.po_number and _status_str(invoice.status) != "new":
+        await _refresh_po_match(db, invoice, warnings, org_settings, erp_po_sync=erp_po_sync)
+    else:
+        invoice.po_match = None
+    invoice.warnings = warnings or None
+    return warnings
+
+
 async def _refresh_recurring_variance(
     db: AsyncSession, invoice: Invoice, warnings: list[dict]
 ) -> None:
@@ -902,7 +938,9 @@ async def refresh_invoices_citing_pos(
     erp_po_sync: dict | None = None,
     entity_id=None,
     lock_invoices: bool = False,
-) -> None:
+    skip_settled: bool = False,
+    matching_only: bool = False,
+) -> int:
     """Re-run warnings (and so PO matching) on every invoice citing a PO number.
 
     The receiving side — a goods receipt, a quality inspection — links to a PO,
@@ -938,35 +976,26 @@ async def refresh_invoices_citing_pos(
     rule (decisions §267, §389). The receipt holds its PO lock and then takes
     the invoices; the approval holds the invoice and reads receipts unlocked,
     so the two never wait on each other in a cycle.
+
+    ``skip_settled`` leaves ``paid`` / ``done`` invoices alone without the
+    rest of ``erp_po_sync``'s narrowing (the PO currency backfill).
+    ``matching_only`` re-runs only the PO match (:func:`refresh_po_match_only`)
+    instead of every warning check — for a caller whose write moved nothing
+    else an invoice's warnings read. Returns how many invoices were refreshed.
     """
     po_numbers = {n for n in po_numbers if n}
     if not po_numbers:
-        return
+        return 0
+    refreshed = 0
 
     async def _run() -> None:
-        # A multi-PO split cites its legs by a combined reference ("PO-A,PO-B")
-        # that equals none of these numbers, so it is found by the legs it
-        # recorded instead (`Invoice.split_po_ids`, decisions §433): a receipt
-        # or inspection on one leg re-matches the split, as it would one PO's.
-        leg_ids = [
-            str(i)
-            for i in (
-                await db.execute(
-                    select(PurchaseOrder.id).where(
-                        PurchaseOrder.organization_id == org_id,
-                        PurchaseOrder.po_number.in_(po_numbers),
-                    )
-                )
-            ).scalars()
-        ]
-        citing = Invoice.po_number.in_(po_numbers)
-        if leg_ids:
-            citing = or_(citing, Invoice.split_po_ids.has_any(array(leg_ids)))
-        query = select(Invoice).where(Invoice.organization_id == org_id, citing)
+        nonlocal refreshed
+        query = await invoices_citing_pos(
+            db, org_id, po_numbers, skip_settled=skip_settled or erp_po_sync is not None
+        )
         if erp_po_sync is not None:
             from app.tenant import apply_entity_scope
 
-            query = query.where(Invoice.status.not_in(_ERP_SYNC_SKIPPED_STATUSES))
             query = apply_entity_scope(query, Invoice, entity_id, include_shared=True)
         if lock_invoices:
             query = (
@@ -975,12 +1004,14 @@ async def refresh_invoices_citing_pos(
                 .execution_options(populate_existing=True)
             )
         invoices = (await db.execute(query)).scalars().all()
+        refresh = refresh_po_match_only if matching_only else refresh_warnings
         for inv in invoices:
-            await refresh_warnings(db, inv, org_settings=org_settings, erp_po_sync=erp_po_sync)
+            await refresh(db, inv, org_settings=org_settings, erp_po_sync=erp_po_sync)
+        refreshed = len(invoices)
 
     if not best_effort:
         await _run()
-        return
+        return refreshed
     try:
         async with db.begin_nested():
             await _run()
@@ -991,6 +1022,42 @@ async def refresh_invoices_citing_pos(
             org_id,
             exc.__class__.__name__,
         )
+        return 0
+    return refreshed
+
+
+async def invoices_citing_pos(
+    db: AsyncSession, org_id, po_numbers: set[str], *, skip_settled: bool = False
+):
+    """``SELECT Invoice`` for every invoice citing one of ``po_numbers`` — the
+    set :func:`refresh_invoices_citing_pos` re-matches, so a caller counting
+    it ahead of time (a dry run) counts the same rows.
+
+    A multi-PO split cites its legs by a combined reference ("PO-A,PO-B") that
+    equals none of these numbers, so it is found by the legs it recorded
+    instead (`Invoice.split_po_ids`, decisions §433): a receipt, inspection or
+    currency stamp on one leg re-matches the split, as it would one PO's.
+    ``skip_settled`` drops ``paid`` / ``done`` invoices: a hold on money
+    already paid stops nothing.
+    """
+    leg_ids = [
+        str(i)
+        for i in (
+            await db.execute(
+                select(PurchaseOrder.id).where(
+                    PurchaseOrder.organization_id == org_id,
+                    PurchaseOrder.po_number.in_(po_numbers),
+                )
+            )
+        ).scalars()
+    ]
+    citing = Invoice.po_number.in_(po_numbers)
+    if leg_ids:
+        citing = or_(citing, Invoice.split_po_ids.has_any(array(leg_ids)))
+    query = select(Invoice).where(Invoice.organization_id == org_id, citing)
+    if skip_settled:
+        query = query.where(Invoice.status.not_in(_ERP_SYNC_SKIPPED_STATUSES))
+    return query
 
 
 #: The exception types `_refresh_po_match` owns. Both block payment
@@ -1010,8 +1077,9 @@ PO_MATCH_EXCEPTION_TYPES: tuple[str, ...] = ("po_mismatch", "quality_hold")
 #: the payment — the open row stays for a human (`segregation_refusal`).
 _PRE_APPROVAL_STATUSES = PRE_APPROVAL_STATUSES
 
-#: Invoices the ERP PO sync's re-match leaves alone: the money has gone, so a
-#: hold would stop nothing (``refresh_invoices_citing_pos``).
+#: Invoices the ERP PO sync's re-match (and any ``skip_settled`` one) leaves
+#: alone: the money has gone, so a hold would stop nothing
+#: (``invoices_citing_pos``).
 _ERP_SYNC_SKIPPED_STATUSES = (InvoiceStatus.paid.value, InvoiceStatus.done.value)
 
 #: ``Exception.erp_report["kind"]`` of an open PO-match row that an ERP PO

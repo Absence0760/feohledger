@@ -42,13 +42,19 @@ Safety properties:
   no money (`_NON_CURRENCY_CODES`: "no currency" and "testing") are refused,
   since asserting either says nothing.
 * **Matching re-verifies, in the same transaction.** Every not-yet-paid invoice
-  citing a stamped PO number is re-run through `invoice_warnings.refresh_warnings`
-  with the org's own settings — the refresh a goods receipt triggers — so a PO
-  now recorded in a DIFFERENT currency from its invoice raises its
-  `po_currency_mismatch` hold with the stamp, not on some later edit. A stamp
-  cannot make a finding disappear: `unknown` already compared at face value,
-  exactly what `same` compares. `paid` / `done` invoices are left alone, as the
-  ERP PO sync leaves them: a hold on money already paid stops nothing.
+  citing a stamped PO — by its number, or as a leg of a multi-PO split
+  (`Invoice.split_po_ids`, decisions §433, §437) — is re-matched through
+  `invoice_warnings.refresh_invoices_citing_pos`, the lookup a goods receipt
+  uses, with the org's own settings and each invoice locked `FOR UPDATE` as a
+  receipt locks it (§267, §389), so a concurrent approval serialises with the
+  stamp. A PO now recorded in a DIFFERENT currency from its invoice raises its
+  `po_currency_mismatch` hold with the stamp, not on some later edit. Only the
+  PO match re-runs (`refresh_po_match_only`): nothing else an invoice's
+  warnings read moved, so duplicate detection and the org's LLM anomaly check
+  are not re-run per invoice. A stamp cannot make a finding disappear:
+  `unknown` already compared at face value, exactly what `same` compares.
+  `paid` / `done` invoices are left alone, as the ERP PO sync leaves them: a
+  hold on money already paid stops nothing. The dry run counts the same set.
 * **Audited, PII-free.** One `purchase_order.currency_backfilled` audit row per
   applied run: the asserted code, the scope, counts and the stamped PO ids —
   never a PO number, vendor, amount or bank detail. `--manifest <file>` writes
@@ -88,12 +94,11 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
 from app.database import _make_tenant_url, control_session_factory
 from app.db_engine import create_async_engine
 from app.models.entity import Entity
-from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.procurement import PurchaseOrder
 from app.services.audit_dispatch import dispatch_audit
 from app.services.e_invoice.codelists import ISO_4217_CURRENCIES
-from app.services.invoice_warnings import refresh_warnings
+from app.services.invoice_warnings import invoices_citing_pos, refresh_invoices_citing_pos
 from app.utils.currency_code import normalize_iso_currency
 from scripts.backfill_import_provenance import CutoverError, parse_cutover
 
@@ -105,10 +110,6 @@ TOOL = "scripts/backfill_po_currency.py"
 # so the TODO-marker hook does not read it as one) and "testing" (XTS):
 # asserting either is not an answer.
 _NON_CURRENCY_CODES = frozenset({"X" * 3, "XTS"})
-
-# Invoices whose money has already moved: a hold raised on them stops nothing.
-# The same pair the ERP PO sync's re-match skips (`invoice_warnings`).
-_REMATCH_SKIPPED_STATUSES = (InvoiceStatus.paid.value, InvoiceStatus.done.value)
 
 
 class AssertionRefused(ValueError):
@@ -298,16 +299,11 @@ async def backfill_tenant(
     return result
 
 
-def _citing(organization_id: uuid.UUID, po_numbers: set[str]):
-    return select(Invoice).where(
-        Invoice.organization_id == organization_id,
-        Invoice.po_number.in_(po_numbers),
-        Invoice.status.not_in(_REMATCH_SKIPPED_STATUSES),
-    )
-
-
 async def _count_citing(db: AsyncSession, organization_id: uuid.UUID, po_numbers: set[str]) -> int:
-    sub = _citing(organization_id, po_numbers).subquery()
+    """The dry run's count: exactly the set :func:`_rematch` would re-match."""
+    sub = (
+        await invoices_citing_pos(db, organization_id, po_numbers, skip_settled=True)
+    ).subquery()
     return int((await db.execute(select(func.count()).select_from(sub))).scalar() or 0)
 
 
@@ -317,20 +313,25 @@ async def _rematch(
     po_numbers: set[str],
     org_settings: dict | None,
 ) -> int:
-    """Re-run warnings (so the PO match) on every unpaid invoice citing a stamped PO.
+    """Re-match every unpaid invoice citing a stamped PO (or one as a split leg).
 
     Not best-effort: a stamp that turned a match into a currency mismatch must
     raise its payment-blocking hold in the same transaction, or the invoice
-    stays payable against an order now known to be in another currency.
+    stays payable against an order now known to be in another currency. Locked
+    like a goods receipt's re-match, so an approval racing the stamp is decided
+    on one side of it. Matching only — the stamp moved nothing else.
     """
-    invoices = (
-        (await db.execute(_citing(organization_id, po_numbers).order_by(Invoice.id)))
-        .scalars()
-        .all()
+    return await refresh_invoices_citing_pos(
+        db,
+        organization_id,
+        po_numbers,
+        org_settings=org_settings,
+        caller="backfill_po_currency",
+        best_effort=False,
+        lock_invoices=True,
+        skip_settled=True,
+        matching_only=True,
     )
-    for invoice in invoices:
-        await refresh_warnings(db, invoice, org_settings=org_settings)
-    return len(invoices)
 
 
 def manifest(result: BackfillResult) -> dict:
