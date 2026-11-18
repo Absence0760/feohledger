@@ -16,6 +16,7 @@ It also never executes a run; every path here lands ``status="draft"``.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from collections.abc import Iterable
 from contextlib import asynccontextmanager
@@ -40,7 +41,6 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
 )
 from app.services.discount_capture import AppliedDiscount, applicable_discounts
-from app.services.international_payments import normalize_currency_code
 from app.services.payment_controls import (
     CFO_REASON_AMOUNT_NOT_EXPRESSIBLE,
     CFO_REASON_THRESHOLD_UNPARSEABLE,
@@ -943,6 +943,33 @@ REFUSAL_VENDOR_NOT_ACTIVE = "vendor_not_active"
 #: USD is the substitution decisions §160/§196/§200/§453 removed elsewhere.
 REFUSAL_CURRENCY_UNKNOWN = "currency_unknown"
 
+#: The whitespace a stored code is trimmed of before it is judged: ASCII only,
+#: so the SQL twin in ``api/payments._queue_currency_unknown`` (``btrim`` with
+#: these characters) reads exactly the rows this module does. Python's bare
+#: ``str.strip()`` also strips NBSP and the Unicode spaces, which ``btrim`` does
+#: not, and that gap let the queue offer a row the builder then refused.
+CURRENCY_TRIM_CHARS = " \t\n\r\x0b\x0c"
+#: A payable code: three ASCII letters once trimmed. The SQL twin uses the same
+#: pattern with ``~``.
+CURRENCY_CODE_PATTERN = "^[A-Za-z]{3}$"
+_CURRENCY_CODE_RE = re.compile(CURRENCY_CODE_PATTERN)
+
+
+def payable_currency_code(value: str | None) -> str | None:
+    """The invoice's currency as a run may pay it, or ``None`` (refused as
+    ``currency_unknown``): NULL, blank, whitespace-only and malformed codes alike.
+
+    The single predicate every run-path check uses, mirrored in SQL by
+    ``api/payments._queue_currency_unknown`` so the queue never offers a row the
+    builder refuses."""
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip(CURRENCY_TRIM_CHARS)
+    if not _CURRENCY_CODE_RE.match(trimmed):
+        return None
+    return trimmed.upper()
+
+
 #: The single rail a card-claimed invoice CAN still be paid on, derived from
 #: ``CARD_CONVERGING_METHODS`` rather than restated, so the two cannot drift.
 #: ``None`` if a second converging rail is ever added — the refusal then reads
@@ -1053,7 +1080,7 @@ async def run_refusal_reasons(
             out[inv.id] = RunRefusal(exception_type)
         elif inv.id in vendor_refused:
             out[inv.id] = RunRefusal(REFUSAL_VENDOR_NOT_ACTIVE)
-        elif normalize_currency_code(inv.currency) is None:
+        elif payable_currency_code(inv.currency) is None:
             out[inv.id] = RunRefusal(REFUSAL_CURRENCY_UNKNOWN)
         elif inv.id in card_refused:
             out[inv.id] = RunRefusal(REFUSAL_LIVE_VIRTUAL_CARD, only_method=CARD_CLAIM_ONLY_METHOD)
@@ -1363,7 +1390,7 @@ async def create_payment_run_for_invoices(
     currencies = {
         code
         for iid in invoice_ids
-        if (code := normalize_currency_code(invoices[iid].currency)) is not None
+        if (code := payable_currency_code(invoices[iid].currency)) is not None
     }
     if len(currencies) > 1:
         raise HTTPException(
@@ -1636,7 +1663,7 @@ async def dispatch_preflight(
     # The run builder refuses a blank currency, but the invoice PATCH can blank
     # it while the run waits; the order must not then go out in a currency
     # nobody recorded.
-    if normalize_currency_code(invoice.currency) is None:
+    if payable_currency_code(invoice.currency) is None:
         return REFUSAL_CURRENCY_UNKNOWN
     if await card_claimed_invoice_ids(db, [(invoice.id, payment.method)]):
         return "invoice_has_live_card"

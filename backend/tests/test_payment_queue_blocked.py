@@ -635,6 +635,15 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
     await _set_currency(mk, blank_id, "")
     await _set_currency(mk, spaces_id, " \t ")
     await _set_currency(mk, lower_id, "usd")
+    # Python's bare `strip()` would empty an NBSP / em-space code while SQL's
+    # `btrim` keeps it, so the two once disagreed; a malformed code is no
+    # payable currency either. Both must read every one of these the same way.
+    nbsp_id = await _seed_invoice(mk, org_id, number="Q-SQL-NOCUR-NBSP")
+    emsp_id = await _seed_invoice(mk, org_id, number="Q-SQL-NOCUR-EMSP")
+    malformed_id = await _seed_invoice(mk, org_id, number="Q-SQL-BADCUR")
+    await _set_currency(mk, nbsp_id, "\xa0")
+    await _set_currency(mk, emsp_id, "\u2003\u2003")
+    await _set_currency(mk, malformed_id, "1X")
     await _link_vendor(mk, org_id, unverified_id, status="unverified")
     await _link_vendor(mk, org_id, active_id, status="active")
     await _add_exception(mk, org_id, exc_id, exception_type="fraud_flag")
@@ -658,6 +667,9 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
         blank_id,
         spaces_id,
         lower_id,
+        nbsp_id,
+        emsp_id,
+        malformed_id,
     ]
     async with mk() as db:
         invoices = (
@@ -676,6 +688,9 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
     assert verdicts[unverified_id].reason == "vendor_not_active"
     assert verdicts[blank_id].reason == "currency_unknown"
     assert verdicts[spaces_id].reason == "currency_unknown"
+    assert verdicts[nbsp_id].reason == "currency_unknown"
+    assert verdicts[emsp_id].reason == "currency_unknown"
+    assert verdicts[malformed_id].reason == "currency_unknown"
     assert clean_id not in verdicts
     assert active_id not in verdicts
     assert lower_id not in verdicts
@@ -693,6 +708,9 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
         unverified_id,
         blank_id,
         spaces_id,
+        nbsp_id,
+        emsp_id,
+        malformed_id,
     ):
         assert str(refused) not in selectable, refused
 

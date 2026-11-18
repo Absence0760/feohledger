@@ -133,6 +133,8 @@ from app.services.payment_controls import (
 from app.services.payment_execution_mode import resolve_execution_mode
 from app.services.payment_runs import (
     CARD_CLAIM_ONLY_METHOD,
+    CURRENCY_CODE_PATTERN,
+    CURRENCY_TRIM_CHARS,
     PAYABLE_VENDOR_STATUS,
     PaymentRunItemInput,
     active_run_payments,
@@ -150,6 +152,7 @@ from app.services.payment_runs import (
     one_currency,
     payable_amount,
     payable_amounts,
+    payable_currency_code,
     recompute_run_status,
     rollup_payment_statuses,
     run_refusal_reasons,
@@ -683,17 +686,13 @@ def _queue_vendor_not_active():
     )
 
 
-#: The whitespace Python's ``str.strip()`` removes from an ASCII code, so the
-#: SQL predicate below and ``normalize_currency_code`` read the same rows as
-#: blank.
-_CURRENCY_BLANK_CHARS = " \t\n\r\x0b\x0c"
-
-
 def _queue_currency_unknown():
-    """SQL predicate — the invoice records no currency (NULL, empty or only
-    whitespace), the SAME condition ``services/payment_runs.run_refusal_reasons``
-    refuses as ``currency_unknown`` via ``normalize_currency_code``."""
-    return func.coalesce(func.btrim(Invoice.currency, _CURRENCY_BLANK_CHARS), "") == ""
+    """SQL predicate — the invoice records no payable currency (NULL, blank,
+    whitespace-only or malformed), the SAME condition
+    ``services/payment_runs.payable_currency_code`` refuses as
+    ``currency_unknown``: one trim set and one pattern, shared."""
+    trimmed = func.coalesce(func.btrim(Invoice.currency, CURRENCY_TRIM_CHARS), "")
+    return not_(trimmed.op("~")(CURRENCY_CODE_PATTERN))
 
 
 def _live_payment_invoice_ids():
@@ -3245,7 +3244,7 @@ async def create_payment(
 
     # The invoice must record a currency — the run builder's `currency_unknown`
     # refusal. A blank is no currency, never USD (decisions §453).
-    if normalize_currency_code(invoice.currency) is None:
+    if payable_currency_code(invoice.currency) is None:
         raise HTTPException(
             status_code=409,
             detail=(
