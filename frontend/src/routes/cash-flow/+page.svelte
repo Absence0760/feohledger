@@ -4,6 +4,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import UsageMeter from '#lib/components/assistant/UsageMeter.svelte';
+	import ChatLayout from '#lib/components/assistant/ChatLayout.svelte';
 	import ExamplePrompts from '#lib/components/assistant/ExamplePrompts.svelte';
 	import CopilotChatMessage from '#lib/components/cash-flow/CopilotChatMessage.svelte';
 	import SavedPlansPanel from '#lib/components/cash-flow/SavedPlansPanel.svelte';
@@ -251,8 +252,8 @@
 		>
 	{/snippet}
 
-	<div class="copilot-layout">
-		<aside class="side-rail">
+	<ChatLayout railLabel={m('cashFlow.rail.toggle')} railId="cash-flow-rail" {busy} bind:scrollEl>
+		{#snippet rail()}
 			<UsageMeter {usage} />
 
 			<div class="help-row">
@@ -268,26 +269,26 @@
 
 			<div class="rail-head">{m('cashFlow.tips.heading')}</div>
 			<p class="rail-hint">{m('cashFlow.tips.body')}</p>
-		</aside>
+		{/snippet}
 
-		<section class="chat-pane">
-			<div class="chat-scroll" bind:this={scrollEl} role="log" aria-live="polite" aria-busy={busy}>
-				{#if isEmpty}
-					<ExamplePrompts
-						prompts={EXAMPLES}
-						heading={m('cashFlow.empty.heading')}
-						sub={m('cashFlow.empty.sub')}
-						onpick={pickPrompt}
-					/>
-				{:else}
-					<div class="msg-stream">
-						{#each messages as message (message.id)}
-							<CopilotChatMessage {message} />
-						{/each}
-					</div>
-				{/if}
-			</div>
+		{#snippet log()}
+			{#if isEmpty}
+				<ExamplePrompts
+					prompts={EXAMPLES}
+					heading={m('cashFlow.empty.heading')}
+					sub={m('cashFlow.empty.sub')}
+					onpick={pickPrompt}
+				/>
+			{:else}
+				<div class="msg-stream">
+					{#each messages as message (message.id)}
+						<CopilotChatMessage {message} />
+					{/each}
+				</div>
+			{/if}
+		{/snippet}
 
+		{#snippet footer()}
 			{#if budgetNotice}
 				<div class="budget-notice" role="alert">{budgetNotice}</div>
 			{/if}
@@ -311,31 +312,12 @@
 					{busy ? m('cashFlow.thinking') : m('cashFlow.send')}
 				</button>
 			</form>
-		</section>
-	</div>
+		{/snippet}
+	</ChatLayout>
 </PageHeader>
 
 <style>
-	.copilot-layout {
-		display: grid;
-		grid-template-columns: 240px 1fr;
-		gap: 16px;
-		flex: 1 1 auto;
-		min-height: 0;
-	}
 
-	.side-rail {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		padding: 14px;
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		background: var(--surface);
-		height: fit-content;
-		max-height: calc(100vh - 140px);
-		overflow-y: auto;
-	}
 
 	.rail-head {
 		font-size: 0.7rem;
@@ -366,24 +348,7 @@
 	.rail-toggle input:disabled {
 		cursor: not-allowed;
 	}
-	.chat-pane {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		min-height: 0;
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		background: var(--bg);
-		overflow: hidden;
-	}
 
-	.chat-scroll {
-		flex: 1 1 auto;
-		min-height: 420px;
-		max-height: calc(100vh - 220px);
-		overflow-y: auto;
-		padding: 20px;
-	}
 
 	.msg-stream {
 		display: flex;
@@ -453,14 +418,4 @@
 		padding: 0 22px;
 	}
 
-	@media (max-width: 720px) {
-		.copilot-layout {
-			grid-template-columns: 1fr;
-		}
-
-		.side-rail {
-			max-height: none;
-		}
-
-	}
 </style>

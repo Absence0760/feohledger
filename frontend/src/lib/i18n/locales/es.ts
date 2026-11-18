@@ -1801,6 +1801,7 @@ export const messages = {
 	'cashFlow.title': 'Copiloto de flujo de caja',
 	'cashFlow.newChat': 'Nuevo chat',
 	'cashFlow.tips.heading': 'Consejos',
+	'cashFlow.rail.toggle': 'Planes, opciones y consejos',
 	'cashFlow.tips.body':
 		'Pregunta por tu posición de caja, los desembolsos próximos, las disyuntivas de plazo de pago o qué descuentos por pronto pago conviene aprovechar.',
 	'cashFlow.empty.heading': 'Pregunta sobre tu caja',
@@ -3795,6 +3796,7 @@ export const messages = {
 	'assistant.newChat': '+ Nuevo chat',
 	'assistant.noConversations': 'Aún no hay conversaciones.',
 	'assistant.recent': 'Recientes',
+	'assistant.rail.toggle': 'Conversaciones y uso',
 	'assistant.role.assistant': 'Asistente',
 	'assistant.role.you': 'Usted',
 	'assistant.send': 'Enviar',

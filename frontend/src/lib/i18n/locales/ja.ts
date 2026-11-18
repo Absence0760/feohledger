@@ -1769,6 +1769,7 @@ export const messages = {
 	'cashFlow.title': 'キャッシュフロー・コパイロット',
 	'cashFlow.newChat': '新しいチャット',
 	'cashFlow.tips.heading': 'ヒント',
+	'cashFlow.rail.toggle': 'プラン・オプション・ヒント',
 	'cashFlow.tips.body':
 		'キャッシュポジション、今後の支出、支払いタイミングのトレードオフ、または取得すべき早期支払割引についてお尋ねください。',
 	'cashFlow.empty.heading': 'キャッシュについて質問する',
@@ -3734,6 +3735,7 @@ export const messages = {
 	'assistant.newChat': '+ 新しいチャット',
 	'assistant.noConversations': 'まだ会話はありません。',
 	'assistant.recent': '最近',
+	'assistant.rail.toggle': '会話と使用量',
 	'assistant.role.assistant': 'アシスタント',
 	'assistant.role.you': 'あなた',
 	'assistant.send': '送信',

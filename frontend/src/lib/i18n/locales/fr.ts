@@ -1803,6 +1803,7 @@ export const messages = {
 	'cashFlow.title': 'Copilote de trésorerie',
 	'cashFlow.newChat': 'Nouvelle discussion',
 	'cashFlow.tips.heading': 'Astuces',
+	'cashFlow.rail.toggle': 'Plans, options et astuces',
 	'cashFlow.tips.body':
 		'Posez des questions sur votre trésorerie, les décaissements à venir, les arbitrages de délai de paiement ou les escomptes à saisir.',
 	'cashFlow.empty.heading': 'Interrogez votre trésorerie',
@@ -3804,6 +3805,7 @@ export const messages = {
 	'assistant.newChat': '+ Nouveau chat',
 	'assistant.noConversations': 'Aucune conversation pour l\'instant.',
 	'assistant.recent': 'Récents',
+	'assistant.rail.toggle': 'Conversations et utilisation',
 	'assistant.role.assistant': 'Assistant',
 	'assistant.role.you': 'Vous',
 	'assistant.send': 'Envoyer',
