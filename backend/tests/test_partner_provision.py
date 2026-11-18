@@ -25,6 +25,7 @@ orphan databases behind.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import asyncpg
@@ -307,6 +308,54 @@ async def test_provision_reports_an_undelivered_link_instead_of_failing(realdb, 
         assert body["set_password_email_sent"] is False
         assert body["set_password_link_expires_at"] is None
         assert await _parent_of(realdb, slug) == realdb.info("a").org_id
+    finally:
+        await _drop_provisioned(realdb, slug)
+
+
+@pytest.mark.asyncio
+async def test_provision_absorbs_the_502_send_failure_and_forgot_password_recovers(
+    realdb, monkeypatch
+):
+    """The admin and portal invites surface a failed send as 502
+    `set_password_email_failed` (`send_set_password_email`). Partner
+    provisioning catches that same refusal (decisions §443): the response is
+    the 201 with `set_password_email_sent: false`, the partner trail records
+    the false, the admin is left with no password (no credential anywhere),
+    and Forgot password — the documented way in — mails the admin a link on
+    the child's own host."""
+    from app.api import auth as auth_api
+
+    capture_outbox(monkeypatch, fail=True)
+    slug = _unique_slug()
+    admin_email = f"founder@{slug}.test"
+    try:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(
+                "/api/partner/children/provision",
+                json={"name": "Mail Down Co", "slug": slug, "admin_email": admin_email},
+            )
+        assert resp.status_code == 201, resp.text
+        assert "set_password_email_failed" not in resp.text
+        assert resp.json()["set_password_email_sent"] is False
+
+        rows = await _audit_rows(realdb, "a", "partner.child_provisioned")
+        mine = [r for r in rows if r.details.get("child_slug") == slug]
+        assert len(mine) == 1
+        assert mine[0].details.get("set_password_email_sent") is False
+
+        async with realdb.control_sessionmaker()() as s:
+            admin = (await s.execute(select(User).where(User.email == admin_email))).scalar_one()
+        assert admin.hashed_password is None
+        assert admin.is_active is True
+
+        sent = capture_outbox(monkeypatch)  # mail is back
+        async with realdb.client(key="a", role=None) as anon:
+            forgot = await anon.post("/api/auth/forgot-password", json={"email": admin_email})
+        assert forgot.status_code == 200, forgot.text
+        if auth_api._background_tasks:
+            await asyncio.gather(*list(auth_api._background_tasks))
+        assert [m.to for m in sent] == [admin_email]
+        assert f"//{slug}." in set_password_link(sent[0])
     finally:
         await _drop_provisioned(realdb, slug)
 
