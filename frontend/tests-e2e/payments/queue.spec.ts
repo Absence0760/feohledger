@@ -2,11 +2,17 @@ import {
 	API_BASE,
 	authedTenantHeaders,
 	deleteInvoicesWhere,
+	deleteVendorsWhere,
 	expect,
 	loadMoreUntilRow,
 	tenantPsql,
 	test
 } from '../fixtures/helpers';
+
+/** The name `createApprovedInvoice` posts, which auto-mints an `unverified`
+ *  vendor of that name on first use. Each worker has its own tenant, so the
+ *  name scopes the teardown to this file's row. */
+const PLURALIZATION_VENDOR = 'E2E Pluralization Vendor';
 
 async function createApprovedInvoice(
 	page: import('@playwright/test').Page,
@@ -15,7 +21,7 @@ async function createApprovedInvoice(
 	const resp = await page.request.post(`${API_BASE}/api/invoices`, {
 		headers: await authedTenantHeaders(page),
 		data: {
-			vendor: 'E2E Pluralization Vendor',
+			vendor: PLURALIZATION_VENDOR,
 			invoice_number: invoiceNumber,
 			amount: 250.0,
 			currency: 'USD'
@@ -75,6 +81,12 @@ function firstSelectableRow(page: import('@playwright/test').Page) {
 }
 
 test.describe('/payments queue selection', () => {
+	// Every invoice on it is gone by now (each test's `finally`), and the
+	// helper clears any that is not. `createApprovedInvoice` rebinds its invoice
+	// to another vendor, so the minted one is otherwise childless — inert, but
+	// still a row in the tenant every later spec reads.
+	test.afterAll(() => deleteVendorsWhere(`name='${PLURALIZATION_VENDOR}'`));
+
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/payments');
 		// Queue is the default tab, but be defensive in case a prior
