@@ -40,6 +40,7 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
 )
 from app.services.discount_capture import AppliedDiscount, applicable_discounts
+from app.services.international_payments import normalize_currency_code
 from app.services.payment_controls import (
     CFO_REASON_AMOUNT_NOT_EXPRESSIBLE,
     CFO_REASON_THRESHOLD_UNPARSEABLE,
@@ -332,6 +333,10 @@ _RETRY_SAFE_FAILURE_PREFIXES = (
     # merged away) after the run was built — refused before the adapter call,
     # and `/retry-failed` re-checks it.
     "vendor_not_active:",
+    # The invoice's currency was blanked after the run was built
+    # (`dispatch_preflight`) — refused before the adapter call, and
+    # `/retry-failed` re-checks it.
+    "currency_unknown",
     # A live virtual card claimed the invoice after the run was built —
     # refused before the adapter call, and `/retry-failed` re-checks it.
     "invoice_has_live_card",
@@ -932,6 +937,11 @@ REFUSAL_LIVE_PAYMENT = "live_payment"
 #: The invoice's vendor is not ``active`` — unverified, inactive or rejected
 #: (:func:`inactive_vendor_statuses`). Refused on every rail.
 REFUSAL_VENDOR_NOT_ACTIVE = "vendor_not_active"
+#: The invoice records no currency (blank or whitespace: the invoice PATCH
+#: still keeps ``""`` as its legacy "no currency" value). Refused on every rail:
+#: paying it means choosing a currency nobody recorded, and reading the blank as
+#: USD is the substitution decisions §160/§196/§200/§453 removed elsewhere.
+REFUSAL_CURRENCY_UNKNOWN = "currency_unknown"
 
 #: The single rail a card-claimed invoice CAN still be paid on, derived from
 #: ``CARD_CONVERGING_METHODS`` rather than restated, so the two cannot drift.
@@ -966,12 +976,14 @@ class RunRefusal:
 #: rather than whichever predicate happened to run first.
 #:
 #: Blocking exception types come first (they are the human-sign-off gate),
-#: then a vendor that may not be paid (refused on EVERY rail, so it must
-#: outrank the rail-conditional card claim — otherwise the queue would offer a
-#: card-pinned row the builder then refuses), then the card claim, then a
+#: then a vendor that may not be paid and an invoice that records no currency
+#: (both refused on EVERY rail, so they must outrank the rail-conditional card
+#: claim — otherwise the queue would offer a card-pinned row the builder then
+#: refuses), then the card claim, then a
 #: fully-credited invoice, then the live-payment backstop.
 _REFUSAL_ORDER: tuple[str, ...] = (
     REFUSAL_VENDOR_NOT_ACTIVE,
+    REFUSAL_CURRENCY_UNKNOWN,
     REFUSAL_LIVE_VIRTUAL_CARD,
     REFUSAL_APPLIED_CREDIT_MISMATCH,
     REFUSAL_FULLY_CREDITED,
@@ -1041,6 +1053,8 @@ async def run_refusal_reasons(
             out[inv.id] = RunRefusal(exception_type)
         elif inv.id in vendor_refused:
             out[inv.id] = RunRefusal(REFUSAL_VENDOR_NOT_ACTIVE)
+        elif normalize_currency_code(inv.currency) is None:
+            out[inv.id] = RunRefusal(REFUSAL_CURRENCY_UNKNOWN)
         elif inv.id in card_refused:
             out[inv.id] = RunRefusal(REFUSAL_LIVE_VIRTUAL_CARD, only_method=CARD_CLAIM_ONLY_METHOD)
         elif inv.id in credit_conflicts:
@@ -1091,6 +1105,10 @@ _REFUSAL_MESSAGES: dict[str, str] = {
     REFUSAL_VENDOR_NOT_ACTIVE: (
         "Invoice(s) are from a vendor that is not active (unverified, inactive or "
         "rejected) — verify or reactivate the vendor before paying: {numbers}"
+    ),
+    REFUSAL_CURRENCY_UNKNOWN: (
+        "currency_unknown: Invoice(s) record no currency — set the invoice's currency "
+        "before paying it: {numbers}"
     ),
     REFUSAL_LIVE_VIRTUAL_CARD: (
         "Invoice(s) already have a live virtual card issued against them — "
@@ -1337,7 +1355,16 @@ async def create_payment_run_for_invoices(
     # independently in its own invoice's currency at execution time
     # (`_execute_single_payment` reads `invoice.currency` per payment) — this
     # only constrains what one BATCH can report a single total for.
-    currencies = {invoices[iid].currency or "USD" for iid in invoice_ids}
+    #
+    # A blank currency is left out here rather than read as anything: it is not
+    # a second currency, it is no currency, and `run_refusal_reasons` refuses it
+    # below as `currency_unknown` (decisions §453 removed the same `or "USD"`
+    # from `/draft-run`).
+    currencies = {
+        code
+        for iid in invoice_ids
+        if (code := normalize_currency_code(invoices[iid].currency)) is not None
+    }
     if len(currencies) > 1:
         raise HTTPException(
             status_code=422,
@@ -1589,7 +1616,7 @@ async def dispatch_preflight(
 
     Returns the failure reason in the dispatcher's vocabulary
     (``invoice_not_payable:<status>``, ``invoice_blocked:<type>``,
-    ``vendor_not_active:<status>``, ``invoice_has_live_card``,
+    ``vendor_not_active:<status>``, ``currency_unknown``, ``invoice_has_live_card``,
     ``applied_credit_mismatch:<why>``, ``discount_changed``,
     ``net_amount_changed``) — each a refusal made before any money moved, so
     each is retry-safe. The amount is never silently re-priced: a payment whose
@@ -1606,6 +1633,11 @@ async def dispatch_preflight(
     vendor_refused = await inactive_vendor_statuses(db, [invoice])
     if invoice.id in vendor_refused:
         return f"vendor_not_active:{vendor_refused[invoice.id]}"
+    # The run builder refuses a blank currency, but the invoice PATCH can blank
+    # it while the run waits; the order must not then go out in a currency
+    # nobody recorded.
+    if normalize_currency_code(invoice.currency) is None:
+        return REFUSAL_CURRENCY_UNKNOWN
     if await card_claimed_invoice_ids(db, [(invoice.id, payment.method)]):
         return "invoice_has_live_card"
     credit_conflict = (await applied_credit_conflicts(db, [invoice])).get(invoice.id)

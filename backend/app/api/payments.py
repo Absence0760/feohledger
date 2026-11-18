@@ -683,6 +683,19 @@ def _queue_vendor_not_active():
     )
 
 
+#: The whitespace Python's ``str.strip()`` removes from an ASCII code, so the
+#: SQL predicate below and ``normalize_currency_code`` read the same rows as
+#: blank.
+_CURRENCY_BLANK_CHARS = " \t\n\r\x0b\x0c"
+
+
+def _queue_currency_unknown():
+    """SQL predicate — the invoice records no currency (NULL, empty or only
+    whitespace), the SAME condition ``services/payment_runs.run_refusal_reasons``
+    refuses as ``currency_unknown`` via ``normalize_currency_code``."""
+    return func.coalesce(func.btrim(Invoice.currency, _CURRENCY_BLANK_CHARS), "") == ""
+
+
 def _live_payment_invoice_ids():
     """Sub-query: invoice ids already claimed by a LIVE payment — anything not
     in ``LIVE_PAYMENT_TERMINAL_STATUSES``, the SAME definition the run builder's
@@ -763,6 +776,7 @@ def _queue_selectable_where() -> list:
         *_queue_base_where(),
         not_(_queue_blocking_exists()),
         not_(_queue_vendor_not_active()),
+        not_(_queue_currency_unknown()),
         not_(applied_credit_conflict_exists()),
         not_(_queue_fully_credited()),
         not_(_queue_live_card_exists()),
@@ -786,6 +800,7 @@ def _queue_blocked_on_every_rail():
     clauses = [
         _queue_blocking_exists(),
         _queue_vendor_not_active(),
+        _queue_currency_unknown(),
         applied_credit_conflict_exists(),
         _queue_fully_credited(),
     ]
@@ -1534,6 +1549,15 @@ async def compare_corridor_quotes(
         # Same opaque 404 an out-of-scope id gets everywhere else in this file,
         # so the response can't enumerate another entity's invoices.
         raise HTTPException(status_code=404, detail="Invoice not found")
+    quote_currency = normalize_currency_code(invoice.currency)
+    if quote_currency is None:
+        # No recorded currency means nothing to price: quoting it as USD would
+        # rank routes for a payment nobody can make (the run builder refuses
+        # it as `currency_unknown`).
+        raise HTTPException(
+            status_code=409,
+            detail="currency_unknown: the invoice records no currency — set it before quoting",
+        )
 
     vendor_bank: dict | None = None
     if invoice.vendor_id:
@@ -1550,7 +1574,7 @@ async def compare_corridor_quotes(
         invoice_number=invoice.invoice_number or "",
         vendor_name=invoice.vendor_name or "",
         amount=invoice.amount or Decimal("0"),
-        currency=(invoice.currency or "USD").upper(),
+        currency=quote_currency,
         method=(body.method or "ach").strip().lower(),
         description=invoice.description,
         vendor_bank=vendor_bank,
@@ -3219,6 +3243,17 @@ async def create_payment(
             ),
         )
 
+    # The invoice must record a currency — the run builder's `currency_unknown`
+    # refusal. A blank is no currency, never USD (decisions §453).
+    if normalize_currency_code(invoice.currency) is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "currency_unknown: Invoice records no currency — set the invoice's "
+                f"currency before paying it: {invoice.invoice_number}"
+            ),
+        )
+
     # A live virtual card is already paying this invoice. Same gate the run
     # builder runs, through the same shared helper, so the run's refusal can't
     # be walked around by posting here instead — the reasoning the
@@ -4551,7 +4586,10 @@ async def _execute_single_payment(
     # here and routed EVERY domestic payment down the international leg — a
     # cross-border corridor, a locked FX rate on the row, and a KYC gate reading
     # a different value for the same setting.
-    invoice_currency = normalize_currency_code(invoice.currency if invoice else None) or "USD"
+    #
+    # No `or "USD"`: `dispatch_preflight` has already refused an invoice that
+    # records no currency (`currency_unknown`), so a blank never reaches here.
+    invoice_currency = normalize_currency_code(invoice.currency)
     org_home_currency = resolve_home_currency(org.settings)
     has_intl_bank_fields = bool(
         vendor_bank and (vendor_bank.get("iban") or vendor_bank.get("swift_bic"))
@@ -4685,7 +4723,9 @@ async def _execute_single_payment(
         invoice_number=invoice.invoice_number if invoice else "",
         vendor_name=invoice.vendor_name if invoice else "",
         amount=payment.amount,
-        currency=invoice.currency if invoice else "USD",
+        # The normalised code the FX leg compared above, never a default: a
+        # blank was refused by `dispatch_preflight` (`currency_unknown`).
+        currency=invoice_currency,
         method=payment.method or "ach",
         description=invoice.description if invoice else None,
         vendor_bank=vendor_bank,
@@ -5831,6 +5871,8 @@ async def retry_failed_payments(
     - `vendor_not_active` — the invoice's vendor has since been rejected,
       deactivated or merged away (or was never verified), the run builder's
       `vendor_not_active` refusal (`payment_runs.inactive_vendor_statuses`);
+    - `currency_unknown` — the invoice's currency has since been blanked, the
+      run builder's `currency_unknown` refusal;
     - `needs_reconciliation` — we cannot prove the processor never accepted the
       original order (`classify_payment_failure`): a populated
       `provider_payment_id`, an `unexpected_error:*` / `*_transport_error:*` /
@@ -5933,6 +5975,11 @@ async def retry_failed_payments(
         }
         blocked_ids = await blocked_invoice_ids(db, invoice_ids)
         vendor_refused_ids = set(await inactive_vendor_statuses(db, invoices.values()))
+        # Blanked since the run was built: dispatch would refuse it
+        # (`dispatch_preflight`), so booking an attempt would only add noise.
+        currency_unknown_ids = {
+            iid for iid, inv in invoices.items() if normalize_currency_code(inv.currency) is None
+        }
         credit_conflict_ids = set(await applied_credit_conflicts(db, invoices.values()))
         # A live virtual card minted since the run was built claims the invoice
         # on a rail this retry isn't using. Same shared gate the run builder and
@@ -5965,6 +6012,9 @@ async def retry_failed_payments(
             continue
         if payment.invoice_id in vendor_refused_ids:
             skipped.append("vendor_not_active")
+            continue
+        if payment.invoice_id in currency_unknown_ids:
+            skipped.append("currency_unknown")
             continue
         if payment.invoice_id in card_claimed_ids:
             skipped.append("invoice_has_live_card")
