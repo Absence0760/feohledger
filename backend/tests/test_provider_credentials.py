@@ -408,6 +408,9 @@ async def test_a_seal_failure_writes_no_audit_row_and_saves_nothing(realdb, monk
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.put(f"{URL}/erp", json={"set": {"api_key": SECRET}})
     assert resp.status_code == 503
+    # Not the unopenable-row code: KMS being down is retried, never answered by
+    # offering to remove the stored keys.
+    assert resp.json()["detail"] == "The credential store is unavailable, so nothing was saved."
     assert SECRET not in resp.text
     assert await _rows(realdb) == []
     assert await _audit(realdb, "organization.credentials_updated") == []
@@ -1144,6 +1147,10 @@ async def test_reset_clears_an_unopenable_block_without_opening_it(realdb, monke
     async with realdb.client(key="a", role="admin") as c:
         stuck = await c.put(f"{URL}/payments", json={"set": {"api_key": SECRET_2}})
         assert stuck.status_code == 503
+        # Coded with the block, so the organization page can offer the reset.
+        assert stuck.json()["detail"]["code"] == "credential_block_unopenable"
+        assert stuck.json()["detail"]["params"] == {"block": "payments"}
+        assert SECRET not in stuck.text and SECRET_2 not in stuck.text
         reset = await c.delete(f"{URL}/payments")
         assert reset.status_code == 200, reset.text
         assert reset.json()["payments"] == [] and reset.json()["cards"] == ["api_key"]
@@ -1159,6 +1166,28 @@ async def test_reset_clears_an_unopenable_block_without_opening_it(realdb, monke
         "cleared": ["api_key", "webhook_secret"],
         "reason": "reset_without_opening",
     }
+
+
+@pytest.mark.asyncio
+async def test_a_provider_switch_over_an_unopenable_block_names_the_block(realdb, monkeypatch):
+    """The PATCH drop opens the row too, so it answers the same coded 503 —
+    naming the block whose stored keys need clearing — and saves nothing."""
+    await _set_settings(realdb, {"cards": {"provider": "lithic"}})
+    await realdb.store_provider_secrets("a", "cards", {"api_key": SECRET})
+
+    async def _unopenable(envelope, context):
+        raise CredentialCryptoError("KMS Decrypt failed (DisabledException).")
+
+    monkeypatch.setattr(credential_crypto, "open_envelope", _unopenable)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch(
+            "/api/organization", json={"settings": {"cards": {"provider": "nium"}}}
+        )
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "credential_block_unopenable"
+    assert resp.json()["detail"]["params"] == {"block": "cards"}
+    assert (await _org(realdb)).settings["cards"]["provider"] == "lithic"
+    assert len(await _rows(realdb)) == 1
 
 
 @pytest.mark.asyncio
