@@ -2,6 +2,7 @@ import {
 	API_BASE,
 	authedTenantHeaders,
 	deleteInvoicesWhere,
+	deletePaymentRunsWhere,
 	deleteVendorsWhere,
 	expect,
 	tenantPsql,
@@ -152,8 +153,7 @@ async function getInvoiceStatus(
 function cleanup(invoiceId: string | null, runId: string | null, vendorId: string | null): void {
 	try {
 		if (runId) {
-			tenantPsql(`DELETE FROM payments WHERE payment_run_id='${runId}'`, SLUG);
-			tenantPsql(`DELETE FROM payment_runs WHERE id='${runId}'`, SLUG);
+			deletePaymentRunsWhere(`id='${runId}'`, SLUG);
 		}
 		if (invoiceId) {
 			tenantPsql(`DELETE FROM payments WHERE invoice_id='${invoiceId}'`, SLUG);

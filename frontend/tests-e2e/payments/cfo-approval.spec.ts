@@ -2,6 +2,7 @@ import {
 	API_BASE,
 	authedTenantHeaders,
 	deleteInvoicesWhere,
+	deletePaymentRunsWhere,
 	expect,
 	signInAndWait,
 	tenantPsql,
@@ -63,10 +64,10 @@ async function createRun(
 }
 
 function hardDeleteInvoice(id: string): void {
-	tenantPsql(`DELETE FROM payments WHERE invoice_id='${id}'`);
-	tenantPsql(
-		`DELETE FROM payment_runs WHERE id IN (SELECT DISTINCT payment_run_id FROM payments WHERE invoice_id='${id}')`
-	);
+	// The invoice's payments, and any run holding only them, go with it in
+	// `deleteInvoicesWhere` below. (The two statements this replaced deleted the
+	// payments first, which emptied the subquery the run delete selected by, so
+	// every such run leaked as a draft.)
 	tenantPsql(
 		`DELETE FROM workflow_steps WHERE instance_id IN (SELECT id FROM workflow_instances WHERE invoice_id='${id}')`
 	);
@@ -83,8 +84,7 @@ function hardDeleteInvoice(id: string): void {
 }
 
 function deletePaymentRun(runId: string): void {
-	tenantPsql(`DELETE FROM payments WHERE payment_run_id='${runId}'`);
-	tenantPsql(`DELETE FROM payment_runs WHERE id='${runId}'`);
+	deletePaymentRunsWhere(`id='${runId}'`);
 }
 
 /**

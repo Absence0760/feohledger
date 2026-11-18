@@ -1576,24 +1576,6 @@ scope (§260) — do not fold them into any of these.
       the nav row gated on the capability. **Trigger:** the product decision on
       who may act as a partner, or the next partner/reseller onboarding.
 
-### Surfaced by fixing the payments-spec data leak (2026-10-21, issue #635, PR #636)
-
-- [ ] **(c) Some e2e spec leaks draft payment runs, and `queue.spec` leaks a vendor.**
-      After `delete-gate.spec` stopped leaking blocked invoices (16d74798), a
-      check of the local e2e tenants found 20 draft payment runs on e2e2 dated
-      2026-09-05..07 that no spec removes. A draft run holding live payments
-      keeps those invoices out of the payment queue, which is the same
-      cross-spec interference that broke `execute.spec`.
-      `payments/queue.spec.ts`'s `createApprovedInvoice` also leaves its
-      auto-created `E2E Pluralization Vendor` behind. It has no invoices, so it
-      is inert today. **Durable fix:** find the spec that creates draft runs
-      (grep `payment-runs` POSTs without a matching `deletePaymentRun` in an
-      `afterEach`) and give it prefix-scoped cleanup. Remove the pluralization
-      vendor in `queue.spec`'s teardown, and extend `meta/teardown-guard` to
-      catch a spec that creates a payment run or vendor without removing it.
-      **Trigger:** the next payments e2e flake, or the next pass over
-      `meta/teardown-guard`.
-
 ### Surfaced by adding external uptime checks (2026-10-21, decisions §311)
 
 - [ ] **(c) Nothing watches the Let's Encrypt certificates Caddy holds on the

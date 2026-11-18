@@ -1,7 +1,13 @@
 import type { Locator, Page } from '@playwright/test';
 
 import type { NachaVerifyResult } from '#lib/types/runOutside.ts';
-import { API_BASE, authedTenantHeaders, expect, tenantPsql } from './helpers';
+import {
+	API_BASE,
+	authedTenantHeaders,
+	deletePaymentRunsWhere,
+	expect,
+	tenantPsql
+} from './helpers';
 
 /**
  * A payment run whose NACHA bank file has been exported — the state "Verify
@@ -136,8 +142,7 @@ export async function withExportedRun(
 		await body({ runId, invoiceId: target.id, invoiceNumber: target.invoice_number, modal });
 	} finally {
 		if (runId) {
-			tenantPsql(`DELETE FROM payments WHERE payment_run_id='${runId}'`);
-			tenantPsql(`DELETE FROM payment_runs WHERE id='${runId}'`);
+			deletePaymentRunsWhere(`id='${runId}'`);
 		}
 		tenantPsql(`UPDATE invoices SET status='${sourceStatus}' WHERE id='${target.id}'`);
 		tenantPsql(

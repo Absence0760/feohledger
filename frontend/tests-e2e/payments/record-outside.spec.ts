@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 import {
 	API_BASE,
 	authedTenantHeaders,
+	deletePaymentRunsWhere,
 	deleteVendorsWhere,
 	expect,
 	loadMoreUntilRow,
@@ -103,8 +104,7 @@ function resetInvoice(invoiceId: string, status: string): void {
 }
 
 function deletePaymentRun(runId: string): void {
-	tenantPsql(`DELETE FROM payments WHERE payment_run_id='${runId}'`);
-	tenantPsql(`DELETE FROM payment_runs WHERE id='${runId}'`);
+	deletePaymentRunsWhere(`id='${runId}'`);
 }
 
 function runDialog(page: Page): Locator {
