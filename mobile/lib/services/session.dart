@@ -8,6 +8,7 @@ import 'package:feohledger_mobile/stores/cash_flow_store.dart';
 import 'package:feohledger_mobile/stores/contract_store.dart';
 import 'package:feohledger_mobile/stores/dashboard_store.dart';
 import 'package:feohledger_mobile/stores/exception_store.dart';
+import 'package:feohledger_mobile/stores/goods_receipt_store.dart';
 import 'package:feohledger_mobile/stores/inspection_store.dart';
 import 'package:feohledger_mobile/stores/invoice_store.dart';
 import 'package:feohledger_mobile/stores/notification_store.dart';
@@ -81,6 +82,7 @@ class SessionManager {
     ContractStore.instance.reset();
     DashboardStore.instance.reset();
     ExceptionStore.instance.reset();
+    GoodsReceiptStore.instance.reset();
     InspectionStore.instance.reset();
     InvoiceStore.instance.reset();
     NotificationStore.instance.reset();

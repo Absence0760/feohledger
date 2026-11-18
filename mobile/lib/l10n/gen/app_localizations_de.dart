@@ -4323,4 +4323,157 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get codedRefusalExternalPaymentBlockingException =>
       'Für diese Rechnung besteht eine ungelöste Ausnahme, die die Zahlung sperrt. Lösen Sie sie, bevor Sie die Rechnung als bezahlt erfassen.';
+
+  @override
+  String get grRecordTitle => 'Wareneingang erfassen';
+
+  @override
+  String get grRecordIntro =>
+      'Erfassen Sie, was zu einer Bestellung geliefert wurde. Rechnungen, die diese Bestellung angeben, werden beim Speichern sofort neu abgeglichen.';
+
+  @override
+  String get grRecordSearchPo => 'Bestellung suchen';
+
+  @override
+  String get grRecordSearchPlaceholder => 'Bestellnummer';
+
+  @override
+  String get grRecordPo => 'Bestellung';
+
+  @override
+  String get grRecordNoPos => 'Keine passenden Bestellungen';
+
+  @override
+  String get grRecordLoadPosFailed =>
+      'Bestellungen konnten nicht geladen werden';
+
+  @override
+  String get grRecordLoadPoFailed =>
+      'Die Bestellung konnte nicht geladen werden';
+
+  @override
+  String grRecordPoCancelled(String number) {
+    return 'Bestellung $number ist storniert, daher kann dazu nichts erfasst werden.';
+  }
+
+  @override
+  String get grRecordOrdered => 'Bestellt';
+
+  @override
+  String get grRecordAlreadyReceived => 'Bisher erhalten';
+
+  @override
+  String get grRecordOutstanding => 'Offen';
+
+  @override
+  String get grRecordThisDelivery => 'Diese Lieferung';
+
+  @override
+  String grRecordQuantityFor(String line) {
+    return 'Erhaltene Menge für $line';
+  }
+
+  @override
+  String get grRecordOverReceipt =>
+      'Mehr als offen ist. Der Abgleich markiert dies als Mehrlieferung.';
+
+  @override
+  String get grRecordLinesHint =>
+      'Lassen Sie eine Position leer, wenn sie nicht Teil dieser Lieferung war. Geben Sie 0 ein, wenn sie erwartet, aber nicht geliefert wurde.';
+
+  @override
+  String get grRecordNoPoLines =>
+      'Diese Bestellung hat keine Positionen. Beschreiben Sie daher, was geliefert wurde.';
+
+  @override
+  String get grRecordAddLine => 'Position hinzufügen';
+
+  @override
+  String grRecordRemoveLine(int n) {
+    return 'Position $n entfernen';
+  }
+
+  @override
+  String grRecordLineDescription(int n) {
+    return 'Beschreibung, Position $n';
+  }
+
+  @override
+  String grRecordLineQuantity(int n) {
+    return 'Erhaltene Menge, Position $n';
+  }
+
+  @override
+  String get grRecordReceivedDate => 'Erhalten am';
+
+  @override
+  String get grRecordNumber => 'Lieferscheinnummer';
+
+  @override
+  String get grRecordNumberHint =>
+      'Optional. Die Lieferschein- oder Packzettelnummer des Lieferanten.';
+
+  @override
+  String grRecordNumberPlaceholder(String po) {
+    return 'Leer: GR-$po-n';
+  }
+
+  @override
+  String get grRecordSaving => 'Wird erfasst…';
+
+  @override
+  String get grRecordSubmit => 'Wareneingang erfassen';
+
+  @override
+  String grRecordRecorded(String number) {
+    return 'Wareneingang $number erfasst';
+  }
+
+  @override
+  String get grRecordFailed => 'Wareneingang konnte nicht erfasst werden';
+
+  @override
+  String get settingsGoodsReceipt => 'Wareneingang erfassen';
+
+  @override
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber) {
+    return 'Bestellung $poNumber ist storniert; dazu kann nichts erfasst werden.';
+  }
+
+  @override
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber) {
+    return 'Ein Wareneingang mit der Nummer $grNumber existiert bereits.';
+  }
+
+  @override
+  String get codedRefusalGoodsReceiptLineNotOnPo =>
+      'Jede erhaltene Position muss eine Position dieser Bestellung sein.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineDuplicated =>
+      'Eine Bestellposition darf auf einem Wareneingang nur einmal vorkommen.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineRequired =>
+      'Beschreiben Sie für jede Position, was geliefert wurde.';
+
+  @override
+  String get codedRefusalGoodsReceiptNothingReceived =>
+      'Ein Wareneingang muss mindestens eine erhaltene Einheit erfassen.';
+
+  @override
+  String get codedRefusalGoodsReceiptIdempotencyReused =>
+      'Diese Anfrage wurde bereits für eine andere Bestellung verwendet. Öffnen Sie das Formular erneut und versuchen Sie es noch einmal.';
+
+  @override
+  String get settingsGoodsReceiptHint =>
+      'Eine Lieferung zu einer Bestellung erfassen';
+
+  @override
+  String get grRecordSegregationNote =>
+      'Funktionstrennung: Sobald Sie diesen Wareneingang erfassen, können Sie keine Rechnung zu dieser Bestellung freigeben, und ein Wareneingang, den Sie nach einer Freigabe erfassen, gibt diese Rechnung nicht frei.';
+
+  @override
+  String get grRecordReceiveLines =>
+      'Geben Sie für mindestens eine Position eine Menge ein';
 }

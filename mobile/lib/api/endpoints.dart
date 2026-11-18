@@ -968,8 +968,8 @@ class InspectionApi {
 
 /// Goods receipts — `GET /api/goods-receipts` (auth-gated, role-open).
 ///
-/// Mobile reads them only to populate the record-inspection picker: an
-/// inspection has to name the delivery it covers.
+/// Mobile reads them to populate the record-inspection picker (an inspection
+/// has to name the delivery it covers), and records new ones.
 class GoodsReceiptApi {
   static final _api = ApiClient();
 
@@ -991,6 +991,44 @@ class GoodsReceiptApi {
         .map((e) => GoodsReceipt.fromJson(e as Map<String, dynamic>))
         .toList();
     return (items: items, total: (data['total'] as num?)?.toInt() ?? items.length);
+  }
+
+  /// `POST /api/goods-receipts` — record a delivery (admin / ap_manager /
+  /// ap_clerk, the backend `RECEIPT_ENTRY_ROLES`). [idempotencyKey] is minted
+  /// once per opened form, so a double tap or a retry after a lost response
+  /// replays the same receipt (the server answers 200 with it) instead of
+  /// booking the delivery twice. Returns the receipt's `gr_number`.
+  static Future<String> create(
+    GoodsReceiptDraft draft, {
+    required String idempotencyKey,
+  }) async {
+    final data = await _api.post('/goods-receipts', draft.toJson(), {
+      'Idempotency-Key': idempotencyKey,
+    });
+    return data['gr_number'] as String? ?? '';
+  }
+
+  /// Purchase orders whose number matches [search], for the record form's
+  /// picker — the same read and page size as the web form.
+  static Future<List<ReceivablePO>> searchPurchaseOrders(
+    String search, {
+    int pageSize = 50,
+  }) async {
+    final params = <String, String>{
+      'page': '1',
+      'page_size': pageSize.toString(),
+    };
+    if (search.trim().isNotEmpty) params['search'] = search.trim();
+    final items = await _api.getList('/purchase-orders', params);
+    return items
+        .map((e) => ReceivablePO.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// `GET /api/purchase-orders/{id}` — the PO's lines with what has arrived.
+  static Future<ReceivablePODetail> getPurchaseOrder(String id) async {
+    final data = await _api.get('/purchase-orders/$id');
+    return ReceivablePODetail.fromJson(data);
   }
 }
 

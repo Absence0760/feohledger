@@ -4,6 +4,7 @@ import 'package:feohledger_mobile/config.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/adaptive_screen.dart';
 import 'package:feohledger_mobile/screens/admin_users_screen.dart';
+import 'package:feohledger_mobile/screens/goods_receipt_record_screen.dart';
 import 'package:feohledger_mobile/screens/inspections_screen.dart';
 import 'package:feohledger_mobile/screens/org_settings_screen.dart';
 import 'package:feohledger_mobile/screens/workflows_screen.dart';
@@ -128,6 +129,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
               MaterialPageRoute(builder: (_) => const InspectionsScreen()),
             ),
           ),
+          // Recording a delivery — gated on the backend's RECEIPT_ENTRY_ROLES
+          // (admin / ap_manager / ap_clerk); a CFO gets no entry, since a
+          // guaranteed 403 is not an affordance.
+          if (AuthStore.instance.canRecordGoodsReceipt)
+            ListTile(
+              key: const Key('settings-record-goods-receipt'),
+              leading: const Icon(Icons.local_shipping_outlined),
+              title: Text(l.settingsGoodsReceipt),
+              subtitle: Text(l.settingsGoodsReceiptHint),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final number = await Navigator.of(context).push<String>(
+                  MaterialPageRoute(
+                    builder: (_) => const GoodsReceiptRecordScreen(),
+                  ),
+                );
+                if (number != null) {
+                  messenger.showSnackBar(
+                    SnackBar(content: Text(l.grRecordRecorded(number))),
+                  );
+                }
+              },
+            ),
 
           // Administration — gated PER ENTRY against each surface's own backend
           // gate, not once for the whole group. `/api/admin/*` and

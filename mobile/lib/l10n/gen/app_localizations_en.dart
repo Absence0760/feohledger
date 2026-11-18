@@ -4297,4 +4297,154 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get codedRefusalExternalPaymentBlockingException =>
       'This invoice has an unresolved payment-blocking exception. Resolve it before recording the invoice as paid.';
+
+  @override
+  String get grRecordTitle => 'Record goods receipt';
+
+  @override
+  String get grRecordIntro =>
+      'Record what arrived against a purchase order. Invoices that quote the PO are matched again as soon as you save.';
+
+  @override
+  String get grRecordSearchPo => 'Find PO';
+
+  @override
+  String get grRecordSearchPlaceholder => 'PO number';
+
+  @override
+  String get grRecordPo => 'Purchase order';
+
+  @override
+  String get grRecordNoPos => 'No matching purchase orders';
+
+  @override
+  String get grRecordLoadPosFailed => 'Failed to load purchase orders';
+
+  @override
+  String get grRecordLoadPoFailed => 'Failed to load the purchase order';
+
+  @override
+  String grRecordPoCancelled(String number) {
+    return 'Purchase order $number is cancelled, so nothing can be received against it.';
+  }
+
+  @override
+  String get grRecordOrdered => 'Ordered';
+
+  @override
+  String get grRecordAlreadyReceived => 'Received so far';
+
+  @override
+  String get grRecordOutstanding => 'Outstanding';
+
+  @override
+  String get grRecordThisDelivery => 'This delivery';
+
+  @override
+  String grRecordQuantityFor(String line) {
+    return 'Quantity received for $line';
+  }
+
+  @override
+  String get grRecordOverReceipt =>
+      'More than is outstanding. Matching will flag this as an over-receipt.';
+
+  @override
+  String get grRecordLinesHint =>
+      'Leave a line blank if it wasn\'t part of this delivery. Enter 0 to record that it was expected but didn\'t arrive.';
+
+  @override
+  String get grRecordNoPoLines =>
+      'This purchase order has no lines, so describe what arrived.';
+
+  @override
+  String get grRecordAddLine => 'Add line';
+
+  @override
+  String grRecordRemoveLine(int n) {
+    return 'Remove line $n';
+  }
+
+  @override
+  String grRecordLineDescription(int n) {
+    return 'Description, line $n';
+  }
+
+  @override
+  String grRecordLineQuantity(int n) {
+    return 'Quantity received, line $n';
+  }
+
+  @override
+  String get grRecordReceivedDate => 'Received on';
+
+  @override
+  String get grRecordNumber => 'Delivery note number';
+
+  @override
+  String get grRecordNumberHint =>
+      'Optional. The supplier\'s packing slip or delivery note number.';
+
+  @override
+  String grRecordNumberPlaceholder(String po) {
+    return 'Blank: GR-$po-n';
+  }
+
+  @override
+  String get grRecordSaving => 'Recording…';
+
+  @override
+  String get grRecordSubmit => 'Record receipt';
+
+  @override
+  String grRecordRecorded(String number) {
+    return 'Recorded goods receipt $number';
+  }
+
+  @override
+  String get grRecordFailed => 'Failed to record the goods receipt';
+
+  @override
+  String get settingsGoodsReceipt => 'Record receipt';
+
+  @override
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber) {
+    return 'Purchase order $poNumber is cancelled; nothing can be received against it.';
+  }
+
+  @override
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber) {
+    return 'A goods receipt numbered $grNumber already exists.';
+  }
+
+  @override
+  String get codedRefusalGoodsReceiptLineNotOnPo =>
+      'Every received line must be one of this purchase order\'s lines.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineDuplicated =>
+      'A purchase-order line can appear only once on a receipt.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineRequired =>
+      'Describe what was received on each line.';
+
+  @override
+  String get codedRefusalGoodsReceiptNothingReceived =>
+      'A receipt must record at least one unit received.';
+
+  @override
+  String get codedRefusalGoodsReceiptIdempotencyReused =>
+      'This request was already used for a different purchase order. Reopen the form and try again.';
+
+  @override
+  String get settingsGoodsReceiptHint =>
+      'Count a delivery in against a purchase order';
+
+  @override
+  String get grRecordSegregationNote =>
+      'Segregation of duties: once you record this receipt, you can\'t approve an invoice billed against this purchase order, and a receipt you record after approving one doesn\'t release it.';
+
+  @override
+  String get grRecordReceiveLines => 'Enter a quantity on at least one line';
 }
