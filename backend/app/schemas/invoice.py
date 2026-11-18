@@ -7,7 +7,7 @@ from app.models.invoice_status import (
     InvoiceStatus,  # the one enum; see that module
     financially_locked,
 )
-from app.schemas.currency import BlankableCurrencyCode, CurrencyCode
+from app.schemas.currency import CurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
@@ -109,7 +109,10 @@ class InvoiceUpdate(BaseModel):
     vendor: str | None = Field(default=None, max_length=255)
     invoice_number: str | None = Field(default=None, max_length=100)
     amount: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    currency: BlankableCurrencyCode = None
+    # Raw on purpose: the handler shape-checks it through
+    # `api/refusals.invoice_currency`, so a blank or malformed code is a coded
+    # 422 a client can state, not Pydantic's list (decisions §NEW-R2).
+    currency: str | None = None
     invoice_date: date | None = None
     received_date: date | None = None
     due_date: date | None = None

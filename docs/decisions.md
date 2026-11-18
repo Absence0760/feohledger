@@ -23126,3 +23126,33 @@ Rejected: a `settings.cash_flow` cap left off by default, which adds a setting
 with no case that the existing holds do not cover better; and a 90-day default,
 which would change behaviour for every tenant to hide its oldest debts. The
 operator delegated the call to the round coordinator.
+
+## §NEW-R2. An invoice edit may change the currency, never clear it (extends §457, round 17, 2026-11-18)
+
+`PATCH /api/invoices/{id}` took `currency` as `BlankableCurrencyCode`, which
+kept a blank as `""` and wrote it to the NOT NULL column as "no currency". §457
+made every money path refuse that value, but each new reader still had to know
+the sentinel, and an explicit `null` reached the `setattr` and failed the
+NOT NULL constraint as a 500.
+
+The PATCH now refuses both in the handler, through `api/refusals.invoice_currency`:
+a blank or `null` is 422 `invoice_currency_required`, and a code that is not
+three ASCII letters is 422 `invoice_currency_invalid` with `params.value`. The
+schema field is a raw `str | None` so the refusal is coded rather than
+Pydantic's validation list, and `BlankableCurrencyCode`, whose only user was
+this field, is gone. `statement_currency` and `invoice_currency` share one
+helper. The other writers already refused a blank: create takes `CurrencyCode`,
+the CSV importer `_parse_currency`, and approve-with-corrections does not take a
+currency. No web or mobile screen edits an invoice's currency, so the codes are
+not in the clients' registries; a client that adds one registers them then.
+
+A PATCH that leaves `currency` out is not checked, so a row already holding
+`""` stays editable. Refusing every edit until the currency is fixed would
+block the notes, coding and vendor clean-up AP does on exactly those rows, and
+the money paths already refuse to pay them (§457). The user can fix the
+currency in the same PATCH whenever they know it.
+
+Rejected: making the column nullable here. That is the larger "currency
+unknown" follow-up (a tenant migration, the upload creating rows with NULL, and
+every reader failing closed on NULL), and it stays in `docs/followups.md` along
+with the rows already blank.
