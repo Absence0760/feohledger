@@ -397,7 +397,10 @@ Three things stay shared and are NOT covered by these variables:
   specs assert against that template (`organization/tenant-url.spec.ts`,
   `organization/custom-domain-rejection.spec.ts`), so a second session on a
   non-default web origin must set `FEOH_TENANT_URL_TEMPLATE` on its backend to
-  match, or those two fail while everything else passes.
+  match, or those two fail while everything else passes. The same goes for
+  the browser OAuth connects in `erp/` (`connectOAuthThroughPanel`): the
+  callback 302s to that template's origin, so with a mismatched template the
+  browser lands on another session's server.
 
 ### The backend's Python imports (`backend/.venv` is the primary checkout's)
 

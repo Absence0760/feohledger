@@ -1,10 +1,11 @@
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 
 import {
 	API_BASE,
 	authedTenantHeaders,
 	currentTenantSlug,
 	expect,
+	tenantBase,
 	tenantHeaders
 } from '../fixtures/helpers';
 
@@ -107,6 +108,88 @@ export async function testErpConnection(
 	});
 	expect(resp.status()).toBe(200);
 	return (await resp.json()) as { success: boolean; message: string };
+}
+
+/**
+ * Connect an OAuth ERP the way an admin does, in the browser: Organization →
+ * ERP, choose it, fill the fields it requires, click Connect. The page saves
+ * the choice, asks the backend for the consent URL (the credentialed call that
+ * sets the browser-binding cookie) and navigates there; the fake provider
+ * 302s straight back to the backend callback with a code (it has no consent
+ * screen); the callback checks that cookie, exchanges the code and 302s to the
+ * tenant's settings page, which says the ERP is connected and names the
+ * company. The API-driven connects in the per-provider specs skip every
+ * browser-only part of that: the cookie crossing from the tenant origin to the
+ * API host, the top-level redirects, and the panel reading the return.
+ *
+ * Starts from a disconnected org so the Connect button is the one shown.
+ * Asserts the navigation hops in order, so a connect that never left the page
+ * (or skipped the callback) cannot pass.
+ */
+export async function connectOAuthThroughPanel(
+	page: Page,
+	opts: {
+		provider: string;
+		/** The provider's label in the panel ("Xero"). */
+		label: string;
+		/** Path of the fake's authorize endpoint the browser must visit. */
+		consentPath: string;
+		/** The company id the panel must name once connected. */
+		company: string;
+		/** Required panel fields, by their visible label. Typed into the panel,
+		 *  so `settings.erp` is cleared first: Connect must be what saves them. */
+		fill?: Record<string, string>;
+	}
+): Promise<void> {
+	const disconnected = await page.request.post(
+		`${API_BASE}/api/organization/erp/oauth/disconnect`,
+		{ headers: await authedTenantHeaders(page) }
+	);
+	expect(disconnected.ok(), await disconnected.text()).toBe(true);
+	if (opts.fill) await setErpSettings(page, null);
+
+	await page.goto('/organization?section=erp');
+	const card = page.getByTestId('erp-panel');
+	await card.getByTestId('erp-provider-select').selectOption(opts.provider);
+	await expect(card.getByTestId('erp-oauth-state')).toHaveText(
+		`Not connected to ${opts.label} yet.`
+	);
+	for (const [label, value] of Object.entries(opts.fill ?? {})) {
+		await card.getByLabel(label, { exact: true }).fill(value);
+	}
+
+	const hops: URL[] = [];
+	const onRequest = (req: Request) => {
+		if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+			hops.push(new URL(req.url()));
+		}
+	};
+	page.on('request', onRequest);
+	try {
+		await card.getByRole('button', { name: `Connect to ${opts.label}` }).click();
+		// Back on the tenant's own settings page, which reads the return once
+		// and strips it from the address bar.
+		await expect(card.getByTestId('erp-status')).toHaveText(`${opts.label} is now connected.`);
+	} finally {
+		page.off('request', onRequest);
+	}
+	await expect(page).not.toHaveURL(/erp_connected|erp_error/);
+	await expect(card.getByTestId('erp-oauth-state')).toHaveText(
+		`Connected to ${opts.label} (company ${opts.company}).`
+	);
+
+	const consent = hops.findIndex(
+		(u) => u.origin === FAKE_ERP_BASE && u.pathname === opts.consentPath
+	);
+	expect(consent, hops.map(String).join('\n')).toBeGreaterThanOrEqual(0);
+	const callback = hops.findIndex(
+		(u, i) => i > consent && `${u.origin}${u.pathname}` === ERP_OAUTH_CALLBACK
+	);
+	expect(callback, hops.map(String).join('\n')).toBeGreaterThan(consent);
+	const home = hops.slice(callback + 1).find((u) => u.pathname === '/organization');
+	expect(home, hops.map(String).join('\n')).toBeTruthy();
+	expect(home!.origin).toBe(tenantBase(currentTenantSlug()));
+	expect(home!.searchParams.get('erp_connected')).toBe(opts.provider);
 }
 
 export type Inv = { id: string; invoice_number: string; status: string };

@@ -18,6 +18,7 @@ import {
 import {
 	FAKE_ERP_BASE,
 	type Inv,
+	connectOAuthThroughPanel,
 	createApprovedInvoice,
 	deleteInvoice,
 	erpFailureFromAudit,
@@ -53,6 +54,9 @@ import type { Invoice } from '#lib/types/invoice.ts';
  *   2. Full send — after the contact + account syncs, an approved invoice
  *      posts as an ACCPAY bill; the bill read back FROM THE FAKE carries the
  *      exact gross, the synced contact, our invoice number and currency.
+ *   2b. Connect in the browser — Organization → ERP → Connect: the page's
+ *      consent redirect, the callback, the panel naming the organisation,
+ *      then the same send (`connectOAuthThroughPanel`).
  *   3. Fail closed — an unlinked vendor, and a bill with no invoice / due
  *      date, are refused before anything is posted (Xero needs both dates;
  *      the adapter never invents them).
@@ -203,6 +207,34 @@ async function auditActions(page: Page, invoiceId: string): Promise<string[]> {
 	return ((await resp.json()) as Array<{ action: string }>).map((r) => r.action);
 }
 
+/** Sync the contacts and accounts, post an approved bill and read it back
+ *  FROM THE FAKE: the exact gross, the synced contact, our number, currency. */
+async function sendBillAndReadBack(page: Page, request: APIRequestContext): Promise<void> {
+	await syncErpVendors(page);
+	await syncErpGlAccounts(page);
+	const inv = await createApprovedInvoice(page, {
+		prefix: 'E2E-XERO',
+		invoiceDate: '2026-10-01',
+		dueDate: '2026-10-31',
+		amount: '1150.00',
+		taxAmount: '150.00',
+		currency: 'ZAR',
+		vendor: SUPPLIER,
+		glAccount: '6100'
+	});
+	try {
+		expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe(await statusSyncPushLanding(page));
+		const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
+		expect(bill.Type).toBe('ACCPAY');
+		expect(bill.Contact.ContactID).toBe('xero-contact-1');
+		expect(bill.InvoiceNumber).toBe(inv.invoice_number);
+		expect(bill.CurrencyCode).toBe('ZAR');
+		expect(Number(bill.Total)).toBe(1150);
+	} finally {
+		await deleteInvoice(page, inv.id);
+	}
+}
+
 test.describe('/erp xero adapter against fake-erp', () => {
 	test.beforeEach(async ({ page }) => {
 		await skipUnlessReachable(SERVICES.fakeErp);
@@ -236,29 +268,17 @@ test.describe('/erp xero adapter against fake-erp', () => {
 		page,
 		request
 	}) => {
-		await syncErpVendors(page);
-		await syncErpGlAccounts(page);
-		const inv = await createApprovedInvoice(page, {
-			prefix: 'E2E-XERO',
-			invoiceDate: '2026-10-01',
-			dueDate: '2026-10-31',
-			amount: '1150.00',
-			taxAmount: '150.00',
-			currency: 'ZAR',
-			vendor: SUPPLIER,
-			glAccount: '6100'
+		await sendBillAndReadBack(page, request);
+	});
+
+	test('connect through the Organization page, then a bill posts', async ({ page, request }) => {
+		await connectOAuthThroughPanel(page, {
+			provider: PROVIDER,
+			label: 'Xero',
+			consentPath: '/xero/identity/connect/authorize',
+			company: TENANT
 		});
-		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe(await statusSyncPushLanding(page));
-			const bill = await xeroBill(request, await erpReferenceFromAudit(page, inv.id));
-			expect(bill.Type).toBe('ACCPAY');
-			expect(bill.Contact.ContactID).toBe('xero-contact-1');
-			expect(bill.InvoiceNumber).toBe(inv.invoice_number);
-			expect(bill.CurrencyCode).toBe('ZAR');
-			expect(Number(bill.Total)).toBe(1150);
-		} finally {
-			await deleteInvoice(page, inv.id);
-		}
+		await sendBillAndReadBack(page, request);
 	});
 
 	test('a posted invoice names its Xero bill and links to it', async ({ page, request }) => {

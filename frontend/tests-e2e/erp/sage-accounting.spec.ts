@@ -12,6 +12,7 @@ import {
 import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
 	FAKE_ERP_BASE,
+	connectOAuthThroughPanel,
 	createApprovedInvoice,
 	deleteInvoice,
 	erpFailureFromAudit,
@@ -42,6 +43,9 @@ import {
  *      read back FROM THE FAKE carries the exact gross, the synced contact,
  *      our invoice number and dates, and the VAT split 1050.00 + 210.00 at
  *      the ledger's own GB_STANDARD rate.
+ *   2b. Connect in the browser — Organization → ERP → Connect: the page's
+ *      consent redirect, the callback, the panel naming the business, then
+ *      the same send (`connectOAuthThroughPanel`).
  *   3. Fail closed — an unlinked vendor, and a taxed invoice on a ledger
  *      with no default tax rate, are refused before anything is posted.
  *   4. Refused creates — a create Sage refuses (a date inside the year-end
@@ -112,6 +116,40 @@ async function setSageBusiness(
 	expect(resp.ok(), await resp.text()).toBe(true);
 }
 
+/** Sync the contacts and ledger accounts, post an approved purchase invoice
+ *  and read it back FROM THE FAKE: the exact gross, dates and VAT split. */
+async function sendBillAndReadBack(page: Page, request: APIRequestContext): Promise<void> {
+	await syncErpVendors(page);
+	await syncErpGlAccounts(page);
+	const inv = await createApprovedInvoice(page, {
+		prefix: 'E2E-SAGE',
+		invoiceDate: '2026-10-01',
+		dueDate: '2026-10-31',
+		amount: '1260.00',
+		taxAmount: '210.00',
+		currency: 'GBP',
+		vendor: SUPPLIER,
+		glAccount: '7500'
+	});
+	try {
+		expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
+		const posted = await sageInvoice(request, await erpReferenceFromAudit(page, inv.id));
+		expect(posted.contact.id).toBe('sage-contact-1');
+		expect(posted.vendor_reference ?? posted.reference).toBe(inv.invoice_number);
+		expect(Number(posted.total_amount)).toBe(1260);
+		expect(posted.currency.id).toBe('GBP');
+		expect([posted.date, posted.due_date]).toEqual(['2026-10-01', '2026-10-31']);
+		// The VAT split: 1050.00 net + 210.00 at the ledger's own 20% rate.
+		type Line = { net_amount: string; tax_amount: string; tax_rate_id?: string };
+		const lines: Line[] = posted.invoice_lines;
+		expect(lines.reduce((sum, l) => sum + Number(l.net_amount), 0)).toBe(1050);
+		expect(lines.reduce((sum, l) => sum + Number(l.tax_amount), 0)).toBe(210);
+		expect(lines.map((l) => l.tax_rate_id)).toEqual(['GB_STANDARD']);
+	} finally {
+		await deleteInvoice(page, inv.id);
+	}
+}
+
 test.describe('/erp sage_accounting adapter against fake-erp', () => {
 	test.beforeEach(async ({ page }) => {
 		await skipUnlessReachable(SERVICES.fakeErp);
@@ -145,35 +183,20 @@ test.describe('/erp sage_accounting adapter against fake-erp', () => {
 		page,
 		request
 	}) => {
-		await syncErpVendors(page);
-		await syncErpGlAccounts(page);
-		const inv = await createApprovedInvoice(page, {
-			prefix: 'E2E-SAGE',
-			invoiceDate: '2026-10-01',
-			dueDate: '2026-10-31',
-			amount: '1260.00',
-			taxAmount: '210.00',
-			currency: 'GBP',
-			vendor: SUPPLIER,
-			glAccount: '7500'
+		await sendBillAndReadBack(page, request);
+	});
+
+	test('connect through the Organization page, then a purchase invoice posts', async ({
+		page,
+		request
+	}) => {
+		await connectOAuthThroughPanel(page, {
+			provider: PROVIDER,
+			label: 'Sage Business Cloud Accounting',
+			consentPath: '/sage/oauth2/auth/central',
+			company: TENANT
 		});
-		try {
-			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('done');
-			const posted = await sageInvoice(request, await erpReferenceFromAudit(page, inv.id));
-			expect(posted.contact.id).toBe('sage-contact-1');
-			expect(posted.vendor_reference ?? posted.reference).toBe(inv.invoice_number);
-			expect(Number(posted.total_amount)).toBe(1260);
-			expect(posted.currency.id).toBe('GBP');
-			expect([posted.date, posted.due_date]).toEqual(['2026-10-01', '2026-10-31']);
-			// The VAT split: 1050.00 net + 210.00 at the ledger's own 20% rate.
-			type Line = { net_amount: string; tax_amount: string; tax_rate_id?: string };
-			const lines: Line[] = posted.invoice_lines;
-			expect(lines.reduce((sum, l) => sum + Number(l.net_amount), 0)).toBe(1050);
-			expect(lines.reduce((sum, l) => sum + Number(l.tax_amount), 0)).toBe(210);
-			expect(lines.map((l) => l.tax_rate_id)).toEqual(['GB_STANDARD']);
-		} finally {
-			await deleteInvoice(page, inv.id);
-		}
+		await sendBillAndReadBack(page, request);
 	});
 
 	test('an invoice whose vendor never synced is refused, not posted', async ({ page }) => {
