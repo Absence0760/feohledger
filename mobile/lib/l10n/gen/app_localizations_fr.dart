@@ -4317,6 +4317,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Ce lot dépasse le seuil d\'approbation CFO de l\'organisation et attend la validation d\'un utilisateur ayant le rôle CFO.';
 
   @override
+  String get codedRefusalMfaCodeInvalid =>
+      'Ce code n\'est pas valide. Vérifiez votre application d\'authentification et réessayez.';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       'Seul un lot en brouillon, ou dont le fichier bancaire a été exporté, peut être enregistré comme payé.';
 
