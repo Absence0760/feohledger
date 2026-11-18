@@ -243,6 +243,7 @@ const codedRefusalCodes = <String>{
   'invoice_bulk_not_found',
   'invoice_status_immutable',
   'invoice_recall_one_at_a_time',
+  'invoice_bulk_refused',
   'invoice_required_fields_missing',
   'invoice_transition_invalid',
   'invoice_transition_recall_only',
@@ -269,6 +270,8 @@ const codedRefusalCodes = <String>{
   'payment_run_nothing_to_record',
   // The sign-in challenge's wrong code (`api/auth.py::verify_mfa`).
   'mfa_code_invalid',
+  // ...and its emailed one-time code's miss (wrong, expired or spent).
+  'mfa_email_code_invalid',
 };
 
 /// The localized refusal for [detail] (a decoded error `detail`), or `null`
@@ -338,6 +341,11 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
           : l.codedRefusalInvoiceStatusImmutable(status);
     case 'invoice_recall_one_at_a_time':
       return l.codedRefusalInvoiceRecallOneAtATime;
+    // A row refused without a code of its own (backend decisions §NEW-T1):
+    // `params.status` is the target it could not reach.
+    case 'invoice_bulk_refused':
+      final target = _status(l, params, 'status');
+      return target == null ? null : l.codedRefusalInvoiceBulkRefused(target);
     case 'invoice_required_fields_missing':
       return _requiredFields(l, params);
     case 'invoice_transition_invalid':
@@ -372,6 +380,8 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
     // MFA screen; backend decisions §461).
     case 'mfa_code_invalid':
       return l.codedRefusalMfaCodeInvalid;
+    case 'mfa_email_code_invalid':
+      return l.codedRefusalMfaEmailCodeInvalid;
   }
   if (code.startsWith('external_payment_')) {
     return _forInvoice(l, params, _externalPayment(l, code, params));

@@ -4047,6 +4047,11 @@ class AppLocalizationsDe extends AppLocalizations {
       'Eine Genehmigung wird je Rechnung einzeln und mit Begründung zurückgenommen: Verwenden Sie „Genehmigung zurücknehmen“ an der Rechnung.';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'Diese Rechnung konnte nicht auf $status gesetzt werden.';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return 'Pflichtfelder fehlen: $fields';
   }
@@ -4311,6 +4316,10 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get codedRefusalMfaCodeInvalid =>
       'Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'Dieser Code ist ungültig oder abgelaufen. Fordern Sie einen neuen Code an und versuchen Sie es erneut.';
 
   @override
   String get codedRefusalPaymentRunNotRecordable =>

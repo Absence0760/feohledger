@@ -3140,6 +3140,15 @@
     }
   },
   "codedRefusalInvoiceRecallOneAtATime": "An approval is recalled one invoice at a time, with a reason: use Recall approval on the invoice.",
+  "codedRefusalInvoiceBulkRefused": "This invoice could not be changed to {status}.",
+  "@codedRefusalInvoiceBulkRefused": {
+    "description": "Coded refusal `invoice_bulk_refused`: a bulk status skip for a row refused without a code of its own; status is the target status label.",
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
   "@codedRefusalInvoiceRecallOneAtATime": {
     "description": "Coded refusal `invoice_recall_one_at_a_time`: a bulk move to Ready for Review of an approved invoice, which only Recall approval may do. Names the invoiceDetailRecall button."
   },
@@ -3279,6 +3288,7 @@
   "codedRefusalPaymentRunSegregationExport": "Segregation of duties: the user who created this payment run cannot also export its bank file. A different user must.",
   "codedRefusalPaymentRunAwaitingCfo": "This run exceeds the organization's CFO-approval threshold and is awaiting sign-off from a user with the CFO role.",
   "codedRefusalMfaCodeInvalid": "That code is not valid. Check your authenticator app and try again.",
+  "codedRefusalMfaEmailCodeInvalid": "That code is not valid or has expired. Request a new code and try again.",
   "codedRefusalPaymentRunNotRecordable": "Only a draft run, or one whose bank file was exported, can be recorded as paid.",
   "codedRefusalPaymentRunNothingToRecord": "This run has no payments left to record.",
   "codedRefusalExternalPaymentBlockingException": "This invoice has an unresolved payment-blocking exception. Resolve it before recording the invoice as paid.",

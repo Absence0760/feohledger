@@ -5910,6 +5910,12 @@ abstract class AppLocalizations {
   /// **'An approval is recalled one invoice at a time, with a reason: use Recall approval on the invoice.'**
   String get codedRefusalInvoiceRecallOneAtATime;
 
+  /// Coded refusal `invoice_bulk_refused`: a bulk status skip for a row refused without a code of its own; status is the target status label.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice could not be changed to {status}.'**
+  String codedRefusalInvoiceBulkRefused(String status);
+
   /// Coded refusal `invoice_required_fields_missing`: a bulk submit for review skipped for missing fields.
   ///
   /// In en, this message translates to:
@@ -6299,6 +6305,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'That code is not valid. Check your authenticator app and try again.'**
   String get codedRefusalMfaCodeInvalid;
+
+  /// No description provided for @codedRefusalMfaEmailCodeInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'That code is not valid or has expired. Request a new code and try again.'**
+  String get codedRefusalMfaEmailCodeInvalid;
 
   /// No description provided for @codedRefusalPaymentRunNotRecordable.
   ///

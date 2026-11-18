@@ -116,7 +116,8 @@ class _MfaScreenState extends State<MfaScreen> {
   }
 
   /// The store's error, in the reader's language when the server coded it
-  /// (a wrong code: `mfa_code_invalid`), else the store's own sentence.
+  /// (a wrong code: `mfa_code_invalid`, or `mfa_email_code_invalid` for the
+  /// emailed one), else the store's own sentence.
   String? _errorText(AppLocalizations l) {
     final auth = AuthStore.instance;
     if (auth.error == null) return null;

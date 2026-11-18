@@ -4025,6 +4025,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'An approval is recalled one invoice at a time, with a reason: use Recall approval on the invoice.';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'This invoice could not be changed to $status.';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return 'Required fields missing: $fields';
   }
@@ -4285,6 +4290,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get codedRefusalMfaCodeInvalid =>
       'That code is not valid. Check your authenticator app and try again.';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'That code is not valid or has expired. Request a new code and try again.';
 
   @override
   String get codedRefusalPaymentRunNotRecordable =>

@@ -3858,6 +3858,11 @@ class AppLocalizationsJa extends AppLocalizations {
       '承認の取り消しは理由を添えて1件ずつ行います。請求書の「承認を取り消す」を使用してください。';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'この請求書を$statusに変更できませんでした。';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return '必須項目が入力されていません：$fields';
   }
@@ -4112,6 +4117,10 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get codedRefusalMfaCodeInvalid => 'このコードは無効です。認証アプリを確認して、もう一度お試しください。';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'このコードは無効か、有効期限が切れています。新しいコードをリクエストして、もう一度お試しください。';
 
   @override
   String get codedRefusalPaymentRunNotRecordable =>

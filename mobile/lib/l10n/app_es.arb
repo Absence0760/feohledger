@@ -964,6 +964,7 @@
   "codedRefusalInvoiceBulkNotFound": "No se encontró esta factura en la entidad seleccionada.",
   "codedRefusalInvoiceStatusImmutable": "Esta factura está en estado {status}, así que ya no puede modificarse.",
   "codedRefusalInvoiceRecallOneAtATime": "Una aprobación se retira de factura en factura, con un motivo: use Retirar aprobación en la factura.",
+  "codedRefusalInvoiceBulkRefused": "Esta factura no se pudo cambiar a {status}.",
   "codedRefusalInvoiceRequiredFieldsMissing": "Faltan campos obligatorios: {fields}",
   "codedRefusalInvoiceTransitionInvalid": "Esta factura no puede pasar de {from} a {to}.",
   "codedRefusalInvoiceTransitionRecallOnly": "Esta factura solo puede pasar de {from} a {to} retirando su aprobación, una factura cada vez: use Retirar aprobación en la factura.",
@@ -1030,6 +1031,7 @@
   "codedRefusalPaymentRunSegregationExport": "Segregación de funciones: el usuario que creó esta remesa de pagos no puede también exportar su archivo bancario. Debe hacerlo otro usuario.",
   "codedRefusalPaymentRunAwaitingCfo": "Esta remesa supera el umbral de aprobación del CFO de la organización y espera la aprobación de un usuario con el rol de CFO.",
   "codedRefusalMfaCodeInvalid": "Ese código no es válido. Compruebe su aplicación de autenticación e inténtelo de nuevo.",
+  "codedRefusalMfaEmailCodeInvalid": "Ese código no es válido o ha caducado. Solicite un código nuevo e inténtelo de nuevo.",
   "codedRefusalPaymentRunNotRecordable": "Solo una remesa en borrador, o una cuyo archivo bancario se exportó, puede registrarse como pagada.",
   "codedRefusalPaymentRunNothingToRecord": "Esta remesa no tiene pagos pendientes de registrar.",
   "codedRefusalExternalPaymentBlockingException": "Esta factura tiene una excepción sin resolver que bloquea el pago. Resuélvala antes de registrar la factura como pagada."
