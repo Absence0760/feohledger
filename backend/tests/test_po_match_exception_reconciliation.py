@@ -852,7 +852,10 @@ async def test_a_split_across_two_currencies_is_held_with_no_combined_total(real
         assert inv.po_match["po_total"] is None
         assert inv.po_match["amount_variance"] is None
         assert inv.po_match["details"]["po_total"] is None
-        assert [(Decimal(str(leg["po_total"])), leg["po_currency"]) for leg in inv.po_match["details"]["legs"]] == [
+        assert [
+            (Decimal(str(leg["po_total"])), leg["po_currency"])
+            for leg in inv.po_match["details"]["legs"]
+        ] == [
             (Decimal("600.00"), "USD"),
             (Decimal("400.00"), "EUR"),
         ]
