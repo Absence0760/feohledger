@@ -367,7 +367,9 @@ the newest. One-time setup: `infra/README.md` § Release deploys.
 Tenants are one command each: `deploy/add-tenant.sh <slug> --name "Company"
 --admin-email admin@company.com` provisions the tenant (the same
 `provision_tenant` path self-service signup uses) — no Caddy block and no DNS
-step, since the tenant host is CloudFront's wildcard. Do **not**
+step, since the tenant host is CloudFront's wildcard. If the admin's
+set-password email did not send, add `--resend-link` (with `<slug>` and
+`--admin-email`, no `--name`) once mail works. Do **not**
 run `scripts/seed.py` (demo data) in prod.
 
 ### 5. Backups (RDS automated backups + `deploy/backup.sh`)

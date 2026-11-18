@@ -22969,3 +22969,34 @@ plan-driven run should cap how overdue an invoice may be is an open product
 question for the operator. A cap would be a `settings.cash_flow` integer
 applied before staging, folded into the plan's derivation so the plan and the
 run agree, with the forecast's overdue slice left uncapped.
+
+## §NEW-L3. The operator re-sends a first admin's set-password link, never to an account with a password (extends §452, round 16, 2026-11-18)
+
+`scripts/create_tenant.py --resend-link --slug <slug> --admin-email <addr>`
+(`deploy/add-tenant.sh <slug> --admin-email <addr> --resend-link`) provisions
+nothing. It finds the tenant's admin (`tenant_provisioning.resend_link_target`),
+bumps the account's link generation as an admin reset does, so every earlier
+link stops working, then mints and emails a fresh one. It prints only a masked
+address (`a***@acme.test`) and writes `user.set_password_link_resent` (actor
+NULL, no address) to the tenant's audit trail. It exits 2 without touching the
+token store when the tenant or account does not exist, the account is not an
+active system admin of that tenant, or no tenant URL is configured, and 3 when
+the generation bump, mint or send fails. The workspace-ready email has one
+builder, `set_password_links.workspace_admin_email`, which partner child
+provisioning uses too. The re-sent copy adds that the link replaces any earlier
+one.
+
+An admin who already has a password is refused, and there is no `--force`. The
+re-send exists for an account whose first link never arrived, which by
+definition has no password. An account with a password is recovered by its
+holder through Forgot password, which now works because mail does, or by
+another admin's reset in the app, which is audited against a named actor. A
+`--force` would have the server operator clear a customer's working password
+from a shell, with no named actor and no step-up. That is a takeover
+primitive the product deliberately keeps behind RBAC and the out-rank guard
+(§276, §443).
+
+**Rejected.** Picking the admin without `--admin-email` (for example, the
+tenant's oldest admin). The operator typed that address when provisioning, and
+naming it means a tenant with several admins cannot be sent the wrong one.
+Printing the link, for the reasons §452 gives.

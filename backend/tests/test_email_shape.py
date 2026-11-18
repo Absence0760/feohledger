@@ -111,3 +111,20 @@ def test_no_fourth_copy_of_the_pattern_under_app():
         "`looks_like_email` from app.utils.emails instead — three copies of "
         "this rule is what the shared module exists to prevent."
     )
+
+
+@pytest.mark.parametrize(
+    ("address", "masked"),
+    [
+        ("admin@acme.test", "a***@acme.test"),
+        ("  Jo.Smith@Example.COM ", "J***@Example.COM"),
+        ("x@y.z", "x***@y.z"),
+        ("no-at-sign", "***"),
+        ("@domain.only", "***"),
+    ],
+)
+def test_mask_address_keeps_only_the_first_character_and_the_domain(address, masked):
+    """What the operator CLI prints in place of the address a link went to."""
+    from app.utils.emails import mask_address
+
+    assert mask_address(address) == masked

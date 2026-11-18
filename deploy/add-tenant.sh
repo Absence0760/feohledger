@@ -13,7 +13,14 @@
 # link; the script prints only the address it went to, never the link (this
 # often runs through SSM, whose output is retained). If the email fails, the
 # provisioning step exits 3: the tenant exists, and once mail works the admin
-# sets a password with Forgot password on the sign-in page.
+# sets a password with Forgot password on the sign-in page, or the operator
+# re-sends the link:
+#
+#   add-tenant.sh <slug> --admin-email a@acme.com --resend-link
+#
+# which emails that admin a fresh link (every earlier one stops working),
+# prints only a masked address, and is refused if the tenant or admin does not
+# exist or the admin has already set a password.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -25,21 +32,28 @@ die() {
 	exit 1
 }
 usage() {
-	die "usage: add-tenant.sh <slug> --name <company> --admin-email <email>"
+	die "usage: add-tenant.sh <slug> --name <company> --admin-email <email>
+       add-tenant.sh <slug> --admin-email <email> --resend-link"
 }
 
 SLUG="${1:-}"
 [ -n "$SLUG" ] || usage
 shift
-NAME="" EMAIL=""
+NAME="" EMAIL="" RESEND=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--name) NAME="${2:-}" && shift 2 ;;
 	--admin-email) EMAIL="${2:-}" && shift 2 ;;
+	--resend-link) RESEND=1 && shift ;;
 	*) usage ;;
 	esac
 done
-{ [ -n "$NAME" ] && [ -n "$EMAIL" ]; } || usage
+[ -n "$EMAIL" ] || usage
+if [ -n "$RESEND" ]; then
+	[ -z "$NAME" ] || usage
+else
+	[ -n "$NAME" ] || usage
+fi
 echo "$SLUG" | grep -Eq '^[a-z0-9](-?[a-z0-9])*$' || die "invalid slug '$SLUG' (lowercase letters, digits, single hyphens)"
 [ -f .env ] || die "deploy/.env missing — run deploy.sh at least once first."
 # Same compose invocation as every other deploy script (deploy/lib.sh) — the
@@ -49,6 +63,12 @@ feoh_load_db_mode || die "could not determine the database mode from deploy/.env
 APP_DOMAIN=$(grep -E '^APP_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
 [ -n "$APP_DOMAIN" ] || die "APP_DOMAIN not set in the sops env."
 HOST="${SLUG}.${APP_DOMAIN}"
+
+if [ -n "$RESEND" ]; then
+	feoh_tenant_resend_argv "$SLUG" "$EMAIL"
+	"${COMPOSE[@]}" exec -T api "${FEOH_TENANT_ARGV[@]}"
+	exit 0
+fi
 
 # The provisioning command itself is built by deploy/lib.sh, which CI's day-one
 # job runs too (#575): no password, a set-password link by email only, and

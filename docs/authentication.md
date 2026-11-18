@@ -1086,7 +1086,8 @@ other account nobody chose a password for: an admin-invited user
 (`POST /api/partner/children/provision`), an operator-provisioned first admin
 (`deploy/add-tenant.sh` → `scripts/create_tenant.py`, which prints only the
 address and has no option to print the link, since its output is often retained
-by SSM),
+by SSM; its `--resend-link` re-sends to a first admin who has no password yet,
+superseding every earlier link),
 and an admin-reset user, whose
 password the reset clears (`POST /api/admin/users/{id}/reset-password`) — each
 emailed the same link, with its own lifetime `FEOH_SET_PASSWORD_LINK_TTL_HOURS`

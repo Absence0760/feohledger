@@ -161,3 +161,14 @@ def exact_email_first(column, address: str) -> ColumnElement[bool]:
     ``.order_by(exact_email_first(...).desc()).limit(1)``.
     """
     return column == address.strip()
+
+
+def mask_address(address: str) -> str:
+    """``a***@example.com``: enough for an operator to recognise where a
+    message went, without the whole address in a terminal or a retained log
+    (``scripts/create_tenant.py``). The domain stays readable; the local part
+    keeps its first character only."""
+    local, sep, domain = address.strip().rpartition("@")
+    if not sep or not local:
+        return "***"
+    return f"{local[0]}***@{domain}"
