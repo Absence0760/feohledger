@@ -1387,6 +1387,88 @@ void main() {
       );
       handle.dispose();
     });
+
+    testWidgets(
+        'record-only: the banner, a recordable row and a refused one meet '
+        'tap-target + label + contrast', (tester) async {
+      final handle = tester.ensureSemantics();
+      // Tall enough that both rows and their record actions are on screen —
+      // an off-screen node is not in the semantics tree the guidelines walk.
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      http.Response j(Object body) => http.Response(jsonEncode(body), 200,
+          headers: {'content-type': 'application/json'});
+      Map<String, dynamic> row(String id, String vendor, String? refusal) => {
+            'id': id,
+            'invoice_number': 'INV-$id',
+            'vendor_name': vendor,
+            'amount': 900.0,
+            'currency': 'USD',
+            'due_date': '2026-02-05',
+            'status': 'approved',
+            'is_overdue': false,
+            'discount_eligible': false,
+            'blocked': false,
+            'blocked_reason': null,
+            'required_method': null,
+            'record_outside_refusal': refusal,
+          };
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          final path = req.url.path;
+          if (path == '/api/auth/login') return j({'access_token': 'tok'});
+          if (path.endsWith('/auth/me')) {
+            return j({
+              'id': 'u1',
+              'email': 'demo@acme.com',
+              'full_name': 'Demo User',
+              'organization_id': 'org1',
+              'roles': ['ap_manager'],
+              'permissions': ['payment.record_external'],
+            });
+          }
+          if (path.endsWith('/payments/execution-mode')) {
+            return j({'mode': 'record_only', 'reason': 'configured'});
+          }
+          if (path.endsWith('/payments/queue')) {
+            return j({
+              'items': [
+                row('1', 'Acme Supplies', null),
+                row('2', 'Beta Ltd', 'external_payment_card_live'),
+              ],
+              'total': 2,
+            });
+          }
+          if (path.endsWith('/payments/summary')) {
+            return j({
+              'total_paid': 1000.0,
+              'total_pending': 200.0,
+              'payment_count': 5,
+              'total_rebates': 12.0,
+              'queue_count': 2,
+            });
+          }
+          return j({'items': [], 'total': 0});
+        }),
+      );
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+      await tester.pumpWidget(_screenHost(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Acme Supplies'));
+
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+
+      // The action names its invoice, so two "Record as paid" buttons are
+      // told apart by a screen reader.
+      expect(find.bySemanticsLabel('Record as paid — invoice INV-1'),
+          findsOneWidget);
+      expect(find.bySemanticsLabel('Record as paid — invoice INV-2'),
+          findsOneWidget);
+      handle.dispose();
+    });
   });
 
   group('AdminUsersScreen', () {

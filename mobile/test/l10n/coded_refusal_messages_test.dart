@@ -299,4 +299,99 @@ void main() {
       isNull,
     );
   });
+
+  // The no-rail pilot (backend decisions §251): the record doors' refusals
+  // and the run verdicts the Pay tab's record dialogs read. Mirrors the web
+  // `codedRefusals.ts` entries for the same codes.
+  test('the record-outside refusals are stated in the reader\'s language', () {
+    expect(localizeCodedRefusal(de, refusal('payments_record_only')),
+        de.codedRefusalPaymentsRecordOnly);
+    expect(localizeCodedRefusal(de, refusal('external_payment_segregation')),
+        de.codedRefusalExternalPaymentSegregation);
+    expect(
+      localizeCodedRefusal(
+          en, refusal('external_payment_not_payable', {'status': 'paid'})),
+      en.codedRefusalExternalPaymentNotPayable('Paid'),
+    );
+    expect(
+      localizeCodedRefusal(
+          en, refusal('external_payment_payment_live', {'payment_status': 'processing'})),
+      en.codedRefusalExternalPaymentPaymentLive(en.paymentStatusProcessing),
+    );
+    expect(
+      localizeCodedRefusal(
+          en, refusal('external_payment_amount_mismatch', {'amount': '95.00', 'currency': 'USD'})),
+      en.codedRefusalExternalPaymentAmountMismatch('\$95.00'),
+    );
+    expect(
+      localizeCodedRefusal(en, refusal('external_payment_in_run', {
+        'payment_run_id': '0123456789abcdef',
+      })),
+      en.codedRefusalExternalPaymentInRun('01234567'),
+    );
+    expect(
+      localizeCodedRefusal(en, refusal('external_payment_in_run', {
+        'payment_run_id': '0123456789abcdef',
+        'exception_id': 'e1',
+      })),
+      en.codedRefusalExternalPaymentErpSplitInRun('01234567'),
+    );
+    expect(localizeCodedRefusal(en, refusal('external_payment_erp_split')),
+        en.codedRefusalExternalPaymentErpSplit);
+  });
+
+  test('a run-level record refusal names the invoice that stopped the run', () {
+    expect(
+      localizeCodedRefusal(en, refusal('external_payment_card_live', {
+        'invoice_number': 'INV-7',
+      })),
+      en.codedRefusalExternalPaymentForInvoice(
+          'INV-7', en.codedRefusalExternalPaymentCardLive),
+    );
+    // A malformed number states nothing rather than an unnamed invoice.
+    expect(
+      localizeCodedRefusal(
+          en, refusal('external_payment_card_live', {'invoice_number': ''})),
+      isNull,
+    );
+  });
+
+  test('a record refusal missing what its sentence needs states nothing', () {
+    expect(localizeCodedRefusal(en, refusal('external_payment_not_payable')),
+        isNull);
+    expect(
+      localizeCodedRefusal(en,
+          refusal('external_payment_payment_live', {'payment_status': 'mystery'})),
+      isNull,
+    );
+    expect(
+      localizeCodedRefusal(
+          en, refusal('external_payment_amount_mismatch', {'amount': 'lots'})),
+      isNull,
+    );
+    expect(localizeCodedRefusal(en, refusal('external_payment_in_run')), isNull);
+    expect(localizeCodedRefusal(en, refusal('external_payment_unheard_of')),
+        isNull);
+  });
+
+  test('the run verdicts name the step maker-checker refuses', () {
+    expect(
+      localizeCodedRefusal(
+          de, refusal('payment_run_segregation', {'step': 'record_outside'})),
+      de.codedRefusalPaymentRunSegregationRecord,
+    );
+    expect(
+      localizeCodedRefusal(
+          de, refusal('payment_run_segregation', {'step': 'nacha_export'})),
+      de.codedRefusalPaymentRunSegregationExport,
+    );
+    expect(localizeCodedRefusal(de, refusal('payment_run_segregation')),
+        de.codedRefusalPaymentRunSegregation);
+    expect(localizeCodedRefusal(de, refusal('payment_run_awaiting_cfo')),
+        de.codedRefusalPaymentRunAwaitingCfo);
+    expect(localizeCodedRefusal(de, refusal('payment_run_not_recordable')),
+        de.codedRefusalPaymentRunNotRecordable);
+    expect(localizeCodedRefusal(de, refusal('payment_run_nothing_to_record')),
+        de.codedRefusalPaymentRunNothingToRecord);
+  });
 }

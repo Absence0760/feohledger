@@ -83,13 +83,19 @@ void main() {
     List<Map<String, dynamic>>? queue,
     Map<String, dynamic>? summary,
     http.Response Function(http.Request req)? onPost,
+    http.Response Function()? mode,
+    void Function(http.Request req)? onGet,
   }) {
     return MockClient((req) async {
       if (req.method == 'POST') {
         if (onPost != null) return onPost(req);
         return _json({'message': 'ok'});
       }
+      onGet?.call(req);
       final path = req.url.path;
+      if (mode != null && path.endsWith('/payments/execution-mode')) {
+        return mode();
+      }
       if (path.endsWith('/payments/queue')) {
         return _json({
           'items': queue ?? [_queueItem('1')],
@@ -490,6 +496,240 @@ void main() {
 
       expect(cancelCalls, 1);
       expect(message, contains('cancelled'));
+    });
+  });
+
+  // The no-rail pilot (issue #517, backend decisions §251): the store mirrors
+  // the server's execution mode, failing closed, and drives the two record
+  // doors the web payments page calls.
+  group('execution mode', () {
+    MockClient modeClient(http.Response Function() mode) =>
+        makeClient(mode: mode);
+
+    test('a processor tenant may dispatch', () async {
+      ApiClient().debugConfigure(
+        client: modeClient(
+            () => _json({'mode': 'processor', 'reason': 'configured'})),
+      );
+      await store.fetch();
+      expect(store.executionMode, 'processor');
+      expect(store.canDispatch, isTrue);
+      expect(store.isRecordOnly, isFalse);
+    });
+
+    test('a record-only tenant may not, and is confirmed record-only',
+        () async {
+      ApiClient().debugConfigure(
+        client: modeClient(() => _json({
+              'mode': 'record_only',
+              'reason': 'no_processor_in_deployed_environment',
+            })),
+      );
+      await store.fetch();
+      expect(store.canDispatch, isFalse);
+      expect(store.isRecordOnly, isTrue);
+    });
+
+    test('a failed read fails closed without taking the queue down', () async {
+      ApiClient().debugConfigure(
+        client: modeClient(() => _json({'detail': 'Forbidden'}, 403)),
+      );
+      await store.fetch();
+      expect(store.executionMode, isNull);
+      expect(store.canDispatch, isFalse, reason: 'unknown reads record-only');
+      expect(store.isRecordOnly, isFalse,
+          reason: 'unknown is not evidence of record-only');
+      expect(store.queue, hasLength(1));
+      expect(store.error, isNull);
+    });
+
+    test('a mode this build does not know fails closed too', () async {
+      ApiClient().debugConfigure(
+        client: modeClient(() => _json({'mode': 'something_new'})),
+      );
+      await store.fetch();
+      expect(store.canDispatch, isFalse);
+      expect(store.isRecordOnly, isFalse);
+    });
+
+    test('reset forgets it', () async {
+      ApiClient().debugConfigure(
+        client: modeClient(() => _json({'mode': 'processor'})),
+      );
+      await store.fetch();
+      store.reset();
+      expect(store.executionMode, isNull);
+      expect(store.canDispatch, isFalse);
+    });
+  });
+
+  group('record outside FeohLedger', () {
+    test('the queue row carries the record verdict and the amount owed', () {
+      final row = PaymentQueueItem.fromJson({
+        ..._queueItem('1'),
+        'record_outside_refusal': 'external_payment_card_live',
+        'payable_amount': '95.00',
+      });
+      expect(row.recordOutsideRefusal, 'external_payment_card_live');
+      expect(row.payableAmountDisplay, '95.00');
+      // Independent of the run builder's verdict.
+      expect(row.blocked, isFalse);
+    });
+
+    test('the offline cache round-trips the record verdict', () async {
+      ApiClient().debugConfigure(
+        client: makeClient(queue: [
+          {
+            ..._queueItem('1'),
+            'record_outside_refusal': 'external_payment_in_run',
+            'payable_amount': '100.00',
+          },
+        ]),
+      );
+      await store.fetch();
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => throw Exception('offline')),
+      );
+      await store.fetch();
+      expect(store.fromCache, isTrue);
+      expect(store.queue.single.recordOutsideRefusal, 'external_payment_in_run');
+      expect(store.queue.single.payableAmountDisplay, '100.00');
+    });
+
+    test('recordOutside posts the web body (no amount) and re-reads the queue',
+        () async {
+      http.Request? posted;
+      var queueReads = 0;
+      ApiClient().debugConfigure(
+        client: makeClient(
+          queue: [],
+          onPost: (req) {
+            posted = req;
+            return _json({'id': 'p1', 'status': 'completed'}, 201);
+          },
+          onGet: (req) {
+            if (req.url.path.endsWith('/payments/queue')) queueReads++;
+          },
+        ),
+      );
+      store.toggleSelection(_item('1'));
+
+      final outcome = await store.recordOutside(
+        _item('1'),
+        method: 'check',
+        reference: '  CHK-1001 ',
+        paidOn: '2026-11-16',
+      );
+
+      expect(outcome.ok, isTrue);
+      expect(posted!.url.path, '/api/payments/record-outside');
+      expect(jsonDecode(posted!.body), {
+        'invoice_id': '1',
+        'method': 'check',
+        'reference': 'CHK-1001',
+        'paid_on': '2026-11-16',
+      });
+      expect(queueReads, 1);
+      expect(store.isSelected('1'), isFalse);
+    });
+
+    test('a coded refusal comes back with its detail and nothing is re-read',
+        () async {
+      var queueReads = 0;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (req.method == 'POST') {
+            return _json({
+              'detail': {
+                'code': 'external_payment_segregation',
+                'message': 'Segregation of duties',
+                'params': null,
+              },
+            }, 403);
+          }
+          if (req.url.path.endsWith('/payments/queue')) queueReads++;
+          return _json({});
+        }),
+      );
+
+      final outcome = await store.recordOutside(
+        _item('1'),
+        method: 'ach',
+        reference: 'R',
+        paidOn: '2026-11-16',
+      );
+
+      expect(outcome.ok, isFalse);
+      expect((outcome.detail as Map)['code'], 'external_payment_segregation');
+      expect(queueReads, 0);
+    });
+
+    test('loadRunRecordDetail reads the caller verdict from actions', () async {
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _json({
+              'id': 'run1',
+              'status': 'exported',
+              'total_amount': '250.00',
+              'currency': 'USD',
+              'payment_count': 2,
+              'requires_cfo_approval': false,
+              'created_at': '2026-11-10T12:00:00',
+              'actions': {
+                'execute': {
+                  'code': 'payments_record_only',
+                  'message': 'x',
+                  'params': null,
+                },
+                'record_outside': null,
+              },
+            })),
+      );
+      final detail = await store.loadRunRecordDetail('run1');
+      expect(detail.run.status, 'exported');
+      expect(detail.recordOutside.allowed, isTrue);
+    });
+
+    test('a run detail without the verdict offers nothing (fail closed)',
+        () async {
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _json({
+              'id': 'run1',
+              'status': 'draft',
+              'total_amount': '250.00',
+              'created_at': '2026-11-10T12:00:00',
+            })),
+      );
+      final detail = await store.loadRunRecordDetail('run1');
+      expect(detail.recordOutside.answered, isFalse);
+      expect(detail.recordOutside.allowed, isFalse);
+    });
+
+    test('recordRunOutside posts reference + paid_on and reports the count',
+        () async {
+      http.Request? posted;
+      ApiClient().debugConfigure(
+        client: makeClient(onPost: (req) {
+          posted = req;
+          return _json({
+            'id': 'run1',
+            'status': 'completed',
+            'payment_count': 3,
+            'total_amount': '300.00',
+          });
+        }),
+      );
+
+      final outcome = await store.recordRunOutside(
+        'run1',
+        reference: 'BATCH-9',
+        paidOn: '2026-11-16',
+      );
+
+      expect(outcome.ok, isTrue);
+      expect(outcome.paymentCount, 3);
+      expect(posted!.url.path, '/api/payments/runs/run1/record-outside');
+      expect(jsonDecode(posted!.body),
+          {'reference': 'BATCH-9', 'paid_on': '2026-11-16'});
     });
   });
 }

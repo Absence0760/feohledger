@@ -68,12 +68,17 @@ Map<String, dynamic> _summaryJson({String currency = 'USD'}) => {
       'currency': currency,
     };
 
-Map<String, dynamic> _me(List<String> roles) => {
+Map<String, dynamic> _me(
+  List<String> roles, {
+  List<String> permissions = const [],
+}) =>
+    {
       'id': 'u1',
       'email': 'demo@acme.com',
       'full_name': 'Demo User',
       'organization_id': 'org1',
       'roles': roles,
+      'permissions': permissions,
     };
 
 http.Response _queueResponse(List<Map<String, dynamic>> items) => _json({
@@ -118,17 +123,30 @@ Map<String, dynamic> _runResponse({
       'cfo_approved_at': cfoApprovedAt,
     };
 
+/// `GET /api/payments/execution-mode`'s `mode`. Defaults to `processor` so the
+/// screen's Execute tests keep reading a tenant FeohLedger sends payments for;
+/// `null` makes the read fail, which must hide Execute (fail closed).
 MockClient _screenClient({
   List<Map<String, dynamic>>? queue,
   List<Map<String, dynamic>>? runs,
   http.Response Function(http.Request req)? onPost,
   String summaryCurrency = 'USD',
+  String? mode = 'processor',
+  Map<String, dynamic>? runDetail,
 }) {
   return MockClient((req) async {
     if (req.method == 'POST') {
       return onPost?.call(req) ?? _json({'message': 'ok'});
     }
     final path = req.url.path;
+    if (path.endsWith('/payments/execution-mode')) {
+      return mode == null
+          ? _json({'detail': 'unavailable'}, 503)
+          : _json({'mode': mode, 'reason': 'configured'});
+    }
+    if (runDetail != null && RegExp(r'/payments/runs/[^/]+$').hasMatch(path)) {
+      return _json(runDetail);
+    }
     if (path.endsWith('/payments/queue')) {
       return _queueResponse(queue ?? [_queueItem('1')]);
     }
@@ -169,13 +187,17 @@ void main() {
     ApiClient().debugConfigure();
   });
 
-  Future<void> loginThen(List<String> roles, MockClient screenClient) async {
+  Future<void> loginThen(
+    List<String> roles,
+    MockClient screenClient, {
+    List<String> permissions = const [],
+  }) async {
     ApiClient().debugConfigure(
       client: MockClient((req) async {
         if (req.url.path == '/api/auth/login') {
           return _json({'access_token': 'tok'});
         }
-        return _json(_me(roles));
+        return _json(_me(roles, permissions: permissions));
       }),
     );
     await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
@@ -830,5 +852,319 @@ void main() {
       find.text('This sends 5000.00 via the configured payment processor.'),
       findsOneWidget,
     );
+  });
+
+  // ── Record-only mode (the no-rail pilot, issue #517, decisions §251) ────
+  // The web hides Execute on a tenant whose payments FeohLedger only records
+  // and offers "Record as paid" instead; mobile reads the same server signals:
+  // the execution mode, the queue row's `record_outside_refusal`, and the run
+  // detail's `actions.record_outside` verdict.
+  group('record-only mode', () {
+    const recorder = ['payment.record_external', 'payment.execute'];
+
+    // The banner, the KPI bar, the queue rows with their record actions and
+    // the record dialog's form do not all fit the default 800x600 test
+    // surface; a phone-height-and-more surface keeps every control on screen.
+    Future<void> tall(WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+    }
+
+    Future<void> openRunMenu(WidgetTester tester) async {
+      await tester.tap(find.text('Runs'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a record-only tenant sees the banner and no Execute',
+        (tester) async {
+      await tall(tester);
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(mode: 'record_only', runs: [_runResponse()]),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+
+      expect(find.byKey(const Key('record-only-banner')), findsOneWidget);
+      expect(find.text('Record as paid'), findsOneWidget);
+
+      await openRunMenu(tester);
+      expect(find.text('Execute'), findsNothing);
+      expect(find.text('Record run as paid…'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+    });
+
+    testWidgets('a processor tenant keeps Execute and shows no banner',
+        (tester) async {
+      await tall(tester);
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(runs: [_runResponse()]),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+
+      expect(find.byKey(const Key('record-only-banner')), findsNothing);
+      // Recording a cheque is offered in both modes, as on the web.
+      expect(find.text('Record as paid'), findsOneWidget);
+
+      await openRunMenu(tester);
+      expect(find.text('Execute'), findsOneWidget);
+      expect(find.text('Record run as paid…'), findsOneWidget);
+    });
+
+    testWidgets('an unknown mode hides Execute but claims nothing',
+        (tester) async {
+      await tall(tester);
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(mode: null, runs: [_runResponse()]),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+
+      expect(find.byKey(const Key('record-only-banner')), findsNothing);
+      await openRunMenu(tester);
+      expect(find.text('Execute'), findsNothing);
+    });
+
+    testWidgets('without payment.record_external there is no record action',
+        (tester) async {
+      await tall(tester);
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(mode: 'record_only', runs: [_runResponse()]),
+        permissions: const ['payment.execute'],
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+
+      expect(find.text('Record as paid'), findsNothing);
+      await openRunMenu(tester);
+      expect(find.text('Record run as paid…'), findsNothing);
+    });
+
+    testWidgets('a refused row shows the action disabled with its reason',
+        (tester) async {
+      await tall(tester);
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(mode: 'record_only', queue: [
+          {
+            ..._queueItem('1'),
+            'record_outside_refusal': 'external_payment_card_live',
+          },
+        ]),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+
+      final button = tester.widget<TextButton>(
+        find.ancestor(
+          of: find.text('Record as paid'),
+          matching: find.byWidgetPredicate((w) => w is TextButton),
+        ),
+      );
+      expect(button.onPressed, isNull);
+      expect(
+        find.text('A live virtual card is issued against this invoice. '
+            'Cancel the card before recording a payment made another way.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('an unverified-vendor row the RUN refuses can still be recorded',
+        (tester) async {
+      await tall(tester);
+      // `blocked` is the run builder's verdict; recording reads its own.
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(mode: 'record_only', queue: [
+          {
+            ..._queueItem('1', blocked: true, blockedReason: 'vendor_not_active'),
+            'record_outside_refusal': null,
+          },
+        ]),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+
+      final button = tester.widget<TextButton>(
+        find.ancestor(
+          of: find.text('Record as paid'),
+          matching: find.byWidgetPredicate((w) => w is TextButton),
+        ),
+      );
+      expect(button.onPressed, isNotNull);
+    });
+
+    testWidgets('recording a row posts to /record-outside and confirms',
+        (tester) async {
+      await tall(tester);
+      http.Request? posted;
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(
+          mode: 'record_only',
+          queue: [
+            {..._queueItem('1'), 'payable_amount': '100.00'},
+          ],
+          onPost: (req) {
+            posted = req;
+            return _json({'id': 'p1', 'status': 'completed'}, 201);
+          },
+        ),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+
+      await tester.tap(find.text('Record as paid'));
+      await tester.pumpAndSettle();
+      expect(find.text('Record a payment made outside FeohLedger'),
+          findsOneWidget);
+      expect(find.text('Amount owed: \$100.00'), findsOneWidget);
+
+      // Submit stays disabled until a reference is entered.
+      final submit = find.widgetWithText(FilledButton, 'Record as paid');
+      expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Reference'), 'CHK-1001');
+      await tester.pump();
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+
+      expect(posted!.url.path, '/api/payments/record-outside');
+      final body = jsonDecode(posted!.body) as Map<String, dynamic>;
+      expect(body['invoice_id'], '1');
+      expect(body['method'], 'ach');
+      expect(body['reference'], 'CHK-1001');
+      expect(body.containsKey('amount'), isFalse);
+      expect(find.text('Invoice INV-1 recorded as paid'), findsOneWidget);
+    });
+
+    testWidgets('a refusal from the server is stated beside the form',
+        (tester) async {
+      await tall(tester);
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(
+          mode: 'record_only',
+          onPost: (req) => _json({
+            'detail': {
+              'code': 'external_payment_segregation',
+              'message': 'server english',
+              'params': null,
+            },
+          }, 403),
+        ),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+
+      await tester.tap(find.text('Record as paid'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Reference'), 'R');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Record as paid'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Segregation of duties: you created or shaped this invoice, '
+            'so a different user must record its payment.'),
+        findsOneWidget,
+      );
+      // The dialog stays open on the refusal.
+      expect(find.text('Record a payment made outside FeohLedger'),
+          findsOneWidget);
+    });
+
+    Map<String, dynamic> detail(Object? recordVerdict, {String status = 'draft'}) => {
+          ..._runResponse(status: status),
+          'actions': {'record_outside': recordVerdict},
+        };
+
+    testWidgets('a run the server refuses this reader states why, with no form',
+        (tester) async {
+      await tall(tester);
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(
+          mode: 'record_only',
+          runs: [_runResponse()],
+          runDetail: detail({
+            'code': 'payment_run_segregation',
+            'message': 'server english',
+            'params': {'step': 'record_outside'},
+          }),
+        ),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+      await openRunMenu(tester);
+      await tester.tap(find.text('Record run as paid…'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Segregation of duties: the user who created this payment '
+            'run cannot also record it as paid. A different user must.'),
+        findsOneWidget,
+      );
+      expect(find.byType(TextField), findsNothing);
+      expect(find.byType(FilledButton), findsNothing);
+    });
+
+    testWidgets('an exported run is recorded from the verdict', (tester) async {
+      await tall(tester);
+      http.Request? posted;
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(
+          mode: 'record_only',
+          runs: [_runResponse(status: 'exported')],
+          runDetail: detail(null, status: 'exported'),
+          onPost: (req) {
+            posted = req;
+            return _json({
+              'id': 'run1',
+              'status': 'completed',
+              'payment_count': 2,
+              'total_amount': '5000.00',
+            });
+          },
+        ),
+        permissions: recorder,
+      );
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Vendor 1'));
+      await openRunMenu(tester);
+      // An exported run is claimed: no Execute, no Cancel — only recording.
+      expect(find.text('Execute'), findsNothing);
+      expect(find.text('Cancel'), findsNothing);
+      await tester.tap(find.text('Record run as paid…'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Bank batch reference'), 'BATCH-9');
+      await tester.pump();
+      await tester.tap(
+          find.widgetWithText(FilledButton, 'Record as paid · \$5,000.00'));
+      await tester.pumpAndSettle();
+
+      expect(posted!.url.path, '/api/payments/runs/run1/record-outside');
+      final body = jsonDecode(posted!.body) as Map<String, dynamic>;
+      expect(body['reference'], 'BATCH-9');
+      expect(body['paid_on'], matches(RegExp(r'^\d{4}-\d{2}-\d{2}$')));
+      expect(find.text('2 payments recorded as paid'), findsOneWidget);
+    });
   });
 }

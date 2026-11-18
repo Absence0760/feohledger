@@ -10,7 +10,9 @@
 /// where an approver acts: the approve / reject / recall verdicts and
 /// refusals on an invoice (the detail screen and the approvals swipe), a
 /// skipped row of a bulk status change (the invoices list), and resolving /
-/// dismissing an exception (the detail screen and the queue swipe). Only those
+/// dismissing an exception (the detail screen and the queue swipe), and
+/// recording a payment made outside FeohLedger (the Pay tab's queue row and
+/// run, backend decisions §251). Only those
 /// codes are mapped here; the web registry
 /// covers the surfaces mobile does not ship (credit memos, expense reports,
 /// the invoice stale-edit prompt).
@@ -131,6 +133,94 @@ String? _requiredFields(AppLocalizations l, Map params) {
   return l.codedRefusalInvoiceRequiredFieldsMissing(labels.join(', '));
 }
 
+/// A `Payment.status` named by its label, or `null` for one this build does
+/// not know.
+String? _paymentStatus(AppLocalizations l, Map params, String key) =>
+    switch (_str(params, key)) {
+      'pending' => l.paymentStatusPending,
+      'processing' => l.paymentStatusProcessing,
+      'completed' => l.paymentStatusCompleted,
+      'failed' => l.paymentStatusFailed,
+      'cancelled' => l.paymentStatusCancelled,
+      _ => null,
+    };
+
+/// A run id as the web shows it in a sentence: its first eight characters.
+String? _runRef(Map params) {
+  final run = _str(params, 'payment_run_id');
+  if (run == null) return null;
+  return run.length > 8 ? run.substring(0, 8) : run;
+}
+
+/// The `external_payment_*` sentence. The run-level record names the invoice
+/// that stopped the WHOLE run in `params.invoice_number`, so a sentence from
+/// that door is prefixed with it — and a malformed number states nothing
+/// rather than a sentence about an unnamed invoice. Mirrors the web
+/// `forInvoice`.
+String? _forInvoice(AppLocalizations l, Map params, String? sentence) {
+  if (sentence == null || !params.containsKey('invoice_number')) {
+    return sentence;
+  }
+  final invoice = _str(params, 'invoice_number');
+  return invoice == null
+      ? null
+      : l.codedRefusalExternalPaymentForInvoice(invoice, sentence);
+}
+
+String? _externalPayment(AppLocalizations l, String code, Map params) {
+  switch (code) {
+    case 'external_payment_not_payable':
+      final status = _status(l, params, 'status');
+      return status == null
+          ? null
+          : l.codedRefusalExternalPaymentNotPayable(status);
+    case 'external_payment_segregation':
+      return l.codedRefusalExternalPaymentSegregation;
+    // The row's blocked chip already names the exception type; the sentence
+    // says what to do about it.
+    case 'external_payment_blocking_exception':
+      return l.codedRefusalExternalPaymentBlockingException;
+    case 'external_payment_card_live':
+      return l.codedRefusalExternalPaymentCardLive;
+    case 'external_payment_credit_conflict':
+      return l.codedRefusalExternalPaymentCreditConflict;
+    case 'external_payment_nothing_to_pay':
+      return l.codedRefusalExternalPaymentNothingToPay;
+    case 'external_payment_payment_live':
+      final status = _paymentStatus(l, params, 'payment_status');
+      return status == null
+          ? null
+          : l.codedRefusalExternalPaymentPaymentLive(status);
+    // With `exception_id` the invoice also holds an ERP split only its
+    // exception can book (backend decisions §426, round-13 amendment).
+    case 'external_payment_in_run':
+      final run = _runRef(params);
+      if (run == null) return null;
+      return _str(params, 'exception_id') == null
+          ? l.codedRefusalExternalPaymentInRun(run)
+          : l.codedRefusalExternalPaymentErpSplitInRun(run);
+    case 'external_payment_amount_mismatch':
+      final amount = _invoiceMoney(params, 'amount', 'currency');
+      return amount == null
+          ? null
+          : l.codedRefusalExternalPaymentAmountMismatch(amount);
+    case 'external_payment_amount_changed':
+      final staged = _invoiceMoney(params, 'staged_amount', 'currency');
+      final amount = _invoiceMoney(params, 'amount', 'currency');
+      return staged == null || amount == null
+          ? null
+          : l.codedRefusalExternalPaymentAmountChanged(staged, amount);
+    case 'external_payment_erp_split':
+      final run = _runRef(params);
+      return run == null
+          ? l.codedRefusalExternalPaymentErpSplit
+          : l.codedRefusalExternalPaymentErpSplitInRun(run);
+    case 'external_payment_paid_on_future':
+      return l.codedRefusalExternalPaymentPaidOnFuture;
+  }
+  return null;
+}
+
 /// The codes this module states — pinned against the backend in the test.
 const codedRefusalCodes = <String>{
   'approval_segregation',
@@ -156,6 +246,26 @@ const codedRefusalCodes = <String>{
   'invoice_transition_invalid',
   'invoice_transition_recall_only',
   'invoice_once_approved_not_reread',
+  // The no-rail pilot (backend decisions §251): the mode refusal every
+  // dispatching endpoint answers on a record-only tenant, the record doors'
+  // own refusals, and the run verdicts the run-level record reads.
+  'payments_record_only',
+  'external_payment_not_payable',
+  'external_payment_segregation',
+  'external_payment_blocking_exception',
+  'external_payment_card_live',
+  'external_payment_credit_conflict',
+  'external_payment_nothing_to_pay',
+  'external_payment_payment_live',
+  'external_payment_in_run',
+  'external_payment_amount_mismatch',
+  'external_payment_amount_changed',
+  'external_payment_erp_split',
+  'external_payment_paid_on_future',
+  'payment_run_segregation',
+  'payment_run_awaiting_cfo',
+  'payment_run_not_recordable',
+  'payment_run_nothing_to_record',
 };
 
 /// The localized refusal for [detail] (a decoded error `detail`), or `null`
@@ -237,6 +347,27 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
           : l.codedRefusalInvoiceTransitionRecallOnly(from, to);
     case 'invoice_once_approved_not_reread':
       return l.codedRefusalInvoiceOnceApprovedNotReread;
+    // `api/payments.py::_refuse_record_only`: the sentence is the same for
+    // every `params.reason`.
+    case 'payments_record_only':
+      return l.codedRefusalPaymentsRecordOnly;
+    // `services/payment_controls.py` — the run verdicts. Maker-checker names
+    // the step in `params.step` for the steps that are not approve / execute.
+    case 'payment_run_segregation':
+      return switch (_str(params, 'step')) {
+        'record_outside' => l.codedRefusalPaymentRunSegregationRecord,
+        'nacha_export' => l.codedRefusalPaymentRunSegregationExport,
+        _ => l.codedRefusalPaymentRunSegregation,
+      };
+    case 'payment_run_awaiting_cfo':
+      return l.codedRefusalPaymentRunAwaitingCfo;
+    case 'payment_run_not_recordable':
+      return l.codedRefusalPaymentRunNotRecordable;
+    case 'payment_run_nothing_to_record':
+      return l.codedRefusalPaymentRunNothingToRecord;
+  }
+  if (code.startsWith('external_payment_')) {
+    return _forInvoice(l, params, _externalPayment(l, code, params));
   }
   return null;
 }

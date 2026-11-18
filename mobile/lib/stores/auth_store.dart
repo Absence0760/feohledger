@@ -86,6 +86,15 @@ class AuthStore extends ChangeNotifier {
   // grant themselves is not a sign-off. Mirrors the web app's
   // `auth.hasRole('cfo')` on the same button.
   bool get canApprovePaymentRun => isCfo;
+  // Recording a payment made outside FeohLedger — `POST
+  // /api/payments/record-outside` is require_permission(PERM_PAYMENT_RECORD_
+  // EXTERNAL), held by admin / ap_manager / cfo by default and grantable to a
+  // custom role, so it is the permission, never a role list. It gates whether
+  // the queue shows "Record as paid" at all; whether a given row may be
+  // recorded is that row's server verdict (`record_outside_refusal`), and a
+  // run's is the run detail's `actions.record_outside`.
+  bool get canRecordExternalPayment =>
+      _user?.can(kPermPaymentRecordExternal) ?? false;
   // Invoice field editing at any editable status — the manage roles
   // (admin / ap_manager / cfo) of `backend/app/api/invoice_entry.py`.
   bool get canEditInvoice => isAdmin || isManager || isCfo;

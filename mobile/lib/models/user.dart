@@ -3,6 +3,12 @@
 /// `backend/app/api/permissions.py`).
 const kPermInvoiceApprove = 'invoice.approve';
 
+/// `payment.record_external` — the permission `POST /api/payments/record-outside`
+/// and `POST /api/payments/runs/{id}/record-outside` are gated on
+/// (`PERM_PAYMENT_RECORD_EXTERNAL`). Separate from `payment.execute` because
+/// recording moves no money (backend decisions §251).
+const kPermPaymentRecordExternal = 'payment.record_external';
+
 class User {
   final String id;
   final String email;
