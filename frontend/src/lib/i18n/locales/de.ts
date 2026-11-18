@@ -1850,6 +1850,8 @@ export const messages = {
 		'Für diesen Plan existiert bereits ein Entwurfslauf — {n, plural, one {# Zahlung} other {# Zahlungen}} über insgesamt {amount}.',
 	'cashFlow.plan.actions.cfoApprovalNote':
 		'Erfordert die Freigabe durch die Finanzleitung, bevor er ausgeführt werden kann.',
+	'cashFlow.plan.actions.skippedCurrencyUnknown': "{n, plural, one {# Rechnung wurde} other {# Rechnungen wurden}} ausgelassen, weil auf der Rechnung keine Währung erfasst ist. Setzen Sie sie, um über die Zahlungswarteschlange zu zahlen.",
+	'cashFlow.plan.actions.skippedOtherCurrency': "{n, plural, one {# Rechnung in einer anderen Währung wurde} other {# Rechnungen in anderen Währungen wurden}} aus diesem {currency}-Lauf ausgelassen. Zahlen Sie sie über die Zahlungswarteschlange.",
 	'cashFlow.plan.actions.captureResult':
 		'{n, plural, one {# Rabattangebot gesichert.} other {# Rabattangebote gesichert.}}',
 	'cashFlow.plan.actions.captureNoneNew':
@@ -4111,6 +4113,8 @@ export const messages = {
 	'refusal.creditMemoNotEditable': "Nur eine offene, nie angewendete Gutschrift kann bearbeitet werden (diese hat den Status {status}).",
 	'refusal.creditMemoNotApplicable': "Eine Gutschrift mit dem Status {status} kann nicht angewendet werden.",
 	'refusal.creditMemoExceedsBalance': "Der Gutschriftsbetrag übersteigt den verbleibenden gutschriftfähigen Saldo der Rechnung ({remaining}).",
+	'refusal.draftRunNoRunCurrency': "Ein Zahlungslauf hat nur eine Währung, und keine der zahlbaren Verpflichtungen dieses Plans lautet auf {currency} (gefunden: {found}). Stellen Sie sie stattdessen über die Zahlungswarteschlange bereit.",
+	'refusal.draftRunCurrencyUnknown': "{count, plural, one {# zahlbare Rechnung in diesem Plan hat} other {# zahlbare Rechnungen in diesem Plan haben}} keine erfasste Währung und kann erst bezahlt werden, wenn sie auf der Rechnung gesetzt ist.",
 	'refusal.expenseReportNotOwner': "Nur der Eigentümer der Abrechnung kann ihre Positionen ändern oder sie einreichen.",
 	'refusal.expenseNotCreator': "Nur die Person, die diese Ausgabe erfasst hat, kann sie ändern oder löschen.",
 	'refusal.expenseReportForeignLine': "Diese Ausgabe wurde von jemand anderem erfasst. Nur die Person, die sie erfasst hat, kann sie einer Abrechnung hinzufügen.",

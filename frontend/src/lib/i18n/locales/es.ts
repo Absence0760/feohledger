@@ -1848,6 +1848,8 @@ export const messages = {
 		'Este plan ya tiene una tanda borrador — {n, plural, one {# pago} other {# pagos}} por un total de {amount}.',
 	'cashFlow.plan.actions.cfoApprovalNote':
 		'Requiere la aprobación del CFO antes de poder ejecutarse.',
+	'cashFlow.plan.actions.skippedCurrencyUnknown': "{n, plural, one {Se omitió # factura} other {Se omitieron # facturas}} porque la factura no tiene una moneda registrada. Indíquela para pagar desde la cola de pagos.",
+	'cashFlow.plan.actions.skippedOtherCurrency': "{n, plural, one {Se omitió # factura en otra moneda} other {Se omitieron # facturas en otras monedas}} de esta tanda en {currency}. Páguelas desde la cola de pagos.",
 	'cashFlow.plan.actions.captureResult':
 		'{n, plural, one {Se capturó # descuento.} other {Se capturaron # descuentos.}}',
 	'cashFlow.plan.actions.captureNoneNew':
@@ -4103,6 +4105,8 @@ export const messages = {
 	'refusal.creditMemoNotEditable': "Solo se puede editar una nota de crédito abierta que nunca se haya aplicado (esta está en estado {status}).",
 	'refusal.creditMemoNotApplicable': "No se puede aplicar una nota de crédito en estado {status}.",
 	'refusal.creditMemoExceedsBalance': "El importe de la nota de crédito supera el saldo acreditable restante de la factura ({remaining}).",
+	'refusal.draftRunNoRunCurrency': "Una tanda de pagos tiene una sola moneda y ninguno de los compromisos pagaderos de este plan está en {currency} (encontrados: {found}). Prepárelos desde la cola de pagos.",
+	'refusal.draftRunCurrencyUnknown': "{count, plural, one {# factura pagadera de este plan no tiene} other {# facturas pagaderas de este plan no tienen}} una moneda registrada y no se puede pagar hasta que se indique en la factura.",
 	'refusal.expenseReportNotOwner': "Solo el propietario del informe puede cambiar sus líneas o enviarlo.",
 	'refusal.expenseNotCreator': "Solo la persona que creó este gasto puede cambiarlo o eliminarlo.",
 	'refusal.expenseReportForeignLine': "Este gasto lo creó otra persona. Solo quien lo creó puede añadirlo a un informe.",

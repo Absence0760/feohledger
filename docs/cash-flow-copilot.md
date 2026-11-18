@@ -725,6 +725,25 @@ holds nothing in the reporting currency the 409 names the currencies that ARE
 there: the actionable version of the old 422. `excluded_currency_count` is 0
 for every single-currency tenant, so nothing changes for them.
 
+**An invoice with no recorded currency is never staged.** The invoice PATCH
+keeps `""` as its legacy "no currency" value, and `(currency or run_currency)`
+used to read that as the reporting currency, so such an invoice was staged into
+the run and paid in a currency nobody recorded — the "missing currency becomes
+the default" pattern decisions §160 / §196 / §200 reject. Each payable invoice
+the route leaves out is now listed in `skipped` with a code: `currency_unknown`
+(no currency recorded) or `currency_not_run_currency` (`params.currency`). The
+plan card states both counts after a successful stage. When nothing is left to
+stage, the 409 is the coded refusal `draft_run_no_run_currency` (`params`:
+`run_currency`, the other `currencies` found, and `unknown_count`), stated in
+the reader's language by `frontend/src/lib/api/codedRefusals.ts`.
+
+**Overdue approved invoices are staged.** Decisions §440 keeps past-due AP in
+the plan's commitment rows, so `/draft-run` stages an approved invoice that is
+already late; a late invoice still in review is in the plan's overdue slice but
+is not payable and is never staged. Whether long-overdue AP belongs in a
+plan-driven run is an open operator call (pinned in
+`test_cash_flow_plan_lifecycle.py`).
+
 ## Capture-discounts row-locks each offer
 
 `POST /plans/{plan_id}/capture-discounts` re-reads each selected offer

@@ -1718,10 +1718,130 @@ async def test_a_plan_with_nothing_in_the_reporting_currency_says_what_it_found(
         )
     assert resp.status_code == 409, resp.text
     detail = resp.json()["detail"]
-    assert "USD" in detail and "EUR" in detail
+    assert detail["code"] == "draft_run_no_run_currency"
+    assert detail["params"] == {"run_currency": "USD", "currencies": ["EUR"], "unknown_count": 0}
+    assert "USD" in detail["message"] and "EUR" in detail["message"]
 
     async with mk_a() as sa:
         assert (await sa.execute(select(PaymentRun))).scalars().all() == []
+
+
+async def test_an_invoice_with_no_recorded_currency_is_skipped_not_paid_as_usd(realdb):
+    """A blank currency (the invoice PATCH's legacy "no currency" `""`) used to
+    read as the reporting currency and be staged into the USD run — the
+    "missing currency becomes the default" pattern decisions §160 / §196 / §200
+    reject, here reaching a payment. It is skipped with its own code instead,
+    and the other-currency invoice is listed under its own."""
+    from app.models.payment import Payment
+
+    a = realdb.info("a")
+    mk_a = realdb.sessionmaker("a")
+    async with mk_a() as sa:
+        ent = await _default_entity_id(sa, a.org_id)
+        usd = await _seed_invoice(sa, a.org_id, ent, number="CUR-USD", amount="250.00")
+        blank = await _seed_invoice(
+            sa, a.org_id, ent, number="CUR-BLANK", amount="7000.00", currency=""
+        )
+        eur = await _seed_invoice(
+            sa, a.org_id, ent, number="CUR-EUR", amount="900.00", currency="EUR"
+        )
+        await sa.commit()
+        usd_id, blank_id, eur_id = usd.id, blank.id, eur.id
+
+    plan = await _propose_plan(realdb)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            f"/api/cash-flow/plans/{plan.plan_id}/draft-run", json=_replay_body(plan)
+        )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["payment_count"] == 1
+    assert Decimal(data["total_amount"]) == Decimal("250.00")
+    assert data["excluded_currency_count"] == 1
+    assert sorted(data["skipped"], key=lambda s: s["code"]) == [
+        {
+            "invoice_id": str(eur_id),
+            "code": "currency_not_run_currency",
+            "params": {"currency": "EUR"},
+        },
+        {"invoice_id": str(blank_id), "code": "currency_unknown", "params": {}},
+    ]
+
+    async with mk_a() as sa:
+        payments = (await sa.execute(select(Payment))).scalars().all()
+    assert [p.invoice_id for p in payments] == [usd_id]
+
+
+async def test_a_plan_whose_only_payable_has_no_currency_stages_nothing(realdb):
+    """Nothing stageable → the coded 409, naming the unknown count, and no run."""
+    from app.models.payment import PaymentRun
+
+    a = realdb.info("a")
+    mk_a = realdb.sessionmaker("a")
+    async with mk_a() as sa:
+        ent = await _default_entity_id(sa, a.org_id)
+        await _seed_invoice(
+            sa, a.org_id, ent, number="CUR-ONLY-BLANK", amount="7000.00", currency=""
+        )
+        await sa.commit()
+
+    plan = await _propose_plan(realdb)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            f"/api/cash-flow/plans/{plan.plan_id}/draft-run", json=_replay_body(plan)
+        )
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "draft_run_no_run_currency"
+    assert detail["params"] == {"run_currency": "USD", "currencies": [], "unknown_count": 1}
+
+    async with mk_a() as sa:
+        assert (await sa.execute(select(PaymentRun))).scalars().all() == []
+
+
+async def test_an_overdue_approved_invoice_is_staged_and_an_overdue_one_in_review_is_not(
+    realdb,
+):
+    """Decisions §440 keeps past-due AP in the plan's commitment rows (timed on
+    today), so `/draft-run` stages an APPROVED invoice that is already late.
+    A late invoice still in `ready_for_review` is in the plan's overdue slice
+    too, but is not payable, so it is never staged. Behaviour pinned as it
+    stands; whether long-overdue AP belongs in a plan-driven run is open."""
+    from app.models.payment import Payment
+
+    a = realdb.info("a")
+    mk_a = realdb.sessionmaker("a")
+    async with mk_a() as sa:
+        ent = await _default_entity_id(sa, a.org_id)
+        late_approved = await _seed_invoice(
+            sa, a.org_id, ent, number="LATE-APPR", amount="1234.56", due_in_days=-45
+        )
+        await _seed_invoice(
+            sa,
+            a.org_id,
+            ent,
+            number="LATE-REVIEW",
+            amount="8765.43",
+            due_in_days=-45,
+            status="ready_for_review",
+        )
+        await sa.commit()
+        late_approved_id = late_approved.id
+
+    plan = await _propose_plan(realdb)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            f"/api/cash-flow/plans/{plan.plan_id}/draft-run", json=_replay_body(plan)
+        )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["payment_count"] == 1
+    assert Decimal(data["total_amount"]) == Decimal("1234.56")
+    assert data["skipped"] == []
+
+    async with mk_a() as sa:
+        payments = (await sa.execute(select(Payment))).scalars().all()
+    assert [(p.invoice_id, p.amount) for p in payments] == [(late_approved_id, Decimal("1234.56"))]
 
 
 # ===========================================================================

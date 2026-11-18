@@ -1813,6 +1813,8 @@ export const messages = {
 	'cashFlow.plan.actions.draftRunExisting':
 		'このプランにはすでに下書きバッチがあります — {n, plural, other {# 件の支払い}}、合計 {amount}。',
 	'cashFlow.plan.actions.cfoApprovalNote': '実行する前にCFOの承認が必要です。',
+	'cashFlow.plan.actions.skippedCurrencyUnknown': "請求書に通貨が記録されていないため、{n, plural, other {#件の請求書}}を除外しました。通貨を設定して支払いキューから支払ってください。",
+	'cashFlow.plan.actions.skippedOtherCurrency': "他の通貨の{n, plural, other {#件の請求書}}をこの{currency}バッチから除外しました。支払いキューから支払ってください。",
 	'cashFlow.plan.actions.captureResult': '{n, plural, other {割引オファーを # 件確保しました。}}',
 	'cashFlow.plan.actions.captureNoneNew':
 		'新たに確保するものはありません — これらのオファーはすでに処理済みです。',
@@ -4042,6 +4044,8 @@ export const messages = {
 	'refusal.creditMemoNotEditable': "編集できるのは、一度も適用されていない未適用のクレジットメモだけです（このメモのステータスは {status} です）。",
 	'refusal.creditMemoNotApplicable': "ステータスが {status} のクレジットメモは適用できません。",
 	'refusal.creditMemoExceedsBalance': "クレジットメモの金額が請求書の残りのクレジット可能残高（{remaining}）を超えています。",
+	'refusal.draftRunNoRunCurrency': "支払いバッチは単一通貨のみで、このプランの支払可能な支出に{currency}建てのものはありません（検出: {found}）。支払いキューから準備してください。",
+	'refusal.draftRunCurrencyUnknown': "このプランの支払可能な請求書のうち{count, plural, other {#件}}は通貨が記録されていないため、請求書に通貨を設定するまで支払えません。",
 	'refusal.expenseReportNotOwner': "明細の変更や提出ができるのは、レポートの所有者のみです。",
 	'refusal.expenseNotCreator': "この経費を変更または削除できるのは、作成した本人のみです。",
 	'refusal.expenseReportForeignLine': "この経費は別のユーザーが作成したものです。レポートに追加できるのは作成した本人のみです。",
