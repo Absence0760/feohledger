@@ -1759,12 +1759,12 @@ async def test_an_invoice_with_no_recorded_currency_is_skipped_not_paid_as_usd(r
     assert Decimal(data["total_amount"]) == Decimal("250.00")
     assert data["excluded_currency_count"] == 1
     assert sorted(data["skipped"], key=lambda s: s["code"]) == [
-        {"invoice_id": str(blank_id), "code": "currency_unknown", "params": {}},
         {
             "invoice_id": str(eur_id),
             "code": "currency_not_run_currency",
             "params": {"currency": "EUR"},
         },
+        {"invoice_id": str(blank_id), "code": "currency_unknown", "params": {}},
     ]
 
     async with mk_a() as sa:
