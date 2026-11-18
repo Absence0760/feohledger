@@ -22988,8 +22988,9 @@ it as a second currency. `dispatch_preflight` refuses it before the processor
 call (retry-safe), which covers rail dispatch, the NACHA export and
 paid-outside close-out; `/retry-failed` skips it; `POST /api/payments` 409s;
 `/corridor-quotes` refuses to price it; and the card mint refuses it before the
-provider call. Both `or "USD"`s are gone, and the adapter payload carries the
-normalised code.
+provider call. Both `or "USD"`s are gone, the adapter payload carries the
+normalised code, and `prepare_international_payment` raises rather than
+defaulting a blank to the home currency.
 
 Rejected: reading the blank as the org's home or reporting currency, which is
 the same substitution with a different default; and fixing only the builder,
