@@ -1530,13 +1530,18 @@ void main() {
           .toList();
       expect(spoken, hasLength(1));
       // The second voice was a `Semantics(liveRegion: true)` around the line:
-      // no live region anywhere in the dialog.
+      // nothing wrapping or inside the refusal line is a live region. Scoped
+      // to the line, not the whole dialog: the framework's own TextField
+      // counter (`maxLength`) is a live region while the field has focus.
+      bool isLive(Widget w) => w is Semantics && w.properties.liveRegion == true;
+      final line = find.byKey(const Key('record-error'));
+      expect(line, findsOneWidget);
       expect(
-        find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.byWidgetPredicate(
-              (w) => w is Semantics && w.properties.liveRegion == true),
-        ),
+        find.ancestor(of: line, matching: find.byWidgetPredicate(isLive)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: line, matching: find.byWidgetPredicate(isLive)),
         findsNothing,
       );
       await expectLater(tester, meetsGuideline(textContrastGuideline));
