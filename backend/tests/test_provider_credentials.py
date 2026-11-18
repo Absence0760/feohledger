@@ -930,3 +930,93 @@ async def test_migration_0135_seals_extraction_and_sso_plaintext(realdb):
     assert "client_secret_configured" not in org.settings["sso"]
     assert org.settings["extraction"]["aws_secret_access_key"] == SECRET_2
     assert {r.block for r in await _rows(realdb)} == set()
+
+
+async def _run_0135_on_tenant(realdb, step: str, key: str = "a") -> bool:
+    """Run one 0135 step against a TENANT database; return what its gate said."""
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mig = _migration_0135()
+    verdict: list[bool] = []
+
+    def _go(sync_conn):
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            verdict.append(mig._is_control_db())
+            getattr(mig, step)()
+
+    async with realdb.sessionmaker(key)() as s:
+        conn = await s.connection()
+        await conn.run_sync(_go)
+        await s.commit()
+    return verdict[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("step", ["upgrade", "downgrade"])
+async def test_migration_0135_is_a_no_op_on_a_tenant_db(realdb, step):
+    """`migrate_all_tenants.py` runs every revision on every tenant DB, which
+    has neither `organizations` nor `provider_credentials`: the gate must say
+    "not the control plane" and the step must return without touching
+    anything (an ungated run would fail on the missing table)."""
+    plaintext = {"extraction": {"program_type": "byok", "api_key": SECRET}}
+    await _set_settings(realdb, plaintext)
+
+    assert await _run_0135_on_tenant(realdb, step) is False
+
+    # Nothing on the control plane moved either.
+    assert (await _org(realdb)).settings == plaintext
+    assert await _rows(realdb) == []
+
+
+@pytest.mark.asyncio
+async def test_migration_0135_gate_recognises_the_control_plane(realdb):
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mig = _migration_0135()
+    verdict: list[bool] = []
+
+    def _go(sync_conn):
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            verdict.append(mig._is_control_db())
+
+    async with realdb.control_sessionmaker()() as s:
+        conn = await s.connection()
+        await conn.run_sync(_go)
+    assert verdict == [True]
+
+
+@pytest.mark.asyncio
+async def test_migration_0135_kms_error_rolls_back_leaving_plaintext_in_place(
+    realdb, fake_kms
+):
+    """A KMS failure part-way through raises and the transaction unwinds: the
+    block sealed before the failure leaves no row, and every plaintext value is
+    still where the running code reads it — never a secret in neither place."""
+    legacy = {
+        "extraction": {"program_type": "byok", "provider": "claude_vision", "api_key": SECRET},
+        "sso": {"enabled": True, "client_id": "feoh", "client_secret": SECRET_2},
+    }
+    await _set_settings(realdb, legacy)
+
+    real_generate = fake_kms.generate_data_key
+    generated = 0
+
+    def _second_call_fails(**kwargs):
+        nonlocal generated
+        generated += 1
+        if generated > 1:
+            raise RuntimeError("KMSInternalException")
+        return real_generate(**kwargs)
+
+    fake_kms.generate_data_key = _second_call_fails
+
+    with pytest.raises(CredentialCryptoError) as exc:
+        await _run_0135(realdb, "upgrade")
+    assert SECRET not in str(exc.value) and SECRET_2 not in str(exc.value)
+    # The first block was sealed before the failure — the rollback is real.
+    assert generated == 2
+
+    assert (await _org(realdb)).settings == legacy
+    assert await _rows(realdb) == []
