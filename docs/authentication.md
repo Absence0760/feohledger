@@ -1005,11 +1005,23 @@ went, with no audit row.
 The PUT states the whole IdP configuration, and a key it leaves out is removed,
 with three exceptions:
 
-- **The client secret is write-only.** Omitted or blank keeps the stored one;
-  `clear_client_secret: true` removes it. No response carries it —
-  `GET /api/organization` drops `sso.client_secret` for every role
-  (`services/org_settings_view.ALWAYS_REDACTED`), and the SSO view reports
-  `client_secret_configured` only.
+- **The client secret is write-only and sealed.** Omitted or blank keeps the
+  stored one; `clear_client_secret: true` removes it. It is not in the JSONB:
+  the save seals it in `provider_credentials` (block `sso`, envelope-encrypted
+  under the app KMS key, the store the ERP / payment / card secrets use) and
+  writes only a `client_secret_configured: true` marker into `settings.sso`,
+  in the same transaction. The sign-in completeness check reads the marker, so
+  it stays local and never unseals; the OIDC callback opens the sealed value
+  (`services/sso.load_client_secret`) only after consuming its single-use
+  `state`, and refuses before contacting the IdP when none is stored (400,
+  audit reason `client_secret_missing`) or the store cannot open it (503,
+  `credentials_unavailable`). A rotation behind an unchanged marker still
+  audits `client_secret` in `changed`, and a store that cannot seal answers
+  503 with nothing saved. No response carries the value —
+  `GET /api/organization` still drops a stray `sso.client_secret` for every
+  role (`services/org_settings_view.ALWAYS_REDACTED`), and the SSO view
+  reports `client_secret_configured` only. Migration `0135_seal_extraction_sso`
+  moved every existing plaintext value and wrote the marker.
 - **The SCIM state is carried.** `scim_bearer_hash` and `scim_groups` belong to
   the SCIM machinery and survive every save; `scim_group_role_map` survives
   unless the request names one, and a named map must reference roles the org
@@ -2033,7 +2045,7 @@ A single OIDC flow supports both Okta and Entra because they're both OIDC-compli
     "provider": "okta",
     "discovery_url": "https://acme.okta.com/.well-known/openid-configuration",
     "client_id": "...",
-    "client_secret": "...",
+    "client_secret_configured": true,
     "scim_bearer_hash": "<sha256 hex>",
     "allowed_email_domains": ["acme.com"]
   }

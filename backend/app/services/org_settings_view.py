@@ -28,7 +28,8 @@ endpoint ever returns it" false and give the settings page a silent, unaudited
 second way to see it.
 
 **Provider credentials are not in the JSONB at all any more.** The secrets of
-the `erp`, `payments` and `cards` blocks live sealed in `provider_credentials`
+the `erp`, `payments`, `cards`, `commerce` and `extraction` blocks live sealed
+in `provider_credentials`
 (`services/provider_credentials`), written only by the audited
 `PUT /api/organization/credentials/{block}` and reported by
 `GET /api/organization/credentials` as names-only "is set" flags. The settings
@@ -41,8 +42,12 @@ beside its sealed tokens — reads as `{"connected": bool}` for the same reason:
 its `connection_id` is the capability the token refresher checks
 (`erp_adapters/catalog.public_erp_config`).
 
-Admins otherwise still get the settings verbatim. `extraction.api_key` is the
-remaining credential an admin reads back; it is tracked separately.
+The OIDC client secret is sealed there too (block `sso`, written only by
+`PUT /api/organization/sso`); the block keeps a `client_secret_configured`
+marker, and `ALWAYS_REDACTED` still drops a stray `client_secret` as the same
+second line.
+
+Admins otherwise still get the settings verbatim.
 
 Pure: no DB, no request, no I/O.
 """
@@ -95,9 +100,10 @@ NON_ADMIN_SETTINGS: dict[str, set[str] | None] = {
 # "is one set?", not for general credential hygiene.
 ALWAYS_REDACTED: tuple[tuple[str, str], ...] = (
     ("chat_notifications", "webhook_url"),
-    # The OIDC client secret. Its one writer, `PUT /api/organization/sso`, keeps
-    # the stored value when the field is left blank, so no page needs to read it
-    # back; `GET /api/organization/sso` reports `client_secret_configured` only.
+    # The OIDC client secret. Sealed in `provider_credentials` (block `sso`) by
+    # its one writer, `PUT /api/organization/sso`, so a value here is a stray
+    # (a hand edit, a pre-0135 backup restored) and must not reappear;
+    # `GET /api/organization/sso` reports `client_secret_configured` only.
     ("sso", "client_secret"),
 )
 

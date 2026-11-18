@@ -105,25 +105,33 @@ def resolve_platform_provider(
     return PLATFORM_OFFLINE_PROVIDER, PLATFORM_REASON_NO_KEY_LOCAL
 
 
-def _resolve_extraction_config(org_settings: dict | None, *, announce: bool = True) -> dict:
+async def _resolve_extraction_config(
+    org_settings: dict | None, *, organization_id: uuid.UUID, announce: bool = True
+) -> dict:
     """Build extraction adapter config based on org settings and program type.
+
+    A BYOK org's key is sealed (`services/provider_credentials`, block
+    ``extraction``), so it is opened here through
+    :func:`provider_credentials.byok_extraction_config` — the only way an
+    adapter gets a tenant's own key. A platform-mode org reads nothing sealed.
 
     ``announce=False`` resolves silently. The failure path re-resolves purely to
     read `provider` / `program_type` for the `ExtractionUsage` row, and a second
     identical warning per failed extraction turns the fallback signal into noise
     — which is how a warning stops being read.
     """
-    extraction = (org_settings or {}).get("extraction", {})
-    program_type = extraction.get("program_type", "platform")
+    from app.services import provider_credentials
 
-    if program_type == "byok":
-        # A COPY: `run_extraction` writes this invoice's `gl_account_catalog`
-        # and RAG `few_shot_prompt` into the config it gets back, and handing
-        # out the org's own nested dict wrote them into `org_settings` — so a
-        # caller reusing that dict for a second extraction sent the previous
-        # invoice's chart (another entity's, possibly) and neighbours as this
-        # one's hints whenever this one had none of its own to overwrite them.
-        return dict(extraction)
+    byok = await provider_credentials.byok_extraction_config(organization_id, org_settings)
+    if byok is not None:
+        # A fresh dict per call: `run_extraction` writes this invoice's
+        # `gl_account_catalog` and RAG `few_shot_prompt` into the config it gets
+        # back, and handing out the org's own nested dict wrote them into
+        # `org_settings` — so a caller reusing that dict for a second extraction
+        # sent the previous invoice's chart (another entity's, possibly) and
+        # neighbours as this one's hints whenever this one had none of its own
+        # to overwrite them.
+        return dict(byok)
 
     # Platform mode — use app-level keys
     provider, reason = resolve_platform_provider(
@@ -684,7 +692,7 @@ async def run_extraction(
     token_usage = None
 
     try:
-        config = _resolve_extraction_config(org_settings)
+        config = await _resolve_extraction_config(org_settings, organization_id=invoice_org_id)
 
         # `get_extraction_adapter` imports (and therefore registers) every
         # built-in adapter itself, and RAISES `UnknownExtractionProviderError`
@@ -1249,7 +1257,9 @@ async def run_extraction(
             # Silent: the success path above already announced any provider
             # fallback for this attempt, and repeating it here would double
             # every such warning per failed extraction.
-            config = _resolve_extraction_config(org_settings, announce=False)
+            config = await _resolve_extraction_config(
+                org_settings, organization_id=invoice_org_id, announce=False
+            )
             db.add(
                 ExtractionUsage(
                     invoice_id=invoice_id,

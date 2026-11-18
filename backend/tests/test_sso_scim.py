@@ -29,7 +29,7 @@ def test_resolve_sso_config_returns_none_when_disabled():
             "enabled": False,
             "discovery_url": "https://x.okta.com/.well-known/openid-configuration",
             "client_id": "a",
-            "client_secret": "b",
+            "client_secret_configured": True,
         }
     }
     assert resolve_sso_config(cfg) is None
@@ -40,7 +40,14 @@ def test_resolve_sso_config_raises_when_partial():
 
     with pytest.raises(SSOConfigError) as exc:
         resolve_sso_config(
-            {"sso": {"enabled": True, "client_id": "a", "client_secret": "must-not-echo"}}
+            {
+                "sso": {
+                    "enabled": True,
+                    "client_id": "a",
+                    "client_secret_configured": True,
+                    "client_secret": "must-not-echo",
+                }
+            }
         )
     # Every absent key, named, and nothing from the block's values: the message
     # and `fields` both reach `PATCH /api/organization`'s 422 (decisions §204).
@@ -57,7 +64,7 @@ def test_resolve_sso_config_returns_full_config():
             "provider": "okta",
             "discovery_url": "https://acme.okta.com/.well-known/openid-configuration",
             "client_id": "cid",
-            "client_secret": "sec",
+            "client_secret_configured": True,
             "allowed_email_domains": ["acme.com"],
         }
     }
@@ -228,7 +235,7 @@ async def test_sso_authorize_uses_per_tenant_redirect_uri(monkeypatch):
                 "enabled": True,
                 "discovery_url": "https://idp.example/.well-known/openid-configuration",
                 "client_id": "client-123",
-                "client_secret": "sec",
+                "client_secret_configured": True,
             }
         }
 
@@ -280,7 +287,7 @@ async def test_sso_authorize_refuses_an_authorize_host_off_the_configured_idp(mo
                 "enabled": True,
                 "discovery_url": "https://idp.example/.well-known/openid-configuration",
                 "client_id": "client-123",
-                "client_secret": "sec",
+                "client_secret_configured": True,
             }
         }
 

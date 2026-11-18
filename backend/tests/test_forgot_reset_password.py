@@ -203,7 +203,7 @@ async def test_a_passwordless_sso_user_can_set_a_password_once_the_plan_drops_ss
                 "provider": "entra",
                 "discovery_url": "https://login.example.com/.well-known/openid-configuration",
                 "client_id": "feoh",
-                "client_secret": "s3cret-not-echoed",
+                "client_secret_configured": True,
             },
         }
         flag_modified(org, "settings")

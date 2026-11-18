@@ -194,6 +194,7 @@ class AmountMismatchResolver(ExceptionResolver):
         changes = {"amount": {"old": str(current), "new": str(po_total)}}
         rationale = await build_rationale(
             org_settings,
+            organization_id=invoice.organization_id,
             template=(
                 f"Adjusted invoice amount from {current} to the PO total {po_total} "
                 f"(variance {variance_pct}% within the {tol}% auto-fix tolerance) "

@@ -917,7 +917,7 @@ Stored in `Organization.settings`:
                "vat_registration_number", "companies_house_number" },
   "invoice_defaults": { "currency", "payment_terms", "number_prefix", "default_gl_account", "default_cost_center" },
   "erp": { "type", "integration_method", "base_url", "client_id", ... },   // secrets: see below
-  "extraction": { "program_type": "platform"|"byok", "provider", "api_key", "model" },
+  "extraction": { "program_type": "platform"|"byok", "provider", "aws_access_key_id", "model" },  // key: sealed
   "cards": { "enabled": true|false, "program_type": "platform"|"byok", "provider", "region": "US"|"EU"|...,
              "default_expiry_days": 30, ... },
   "payments": { "provider", "org_id", "originating_account_id", "cfo_approval_above": Decimal,
@@ -926,14 +926,15 @@ Stored in `Organization.settings`:
   "mfa": { "required": true|false },
   "chat_notifications": { "enabled": true|false, "provider": "slack"|"teams"|"mock",
                           "webhook_url": "...", "events": { "invoice_approved": true, ... } },
-  "sso": { ... },
+  "sso": { ..., "client_secret_configured": true },   // the secret itself: sealed
   "fraud_rules": { ... },
   "exception_agents": { "autonomy_level": "conservative"|"balanced"|"aggressive", "amount_tolerance_pct": 2.5 }
 }
 ```
 
 **Provider secrets are not in this JSONB.** The secret keys of `erp`, `payments`,
-`cards` and `commerce` (API keys, OAuth client secrets, account tokens and the three
+`cards`, `commerce` and `extraction` (API keys, OAuth client secrets, account tokens,
+a BYOK extraction key or AWS secret, and the three
 `webhook_*_secret` HMAC keys — catalogue `services/provider_credentials.SECRET_FIELDS`)
 are envelope-encrypted under the app KMS key in the control-plane
 `provider_credentials` table. Read them ONLY through
@@ -943,8 +944,15 @@ holds anything. Write them only through `PUT /api/organization/credentials/{bloc
 `PATCH /api/organization` refuses them. A mock-DB test opts into the
 `provider_store_from_settings` fixture; a realdb test seals what it needs with
 `realdb.store_provider_secrets`. See `docs/erp-integration.md` § Where the
-credentials live. `extraction.api_key` and `sso.client_secret` are still plain
-JSONB (write-only for SSO).
+credentials live. A BYOK extraction key is read ONLY through
+`provider_credentials.byok_extraction_config` (platform orgs never open the
+store), and a `PATCH` that switches `extraction.provider` drops the sealed key.
+The OIDC client secret is sealed too (block `sso`, migration 0135), but its only
+writer is `PUT /api/organization/sso` — the generic credentials door refuses
+the block (`DEDICATED_WRITER_BLOCKS`) — and its only reader is the OIDC
+callback (`services/sso.load_client_secret`). The block keeps a
+`client_secret_configured: true` marker, written in the same transaction, which
+is what the sync sign-in completeness check (`is_sso_only`) reads.
 
 ## Exception types
 

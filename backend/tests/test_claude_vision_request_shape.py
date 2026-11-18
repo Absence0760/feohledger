@@ -157,12 +157,13 @@ async def test_a_byok_model_choice_is_honoured(monkeypatch):
     assert client.calls[0]["json"]["model"] == "claude-opus-5-5"
 
 
-def test_platform_mode_passes_the_configured_effort():
+async def test_platform_mode_passes_the_configured_effort():
+    import uuid
+
     from app.services import extraction as ext
 
-    assert ext._resolve_extraction_config({}, announce=False)["effort"] == (
-        settings.extraction_effort
-    )
+    config = await ext._resolve_extraction_config({}, organization_id=uuid.uuid4(), announce=False)
+    assert config["effort"] == settings.extraction_effort
 
 
 async def test_statement_read_uses_the_same_request_shape(monkeypatch):

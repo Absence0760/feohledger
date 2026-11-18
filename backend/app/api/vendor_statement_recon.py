@@ -530,6 +530,7 @@ async def upload_reconciliation(
         try:
             statement_lines, extraction_meta = await extraction.extract_statement_lines(
                 org_settings=org.settings or {},
+                organization_id=org.id,
                 file_bytes=raw,
                 file_key=file.filename or "",
                 mime_type="application/pdf",

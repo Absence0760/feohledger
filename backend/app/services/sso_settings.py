@@ -8,10 +8,14 @@ IdP config and the SCIM group state, and nothing recorded that it happened.
 
 Four rules, kept here so the router does not have to re-derive them:
 
-1. **The client secret is write-only.** :func:`sso_status` reports whether one
-   is stored and never what it is. A save that omits it, or sends it blank,
-   keeps the stored one ("leave blank to keep"); clearing it is an explicit
-   flag, never a side effect of an empty field.
+1. **The client secret is write-only, and not in this block.** It is sealed in
+   ``provider_credentials`` (block ``sso``); the block carries only the
+   ``client_secret_configured`` marker (``services/sso``). :func:`sso_status`
+   reports that marker and never a value. A save that omits the secret, or
+   sends it blank, keeps the stored one ("leave blank to keep"); clearing it
+   is an explicit flag, never a side effect of an empty field.
+   :func:`client_secret_update` turns the request into the sealed-store write
+   the router makes in the same transaction as the block.
 2. **Keys the admin does not edit here are carried across.** The SCIM token
    digest and the SCIM group state are written by the SCIM machinery
    (`POST /organization/sso/scim-token`, `/scim/v2/Groups`), and the group →
@@ -34,6 +38,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.services.sso import (
+    CLIENT_SECRET_MARKER,
     SAML_PROTOCOL,
     SSOConfigError,
     check_sso_idp_config,
@@ -203,19 +208,12 @@ def build_sso_block(
         block["idp_x509_cert_multi"] = certs
 
     # The secret: replaced only by a non-blank value, removed only on request.
-    if client_secret is not None and not isinstance(client_secret, str):
-        raise SSOSettingsError("sso.client_secret must be text.", field=CLIENT_SECRET_KEY)
-    new_secret = (client_secret or "").strip()
-    if new_secret and clear_client_secret:
-        raise SSOSettingsError(
-            "Send a new client_secret or clear_client_secret, not both.", field=CLIENT_SECRET_KEY
-        )
-    if len(new_secret) > MAX_TEXT:
-        raise SSOSettingsError("sso.client_secret is too long.", field=CLIENT_SECRET_KEY)
-    if new_secret:
-        block[CLIENT_SECRET_KEY] = new_secret
-    elif not clear_client_secret and stored.get(CLIENT_SECRET_KEY):
-        block[CLIENT_SECRET_KEY] = stored[CLIENT_SECRET_KEY]
+    # Only the marker lands here; the value goes to the sealed store
+    # (:func:`client_secret_update`). A plaintext `client_secret` left in the
+    # stored block is never carried.
+    new_secret = _validated_secret(client_secret, clear_client_secret)
+    if new_secret or (not clear_client_secret and stored.get(CLIENT_SECRET_MARKER) is True):
+        block[CLIENT_SECRET_MARKER] = True
 
     if scim_group_role_map is None:
         if SCIM_GROUP_ROLE_MAP_KEY in stored:
@@ -231,6 +229,36 @@ def build_sso_block(
     return block
 
 
+def _validated_secret(client_secret: object, clear_client_secret: bool) -> str:
+    """The submitted client secret, stripped (``""`` = keep / clear). Refusals name no value."""
+    if client_secret is not None and not isinstance(client_secret, str):
+        raise SSOSettingsError("sso.client_secret must be text.", field=CLIENT_SECRET_KEY)
+    new_secret = (client_secret or "").strip()
+    if new_secret and clear_client_secret:
+        raise SSOSettingsError(
+            "Send a new client_secret or clear_client_secret, not both.", field=CLIENT_SECRET_KEY
+        )
+    if len(new_secret) > MAX_TEXT:
+        raise SSOSettingsError("sso.client_secret is too long.", field=CLIENT_SECRET_KEY)
+    return new_secret
+
+
+def client_secret_update(
+    client_secret: object, clear_client_secret: bool
+) -> tuple[dict[str, str], list[str]]:
+    """The sealed-store write a save makes: ``(to_set, to_clear)`` for block ``sso``.
+
+    Mirrors :func:`build_sso_block`'s marker rule exactly — a non-blank value is
+    set, ``clear_client_secret`` clears, anything else keeps what is stored.
+    """
+    new_secret = _validated_secret(client_secret, clear_client_secret)
+    if new_secret:
+        return {CLIENT_SECRET_KEY: new_secret}, []
+    if clear_client_secret:
+        return {}, [CLIENT_SECRET_KEY]
+    return {}, []
+
+
 def _comparable(block: Mapping[str, Any]) -> dict:
     """``block`` with the spellings that mean the same thing folded together.
 
@@ -239,6 +267,12 @@ def _comparable(block: Mapping[str, Any]) -> dict:
     report keys it only re-spelled.
     """
     out = {k: v for k, v in block.items() if v not in (None, "", [], {})}
+    # The secret's presence is a change to `client_secret`, the name the admin
+    # and the audit trail know; a rotation behind an unchanged marker is
+    # reported by the sealed-store write instead.
+    out.pop(CLIENT_SECRET_KEY, None)
+    if out.pop(CLIENT_SECRET_MARKER, None) is True:
+        out[CLIENT_SECRET_KEY] = True
     out.setdefault("protocol", "oidc")
     out["enabled"] = bool(block.get("enabled"))
     out["sso_only"] = bool(block.get("sso_only"))
@@ -299,7 +333,7 @@ def sso_status(
         else [],
         "discovery_url": text("discovery_url"),
         "client_id": text("client_id"),
-        "client_secret_configured": bool(text(CLIENT_SECRET_KEY)),
+        "client_secret_configured": block.get(CLIENT_SECRET_MARKER) is True,
         "idp_entity_id": text("idp_entity_id"),
         "idp_sso_url": text("idp_sso_url"),
         "idp_x509_cert": text("idp_x509_cert"),

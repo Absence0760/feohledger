@@ -260,6 +260,7 @@ class MissingPOResolver(ExceptionResolver):
         changes = {"po_number": {"old": str(invoice.po_number or ""), "new": str(po.po_number)}}
         rationale = await build_rationale(
             org_settings,
+            organization_id=invoice.organization_id,
             template=(
                 f"Linked invoice to purchase order {po.po_number} "
                 f"(matched on vendor + amount {invoice.amount}"

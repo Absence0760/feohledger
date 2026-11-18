@@ -43,9 +43,11 @@ from app.services.org_settings_view import settings_for_response
 from app.services.provider_credentials import (
     CREDENTIAL_BLOCKS,
     CREDENTIALS_UNAVAILABLE_DETAIL,
+    SECRET_FIELDS,
     config_for_connection_test,
     credential_status,
     extract_secrets,
+    extraction_secrets_to_drop,
     strip_secrets,
     update_secrets,
 )
@@ -323,8 +325,9 @@ async def update_organization(
         org.name = body.name
     credential_changes: dict[str, list[str]] = {}
     nacha_changes: dict[str, list[str]] = {}
-    erp_secrets_to_drop: frozenset[str] = frozenset()
-    erp_drop_reason = "erp_destination_changed"
+    # Sealed secrets a save leaves pointing somewhere new, per block, with the
+    # audited reason: dropped below, in this transaction.
+    secret_drops: dict[str, tuple[frozenset[str], str]] = {}
 
     if body.settings is not None:
         # The NACHA offset account number reads back masked, so a re-save of
@@ -387,12 +390,23 @@ async def update_organization(
                     kept[erp_catalog.OAUTH_KEY] = erp_before[erp_catalog.OAUTH_KEY]
                 body.settings["erp"] = kept or None
             await ensure_live_erp_entitled(db, org.id, body.settings.get("erp"))
-            erp_secrets_to_drop = erp_catalog.secrets_to_drop(erp_before, body.settings["erp"])
             # Same connection: only a switched-off sign-in method's secrets go.
-            erp_drop_reason = (
+            secret_drops["erp"] = (
+                erp_catalog.secrets_to_drop(erp_before, body.settings["erp"]),
                 "erp_sign_in_method_changed"
                 if erp_catalog.same_connection(erp_before, body.settings["erp"])
-                else "erp_destination_changed"
+                else "erp_destination_changed",
+            )
+        # A BYOK extraction key belongs to the provider it was typed for:
+        # `claude_vision` and `openai_vision` share the `api_key` slot, so a
+        # save that switches provider drops it rather than send one vendor's
+        # secret to the other (`provider_credentials.extraction_secrets_to_drop`).
+        if "extraction" in body.settings and extraction_secrets_to_drop(
+            (org.settings or {}).get("extraction"), body.settings["extraction"]
+        ):
+            secret_drops["extraction"] = (
+                SECRET_FIELDS["extraction"],
+                "extraction_provider_changed",
             )
 
         # The chat webhook URL has one sanctioned writer — the audited
@@ -569,17 +583,20 @@ async def update_organization(
                 status_code=503,
                 detail="The change could not be recorded in the audit trail, so it was not saved.",
             ) from None
-    # A save that points the ERP block at a different ERP or destination drops
-    # the sealed secrets that belonged to the old one, through the same audited
-    # writer the credentials endpoint uses: audit row first, sealed-store write
-    # second, both in this transaction. Only names actually stored are touched,
-    # so a save that drops nothing never opens the store.
-    if erp_secrets_to_drop:
-        stored_names = set((await credential_status(db, org.id))["erp"])
-        to_clear = sorted(stored_names & erp_secrets_to_drop)
+    # A save that points the ERP block at a different ERP or destination (or
+    # the extraction block at a different provider) drops the sealed secrets
+    # that belonged to the old one, through the same audited writer the
+    # credentials endpoint uses: audit row first, sealed-store write second,
+    # all in this transaction. Only names actually stored are touched, so a
+    # save that drops nothing never opens the store.
+    stored_status = await credential_status(db, org.id) if secret_drops else {}
+    for drop_block, (drop_names, drop_reason) in secret_drops.items():
+        to_clear = sorted(set(stored_status.get(drop_block, [])) & drop_names)
         if to_clear:
 
-            async def _audit_drop(changed: list[str]) -> None:
+            async def _audit_drop(
+                changed: list[str], block: str = drop_block, reason: str = drop_reason
+            ) -> None:
                 try:
                     await record_auth_audit_or_raise(
                         organization_id=org.id,
@@ -588,10 +605,10 @@ async def update_organization(
                         entity_type="organization",
                         entity_id=org.id,
                         details={
-                            "block": "erp",
+                            "block": block,
                             "changed": changed,
                             "cleared": changed,
-                            "reason": erp_drop_reason,
+                            "reason": reason,
                         },
                     )
                 except Exception:
@@ -604,7 +621,7 @@ async def update_organization(
                     ) from None
 
             try:
-                await update_secrets(db, org.id, "erp", {}, to_clear, before_write=_audit_drop)
+                await update_secrets(db, org.id, drop_block, {}, to_clear, before_write=_audit_drop)
             except CredentialCryptoError:
                 await db.rollback()
                 raise HTTPException(
@@ -1213,11 +1230,26 @@ async def test_extraction_connection(
     request: dict | None = None,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    db: AsyncSession = Depends(get_control_db),
 ):
-    """Test the AI extraction provider connection. Uses request body config if provided."""
-    config = (
-        request if request and request.get("provider") else (org.settings or {}).get("extraction")
-    )
+    """Test the AI extraction provider connection.
+
+    Uses the request body (the form, possibly unsaved) when it names a
+    provider, otherwise the saved block. The BYOK key is sealed and write-only:
+    the stored one joins a request body only when it names the saved provider
+    (`provider_credentials.config_for_connection_test`), so the form can test a
+    saved key with its field left blank but cannot send it to another provider.
+    """
+    try:
+        config = await config_for_connection_test(
+            org, "extraction", request if request and request.get("provider") else None, db=db
+        )
+    except CredentialCryptoError:
+        return {
+            "success": False,
+            "code": "credentials_unavailable",
+            "message": CREDENTIALS_UNAVAILABLE_DETAIL,
+        }
     if not config:
         raise HTTPException(status_code=400, detail="No extraction configuration provided")
 

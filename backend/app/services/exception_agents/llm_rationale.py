@@ -19,15 +19,17 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 import httpx
 
 from app.config import settings
+from app.services import provider_credentials
 
 logger = logging.getLogger(__name__)
 
 
-def _resolve_config(org_settings: dict | None) -> dict:
+async def _resolve_config(org_settings: dict | None, *, organization_id: uuid.UUID) -> dict:
     """Reuse the extraction key/model (same pattern as audit_summary).
     Empty api_key → template path (the local-dev default)."""
     # The master switch, and the reason it has to exist: sharing the extraction
@@ -39,8 +41,8 @@ def _resolve_config(org_settings: dict | None) -> dict:
     if not settings.exception_agent_rationale_enabled:
         return {"api_key": "", "model": ""}
 
-    extraction = (org_settings or {}).get("extraction", {})
-    if extraction.get("program_type") == "byok":
+    extraction = await provider_credentials.byok_extraction_config(organization_id, org_settings)
+    if extraction is not None:
         # Only a `claude_vision` org's key is an Anthropic key; another
         # provider's secret must never reach api.anthropic.com, and the platform
         # key is no fallback (`llm_fraud_detection.resolve_anomaly_llm_config`).
@@ -95,6 +97,7 @@ def _parse_response(text: str) -> str | None:
 async def build_rationale(
     org_settings: dict | None,
     *,
+    organization_id: uuid.UUID,
     template: str,
     facts: dict,
     http_post=None,
@@ -103,7 +106,7 @@ async def build_rationale(
     the fallback; an LLM is consulted ONLY when a key is configured. Any failure
     (no key, network, parse) returns ``template``. No network call in the
     no-key/local default."""
-    cfg = _resolve_config(org_settings)
+    cfg = await _resolve_config(org_settings, organization_id=organization_id)
     api_key = cfg.get("api_key") or ""
     if not api_key:
         return template  # local-first default: deterministic, no network.

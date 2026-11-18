@@ -236,7 +236,7 @@ _OIDC = {
     "enabled": True,
     "discovery_url": "https://idp.example/.well-known/openid-configuration",
     "client_id": "client-123",
-    "client_secret": "sec",
+    "client_secret_configured": True,
 }
 
 

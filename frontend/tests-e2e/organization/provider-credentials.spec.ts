@@ -2,7 +2,8 @@ import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers
 import type { ProviderCredentialStatus } from '#lib/types/providerCredentials.ts';
 
 /**
- * /organization → Payments: the processor API key is write-only.
+ * /organization → Payments and AI Extraction: the processor API key and the
+ * bring-your-own extraction key are write-only.
  *
  * ERP, payment-rail and card-issuer secrets are stored envelope-encrypted
  * server-side (`backend/app/services/provider_credentials.py`) and no endpoint
@@ -17,6 +18,7 @@ import type { ProviderCredentialStatus } from '#lib/types/providerCredentials.ts
  */
 
 const SECRET = 'mt_e2e_api_key_never_rendered_0001';
+const BYOK_SECRET = 'sk-e2e-byok-key-never-rendered-0001';
 const KEEP = 'Leave blank to keep the stored value';
 
 async function credentialStatus(
@@ -39,6 +41,20 @@ async function reset(page: import('@playwright/test').Page): Promise<void> {
 	const patched = await page.request.patch(`${API_BASE}/api/organization`, {
 		headers,
 		data: { settings: { payments: { provider: 'mock' } } }
+	});
+	expect(patched.status()).toBe(200);
+}
+
+async function resetExtraction(page: import('@playwright/test').Page): Promise<void> {
+	const headers = { ...(await authedTenantHeaders(page)), 'Content-Type': 'application/json' };
+	const cleared = await page.request.put(`${API_BASE}/api/organization/credentials/extraction`, {
+		headers,
+		data: { clear: ['api_key', 'aws_secret_access_key'] }
+	});
+	expect(cleared.status()).toBe(200);
+	const patched = await page.request.patch(`${API_BASE}/api/organization`, {
+		headers,
+		data: { settings: { extraction: { program_type: 'platform' } } }
 	});
 	expect(patched.status()).toBe(200);
 }
@@ -110,6 +126,72 @@ test.describe('/organization provider credentials', () => {
 			expect((await credentialStatus(page)).payments).toEqual([]);
 		} finally {
 			await reset(page);
+		}
+	});
+
+	test('the BYOK extraction key is write-only and does not follow a provider switch', async ({
+		page
+	}) => {
+		const loaded = Promise.all([
+			page.waitForResponse(
+				(r) => r.url().endsWith('/api/organization') && r.request().method() === 'GET'
+			),
+			page.waitForResponse(
+				(r) =>
+					r.url().endsWith('/api/organization/credentials') && r.request().method() === 'GET'
+			)
+		]);
+		await page.goto('/organization?section=extraction');
+		await loaded;
+		const save = page.getByRole('button', { name: 'Save Extraction Settings' });
+		const field = page.getByTestId('extraction-api-key');
+		const saved = () =>
+			page.waitForResponse(
+				(r) =>
+					r.url().endsWith('/api/organization') &&
+					r.request().method() === 'PATCH' &&
+					r.status() === 200
+			);
+		try {
+			await expect(save).toBeVisible();
+			await page.getByRole('combobox', { name: 'Program', exact: true }).selectOption('byok');
+			await page
+				.getByRole('combobox', { name: 'Provider', exact: true })
+				.selectOption('claude_vision');
+			await expect(field).toHaveValue('');
+			await field.fill(BYOK_SECRET);
+
+			const patch = saved();
+			const put = page.waitForResponse(
+				(r) =>
+					r.url().endsWith('/api/organization/credentials/extraction') &&
+					r.request().method() === 'PUT' &&
+					r.status() === 200
+			);
+			await save.click();
+			expect(await (await patch).text()).not.toContain(BYOK_SECRET);
+			expect(await (await put).text()).not.toContain(BYOK_SECRET);
+			await expect(field).toHaveValue('');
+			await expect(field).toHaveAttribute('placeholder', KEEP);
+			expect((await credentialStatus(page)).extraction).toEqual(['api_key']);
+
+			// Another provider: the stored Anthropic key is dropped by the save,
+			// never kept to be sent to OpenAI.
+			await page
+				.getByRole('combobox', { name: 'Provider', exact: true })
+				.selectOption('openai_vision');
+			const switched = saved();
+			const reread = page.waitForResponse(
+				(r) =>
+					r.url().endsWith('/api/organization/credentials') && r.request().method() === 'GET'
+			);
+			await save.click();
+			await switched;
+			expect(await (await reread).json()).toMatchObject({ extraction: [] });
+			await expect(field).not.toHaveAttribute('placeholder', KEEP);
+			expect((await credentialStatus(page)).extraction).toEqual([]);
+		} finally {
+			await resetExtraction(page);
 		}
 	});
 });

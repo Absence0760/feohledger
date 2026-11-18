@@ -138,7 +138,7 @@ Dispatch (local or Lambda)
     v
 Resolve Config
     ├── Platform → use app-level Anthropic key (FEOH_ANTHROPIC_API_KEY)
-    └── BYOK → use customer's key from org.settings.extraction
+    └── BYOK → use customer's key, sealed (provider_credentials.byok_extraction_config)
     |
     v
 Structured e-invoice? → `einvoice` adapter (no model, never billed)
@@ -625,11 +625,32 @@ BYOK example:
 {
   "extraction": {
     "program_type": "byok",
-    "provider": "openai_vision",
-    "api_key": "sk-..."
+    "provider": "openai_vision"
   }
 }
 ```
+
+**The BYOK key is not in this block.** `api_key` (`claude_vision` /
+`openai_vision`) and `aws_secret_access_key` (`aws_textract`) are sealed in
+`provider_credentials` (block `extraction`, envelope-encrypted under the app
+KMS key), written only through `PUT /api/organization/credentials/extraction`
+and never returned — the settings panel shows a "leave blank to keep" field
+and `GET /api/organization/credentials` reports which are stored, by name.
+`aws_access_key_id` is an identifier and stays here. `PATCH
+/api/organization` refuses a non-blank key in the block, and a save that
+changes `provider` drops the sealed key (audited as
+`organization.credentials_updated`, reason `extraction_provider_changed`):
+`claude_vision` and `openai_vision` share the `api_key` slot, so keeping it
+would send one vendor's secret to the other. Every reader — extraction, the
+GL-only re-read, statement reads, and the three side features that may reuse
+a `claude_vision` key (audit summary, LLM anomaly check, exception-agent
+rationale) — opens it through `provider_credentials.byok_extraction_config`,
+which ignores a stray plaintext key in the JSONB and never opens the store for
+a platform-mode org. `POST /api/organization/test-extraction` joins the stored
+key to an unsaved form only when the form names the saved provider. A store
+that cannot open the key fails the read closed (the invoice lands `failed`; a
+statement upload gets a 422). Migration `0135_seal_extraction_sso` moved
+every existing plaintext key.
 
 A BYOK `claude_vision` org may also set `"model"` (any current Claude model id;
 empty → the platform default) and `"effort"` (`output_config.effort`; omitted

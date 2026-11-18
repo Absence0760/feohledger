@@ -28,6 +28,7 @@ Covers:
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 from sqlalchemy import select
@@ -78,7 +79,22 @@ async def _stored(realdb, key: str = "a") -> dict:
     return dict((org.settings or {}).get("sso") or {})
 
 
+async def _sealed_secret(realdb, key: str = "a") -> str | None:
+    """The OIDC client secret as the sealed store holds it (block ``sso``)."""
+    from app.services.provider_credentials import load_secrets
+
+    async with realdb.control_sessionmaker()() as s:
+        return (await load_secrets(realdb.info(key).org_id, "sso", db=s)).get("client_secret")
+
+
 async def _seed(realdb, block: dict, key: str = "a") -> None:
+    """Store ``block`` as the endpoint would: a ``client_secret`` in it is
+    sealed, and the block keeps only the ``client_secret_configured`` marker."""
+    block = dict(block)
+    secret = block.pop("client_secret", None)
+    if secret:
+        block["client_secret_configured"] = True
+        await realdb.store_provider_secrets(key, "sso", {"client_secret": secret})
     async with realdb.control_sessionmaker()() as s:
         org = (
             await s.execute(select(Organization).where(Organization.id == realdb.info(key).org_id))
@@ -154,7 +170,12 @@ async def test_client_secret_never_appears_in_any_response(realdb):
     assert SECRET not in resp.text
     assert resp.json()["client_secret_configured"] is True
     assert resp.json()["password_sign_in_closed"] is True
-    assert (await _stored(realdb))["client_secret"] == SECRET
+    # Sealed, not in the JSONB: the block keeps only the marker.
+    stored = await _stored(realdb)
+    assert "client_secret" not in stored
+    assert stored["client_secret_configured"] is True
+    assert SECRET not in json.dumps(stored)
+    assert await _sealed_secret(realdb) == SECRET
 
     async with realdb.client(key="a", role="admin") as c:
         get_sso = await c.get(URL)
@@ -192,7 +213,8 @@ async def test_a_blank_or_omitted_secret_keeps_the_stored_one(realdb, omitted):
     resp = await _put(realdb, {**body, "client_id": "feoh-renamed"})
     assert resp.status_code == 200, resp.text
     stored = await _stored(realdb)
-    assert stored["client_secret"] == SECRET
+    assert stored["client_secret_configured"] is True
+    assert await _sealed_secret(realdb) == SECRET
     assert stored["client_id"] == "feoh-renamed"
 
 
@@ -201,7 +223,8 @@ async def test_a_new_secret_replaces_the_stored_one(realdb):
     await _seed(realdb, dict(OIDC_READY))
     resp = await _put(realdb, {**OIDC_READY, "client_secret": f"  {SECRET_2}\n"})
     assert resp.status_code == 200, resp.text
-    assert (await _stored(realdb))["client_secret"] == SECRET_2
+    assert await _sealed_secret(realdb) == SECRET_2
+    assert SECRET_2 not in json.dumps(await _stored(realdb))
     assert SECRET_2 not in resp.text
 
 
@@ -211,7 +234,8 @@ async def test_clearing_the_secret_is_explicit(realdb):
     body = {k: v for k, v in OIDC_READY.items() if k != "client_secret"}
     resp = await _put(realdb, {**body, "sso_only": False, "clear_client_secret": True})
     assert resp.status_code == 200, resp.text
-    assert "client_secret" not in await _stored(realdb)
+    assert "client_secret_configured" not in await _stored(realdb)
+    assert await _sealed_secret(realdb) is None
     assert resp.json()["client_secret_configured"] is False
 
 
@@ -223,7 +247,63 @@ async def test_clearing_the_secret_under_sso_only_is_refused(realdb):
     resp = await _put(realdb, {**body, "clear_client_secret": True})
     assert resp.status_code == 422
     assert resp.json()["detail"]["params"]["fields"] == ["client_secret"]
-    assert (await _stored(realdb))["client_secret"] == SECRET
+    assert await _sealed_secret(realdb) == SECRET
+
+
+@pytest.mark.asyncio
+async def test_a_plaintext_secret_left_in_the_block_is_neither_carried_nor_counted(realdb):
+    """Only the sealed store holds the secret. A plaintext one in the JSONB (a
+    hand edit, a pre-0135 backup) is not a stored secret: the panel says none
+    is configured, and the next save drops it rather than carry it."""
+    stray = {k: v for k, v in OIDC_READY.items() if k != "client_secret"}
+    await _seed(realdb, {**stray, "sso_only": False})
+    async with realdb.control_sessionmaker()() as s:
+        org = (
+            await s.execute(select(Organization).where(Organization.id == realdb.info("a").org_id))
+        ).scalar_one()
+        org.settings = {**org.settings, "sso": {**org.settings["sso"], "client_secret": SECRET}}
+        flag_modified(org, "settings")
+        await s.commit()
+    async with realdb.client(key="a", role="admin") as c:
+        assert (await c.get(URL)).json()["client_secret_configured"] is False
+    resp = await _put(realdb, {**stray, "sso_only": False})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["client_secret_configured"] is False
+    assert SECRET not in json.dumps(await _stored(realdb))
+    assert await _sealed_secret(realdb) is None
+
+
+@pytest.mark.asyncio
+async def test_a_rotation_alone_is_audited_as_the_secret(realdb):
+    """A new value behind an unchanged `client_secret_configured` marker still
+    names `client_secret` in the trail — the sealed write reports it."""
+    await _seed(realdb, {**OIDC_READY, "sso_only": False})
+    resp = await _put(realdb, {**OIDC_READY, "sso_only": False, "client_secret": SECRET_2})
+    assert resp.status_code == 200, resp.text
+    rows = await _audit_rows(realdb)
+    assert [r.details["changed"] for r in rows] == [["client_secret"]]
+    assert SECRET_2 not in str(rows[0].details)
+
+
+@pytest.mark.asyncio
+async def test_a_seal_failure_saves_nothing_and_writes_no_audit_row(realdb, monkeypatch):
+    from app.services import credential_crypto
+    from app.services.credential_crypto import CredentialCryptoError
+
+    await _seed(realdb, {**OIDC_READY, "sso_only": False})
+
+    async def _down(*_a, **_kw):
+        raise CredentialCryptoError("credential store unavailable")
+
+    monkeypatch.setattr(credential_crypto, "seal", _down)
+    resp = await _put(realdb, {**OIDC_READY, "client_id": "feoh-2", "client_secret": SECRET_2})
+    assert resp.status_code == 503, resp.text
+    assert SECRET_2 not in resp.text
+    stored = await _stored(realdb)
+    assert stored["client_id"] == "feoh"
+    assert stored["sso_only"] is False
+    assert await _audit_rows(realdb) == []
+    assert await _sealed_secret(realdb) == SECRET
 
 
 @pytest.mark.asyncio
@@ -263,7 +343,8 @@ async def test_a_put_replaces_rather_than_merges(realdb):
     assert "client_id" not in stored
     assert "allowed_email_domains" not in stored
     # The secret is the exception: kept until cleared.
-    assert stored["client_secret"] == SECRET
+    assert stored["client_secret_configured"] is True
+    assert await _sealed_secret(realdb) == SECRET
 
 
 @pytest.mark.asyncio
@@ -390,7 +471,11 @@ async def test_an_sso_block_that_cannot_lock_anyone_out_is_accepted(realdb, bloc
     assert resp.status_code == 200, resp.text
     stored = await _stored(realdb)
     for key, value in block.items():
-        assert stored[key] == value
+        if key == "client_secret":
+            assert stored["client_secret_configured"] is True
+            assert await _sealed_secret(realdb) == value
+        else:
+            assert stored[key] == value
 
 
 # ---------- audit --------------------------------------------------------------
@@ -447,7 +532,7 @@ async def test_no_audit_row_means_no_save(realdb, monkeypatch):
     assert resp.status_code == 503, resp.text
     assert SECRET_2 not in resp.text
     stored = await _stored(realdb)
-    assert stored["client_secret"] == SECRET
+    assert await _sealed_secret(realdb) == SECRET
     assert stored["sso_only"] is False
 
 
