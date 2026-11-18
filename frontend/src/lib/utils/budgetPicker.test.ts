@@ -147,7 +147,9 @@ describe('budgetCheckDisplay', () => {
 		});
 	});
 
-	it('never holds a verdict across a currency change', () => {
+	it('never holds a verdict in another currency than the requisition', () => {
+		// The held answer is USD headroom; the requisition is now EUR. It is
+		// not shown, busy or not: the fresh check will say mismatch.
 		const d = budgetCheckDisplay({
 			...base,
 			budgetCurrency: null,
@@ -155,7 +157,7 @@ describe('budgetCheckDisplay', () => {
 			amount: '50.00',
 			answer: ready(check())
 		});
-		expect(d.view.kind).toBe('mismatch');
+		expect(d).toEqual({ view: { kind: 'checking' }, busy: true });
 	});
 });
 
