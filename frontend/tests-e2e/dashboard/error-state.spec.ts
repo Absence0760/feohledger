@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/helpers';
+import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers';
 
 /**
  * Dashboard recoverable-error state.
@@ -56,5 +56,19 @@ test.describe('dashboard error state', () => {
 		await retry.click();
 		await expect(row.locator('.kpi[data-kpi-state="value"]').first()).toBeVisible();
 		await expect(page.getByTestId('dashboard-error')).toHaveCount(0);
+	});
+
+	test('the greeting names the signed-in user', async ({ page }) => {
+		await page.goto('/');
+		// Read the name from the API rather than hard-coding a seed value, so
+		// the assertion follows whichever per-worker admin signed in.
+		const me = await page.request.get(`${API_BASE}/api/auth/me`, {
+			headers: await authedTenantHeaders(page)
+		});
+		expect(me.ok()).toBe(true);
+		const { full_name } = (await me.json()) as { full_name: string };
+		const first = full_name.trim().split(/\s+/)[0];
+		expect(first).toBeTruthy();
+		await expect(page.getByTestId('dashboard-greeting')).toContainText(first);
 	});
 });
