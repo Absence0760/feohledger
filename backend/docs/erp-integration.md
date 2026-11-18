@@ -659,7 +659,9 @@ NetSuite OAuth 2.0,
 `subscription_key` for Blackbaud) plus `webhook_signing_secret` (inbound ERP
 webhooks, older spelling `webhook_secret`) — are **not** in
 `Organization.settings`, and neither are the OAuth access and refresh tokens. They are envelope-encrypted in the control-plane
-`provider_credentials` table, one sealed row per org and block
+`provider_credentials` table, one sealed row per org and block (the same table
+seals the `payments`, `cards`, `commerce` and BYOK `extraction` blocks and the
+OIDC `sso` client secret; this section covers `erp`)
 (`services/provider_credentials.py`, catalogue `SECRET_FIELDS`;
 `services/credential_crypto.py` for the crypto):
 

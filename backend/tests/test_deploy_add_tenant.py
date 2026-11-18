@@ -3,7 +3,8 @@ and CI's day-one job provisions through the same function (#575).
 
 The command line used to be built inline in add-tenant.sh, so the only way for
 a rehearsal to provision "the way production does" was to copy it — and a copy
-drifts. These pin the function's output (the argv production has always run),
+drifts. These pin the function's output (the argv production runs: no password, a
+set-password link by email, `--print-link` only when asked for),
 that add-tenant.sh execs exactly that array into the api container, and that the
 day-one stack calls the function rather than spelling create_tenant.py itself.
 
@@ -41,44 +42,41 @@ def _lib(body: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_a_given_password_is_used_as_is_and_no_change_is_forced() -> None:
-    result = _lib(
-        'feoh_tenant_argv acme "Acme Corp" a@acme.example "Given-Passw0rd-1"\n'
-        'printf "%s\\n" "${FEOH_TENANT_ARGV[@]}"\n'
-        'echo "forced=$FEOH_TENANT_FORCED password=$FEOH_TENANT_PASSWORD"'
-    )
-    assert result.returncode == 0, result.stderr
-    *argv, summary = result.stdout.splitlines()
-    assert argv == [
-        "python",
-        "scripts/create_tenant.py",
-        "--name",
-        "Acme Corp",
-        "--slug",
-        "acme",
-        "--admin-email",
-        "a@acme.example",
-        "--admin-password",
-        "Given-Passw0rd-1",
-        "--skip-existing",
-    ]
-    assert summary == "forced=0 password=Given-Passw0rd-1"
+_BASE_ARGV = [
+    "python",
+    "scripts/create_tenant.py",
+    "--name",
+    "Acme Corp",
+    "--slug",
+    "acme",
+    "--admin-email",
+    "a@acme.example",
+    "--skip-existing",
+]
 
 
-def test_no_password_generates_one_that_meets_the_rules_and_forces_a_change() -> None:
+def test_the_admin_gets_no_password_and_the_link_goes_by_email() -> None:
+    """No password reaches the command line at all: the first admin chooses
+    their own through the emailed set-password link (decisions §283), so the
+    operator never holds the customer's credential."""
     result = _lib(
-        'feoh_tenant_argv acme "Acme Corp" a@acme.example ""\n'
+        'feoh_tenant_argv acme "Acme Corp" a@acme.example\n'
         'printf "%s\\n" "${FEOH_TENANT_ARGV[@]}"\n'
-        'echo "forced=$FEOH_TENANT_FORCED"\n'
-        'echo "$FEOH_TENANT_PASSWORD"'
+        'echo "password=${FEOH_TENANT_PASSWORD-unset}"'
     )
     assert result.returncode == 0, result.stderr
-    *argv, forced, password = result.stdout.splitlines()
-    assert forced == "forced=1"
-    # 12+ chars with upper, lower and a digit — the app's complexity rules.
-    assert password.startswith("Aa1-") and len(password) == 4 + 24
-    assert argv[argv.index("--admin-password") + 1] == password
-    assert argv[-2:] == ["--skip-existing", "--force-password-change"]
+    *argv, password = result.stdout.splitlines()
+    assert argv == _BASE_ARGV
+    assert password == "password=unset"
+
+
+def test_print_link_is_passed_through_only_when_asked_for() -> None:
+    result = _lib(
+        'feoh_tenant_argv acme "Acme Corp" a@acme.example 1\n'
+        'printf "%s\\n" "${FEOH_TENANT_ARGV[@]}"'
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [*_BASE_ARGV, "--print-link"]
 
 
 @pytest.fixture
@@ -102,13 +100,10 @@ def _calls(log: Path) -> list[list[str]]:
     return [block.split("\n") for block in log.read_text().strip("\n").split("\n\n")]
 
 
-def test_add_tenant_execs_the_shared_argv_into_the_api_container(
-    deploy_dir: tuple[Path, Path, Path],
-) -> None:
-    root, bin_dir, log = deploy_dir
-    result = subprocess.run(
+def _add_tenant(root: Path, bin_dir: Path, log: Path, *extra: str):
+    return subprocess.run(
         ["bash", str(root / "add-tenant.sh"), "acme", "--name", "Acme Corp"]
-        + ["--admin-email", "a@acme.example", "--admin-password", "Given-Passw0rd-1"],
+        + ["--admin-email", "a@acme.example", *extra],
         capture_output=True,
         text=True,
         env={
@@ -116,41 +111,43 @@ def test_add_tenant_execs_the_shared_argv_into_the_api_container(
             "STUB_LOG": str(log),
         },
     )
+
+
+def test_add_tenant_execs_the_shared_argv_into_the_api_container(
+    deploy_dir: tuple[Path, Path, Path],
+) -> None:
+    root, bin_dir, log = deploy_dir
+    result = _add_tenant(root, bin_dir, log)
     assert result.returncode == 0, result.stdout + result.stderr
     provision = [c for c in _calls(log) if "scripts/create_tenant.py" in c]
     assert provision == [
         ["compose", "-f", "compose.prod.yml", "--profile", "localdb", "exec", "-T", "api"]
-        + ["python", "scripts/create_tenant.py", "--name", "Acme Corp", "--slug", "acme"]
-        + ["--admin-email", "a@acme.example", "--admin-password", "Given-Passw0rd-1"]
-        + ["--skip-existing"]
+        + _BASE_ARGV
     ]
-    # A given password is the operator's own, so it is never echoed back.
-    assert "temp password" not in result.stdout
+    # Nothing credential-shaped is printed: there is none to print.
+    assert "password:" not in result.stdout.lower()
     # The tenant host is CloudFront's wildcard (docs/decisions.md §364): no
     # Caddy block, no reload.
     assert (root / "tenants.caddy").read_text() == ""
     assert not [c for c in _calls(log) if "caddy" in c]
 
 
-def test_add_tenant_prints_the_generated_password_it_provisioned_with(
-    deploy_dir: tuple[Path, Path, Path],
-) -> None:
+def test_add_tenant_print_link_reaches_the_cli(deploy_dir: tuple[Path, Path, Path]) -> None:
     root, bin_dir, log = deploy_dir
-    result = subprocess.run(
-        ["bash", str(root / "add-tenant.sh"), "acme", "--name", "Acme Corp"]
-        + ["--admin-email", "a@acme.example"],
-        capture_output=True,
-        text=True,
-        env={
-            "PATH": f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}",
-            "STUB_LOG": str(log),
-        },
-    )
+    result = _add_tenant(root, bin_dir, log, "--print-link")
     assert result.returncode == 0, result.stdout + result.stderr
     (provision,) = [c for c in _calls(log) if "scripts/create_tenant.py" in c]
-    password = provision[provision.index("--admin-password") + 1]
-    assert provision[-1] == "--force-password-change"
-    assert f"temp password: {password}" in result.stdout
+    assert provision[-2:] == ["--skip-existing", "--print-link"]
+
+
+def test_add_tenant_no_longer_takes_a_password(deploy_dir: tuple[Path, Path, Path]) -> None:
+    """The old `--admin-password` is refused, not silently ignored: an operator
+    script still passing one must learn the admin will get a link instead."""
+    root, bin_dir, log = deploy_dir
+    result = _add_tenant(root, bin_dir, log, "--admin-password", "Given-Passw0rd-1")
+    assert result.returncode != 0
+    assert "usage:" in result.stderr
+    assert not log.exists() or not [c for c in _calls(log) if "scripts/create_tenant.py" in c]
 
 
 def test_the_day_one_stack_provisions_through_the_shared_function() -> None:

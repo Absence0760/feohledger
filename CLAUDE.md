@@ -160,7 +160,7 @@ repo — never in any `.env*`, and never in this repo.
 - **Control plane DB** (`feohledger`): organizations, users, roles
 - **Tenant DBs** (`feoh_<slug>`): invoices, vendors, payments, workflows, etc.
 - Frontend extracts subdomain → sends `X-Tenant-Slug` header → backend resolves tenant DB
-- Provision: `python scripts/create_tenant.py --name "Corp" --slug corp --admin-email admin@corp.com --admin-password changeme`
+- Provision: `python scripts/create_tenant.py --name "Corp" --slug corp --admin-email admin@corp.com --admin-password changeme` (`--admin-password` is local-dev only; without it the admin is emailed a set-password link, or `--print-link` prints it — the deployed path, `deploy/README.md` § Tenants)
 
 ## Architecture overview
 
@@ -177,7 +177,7 @@ before changing any router; the summaries below are only an index.
 | `/scim/v2` | SCIM 2.0 user provisioning (Okta/Entra/Authentik), per-tenant bearer auth |
 | `/portal`, `/portal/auth` | Supplier portal — VendorUser auth, invoice submit/resubmit, payments, self-service, MFA |
 | `/admin` | User CRUD, role assignment |
-| `/organization` | Org settings, connection tests, SSO config (`/organization/sso`, the one audited writer of `settings.sso`), provider credentials (`/organization/credentials` — ERP / payment / card secrets, KMS-sealed, write-only), SCIM token, branding, custom domains, data residency, closing an unused workspace (`/organization/close`, fail-closed guards + second-factor step-up, decisions §306) |
+| `/organization` | Org settings, connection tests, SSO config (`/organization/sso`, the one audited writer of `settings.sso`), provider credentials (`/organization/credentials` — ERP / payment / card / commerce / extraction secrets and the OIDC client secret, KMS-sealed, write-only), SCIM token, branding, custom domains, data residency, closing an unused workspace (`/organization/close`, fail-closed guards + second-factor step-up, decisions §306) |
 | `/entities` | Multi-entity admin (legal entities / subsidiaries — the `entity_id` scope target) |
 | `/partner` | Partner / reseller multi-tenant admin — child tenants, link codes, provision |
 | `/invoices` | Invoice CRUD, upload, extraction, approve/reject, line items, e-invoice, email approval |

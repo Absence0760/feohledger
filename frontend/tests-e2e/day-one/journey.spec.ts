@@ -21,11 +21,11 @@ import {
  *
  * No seed data, no SQL, no fixture tenant: the only things that exist when this
  * starts are what `deploy/add-tenant.sh` creates — an organization and its
- * admin, holding a generated temporary password. Every other row is made
- * through the app, by the people who would make it:
+ * admin, with no password and a set-password link in their inbox. Every other
+ * row is made through the app, by the people who would make it:
  *
- *   1. the admin signs in with the temporary password, is forced to change it,
- *      and enrols TOTP;
+ *   1. the admin sets a password from the emailed link (the operator never saw
+ *      a credential), signs in and enrols TOTP;
  *   2. the admin invites an AP Manager and a financial controller (a second
  *      AP Manager), whose invitations arrive by email as set-password links
  *      (no temporary password, decisions §283);
@@ -151,25 +151,6 @@ function setPasswordLink(text: string): string {
 	return link;
 }
 
-/** /change-password, filled the way the form asks. Lands on the tenant root. */
-async function changePassword(page: Page, current: string, next: string): Promise<void> {
-	await expect(page).toHaveURL(/\/change-password$/);
-	await page.locator('input[autocomplete="current-password"]').fill(current);
-	const fresh = page.locator('input[autocomplete="new-password"]');
-	await fresh.first().fill(next);
-	await fresh.last().fill(next);
-	const changed = page.waitForResponse(
-		(r) => r.url().endsWith('/api/auth/change-password') && r.request().method() === 'POST'
-	);
-	await page.getByRole('button', { name: 'Change password' }).click();
-	const resp = await changed;
-	expect(resp.status()).toBe(200);
-	expect(((await resp.json()) as { must_change_password: boolean }).must_change_password).toBe(
-		false
-	);
-	await page.waitForURL(TENANT_ROOT_URL);
-}
-
 async function signOut(page: Page): Promise<void> {
 	await page.locator('.profile-btn').click();
 	await page.locator('.profile-logout').click();
@@ -192,10 +173,20 @@ test('the deploy left a working, empty install with signup closed', async () => 
 	await answerConsent(admin);
 });
 
-test('first admin: temporary password, forced change, TOTP enrolment', async () => {
-	await submitLogin(admin, t().admin_email, t().admin_temp_password);
-	// add-tenant.sh generated the password, so the first sign-in must change it.
-	await changePassword(admin, t().admin_temp_password, ADMIN_PASSWORD);
+test('first admin: set-password link by email, TOTP enrolment', async () => {
+	// add-tenant.sh created the admin with no password and emailed them the
+	// same single-use link an invite sends — nothing for the operator to relay.
+	const welcome = await awaitEmail(
+		admin,
+		t().mailpit_url,
+		t().admin_email,
+		/workspace is ready/i
+	);
+	expect(welcome.text).not.toMatch(/Password:/);
+	const link = setPasswordLink(welcome.text);
+	expect(new URL(link).origin).toBe(new URL(admin.url()).origin);
+	expect(new URL(link).searchParams.get('mode')).toBe('set');
+	await setPasswordFromLink(admin, link, t().admin_email, ADMIN_PASSWORD);
 
 	await admin.goto('/profile?section=mfa');
 	await expect(admin.getByText('Not configured')).toBeVisible();

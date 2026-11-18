@@ -549,9 +549,12 @@ async def update_secrets(
     """Apply a validated write and return the changed path NAMES.
 
     The caller has validated (:func:`validate_update`) and taken the org row
-    lock; it commits. Every caller takes that lock first, so one holding it may
-    read the current values (:func:`load_secrets`) and decide on them — the ERP
-    token refresher's compare-and-swap does. The callers: the audited endpoint,
+    lock. This function never commits: it writes and flushes inside the
+    caller's transaction, and the CALLER commits — or rolls back, which is how
+    `PUT /api/organization/sso` undoes a secret it could not audit. Every
+    caller takes that lock first, so one holding it may read the current values
+    (:func:`load_secrets`) and decide on them — the ERP token refresher's
+    compare-and-swap does. The callers: the audited endpoint,
     `PATCH /api/organization` dropping an ERP's (or a BYOK extraction
     provider's) secrets when the save points them somewhere new,
     `PUT /api/organization/sso` (the OIDC client secret, which audits after

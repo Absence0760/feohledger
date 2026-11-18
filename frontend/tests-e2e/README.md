@@ -587,7 +587,7 @@ creates, and the journey makes the rest through the UI.
 | Step | What it proves |
 |---|---|
 | install | `/api/health`, signup reported closed (`FEOH_SIGNUP_ENABLED=false`), the tenant host serves `/login` |
-| first admin | the generated temporary password signs in, a change is forced, TOTP enrols |
+| first admin | the set-password link add-tenant emailed (read from Mailpit) sets a password, it signs in, TOTP enrols |
 | invite | an AP Manager and a financial controller (a second AP Manager) are created; the admin is shown no credential, and each invitation reaches Mailpit with a single-use set-password link on the tenant's own host (decisions §283) |
 | credentials | a provider secret is sealed (a deployed env refuses the local key, so this went through KMS) |
 | first invoice | a tax-exclusive UBL e-invoice (net lines, tax on the header) from an unknown, long, non-ASCII supplier is picked from the empty state's file dialog and reaches review **without a reload**; its only findings are the unverified vendor and the PO that does not exist |

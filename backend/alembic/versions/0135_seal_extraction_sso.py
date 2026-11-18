@@ -66,12 +66,15 @@ SSO_MARKER = "client_secret_configured"
 
 
 def _is_control_db() -> bool:
+    # The same probe as 0110 and as this module's docstring: ``organizations``
+    # exists only on the control plane, where 0110 has already created
+    # ``provider_credentials``.
     bind = op.get_bind()
     return (
         bind.execute(
             text(
                 "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_name = 'provider_credentials'"
+                "WHERE table_schema = 'public' AND table_name = 'organizations'"
             )
         ).scalar()
         is not None

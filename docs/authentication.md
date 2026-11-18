@@ -1083,7 +1083,10 @@ link**, which is a forgot-password reset token with a longer life
 `/login/reset-password` page and `POST /api/auth/reset-password`. So does every
 other account nobody chose a password for: an admin-invited user
 (`POST /api/admin/users`), a partner-provisioned child admin
-(`POST /api/partner/children/provision`), and an admin-reset user, whose
+(`POST /api/partner/children/provision`), an operator-provisioned first admin
+(`deploy/add-tenant.sh` → `scripts/create_tenant.py`, which prints only the
+address unless `--print-link` asks for the link on the operator's own terminal),
+and an admin-reset user, whose
 password the reset clears (`POST /api/admin/users/{id}/reset-password`) — each
 emailed the same link, with its own lifetime `FEOH_SET_PASSWORD_LINK_TTL_HOURS`
 (default 72). The link is never returned to the admin or partner who triggered

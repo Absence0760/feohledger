@@ -17,13 +17,12 @@ import { SHARED } from '../fixtures/realisticValues';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 
-/** What `stack.sh provision` writes: the first tenant and its admin's
- *  generated temporary password — the one add-tenant.sh prints. */
+/** What `stack.sh provision` writes: the first tenant and the address its
+ *  admin's set-password link was emailed to — all add-tenant.sh prints. */
 export interface DayOneTenant {
 	slug: string;
 	name: string;
 	admin_email: string;
-	admin_temp_password: string;
 	mailpit_url: string;
 }
 

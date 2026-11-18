@@ -1222,6 +1222,134 @@ async def test_create_tenant_cli_fails_when_provisioning_fails(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# The first admin gets a set-password link, never a password (decisions §283)
+# ---------------------------------------------------------------------------
+
+_LINK_CLI_ARGS = [
+    "--name",
+    "Acme Co",
+    "--slug",
+    "acmeco",
+    "--admin-email",
+    "admin@acme.test",
+]
+_LINK = "https://acmeco.feohledger.example/login/reset-password?token=tok-secret&mode=set"
+
+
+def _link_cli(monkeypatch, argv: list[str]):
+    """The CLI with provisioning, minting and sending stubbed out."""
+    cli = _load_create_tenant_cli(monkeypatch, argv)
+    monkeypatch.setattr(settings, "tenant_url_template", "https://{slug}.feohledger.example")
+    user_id = uuid.uuid4()
+    monkeypatch.setattr(
+        cli,
+        "provision_tenant",
+        AsyncMock(return_value=MagicMock(db_name="feoh_acmeco", user_id=user_id)),
+    )
+    monkeypatch.setattr(cli, "mint_employee_link", AsyncMock(return_value=_LINK))
+    monkeypatch.setattr(cli, "send_set_password_email", AsyncMock())
+    return cli, user_id
+
+
+async def test_create_tenant_emails_the_admin_a_set_password_link(monkeypatch, capsys):
+    cli, user_id = _link_cli(monkeypatch, _LINK_CLI_ARGS)
+
+    await cli.main()
+
+    kwargs = cli.provision_tenant.await_args.kwargs
+    assert kwargs["admin_password"] is None
+    assert kwargs["must_change_password"] is False
+    cli.mint_employee_link.assert_awaited_once_with("acmeco", None, user_id, set_password=True)
+    message = cli.send_set_password_email.await_args.args[0]
+    assert message.to == "admin@acme.test"
+    assert _LINK in message.body_text
+    out = capsys.readouterr().out
+    # Only where it went: the operator's terminal never carries the link.
+    assert "Set-password link emailed to admin@acme.test." in out
+    assert "tok-secret" not in out
+    assert "Password:" not in out
+
+
+async def test_create_tenant_print_link_prints_it_and_sends_nothing(monkeypatch, capsys):
+    cli, _ = _link_cli(monkeypatch, [*_LINK_CLI_ARGS, "--print-link"])
+
+    await cli.main()
+
+    cli.send_set_password_email.assert_not_awaited()
+    assert f"    {_LINK}\n" in capsys.readouterr().out
+
+
+async def test_create_tenant_exits_3_when_the_link_is_not_delivered(monkeypatch, capsys):
+    """The tenant exists by then; a wrapper must not report success, and the
+    message says how the admin recovers — without the link in it."""
+    from fastapi import HTTPException
+
+    from app.api.refusals import SET_PASSWORD_EMAIL_FAILED_DETAIL
+
+    cli, _ = _link_cli(monkeypatch, _LINK_CLI_ARGS)
+    monkeypatch.setattr(
+        cli,
+        "send_set_password_email",
+        AsyncMock(side_effect=HTTPException(502, detail=SET_PASSWORD_EMAIL_FAILED_DETAIL)),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        await cli.main()
+
+    assert exc_info.value.code == cli.EXIT_LINK_NOT_DELIVERED == 3
+    captured = capsys.readouterr()
+    assert "set_password_email_failed" in captured.err
+    assert "Forgot password" in captured.err
+    assert "tok-secret" not in captured.out + captured.err
+
+
+async def test_create_tenant_refuses_before_provisioning_with_no_tenant_url(monkeypatch, capsys):
+    cli, _ = _link_cli(monkeypatch, _LINK_CLI_ARGS)
+    monkeypatch.setattr(settings, "tenant_url_template", "")
+
+    with pytest.raises(SystemExit) as exc_info:
+        await cli.main()
+
+    assert exc_info.value.code == 2
+    cli.provision_tenant.assert_not_awaited()
+    assert "FEOH_TENANT_URL_TEMPLATE" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("extra", "environment"),
+    [
+        (["--admin-password", "Aa1-not-used-000000"], "production"),
+        (["--admin-password", "Aa1-not-used-000000", "--print-link"], "development"),
+        (["--force-password-change"], "development"),
+    ],
+)
+async def test_create_tenant_refuses_a_password_where_it_does_not_belong(
+    monkeypatch, extra, environment
+):
+    """A deployed environment never takes an operator-chosen password: the
+    admin chooses their own. Locally it still works, for `pnpm` dev setups."""
+    cli, _ = _link_cli(monkeypatch, [*_LINK_CLI_ARGS, *extra])
+    monkeypatch.setattr(settings, "environment", environment)
+
+    with pytest.raises(SystemExit) as exc_info:
+        await cli.main()
+
+    assert exc_info.value.code == 2
+    cli.provision_tenant.assert_not_awaited()
+
+
+async def test_create_tenant_admin_password_still_works_locally(monkeypatch, capsys):
+    cli, _ = _link_cli(monkeypatch, [*_LINK_CLI_ARGS, "--admin-password", "Aa1-not-used-000000"])
+    monkeypatch.setattr(settings, "environment", "development")
+
+    await cli.main()
+
+    assert cli.provision_tenant.await_args.kwargs["admin_password"] == "Aa1-not-used-000000"
+    cli.mint_employee_link.assert_not_awaited()
+    cli.send_set_password_email.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
 # Role-name uniqueness (the constraint provision_tenant's role lookup relies on)
 # ---------------------------------------------------------------------------
 
