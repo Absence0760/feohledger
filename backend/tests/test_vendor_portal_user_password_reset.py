@@ -359,3 +359,42 @@ async def test_reset_supersedes_the_unused_invite_link(realdb, fake_redis, sent_
         assert stale.status_code == 400
         assert (await _set_password(anon, invite_token, "Stale-Link-Pass9")).status_code == 400
         assert (await _set_password(anon, reset_token, "Fresh-Link-Pass9")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_session_revoke_failure_does_not_fail_a_completed_set_password(
+    realdb, mk, fake_redis, sent_mail, monkeypatch
+):
+    """The token is spent and the password committed before sessions are
+    ended, so a Redis failure there must not 500 the redemption (the supplier
+    would retry a link that no longer works). The password is set, the change
+    is still audited, and no `portal.session.revoked` row claims a revoke that
+    did not happen."""
+    email = f"invited-{uuid.uuid4().hex[:8]}@vendor.test"
+    async with realdb.client(key=TENANT, role="admin") as client:
+        vendor_id = await _create_vendor(client)
+        invited = await _invite_portal_user(client, vendor_id, email)
+    vu_id = uuid.UUID(invited["user"]["id"])
+    token = link_token(sent_mail[0])
+
+    async def _redis_down(user_id):  # noqa: ARG001
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr("app.api.portal_auth.revoke_user_sessions", _redis_down)
+
+    async with realdb.client(key=TENANT, role=None) as anon:
+        done = await _set_password(anon, token, "Supplier-Chosen9")
+        assert done.status_code == 200, done.text
+        login = await anon.post(
+            "/api/portal/auth/login", json={"email": email, "password": "Supplier-Chosen9"}
+        )
+    assert login.status_code == 200, login.text
+
+    async with mk() as s:
+        actions = (
+            (await s.execute(select(AuditLog.action).where(AuditLog.entity_id == vu_id)))
+            .scalars()
+            .all()
+        )
+    assert "portal.password.changed" in actions
+    assert "portal.session.revoked" not in actions

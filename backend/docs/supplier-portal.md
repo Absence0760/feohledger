@@ -44,7 +44,8 @@ All under `/api/portal/*`. Tenant resolved via the usual `X-Tenant-Slug`
 header. RBAC coverage gate in `tests/test_rbac.py` asserts every endpoint
 uses `get_current_vendor_user` (except `/portal/auth/login`,
 `/portal/auth/logout`, `/portal/auth/mfa/challenge` and the two
-`/portal/auth/reset-password` routes, which are listed in `ALTERNATE_AUTH`).
+`/portal/auth/reset-password` routes, which are listed in `ALTERNATE_AUTH`, and
+`/portal/auth/forgot-password`, which is listed in `PUBLIC_BY_DESIGN`).
 
 ### Auth (`portal_auth.py`)
 
@@ -55,7 +56,8 @@ uses `get_current_vendor_user` (except `/portal/auth/login`,
 | GET    | `/portal/auth/me`                | Returns the vendor-user + vendor summary (incl. `mfa_enabled`)               |
 | POST   | `/portal/auth/change-password`   | Voluntary rotations, and the forced rotation of a legacy pre-link temporary password |
 | POST   | `/portal/auth/reset-password/check` | **Public** — read a set-password token WITHOUT spending it → `{email}`; opaque `400` for any token the redemption would refuse (incl. one minted for another tenant). 20/min per IP |
-| POST   | `/portal/auth/reset-password`    | **Public** — redeem the single-use set-password token from an invite / reset email: sets the password, ends every portal session, audits `portal.password.changed` `{via: "set_password_link"}`. 10/min per IP |
+| POST   | `/portal/auth/reset-password`    | **Public** — redeem the single-use set-password token from an invite / reset / forgot-password email: sets the password, ends every portal session, audits `portal.password.changed` `{via: "set_password_link"}`. 10/min per IP. Ending the sessions runs after the commit and is guarded: a Redis failure there is logged by vendor-user id and the redemption still answers 200 (the token is spent, so a 500 would send the supplier back to a dead link); the old sessions then end at their token's expiry and no `portal.session.revoked` row is written |
+| POST   | `/portal/auth/forgot-password`   | **Public** — supplier self-service recovery. Tenant-scoped by `X-Tenant-Slug` / Host (the address is looked up only in this tenant's DB, and the token carries this slug). The same generic 200 for every address, and everything only a match does (token mint, send, audit row) runs on a detached task, so response time is no oracle either. Budgets: 5/hour per IP (not per tenant, like the employee twin: suppliers of different tenants behind one NAT share it) and 3/hour per (tenant, address), the second checked before the lookup so an unknown address throttles identically. For an active account it mints the portal token with the **forgot-password** lifetime (`FEOH_PASSWORD_RESET_TTL_MINUTES`, not the 72-hour set-password one) and audits `portal.password_reset.requested` `{ip}`. Changes nothing on the account: the current password works until the link is used, earlier links are not superseded, and `provisioned_by_user_id` is never re-stamped. A token-store failure is logged by id; the response was already the same 200 |
 | POST   | `/portal/auth/mfa/challenge`     | **Public** — trade the login-issued challenge token + a code (`method` totp\|email) for an access token |
 | POST   | `/portal/auth/mfa/challenge/email` | **Public** — email the on-demand OTP backup code to the enrolled vendor; 204-silent (no enumeration) |
 | POST   | `/portal/auth/mfa/enroll`        | Mint a CANDIDATE TOTP secret + QR (parked in Redis until verified). Optional `{password?, code?}` step-up — required once a factor is already live |
@@ -447,8 +449,10 @@ Three properties are deliberate and easy to get wrong:
   `POST /portal/auth/change-password` requires the *current* password, and
   `POST /portal/auth/reset-password` the invite's link, either of which the
   provisioner may hold (they chose the address the link went to) — so clearing there would be a one-request bypass of the whole
-  control. The stamp is durable provenance, not a "who knows the password right
-  now" flag. The operational cost is real and accepted: an AP user who onboarded
+  control. The same holds for a link the supplier requests through
+  `POST /portal/auth/forgot-password`: it goes to the address the provisioner
+  chose, so it neither clears nor re-stamps. The stamp is durable provenance,
+  not a "who knows the password right now" flag. The operational cost is real and accepted: an AP user who onboarded
   a supplier is never an independent second party to what that identity submits,
   so someone else approves. Admin holds `vendor.bank_change.approve` by default,
   so no tenant can be left with nobody able to approve.
@@ -541,9 +545,10 @@ Routes:
 | Route                         | Purpose                                                |
 |-------------------------------|--------------------------------------------------------|
 | `/portal`                     | **Home / overview** — whole-set KPI cards (needs your attention / with your customer / paid / completed), per-currency outstanding value, and the decisions waiting on the supplier elsewhere (open early-payment offers, a staged bank/tax change). Reads `GET /portal/summary`; `EmptyState` for a supplier with no invoices yet |
-| `/portal/login`               | Sign-in form + MFA second-factor step (TOTP, with a "use email code instead" backup) |
+| `/portal/login`               | Sign-in form + MFA second-factor step (TOTP, with a "use email code instead" backup); a "Forgot password?" link to `/portal/forgot-password` |
+| `/portal/forgot-password`     | **Public** — request a reset link (`POST /portal/auth/forgot-password`); the generic confirmation shows on any 2xx and takes focus |
 | `/portal/change-password`     | Voluntary rotation; forced for a legacy temporary password |
-| `/portal/reset-password`      | **Public** — where an invite / reset set-password link lands (`mode=set` for an invite). The employee reset page's state machine (`components/auth/SetPasswordLink.svelte`) in the portal's own branded frame; a dead link says to ask the AP team for a new one |
+| `/portal/reset-password`      | **Public** — where an invite / reset set-password link lands (`mode=set` for an invite). The employee reset page's state machine (`components/auth/SetPasswordLink.svelte`) in the portal's own branded frame (`components/portal/PortalAuthCard.svelte`, shared with `/portal/forgot-password`); a dead link offers `/portal/forgot-password` and says the AP team can also send one |
 | `/portal/invoices`            | List (invoice-number search + vendor-facing phase chips) + upload + per-row "Revise & resubmit" on a rejected invoice |
 | `/portal/purchase-orders`     | PO list + per-row "Create invoice" (flip)              |
 | `/portal/payments`            | Payment history + per-row "Download remittance"        |
@@ -605,8 +610,13 @@ and redeeming one kills the rest (a per-supplier generation counter). It is not
   base URL to point a link at the request is a `503
   set_password_link_unavailable` before anything changes. Local dev is
   unaffected — the default `console` adapter renders the message. Recovery for
-  a lost or expired link is `reset-password`, which emails a new one on the same
-  row; there is still no supplier self-service forgot-password.
+  a lost or expired link, or a forgotten password, is either the AP team's
+  `reset-password` (a new link on the same row) or the supplier's own
+  `POST /portal/auth/forgot-password`, which mails a short-lived link from the
+  same token family to the account's stored address. Unlike the AP reset, the
+  supplier's request clears nothing and re-stamps nothing: anyone can submit an
+  address, so it must not be able to lock a supplier out, and no AP actor chose
+  where that link goes.
 
   This changed for a security reason, not a tidiness one. AP chooses the
   address, so returning a credential made "mint a supplier login I control" a

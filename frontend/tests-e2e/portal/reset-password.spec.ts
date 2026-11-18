@@ -24,7 +24,7 @@ test.describe('/portal/reset-password', () => {
 		await expect(page.locator('input[type="password"]')).toHaveCount(0);
 	});
 
-	test('a bogus invite link is refused up front and says who sends a new one', async ({
+	test('a bogus invite link is refused up front and says how to get a new one', async ({
 		page
 	}) => {
 		const checked = page.waitForResponse(
@@ -35,7 +35,13 @@ test.describe('/portal/reset-password', () => {
 
 		await expect(page.getByRole('heading', { name: 'Set your password' })).toBeVisible();
 		await expect(page.getByText(/invalid or has expired/i)).toBeVisible();
-		await expect(page.getByText(/accounts payable team to send you a new one/i)).toBeVisible();
+		await expect(page.getByText(/Request a new one below/i)).toBeVisible();
+		// The supplier can ask for a new link themselves, on the portal's own
+		// request page.
+		await expect(page.getByRole('link', { name: 'Reset your password' })).toHaveAttribute(
+			'href',
+			'/portal/forgot-password'
+		);
 		await expect(page.locator('input[type="password"]')).toHaveCount(0);
 		// The way back is the portal's own sign-in — never the employee
 		// forgot-password page, which cannot reset a supplier account.

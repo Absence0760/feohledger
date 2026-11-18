@@ -60,7 +60,7 @@ export const enPortal = {
 	'portal.changePassword.saving': 'Saving...',
 	'portal.changePassword.failed': 'Change failed',
 	'portal.resetPassword.expiredHint':
-		'Set-password links work once and expire. Ask your customer\'s accounts payable team to send you a new one.',
+		'Set-password links work once and expire. Request a new one below, or ask your customer\'s accounts payable team to send one.',
 	'portal.resetPassword.backToSignIn': 'Back to sign in',
 
 	// Portal invoices (routes/portal/invoices/+page.svelte)

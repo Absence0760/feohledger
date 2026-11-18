@@ -216,6 +216,7 @@
 			<button type="submit" disabled={loading}>
 				{loading ? m('portal.login.signingIn') : m('portal.login.signIn')}
 			</button>
+			<a class="forgot-link" href="/portal/forgot-password">{m('auth.login.forgotPassword')}</a>
 		</form>
 	{/if}
 </div>
@@ -387,6 +388,13 @@
 		color: var(--text-muted);
 		font-weight: 400;
 		font-size: 0.82rem;
+	}
+	.forgot-link {
+		align-self: center;
+		margin-top: -4px;
+		font-size: 0.82rem;
+		color: var(--accent-strong);
+		text-decoration: underline;
 	}
 	.secondary {
 		margin-top: 0;
