@@ -79,7 +79,7 @@ export const VENDOR_GUIDES: Guide[] = [
 						items: [
 							'On the vendor\'s row, select {ui:vendors.row.invite}.',
 							'Enter the supplier contact\'s {ui:vendors.invite.field.fullName} and {ui:vendors.invite.field.email}, then select {ui:vendors.invite.send}.',
-							'The supplier is emailed a link to choose their own password. It is never shown to you, so no one in AP ever knows a supplier\'s password. If the link expires, use Reset password to send a new one.'
+							'The supplier is emailed a link to choose their own password. It is never shown to you, so no one in AP ever knows a supplier\'s password. If the link expires, or they later forget their password, they can select {ui:auth.login.forgotPassword} on the portal sign-in page to be emailed a new link, or you can use Reset password to send one.'
 						]
 					},
 					{
