@@ -455,8 +455,10 @@ async def test_bad_bodies_are_refused_without_echoing_the_value(realdb, body):
 
 @pytest.mark.asyncio
 async def test_unknown_block_is_404(realdb):
+    # `extraction` was the example of an unknown block until 0135 made it a
+    # real one; a name no catalogue holds keeps the test about what it says.
     async with realdb.client(key="a", role="admin") as c:
-        resp = await c.put(f"{URL}/extraction", json={"set": {"api_key": SECRET}})
+        resp = await c.put(f"{URL}/not_a_block", json={"set": {"api_key": SECRET}})
     assert resp.status_code == 404
 
 
