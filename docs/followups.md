@@ -1789,22 +1789,6 @@ user-visible halves still open.
       "USD"`s; longer term, stop the invoice PATCH writing `""` at all.
       **Trigger:** the next change to the payment-run builder or queue
       refusals.
-- [ ] **(c) The employee forgot-password reveals whether an account exists by
-      response time.** `POST /api/auth/forgot-password` (`api/auth.py`) awaits
-      the reset-token mint and `dispatch_auth_audit` only on the known-address
-      branch. The supplier route now runs that work on a detached task (§451).
-      **Durable fix:** the same shape for the employee route, with a test that
-      the response does not await the mint. **Trigger:** the next change to
-      `api/auth.py`'s forgot-password, or a security review of the login
-      surface.
-- [ ] **(c) Closing a workspace leaves its suppliers' set-password links in
-      Redis.** `credential_cleanup.forget_users` now clears employee reset
-      links and their generation counters (round 15), but not the
-      `portal:pwreset:` family. The links are unusable once the tenant's
-      portal accounts are gone, so this is hygiene, not exposure. **Durable
-      fix:** clear the tenant's `portal:pwreset:` keys and counters in the
-      same sweep. **Trigger:** the next change to workspace closure or portal
-      tokens.
 - [ ] **(c) `create_tenant.py` cannot re-send the first admin's link.** If the
       set-password email fails on a tenant with no working mail, a re-run
       skips the existing slug (`--skip-existing`), so the only recovery is
@@ -1818,12 +1802,6 @@ user-visible halves still open.
       screen or a screen reader cannot reach. The GL off-chart badge beside it
       was fixed in round 15. **Durable fix:** the same shape: visible or
       visually-hidden text. **Trigger:** the next change to `/recurring`.
-- [ ] **(c) The two SSO step-up tests fail in any fresh local venv.**
-      `pyproject.toml` allows `pyotp>=2.10,<3`; pyotp 2.12 refuses secrets
-      under 112 bits, so `test_sso_only.py`'s step-up tests fail locally while
-      CI (pinned 2.10 by the lock) passes. **Durable fix:** a `TOTP_SECRET` of
-      at least 16 base32 characters in that test. **Trigger:** the next pyotp
-      bump.
 - [ ] **(c) A malformed invoice currency prints a blank in the split currency
       warning.** When an invoice's own code is malformed and a split's legs
       disagree (§445), `po_currency_mismatch` reads "Invoice is in  but PO …

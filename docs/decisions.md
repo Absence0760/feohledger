@@ -22969,3 +22969,46 @@ plan-driven run should cap how overdue an invoice may be is an open product
 question for the operator. A cap would be a `settings.cash_flow` integer
 applied before staging, folded into the plan's derivation so the plan and the
 run agree, with the forecast's overdue slice left uncapped.
+
+## §NEW-L2. Forgot-password work only a known address does runs detached, on both routes (round 16, 2026-11-18)
+
+`POST /api/auth/forgot-password` sent its email on a detached task but awaited
+the org lookup, the reset-token mint and the `auth.password_reset.requested`
+audit row first, and only a known, active address took those steps. The
+response time therefore still said whether the account existed. The route now
+does the user lookup and nothing else; the rest runs on a detached task with
+its own control-plane session, the shape §451 gave the supplier route. A token
+store failure is logged by user id and answered with the same 200, as on the
+portal.
+
+Both routes now spawn through one registry, `app/utils/detached_tasks.py`.
+Each had its own copy, and tests drained a module's private set or yielded in
+a loop until mail appeared. Tests await `drain_detached()`, the real
+completion signal. The lifespan shutdown drains it too, bounded at five
+seconds before the auth-audit drain, because a stopping process could
+otherwise drop a reset link mid-send. Any work still running at the deadline
+is cancelled and logged with a count.
+
+Rejected: loading the org with the user in one join. That keeps the query
+count equal, but the mint and the audit write would still be awaited only for
+a match. Padding the unknown branch with dummy work was also rejected: it
+tracks Redis and tenant-DB latency only roughly, so it masks the leak rather
+than removing it.
+
+A workspace closure also forgets its suppliers' set-password links now.
+`credential_cleanup.forget_portal_links(slug)` deletes every `portal:pwreset:`
+token whose stored value is bound to the slug, plus the generation counter of
+each supplier those tokens name. The closure already requires every portal
+account to be deleted, so these are links that outlived their rows. A counter
+is keyed by the supplier id alone, so only a link ties it to a tenant. A
+counter with no remaining link is left to its own TTL: it is a number under a
+random id whose row is gone. Re-keying the counters by slug was rejected. A
+counter that reads as `0` under a new key would revive any link superseded at
+generation 0.
+
+The test TOTP secrets were 16 base32 characters, which is 80 bits. pyotp 2.12
+refuses anything under 112 bits, and the lock pins 2.10, so the tests passed
+in CI and failed in any fresh venv. Wherever `verify_totp` swallowed the
+error, a refusal test passed for the wrong reason. Every such literal is now
+32 characters (160 bits, pyotp's `random_base32` default). The followup
+suggested 16 characters, which would not have been enough.
