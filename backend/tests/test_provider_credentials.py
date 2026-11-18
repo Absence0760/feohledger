@@ -1024,3 +1024,153 @@ async def test_migration_0135_kms_error_rolls_back_leaving_plaintext_in_place(re
 
     assert (await _org(realdb)).settings == legacy
     assert await _rows(realdb) == []
+
+
+# ---------- payments / cards: a provider switch drops the stranded key ---------
+
+
+@pytest.mark.parametrize(
+    ("block", "before", "after", "drop"),
+    [
+        # same provider, same environment (sandbox spelled or defaulted) → keep
+        ("payments", {"provider": "column"}, {"provider": "column", "sandbox": True}, set()),
+        ("cards", {"provider": "lithic"}, {"provider": " lithic ", "sandbox": False}, set()),
+        # another provider, another environment, or the block cleared → drop
+        ("payments", {"provider": "column"}, {"provider": "increase"}, {"top"}),
+        ("payments", {"provider": "column"}, {"provider": "column", "sandbox": False}, {"top"}),
+        ("cards", {"provider": "lithic"}, {"provider": "nium"}, {"top"}),
+        ("cards", {"provider": "lithic"}, None, {"top"}),
+        # no card provider: the region picks the issuer, so it is the identity
+        ("cards", {"region": "US"}, {"region": "ZA"}, {"top"}),
+        (
+            "cards",
+            {"provider": "nium", "region": "US"},
+            {"provider": "nium", "region": "ZA"},
+            set(),
+        ),
+        # a multi-route entry: keyed by its provider already; goes when removed
+        # or when its own environment changes
+        (
+            "payments",
+            {"provider": "column", "providers": [{"provider": "wise"}, {"provider": "dwolla"}]},
+            {"provider": "column", "providers": [{"provider": "dwolla"}]},
+            {"wise"},
+        ),
+        (
+            "payments",
+            {"provider": "column", "providers": [{"provider": "dwolla"}]},
+            {"provider": "column", "providers": [{"provider": "dwolla", "sandbox": False}]},
+            {"dwolla"},
+        ),
+    ],
+)
+def test_rail_secrets_follow_the_provider_and_environment(block, before, after, drop):
+    fields = provider_credentials.SECRET_FIELDS[block]
+    expected: set[str] = set()
+    for what in drop:
+        if what == "top":
+            expected |= fields
+        else:
+            expected |= {f"providers.{what}.{f}" for f in fields}
+    assert provider_credentials.rail_secrets_to_drop(block, before, after) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("block", "before", "switched"),
+    [
+        ("payments", {"provider": "column"}, {"provider": "increase"}),
+        ("cards", {"provider": "lithic"}, {"provider": "nium"}),
+    ],
+)
+async def test_patch_drops_a_rail_key_when_the_provider_changes(realdb, block, before, switched):
+    """Re-saving the same provider keeps the sealed key; switching provider
+    drops it (audited, in the save's transaction) so the new provider's host
+    never receives the old provider's secret."""
+    await _set_settings(realdb, {block: before})
+    await realdb.store_provider_secrets("a", block, {"api_key": SECRET})
+    async with realdb.client(key="a", role="admin") as c:
+        same = await c.patch(
+            "/api/organization", json={"settings": {block: {**before, "api_key": ""}}}
+        )
+        assert same.status_code == 200, same.text
+        org = await _org(realdb)
+        assert (await provider_credentials.provider_config(org, block))["api_key"] == SECRET
+
+        resp = await c.patch("/api/organization", json={"settings": {block: switched}})
+        assert resp.status_code == 200, resp.text
+        assert SECRET not in resp.text
+    org = await _org(realdb)
+    assert "api_key" not in await provider_credentials.provider_config(org, block)
+    assert await _rows(realdb) == []
+    drops = [
+        a.details
+        for a in await _audit(realdb, "organization.credentials_updated")
+        if a.details.get("reason") == f"{block}_provider_changed"
+    ]
+    assert drops == [
+        {
+            "block": block,
+            "changed": ["api_key"],
+            "cleared": ["api_key"],
+            "reason": f"{block}_provider_changed",
+        }
+    ]
+
+
+# ---------- recovery: clearing a block that can no longer be opened -----------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["ap_manager", "ap_clerk", "cfo"])
+async def test_only_admins_reset_a_block(realdb, role):
+    await realdb.store_provider_secrets("a", "payments", {"api_key": SECRET})
+    async with realdb.client(key="a", role=role) as c:
+        assert (await c.delete(f"{URL}/payments")).status_code == 403
+    assert len(await _rows(realdb)) == 1
+
+
+@pytest.mark.asyncio
+async def test_reset_clears_an_unopenable_block_without_opening_it(realdb, monkeypatch):
+    """A row that cannot be opened makes every PUT a 503 (the writer merges into
+    it); DELETE removes it without opening, audited by path name."""
+    await realdb.store_provider_secrets("a", "payments", {"api_key": SECRET, "webhook_secret": "w"})
+    await realdb.store_provider_secrets("a", "cards", {"api_key": SECRET_2})
+
+    async def _unopenable(envelope, context):
+        raise CredentialCryptoError("KMS Decrypt failed (DisabledException).")
+
+    monkeypatch.setattr(credential_crypto, "open_envelope", _unopenable)
+    async with realdb.client(key="a", role="admin") as c:
+        stuck = await c.put(f"{URL}/payments", json={"set": {"api_key": SECRET_2}})
+        assert stuck.status_code == 503
+        reset = await c.delete(f"{URL}/payments")
+        assert reset.status_code == 200, reset.text
+        assert reset.json()["payments"] == [] and reset.json()["cards"] == ["api_key"]
+        again = await c.delete(f"{URL}/payments")  # nothing stored → no-op
+        assert again.status_code == 200
+        unknown = await c.delete(f"{URL}/sso")
+        assert unknown.status_code == 404
+    assert [r.block for r in await _rows(realdb)] == ["cards"]
+    (audit,) = await _audit(realdb, "organization.credentials_updated")
+    assert audit.details == {
+        "block": "payments",
+        "changed": ["api_key", "webhook_secret"],
+        "cleared": ["api_key", "webhook_secret"],
+        "reason": "reset_without_opening",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_reset_that_cannot_be_audited_removes_nothing(realdb, monkeypatch):
+    from app.services import audit_dispatch
+
+    async def _fail(**_kwargs):
+        raise ConnectionError("audit store down")
+
+    await realdb.store_provider_secrets("a", "erp", {"api_key": SECRET})
+    monkeypatch.setattr(audit_dispatch, "_write_auth_audit", _fail)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.delete(f"{URL}/erp")
+    assert resp.status_code == 503
+    assert len(await _rows(realdb)) == 1

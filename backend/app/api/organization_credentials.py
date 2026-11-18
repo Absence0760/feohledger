@@ -11,6 +11,9 @@ way to set or remove one, and no endpoint returns one:
 * `GET  /api/organization/credentials` — which secret paths are set, per block.
 * `PUT  /api/organization/credentials/{block}` — `{"set": {path: value},
   "clear": [path]}`. A blank value keeps what is stored.
+* `DELETE /api/organization/credentials/{block}` — remove every stored secret
+  of the block without opening it: the recovery when the sealed value can no
+  longer be opened and so every `PUT` of the block answers 503.
 
 `PATCH /api/organization` refuses a non-blank secret in these blocks and names
 this endpoint, the arrangement `PUT /api/organization/sso` has for the OIDC
@@ -36,6 +39,7 @@ from app.services.provider_credentials import (
     CREDENTIAL_BLOCKS,
     CredentialPathError,
     credential_status,
+    reset_block,
     update_secrets,
     validate_update,
 )
@@ -173,6 +177,61 @@ async def update_provider_credentials(
             status_code=503,
             detail="The credential store is unavailable, so nothing was saved.",
         ) from None
+    except HTTPException:
+        await db.rollback()
+        raise
+    await db.commit()
+    return ProviderCredentialStatus(**await credential_status(db, locked.id))
+
+
+@router.delete("/{block}", response_model=ProviderCredentialStatus)
+async def reset_provider_credentials(
+    block: str,
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+    db: AsyncSession = Depends(get_control_db),
+):
+    """Remove every stored secret of one block, WITHOUT opening it. Admin only.
+
+    The recovery for a sealed row that can no longer be opened — its KMS key
+    disabled, or in dev a changed `FEOH_SECRET_KEY`: `PUT` merges into the
+    stored value, so it has to open it, and answers 503 for as long as it
+    cannot. This replaces the row without reading it, so it works then too;
+    the admin then types each key again. It also removes an ERP's OAuth tokens
+    (sealed in the same row), which leaves that connection needing a reconnect.
+
+    Audited first as `organization.credentials_updated` with the cleared path
+    NAMES (read from the row's `secret_fields`, never a value) and
+    `reason: "reset_without_opening"`; a row that cannot be written is a 503
+    with nothing removed. Nothing stored → nothing recorded, nothing written.
+    """
+    if block not in CREDENTIAL_BLOCKS:
+        raise HTTPException(status_code=404, detail="Unknown credential block")
+    locked = await lock_organization(db, org)
+
+    async def _audit_first(cleared: list[str]) -> None:
+        try:
+            await record_auth_audit_or_raise(
+                organization_id=locked.id,
+                actor_id=user.id,
+                action="organization.credentials_updated",
+                entity_type="organization",
+                entity_id=locked.id,
+                details={
+                    "block": block,
+                    "changed": cleared,
+                    "cleared": cleared,
+                    "reason": "reset_without_opening",
+                },
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail="The change could not be recorded in the audit trail, so it was not saved.",
+            ) from None
+
+    try:
+        await reset_block(db, locked.id, block, before_write=_audit_first)
     except HTTPException:
         await db.rollback()
         raise

@@ -433,6 +433,63 @@ def extraction_secrets_to_drop(before: object, after: object) -> bool:
     return _extraction_provider(before) != _extraction_provider(after)
 
 
+# Where a payment-rail or card-issuer secret is SENT: the provider, and the
+# sandbox flag that picks the host (`payment_adapters/{column,increase,dwolla,
+# checkeeper}.py`, `card_adapters/{lithic,nium}.py`), read with the default the
+# adapters apply when it is absent. A card block with no provider resolves
+# through its region (`card_adapters/dispatcher.get_card_adapter`), so the region
+# is part of the identity only then.
+_RAIL_SANDBOX_DEFAULT: dict[str, bool] = {"payments": True, "cards": False}
+
+
+def _rail_identity(block: str, cfg: object) -> tuple[str | None, str | None, bool]:
+    cfg = cfg if isinstance(cfg, Mapping) else {}
+    provider = _extraction_provider(cfg)
+    region = None
+    if block == "cards" and provider is None:
+        raw_region = cfg.get("region")
+        region = (raw_region.strip() if isinstance(raw_region, str) else "") or "US"
+    return provider, region, bool(cfg.get("sandbox", _RAIL_SANDBOX_DEFAULT[block]))
+
+
+def rail_secrets_to_drop(block: str, before: object, after: object) -> frozenset[str]:
+    """The sealed paths a save of ``settings.payments`` / ``settings.cards`` strands.
+
+    A key is typed for one provider in one environment. The block's own
+    secrets (``api_key``, ``client_secret``, the webhook key) go when the save
+    changes the provider or its sandbox flag (for cards with no provider, the
+    region that picks one) — kept, the next call would send them to the new
+    provider's host. A multi-route entry's secrets
+    (``providers.<provider>.<field>``) are already keyed by its provider, so
+    they go when that entry is removed or its own sandbox flag changes.
+    `PATCH /api/organization` clears the returned paths that are actually
+    stored, in the save's transaction, audited (decisions §271's shape for the
+    ERP block). Pure: no I/O.
+    """
+    if block not in _RAIL_SANDBOX_DEFAULT:
+        raise CredentialPathError(f"{block} is not a payment or card block.")
+    fields = SECRET_FIELDS[block]
+    drop: set[str] = set()
+    if _rail_identity(block, before) != _rail_identity(block, after):
+        drop |= fields
+    list_key = _PROVIDER_LISTS.get(block)
+    if list_key:
+
+        def _entries(cfg: object) -> dict[str, Mapping]:
+            raw = cfg.get(list_key) if isinstance(cfg, Mapping) else None
+            out: dict[str, Mapping] = {}
+            for entry in raw if isinstance(raw, list) else []:
+                if isinstance(entry, Mapping) and entry.get("provider"):
+                    out.setdefault(str(entry["provider"]), entry)
+            return out
+
+        old, new = _entries(before), _entries(after)
+        for name, entry in old.items():
+            if name not in new or _rail_identity(block, entry) != _rail_identity(block, new[name]):
+                drop |= {f"{list_key}.{name}.{f}" for f in fields}
+    return frozenset(drop)
+
+
 async def byok_extraction_config(
     org_id: uuid.UUID, settings: Mapping | None, *, db: AsyncSession | None = None
 ) -> dict | None:
@@ -506,6 +563,36 @@ async def credential_status(db: AsyncSession, org_id: uuid.UUID) -> dict[str, li
 # ── the writer ───────────────────────────────────────────────────────────────
 
 
+async def reset_block(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    block: str,
+    *,
+    before_write: Callable[[list[str]], Awaitable[None]],
+) -> list[str]:
+    """Remove every sealed secret of ``block`` WITHOUT opening the row.
+
+    The recovery for a row that can no longer be opened (its KMS key disabled,
+    or in dev a changed `FEOH_SECRET_KEY`): :func:`update_secrets` opens the
+    row to merge into it, so every save of such a block fails. This deletes the
+    row instead, naming what was stored from ``secret_fields`` (names, never
+    values) — service-only paths included, so an ERP OAuth connection reads
+    as "reconnect". ``before_write`` (the audit row) runs before the delete and
+    aborts it by raising. Returns ``[]``, without calling ``before_write``,
+    when nothing is stored. Never commits; the caller holds the org row lock.
+    """
+    if block not in SECRET_FIELDS:
+        raise CredentialPathError(f"{block} has no stored credentials.")
+    row = await _row(db, org_id, block, for_update=True)
+    if row is None:
+        return []
+    names = sorted(row.secret_fields or [])
+    await before_write(names)
+    await db.execute(delete(ProviderCredential).where(ProviderCredential.id == row.id))
+    await db.flush()
+    return names
+
+
 def validate_update(
     block: str, set_values: Mapping[str, object], clear: Iterable[str]
 ) -> tuple[dict[str, str], set[str]]:
@@ -555,8 +642,9 @@ async def update_secrets(
     caller takes that lock first, so one holding it may read the current values
     (:func:`load_secrets`) and decide on them — the ERP token refresher's
     compare-and-swap does. The callers: the audited endpoint,
-    `PATCH /api/organization` dropping an ERP's (or a BYOK extraction
-    provider's) secrets when the save points them somewhere new,
+    `PATCH /api/organization` dropping an ERP's, a payment rail's, a card
+    issuer's or a BYOK extraction provider's secrets when the save points them
+    somewhere new,
     `PUT /api/organization/sso` (the OIDC client secret, which audits after
     this returns and rolls the write back if it cannot), and
     `services/erp_oauth` (consent, refresh, disconnect) — the only writer of
