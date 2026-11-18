@@ -5344,6 +5344,7 @@ export const messages = {
 	'refusal.cardSkipVendorUnscreenable': "Esta fatura não tem cadastro de fornecedor para verificar, por isso nenhum cartão pode ser emitido.",
 	'refusal.cardSkipComplianceHold': "A verificação de conformidade não liberou o fornecedor para pagamento.",
 	'refusal.cardSkipErpBill': "O ERP não conseguiu confirmar que esta fatura continua em aberto e não paga, por isso nenhum cartão foi emitido.",
+	'refusal.cardSkipCurrencyUnknown': "A fatura não registra nenhuma moeda; defina a moeda antes de emitir um cartão.",
 	'refusal.cardSkipIssueFailed': "O provedor de cartões não emitiu nenhum cartão.",
 	'refusal.cardsNotEnabled': "Os cartões virtuais não estão ativados. Ative-os nas configurações da organização.",
 	'refusal.statusSyncOff': "A sincronização do status de pagamento está desativada neste servidor, então os pagamentos feitos no ERP não são verificados daqui.",

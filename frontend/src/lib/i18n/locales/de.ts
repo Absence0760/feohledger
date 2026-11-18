@@ -5351,6 +5351,7 @@ export const messages = {
 	'refusal.cardSkipVendorUnscreenable': "Diese Rechnung hat keinen prüfbaren Lieferantendatensatz, daher kann keine Karte ausgegeben werden.",
 	'refusal.cardSkipComplianceHold': "Die Compliance-Prüfung hat den Lieferanten nicht für Zahlungen freigegeben.",
 	'refusal.cardSkipErpBill': "Das ERP konnte nicht bestätigen, dass diese Rechnung noch offen und unbezahlt ist, daher wurde keine Karte ausgegeben.",
+	'refusal.cardSkipCurrencyUnknown': "Für die Rechnung ist keine Währung erfasst; legen Sie die Währung fest, bevor Sie eine Karte ausgeben.",
 	'refusal.cardSkipIssueFailed': "Der Kartenanbieter hat keine Karte ausgegeben.",
 	'refusal.cardsNotEnabled': "Virtuelle Karten sind nicht aktiviert. Aktivieren Sie sie in den Organisationseinstellungen.",
 	'refusal.statusSyncOff': "Die Synchronisierung des Zahlungsstatus ist auf diesem Server ausgeschaltet, daher werden im ERP erfasste Zahlungen von hier aus nicht geprüft.",

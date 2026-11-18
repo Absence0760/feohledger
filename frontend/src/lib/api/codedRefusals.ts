@@ -966,6 +966,7 @@ const BUILDERS: Record<string, Builder> = {
 	card_skip_vendor_unscreenable: fixed('refusal.cardSkipVendorUnscreenable'),
 	card_skip_compliance_hold: fixed('refusal.cardSkipComplianceHold'),
 	card_skip_erp_bill: fixed('refusal.cardSkipErpBill'),
+	card_skip_currency_unknown: fixed('refusal.cardSkipCurrencyUnknown'),
 	card_skip_issue_failed: fixed('refusal.cardSkipIssueFailed'),
 	// The whole `/cards/generate` call, on a tenant whose programme is off.
 	cards_not_enabled: fixed('refusal.cardsNotEnabled'),

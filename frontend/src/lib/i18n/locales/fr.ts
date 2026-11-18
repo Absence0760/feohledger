@@ -5350,6 +5350,7 @@ export const messages = {
 	'refusal.cardSkipVendorUnscreenable': "Cette facture n’a aucune fiche fournisseur à contrôler ; aucune carte ne peut être émise.",
 	'refusal.cardSkipComplianceHold': "Le contrôle de conformité n’a pas autorisé le paiement du fournisseur.",
 	'refusal.cardSkipErpBill': "L’ERP n’a pas pu confirmer que cette facture est toujours ouverte et impayée ; aucune carte n’a été émise.",
+	'refusal.cardSkipCurrencyUnknown': "La facture n’indique aucune devise ; définissez sa devise avant d’émettre une carte.",
 	'refusal.cardSkipIssueFailed': "Le fournisseur de cartes n’a pas émis de carte.",
 	'refusal.cardsNotEnabled': "Les cartes virtuelles ne sont pas activées. Activez-les dans les paramètres de l’organisation.",
 	'refusal.statusSyncOff': "La synchronisation de l’état des paiements est désactivée sur ce serveur : les paiements saisis dans l’ERP ne sont donc pas vérifiés d’ici.",

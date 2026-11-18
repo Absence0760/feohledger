@@ -5259,6 +5259,7 @@ export const messages = {
 	'refusal.cardSkipVendorUnscreenable': "この請求書には審査できる仕入先レコードがないため、カードを発行できません。",
 	'refusal.cardSkipComplianceHold': "コンプライアンス審査で仕入先への支払いが承認されませんでした。",
 	'refusal.cardSkipErpBill': "ERP でこの請求書が未払いのままであることを確認できなかったため、カードは発行されませんでした。",
+	'refusal.cardSkipCurrencyUnknown': "請求書に通貨が記録されていません。カードを発行する前に通貨を設定してください。",
 	'refusal.cardSkipIssueFailed': "カード会社がカードを発行しませんでした。",
 	'refusal.cardsNotEnabled': "バーチャルカードが有効になっていません。組織設定で有効にしてください。",
 	'refusal.statusSyncOff': "このサーバーでは支払いステータスの同期がオフになっているため、ERPで行われた支払いはここから確認されません。",
