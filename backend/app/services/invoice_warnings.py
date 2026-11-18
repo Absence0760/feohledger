@@ -94,8 +94,9 @@ DEFAULT_FRAUD_RULES: dict = {
 
 
 # Warning categories appended directly onto `invoice.warnings` by callers
-# OTHER than this module — currently all in `services/extraction.py`, before
-# it calls `refresh_warnings` as the last step of `run_extraction`.
+# OTHER than this module — `services/extraction.py`, before it calls
+# `refresh_warnings` as the last step of `run_extraction`, and
+# `services/recurring_invoices.generate_one` (`gl_account_invalid`).
 # `refresh_warnings` rebuilds every category IT owns from scratch on every
 # call (that's the point — a fully fresh re-derivation), but it must not
 # blind-overwrite `invoice.warnings` and silently drop these, since it never

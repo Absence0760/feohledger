@@ -3503,7 +3503,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String invoiceWarningGlCodesNotInChart(String codes) {
-    return 'Cuentas contables sugeridas por la IA que no están en el plan activo: $codes';
+    return 'Cuentas contables que no están en el plan de cuentas activo, sin imputar: $codes';
   }
 
   @override

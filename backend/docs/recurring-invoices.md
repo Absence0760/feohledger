@@ -28,7 +28,7 @@ tenant-scoped + `EntityMixin` + `TimestampMixin`). Money is exact: `amount` is
 | `description` | varchar(500) | |
 | `amount` | numeric(15,2) | Fixed amount stamped onto each generated invoice. Required to generate. |
 | `currency` | varchar(3) | Default `USD`. |
-| `gl_account` / `cost_center` / `department` / `project` / `po_number` / `payment_terms` | varchar | Pre-coding carried onto every generated invoice. A `gl_account` is refused (422) on create and on a PATCH that changes it when it belongs only to another entity's chart, or — whenever the template entity's effective active chart has any account — when it is not an active account of it (retired or unknown): every generated invoice lands under the template's `entity_id` and carries this code (`services/gl_chart.py`, `docs/decisions.md` §194/§199). A PATCH that re-sends the stored code unchanged is not judged, so a template whose account is retired later stays editable — and keeps stamping that code on what it generates until someone re-codes it (`docs/followups.md`). The `/recurring` form offers this field as a picker over the template entity's chart (the template's own `entity_id` on edit, the entity a create lands under on create), free text only while that chart is empty — so it cannot invite a code the save would refuse. |
+| `gl_account` / `cost_center` / `department` / `project` / `po_number` / `payment_terms` | varchar | Pre-coding carried onto every generated invoice. A `gl_account` is refused (422) on create and on a PATCH that changes it when it belongs only to another entity's chart, or — whenever the template entity's effective active chart has any account — when it is not an active account of it (retired or unknown): every generated invoice lands under the template's `entity_id` and carries this code (`services/gl_chart.py`, `docs/decisions.md` §194/§199). A PATCH that re-sends the stored code unchanged is not judged, so a template whose account is retired later stays editable — and generation re-judges the code every period, raising the invoice uncoded with a warning while the chart refuses it (§ A GL code the chart has since dropped is not stamped). The `/recurring` form offers this field as a picker over the template entity's chart (the template's own `entity_id` on edit, the entity a create lands under on create), free text only while that chart is empty — so it cannot invite a code the save would refuse. |
 | `cadence` | enum | `monthly` (default), `quarterly`, `annual` — how often the template generates. |
 | `day_of_period` | integer | Day-of-month (1–28) the invoice is dated/generated on. Capped at 28 so every month is valid (no Feb-30 clamp guesswork). |
 | `start_date` | date | Required. First period the template is eligible for. |
@@ -350,6 +350,40 @@ Disabled by default. Env vars:
 | `FEOH_RECURRING_INVOICES_INTERVAL_SECONDS` | `3600` | Sweep interval. |
 | `FEOH_RECURRING_INVOICES_MAX_PER_SWEEP` | `200` | Per-tick cap on invoices generated per tenant (backlog guard). |
 
+### A GL code the chart has since dropped is not stamped
+
+§199 refuses a retired, unknown or another entity's code when a template is
+written, but the chart moves on afterwards: an account retired a year after
+the template was authored would otherwise be coded onto every invoice the
+template raises, which then reach approval and the ERP push carrying a code the
+tenant's chart no longer offers. So `generate_one` — the one primitive behind
+both `generate-now` and the sweep — judges `template.gl_account` again on every
+generation (`_gl_code_for_generation`), through `services/gl_chart.load_invoice_chart`
+against the template's own `entity_id` (shared ∪ that entity's accounts), the
+same rule a manual write meets.
+
+When the chart refuses the code, the invoice is **raised uncoded**
+(`gl_account = NULL`) carrying the `gl_codes_not_in_chart` warning
+(`type: gl_account_invalid`, `params.codes` = the template's code) — the warning
+extraction raises when it drops an automated code for the same reason, and one
+`refresh_warnings` preserves (`UPSTREAM_WARNING_TYPES`). The reviewer picks an
+active account before approving. The `invoice.created` audit row records the
+dropped code as `details.gl_account_not_in_chart`. Generation itself is never
+refused over the code: the sweep has no human to ask, and a missed rent invoice
+is the worse failure. An empty active chart keeps today's behaviour (nothing to
+hold a code to), exactly as on a manual write.
+
+The template **keeps** its code — silently rewriting a standing instruction is
+the operator's call, not the sweep's. Every template response carries
+`gl_account_off_chart` (true while the code is one the chart would refuse),
+`GET /recurring` and `GET /recurring/summary` take a `gl_off_chart=true` filter,
+and the summary counts the matching set (`gl_off_chart`), so the page can badge
+each such template and filter to all of them at once. The list reads the flag
+with `gl_chart.gl_code_off_chart`, a correlated-SQL twin of
+`InvoiceChart.judge` (one query for a whole page, and a filter the database can
+apply before pagination); `tests/test_gl_code_entity_chart.py` pins the two to
+the same verdict matrix.
+
 ## Variance signal
 
 A recurring template promises a fixed amount, but the *arriving* bill from the
@@ -367,8 +401,8 @@ Mounted at `/api/recurring`.
 
 | Method + path | Purpose | RBAC |
 |---------------|---------|------|
-| `GET /recurring` | List (filters: `status`, `vendor_id`, `search`; paginated `page`) | read |
-| `GET /recurring/summary` | Whole-set KPI rollup — `by_status` counts, per-currency **monthly-equivalent** spend (cadence normalised in exact Postgres numeric `amount`/{1,3,12}, the exact quotients summed per currency, and the SUM quantised once to `ROUND_HALF_UP` 2dp — not rounded per template, which would drop up to half a cent a row: three 100.00 annual templates are 25.00 a month, not 3 x 8.33 = 24.99. The frontend used to divide floats), and the soonest upcoming `next_run_on` across active templates. Shares `_recurring_list_filters` with the list. Groups are ordered by currency code, and each page headlines the first one with the rest on a sub-line — so which currency headlines is alphabetical, never largest-total. | read |
+| `GET /recurring` | List (filters: `status`, `vendor_id`, `search`, `gl_off_chart`; paginated `page`) | read |
+| `GET /recurring/summary` | Whole-set KPI rollup — `by_status` counts, per-currency **monthly-equivalent** spend (cadence normalised in exact Postgres numeric `amount`/{1,3,12}, the exact quotients summed per currency, and the SUM quantised once to `ROUND_HALF_UP` 2dp — not rounded per template, which would drop up to half a cent a row: three 100.00 annual templates are 25.00 a month, not 3 x 8.33 = 24.99. The frontend used to divide floats), the soonest upcoming `next_run_on` across active templates, and `gl_off_chart` — how many templates in the set carry a GL code the chart no longer accepts. Shares `_recurring_list_filters` with the list. Groups are ordered by currency code, and each page headlines the first one with the rest on a sub-line — so which currency headlines is alphabetical, never largest-total. | read |
 | `POST /recurring` | Create a template | mutate |
 | `GET /recurring/{id}` | Detail | read |
 | `PATCH /recurring/{id}` | Update (status excluded — the lifecycle endpoints own it) | mutate |
@@ -383,7 +417,8 @@ Mounted at `/api/recurring`.
 Every template response carries `last_skip` — `null` normally, otherwise the
 sweep's persisted `{reason, period_key, consecutive, last_skipped_at}` marker
 for the last due period it could not generate. See § A skipped period is never
-silent.
+silent. It also carries `gl_account_off_chart` — see § A GL code the chart has
+since dropped is not stamped.
 
 ### RBAC
 
@@ -419,7 +454,7 @@ a `<Modal>`, status `FilterChips` (`active` / `paused` / `ended`), a KPI row
 (active templates, monthly committed, generated this period, next run), and — in
 the detail modal — an **upcoming-schedule preview** (from
 `GET /{id}/upcoming-schedule`) and the **generated-invoice history** (from
-`GET /{id}/history`). Read roles see the page; mutate actions are gated to
+`GET /{id}/history`). A template whose GL code the chart no longer accepts carries a "Needs GL re-coding" badge, and a second chip group (shown while any exist, URL `?gl=off_chart`) filters the whole set to them. Read roles see the page; mutate actions are gated to
 admin / ap_manager (`auth.isManager`). See `frontend/CLAUDE.md`.
 
 ## Migration
@@ -456,6 +491,12 @@ seeded tenant. Additive + skip-if-exists, like the rest of `seed_extras`.
   and confirm the generated invoice appears in the history (or the invoice
   queue). Selectors are by accessible name / aria-label / `data-testid` — no
   brittle CSS, no arbitrary sleeps.
+- `frontend/tests-e2e/recurring/gl-off-chart.spec.ts` — the "Needs GL re-coding"
+  badge and the `gl_off_chart` filter chip (stubbed responses).
+- `backend/tests/test_gl_code_entity_chart.py` § generation — a template coded
+  to a since-retired account generates uncoded with the warning (`generate-now`
+  and the sweep), a valid code is stamped unchanged, the list flag / filter /
+  summary count, and `gl_code_off_chart` agreeing with `InvoiceChart.judge`.
 - Backend `pytest` covers the model, the schemas, the router (CRUD + lifecycle +
   the `409`-once-generated delete guard), the period_key derivation, and the
   idempotency invariant (a double generate for one period creates exactly one

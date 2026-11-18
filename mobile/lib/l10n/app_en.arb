@@ -2581,7 +2581,7 @@
       }
     }
   },
-  "invoiceWarningGlCodesNotInChart": "AI suggested GL code(s) not in active chart: {codes}",
+  "invoiceWarningGlCodesNotInChart": "GL code(s) not in the active chart of accounts, left uncoded: {codes}",
   "@invoiceWarningGlCodesNotInChart": {
     "placeholders": {
       "codes": {

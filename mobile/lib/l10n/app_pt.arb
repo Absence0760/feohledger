@@ -1028,7 +1028,7 @@
   "invoiceWarningSelfCorrectionCurrencyConflict": "Os valores estão impressos em {printedCurrency}, mas a moeda da nota indica {fieldCurrency}. Os valores ficaram em branco — preencha-os a partir do documento.",
   "invoiceWarningSelfCorrectionCurrencyMixed": "Os valores estão impressos em mais de uma moeda ({printedCurrencies}). Os valores ficaram em branco — preencha-os a partir do documento.",
   "invoiceWarningSelfCorrectionLineItemMath": "Item {lineNumber}: {quantity} × {unitPrice} = {expected}, mas o total é {total}.",
-  "invoiceWarningGlCodesNotInChart": "Contas contábeis sugeridas pela IA que não estão no plano ativo: {codes}",
+  "invoiceWarningGlCodesNotInChart": "Contas contábeis fora do plano de contas ativo, não atribuídas: {codes}",
   "invoiceWarningGlCodeStalePrior": "A conta contábil “{code}” em cache para o fornecedor não está mais no plano de contas ativo.",
   "invoicePoMatchIssuePoNotFound": "Pedido {poNumber} não encontrado",
   "invoicePoMatchIssueCurrencyMismatch": "Divergência de moeda: nota em {invoiceCurrency}, pedido em {poCurrency} — valores não comparados",

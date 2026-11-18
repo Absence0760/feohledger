@@ -29,6 +29,13 @@ reconciliation payload, `duplicate_similar` a `related_invoices` array,
 `check` name). Those are machine fields the UI reads structurally; they are
 unaffected by the catalogue.
 
+`gl_codes_not_in_chart` has two writers, both of which drop a code the
+invoice's chart refuses rather than store it: extraction (an AI-suggested code)
+and recurring generation (a template's code whose account was retired or moved
+after the template was written — `backend/docs/recurring-invoices.md`). Its
+sentence therefore names no source ("GL code(s) not in the active chart of
+accounts, left uncoded").
+
 ## One code per SENTENCE, not per type
 
 `po_mismatch` is seven different sentences (no PO, an amount variance, an amount

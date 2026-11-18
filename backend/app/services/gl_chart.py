@@ -42,7 +42,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import ColumnElement, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gl_account import GLAccount
@@ -314,6 +314,51 @@ async def load_invoice_chart(
     else:
         has_active = False
     return InvoiceChart(ownership=ownership, entity_id=entity_id, has_active_accounts=has_active)
+
+
+def gl_code_off_chart(
+    code: ColumnElement,
+    entity_id: ColumnElement,
+    organization_id: ColumnElement,
+) -> ColumnElement[bool]:
+    """SQL twin of "``InvoiceChart.judge([code])`` would refuse it" for a row
+    that STORES a GL code — true when the row's code, judged against the chart
+    of the row's own entity today, is another entity's (§194) or, while that
+    chart has any active account, not an active account of it (§199).
+
+    For a reader that has to ask the question of many stored rows at once — a
+    filter or a flag over a whole list, where one :func:`load_invoice_chart`
+    per row would be a query per row. The three arguments are the row's own
+    columns, so the subqueries correlate to it. A blank / NULL code is never
+    off the chart, exactly as :meth:`InvoiceChart.judge` skips one.
+    ``tests/test_gl_code_entity_chart.py`` pins this against ``judge`` over the
+    same verdict matrix, so the two cannot drift.
+    """
+    base = GLAccount.organization_id == organization_id
+    # `entity_id = NULL` is NULL, so a NULL-entity row sees the shared chart
+    # alone — `ChartOwnership.in_own_chart`'s rule.
+    own = or_(GLAccount.entity_id.is_(None), GLAccount.entity_id == entity_id)
+    same_code = GLAccount.code == code
+    active = GLAccount.is_active.is_(True)
+    in_own_active = select(GLAccount.id).where(base, own, same_code, active).exists()
+    in_own_any = select(GLAccount.id).where(base, own, same_code).exists()
+    elsewhere = (
+        select(GLAccount.id)
+        .where(
+            base,
+            same_code,
+            GLAccount.entity_id.is_not(None),
+            GLAccount.entity_id.is_distinct_from(entity_id),
+        )
+        .exists()
+    )
+    chart_has_active = select(GLAccount.id).where(base, own, active).exists()
+    return and_(
+        code.is_not(None),
+        code != "",
+        ~in_own_active,
+        or_(chart_has_active, and_(~in_own_any, elsewhere)),
+    )
 
 
 async def refuse_gl_codes_outside_chart(

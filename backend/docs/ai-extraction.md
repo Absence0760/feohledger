@@ -470,7 +470,7 @@ Even with the chart pinned in the prompt, the model can still hallucinate a plau
 {
   "type": "gl_account_invalid",
   "severity": "warning",
-  "message": "AI suggested GL code(s) not in active chart: 9999",
+  "message": "GL code(s) not in the active chart of accounts, left uncoded: 9999",
   "codes": ["9999"]
 }
 ```

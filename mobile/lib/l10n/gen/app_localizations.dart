@@ -5233,7 +5233,7 @@ abstract class AppLocalizations {
   /// No description provided for @invoiceWarningGlCodesNotInChart.
   ///
   /// In en, this message translates to:
-  /// **'AI suggested GL code(s) not in active chart: {codes}'**
+  /// **'GL code(s) not in the active chart of accounts, left uncoded: {codes}'**
   String invoiceWarningGlCodesNotInChart(String codes);
 
   /// No description provided for @invoiceWarningGlCodeStalePrior.

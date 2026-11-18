@@ -15,6 +15,8 @@ export interface RecurringListParams {
 	status?: string;
 	vendor_id?: string;
 	search?: string;
+	/** Only templates whose GL code the chart no longer accepts. */
+	gl_off_chart?: boolean;
 	page?: number;
 	page_size?: number;
 }
@@ -24,6 +26,7 @@ export function listRecurring(params: RecurringListParams = {}): Promise<Recurri
 	if (params.status) qs.set('status', params.status);
 	if (params.vendor_id) qs.set('vendor_id', params.vendor_id);
 	if (params.search) qs.set('search', params.search);
+	if (params.gl_off_chart) qs.set('gl_off_chart', 'true');
 	qs.set('page', String(params.page ?? 1));
 	qs.set('page_size', String(params.page_size ?? 20));
 	return api.get<RecurringListResponse>(`/api/recurring?${qs}`);
@@ -34,12 +37,13 @@ export function listRecurring(params: RecurringListParams = {}): Promise<Recurri
 // `listRecurring`. The page's `activeCount` / `soonestNextRun` /
 // `monthlyRecurringTotal` all derived from the loaded page (and divided floats).
 export function getRecurringSummary(
-	params: Pick<RecurringListParams, 'status' | 'vendor_id' | 'search'> = {}
+	params: Pick<RecurringListParams, 'status' | 'vendor_id' | 'search' | 'gl_off_chart'> = {}
 ): Promise<RecurringTemplateSummary> {
 	const qs = new URLSearchParams();
 	if (params.status) qs.set('status', params.status);
 	if (params.vendor_id) qs.set('vendor_id', params.vendor_id);
 	if (params.search) qs.set('search', params.search);
+	if (params.gl_off_chart) qs.set('gl_off_chart', 'true');
 	const suffix = qs.toString() ? `?${qs}` : '';
 	return api.get<RecurringTemplateSummary>(`/api/recurring/summary${suffix}`);
 }

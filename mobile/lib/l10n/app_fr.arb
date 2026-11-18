@@ -862,7 +862,7 @@
   "invoiceWarningSelfCorrectionCurrencyConflict": "Les montants sont libellés en {printedCurrency}, mais la devise de la facture indique {fieldCurrency}. Les montants ont été laissés vides — saisissez-les depuis le document.",
   "invoiceWarningSelfCorrectionCurrencyMixed": "Les montants sont libellés dans plusieurs devises ({printedCurrencies}). Les montants ont été laissés vides — saisissez-les depuis le document.",
   "invoiceWarningSelfCorrectionLineItemMath": "Ligne {lineNumber} : {quantity} × {unitPrice} = {expected}, mais le total est {total}.",
-  "invoiceWarningGlCodesNotInChart": "Comptes généraux suggérés par l’IA absents du plan comptable actif : {codes}",
+  "invoiceWarningGlCodesNotInChart": "Comptes généraux absents du plan comptable actif, non imputés : {codes}",
   "invoiceWarningGlCodeStalePrior": "Le compte général « {code} » mis en cache pour ce fournisseur n’est plus dans le plan comptable actif.",
   "invoicePoMatchIssuePoNotFound": "Commande {poNumber} introuvable",
   "invoicePoMatchIssueCurrencyMismatch": "Devises différentes : facture en {invoiceCurrency}, commande en {poCurrency} — montants non comparés",
