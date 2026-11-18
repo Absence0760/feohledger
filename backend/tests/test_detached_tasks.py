@@ -54,3 +54,25 @@ async def test_a_failing_task_is_logged_by_name_and_class_only(caplog):
     assert "test.boom" in caplog.text
     assert "ConnectionError" in caplog.text
     assert "someone@example.com" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_task_left_on_a_closed_loop_does_not_hang_the_next_drain():
+    """pytest-asyncio gives each test its own loop. A detached task left
+    pending when an earlier loop closed can never finish, and the unbounded
+    drain once awaited it forever, timing out a whole CI shard."""
+    other = asyncio.new_event_loop()
+    orphan = other.create_task(asyncio.sleep(3600), name="test.orphan")
+    detached_tasks._tasks.add(orphan)
+    other.close()
+
+    done: list[str] = []
+
+    async def _mine() -> None:
+        done.append("mine")
+
+    detached_tasks.spawn_detached(_mine(), name="test.mine")
+    assert await asyncio.wait_for(detached_tasks.drain_detached(), timeout=5) == 0
+    assert done == ["mine"]
+    assert orphan not in detached_tasks._tasks
+    assert await asyncio.wait_for(detached_tasks.drain_detached(timeout=1), timeout=5) == 0
