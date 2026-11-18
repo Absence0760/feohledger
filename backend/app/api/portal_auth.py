@@ -622,33 +622,74 @@ def _spawn_background(coro) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
-async def _send_portal_forgot_password_email(vu: VendorUser, org_name: str, reset_url: str) -> None:
-    """Best-effort and detached: nothing is left to report a failure to, and
-    the failure log names the account by id only — never the address or link."""
-    msg = EmailMessage(
-        to=vu.email,
-        subject=f"Reset your {org_name} supplier-portal password",
-        body_text=(
-            f"Hi {vu.full_name},\n\n"
-            f"We received a request to reset your {org_name} supplier-portal "
-            "password. If you made this request, choose a new one with this "
-            "link:\n\n"
-            f"  {reset_url}\n\n"
-            f"This link expires in {settings.password_reset_ttl_minutes} minutes "
-            "and works once.\n\n"
-            "If you didn't request this, you can ignore this email; your "
-            "password will not be changed.\n"
-        ),
-        links=(reset_url,),
-        preheader="Use the link in this email to choose a new supplier-portal password.",
-    )
+async def _issue_and_send_portal_reset(
+    *,
+    slug: str,
+    org_id: uuid.UUID,
+    org_name: str,
+    org_settings: dict | None,
+    vendor_user_id: uuid.UUID,
+    to: str,
+    full_name: str,
+    ip: str,
+) -> None:
+    """Mint, mail and audit one supplier's forgot-password link — detached.
+
+    Everything only a MATCHING address does lives here, off the response path:
+    the token mint (a Redis write), the send and the audit row (a tenant-DB
+    round trip). Awaiting any of them in the route would make a known address
+    measurably slower than an unknown one. Plain values, not the ORM row: the
+    request's session is closed by the time this runs. Failures are logged by
+    vendor-user id only — never the address or the link.
+    """
     try:
-        await get_email_adapter().send(msg)
-    except Exception as exc:  # noqa: BLE001
-        # The class only: an SMTP refusal's message can quote the recipient.
-        logger.error(
-            "Portal forgot-password email failed (vendor_user=%s): %s", vu.id, type(exc).__name__
+        token = await password_reset.issue_portal_reset_token(
+            slug, vendor_user_id, ttl_seconds=settings.password_reset_ttl_minutes * 60
         )
+    except Exception:  # noqa: BLE001
+        logger.exception("Portal forgot-password token not minted (vendor_user=%s)", vendor_user_id)
+        return
+    reset_url = portal_password_reset_url(slug, org_settings, token)
+    if reset_url is None:
+        logger.warning(
+            "Portal password reset requested but no tenant base URL is configured "
+            "(slug=%s) — no email sent",
+            slug,
+        )
+    else:
+        msg = EmailMessage(
+            to=to,
+            subject=f"Reset your {org_name} supplier-portal password",
+            body_text=(
+                f"Hi {full_name},\n\n"
+                f"We received a request to reset your {org_name} supplier-portal "
+                "password. If you made this request, choose a new one with this "
+                "link:\n\n"
+                f"  {reset_url}\n\n"
+                f"This link expires in {settings.password_reset_ttl_minutes} minutes "
+                "and works once.\n\n"
+                "If you didn't request this, you can ignore this email; your "
+                "password will not be changed.\n"
+            ),
+            links=(reset_url,),
+            preheader="Use the link in this email to choose a new supplier-portal password.",
+        )
+        try:
+            await get_email_adapter().send(msg)
+        except Exception as exc:  # noqa: BLE001
+            # The class only: an SMTP refusal's message can quote the recipient.
+            logger.error(
+                "Portal forgot-password email failed (vendor_user=%s): %s",
+                vendor_user_id,
+                type(exc).__name__,
+            )
+    await dispatch_auth_audit(
+        organization_id=org_id,
+        actor_id=None,
+        action="portal.password_reset.requested",
+        entity_id=vendor_user_id,
+        details={"ip": ip},
+    )
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)
@@ -664,8 +705,9 @@ async def portal_forgot_password(
     Tenant-scoped by `X-Tenant-Slug` / Host like `/login`: a vendor address is
     unique only within a tenant DB, so the lookup runs in this tenant's
     database and the token is bound to this slug. The same response whether or
-    not the address matched an active account, and the send is detached, so
-    neither the body nor the response time is an enumeration oracle.
+    not the address matched an active account, and every step only a match
+    takes (mint, send, audit) runs detached, so neither the body nor the
+    response time is an enumeration oracle.
     """
     # Per-IP budget: an unauthenticated route that sends mail.
     await check_rate_limit("portal_auth_forgot_password", request, limit=5, window_seconds=3600)
@@ -691,31 +733,17 @@ async def portal_forgot_password(
     ).scalar_one_or_none()
 
     if vu is not None and vu.is_active:
-        # A token-store failure would otherwise 500 only for a REAL address —
-        # an enumeration oracle — so it is logged by id and answered like any
-        # other request.
-        try:
-            token = await password_reset.issue_portal_reset_token(
-                slug, vu.id, ttl_seconds=settings.password_reset_ttl_minutes * 60
+        _spawn_background(
+            _issue_and_send_portal_reset(
+                slug=slug,
+                org_id=org.id,
+                org_name=org.name,
+                org_settings=org.settings,
+                vendor_user_id=vu.id,
+                to=vu.email,
+                full_name=vu.full_name,
+                ip=resolve_client_ip(request) or "unknown",
             )
-        except Exception:  # noqa: BLE001
-            logger.exception("Portal forgot-password token not minted (vendor_user=%s)", vu.id)
-            token = None
-        reset_url = portal_password_reset_url(slug, org.settings, token) if token else None
-        if reset_url is not None:
-            _spawn_background(_send_portal_forgot_password_email(vu, org.name, reset_url))
-        elif token is not None:
-            logger.warning(
-                "Portal password reset requested but no tenant base URL is configured "
-                "(slug=%s) — no email sent",
-                slug,
-            )
-        await dispatch_auth_audit(
-            organization_id=org.id,
-            actor_id=None,
-            action="portal.password_reset.requested",
-            entity_id=vu.id,
-            details={"ip": resolve_client_ip(request) or "unknown"},
         )
 
     return ForgotPasswordResponse()
