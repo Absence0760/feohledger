@@ -43,11 +43,36 @@ def spawn_detached(coro: Coroutine[Any, Any, None], *, name: str) -> asyncio.Tas
     return task
 
 
-async def drain_detached() -> None:
+#: How long a graceful shutdown waits for detached tasks (a reset link's mint,
+#: send and audit). Bounded for the reason `audit_dispatch`'s auth-audit drain
+#: is: a hung send must cost the shutdown a known amount, not block it.
+DETACHED_DRAIN_TIMEOUT_SECONDS = 5.0
+
+
+async def drain_detached(*, timeout: float | None = None) -> int:
     """Wait for every detached task, including any one of them spawns.
 
     The completion signal a test awaits before reading what a detached task
-    wrote (an outbox, an audit row) — never a sleep.
+    wrote (an outbox, an audit row) — never a sleep — and the lifespan
+    shutdown's flush, so a clean stop does not drop a link mid-send. Past
+    ``timeout`` the remainder is cancelled, counted at WARNING and returned;
+    ``None`` (the test default) waits indefinitely.
     """
+    if timeout is None:
+        while _tasks:
+            await asyncio.gather(*list(_tasks), return_exceptions=True)
+        return 0
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
     while _tasks:
-        await asyncio.gather(*list(_tasks), return_exceptions=True)
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        await asyncio.wait(list(_tasks), timeout=remaining)
+    abandoned = list(_tasks)
+    for task in abandoned:
+        task.cancel()
+    if abandoned:
+        logger.warning("Shutdown abandoned %d detached task(s)", len(abandoned))
+    return len(abandoned)
