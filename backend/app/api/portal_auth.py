@@ -5,6 +5,8 @@ the tenant DB; the tenant is resolved from the `X-Tenant-Slug` header, same
 as every other tenant-scoped route.
 """
 
+import asyncio
+import logging
 import time
 import uuid
 from datetime import UTC, datetime
@@ -17,10 +19,13 @@ from app.api.deps import create_vendor_access_token, decode_token
 from app.api.portal_deps import get_current_vendor_user
 from app.api.refusals import MFA_CODE_INVALID_DETAIL, coded_refusal
 from app.config import settings
+from app.models.organization import Organization
 from app.models.vendor import Vendor
 from app.models.vendor_user import VendorUser
 from app.redis import block_token
 from app.schemas.auth import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     ResetPasswordCheckRequest,
     ResetPasswordCheckResponse,
     ResetPasswordRequest,
@@ -63,7 +68,7 @@ from app.services.session_management import (
     revoke_other_sessions,
     revoke_user_sessions,
 )
-from app.tenant import get_tenant_db, get_tenant_slug
+from app.tenant import get_tenant, get_tenant_db, get_tenant_slug
 from app.utils.emails import email_matches, exact_email_first
 from app.utils.passwords import (
     PasswordError,
@@ -72,6 +77,9 @@ from app.utils.passwords import (
     validate_password_complexity,
     verify_password,
 )
+from app.utils.tenant_urls import portal_password_reset_url
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal/auth", tags=["portal-auth"])
 
@@ -561,8 +569,16 @@ async def portal_reset_password(
     await db.commit()
 
     # After the commit, so a Redis failure cannot roll back a password the
-    # supplier was told is set.
-    revoked = await revoke_user_sessions(vu.id)
+    # supplier was told is set — and guarded, so it cannot 500 one either: the
+    # token is spent and the password committed, and a 500 would tell the
+    # supplier to retry a link that no longer works. The same posture as the
+    # AP team's reset (`api/vendors.reset_vendor_portal_user_password`): logged
+    # by id only, and the old sessions die with their token's expiry.
+    try:
+        revoked = await revoke_user_sessions(vu.id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Portal session revoke after set-password failed (vendor_user=%s)", vu.id)
+        revoked = []
     await _audit_portal_mfa_event(
         vu,
         action="portal.password.changed",
@@ -577,6 +593,132 @@ async def portal_reset_password(
             details={"scope": "all", "revoked": len(revoked), "reason": "password_set"},
         )
     return ResetPasswordResponse()
+
+
+# ---------------------------------------------------------------------------
+# Forgot password (supplier self-service recovery)
+# ---------------------------------------------------------------------------
+#
+# The portal twin of `POST /api/auth/forgot-password`. Before it, a supplier who
+# forgot their password had to ask the AP team for a reset. It mints the same
+# tenant-bound portal token the AP team's reset does, with the forgot-password
+# lifetime (`FEOH_PASSWORD_RESET_TTL_MINUTES`) rather than the 72-hour
+# set-password one, and redeems at the same `/portal/reset-password`.
+#
+# Unlike the AP reset it changes nothing on the account: the current password
+# keeps working until the link is used (so anyone can request one without
+# locking the supplier out), earlier links are not superseded, and
+# `VendorUser.provisioned_by_user_id` is NOT re-stamped — no AP actor chose
+# this address, and the stamp is the bank-change SoD record (decisions §283).
+
+# Strong references to the detached sends — the event loop only holds tasks
+# weakly. Mirrors `api/auth._background_tasks`.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _send_portal_forgot_password_email(vu: VendorUser, org_name: str, reset_url: str) -> None:
+    """Best-effort and detached: nothing is left to report a failure to, and
+    the failure log names the account by id only — never the address or link."""
+    msg = EmailMessage(
+        to=vu.email,
+        subject=f"Reset your {org_name} supplier-portal password",
+        body_text=(
+            f"Hi {vu.full_name},\n\n"
+            f"We received a request to reset your {org_name} supplier-portal "
+            "password. If you made this request, choose a new one with this "
+            "link:\n\n"
+            f"  {reset_url}\n\n"
+            f"This link expires in {settings.password_reset_ttl_minutes} minutes "
+            "and works once.\n\n"
+            "If you didn't request this, you can ignore this email; your "
+            "password will not be changed.\n"
+        ),
+        links=(reset_url,),
+        preheader="Use the link in this email to choose a new supplier-portal password.",
+    )
+    try:
+        await get_email_adapter().send(msg)
+    except Exception as exc:  # noqa: BLE001
+        # The class only: an SMTP refusal's message can quote the recipient.
+        logger.error(
+            "Portal forgot-password email failed (vendor_user=%s): %s", vu.id, type(exc).__name__
+        )
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+async def portal_forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    slug: str = Depends(get_tenant_slug),
+    org: Organization = Depends(get_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Request a supplier-portal reset link. Public, unauthenticated.
+
+    Tenant-scoped by `X-Tenant-Slug` / Host like `/login`: a vendor address is
+    unique only within a tenant DB, so the lookup runs in this tenant's
+    database and the token is bound to this slug. The same response whether or
+    not the address matched an active account, and the send is detached, so
+    neither the body nor the response time is an enumeration oracle.
+    """
+    # Per-IP budget: an unauthenticated route that sends mail.
+    await check_rate_limit("portal_auth_forgot_password", request, limit=5, window_seconds=3600)
+    # Per-(tenant, address) budget, checked before the lookup so an unknown
+    # address throttles identically — the per-IP cap cannot stop rotating
+    # sources bombing one supplier's inbox. Tenant-scoped like the portal
+    # login's failure budget, so one tenant's traffic never throttles another
+    # tenant's supplier.
+    await check_rate_limit(
+        "portal_auth_forgot_password_email",
+        subject=auth_identity_key(slug, body.email),
+        limit=3,
+        window_seconds=3600,
+    )
+
+    vu = (
+        await db.execute(
+            select(VendorUser)
+            .where(email_matches(VendorUser.email, body.email))
+            .order_by(exact_email_first(VendorUser.email, body.email).desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if vu is not None and vu.is_active:
+        # A token-store failure would otherwise 500 only for a REAL address —
+        # an enumeration oracle — so it is logged by id and answered like any
+        # other request.
+        try:
+            token = await password_reset.issue_portal_reset_token(
+                slug, vu.id, ttl_seconds=settings.password_reset_ttl_minutes * 60
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Portal forgot-password token not minted (vendor_user=%s)", vu.id)
+            token = None
+        reset_url = portal_password_reset_url(slug, org.settings, token) if token else None
+        if reset_url is not None:
+            _spawn_background(_send_portal_forgot_password_email(vu, org.name, reset_url))
+        elif token is not None:
+            logger.warning(
+                "Portal password reset requested but no tenant base URL is configured "
+                "(slug=%s) — no email sent",
+                slug,
+            )
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=None,
+            action="portal.password_reset.requested",
+            entity_id=vu.id,
+            details={"ip": resolve_client_ip(request) or "unknown"},
+        )
+
+    return ForgotPasswordResponse()
 
 
 # ---------------------------------------------------------------------------

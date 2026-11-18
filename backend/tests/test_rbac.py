@@ -278,6 +278,17 @@ PUBLIC_BY_DESIGN: tuple[PublicProbe, ...] = (
         needs_db=True,
     ),
     PublicProbe(
+        "POST",
+        "/portal/auth/forgot-password",
+        "/api/portal/auth/forgot-password",
+        "Supplier self-service password recovery — reachable by a supplier who "
+        "cannot sign in. Tenant-scoped by X-Tenant-Slug; answers identically for "
+        "a known and an unknown address. The RESET is gated by the single-use "
+        "emailed portal token (see ALTERNATE_AUTH).",
+        body={"email": _UNKNOWN_EMAIL},
+        needs_db=True,
+    ),
+    PublicProbe(
         "GET",
         "/portal/branding",
         "/api/portal/branding",
