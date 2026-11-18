@@ -321,6 +321,7 @@
   "payQueueBlockedQualityHold": "Retenção de qualidade — mercadoria reprovada ou aguardando inspeção",
   "payQueueBlockedPoMismatch": "Não confere com o pedido de compra — não resolvido",
   "payQueueBlockedVendorNotActive": "Fornecedor não verificado ou inativo — verifique o fornecedor primeiro",
+  "payQueueBlockedCurrencyUnknown": "Esta fatura não tem moeda registrada — defina a moeda primeiro",
   "payQueueBlockedAppliedCreditMismatch": "Uma nota de crédito aplicada não corresponde mais ao fornecedor ou à moeda desta fatura — corrija a fatura primeiro",
   "payQueueBlockedFullyCredited": "Totalmente coberta por notas de crédito — nada a pagar",
   "payQueueBlockedLiveVirtualCard": "Um cartão virtual ativo cobre esta fatura — pague-a com cartão",

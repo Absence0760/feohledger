@@ -72,6 +72,8 @@ String _blockedReasonLabel(AppLocalizations l, String? code) => switch (code) {
       'quality_hold' => l.payQueueBlockedQualityHold,
       'po_mismatch' => l.payQueueBlockedPoMismatch,
       'vendor_not_active' => l.payQueueBlockedVendorNotActive,
+      // The invoice records no currency: no rail can pay it until one is set.
+      'currency_unknown' => l.payQueueBlockedCurrencyUnknown,
       'applied_credit_mismatch' => l.payQueueBlockedAppliedCreditMismatch,
       'fully_credited' => l.payQueueBlockedFullyCredited,
       // Not a block — the row is pinned to the card rail. Its own sentence

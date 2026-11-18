@@ -340,6 +340,7 @@
   "payQueueBlockedQualityHold": "Qualitätssperre — Ware abgelehnt oder Prüfung ausstehend",
   "payQueueBlockedPoMismatch": "Weicht von der Bestellung ab — ungeklärt",
   "payQueueBlockedVendorNotActive": "Lieferant nicht verifiziert oder nicht aktiv — zuerst den Lieferanten verifizieren",
+  "payQueueBlockedCurrencyUnknown": "Für diese Rechnung ist keine Währung erfasst — zuerst die Währung festlegen",
   "payQueueBlockedAppliedCreditMismatch": "Eine verrechnete Gutschrift passt nicht mehr zu Lieferant oder Währung dieser Rechnung — Rechnung zuerst korrigieren",
   "payQueueBlockedFullyCredited": "Vollständig durch Gutschriften gedeckt — nichts zu zahlen",
   "payQueueBlockedLiveVirtualCard": "Eine aktive virtuelle Karte beansprucht diese Rechnung — per Karte bezahlen",
