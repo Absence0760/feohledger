@@ -385,6 +385,9 @@ export const messages = {
 
 	// Dashboard
 	'dashboard.title': 'Tableau de bord',
+	'dashboard.greeting.morning': 'Bonjour, {name}',
+	'dashboard.greeting.afternoon': 'Bon après-midi, {name}',
+	'dashboard.greeting.evening': 'Bonsoir, {name}',
 	'dashboard.kpi.invoices': 'Factures',
 	'dashboard.kpi.totalAmount': 'Montant total (toutes les factures)',
 	'dashboard.kpi.paid': 'Payées',

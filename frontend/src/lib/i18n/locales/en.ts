@@ -442,6 +442,9 @@ export const en = {
 
 	// Dashboard (routes/+page.svelte)
 	'dashboard.title': 'Dashboard',
+	'dashboard.greeting.morning': 'Good morning, {name}',
+	'dashboard.greeting.afternoon': 'Good afternoon, {name}',
+	'dashboard.greeting.evening': 'Good evening, {name}',
 	'dashboard.kpi.invoices': 'Invoices',
 	// Disambiguated from the CFO analytics "total spend" figure
 	// (`GET /api/analytics/cfo` — a trailing period_days window excluding only

@@ -382,6 +382,9 @@ export const messages = {
 
 	// Dashboard
 	'dashboard.title': 'Übersicht',
+	'dashboard.greeting.morning': 'Guten Morgen, {name}',
+	'dashboard.greeting.afternoon': 'Guten Tag, {name}',
+	'dashboard.greeting.evening': 'Guten Abend, {name}',
 	'dashboard.kpi.invoices': 'Rechnungen',
 	'dashboard.kpi.totalAmount': 'Gesamtbetrag (alle Rechnungen)',
 	'dashboard.kpi.paid': 'Bezahlt',

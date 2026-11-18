@@ -32,7 +32,8 @@
 		type ExcludingKpi
 	} from '#lib/utils/dashboardPartials.ts';
 	import type { DashboardData } from '#lib/types/analytics.ts';
-	import { m } from '#lib/i18n/store.svelte.ts';
+	import { currentLocale, m } from '#lib/i18n/store.svelte.ts';
+	import { firstName, greetingKey, localDateKey } from '#lib/utils/greeting.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 
 	// The response shape lives in `#lib/types/analytics.ts` (`DashboardData`,
@@ -229,9 +230,33 @@
 	let vendorSpendPartialNames = $derived(partialLabels(data?.vendor_spend, (v) => v.vendor));
 	let trendUnconverted = $derived(totalUnconverted(data?.monthly_trend));
 	let trendPartialMonths = $derived(partialLabels(data?.monthly_trend, (t) => t.month));
+
+	// The greeting line: the reader's own clock, re-read each minute so a tab
+	// left open overnight does not still say "Good evening" with yesterday's
+	// date. Presentation only — nothing below reads it.
+	let now = $state(new Date());
+	$effect(() => {
+		const id = setInterval(() => (now = new Date()), 60_000);
+		return () => clearInterval(id);
+	});
+	const greetName = $derived(firstName(auth.user?.full_name));
+	const todayKey = $derived(localDateKey(now));
+	// `formatDate` reads the locale from a plain holder, not a rune, so the
+	// `currentLocale()` read is what re-renders the date on a locale switch.
+	const todayLabel = $derived.by(() => {
+		currentLocale();
+		return formatDate(todayKey, '', { weekday: 'long', month: 'long', day: 'numeric' });
+	});
 </script>
 
 <PageHeader title={m('dashboard.title')}>
+	<!-- One compact line under the title, so the KPI row stays above the fold
+	     at 1366×768. No name (an SSO/SCIM account with an empty full_name)
+	     shows the date alone rather than "Good morning, ". -->
+	<p class="greeting" data-testid="dashboard-greeting">
+		{#if greetName}<span>{m(greetingKey(now.getHours()), { name: greetName })}</span
+			><span class="greeting-sep" aria-hidden="true">·</span>{/if}<time datetime={todayKey}>{todayLabel}</time>
+	</p>
 	<!-- The zero-invoice EmptyState is the ONE thing that REPLACES the KPI row,
 	     and it does so only once the response has LANDED — `isEmptyTenant` is
 	     false while `data` is null. So an empty tenant sees a pending row that
@@ -677,6 +702,19 @@
 
 <style>
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
+	/* Tucked up under the <h1>, eating most of the workspace's 18px flex gap,
+	   so the line costs ~one text row above the KPI row. It may wrap at phone
+	   width rather than truncate the date. */
+	.greeting {
+		margin: -12px 0 0;
+		font-size: 0.88rem;
+		line-height: 1.4;
+		color: var(--text-muted);
+	}
+	.greeting-sep {
+		margin: 0 8px;
+	}
+
 	h2 {
 		margin: 0 0 14px;
 		font-size: 0.88rem;
