@@ -23126,3 +23126,48 @@ Rejected: a `settings.cash_flow` cap left off by default, which adds a setting
 with no case that the existing holds do not cover better; and a 90-day default,
 which would change behaviour for every tenant to hide its oldest debts. The
 operator delegated the call to the round coordinator.
+
+## §NEW-R1. Payment-run SoD / CFO sign-off and the sign-in MFA wrong code are coded refusals (round 17, 2026-11-18)
+
+**Context.** §238 coded the refusals a user acts on, but three stayed English
+(`docs/followups.md`). Two are closed here. The payment run's maker-checker
+(`payment_run_segregation`) and CFO wait (`payment_run_awaiting_cfo`) already
+had codes, because the run dialog's `actions` verdicts carry them. But the POSTs
+behind those verdicts (approve, execute, resume, retry-failed, record-outside,
+the NACHA export) still answered with the plain sentence. That was deliberate
+then: "every client, mobile included, reads it as text". The standalone
+`POST /api/payments` CFO refusal had no code at all. The sign-in challenge's
+wrong TOTP code was a bare `401 "Invalid code"`, the same sentence §238 had
+already coded on enroll-verify.
+
+**Decision.** `payment_controls._segregation`, `_segregation_for` and
+`_awaiting_cfo` are `ActionRefusal(coded=True)`, so each endpoint raises the
+same `{code, message, params}` its verdict ships, and `check_run_segregation`
+(the `/resume` gate) raises through `_segregation(...).http()`. The standalone
+payment's CFO refusal is `payment_cfo_required`. The plain-text concern no
+longer holds: web's `formatApiDetail` and mobile's `ApiClient.errorMessage`
+both render an object `detail` by its `message`, so a client that cannot
+localize a code still shows the server's sentence. Both web and mobile now
+localize these codes. On mobile, `PaymentQueueStore` keeps the refused body for
+the Pay tab.
+
+The sign-in MFA wrong code (`POST /api/auth/mfa/verify`, and the portal's
+`/mfa/challenge` twin, which had the same bare sentence) carries
+`MFA_CODE_INVALID_DETAIL` and **stays a 401**. The followup asked for this to
+be checked against the login throttle and each client's 401 handling. Neither
+gives a reason to move it:
+
+- The per-account `auth_mfa` failure budget records the miss before the raise,
+  whatever the status.
+- Web's `request()` only ends a session on a 401 when a token was sent, and
+  none exists at this step.
+- Mobile ends a session only when it presented a token, and on this 401 it
+  shows the localized sentence (`AuthStore.errorDetail`).
+
+A 401 is also the truthful status: no session exists yet. §238's enroll-verify
+move to 400 was about a signed-in session being torn down, which cannot happen
+here.
+
+**Not done.** The bulk status change's per-row skip reasons
+(`api/invoices._skip_reason`) and the email-OTP miss ("Invalid or expired
+code") stay in `docs/followups.md`.

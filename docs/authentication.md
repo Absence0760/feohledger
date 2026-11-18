@@ -930,8 +930,14 @@ web clients read a 401 on a call that carried a token as an expired session —
 they clear it and bounce to the login page — so a mistyped code signed the user
 out. They now answer `400` with `detail = coded_refusal("mfa_code_invalid",
 "Invalid code")` (`api/refusals.MFA_CODE_INVALID_DETAIL`), exactly as specific as
-the sentence it replaced. The login challenge's own `/mfa/verify` "Invalid code"
-stays a `401`: there is no session yet, so nobody is signed out by it.
+the sentence it replaced. The login challenge's own wrong TOTP code on
+`POST /api/auth/mfa/verify` (and the portal's `POST /api/portal/auth/mfa/challenge`)
+carries the same coded detail but stays a `401`: there is no session yet, so
+nobody is signed out by it — neither web client bounces a 401 on a call that
+carried no token, mobile ends a session on a 401 only when it presented one, and
+the per-account MFA failure budget counts the miss whatever the status
+(`docs/decisions.md` §NEW-R1). The email-OTP miss ("Invalid or expired code") is
+still plain text.
 
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
