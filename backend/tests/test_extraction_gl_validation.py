@@ -564,6 +564,10 @@ async def test_chart_ownership_is_read_once_and_only_when_the_active_chart_is_em
 
 
 @pytest.mark.asyncio
+# A BYOK org's key is sealed in the control-plane store (decisions §444), so
+# resolving its config reads that store; this mock-DB test lets the inline
+# settings block stand in for it (no secret is needed by the mock adapter).
+@pytest.mark.usefixtures("provider_store_from_settings")
 async def test_the_gl_catalog_never_leaks_into_org_settings_or_the_next_extraction():
     """The catalog is this invoice's chart. It used to be written into the
     org's own `settings["extraction"]` dict (BYOK resolved to that very dict),
