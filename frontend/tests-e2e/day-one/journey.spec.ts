@@ -27,18 +27,20 @@ import {
  *   1. the admin signs in with the temporary password, is forced to change it,
  *      and enrols TOTP;
  *   2. the admin invites an AP Manager and a financial controller (a second
- *      AP Manager), whose invitations arrive by email;
+ *      AP Manager), whose invitations arrive by email as set-password links
+ *      (no temporary password, decisions §283);
  *   3. the admin uploads the first invoice — a tax-exclusive e-invoice from a
  *      supplier nobody has set up, so the vendor is auto-created unverified —
  *      and it references a purchase order that does not exist;
- *   4. the controller signs in (forced change) and clears the PO flag. It is a
+ *   4. the controller sets a password from the link and clears the PO flag. It is a
  *      third person's call: the admin uploaded the invoice and the AP Manager
  *      will approve it, and an approver who cleared the hold would have it
  *      re-raised by their own approval (decisions §420, §422);
- *   5. the AP Manager signs in (forced change), verifies the supplier,
+ *   5. the AP Manager sets a password from the link, verifies the supplier,
  *      approves the invoice and records it paid outside FeohLedger;
- *   6. the admin resets the AP Manager's password, and the AP Manager's next
- *      sign-in is forced to change it; the new password then works;
+ *   6. the admin resets the AP Manager's password: the old one stops working,
+ *      a new set-password link arrives by email, and the password it sets
+ *      works;
  *   7. the admin signs back in, through the TOTP challenge.
  *
  * Three browser contexts, one per person, for the whole journey — the way two
@@ -68,8 +70,8 @@ let mfaSecret = '';
 let mfaStepUsed = -1;
 let invoiceId = '';
 let vendorId = '';
-let managerPassword = '';
-let controllerPassword = '';
+let managerLink = '';
+let controllerLink = '';
 
 const ADMIN_PASSWORD = 'Day-One-Owner-Passw0rd';
 const MANAGER_PASSWORD = 'Day-One-Manager-Passw0rd';
@@ -122,6 +124,31 @@ async function submitLogin(page: Page, email: string, password: string): Promise
 	await page.locator('input[type="email"]').fill(email);
 	await page.locator('input[type="password"]').fill(password);
 	await page.locator('form button[type="submit"]').click();
+}
+
+/** The set-password link from an email: the reset page, filled the way it
+ *  asks, then a real sign-in with the password it set. Lands on the tenant root. */
+async function setPasswordFromLink(page: Page, link: string, email: string, password: string) {
+	await page.goto(link);
+	const fresh = page.locator('input[autocomplete="new-password"]');
+	await expect(fresh.first()).toBeVisible();
+	await fresh.first().fill(password);
+	await fresh.last().fill(password);
+	const redeemed = page.waitForResponse(
+		(r) => r.url().endsWith('/api/auth/reset-password') && r.request().method() === 'POST'
+	);
+	await page.locator('form button[type="submit"]').click();
+	expect((await redeemed).status()).toBe(200);
+	await page.getByRole('link', { name: 'Go to sign in' }).click();
+	await submitLogin(page, email, password);
+	await page.waitForURL(TENANT_ROOT_URL);
+}
+
+/** The one set-password link in an email's text. */
+function setPasswordLink(text: string): string {
+	const link = /https?:\/\/\S+\/login\/reset-password\?\S+/.exec(text)?.[0] ?? '';
+	expect(link).not.toBe('');
+	return link;
 }
 
 /** /change-password, filled the way the form asks. Lands on the tenant root. */
@@ -188,9 +215,8 @@ test('first admin: temporary password, forced change, TOTP enrolment', async () 
 });
 
 /** The admin invites `name` as an AP Manager from /admin; returns the
- *  temporary password from the email they receive, after checking it is the
- *  one the admin was shown and that the email carries the tenant's own
- *  sign-in URL. */
+ *  set-password link from the email they receive, after checking the admin was
+ *  shown no credential and that the link is on the tenant's own host. */
 async function inviteApManager(name: string, email: string): Promise<string> {
 	await admin.goto('/admin');
 	await admin.getByRole('button', { name: '+ Invite User' }).click();
@@ -204,33 +230,35 @@ async function inviteApManager(name: string, email: string): Promise<string> {
 		(r) => r.url().endsWith('/api/admin/users') && r.request().method() === 'POST'
 	);
 	await modal.getByRole('button', { name: /Create User/ }).click();
-	expect((await created).status()).toBe(201);
+	const resp = await created;
+	expect(resp.status()).toBe(201);
+	expect(await resp.json()).not.toHaveProperty('temporary_password');
 
-	const credentials = admin.locator('div.modal[role="dialog"][aria-label="User created"]');
-	await expect(credentials).toBeVisible();
-	const shown = (await credentials.locator('.credential-value.password').textContent())?.trim();
-	await credentials.getByRole('button', { name: /^Done$/ }).click();
+	const sent = admin.locator('div.modal[role="dialog"][aria-label="Invitation sent"]');
+	await expect(sent).toBeVisible();
+	await expect(sent).toContainText(email);
+	await sent.getByRole('button', { name: /^Done$/ }).click();
 	await expect(admin.locator('table tbody td.email-cell', { hasText: email })).toBeVisible();
 	await expectNoPageOverflow(admin);
 
-	// What the invitee actually receives: the tenant's own sign-in URL and the
-	// same temporary password the admin was shown.
+	// What the invitee actually receives: a single-use link on the tenant's
+	// own host, and no password at all.
 	const invite = await awaitEmail(admin, t().mailpit_url, email, /invited/i);
-	expect(invite.text).toContain(new URL(admin.url()).origin);
-	const password = /Password:\s+(\S+)/.exec(invite.text)?.[1] ?? '';
-	expect(password).not.toBe('');
-	expect(password).toBe(shown);
-	return password;
+	expect(invite.text).not.toMatch(/Password:/);
+	const link = setPasswordLink(invite.text);
+	expect(new URL(link).origin).toBe(new URL(admin.url()).origin);
+	expect(new URL(link).searchParams.get('mode')).toBe('set');
+	return link;
 }
 
 test('admin invites an AP Manager, whose invitation arrives by email', async () => {
-	managerPassword = await inviteApManager(REAL.managerName, REAL.managerEmail);
+	managerLink = await inviteApManager(REAL.managerName, REAL.managerEmail);
 });
 
 // A third person, so the PO flag can be cleared by someone who neither
 // uploaded nor approves the invoice (decisions §420, §422).
 test('admin invites a financial controller, whose invitation arrives by email', async () => {
-	controllerPassword = await inviteApManager(REAL.controllerName, REAL.controllerEmail);
+	controllerLink = await inviteApManager(REAL.controllerName, REAL.controllerEmail);
 });
 
 test('a provider secret is sealed under the KMS key, not the development key', async () => {
@@ -304,11 +332,10 @@ test('admin uploads the first invoice: a tax-exclusive e-invoice from a new supp
 	await expectNoPageOverflow(admin);
 });
 
-test('controller: first sign-in forces a change, then the PO flag is cleared', async () => {
+test('controller: sets a password from the emailed link, then the PO flag is cleared', async () => {
 	await controller.goto('/login');
 	await answerConsent(controller);
-	await submitLogin(controller, REAL.controllerEmail, controllerPassword);
-	await changePassword(controller, controllerPassword, CONTROLLER_PASSWORD);
+	await setPasswordFromLink(controller, controllerLink, REAL.controllerEmail, CONTROLLER_PASSWORD);
 
 	await controller.goto('/exceptions');
 	const row = controller.locator('table tbody tr', { hasText: 'PO Mismatch' }).filter({
@@ -333,11 +360,10 @@ test('controller: first sign-in forces a change, then the PO flag is cleared', a
 	await expect(dialog).toBeHidden();
 });
 
-test('AP Manager: first sign-in forces a change', async () => {
+test('AP Manager: sets a password from the emailed link', async () => {
 	await manager.goto('/login');
 	await answerConsent(manager);
-	await submitLogin(manager, REAL.managerEmail, managerPassword);
-	await changePassword(manager, managerPassword, MANAGER_PASSWORD);
+	await setPasswordFromLink(manager, managerLink, REAL.managerEmail, MANAGER_PASSWORD);
 });
 
 test('AP Manager verifies the new supplier', async () => {
@@ -402,13 +428,13 @@ test('AP Manager records it paid outside FeohLedger', async () => {
 	expect(((await invoice.json()) as { status: string }).status).toBe('paid');
 });
 
-test("admin resets the AP Manager's password; the next sign-in must change it", async () => {
+test("admin resets the AP Manager's password; a new link sets the next one", async () => {
 	await admin.goto('/admin');
 	const row = admin.locator('table tbody tr', { hasText: REAL.managerEmail });
 	await row.getByRole('button', { name: 'Edit' }).click();
 	const modal = admin.locator('div.modal[role="dialog"][aria-label="Edit user"]');
 	await expect(modal.locator('input[type="email"]')).toHaveValue(REAL.managerEmail);
-	// No password input to autofill: the reset issues a generated one (#566).
+	// No password input to autofill: the reset never takes a typed one (#566).
 	await expect(modal.locator('input[type="password"]')).toHaveCount(0);
 
 	const before = await inboxIds(admin, t().mailpit_url);
@@ -417,15 +443,17 @@ test("admin resets the AP Manager's password; the next sign-in must change it", 
 		(r) => r.url().endsWith('/reset-password') && r.request().method() === 'POST'
 	);
 	await modal.getByRole('button', { name: 'Confirm reset' }).click();
-	expect((await reset).status()).toBe(200);
-	const credentials = admin.locator('div.modal[role="dialog"][aria-label="Password reset"]');
-	await expect(credentials).toBeVisible();
-	const temp = (await credentials.locator('.credential-value.password').textContent())?.trim() ?? '';
-	expect(temp.length).toBeGreaterThanOrEqual(12);
-	await credentials.getByRole('button', { name: /^Done$/ }).click();
-	// The manager is told too, with the same temporary password.
+	const resp = await reset;
+	expect(resp.status()).toBe(200);
+	expect(await resp.json()).not.toHaveProperty('temporary_password');
+	const sent = admin.locator('div.modal[role="dialog"][aria-label="Password reset"]');
+	await expect(sent).toBeVisible();
+	await expect(sent).toContainText(REAL.managerEmail);
+	await sent.getByRole('button', { name: /^Done$/ }).click();
+	// Only the manager gets the way back in: a link, in their own inbox.
 	const notice = await awaitEmail(admin, t().mailpit_url, REAL.managerEmail, /.*/, before);
-	expect(/Password:\s+(\S+)/.exec(notice.text)?.[1]).toBe(temp);
+	expect(notice.text).not.toMatch(/Password:/);
+	const link = setPasswordLink(notice.text);
 
 	// The manager's own password stopped working the moment it was reset.
 	await signOut(manager);
@@ -433,12 +461,7 @@ test("admin resets the AP Manager's password; the next sign-in must change it", 
 	await expect(manager.locator('.error, [role="alert"]').first()).toBeVisible();
 	await expect(manager).toHaveURL(/\/login$/);
 
-	await submitLogin(manager, REAL.managerEmail, temp);
-	await changePassword(manager, temp, MANAGER_PASSWORD_AFTER_RESET);
-
-	await signOut(manager);
-	await submitLogin(manager, REAL.managerEmail, MANAGER_PASSWORD_AFTER_RESET);
-	await manager.waitForURL(TENANT_ROOT_URL);
+	await setPasswordFromLink(manager, link, REAL.managerEmail, MANAGER_PASSWORD_AFTER_RESET);
 });
 
 test('admin signs back in through the TOTP challenge', async () => {

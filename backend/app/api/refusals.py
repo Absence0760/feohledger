@@ -411,3 +411,25 @@ WORKSPACE_CLOSE_INCOMPLETE_DETAIL = coded_refusal(
     WORKSPACE_CLOSE_INCOMPLETE,
     "Closing the workspace did not finish. Try again; if it fails again, contact support.",
 )
+
+
+#: An invite or admin-initiated reset that cannot mint its set-password link:
+#: no tenant base URL to point it at, or the token store refused. A 503, raised
+#: BEFORE anything is created or changed — the account would otherwise exist (or
+#: have lost its password) with no way to set one (``docs/decisions.md`` §283).
+SET_PASSWORD_LINK_UNAVAILABLE = "set_password_link_unavailable"
+SET_PASSWORD_LINK_UNAVAILABLE_DETAIL = coded_refusal(
+    SET_PASSWORD_LINK_UNAVAILABLE,
+    "A set-password link cannot be issued right now, so nothing was changed. Try again later.",
+)
+
+#: The same flows when the email carrying the link could not be sent. A 502,
+#: and the request is rolled back: the email is the link's only channel — it is
+#: never shown to the admin — so an account whose link never arrived would be
+#: one nobody can sign in to.
+SET_PASSWORD_EMAIL_FAILED = "set_password_email_failed"
+SET_PASSWORD_EMAIL_FAILED_DETAIL = coded_refusal(
+    SET_PASSWORD_EMAIL_FAILED,
+    "The set-password email could not be sent, so nothing was changed. "
+    "Check the email provider configuration and try again.",
+)

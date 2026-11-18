@@ -245,53 +245,11 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
       return;
     }
 
-    final message = l.adminUsersCreated(result.user.fullName);
+    // No credential to show: the new user was emailed a set-password link.
+    final message = l.adminUsersInvited(result.user.fullName, result.user.email);
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
     A11y.announce(context, message);
-    // Surface the one-time temp password so the admin can hand it over.
-    await _showTempPassword(result);
-  }
-
-  Future<void> _showTempPassword(CreateUserResult result) async {
-    final l = AppLocalizations.of(context);
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(l.adminUsersTempPasswordTitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(l.adminUsersTempPasswordBody(result.user.fullName)),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Theme.of(dialogContext).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SelectableText(
-                result.temporaryPassword,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(AppLocalizations.of(dialogContext).commonClose),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _deleteUser(AdminUser user) async {
@@ -349,8 +307,8 @@ class _NewUserDraft {
 /// Create-user form sheet — full name + email (validated) + a checkbox per
 /// available system role. Returns a [_NewUserDraft] on Create, or null on
 /// Cancel / dismiss. Mirrors the `_RoleEditor` shape + the backend
-/// `CreateUserRequest` (email + full_name + role_names; the temp password is
-/// server-generated).
+/// `CreateUserRequest` (email + full_name + role_names; the user is emailed a
+/// set-password link — no password is ever generated or shown).
 class _CreateUserSheet extends StatefulWidget {
   final List<String> availableRoles;
 

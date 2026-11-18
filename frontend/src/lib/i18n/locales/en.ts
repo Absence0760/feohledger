@@ -1293,7 +1293,7 @@ export const en = {
 	'vendors.invite.aria': 'Invite vendor to the supplier portal',
 	'vendors.invite.title': 'Invite {vendor} to the portal',
 	'vendors.invite.hint':
-		'Creates a supplier-portal login and emails them a temporary password.',
+		'Creates a supplier-portal login and emails them a link to set their password.',
 	'vendors.invite.field.fullName': 'Contact name',
 	'vendors.invite.field.email': 'Email',
 	'vendors.invite.send': 'Send invite',
@@ -1302,7 +1302,7 @@ export const en = {
 	'vendors.invite.sent.aria': 'Supplier portal invite sent',
 	'vendors.invite.sent.heading': 'Portal invite sent',
 	'vendors.invite.sent.body':
-		'The temporary password was emailed to {email}. It is never shown here — if the supplier never receives it, use Reset password to send a new one.',
+		'We emailed {email} a link to set their password. It is never shown here — if the supplier never receives it, or it expires, use Reset password to send a new one.',
 	'vendors.invite.sent.email': 'Email',
 	'vendors.invite.sent.url': 'Portal URL',
 	'vendors.invite.sent.done': 'Done',
@@ -5448,6 +5448,10 @@ export const en = {
 	'refusal.emailInThisWorkspace': "A user with this email address already exists in this workspace.",
 	'refusal.emailInOtherWorkspace': "This email address already has an account in another workspace. An address can belong to only one workspace, so use a different address for this person. If they no longer use that other workspace, its administrator can close it, which frees the address.",
 	'refusal.emailCheckThrottled': "Too many addresses entered in this workspace recently already belonged to other workspaces, so adding users or changing their email is paused for up to an hour. Try again later.",
+	'refusal.setPasswordLinkUnavailable':
+		"A set-password link cannot be issued right now, so nothing was changed. Try again later.",
+	'refusal.setPasswordEmailFailed':
+		"The set-password email could not be sent, so nothing was changed. Check the email provider configuration and try again.",
 	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`). No
 	// params: the vendors are already on the steward's screen.
 	'refusal.vendorMergeSelf': "A vendor can't be merged into itself. Choose a different canonical vendor.",

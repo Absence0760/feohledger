@@ -12,6 +12,7 @@
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 	import { accentStrongContrast } from '#lib/stores/brandTheme.ts';
 	import { formatRatio, WCAG_AA_NORMAL } from '#lib/a11y/contrast.ts';
 	import {
@@ -229,8 +230,8 @@
 	let provSlug = $state('');
 	let provEmail = $state('');
 	let provisioning = $state(false);
-	// The temp credential is returned exactly once — held only until the result
-	// dialog is dismissed, then dropped (never re-fetchable).
+	// The new child, and whether its admin was emailed their set-password link.
+	// No credential ever reaches the partner (decisions §283).
 	let provisioned = $state<ProvisionedChild | null>(null);
 
 	const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
@@ -271,16 +272,6 @@
 			toast(e instanceof Error ? e.message : m('admin.partner.toast.provisionFailed'), 'error');
 		} finally {
 			provisioning = false;
-		}
-	}
-
-	async function copyTempPassword() {
-		if (!provisioned) return;
-		try {
-			await navigator.clipboard.writeText(provisioned.temp_password);
-			toast(m('admin.partner.toast.passwordCopied'), 'success');
-		} catch {
-			toast(m('admin.partner.toast.passwordCopyFailed'), 'error');
 		}
 	}
 
@@ -530,22 +521,30 @@
 	onclose={closeProvision}
 >
 	{#if provisioned}
-		<!-- Result: the one-time temp credentials. Shown once; dropped on close. -->
+		<!-- Result: the new tenant, and where its admin's set-password link went.
+		     Never a credential — the link reaches only the admin's inbox. -->
 		<div class="provisioned-result" data-testid="provisioned-result">
 			<p class="modal-hint">
-				<strong>{provisioned.name}</strong> ({provisioned.slug}) {m('admin.partner.provision.resultHintPre')}
-				<strong>{m('admin.partner.provision.resultHintOnce')}</strong> {m('admin.partner.provision.resultHintPost')}
+				{provisioned.set_password_email_sent && provisioned.set_password_link_expires_at
+					? m('admin.partner.provision.resultSent', {
+							name: provisioned.name,
+							slug: provisioned.slug,
+							expires: formatDate(provisioned.set_password_link_expires_at, '—', {
+								month: 'short',
+								day: 'numeric',
+								hour: 'numeric',
+								minute: '2-digit'
+							})
+						})
+					: m('admin.partner.provision.resultNotSent', {
+							name: provisioned.name,
+							slug: provisioned.slug
+						})}
 			</p>
 			<dl class="cred">
 				<dt>{m('admin.partner.provision.adminEmail')}</dt>
 				<dd class="mono">{provisioned.admin_email}</dd>
-				<dt>{m('admin.partner.provision.tempPassword')}</dt>
-				<dd class="mono pw">
-					<code class="code-value">{provisioned.temp_password}</code>
-					<button type="button" class="btn-cancel copy-btn" onclick={copyTempPassword}>{m('admin.partner.provision.copy')}</button>
-				</dd>
 			</dl>
-			<p class="panel-hint">{m('admin.partner.provision.changeNote')}</p>
 			<div class="modal-footer">
 				<button type="button" class="btn-primary" onclick={closeProvision}>{m('admin.partner.provision.done')}</button>
 			</div>
@@ -693,13 +692,6 @@
 	.cred dd {
 		margin: 0;
 		font-size: 0.85rem;
-	}
-
-	.cred dd.pw {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		flex-wrap: wrap;
 	}
 
 	.copy-btn {

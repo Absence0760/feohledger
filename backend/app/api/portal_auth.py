@@ -1,4 +1,4 @@
-"""Supplier-portal auth — login, logout, /me, change-password.
+"""Supplier-portal auth — login, logout, /me, change-password, set-password links.
 
 Completely separate from `/api/auth/*` (employee auth). Vendor users live in
 the tenant DB; the tenant is resolved from the `X-Tenant-Slug` header, same
@@ -20,6 +20,12 @@ from app.config import settings
 from app.models.vendor import Vendor
 from app.models.vendor_user import VendorUser
 from app.redis import block_token
+from app.schemas.auth import (
+    ResetPasswordCheckRequest,
+    ResetPasswordCheckResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
+)
 from app.schemas.portal import (
     PortalChangePasswordRequest,
     PortalLoginRequest,
@@ -34,7 +40,7 @@ from app.schemas.portal import (
     PortalTokenResponse,
     PortalUpdateProfileRequest,
 )
-from app.services import mfa
+from app.services import mfa, password_reset
 from app.services.audit_dispatch import dispatch_auth_audit, queue_auth_audit
 from app.services.credential_upgrade import upgrade_password_hash
 from app.services.email_adapters import EmailMessage, get_email_adapter, is_supported_locale
@@ -55,6 +61,7 @@ from app.services.session_management import (
     end_session,
     register_session,
     revoke_other_sessions,
+    revoke_user_sessions,
 )
 from app.tenant import get_tenant_db, get_tenant_slug
 from app.utils.emails import email_matches, exact_email_first
@@ -475,6 +482,101 @@ async def portal_change_password(
         vendor_status=vendor.status if vendor else "unknown",
         locale=vu.locale,
     )
+
+
+# ---------------------------------------------------------------------------
+# Set-password links (the AP team's portal invite and reset)
+# ---------------------------------------------------------------------------
+#
+# The portal twin of `POST /api/auth/reset-password[/check]`. The AP team's
+# invite and reset (`api/vendors.py`) leave the account with no password and
+# mail a single-use, expiring link bound to this tenant
+# (`services/password_reset.issue_portal_reset_token`, decisions §283); these
+# two routes are where it lands. Public — the token is the credential — and
+# tenant-scoped by `X-Tenant-Slug` / Host like every portal route: a token
+# minted for another tenant is the same 400 as an unknown one, and is not spent.
+
+_INVALID_PORTAL_LINK = "Invalid or expired link."
+
+
+async def _vendor_user_for_link(db: AsyncSession, vu_id: uuid.UUID | None) -> VendorUser | None:
+    if vu_id is None:
+        return None
+    vu = (await db.execute(select(VendorUser).where(VendorUser.id == vu_id))).scalar_one_or_none()
+    if vu is None or not vu.is_active:
+        return None
+    return vu
+
+
+@router.post("/reset-password/check", response_model=ResetPasswordCheckResponse)
+async def portal_check_reset_token(
+    body: ResetPasswordCheckRequest,
+    request: Request,
+    slug: str = Depends(get_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Is this set-password link still good here, and for which account?
+
+    Read-only — never consumes the token, so a mail scanner's fetch or a reload
+    leaves it usable. The same 400 for every token the redemption would refuse
+    (unknown, spent, expired, another tenant's, a deactivated account), and the
+    address returned is only the one the holder's link already resets. POST so
+    the token never rides a query string an access log keeps.
+    """
+    await check_rate_limit("portal_reset_password_check", request, limit=20, window_seconds=60)
+    vu_id = await password_reset.peek_portal_reset_token(body.token, slug)
+    vu = await _vendor_user_for_link(db, vu_id)
+    if vu is None:
+        raise HTTPException(status_code=400, detail=_INVALID_PORTAL_LINK)
+    return ResetPasswordCheckResponse(email=vu.email)
+
+
+@router.post("/reset-password", response_model=ResetPasswordResponse)
+async def portal_reset_password(
+    body: ResetPasswordRequest,
+    request: Request,
+    slug: str = Depends(get_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Redeem a portal set-password link and set the supplier's password.
+
+    Single-use: the token is spent by an atomic ``GETDEL``, so a replay is the
+    same 400 as an expired link. Every existing portal session of the supplier
+    is ended — the link replaces whatever password came before it.
+    """
+    await check_rate_limit("portal_reset_password", request, limit=10, window_seconds=60)
+
+    try:
+        validate_password_complexity(body.new_password)
+    except PasswordError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    vu_id = await password_reset.consume_portal_reset_token(body.token, slug)
+    vu = await _vendor_user_for_link(db, vu_id)
+    if vu is None:
+        raise HTTPException(status_code=400, detail=_INVALID_PORTAL_LINK)
+
+    vu.hashed_password = await hash_password(body.new_password)
+    vu.must_change_password = False
+    await db.commit()
+
+    # After the commit, so a Redis failure cannot roll back a password the
+    # supplier was told is set.
+    revoked = await revoke_user_sessions(vu.id)
+    await _audit_portal_mfa_event(
+        vu,
+        action="portal.password.changed",
+        details={"via": "set_password_link", "forced": False},
+    )
+    if vu.organization_id and revoked:
+        await dispatch_auth_audit(
+            organization_id=vu.organization_id,
+            actor_id=None,
+            action="portal.session.revoked",
+            entity_id=vu.id,
+            details={"scope": "all", "revoked": len(revoked), "reason": "password_set"},
+        )
+    return ResetPasswordResponse()
 
 
 # ---------------------------------------------------------------------------

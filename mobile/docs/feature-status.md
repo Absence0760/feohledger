@@ -210,9 +210,9 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   offline-cached (privileged admin read).
 - **Admin user management** — `AdminUsersScreen` over `/api/admin/*`: list/search
   users, **create a user** (a FAB opens a validated form sheet — full name +
-  email + system-role pick → `POST /api/admin/users`; the server-generated
-  one-time temporary password is surfaced in a dialog for the admin to hand
-  over, then the list refreshes), edit a user's roles (system roles only —
+  email + system-role pick → `POST /api/admin/users`; the user is emailed a
+  single-use set-password link and the screen confirms it in a snackbar — no
+  credential is ever shown, decisions §283 — then the list refreshes), edit a user's roles (system roles only —
   the mobile role editor offers only the four SYSTEM roles — custom roles are created and granted on the web (`/admin?tab=roles`). Custom roles DO confer access: effective permissions are the union over a user's roles, custom ones via the `roles.permissions` JSONB column (migration 0062) — see `backend/app/api/permissions.py`), activate/deactivate, and **delete a
   user** (an armed/confirmed destructive action in the per-user sheet →
   `DELETE /api/admin/users/{id}`; self-delete is disabled client-side and the

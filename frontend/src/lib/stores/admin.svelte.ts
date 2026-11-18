@@ -8,13 +8,15 @@ interface AdminUserListResponse {
 	total: number;
 }
 
+/** The created user and when their emailed set-password link stops working.
+ *  No credential: the link goes only to the user's inbox (decisions §283). */
 interface CreateUserResponse extends AdminUser {
-	temporary_password: string;
+	set_password_link_expires_at: string;
 }
 
-/** Same shape as an invite: the user plus the one-time temporary password —
- *  and whether the forced logout went through (`false` when the server could
- *  not revoke the user's sessions after the reset committed). */
+/** Same shape as an invite — and whether the forced logout went through
+ *  (`false` when the server could not revoke the user's sessions after the
+ *  reset committed). */
 interface ResetUserPasswordResponse extends CreateUserResponse {
 	sessions_revoked: boolean;
 }
@@ -202,13 +204,14 @@ function createAdminStore() {
 	}
 
 	/**
-	 * Reset a user's password to a server-generated temporary one they must
-	 * change at next sign-in (`POST /api/admin/users/{id}/reset-password`).
+	 * Reset a user's password (`POST /api/admin/users/{id}/reset-password`):
+	 * the server clears it, signs them out and emails them a single-use link to
+	 * choose a new one.
 	 *
 	 * There is deliberately no way to SET a password from here: an admin-typed
 	 * value is one the admin keeps knowing, and a password input in the edit
 	 * form is one a browser autofills with the admin's own credential (#566).
-	 * The temp comes back once, on this response, for the caller to show.
+	 * Nor does any credential come back: the link reaches only the user.
 	 */
 	async function resetUserPassword(id: string): Promise<ResetUserPasswordResponse> {
 		const res = await api.post<ResetUserPasswordResponse>(

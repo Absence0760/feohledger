@@ -103,8 +103,10 @@ def password_reset_url(
 ) -> str | None:
     """The tenant-hosted reset page for ``token``, or ``None`` with no base URL.
 
-    One builder for both links that redeem a reset token: the forgot-password
-    email and signup's set-password link (``docs/decisions.md`` §283).
+    One builder for every link that redeems an employee reset token: the
+    forgot-password email, and the set-password link signup, admin invite /
+    reset and partner provisioning send instead of a temporary password
+    (``docs/decisions.md`` §283).
     ``set_password`` adds ``mode=set``, which changes only the page's copy
     ("Set your password" rather than "Set a new password") — the token, the
     endpoint and the single-use redemption are identical.
@@ -121,6 +123,28 @@ def password_reset_url(
     if not base:
         return None
     url = f"{base}/login/reset-password?token={quote(token)}"
+    return f"{url}&mode=set" if set_password else url
+
+
+def portal_password_reset_url(
+    slug: str | None,
+    org_settings: Mapping[str, Any] | None,
+    token: str,
+    *,
+    set_password: bool = False,
+) -> str | None:
+    """The supplier portal's set-password page for a portal ``token``.
+
+    The portal twin of :func:`password_reset_url`, over the same resolver, so a
+    white-label tenant's supplier lands on the tenant's own host. ``None`` with
+    no base URL for the same reason: a relative link in an email is dead and
+    leaks a live credential. ``set_password`` (an invite) adds ``mode=set``,
+    which changes only the page's copy.
+    """
+    base = tenant_base_url(slug, org_settings)
+    if not base:
+        return None
+    url = f"{base}/portal/reset-password?token={quote(token)}"
     return f"{url}&mode=set" if set_password else url
 
 

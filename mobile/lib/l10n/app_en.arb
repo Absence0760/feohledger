@@ -968,23 +968,17 @@
   "adminUsersValidationEmailInvalid": "Enter a valid email address",
   "adminUsersCreateSubmit": "Create",
   "adminUsersCreating": "Creating…",
-  "adminUsersCreated": "Created {name}",
-  "@adminUsersCreated": {
+  "adminUsersInvited": "Invited {name}. We emailed {email} a link to set their password.",
+  "@adminUsersInvited": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": { "type": "String" },
+      "email": { "type": "String" }
     }
   },
   "adminUsersCreateFailed": "Failed to create user: {error}",
   "@adminUsersCreateFailed": {
     "placeholders": {
       "error": { "type": "String" }
-    }
-  },
-  "adminUsersTempPasswordTitle": "User created",
-  "adminUsersTempPasswordBody": "Share this one-time password with {name}. They'll be asked to change it on first sign-in. It won't be shown again.",
-  "@adminUsersTempPasswordBody": {
-    "placeholders": {
-      "name": { "type": "String" }
     }
   },
   "adminUsersDelete": "Delete user",

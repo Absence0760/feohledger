@@ -22,6 +22,7 @@ audit (booleans only, never raw values). Admin-only on every mutation.
 
 import logging
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -32,17 +33,24 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, require_roles
 from app.api.organization import _resolve_brand
+from app.api.set_password_links import (
+    expiry_sentence,
+    link_expires_at,
+    mint_employee_link,
+    require_link_base,
+    send_set_password_email,
+)
 from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.organization import BrandConfig
 from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.email_adapters import EmailMessage
 from app.services.partner_link_token import build_link_code, verify_link_code
 from app.services.tenant_provisioning import provision_tenant
 from app.tenant import get_tenant, lock_organization
 from app.utils.emails import looks_like_email
-from app.utils.passwords import generate_temp_password
 from app.utils.slug import SlugError, ensure_slug_available, validate_slug_format
 
 logger = logging.getLogger(__name__)
@@ -322,9 +330,9 @@ class ProvisionChildRequest(BaseModel):
     """Provision a brand-NEW child tenant under the calling partner org.
 
     Mirrors ``scripts/create_tenant.py`` inputs: a company name, a URL slug, and
-    the first admin's email. The admin password is platform-generated (a 16-char
-    temp credential the admin rotates on first login) — a partner never sets
-    another org's password, and no secret travels in this request.
+    the first admin's email. There is no admin password at all until the admin
+    chooses one through the emailed set-password link — a partner never sets or
+    sees another org's password, and no secret travels in this request.
     """
 
     name: str = Field(min_length=1, max_length=200)
@@ -335,16 +343,19 @@ class ProvisionChildRequest(BaseModel):
 
 
 class ProvisionChildResponse(ChildTenantSummary):
-    """The newly provisioned child + the first-login credentials.
+    """The newly provisioned child, and whether its admin was sent their link.
 
-    The temp password is returned EXACTLY once (like an API-key mint) so the
-    partner can hand the new admin their first credential; it is never stored in
-    plaintext or re-fetchable. The admin must change it on first login
-    (``must_change_password``).
+    No credential: the child's admin is provisioned with no password and emailed
+    a single-use set-password link (`docs/decisions.md` §283) — the partner
+    never holds a working credential for the child. ``set_password_email_sent``
+    is false when the link could not be minted or mailed AFTER the tenant
+    already existed; the admin then uses Forgot password on the child's sign-in
+    page, which works for the account like any other.
     """
 
     admin_email: str
-    temp_password: str
+    set_password_email_sent: bool
+    set_password_link_expires_at: datetime | None = None
 
 
 @router.post(
@@ -381,7 +392,7 @@ async def provision_child(
     """
     # Shape only, from the one owner in `app/utils/emails.py` — the address is
     # the new admin's login; the real check is that admin clicking their
-    # first-login link.
+    # set-password link.
     if not looks_like_email(body.admin_email):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -403,8 +414,11 @@ async def provision_child(
     except SlugError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
+    # Nowhere to point the admin's set-password link (or forgot-password, its
+    # fallback) → refuse before a database is created, as signup does.
+    require_link_base(body.slug, None)
+
     admin_name = body.admin_name or f"{body.name} Admin"
-    temp_password = generate_temp_password()
 
     # provision_tenant owns the orphan-DB rollback: if the control-plane insert
     # or tenant-table creation fails after CREATE DATABASE, it drops the DB it
@@ -416,9 +430,11 @@ async def provision_child(
             slug=body.slug,
             admin_email=body.admin_email,
             admin_name=admin_name,
-            admin_password=temp_password,
+            # No password: the child's admin chooses one through the emailed
+            # link, so the partner never holds a credential for the child.
+            admin_password=None,
             plan=body.plan,
-            must_change_password=True,
+            must_change_password=False,
         )
     except IntegrityError as exc:
         # Two provisions racing the same slug (or email) — the loser gets a 409,
@@ -439,15 +455,28 @@ async def provision_child(
     child.parent_org_id = org.id
     await db.commit()
 
+    # The child admin's set-password link. Best-effort, unlike the admin and
+    # portal invites: the tenant and its database already exist and cannot be
+    # unwound here, so a failure is reported on the response instead and the
+    # admin's way in is Forgot password, which needs only the active account
+    # and the base URL checked above.
+    email_sent = await _send_child_admin_link(
+        child, user_id=result.user_id, admin_name=admin_name, admin_email=body.admin_email
+    )
+
     # Audit BOTH org trails, PII-free (org ids + slug only — never the admin
-    # email or the temp password).
+    # email or the set-password link).
     await dispatch_auth_audit(
         organization_id=org.id,
         actor_id=user.id,
         action="partner.child_provisioned",
         entity_type="organization",
         entity_id=child.id,
-        details={"child_org_id": str(child.id), "child_slug": child.slug},
+        details={
+            "child_org_id": str(child.id),
+            "child_slug": child.slug,
+            "set_password_email_sent": email_sent,
+        },
     )
     await dispatch_auth_audit(
         organization_id=child.id,
@@ -462,8 +491,43 @@ async def provision_child(
     return ProvisionChildResponse(
         **summary.model_dump(),
         admin_email=body.admin_email,
-        temp_password=temp_password,
+        set_password_email_sent=email_sent,
+        set_password_link_expires_at=link_expires_at() if email_sent else None,
     )
+
+
+async def _send_child_admin_link(
+    child: Organization, *, user_id: uuid.UUID, admin_name: str, admin_email: str
+) -> bool:
+    """Mint and mail the child admin's set-password link; ``False`` on any
+    failure (logged by slug and ids only — never the address or the link)."""
+    try:
+        link = await mint_employee_link(child.slug, child.settings, user_id, set_password=True)
+        await send_set_password_email(
+            EmailMessage(
+                to=admin_email,
+                subject=f"Your {child.name} FeohLedger workspace is ready",
+                body_text=(
+                    f"Hi {admin_name},\n\n"
+                    f"A FeohLedger workspace has been set up for {child.name}, "
+                    "with you as its administrator. Choose your password with "
+                    "this link:\n\n"
+                    f"  {link}\n\n"
+                    + expiry_sentence()
+                    + " If it has expired, use Forgot password on the sign-in page.\n"
+                ),
+                links=(link,),
+                preheader="Use the link in this email to set your password.",
+            ),
+            log_ref=f"child_org={child.id}",
+        )
+    except HTTPException:
+        logger.warning(
+            "Child tenant provisioned without a delivered set-password link (slug=%s)",
+            child.slug,
+        )
+        return False
+    return True
 
 
 @router.post("/children", response_model=ChildTenantSummary, status_code=status.HTTP_201_CREATED)

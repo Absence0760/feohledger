@@ -1618,21 +1618,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get adminUsersCreating => 'Création…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name créé';
+  String adminUsersInvited(String name, String email) {
+    return '$name invité. Nous avons envoyé à $email un lien pour définir son mot de passe.';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'Échec de la création de l\'utilisateur : $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'Utilisateur créé';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'Communiquez ce mot de passe à usage unique à $name. Il devra le changer à la première connexion. Il ne sera plus affiché.';
   }
 
   @override

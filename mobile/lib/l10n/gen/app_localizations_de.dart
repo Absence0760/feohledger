@@ -1611,21 +1611,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get adminUsersCreating => 'Wird erstellt…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name erstellt';
+  String adminUsersInvited(String name, String email) {
+    return '$name eingeladen. Wir haben $email einen Link zum Festlegen des Passworts gesendet.';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'Benutzer konnte nicht erstellt werden: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'Benutzer erstellt';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'Teilen Sie dieses Einmalpasswort mit $name. Bei der ersten Anmeldung wird es geändert. Es wird nicht erneut angezeigt.';
   }
 
   @override

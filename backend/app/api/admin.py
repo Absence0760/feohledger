@@ -31,6 +31,14 @@ from app.api.refusals import (
     EMAIL_IN_THIS_WORKSPACE_DETAIL,
     coded_refusal,
 )
+from app.api.set_password_links import (
+    expiry_sentence,
+    link_expires_at,
+    link_unavailable,
+    mint_employee_link,
+    require_link_base,
+    send_set_password_email,
+)
 from app.database import get_control_db, get_tenant_engine
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
@@ -46,13 +54,14 @@ from app.schemas.admin import (
     UpdateRoleRequest,
     UpdateUserRequest,
 )
+from app.services import password_reset
 from app.services.admin_lockout import (
     LAST_ADMIN_MESSAGE,
     LastAdminLockout,
     guard_against_last_admin_lockout,
 )
 from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
-from app.services.email_adapters import EmailMessage, get_email_adapter
+from app.services.email_adapters import EmailMessage
 from app.services.identity_provisioning import email_holder_org_id
 from app.services.rate_limit import (
     RateLimitExceeded,
@@ -63,7 +72,6 @@ from app.services.rate_limit import (
 from app.services.session_management import revoke_user_sessions
 from app.services.user_audit import user_deleted_details, user_updated_details
 from app.utils.emails import normalize_email
-from app.utils.passwords import generate_temp_password, hash_password
 from app.utils.search import ilike_contains
 from app.utils.tenant_urls import tenant_base_url
 
@@ -529,54 +537,58 @@ async def _guard_against_last_admin_lockout(
 ADMIN_PASSWORD_FIELD_REMOVED = "admin_password_field_removed"
 
 #: `POST /admin/users/{id}/reset-password` on the caller's own account. A self
-#: reset would sign the caller out of the tab they made it from and hand them a
-#: temp credential for an account whose password they already know — the
+#: reset would sign the caller out of the tab they made it from and clear the
+#: password of an account whose password they already know — the
 #: caller's own path is `POST /api/auth/change-password`.
 ADMIN_PASSWORD_RESET_SELF = "admin_password_reset_self"
 
 
-async def _send_credentials_email(
-    db: AsyncSession,
-    org_id: uuid.UUID,
+async def _load_org(db: AsyncSession, org_id: uuid.UUID) -> Organization:
+    org_row = (
+        await db.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    if org_row is None:  # pragma: no cover - get_org_id resolved it
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return org_row
+
+
+async def _send_set_password_email(
+    org_row: Organization,
     user: User,
-    temp_password: str,
+    link: str,
     *,
     subject: str,
     lead: str,
 ) -> None:
-    """Best-effort mail of a generated temp credential to its owner.
+    """Mail the account's set-password link to its owner, or raise 502.
 
     Shared by "Invite User" and the admin password reset so the two cannot
-    drift. A failed send never fails the request: the temp password also rides
-    the API response, which is what local dev (the `console` adapter only logs)
-    and an admin relaying it out-of-band both rely on.
+    drift. Required, not best-effort: the email is the link's only channel —
+    the API response never carries it, because whoever holds it chooses the
+    password (``api/set_password_links``, ``docs/decisions.md`` §283) — so a
+    failed send rolls the caller's request back.
     """
-    org_row = (
-        await db.execute(select(Organization).where(Organization.id == org_id))
-    ).scalar_one_or_none()
-    if org_row is None:
-        return
     tenant_url = tenant_base_url(org_row.slug, org_row.settings) or None
-    try:
-        await get_email_adapter().send(
-            EmailMessage(
-                to=user.email,
-                subject=subject.format(org=org_row.name),
-                body_text=(
-                    f"Hi {user.full_name},\n\n"
-                    + lead.format(org=org_row.name)
-                    + "\n\n"
-                    + (f"  URL:      {tenant_url}\n" if tenant_url else "")
-                    + f"  Email:    {user.email}\n"
-                    f"  Password: {temp_password}\n\n"
-                    "You'll be asked to change your password on first sign-in.\n"
-                ),
-                links=(tenant_url,) if tenant_url else (),
-                preheader="Your sign-in details are inside.",
-            )
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("Credentials email failed for user %s (org=%s)", user.id, org_id)
+    await send_set_password_email(
+        EmailMessage(
+            to=user.email,
+            subject=subject.format(org=org_row.name),
+            body_text=(
+                f"Hi {user.full_name},\n\n"
+                + lead.format(org=org_row.name)
+                + "\n\n"
+                + f"  {link}\n\n"
+                + expiry_sentence()
+                + " If it has expired, use Forgot password on the sign-in page.\n\n"
+                + (f"  URL:      {tenant_url}\n" if tenant_url else "")
+                + f"  Email:    {user.email}\n"
+            ),
+            links=(link, tenant_url) if tenant_url else (link,),
+            # Fixed copy: the derived preview would reach the link.
+            preheader="Use the link in this email to set your password.",
+        ),
+        log_ref=f"user={user.id}",
+    )
 
 
 @router.post("/users", response_model=CreateUserResponse, status_code=status.HTTP_201_CREATED)
@@ -595,19 +607,20 @@ async def create_user(
     email = normalize_email(body.email)
     await _refuse_taken_email(db, org_id, email)
 
-    # The SHARED generator (`utils/passwords`), not a local one. The local copy
-    # this replaces drew 12 characters from `ascii_letters + digits` with no
-    # guarantee of case mix or a digit, so an admin-created account could be
-    # handed a temp credential that `validate_password_complexity` — the policy
-    # every other password on the platform must satisfy — would itself refuse.
-    # Signup and partner provisioning already use this one.
-    temp_password = generate_temp_password()
+    # Nowhere to point a set-password link → refuse before creating anything.
+    org_row = await _load_org(db, org_id)
+    require_link_base(org_row.slug, org_row.settings)
+
+    # No password at all: the user chooses their own through the emailed
+    # set-password link, so there is nothing for the admin to see or relay and
+    # nothing to force-change (`docs/decisions.md` §283). `/auth/login` refuses
+    # the account until a password exists — the JIT/SCIM representation.
     new_user = User(
         email=email,
         full_name=body.full_name,
-        hashed_password=await hash_password(temp_password),
+        hashed_password=None,
         organization_id=org_id,
-        must_change_password=True,
+        must_change_password=False,
     )
     db.add(new_user)
     await db.flush()
@@ -633,6 +646,23 @@ async def create_user(
         select(User).where(User.id == new_user.id).options(selectinload(User.roles))
     )
     new_user = result.scalar_one()
+
+    # Mint and send BEFORE the commit: a token-store or email failure raises,
+    # and the request's transaction unwinds — no account whose link never
+    # arrived. (A token minted for a user the rollback discards resolves to
+    # no account, so redeeming it is the same 400 as any dead link.)
+    link = await mint_employee_link(org_row.slug, org_row.settings, new_user.id, set_password=True)
+    await _send_set_password_email(
+        org_row,
+        new_user,
+        link,
+        subject="You've been invited to {org} on FeohLedger",
+        lead=(
+            "An administrator has created an account for you on {org}'s FeohLedger "
+            "workspace. Choose your password with this link:"
+        ),
+    )
+    expires_at = link_expires_at()
     await db.commit()
 
     await dispatch_auth_audit(
@@ -640,24 +670,14 @@ async def create_user(
         actor_id=user.id,
         action="user.created",
         entity_id=new_user.id,
-        details={"role_names": sorted(r.name for r in new_user.roles)},
-    )
-
-    # Best-effort welcome email — same posture as the supplier-portal invite
-    # (`vendors.py::invite_vendor_portal_user`) and the tenant-signup welcome
-    # email. This makes "Invite User" an actual email invite instead of only a
-    # shown-once password the admin must copy.
-    await _send_credentials_email(
-        db,
-        org_id,
-        new_user,
-        temp_password,
-        subject="You've been invited to {org} on FeohLedger",
-        lead=("An administrator has created an account for you on {org}'s FeohLedger workspace."),
+        details={
+            "role_names": sorted(r.name for r in new_user.roles),
+            "delivery": "set_password_link",
+        },
     )
 
     resp = _user_to_response(new_user)
-    return CreateUserResponse(**resp.model_dump(), temporary_password=temp_password)
+    return CreateUserResponse(**resp.model_dump(), set_password_link_expires_at=expires_at)
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserResponse)
@@ -680,8 +700,8 @@ async def update_user(
             detail=coded_refusal(
                 ADMIN_PASSWORD_FIELD_REMOVED,
                 "Setting a password through this endpoint is no longer supported. "
-                "Use POST /api/admin/users/{id}/reset-password to issue a temporary "
-                "password the user must change at next sign-in.",
+                "Use POST /api/admin/users/{id}/reset-password to email the user a "
+                "link to set a new password.",
             ),
         )
 
@@ -822,19 +842,21 @@ async def reset_user_password(
     current_user: User = Depends(require_permission(PERM_USER_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
 ) -> ResetUserPasswordResponse:
-    """Reset a user's password to a generated temp they must change at sign-in.
+    """Reset a user's password: clear it, and email them a set-password link.
 
-    The same credential shape "Invite User" issues: the shared generator (so the
-    temp satisfies `validate_password_complexity`), `must_change_password=True`,
-    shown once on the response and mailed best-effort. The admin never chooses
-    the value, so they never hold a working long-term credential for someone
-    else's account — the temp stops working the moment its owner replaces it
-    (#566, `docs/decisions.md` §276).
+    The admin never sees a credential for someone else's account — not a value
+    they type (#566, `docs/decisions.md` §276), and since the set-password
+    links not a generated temporary password either (§283): the reset leaves
+    the account with NO usable password (the old one dies at once, which is
+    what a reset of a possibly-compromised account is for) and mails a
+    single-use, expiring link to the account's own address. The link is never
+    in the response.
 
     Org-scoped (a foreign user is the same 404 as a missing one), out-rank
     guarded (resetting an admin's password is a takeover primitive), refused on
     the caller's own account, revokes every session the target holds, and
-    audited `user.password_reset` with no credential in it.
+    audited `user.password_reset` with no credential in it. Nothing changes
+    unless the link was minted and mailed (503 / 502 otherwise).
     """
     target = (
         await db.execute(
@@ -855,18 +877,43 @@ async def reset_user_password(
         )
     _authorize_target_mutation(current_user, target)
 
-    temp_password = generate_temp_password()
-    target.hashed_password = await hash_password(temp_password)
-    target.must_change_password = True
+    org_row = await _load_org(db, org_id)
+    require_link_base(org_row.slug, org_row.settings)
+
+    target.hashed_password = None
+    target.must_change_password = False
+    await db.flush()
+
+    # Any earlier invite / reset / forgot-password link for this account dies
+    # with the old password — a 72-hour link must not outlive the reset.
+    try:
+        await password_reset.revoke_outstanding(target.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Could not supersede earlier links for user %s", target.id)
+        raise link_unavailable() from exc
+
+    # Mint and mail before the commit, so a failure of either leaves the old
+    # password working rather than an account nobody can sign in to.
+    link = await mint_employee_link(org_row.slug, org_row.settings, target.id, set_password=False)
+    await _send_set_password_email(
+        org_row,
+        target,
+        link,
+        subject="Your {org} FeohLedger password was reset",
+        lead=(
+            "An administrator has reset the password for your account on "
+            "{org}'s FeohLedger workspace. Choose a new password with this link:"
+        ),
+    )
+    expires_at = link_expires_at()
     await db.commit()
 
     # After the commit, like every other forced logout here: a token an
     # attacker already holds is exactly what a reset exists to kill (#160).
-    # But a revoke failure (Redis down) must NOT turn into a 500 here: the
-    # password is already replaced, and this response is the only place the
-    # temp is ever shown — a 500 would lock the user out with no audit row and
-    # no email. So it is caught, recorded on the audit row, and reported on the
-    # response (`sessions_revoked: false`) so the admin knows to retry the
+    # A revoke failure (Redis down) must not turn into a 500: the password is
+    # already cleared and the link already mailed, so a 500 would hide a reset
+    # that happened. It is caught, recorded on the audit row, and reported on
+    # the response (`sessions_revoked: false`) so the admin knows to retry the
     # standalone force-logout.
     try:
         revoked_count: int | None = len(await revoke_user_sessions(user_id))
@@ -880,27 +927,15 @@ async def reset_user_password(
         entity_id=user_id,
         details={
             "changed_fields": ["password"],
-            "must_change_password": True,
+            "delivery": "set_password_link",
             "sessions_revoked": revoked_count,
         },
-    )
-
-    await _send_credentials_email(
-        db,
-        org_id,
-        target,
-        temp_password,
-        subject="Your {org} FeohLedger password was reset",
-        lead=(
-            "An administrator has reset the password for your account on "
-            "{org}'s FeohLedger workspace. Sign in with this temporary password."
-        ),
     )
 
     resp = _user_to_response(target)
     return ResetUserPasswordResponse(
         **resp.model_dump(),
-        temporary_password=temp_password,
+        set_password_link_expires_at=expires_at,
         sessions_revoked=revoked_count is not None,
     )
 

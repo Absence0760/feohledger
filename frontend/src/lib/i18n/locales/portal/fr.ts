@@ -54,6 +54,9 @@ export const messages = {
 	'portal.changePassword.save': 'Enregistrer le mot de passe',
 	'portal.changePassword.saving': 'Enregistrement...',
 	'portal.changePassword.failed': 'Échec de la modification',
+	'portal.resetPassword.expiredHint':
+		'Les liens de définition du mot de passe ne fonctionnent qu\'une fois et expirent. Demandez à l\'équipe comptabilité fournisseurs de votre client de vous en envoyer un nouveau.',
+	'portal.resetPassword.backToSignIn': 'Retour à la connexion',
 	'portal.invoices.title': 'Mes factures',
 	'portal.invoices.submit': 'Soumettre une facture',
 	'portal.invoices.submitting': 'Soumission...',

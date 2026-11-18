@@ -129,8 +129,8 @@ export const SETUP_GUIDES: Guide[] = [
 						items: [
 							'Open [[page:/admin?tab=users]] under {ui:nav.group.settings} and click {ui:admin.usersRoles.inviteUser}.',
 							'Enter their {ui:admin.users.field.fullName} and {ui:admin.users.field.email}, and tick one or more roles.',
-							'Click {ui:admin.users.modal.invite.create}. The app generates a temporary password.',
-							'Click {ui:admin.users.modal.created.copy} and send the sign-in details to the person yourself. The temporary password is shown only once.'
+							'Click {ui:admin.users.modal.invite.create}. The person is emailed a link to choose their own password; nobody else ever sees it.',
+							'The link works once and expires after a few days. If it expires or never arrives, open the user and use {ui:admin.users.reset.action} to send a new one.'
 						]
 					},
 					{

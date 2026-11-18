@@ -778,10 +778,10 @@ class AdminApi {
   static Future<AdminUser> setActive(String id, bool active) =>
       updateUser(id, {'is_active': active});
 
-  /// `POST /api/admin/users` — create a user. The backend generates a
-  /// temporary password (the user is forced to change it on first login) and
-  /// returns it EXACTLY once in the response, so the result carries it for the
-  /// admin to hand over. 409 if the email is already in use.
+  /// `POST /api/admin/users` — create a user. The backend gives the user no
+  /// password and emails them a single-use set-password link (decisions §283);
+  /// the response carries only when that link expires, never a credential.
+  /// 409 if the email is already in use.
   static Future<CreateUserResult> createUser({
     required String email,
     required String fullName,

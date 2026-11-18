@@ -1,21 +1,18 @@
-"""AP-admin-triggered supplier-portal user password reset.
+"""AP-admin-triggered supplier-portal user password reset, and the portal
+set-password link it and the invite send.
 
 Before `POST /api/vendors/{vendor_id}/portal-users/{vendor_user_id}/reset-password`
 existed, the only recovery for a locked-out vendor portal user was AP deleting
 and re-inviting them — a new `VendorUser.id` that breaks anything referencing
-the old one (chat authorship, audit rows, notification-preferences), and a new
-temp password/new account rather than a reset on the same one.
+the old one (chat authorship, audit rows, notification-preferences).
 
-Exercised through the real HTTP surface + real Postgres via the `realdb`
-harness so the round-trip (mint a new temp password → hash it onto the SAME
-row → force `must_change_password` → the OLD password stops authenticating →
-the audit row lands) is proven end to end, not just at the unit level.
-
-Both temp passwords are read out of the **delivered email**, not the HTTP
-response. Invite and reset no longer echo the plaintext back to the AP caller:
-returning it for a caller-supplied address is what let one `ap_manager` mint a
-supplier login they controlled and complete a bank redirect alone — see
-`test_vendor_bank_change_provisioner_sod.py`.
+Neither invite nor reset hands out a temporary password any more (decisions
+§283): each leaves the account with no password and emails the supplier a
+single-use, expiring link bound to this tenant, redeemed by `POST
+/api/portal/auth/reset-password`. The link is read out of the **delivered
+email**, never the HTTP response — returning a credential for a caller-supplied
+address is what let one `ap_manager` mint a supplier login they controlled and
+complete a bank redirect alone (`test_vendor_bank_change_provisioner_sod.py`).
 """
 
 from __future__ import annotations
@@ -27,6 +24,7 @@ from sqlalchemy import select
 
 from app.models.vendor_user import VendorUser
 from app.models.workflow import AuditLog
+from tests.set_password_mail import capture_outbox, link_mode, link_token, set_password_link
 from tests.test_session_management import FakeRedis
 
 TENANT = "a"
@@ -40,23 +38,8 @@ def mk(realdb):
 @pytest.fixture
 def sent_mail(monkeypatch):
     """Capture what the (dev-default `console`) email adapter would send —
-    the only channel a supplier-portal credential travels on now."""
-    outbox: list = []
-
-    async def _fake_send(self, message):  # noqa: ANN001
-        outbox.append(message)
-
-    from app.services.email_adapters.console_adapter import ConsoleAdapter
-
-    monkeypatch.setattr(ConsoleAdapter, "send", _fake_send, raising=True)
-    return outbox
-
-
-def _password_from(message) -> str:
-    for line in message.body_text.splitlines():
-        if line.strip().startswith("Password:"):
-            return line.split("Password:", 1)[1].strip()
-    raise AssertionError("no password line in the delivered message")
+    the only channel a supplier-portal set-password link travels on."""
+    return capture_outbox(monkeypatch)
 
 
 @pytest.fixture
@@ -93,82 +76,200 @@ async def _invite_portal_user(client, vendor_id: str, email: str) -> dict:
     return resp.json()
 
 
+async def _set_password(anon_client, token: str, password: str):
+    return await anon_client.post(
+        "/api/portal/auth/reset-password", json={"token": token, "new_password": password}
+    )
+
+
 @pytest.mark.asyncio
-async def test_reset_mints_new_temp_password_and_forces_change(realdb, mk, sent_mail):
-    """Happy path: a fresh temp password, distinct from the invite one, is
-    EMAILED to the supplier (never returned to the AP caller), lands on the
-    SAME VendorUser id, and sets `must_change_password: true` so the vendor is
-    forced through the change-password flow on next login — mirroring
-    `invite_vendor_portal_user`."""
-    email = f"locked-{uuid.uuid4().hex[:8]}@vendor.test"
+async def test_invite_mails_a_tenant_bound_set_link_and_no_password(realdb, mk, sent_mail):
+    email = f"invited-{uuid.uuid4().hex[:8]}@vendor.test"
     async with realdb.client(key=TENANT, role="admin") as client:
         vendor_id = await _create_vendor(client)
         invited = await _invite_portal_user(client, vendor_id, email)
-        vendor_user_id = invited["user"]["id"]
-        old_temp_password = _password_from(sent_mail[0])
+    vendor_user_id = invited["user"]["id"]
 
-        resp = await client.post(
-            f"/api/vendors/{vendor_id}/portal-users/{vendor_user_id}/reset-password"
-        )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-
-    assert body["user"]["id"] == vendor_user_id
-    assert body["user"]["must_change_password"] is True
-    assert "temp_password" not in body
-    assert len(sent_mail) == 2
-    assert sent_mail[1].to == email
-    new_temp_password = _password_from(sent_mail[1])
-    assert new_temp_password
-    assert new_temp_password != old_temp_password
+    assert len(sent_mail) == 1
+    msg = sent_mail[0]
+    assert msg.to == email
+    assert "/portal/reset-password?token=" in set_password_link(msg)
+    assert link_mode(msg) == "set"
+    assert "Password:" not in msg.body_text
+    assert link_token(msg) not in str(invited)
 
     async with mk() as s:
         vu = (
             await s.execute(select(VendorUser).where(VendorUser.id == uuid.UUID(vendor_user_id)))
         ).scalar_one()
-        assert vu.must_change_password is True
-        # A real hash — not the temp password stored/echoed as plaintext.
-        assert vu.hashed_password != new_temp_password
-        assert vu.hashed_password
+    assert vu.hashed_password is None
+    assert vu.must_change_password is False
+    assert invited["user"]["must_change_password"] is False
 
 
 @pytest.mark.asyncio
-async def test_old_password_stops_working_after_reset(realdb, mk, fake_redis, sent_mail):
-    """The whole point: once reset, the OLD temp password no longer
-    authenticates at the real portal login endpoint, and the NEW one does."""
+async def test_invite_link_sets_the_password_once_and_the_supplier_signs_in(
+    realdb, fake_redis, sent_mail
+):
+    email = f"invited-{uuid.uuid4().hex[:8]}@vendor.test"
+    async with realdb.client(key=TENANT, role="admin") as client:
+        vendor_id = await _create_vendor(client)
+        await _invite_portal_user(client, vendor_id, email)
+    token = link_token(sent_mail[0])
+
+    async with realdb.client(key=TENANT, role=None) as anon:
+        refused = await anon.post(
+            "/api/portal/auth/login", json={"email": email, "password": "Anything-Goes1"}
+        )
+        assert refused.status_code == 401
+
+        # The page's load is a read: it does not spend the link.
+        for _ in range(2):
+            check = await anon.post("/api/portal/auth/reset-password/check", json={"token": token})
+            assert check.status_code == 200, check.text
+            assert check.json()["email"] == email
+
+        weak = await _set_password(anon, token, "short")
+        assert weak.status_code == 422
+        done = await _set_password(anon, token, "Supplier-Chosen9")
+        assert done.status_code == 200, done.text
+
+        assert (await _set_password(anon, token, "Another-Chosen9")).status_code == 400
+        gone = await anon.post("/api/portal/auth/reset-password/check", json={"token": token})
+        assert gone.status_code == 400
+
+        login = await anon.post(
+            "/api/portal/auth/login", json={"email": email, "password": "Supplier-Chosen9"}
+        )
+    assert login.status_code == 200, login.text
+    assert login.json()["must_change_password"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_portal_link_is_refused_on_another_tenant_and_not_spent(
+    realdb, fake_redis, sent_mail
+):
+    """The token is bound to the tenant that minted it: presented on another
+    tenant's host it is the same 400 as an unknown link, and it still works
+    where it belongs."""
+    email = f"invited-{uuid.uuid4().hex[:8]}@vendor.test"
+    async with realdb.client(key=TENANT, role="admin") as client:
+        vendor_id = await _create_vendor(client)
+        await _invite_portal_user(client, vendor_id, email)
+    token = link_token(sent_mail[0])
+
+    async with realdb.client(key="b", role=None) as other:
+        check = await other.post("/api/portal/auth/reset-password/check", json={"token": token})
+        assert check.status_code == 400
+        assert (await _set_password(other, token, "Supplier-Chosen9")).status_code == 400
+
+    async with realdb.client(key=TENANT, role=None) as anon:
+        assert (await _set_password(anon, token, "Supplier-Chosen9")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_an_employee_reset_token_is_not_a_portal_token(realdb, sent_mail):
+    """Two token families under two key prefixes: neither redemption endpoint
+    accepts the other's token, whatever the ids."""
+    from app.services import password_reset
+
+    async with realdb.client(key=TENANT, role="admin") as client:
+        vendor_id = await _create_vendor(client)
+        invited = await _invite_portal_user(
+            client, vendor_id, f"invited-{uuid.uuid4().hex[:8]}@vendor.test"
+        )
+    vu_id = uuid.UUID(invited["user"]["id"])
+    employee_token = await password_reset.issue_reset_token(vu_id)
+    portal_token = link_token(sent_mail[0])
+
+    async with realdb.client(key=TENANT, role=None) as anon:
+        assert (await _set_password(anon, employee_token, "Supplier-Chosen9")).status_code == 400
+        employee_side = await anon.post(
+            "/api/auth/reset-password",
+            json={"token": portal_token, "new_password": "Supplier-Chosen9"},
+        )
+        assert employee_side.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_reset_clears_the_password_and_mails_a_new_link(realdb, mk, fake_redis, sent_mail):
+    """Reset lands on the SAME VendorUser id, kills the old password at once,
+    and mails a fresh link (never returned to the AP caller) that sets a new
+    one."""
     email = f"locked-{uuid.uuid4().hex[:8]}@vendor.test"
     async with realdb.client(key=TENANT, role="admin") as admin_client:
         vendor_id = await _create_vendor(admin_client)
         invited = await _invite_portal_user(admin_client, vendor_id, email)
         vendor_user_id = invited["user"]["id"]
-        old_temp_password = _password_from(sent_mail[0])
-
-        # Sanity: the pre-reset password actually works.
-        async with realdb.client(key=TENANT, role=None) as anon_client:
-            pre_resp = await anon_client.post(
-                "/api/portal/auth/login",
-                json={"email": email, "password": old_temp_password},
+        async with realdb.client(key=TENANT, role=None) as anon:
+            assert (
+                await _set_password(anon, link_token(sent_mail[0]), "Original-Pass9")
+            ).status_code == 200
+            pre = await anon.post(
+                "/api/portal/auth/login", json={"email": email, "password": "Original-Pass9"}
             )
-        assert pre_resp.status_code == 200, pre_resp.text
+            assert pre.status_code == 200, pre.text
 
-        reset_resp = await admin_client.post(
+        resp = await admin_client.post(
             f"/api/vendors/{vendor_id}/portal-users/{vendor_user_id}/reset-password"
         )
-    assert reset_resp.status_code == 200, reset_resp.text
-    new_temp_password = _password_from(sent_mail[-1])
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["user"]["id"] == vendor_user_id
+    assert body["user"]["must_change_password"] is False
+    assert "temp_password" not in body
+    assert len(sent_mail) == 2
+    assert sent_mail[1].to == email
+    new_token = link_token(sent_mail[1])
+    assert link_mode(sent_mail[1]) is None
+    assert new_token not in resp.text
 
-    async with realdb.client(key=TENANT, role=None) as anon_client:
-        old_login = await anon_client.post(
-            "/api/portal/auth/login",
-            json={"email": email, "password": old_temp_password},
-        )
-        assert old_login.status_code == 401
+    async with mk() as s:
+        vu = (
+            await s.execute(select(VendorUser).where(VendorUser.id == uuid.UUID(vendor_user_id)))
+        ).scalar_one()
+    assert vu.hashed_password is None
 
-        new_login = await anon_client.post(
-            "/api/portal/auth/login",
-            json={"email": email, "password": new_temp_password},
+    async with realdb.client(key=TENANT, role=None) as anon:
+        old = await anon.post(
+            "/api/portal/auth/login", json={"email": email, "password": "Original-Pass9"}
         )
-    assert new_login.status_code == 200, new_login.text
+        assert old.status_code == 401
+        assert (await _set_password(anon, new_token, "Replaced-Pass9")).status_code == 200
+        new = await anon.post(
+            "/api/portal/auth/login", json={"email": email, "password": "Replaced-Pass9"}
+        )
+    assert new.status_code == 200, new.text
+
+
+@pytest.mark.asyncio
+async def test_reset_email_failure_leaves_the_old_password_working(realdb, mk, monkeypatch):
+    from app.utils.passwords import hash_password, verify_password
+
+    capture_outbox(monkeypatch)
+    email = f"locked-{uuid.uuid4().hex[:8]}@vendor.test"
+    async with realdb.client(key=TENANT, role="admin") as client:
+        vendor_id = await _create_vendor(client)
+        invited = await _invite_portal_user(client, vendor_id, email)
+        vendor_user_id = uuid.UUID(invited["user"]["id"])
+        async with mk() as s:
+            vu = (
+                await s.execute(select(VendorUser).where(VendorUser.id == vendor_user_id))
+            ).scalar_one()
+            vu.hashed_password = await hash_password("Original-Pass9")
+            await s.commit()
+
+        capture_outbox(monkeypatch, fail=True)
+        resp = await client.post(
+            f"/api/vendors/{vendor_id}/portal-users/{vendor_user_id}/reset-password"
+        )
+    assert resp.status_code == 502, resp.text
+    assert resp.json()["detail"]["code"] == "set_password_email_failed"
+    async with mk() as s:
+        vu = (
+            await s.execute(select(VendorUser).where(VendorUser.id == vendor_user_id))
+        ).scalar_one()
+    assert await verify_password("Original-Pass9", vu.hashed_password)
 
 
 @pytest.mark.asyncio
@@ -204,8 +305,9 @@ async def test_reset_writes_an_audit_row(realdb, mk, sent_mail):
     assert len(rows) == 1
     details = rows[0].details or {}
     assert details.get("vendor_id") == vendor_id
-    # PII-lean: never the temp password or the vendor user's email.
-    assert "temp_password" not in details
+    assert details.get("delivery") == "set_password_link"
+    # PII-lean: never the link or the vendor user's email.
+    assert link_token(sent_mail[-1]) not in str(details)
     assert email not in str(details)
 
 
@@ -234,3 +336,26 @@ async def test_reset_requires_admin_or_ap_manager_role(realdb, sent_mail):
             f"/api/vendors/{vendor_id}/portal-users/{vendor_user_id}/reset-password"
         )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reset_supersedes_the_unused_invite_link(realdb, fake_redis, sent_mail):
+    """A 72-hour invite link must not outlive a reset: the reset kills every
+    earlier link, so only the newest one sets a password."""
+    email = f"locked-{uuid.uuid4().hex[:8]}@vendor.test"
+    async with realdb.client(key=TENANT, role="admin") as client:
+        vendor_id = await _create_vendor(client)
+        invited = await _invite_portal_user(client, vendor_id, email)
+        resp = await client.post(
+            f"/api/vendors/{vendor_id}/portal-users/{invited['user']['id']}/reset-password"
+        )
+    assert resp.status_code == 200, resp.text
+    invite_token, reset_token = link_token(sent_mail[0]), link_token(sent_mail[1])
+
+    async with realdb.client(key=TENANT, role=None) as anon:
+        stale = await anon.post(
+            "/api/portal/auth/reset-password/check", json={"token": invite_token}
+        )
+        assert stale.status_code == 400
+        assert (await _set_password(anon, invite_token, "Stale-Link-Pass9")).status_code == 400
+        assert (await _set_password(anon, reset_token, "Fresh-Link-Pass9")).status_code == 200

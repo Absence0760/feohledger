@@ -1490,21 +1490,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get adminUsersCreating => '作成中…';
 
   @override
-  String adminUsersCreated(String name) {
-    return '$name を作成しました';
+  String adminUsersInvited(String name, String email) {
+    return '$name を招待しました。$email にパスワード設定用のリンクを送信しました。';
   }
 
   @override
   String adminUsersCreateFailed(String error) {
     return 'ユーザーの作成に失敗しました: $error';
-  }
-
-  @override
-  String get adminUsersTempPasswordTitle => 'ユーザーを作成しました';
-
-  @override
-  String adminUsersTempPasswordBody(String name) {
-    return 'このワンタイムパスワードを $name に共有してください。初回サインイン時に変更を求められます。再表示されません。';
   }
 
   @override

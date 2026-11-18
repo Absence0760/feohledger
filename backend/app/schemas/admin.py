@@ -1,5 +1,7 @@
 """Schemas for user management endpoints."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 from pydantic.json_schema import SkipJsonSchema
 
@@ -68,17 +70,19 @@ class CreateUserRequest(BaseModel):
 
 
 class CreateUserResponse(AdminUserResponse):
-    """Returned on user creation — includes the generated temporary password."""
+    """Returned on user creation. Carries NO credential: the new user was
+    emailed a single-use set-password link (`docs/decisions.md` §283), and only
+    when it stops working is shown here, so the admin can say so."""
 
-    temporary_password: str
+    set_password_link_expires_at: datetime
 
 
 class ResetUserPasswordResponse(AdminUserResponse):
-    """Returned by an admin password reset — the generated temporary password,
-    shown once. Same shape as `CreateUserResponse` on purpose: both are "here
-    is a credential its owner must change at first sign-in"."""
+    """Returned by an admin password reset. Same shape as `CreateUserResponse`
+    on purpose: the password is cleared and a set-password link mailed to the
+    user's own address; no credential is ever in the response."""
 
-    temporary_password: str
+    set_password_link_expires_at: datetime
     # False when the forced logout failed (Redis unreachable) after the reset
     # committed — the user's existing sessions may still be live, and the admin
     # should run the standalone force-logout.

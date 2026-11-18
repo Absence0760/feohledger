@@ -43,8 +43,8 @@ columns exactly. See **MFA (two-factor)** below.
 All under `/api/portal/*`. Tenant resolved via the usual `X-Tenant-Slug`
 header. RBAC coverage gate in `tests/test_rbac.py` asserts every endpoint
 uses `get_current_vendor_user` (except `/portal/auth/login`,
-`/portal/auth/logout`, and `/portal/auth/mfa/challenge`, which are listed in
-`ALTERNATE_AUTH`).
+`/portal/auth/logout`, `/portal/auth/mfa/challenge` and the two
+`/portal/auth/reset-password` routes, which are listed in `ALTERNATE_AUTH`).
 
 ### Auth (`portal_auth.py`)
 
@@ -53,7 +53,9 @@ uses `get_current_vendor_user` (except `/portal/auth/login`,
 | POST   | `/portal/auth/login`             | email + password → `{access_token, …}` OR (MFA-enrolled) an MFA challenge     |
 | POST   | `/portal/auth/logout`            | Adds `jti` to the shared Redis blocklist                                      |
 | GET    | `/portal/auth/me`                | Returns the vendor-user + vendor summary (incl. `mfa_enabled`)               |
-| POST   | `/portal/auth/change-password`   | Used by the forced first-login rotation and voluntary rotations               |
+| POST   | `/portal/auth/change-password`   | Voluntary rotations, and the forced rotation of a legacy pre-link temporary password |
+| POST   | `/portal/auth/reset-password/check` | **Public** — read a set-password token WITHOUT spending it → `{email}`; opaque `400` for any token the redemption would refuse (incl. one minted for another tenant). 20/min per IP |
+| POST   | `/portal/auth/reset-password`    | **Public** — redeem the single-use set-password token from an invite / reset email: sets the password, ends every portal session, audits `portal.password.changed` `{via: "set_password_link"}`. 10/min per IP |
 | POST   | `/portal/auth/mfa/challenge`     | **Public** — trade the login-issued challenge token + a code (`method` totp\|email) for an access token |
 | POST   | `/portal/auth/mfa/challenge/email` | **Public** — email the on-demand OTP backup code to the enrolled vendor; 204-silent (no enumeration) |
 | POST   | `/portal/auth/mfa/enroll`        | Mint a CANDIDATE TOTP secret + QR (parked in Redis until verified). Optional `{password?, code?}` step-up — required once a factor is already live |
@@ -371,8 +373,8 @@ concurrency) and `tests/test_card_reveal_endpoint.py` (handler ordering).
 | Method | Path                                                 | Notes                                 |
 |--------|------------------------------------------------------|---------------------------------------|
 | GET    | `/vendors/{id}/portal-users`                         | List portal users for a vendor        |
-| POST   | `/vendors/{id}/portal-users`                         | Invite — the temp password is **emailed only**, never returned. Stamps `provisioned_by_user_id` |
-| POST   | `/vendors/{id}/portal-users/{vendor_user_id}/reset-password` | Mint + email a replacement password on the SAME row. Re-stamps `provisioned_by_user_id` |
+| POST   | `/vendors/{id}/portal-users`                         | Invite — the account has **no password**; a single-use set-password link is **emailed only**, never returned. Stamps `provisioned_by_user_id` |
+| POST   | `/vendors/{id}/portal-users/{vendor_user_id}/reset-password` | Clear the password on the SAME row, end its portal sessions, email a fresh set-password link. Re-stamps `provisioned_by_user_id` |
 | DELETE | `/vendors/{id}/portal-users/{vendor_user_id}`        | Remove a portal user                  |
 | GET    | `/vendors/change-requests/counts`                    | Whole-set tallies for the queue — `{total, pending, by_status}` (admin, ap_manager — **exactly** the queue list's gate, decisions §48: it previously admitted `cfo`, who cannot read the queue, so the size of the staged-bank-change review set was visible to a role excluded from it); counts only, PII-free. A nav badge driven off a page of results undercounts once the queue paginates — the same reason `/vendors/counts` exists |
 | GET    | `/vendors/change-requests`                           | Pending change-request queue (admin, ap_manager); value masked |
@@ -441,9 +443,10 @@ Three properties are deliberate and easy to get wrong:
   would let an approver delete the portal identity between staging and approving
   and walk their own request through. A frozen column cannot be un-stamped by a
   later delete.
-- **The supplier changing their own password does NOT clear the stamp.**
-  `POST /portal/auth/change-password` requires the *current* password, which the
-  provisioner has — so clearing there would be a one-request bypass of the whole
+- **The supplier changing — or setting — their own password does NOT clear the stamp.**
+  `POST /portal/auth/change-password` requires the *current* password, and
+  `POST /portal/auth/reset-password` the invite's link, either of which the
+  provisioner may hold (they chose the address the link went to) — so clearing there would be a one-request bypass of the whole
   control. The stamp is durable provenance, not a "who knows the password right
   now" flag. The operational cost is real and accepted: an AP user who onboarded
   a supplier is never an independent second party to what that identity submits,
@@ -539,7 +542,8 @@ Routes:
 |-------------------------------|--------------------------------------------------------|
 | `/portal`                     | **Home / overview** — whole-set KPI cards (needs your attention / with your customer / paid / completed), per-currency outstanding value, and the decisions waiting on the supplier elsewhere (open early-payment offers, a staged bank/tax change). Reads `GET /portal/summary`; `EmptyState` for a supplier with no invoices yet |
 | `/portal/login`               | Sign-in form + MFA second-factor step (TOTP, with a "use email code instead" backup) |
-| `/portal/change-password`     | Forced first-login rotation                            |
+| `/portal/change-password`     | Voluntary rotation; forced for a legacy temporary password |
+| `/portal/reset-password`      | **Public** — where an invite / reset set-password link lands (`mode=set` for an invite). The employee reset page's state machine (`components/auth/SetPasswordLink.svelte`) in the portal's own branded frame; a dead link says to ask the AP team for a new one |
 | `/portal/invoices`            | List (invoice-number search + vendor-facing phase chips) + upload + per-row "Revise & resubmit" on a rejected invoice |
 | `/portal/purchase-orders`     | PO list + per-row "Create invoice" (flip)              |
 | `/portal/payments`            | Payment history + per-row "Download remittance"        |
@@ -585,16 +589,27 @@ Add these when there's demand from the first paying customer:
   one via the admin UI (or SCIM) does not create a portal login.
 - Deleting a `Vendor` cascades to `vendor_users` (`ON DELETE CASCADE`). An
   orphaned portal user row is therefore impossible.
-- **The temp password is emailed and nothing else.** It is not in the invite
-  (or reset) response body, and delivery is not best-effort: a send failure
-  rolls the whole request back (502) rather than leaving a portal account whose
-  credential nobody received. Local dev is unaffected — the default `console`
-  adapter renders the message, exactly as the tenant-signup welcome email
-  already relies on. Recovery for a lost credential is `reset-password`, which
-  mints and emails a new one on the same row.
+- **No password is ever handed out — a set-password link is emailed, and
+  nothing else.** Invite creates the portal account with no password, and
+  reset clears it (the old one dies at once); each mints a single-use, expiring
+  token (`FEOH_SET_PASSWORD_LINK_TTL_HOURS`, default 72) and emails a link to
+  the tenant's own `/portal/reset-password` page (decisions §283). The token is
+  stored only as a keyed PBKDF2 digest under its own Redis prefix
+  (`portal:pwreset:`, so no employee token redeems here and vice versa), carries
+  the tenant slug, and is refused unspent on any other tenant's host. A reset
+supersedes every earlier link for the supplier (the unused invite included),
+and redeeming one kills the rest (a per-supplier generation counter). It is not
+  in the invite (or reset) response body, and delivery is not best-effort: a
+  send failure rolls the whole request back (`502 set_password_email_failed`)
+  rather than leaving a portal account nobody can sign in to, and with no tenant
+  base URL to point a link at the request is a `503
+  set_password_link_unavailable` before anything changes. Local dev is
+  unaffected — the default `console` adapter renders the message. Recovery for
+  a lost or expired link is `reset-password`, which emails a new one on the same
+  row; there is still no supplier self-service forgot-password.
 
   This changed for a security reason, not a tidiness one. AP chooses the
-  address, so returning the plaintext made "mint a supplier login I control" a
+  address, so returning a credential made "mint a supplier login I control" a
   single frictionless request with no delivery record — the first link of the
   BEC chain in [Credential provenance](#credential-provenance-and-the-bec-dual-control)
   below. Removing it does not close that chain on its own (an AP actor who

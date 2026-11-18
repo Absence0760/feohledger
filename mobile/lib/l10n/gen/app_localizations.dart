@@ -2592,29 +2592,17 @@ abstract class AppLocalizations {
   /// **'Creating…'**
   String get adminUsersCreating;
 
-  /// No description provided for @adminUsersCreated.
+  /// No description provided for @adminUsersInvited.
   ///
   /// In en, this message translates to:
-  /// **'Created {name}'**
-  String adminUsersCreated(String name);
+  /// **'Invited {name}. We emailed {email} a link to set their password.'**
+  String adminUsersInvited(String name, String email);
 
   /// No description provided for @adminUsersCreateFailed.
   ///
   /// In en, this message translates to:
   /// **'Failed to create user: {error}'**
   String adminUsersCreateFailed(String error);
-
-  /// No description provided for @adminUsersTempPasswordTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'User created'**
-  String get adminUsersTempPasswordTitle;
-
-  /// No description provided for @adminUsersTempPasswordBody.
-  ///
-  /// In en, this message translates to:
-  /// **'Share this one-time password with {name}. They\'ll be asked to change it on first sign-in. It won\'t be shown again.'**
-  String adminUsersTempPasswordBody(String name);
 
   /// No description provided for @adminUsersDelete.
   ///

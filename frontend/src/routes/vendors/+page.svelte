@@ -79,8 +79,8 @@
 	// CSV import), hence `auth.isManager` not the granular permission.
 	let inviteVendor = $state<Vendor | null>(null);
 	// Confirmation of a sent invite. Deliberately NOT a credential: the backend
-	// no longer returns the temp password (it is emailed to the supplier), so
-	// there is nothing here to reveal-once, copy, or leave in the DOM.
+	// emails the supplier a set-password link and never returns it, so there is
+	// nothing here to reveal-once, copy, or leave in the DOM.
 	let inviteResult = $state<PortalInviteResult | null>(null);
 	let bankEditing = $state<Vendor | null>(null);
 	let bankForm = $state<BankDetails>({

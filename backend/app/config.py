@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     # single-use link that dies on first use — where the temporary password it
     # replaces stayed valid in the inbox until someone signed in.
     signup_set_password_ttl_hours: int = Field(default=72, ge=1)
+    # Lifetime of the set-password link every OTHER account-creating or
+    # admin-reset flow sends instead of a temporary password: admin "Invite
+    # User" and "Reset password", the supplier-portal invite and reset, and
+    # partner child provisioning. Same reasoning as the signup link above —
+    # nobody asked for it a minute ago — and kept separate from it so an
+    # operator can shorten one without the other.
+    set_password_link_ttl_hours: int = Field(default=72, ge=1)
 
     # S3 / MinIO
     s3_endpoint_url: str = "http://localhost:9000"

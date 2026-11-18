@@ -123,13 +123,22 @@ Backend API endpoints are role-gated via `Depends(require_roles(...))` in `backe
 
 1. An admin navigates to **Admin > Users** and clicks **+ Invite User**
 2. They enter the user's **full name**, **email**, and select **roles**
-3. The system generates a **12-character temporary password** (alphanumeric)
-4. A confirmation dialog shows the credentials (email + temp password)
-5. The admin clicks **Copy to Clipboard** and shares the credentials with the user out-of-band (Slack, email, etc.)
-6. The user logs in at `<tenant>.localhost:7777/login` with their email and temp password
-7. The user can change their password via the **profile popover** in the sidebar
+3. The account is created with **no password**, and the user is emailed a
+   single-use **set-password link** to the tenant's own
+   `/login/reset-password?…&mode=set` page (`docs/decisions.md` §283 — the same
+   token, store and redemption as forgot-password)
+4. A confirmation dialog says where the link went and when it expires — it
+   shows **no credential**: whoever holds the link chooses the password, so the
+   admin never sees it
+5. The user opens the link, chooses their own password, and signs in
 
-The temporary password is shown **only once** — it is not stored or retrievable after the dialog is closed.
+The link works once and expires after `FEOH_SET_PASSWORD_LINK_TTL_HOURS`
+(default 72). If it expires or never arrives, **Reset password** on the user
+sends a fresh one, and Forgot password works for the account too. The email is
+the link's only channel, so a send failure is a `502
+set_password_email_failed` and no account is created; with no tenant base URL to
+point a link at, the invite is a `503 set_password_link_unavailable` before
+anything is created (`backend/app/api/set_password_links.py`).
 
 ### An address can belong to only one workspace
 
@@ -208,18 +217,28 @@ refusal's sentence only says that its administrator can close it.
 
 ## Resetting a user's password
 
-An admin never **chooses** another user's password — they reset it, and the
-server issues a temp exactly like an invite's (`docs/decisions.md` §276, #566):
+An admin never **chooses** — or sees — another user's password. They reset it,
+and the user is emailed a set-password link exactly like an invite's
+(`docs/decisions.md` §276, #566, §283):
 
 1. **Admin > Users**, open the user's **Edit** dialog
 2. Under **Password**, click **Reset password**, then **Confirm reset** (two
    clicks — a reset signs the user out everywhere)
-3. `POST /api/admin/users/:id/reset-password` generates a temp with the shared
-   generator, sets `must_change_password`, revokes every session the user
-   holds, emails the temp best-effort, and returns it once
-4. The **Password Reset** dialog shows the temp (Copy to Clipboard); relay it
-5. On sign-in with the temp the user is sent to `/change-password` and must
-   choose their own before using the app
+3. `POST /api/admin/users/:id/reset-password` clears the password (the old one
+   stops working at once), mints a single-use set-password token, emails the
+   link to the user's own address, then revokes every session the user holds
+4. The **Password Reset** dialog says where the link went and when it expires —
+   no credential
+5. The user opens the link and chooses a new password
+
+A reset also supersedes every earlier link for the account (an unused invite,
+a forgot-password link), and redeeming any link kills its siblings — a
+generation counter beside the tokens in `services/password_reset.py` — so no
+72-hour link outlives the password it was for.
+
+The token is minted and the email sent before the change commits: if either
+fails (`503 set_password_link_unavailable`, `502 set_password_email_failed`)
+nothing changes and the old password still works.
 
 Rules: `user.manage`; org-scoped (another tenant's user is a 404); the same
 out-rank guard as every other mutation (a `user.manage`-only role cannot reset
@@ -254,7 +273,7 @@ Invited (active) --> Deactivated --> Reactivated --> ...
 Users can update their own profile via the sidebar profile popover:
 
 - **Name**: Change display name
-- **Password**: Change password (requires current password for verification). Every self-service change — this one, the forced first-login change at `/change-password`, and `PATCH /api/auth/me` — writes a PII-free `auth.password.changed` audit row (`{"via": "change_password" | "profile", "forced": bool}`; `forced` is true when it replaced an admin- or signup-issued temp)
+- **Password**: Change password (requires current password for verification). Every self-service change — this one, the forced first-login change at `/change-password`, and `PATCH /api/auth/me` — writes a PII-free `auth.password.changed` audit row (`{"via": "change_password" | "profile", "forced": bool}`; `forced` is true when it replaced a temporary password — only an account still carrying one from before the set-password links, or a CLI-provisioned tenant admin, has one)
 
 Users cannot change their own email or roles.
 
@@ -267,9 +286,9 @@ Users cannot change their own email or roles.
 | GET | `/api/admin/users` | List all users in the organization (`user.manage`) |
 | GET | `/api/admin/roles` | List all available roles — the picker `role_names` is chosen from (`user.manage`) |
 | GET | `/api/admin/permissions` | The granular-permission catalog, key + label (`user.manage`) |
-| POST | `/api/admin/users` | Create a user (returns temp password) (`user.manage`) |
+| POST | `/api/admin/users` | Create a user with no password and email them a set-password link; returns `set_password_link_expires_at`, never a credential (`user.manage`; `502` if the email fails, `503` with no tenant URL — nothing is created either way) |
 | PATCH | `/api/admin/users/:id` | Update user name, email, roles or active status (`user.manage`). A field resent at its current value is not a change: it is not applied and not named in the `user.updated` audit row, which records each changed role list, active flag and address before and after. A `password` field is refused (`422 admin_password_field_removed`). Removing the org's last active admin (demote or deactivate, self or not) is `409`, serialized on the organization row so two admins demoting each other cannot both pass |
-| POST | `/api/admin/users/:id/reset-password` | Reset to a generated temp the user must change at next sign-in; revokes their sessions; returns the temp once (`user.manage`, org-scoped, out-rank guarded, not self, audited `user.password_reset`) |
+| POST | `/api/admin/users/:id/reset-password` | Clear the password (the old one dies at once), revoke the user's sessions and email them a set-password link; returns `set_password_link_expires_at` and `sessions_revoked`, never a credential (`user.manage`, org-scoped, out-rank guarded, not self, audited `user.password_reset` with `delivery: set_password_link`; a failed email is a `502` that changes nothing) |
 | POST | `/api/admin/users/:id/revoke-sessions` | Force-log-out a user without changing their account (`user.manage`, org-scoped, idempotent, audited) |
 | DELETE | `/api/admin/users/:id` | Permanently delete a user (cannot delete yourself; never the last active admin — `409`) (`user.manage`). Audited `user.deleted` with the account's `email`, `role_names` and `was_active`, written before the delete commits: if the record cannot be written the delete is refused (`503`) |
 | POST | `/api/admin/users/bulk-delete` | The same delete per id, best-effort (`user.manage`). Each row's delete and its `user.deleted` record stand or fall together (a savepoint per row); per-row failure reasons: `not_found`, `self`, `forbidden`, `blocked` (still referenced), `last_admin`, `audit_unavailable` |
@@ -316,7 +335,7 @@ Response (201):
     { "id": "uuid", "name": "ap_clerk", "description": "Enter and code invoices; prepare requisitions, intake and expenses" }
   ],
   "created_at": "2026-04-05T...",
-  "temporary_password": "aB3kLm9xPq2R"
+  "set_password_link_expires_at": "2026-04-08T..."
 }
 ```
 

@@ -36,8 +36,17 @@
 		// link. The URL token is the credential — vendors don't need a
 		// portal login to use it. Skip the auth redirect for this path.
 		const isPublicCardReveal = path.startsWith('/portal/cards/');
+		// `/portal/reset-password` is where the AP team's invite and reset
+		// links land; the supplier has no password yet, so it must be reachable
+		// signed out (the link's token is the credential).
+		const isSetPasswordLink = path === '/portal/reset-password';
 
-		if (!portalAuth.loggedIn && path !== '/portal/login' && !isPublicCardReveal) {
+		if (
+			!portalAuth.loggedIn &&
+			path !== '/portal/login' &&
+			!isPublicCardReveal &&
+			!isSetPasswordLink
+		) {
 			goto('/portal/login');
 			return;
 		}
@@ -69,7 +78,7 @@
 	<div class="no-tenant">
 		<p>{m('portal.shell.noTenant')}</p>
 	</div>
-{:else if page.url.pathname === '/portal/login' || page.url.pathname === '/portal/change-password' || page.url.pathname.startsWith('/portal/cards/')}
+{:else if page.url.pathname === '/portal/login' || page.url.pathname === '/portal/change-password' || page.url.pathname === '/portal/reset-password' || page.url.pathname.startsWith('/portal/cards/')}
 	<div class="portal-shell">
 		<div class="portal-standalone">
 			<slot />

@@ -61,6 +61,9 @@ export const messages = {
 	'portal.changePassword.save': 'Guardar contraseña',
 	'portal.changePassword.saving': 'Guardando...',
 	'portal.changePassword.failed': 'Error al cambiar',
+	'portal.resetPassword.expiredHint':
+		'Los enlaces para establecer la contraseña solo funcionan una vez y caducan. Pida al equipo de cuentas por pagar de su cliente que le envíe uno nuevo.',
+	'portal.resetPassword.backToSignIn': 'Volver a iniciar sesión',
 
 	// Facturas del portal (routes/portal/invoices/+page.svelte)
 	'portal.invoices.title': 'Mis facturas',

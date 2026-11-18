@@ -167,11 +167,11 @@ class PortalInviteResponse(BaseModel):
     in as it, stage a bank-detail change, approve their own request through the
     NULL `requested_by_user_id` short-circuit, then pay it).
 
-    The credential now leaves only through the email adapter, to the portal
-    user's own address. Local-first is unaffected: the dev default `console`
-    adapter renders the message, exactly as the tenant-signup welcome email
-    already relies on. See `backend/docs/supplier-portal.md` § Credential
-    delivery.
+    No credential exists to return: the account is left with no password and a
+    single-use set-password link leaves only through the email adapter, to the
+    portal user's own address (`docs/decisions.md` §283). Local-first is
+    unaffected: the dev default `console` adapter renders the message. See
+    `backend/docs/supplier-portal.md` § Operational notes.
     """
 
     user: PortalUserResponse
