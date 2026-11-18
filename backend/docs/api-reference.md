@@ -407,9 +407,9 @@ All require `admin`.
 |----------|--------------------------|-------------|
 | `GET`    | `/api/admin/users`       | List all users in the organization |
 | `GET`    | `/api/admin/roles`       | List all available roles |
-| `POST`   | `/api/admin/users`       | Create user (returns temp password) |
+| `POST`   | `/api/admin/users`       | Create a user with no password and email them a single-use set-password link; returns the user + `set_password_link_expires_at`, never a credential. `502 set_password_email_failed` / `503 set_password_link_unavailable` create nothing |
 | `PATCH`  | `/api/admin/users/{id}`  | Update user (name, email, roles, active). Only fields whose value differs are applied and audited. `password` → `422 admin_password_field_removed` |
-| `POST`   | `/api/admin/users/{id}/reset-password` | Reset to a generated temp (`must_change_password=true`), revoke the user's sessions, return `temporary_password` once (same shape as create) plus `sessions_revoked` (false if the forced logout failed after the commit — the reset stands and the temp is still returned). Org-scoped, out-rank guarded, not self (`400 admin_password_reset_self`), audited `user.password_reset` |
+| `POST`   | `/api/admin/users/{id}/reset-password` | Clear the password, email the user a set-password link, revoke their sessions; returns the user + `set_password_link_expires_at` (same shape as create) plus `sessions_revoked` (false if the forced logout failed after the commit — the reset stands). Never a credential. A failed email (`502`) or no tenant URL (`503`) changes nothing. Org-scoped, out-rank guarded, not self (`400 admin_password_reset_self`), audited `user.password_reset` |
 | `POST`   | `/api/admin/users/{id}/revoke-sessions` | Force-log-out a user without changing their account. Org-scoped (foreign user → 404), idempotent, audited `user.sessions_revoked` |
 | `DELETE` | `/api/admin/users/{id}`  | Permanently delete a user. `409` for yourself, a user still referenced by in-flight work, or the org's last active admin; `503` (nothing deleted) if the `user.deleted` audit row cannot be written |
 | `POST`   | `/api/admin/users/bulk-delete` | `{user_ids: [...]}` → `{deleted: [...], failed: [{user_id, reason, references}]}`; `reason` is `not_found` \| `self` \| `forbidden` \| `blocked` \| `last_admin` \| `audit_unavailable` |

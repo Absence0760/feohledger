@@ -752,10 +752,16 @@ failure), so we never half-create; a slug that races past the pre-check trips th
 unique constraint inside provisioning → a clean **409** (not a 500). An invalid
 slug is **422**, a taken slug **409** (the only enumeration surface is the
 partner's *own* choice of slug, which public signup already exposes — not a
-cross-tenant leak). Returns the `ChildTenantSummary` plus the new admin's
-`admin_email` + a one-time `temp_password` (returned EXACTLY once, like an API-key
-mint — the new admin rotates it on first login via `must_change_password`). No
-migration (the `parent_org_id` column already exists).
+cross-tenant leak). The new admin is provisioned with **no password** and
+emailed a single-use set-password link to the child's own host (decisions §283),
+so the partner never holds a credential for the child. Returns the
+`ChildTenantSummary` plus the new admin's `admin_email`,
+`set_password_email_sent` and `set_password_link_expires_at`. The email is
+best-effort here — the tenant and its database already exist and are not unwound
+— so a failed send is reported as `set_password_email_sent: false` and the admin
+uses Forgot password; with no tenant base URL the request is a `503
+set_password_link_unavailable` before any database is created. No migration (the
+`parent_org_id` column already exists).
 
 **Why this authorization model is safe (the privilege boundary).** The hard
 question attach poses: who may declare org X a child of partner P? Letting any
@@ -836,7 +842,9 @@ and an armed two-click **Detach** `RowAction` per child row
   (realdb — provisioning creates the org + tenant DB and stamps
   `parent_org_id = caller`; the child appears in the partner overview; both
   trails audited PII-free (`child_provisioned`/`parent_linked`, never the admin
-  email or temp password); admin-only (403) + 401 unauth; slug collision → clean
+  email or set-password link); the admin gets a link, not a password, and a
+  failed send is reported rather than failing; no tenant URL → 503 before any
+  database exists; admin-only (403) + 401 unauth; slug collision → clean
   409 with the existing tenant undisturbed; invalid slug / email → 422. Each test
   drops the provisioned DB + control rows in a `finally`).
 - Frontend: `frontend/tests-e2e/admin/partner.spec.ts` (branding admin surface) +
