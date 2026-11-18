@@ -1805,13 +1805,6 @@ user-visible halves still open.
       fix:** clear the tenant's `portal:pwreset:` keys and counters in the
       same sweep. **Trigger:** the next change to workspace closure or portal
       tokens.
-- [ ] **(c) `create_tenant.py` cannot re-send the first admin's link.** If the
-      set-password email fails on a tenant with no working mail, a re-run
-      skips the existing slug (`--skip-existing`), so the only recovery is
-      Forgot password once mail works (§452). **Durable fix:** an operator
-      `--resend-link` for an existing tenant's first admin, sharing one email
-      builder with `api/partner.py`'s child-admin email. **Trigger:** the
-      first operator who hits it.
 - [ ] **(c) `/recurring`'s "Not generating" badge explains itself only in a
       tooltip.** The skip badge (`recurring.skip.title`) carries the skipped-
       period count, period and reason in a `title`, which a keyboard, a touch
