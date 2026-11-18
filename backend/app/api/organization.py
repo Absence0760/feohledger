@@ -48,6 +48,7 @@ from app.services.provider_credentials import (
     credential_status,
     extract_secrets,
     extraction_secrets_to_drop,
+    rail_secrets_to_drop,
     strip_secrets,
     update_secrets,
 )
@@ -408,6 +409,18 @@ async def update_organization(
                 SECRET_FIELDS["extraction"],
                 "extraction_provider_changed",
             )
+        # A payment-rail or card-issuer key belongs to the provider and the
+        # environment it was typed for: a save that changes either (or removes
+        # a multi-route entry) drops the stranded secrets rather than send them
+        # to the new host (`provider_credentials.rail_secrets_to_drop`).
+        for rail in ("payments", "cards"):
+            if rail not in body.settings:
+                continue
+            rail_drop = rail_secrets_to_drop(
+                rail, (org.settings or {}).get(rail), body.settings[rail]
+            )
+            if rail_drop:
+                secret_drops[rail] = (rail_drop, f"{rail}_provider_changed")
 
         # The chat webhook URL has one sanctioned writer — the audited
         # `PUT /api/organization/chat-notifications/webhook`. This generic merge
@@ -584,7 +597,7 @@ async def update_organization(
                 detail="The change could not be recorded in the audit trail, so it was not saved.",
             ) from None
     # A save that points the ERP block at a different ERP or destination (or
-    # the extraction block at a different provider) drops the sealed secrets
+    # the extraction, payments or cards block at a different provider) drops the sealed secrets
     # that belonged to the old one, through the same audited writer the
     # credentials endpoint uses: audit row first, sealed-store write second,
     # all in this transaction. Only names actually stored are touched, so a

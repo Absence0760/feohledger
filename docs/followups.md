@@ -1231,29 +1231,17 @@ scope (§260) — do not fold them into any of these.
       pending.
 ### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
 
-- [ ] **(c) Switching payment or card provider keeps the old provider's sealed
-      secret.** Changing `payments.provider` (or `cards.provider`) leaves the
-      previous provider's stored key in place, and the next call sends it to
-      the new provider's host. The change is audited
-      (`organization.provider_config_updated`) but nothing clears it. The ERP
-      block no longer has this gap: a new ERP or a new destination drops its
-      sealed secrets in the same transaction (decisions §271,
-      `erp_adapters/catalog.secrets_to_drop`). **Durable fix:** the same shape
-      for `payments` / `cards` — a pure "what does this save drop" rule keyed on
-      the provider identity (and any base-URL / environment key), applied by
-      `PATCH /api/organization` through `provider_credentials.update_secrets`
-      with an audited `credentials_updated` row, plus a test. **Trigger:** the
-      next change to the payments or cards settings writers, or before the
-      first tenant with live payment-rail or card-issuer credentials. The extraction block no longer has the gap
-      either: a provider switch drops its sealed key with an audited
-      `extraction_provider_changed` row (decisions §444).
-- [ ] **(c) A sealed value that can no longer be opened has no in-app
-      recovery.** If the KMS key is disabled or (in dev) `FEOH_SECRET_KEY`
-      changes, every save for that block returns 503, because the writer opens
-      the existing value to merge into it. **Durable fix:** an admin "clear
-      unreadable credentials" action on `/api/organization/credentials/{block}`,
-      audited, that replaces the row without opening it. **Trigger:** the first
-      key rotation or environment where it happens.
+- [ ] **(c) Clearing an unopenable credential block is API-only.** A sealed
+      row that can no longer be opened (KMS key disabled, a changed dev
+      `FEOH_SECRET_KEY`) is cleared by `DELETE
+      /api/organization/credentials/{block}`, which removes it without opening
+      it, audited (decisions §NEW-S1). The organization page has no control for
+      it: each secret field has its own "remove the stored value", which goes
+      through `PUT` and so answers 503 on such a row. **Durable fix:** when a
+      block's `PUT` answers 503, the panel offers "Clear all stored
+      credentials for this block" (admin, confirm dialog) calling the DELETE.
+      **Trigger:** the first time a tenant admin hits the 503, or the next
+      change to the credential panels.
 
 ### Surfaced by evaluating Baidu's Unlimited OCR (2026-10-11)
 

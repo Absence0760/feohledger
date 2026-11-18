@@ -23260,3 +23260,58 @@ fetched branding is authoritative: it overwrites or removes the entry.
   bring back the flash this removes.
 - **No CSP hash to update:** the frontend ships no CSP (`infra/frontend.tf`,
   SvelteKit hydration uses inline scripts).
+
+## §NEW-S1. A payment or card key goes with its provider, and an unopenable block can be cleared (round 18, 2026-11-18)
+
+**The drop.** Changing `settings.payments.provider` or `settings.cards.provider`
+left the old provider's sealed `api_key` / `client_secret` / webhook key in
+`provider_credentials`, and the next call sent it to the new provider's host.
+The ERP block (§271) and the extraction block (§444) already drop their secrets
+when a save points them somewhere new; the rail blocks now do the same.
+`provider_credentials.rail_secrets_to_drop(block, before, after)` is the pure
+rule. A key belongs to a provider in one environment, so the block's own secrets
+go when the save changes:
+
+- the provider (stripped, blank = none);
+- the `sandbox` flag, read with the default the adapters apply when it is absent
+  (`true` for payments, `false` for cards). Column, Increase, Dwolla, Checkeeper,
+  Lithic and Nium pick their host from it, and a sandbox key on a production
+  host, or the reverse, is the same mistake on a smaller scale;
+- for a card block with no provider, the `region`, because
+  `card_adapters/dispatcher` then picks the issuer from it.
+
+A `payments.providers[]` entry's secrets are stored as
+`providers.<provider>.<field>`, which is already keyed by provider. They go when
+that entry is removed or its own `sandbox` changes. `PATCH /api/organization`
+clears only the paths that are actually stored, through `update_secrets`, in the
+save's transaction, audited first as `organization.credentials_updated` with
+reason `payments_provider_changed` / `cards_provider_changed`.
+
+The rule over-drops on purpose in two cases. A card block that resolved its
+issuer by region and is then saved naming that same issuer explicitly loses its
+key. So does a Modern Treasury or Stripe block whose `sandbox` flag is flipped,
+even though those two pick the environment by key rather than by host. In both
+cases the admin types the key again, in the same save. Working out "the same
+issuer" would mean copying the dispatcher's credential-dependent fallback into
+a pure rule. A rule that wrongly keeps a key sends it to the wrong host.
+Rejected: comparing the whole configuration, as the generic connection test
+does. That would drop keys on every threshold or NACHA edit in the payments
+block, which holds both rail configuration and AP policy.
+
+**The reset.** `update_secrets` opens the stored row so it can merge into it. A
+row that can no longer be opened (KMS key disabled, or a changed dev
+`FEOH_SECRET_KEY`) therefore made every save of that block a 503, and that
+includes a `clear` and the PATCH drop above. `DELETE
+/api/organization/credentials/{block}` (`provider_credentials.reset_block`)
+deletes the row without opening it, naming what it held from its
+`secret_fields`. It is admin-only, holds the org row lock, and is audited first
+(`organization.credentials_updated`, reason `reset_without_opening`); if that
+audit row cannot be written, nothing is removed. It is deliberately not limited
+to rows that fail to open. Checking that would mean calling KMS on a path meant
+for when KMS is the problem, and removing all of a block's keys is an action an
+admin may take anyway. For `erp` it also removes the OAuth tokens sealed in the
+same row. They cannot be revoked at the provider without being opened, so the
+connection reads as "reconnect" (`erp_oauth` treats a missing refresh token as
+not connected). The organization page has no per-block "remove all" control to
+attach this to, since each secret field has its own "remove the stored value",
+so the action is API-only for now; the button is tracked in `docs/followups.md`.

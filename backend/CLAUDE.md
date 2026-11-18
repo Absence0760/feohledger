@@ -946,7 +946,10 @@ holds anything. Write them only through `PUT /api/organization/credentials/{bloc
 `realdb.store_provider_secrets`. See `docs/erp-integration.md` § Where the
 credentials live. A BYOK extraction key is read ONLY through
 `provider_credentials.byok_extraction_config` (platform orgs never open the
-store), and a `PATCH` that switches `extraction.provider` drops the sealed key.
+store), and a `PATCH` that switches `extraction.provider` drops the sealed key;
+one that switches `payments` / `cards` provider or `sandbox` drops theirs
+(`rail_secrets_to_drop`). `DELETE /api/organization/credentials/{block}` clears
+a block without opening it — the recovery for a row that no longer opens.
 The OIDC client secret is sealed too (block `sso`, migration 0135), but its only
 writer is `PUT /api/organization/sso` — the generic credentials door refuses
 the block (`DEDICATED_WRITER_BLOCKS`) — and its only reader is the OIDC
