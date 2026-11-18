@@ -349,8 +349,9 @@ export interface PortalInvitePayload {
 
 /** Mirrors `backend/app/schemas/portal.PortalInviteResponse`.
  *
- *  There is deliberately **no** `temp_password`: the backend now delivers the
- *  credential only by email to the portal user's own address. Returning it here
+ *  There is deliberately **no** credential: the backend emails a single-use
+ *  set-password link to the portal user's own address (decisions §283).
+ *  Returning a credential here
  *  let one `ap_manager` mint a supplier login at an address they controlled in
  *  a single request — the first link of a BEC bank-redirect chain they could
  *  then complete alone. `portal_url` is `null` when `FEOH_TENANT_URL_TEMPLATE`

@@ -1177,7 +1177,7 @@ export const messages = {
 	'vendors.createModal.toast.createFailed': '取引先を作成できませんでした',
 	'vendors.invite.aria': '取引先をサプライヤーポータルに招待',
 	'vendors.invite.title': '{vendor} をポータルに招待',
-	'vendors.invite.hint': 'サプライヤーポータルのログインを作成し、仮パスワードをメールで送信します。',
+	'vendors.invite.hint': 'サプライヤーポータルのログインを作成し、パスワード設定用のリンクをメールで送信します。',
 	'vendors.invite.field.fullName': '担当者名',
 	'vendors.invite.field.email': 'メール',
 	'vendors.invite.send': '招待を送信',
@@ -1186,7 +1186,7 @@ export const messages = {
 	'vendors.invite.sent.aria': 'ポータル招待を送信しました',
 	'vendors.invite.sent.heading': 'ポータル招待を送信しました',
 	'vendors.invite.sent.body':
-		'仮パスワードは {email} 宛にメールで送信されました。ここには表示されません。サプライヤーが受け取れない場合は、パスワードのリセットで再送してください。',
+		'{email} にパスワード設定用のリンクを送信しました。ここには表示されません。サプライヤーに届かない場合や期限切れの場合は、「パスワードをリセット」で新しいリンクを送信してください。',
 	'vendors.invite.sent.email': 'メール',
 	'vendors.invite.sent.url': 'ポータル URL',
 	'vendors.invite.sent.done': '完了',
@@ -5145,6 +5145,10 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "このメールアドレスのユーザーは、このワークスペースに既に存在します。",
 	'refusal.emailInOtherWorkspace': "このメールアドレスには別のワークスペースのアカウントが既にあります。1 つのアドレスは 1 つのワークスペースにしか所属できないため、この方には別のアドレスを使用してください。その方がもう別のワークスペースを使用していない場合は、そのワークスペースの管理者が閉鎖するとアドレスが解放されます。",
 	'refusal.emailCheckThrottled': "このワークスペースで最近入力されたアドレスのうち、別のワークスペースに既に属していたものが多すぎるため、ユーザーの追加とメールアドレスの変更を最大 1 時間停止しています。しばらくしてからもう一度お試しください。",
+	'refusal.setPasswordLinkUnavailable':
+		"現在パスワード設定リンクを発行できないため、何も変更されていません。しばらくしてから再試行してください。",
+	'refusal.setPasswordEmailFailed':
+		"パスワード設定リンクのメールを送信できなかったため、何も変更されていません。メールプロバイダーの設定を確認して再試行してください。",
 	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
 	'refusal.vendorMergeSelf': "取引先を自分自身に統合することはできません。別の正規の取引先を選択してください。",
 	'refusal.vendorMergeNoDuplicates': "統合する重複を 1 件以上選択してください。",

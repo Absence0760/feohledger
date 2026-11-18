@@ -32,7 +32,7 @@
 				full_name: fullName.trim()
 			});
 			// The parent confirms delivery. There is no credential in `result` —
-			// the temp password is emailed to the supplier and never returned.
+			// the set-password link is emailed to the supplier and never returned.
 			oninvited(result);
 			onclose();
 		} catch (err) {

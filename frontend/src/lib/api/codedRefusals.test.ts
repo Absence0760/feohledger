@@ -117,6 +117,8 @@ describe('codedRefusalText', () => {
 		['email_in_this_workspace', 'refusal.emailInThisWorkspace'],
 		['email_in_other_workspace', 'refusal.emailInOtherWorkspace'],
 		['email_check_throttled', 'refusal.emailCheckThrottled'],
+		['set_password_link_unavailable', 'refusal.setPasswordLinkUnavailable'],
+		['set_password_email_failed', 'refusal.setPasswordEmailFailed'],
 		['workspace_close_confirmation_mismatch', 'refusal.workspaceCloseConfirmationMismatch'],
 		['workspace_close_in_progress', 'refusal.workspaceCloseInProgress'],
 		['workspace_close_audit_unavailable', 'refusal.workspaceCloseAuditUnavailable'],

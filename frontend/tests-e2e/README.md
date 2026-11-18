@@ -585,12 +585,12 @@ creates, and the journey makes the rest through the UI.
 |---|---|
 | install | `/api/health`, signup reported closed (`FEOH_SIGNUP_ENABLED=false`), the tenant host serves `/login` |
 | first admin | the generated temporary password signs in, a change is forced, TOTP enrols |
-| invite | an AP Manager and a financial controller (a second AP Manager) are created; each invitation reaches Mailpit with the tenant URL and the same temporary password the admin saw |
+| invite | an AP Manager and a financial controller (a second AP Manager) are created; the admin is shown no credential, and each invitation reaches Mailpit with a single-use set-password link on the tenant's own host (decisions §283) |
 | credentials | a provider secret is sealed (a deployed env refuses the local key, so this went through KMS) |
 | first invoice | a tax-exclusive UBL e-invoice (net lines, tax on the header) from an unknown, long, non-ASCII supplier is picked from the empty state's file dialog and reaches review **without a reload**; its only findings are the unverified vendor and the PO that does not exist |
-| controller | forced change on first sign-in, clears the PO flag. A third person, because the admin uploaded the invoice and the AP Manager approves it: an approver's own clearance is re-raised by their approval (decisions §420, §422) |
-| AP Manager | forced change on first sign-in, verifies the supplier, approves (the controller's clearance survives it), records it paid outside FeohLedger |
-| reset | the admin's reset issues a generated temporary password (also emailed), the old one stops working, the next sign-in is forced to change it, the new one works |
+| controller | sets a password from the emailed link, clears the PO flag. A third person, because the admin uploaded the invoice and the AP Manager approves it: an approver's own clearance is re-raised by their approval (decisions §420, §422) |
+| AP Manager | sets a password from the emailed link, verifies the supplier, approves (the controller's clearance survives it), records it paid outside FeohLedger |
+| reset | the admin's reset shows no credential, the old password stops working at once, a fresh set-password link reaches Mailpit, and the password it sets works |
 | MFA | the admin signs back in through the TOTP challenge |
 
 The long strings (`fixtures.ts::REAL`) are the production-shaped values; every

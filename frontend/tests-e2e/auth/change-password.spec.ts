@@ -1,4 +1,14 @@
-import { API_BASE, authedTenantHeaders, expect, signIn, signInAndWait, signOut, TENANT_ROOT_URL, test } from '../fixtures/helpers';
+import {
+	API_BASE,
+	authedTenantHeaders,
+	createUserWithKnownPassword,
+	expect,
+	signIn,
+	signInAndWait,
+	signOut,
+	TENANT_ROOT_URL,
+	test
+} from '../fixtures/helpers';
 
 // Start unauthenticated — this spec drives its own sign-in / sign-out for the change-password UX.
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -14,22 +24,17 @@ interface CreatedUser {
  * round-trip via a freshly-created admin-side user. Each test creates
  * the user, drives the change-password form, and deletes the user in
  * finally. The seed never gets touched.
+ *
+ * No flow issues a temporary password any more (invites and resets email a
+ * set-password link, decisions §283), but the forced mode still serves an
+ * account created before that, or a tenant admin provisioned from the CLI with
+ * `must_change_password`; the user is put in exactly that state.
  */
-
 async function createTestUser(
 	page: import('@playwright/test').Page
 ): Promise<CreatedUser> {
-	const email = `e2e-pw-${Date.now()}@test.local`;
-	const resp = await page.request.post(`${API_BASE}/api/admin/users`, {
-		headers: await authedTenantHeaders(page),
-		data: { full_name: 'Password Test', email, role_names: ['ap_clerk'] }
-	});
-	const body = (await resp.json()) as {
-		id: string;
-		email: string;
-		temporary_password: string;
-	};
-	return { id: body.id, email: body.email, temp_password: body.temporary_password };
+	const created = await createUserWithKnownPassword(page, { mustChange: true });
+	return { id: created.id, email: created.email, temp_password: created.password };
 }
 
 async function deleteTestUser(
@@ -121,31 +126,17 @@ test.describe('/change-password', () => {
 		}
 	});
 
-	test('admin reset → temp sign-in is forced to /change-password → the new password works', async ({
+	test('admin reset clears the password and says a link was emailed — never shows one', async ({
 		page
 	}) => {
-		// #566: the reset issues a GENERATED temp the user must change; the Edit
-		// modal carries no password input (a browser used to autofill the
-		// admin's own password into it and silently reset the target on save).
+		// #566: the Edit modal carries no password input (a browser used to
+		// autofill the admin's own password into it and silently reset the
+		// target on save). Decisions §283: the reset clears the password and
+		// emails the user a set-password link; the admin is shown neither.
 		await signInAndWait(page);
-		const created = await createTestUser(page);
+		const created = await createUserWithKnownPassword(page, { mustChange: false });
 
 		try {
-			// Replace the invite temp first, so the forced change below can only
-			// have come from the reset.
-			await signOut(page);
-			await signIn(page, { email: created.email, password: created.temp_password });
-			await page.waitForURL(/\/change-password$/);
-			const ownPw = 'Owner-Chosen-1234';
-			await page.locator('input[autocomplete="current-password"]').fill(created.temp_password);
-			await page.locator('input[autocomplete="new-password"]').first().fill(ownPw);
-			await page.locator('input[autocomplete="new-password"]').last().fill(ownPw);
-			await page.getByRole('button', { name: 'Change password' }).click();
-			await page.waitForURL(TENANT_ROOT_URL, { timeout: 10_000 });
-			await signOut(page);
-
-			// Admin opens the user's Edit modal and resets.
-			await signInAndWait(page);
 			await page.goto('/admin');
 			const row = page.locator('table tbody tr', { hasText: created.email });
 			await expect(row).toBeVisible();
@@ -162,29 +153,26 @@ test.describe('/change-password', () => {
 					r.request().method() === 'POST'
 			);
 			await modal.getByRole('button', { name: 'Confirm reset' }).click();
-			expect((await reset).status()).toBe(200);
+			const resp = await reset;
+			expect(resp.status()).toBe(200);
+			const body = (await resp.json()) as Record<string, unknown>;
+			expect(body).not.toHaveProperty('temporary_password');
 
-			const cred = page.locator('div.modal[role="dialog"][aria-label="Password reset"]');
-			await expect(cred).toBeVisible();
-			const temp = (await cred.locator('.credential-value.password').textContent())?.trim() ?? '';
-			expect(temp.length).toBeGreaterThanOrEqual(12);
-			await cred.getByRole('button', { name: /^Done$/ }).click();
+			const sent = page.locator('div.modal[role="dialog"][aria-label="Password reset"]');
+			await expect(sent).toBeVisible();
+			await expect(sent).toContainText(`We emailed ${created.email} a link to choose a new password.`);
+			await expect(sent.locator('code, input')).toHaveCount(0);
+			await sent.getByRole('button', { name: /^Done$/ }).click();
 
-			// The user's own password no longer works; the temp does, and forces a change.
+			// The user's old password stopped working at the reset.
 			await signOut(page);
-			await signIn(page, { email: created.email, password: temp });
-			await page.waitForURL(/\/change-password$/, { timeout: 10_000 });
-			const newPw = 'After-Reset-5678';
-			await page.locator('input[autocomplete="current-password"]').fill(temp);
-			await page.locator('input[autocomplete="new-password"]').first().fill(newPw);
-			await page.locator('input[autocomplete="new-password"]').last().fill(newPw);
-			await page.getByRole('button', { name: 'Change password' }).click();
-			await page.waitForURL(TENANT_ROOT_URL, { timeout: 10_000 });
-
-			await signOut(page);
-			await signIn(page, { email: created.email, password: newPw });
-			await page.waitForURL(TENANT_ROOT_URL, { timeout: 10_000 });
-			await signOut(page);
+			const refused = page.waitForResponse(
+				(r) => r.url().includes('/api/auth/login') && r.request().method() === 'POST'
+			);
+			await signIn(page, { email: created.email, password: created.password });
+			expect((await refused).status()).toBe(401);
+			await expect(page).toHaveURL(/\/login/);
+			await expect(page.locator('.error')).toBeVisible();
 		} finally {
 			await deleteTestUser(page, created.id);
 		}

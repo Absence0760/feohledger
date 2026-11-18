@@ -1189,7 +1189,8 @@ export const messages = {
 	'vendors.createModal.toast.createFailed': 'Lieferant konnte nicht angelegt werden',
 	'vendors.invite.aria': 'Lieferant zum Lieferantenportal einladen',
 	'vendors.invite.title': '{vendor} zum Portal einladen',
-	'vendors.invite.hint': 'Legt einen Portal-Zugang an und sendet ein temporäres Passwort per E-Mail.',
+	'vendors.invite.hint':
+		'Legt einen Portal-Zugang an und sendet per E-Mail einen Link zum Festlegen des Passworts.',
 	'vendors.invite.field.fullName': 'Name der Kontaktperson',
 	'vendors.invite.field.email': 'E-Mail',
 	'vendors.invite.send': 'Einladung senden',
@@ -1198,7 +1199,7 @@ export const messages = {
 	'vendors.invite.sent.aria': 'Portal-Einladung gesendet',
 	'vendors.invite.sent.heading': 'Portal-Einladung gesendet',
 	'vendors.invite.sent.body':
-		'Das temporäre Passwort wurde per E-Mail an {email} gesendet. Es wird hier nie angezeigt — erhält der Lieferant es nicht, senden Sie über Passwort zurücksetzen ein neues.',
+		'Wir haben {email} einen Link zum Festlegen des Passworts gesendet. Er wird hier nie angezeigt — falls der Lieferant ihn nicht erhält oder er abläuft, senden Sie mit „Passwort zurücksetzen“ einen neuen.',
 	'vendors.invite.sent.email': 'E-Mail',
 	'vendors.invite.sent.url': 'Portal-URL',
 	'vendors.invite.sent.done': 'Fertig',
@@ -5236,6 +5237,10 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "In diesem Workspace gibt es bereits einen Benutzer mit dieser E-Mail-Adresse.",
 	'refusal.emailInOtherWorkspace': "Diese E-Mail-Adresse hat bereits ein Konto in einem anderen Workspace. Eine Adresse kann nur zu einem Workspace gehören; verwenden Sie für diese Person eine andere Adresse. Wenn die Person den anderen Workspace nicht mehr nutzt, kann dessen Administrator ihn schließen, wodurch die Adresse frei wird.",
 	'refusal.emailCheckThrottled': "Zu viele kürzlich in diesem Workspace eingegebene Adressen gehörten bereits zu anderen Workspaces. Das Hinzufügen von Benutzern und das Ändern ihrer E-Mail-Adresse ist daher für bis zu eine Stunde pausiert. Versuchen Sie es später erneut.",
+	'refusal.setPasswordLinkUnavailable':
+		"Ein Link zum Festlegen des Passworts kann gerade nicht ausgestellt werden, daher wurde nichts geändert. Versuchen Sie es später erneut.",
+	'refusal.setPasswordEmailFailed':
+		"Die E-Mail mit dem Link zum Festlegen des Passworts konnte nicht gesendet werden, daher wurde nichts geändert. Prüfen Sie die Konfiguration des E-Mail-Anbieters und versuchen Sie es erneut.",
 	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
 	'refusal.vendorMergeSelf': "Ein Lieferant kann nicht mit sich selbst zusammengeführt werden. Wählen Sie einen anderen maßgeblichen Lieferanten.",
 	'refusal.vendorMergeNoDuplicates': "Wählen Sie mindestens ein Duplikat zum Zusammenführen aus.",

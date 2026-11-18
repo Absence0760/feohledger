@@ -1190,7 +1190,8 @@ export const messages = {
 	'vendors.createModal.toast.createFailed': 'Impossible de créer le fournisseur',
 	'vendors.invite.aria': 'Inviter le fournisseur au portail fournisseurs',
 	'vendors.invite.title': 'Inviter {vendor} au portail',
-	'vendors.invite.hint': 'Crée un accès au portail fournisseurs et envoie un mot de passe temporaire par e-mail.',
+	'vendors.invite.hint':
+		'Crée un accès au portail fournisseurs et lui envoie par e-mail un lien pour définir son mot de passe.',
 	'vendors.invite.field.fullName': 'Nom du contact',
 	'vendors.invite.field.email': 'E-mail',
 	'vendors.invite.send': "Envoyer l'invitation",
@@ -1199,7 +1200,7 @@ export const messages = {
 	'vendors.invite.sent.aria': 'Invitation au portail envoyée',
 	'vendors.invite.sent.heading': 'Invitation au portail envoyée',
 	'vendors.invite.sent.body':
-		"Le mot de passe temporaire a été envoyé par e-mail à {email}. Il n'est jamais affiché ici — si le fournisseur ne le reçoit pas, utilisez Réinitialiser le mot de passe pour en envoyer un nouveau.",
+		'Nous avons envoyé à {email} un lien pour définir son mot de passe. Il n\'est jamais affiché ici — si le fournisseur ne le reçoit pas ou s\'il expire, utilisez Réinitialiser le mot de passe pour en envoyer un nouveau.',
 	'vendors.invite.sent.email': 'E-mail',
 	'vendors.invite.sent.url': 'URL du portail',
 	'vendors.invite.sent.done': 'Terminé',
@@ -5235,6 +5236,10 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "Un utilisateur avec cette adresse e-mail existe déjà dans cet espace de travail.",
 	'refusal.emailInOtherWorkspace': "Cette adresse e-mail a déjà un compte dans un autre espace de travail. Une adresse ne peut appartenir qu’à un seul espace de travail ; utilisez une autre adresse pour cette personne. Si cette personne n’utilise plus l’autre espace de travail, son administrateur peut le fermer, ce qui libère l’adresse.",
 	'refusal.emailCheckThrottled': "Trop d’adresses saisies récemment dans cet espace de travail appartenaient déjà à d’autres espaces de travail : l’ajout d’utilisateurs et la modification de leur e-mail sont suspendus pendant une heure au plus. Réessayez plus tard.",
+	'refusal.setPasswordLinkUnavailable':
+		"Impossible d'émettre un lien de définition du mot de passe pour le moment ; rien n'a été modifié. Réessayez plus tard.",
+	'refusal.setPasswordEmailFailed':
+		"L'e-mail contenant le lien de définition du mot de passe n'a pas pu être envoyé ; rien n'a été modifié. Vérifiez la configuration du fournisseur d'e-mail et réessayez.",
 	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
 	'refusal.vendorMergeSelf': "Un fournisseur ne peut pas être fusionné avec lui-même. Choisissez un autre fournisseur de référence.",
 	'refusal.vendorMergeNoDuplicates': "Choisissez au moins un doublon à fusionner.",

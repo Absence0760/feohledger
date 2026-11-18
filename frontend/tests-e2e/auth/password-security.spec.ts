@@ -1,5 +1,6 @@
 import {
 	API_BASE,
+	createUserWithKnownPassword,
 	currentTenantSlug,
 	expect,
 	signInAndWait,
@@ -38,21 +39,17 @@ interface CreatedUser {
 	tempPassword: string;
 }
 
+/** A throwaway account with a known password. The admin create returns no
+ *  credential (a set-password link is emailed, decisions §283), so the helper
+ *  gives the account a password the spec knows. */
 async function createUser(
-	page: import('@playwright/test').Page,
-	token: string
+	page: import('@playwright/test').Page
 ): Promise<CreatedUser> {
-	const email = `e2e-pwsec-${Date.now()}@test.local`;
-	const resp = await page.request.post(`${API_BASE}/api/admin/users`, {
-		headers: { Authorization: `Bearer ${token}`, 'X-Tenant-Slug': currentTenantSlug() },
-		data: { full_name: 'PW Sec Test', email, role_names: ['ap_clerk'] }
+	const created = await createUserWithKnownPassword(page, {
+		mustChange: true,
+		emailPrefix: 'e2e-pwsec'
 	});
-	const body = (await resp.json()) as {
-		id: string;
-		email: string;
-		temporary_password: string;
-	};
-	return { id: body.id, email: body.email, tempPassword: body.temporary_password };
+	return { id: created.id, email: created.email, tempPassword: created.password };
 }
 
 async function deleteUser(
@@ -81,7 +78,7 @@ async function loginAndGetToken(
 test.describe('password security — change-password API', () => {
 	test('rejects new password shorter than the minimum', async ({ page }) => {
 		const admin = await adminToken(page);
-		const user = await createUser(page, admin);
+		const user = await createUser(page);
 		try {
 			const login = await loginAndGetToken(page, user.email, user.tempPassword);
 			expect(login.token).toBeTruthy();
@@ -102,7 +99,7 @@ test.describe('password security — change-password API', () => {
 
 	test('rejects new password missing an uppercase letter', async ({ page }) => {
 		const admin = await adminToken(page);
-		const user = await createUser(page, admin);
+		const user = await createUser(page);
 		try {
 			const login = await loginAndGetToken(page, user.email, user.tempPassword);
 			const r = await page.request.post(`${API_BASE}/api/auth/change-password`, {
@@ -126,7 +123,7 @@ test.describe('password security — change-password API', () => {
 
 	test('rejects new password missing a digit', async ({ page }) => {
 		const admin = await adminToken(page);
-		const user = await createUser(page, admin);
+		const user = await createUser(page);
 		try {
 			const login = await loginAndGetToken(page, user.email, user.tempPassword);
 			const r = await page.request.post(`${API_BASE}/api/auth/change-password`, {
@@ -148,7 +145,7 @@ test.describe('password security — change-password API', () => {
 
 	test('wrong current password returns generic error, no enumeration', async ({ page }) => {
 		const admin = await adminToken(page);
-		const user = await createUser(page, admin);
+		const user = await createUser(page);
 		try {
 			const login = await loginAndGetToken(page, user.email, user.tempPassword);
 			const r = await page.request.post(`${API_BASE}/api/auth/change-password`, {
@@ -176,7 +173,7 @@ test.describe('password security — change-password API', () => {
 		page
 	}) => {
 		const admin = await adminToken(page);
-		const user = await createUser(page, admin);
+		const user = await createUser(page);
 		const newPassword = `Rotation-${Date.now()}-Aa1`;
 		try {
 			const login = await loginAndGetToken(page, user.email, user.tempPassword);

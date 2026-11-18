@@ -620,6 +620,37 @@ export function controlPsql(query: string): string {
 }
 
 /**
+ * A fresh employee account a spec can sign in as, with a password it knows.
+ *
+ * `POST /api/admin/users` returns no credential any more: the new user is
+ * emailed a single-use set-password link (decisions §283), which a UI spec has
+ * no inbox to read. So the account is created through the real endpoint and
+ * then given the worker admin's own, already-known password hash — copied in
+ * the control plane, so no hash or plaintext is baked into the suite.
+ * `mustChange` puts it in the state a legacy temporary-password account (or a
+ * CLI-provisioned tenant admin) is in, which `/change-password`'s forced mode
+ * serves. Scoped to the row the call created, as `controlPsql` requires.
+ */
+export async function createUserWithKnownPassword(
+	page: Page,
+	opts: { mustChange: boolean; emailPrefix?: string; roleNames?: string[] }
+): Promise<{ id: string; email: string; password: string }> {
+	const admin = _currentWorkerAdmin();
+	const email = `${opts.emailPrefix ?? 'e2e-pw'}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@test.local`;
+	const resp = await page.request.post(`${API_BASE}/api/admin/users`, {
+		headers: await authedTenantHeaders(page),
+		data: { full_name: 'Password Test', email, role_names: opts.roleNames ?? ['ap_clerk'] }
+	});
+	expect(resp.status()).toBe(201);
+	const body = (await resp.json()) as { id: string; email: string };
+	controlPsql(
+		`UPDATE users SET hashed_password = (SELECT hashed_password FROM users WHERE email = '${admin.email}'), ` +
+			`must_change_password = ${opts.mustChange ? 'true' : 'false'} WHERE id = '${body.id}'`
+	);
+	return { id: body.id, email: body.email, password: admin.password };
+}
+
+/**
  * Seal (or clear) the current worker tenant's provider credentials through
  * their one writer, `PUT /api/organization/credentials/{block}`, signed in as
  * the worker's tenant admin.

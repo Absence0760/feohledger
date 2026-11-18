@@ -1191,7 +1191,8 @@ export const messages = {
 	'vendors.createModal.toast.createFailed': 'Não foi possível criar o fornecedor',
 	'vendors.invite.aria': 'Convidar o fornecedor para o portal do fornecedor',
 	'vendors.invite.title': 'Convidar {vendor} para o portal',
-	'vendors.invite.hint': 'Cria um acesso ao portal do fornecedor e envia uma senha temporária por e-mail.',
+	'vendors.invite.hint':
+		'Cria um acesso ao portal do fornecedor e envia por e-mail um link para definir a senha.',
 	'vendors.invite.field.fullName': 'Nome do contato',
 	'vendors.invite.field.email': 'E-mail',
 	'vendors.invite.send': 'Enviar convite',
@@ -1200,7 +1201,7 @@ export const messages = {
 	'vendors.invite.sent.aria': 'Convite para o portal enviado',
 	'vendors.invite.sent.heading': 'Convite para o portal enviado',
 	'vendors.invite.sent.body':
-		'A senha temporária foi enviada por e-mail para {email}. Ela nunca é exibida aqui — se o fornecedor não receber, use Redefinir senha para enviar uma nova.',
+		'Enviamos para {email} um link para definir a senha. Ele nunca é exibido aqui — se o fornecedor não o receber ou ele expirar, use Redefinir senha para enviar um novo.',
 	'vendors.invite.sent.email': 'E-mail',
 	'vendors.invite.sent.url': 'URL do portal',
 	'vendors.invite.sent.done': 'Concluído',
@@ -5229,6 +5230,10 @@ export const messages = {
 	'refusal.emailInThisWorkspace': "Já existe um usuário com este endereço de e-mail neste espaço de trabalho.",
 	'refusal.emailInOtherWorkspace': "Este endereço de e-mail já tem uma conta em outro espaço de trabalho. Um endereço só pode pertencer a um espaço de trabalho; use outro endereço para esta pessoa. Se a pessoa não usa mais o outro espaço de trabalho, o administrador dele pode encerrá-lo, o que libera o endereço.",
 	'refusal.emailCheckThrottled': "Muitos endereços inseridos recentemente neste espaço de trabalho já pertenciam a outros espaços de trabalho, então adicionar usuários ou alterar o e-mail deles está pausado por até uma hora. Tente novamente mais tarde.",
+	'refusal.setPasswordLinkUnavailable':
+		"Não é possível emitir um link para definir a senha agora, então nada foi alterado. Tente novamente mais tarde.",
+	'refusal.setPasswordEmailFailed':
+		"Não foi possível enviar o e-mail com o link para definir a senha, então nada foi alterado. Verifique a configuração do provedor de e-mail e tente novamente.",
 	// A refused vendor merge (`services/vendor_merge.py`, `vendor_merge_*`).
 	'refusal.vendorMergeSelf': "Um fornecedor não pode ser mesclado com ele mesmo. Escolha outro fornecedor principal.",
 	'refusal.vendorMergeNoDuplicates': "Escolha pelo menos um duplicado para mesclar.",

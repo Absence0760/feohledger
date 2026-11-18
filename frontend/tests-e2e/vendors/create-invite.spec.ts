@@ -80,12 +80,12 @@ test.describe('/vendors create + portal invite (acme admin)', () => {
 			await inviteModal.getByRole('button', { name: 'Send invite' }).click();
 			expect((await inviteResp).status()).toBe(201);
 
-			// The confirmation names the address the credential was emailed to —
-			// and carries NO password. The temp password is delivered only by the
-			// email adapter now: returning it to the caller (who also chose the
+			// The confirmation names the address the set-password link was emailed
+			// to — and carries NO credential. The link is delivered only by the
+			// email adapter: returning a credential to the caller (who also chose the
 			// address) let one ap_manager mint a supplier login they controlled,
 			// which is the first link of the BEC bank-redirect chain the approval
-			// segregation check now refuses. If a password ever reappears in this
+			// segregation check now refuses. If a credential ever reappears in this
 			// dialog, that hole is back.
 			const sent = page.getByTestId('vendor-invite-sent');
 			await expect(sent).toBeVisible({ timeout: 10_000 });

@@ -785,6 +785,10 @@ const BUILDERS: Record<string, Builder> = {
 	email_in_other_workspace: fixed('refusal.emailInOtherWorkspace'),
 	// The admin path's other-workspace budget is spent (`api/admin.py`).
 	email_check_throttled: fixed('refusal.emailCheckThrottled'),
+	// An invite or admin reset that could not mint or mail its set-password
+	// link, so nothing was changed (`api/set_password_links.py`, decisions §283).
+	set_password_link_unavailable: fixed('refusal.setPasswordLinkUnavailable'),
+	set_password_email_failed: fixed('refusal.setPasswordEmailFailed'),
 	// Any 429 from the shared limiter (`services/rate_limit.py`).
 	[RATE_LIMITED]: rateLimited,
 	// A refused vendor merge (`services/vendor_merge.py`; the malformed-id 422

@@ -4,9 +4,12 @@
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
-	let email = $state('');
+	// Prefilled from `?email=` — the set-password page's "Go to sign in" link
+	// passes the account it just set a password for.
+	let email = $state(page.url.searchParams.get('email') ?? '');
 	let password = $state('');
 	let error = $state('');
 	let loading = $state(false);

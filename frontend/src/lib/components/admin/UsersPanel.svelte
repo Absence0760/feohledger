@@ -20,14 +20,20 @@
 
 	let showCreateModal = $state(false);
 	let editingUser = $state<AdminUser | null>(null);
-	// The one-time credential dialog serves both an invite and a password reset:
-	// the same shape (a generated temp the user must change at first sign-in),
-	// only the heading and the instruction differ.
-	let createdCredentials = $state<{
+	// The confirmation after an invite or a password reset: both email the user
+	// a single-use set-password link (decisions §283), so there is no credential
+	// to show or copy — only where the link went and when it stops working.
+	let linkSent = $state<{
 		kind: 'created' | 'reset';
 		email: string;
-		password: string;
+		expiresAt: string;
 	} | null>(null);
+	const LINK_EXPIRY_OPTS: Intl.DateTimeFormatOptions = {
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	};
 	let confirmDeleteId = $state<string | null>(null);
 
 	// Bulk-select state
@@ -203,10 +209,10 @@
 				role_names: newRoles,
 			});
 			showCreateModal = false;
-			createdCredentials = {
+			linkSent = {
 				kind: 'created',
 				email: result.email,
-				password: result.temporary_password,
+				expiresAt: result.set_password_link_expires_at,
 			};
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('admin.users.toast.createFailed'), 'error');
@@ -256,10 +262,10 @@
 			const result = await adminStore.resetUserPassword(editingUser.id);
 			editingUser = null;
 			confirmReset = false;
-			createdCredentials = {
+			linkSent = {
 				kind: 'reset',
 				email: result.email,
-				password: result.temporary_password,
+				expiresAt: result.set_password_link_expires_at,
 			};
 			if (result.sessions_revoked === false) {
 				toast(m('admin.users.toast.resetSessionsNotRevoked'), 'error');
@@ -489,32 +495,18 @@
 	</form>
 </Modal>
 
-<!-- Created Credentials Modal -->
-<Modal open={createdCredentials !== null} ariaLabel={createdCredentials?.kind === 'reset' ? m('admin.users.modal.reset.aria') : m('admin.users.modal.created.aria')} width="sm" onclose={() => (createdCredentials = null)}>
-	{#if createdCredentials}
-		{#if createdCredentials.kind === 'reset'}
-			<h2>{m('admin.users.modal.reset.heading')}</h2>
-			<p class="modal-hint">{m('admin.users.modal.reset.hint')}</p>
-		{:else}
-			<h2>{m('admin.users.modal.created.heading')}</h2>
-			<p class="modal-hint">{m('admin.users.modal.created.hint')}</p>
-		{/if}
-		<div class="credentials-box">
-			<div class="credential-row">
-				<span class="credential-label">{m('admin.users.modal.created.email')}</span>
-				<code class="credential-value">{createdCredentials.email}</code>
-			</div>
-			<div class="credential-row">
-				<span class="credential-label">{m('admin.users.modal.created.tempPassword')}</span>
-				<code class="credential-value password">{createdCredentials.password}</code>
-			</div>
-		</div>
+<!-- Set-password link sent (invite or reset) — never a credential -->
+<Modal open={linkSent !== null} ariaLabel={linkSent?.kind === 'reset' ? m('admin.users.modal.reset.aria') : m('admin.users.modal.created.aria')} width="sm" onclose={() => (linkSent = null)}>
+	{#if linkSent}
+		<h2>{linkSent.kind === 'reset' ? m('admin.users.modal.reset.heading') : m('admin.users.modal.created.heading')}</h2>
+		<p class="modal-hint">
+			{m(linkSent.kind === 'reset' ? 'admin.users.modal.reset.hint' : 'admin.users.modal.created.hint', {
+				email: linkSent.email,
+				expires: formatDate(linkSent.expiresAt, '—', LINK_EXPIRY_OPTS)
+			})}
+		</p>
 		<div class="modal-footer">
-			<button class="btn-primary" onclick={() => {
-				navigator.clipboard.writeText(`Email: ${createdCredentials?.email}\nPassword: ${createdCredentials?.password}`);
-				toast(m('admin.users.toast.copied'), 'success');
-			}}>{m('admin.users.modal.created.copy')}</button>
-			<button class="btn-cancel" onclick={() => (createdCredentials = null)}>{m('admin.users.modal.created.done')}</button>
+			<button class="btn-primary" onclick={() => (linkSent = null)}>{m('admin.users.modal.created.done')}</button>
 		</div>
 	{/if}
 </Modal>
@@ -535,8 +527,8 @@
 			<!-- No password input here, deliberately (#566). A typed password was
 			     one the admin kept knowing, and a password field in this form got
 			     the ADMIN's own saved password autofilled into it, so saving a
-			     rename silently reset the user's credential. The reset issues a
-			     generated temp the user must change at next sign-in. Not offered
+			     rename silently reset the user's credential. The reset clears the
+			     password and emails the user a set-password link. Not offered
 			     on your own account — that is /profile's change-password. -->
 			{#if !isSelf(editingUser.id)}
 				<fieldset class="reset-password">
@@ -747,48 +739,5 @@
 		flex-direction: column;
 		align-items: flex-start;
 		gap: 8px;
-	}
-
-	/* --- Credentials display --- */
-
-	.credentials-box {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		padding: 14px;
-		margin-bottom: 16px;
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-	}
-
-	.credential-row {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-	}
-
-	.credential-label {
-		font-size: 0.72rem;
-		font-weight: 500;
-		color: var(--text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-	}
-
-	.credential-value {
-		font-size: 0.9rem;
-		color: var(--text);
-		font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-		background: var(--surface);
-		padding: 4px 8px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		user-select: all;
-	}
-
-	.credential-value.password {
-		color: var(--accent);
-		font-weight: 600;
 	}
 </style>
