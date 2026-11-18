@@ -8,9 +8,10 @@ The first admin is created with NO password and is emailed the same
 single-use, expiring set-password link "Invite User", partner provisioning and
 signup send (``app/api/set_password_links``, ``docs/decisions.md`` §283): the
 operator never sees, chooses or relays a credential, and the CLI prints only
-the address the link went to. ``--print-link`` prints the link to the
-operator's terminal instead of emailing it, for a tenant whose mail does not
-work yet — the operator's own channel, handed on to the admin out of band.
+the address the link went to. There is deliberately no way to print the link:
+this CLI runs on the server (``deploy/add-tenant.sh``, often through SSM, whose
+output is retained), so a printed credential would land in logs. If the email
+fails, the CLI exits 3 and the admin uses Forgot password once mail works.
 ``--admin-password`` sets a password directly and is local-dev only: a
 deployed environment (``FEOH_ENVIRONMENT``) refuses it.
 """
@@ -58,16 +59,12 @@ EXIT_LINK_NOT_DELIVERED = 3
 
 
 async def _deliver_set_password_link(
-    *, name: str, slug: str, admin_email: str, admin_name: str, user_id, print_link: bool
+    *, name: str, slug: str, admin_email: str, admin_name: str, user_id
 ) -> None:
-    """Mint the first admin's set-password link and email it, or print it with
-    ``--print-link``. Raises ``HTTPException`` (503 / 502, coded) when it could
+    """Mint the first admin's set-password link and email it. The link never
+    reaches stdout. Raises ``HTTPException`` (503 / 502, coded) when it could
     not be minted or sent — never with the link in it."""
     link = await mint_employee_link(slug, None, user_id, set_password=True)
-    if print_link:
-        print(f"  Set-password link (single use; give it only to {admin_email}):")
-        print(f"    {link}")
-        return
     await send_set_password_email(
         EmailMessage(
             to=admin_email,
@@ -108,13 +105,6 @@ async def main():
         "set-password link. Refused in a deployed environment.",
     )
     parser.add_argument(
-        "--print-link",
-        action="store_true",
-        help="Print the admin's set-password link here instead of emailing it "
-        "(a tenant with no working mail yet). Hand it to the admin out of band; "
-        "it works once and expires.",
-    )
-    parser.add_argument(
         "--admin-name", default=None, help="Admin full name (defaults to '<company> Admin')"
     )
     parser.add_argument(
@@ -137,8 +127,6 @@ async def main():
                 "--admin-password is local-dev only; a deployed tenant's admin "
                 "chooses their own password through the set-password link."
             )
-        if args.print_link:
-            parser.error("--print-link has no link to print with --admin-password.")
     elif args.force_password_change:
         parser.error("--force-password-change applies only with --admin-password.")
 
@@ -201,7 +189,6 @@ async def main():
             admin_email=args.admin_email,
             admin_name=admin_name,
             user_id=result.user_id,
-            print_link=args.print_link,
         )
     except HTTPException as exc:
         code = exc.detail.get("code") if isinstance(exc.detail, dict) else exc.status_code

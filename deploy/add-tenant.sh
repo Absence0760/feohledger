@@ -9,12 +9,11 @@
 # added by hand: docs/founder-runbooks/custom-domain-provisioning.md.)
 #
 # Usage: add-tenant.sh <slug> --name "Acme Corp" --admin-email a@acme.com
-#                      [--print-link]
 # The admin is created with no password and emailed a single-use set-password
-# link; the script prints only the address it went to. --print-link prints the
-# link here instead of emailing it, for a tenant whose mail does not work yet:
-# hand it to the admin yourself, over a channel you trust. It works once and
-# expires (FEOH_SET_PASSWORD_LINK_TTL_HOURS).
+# link; the script prints only the address it went to, never the link (this
+# often runs through SSM, whose output is retained). If the email fails, the
+# provisioning step exits 3: the tenant exists, and once mail works the admin
+# sets a password with Forgot password on the sign-in page.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -26,18 +25,17 @@ die() {
 	exit 1
 }
 usage() {
-	die "usage: add-tenant.sh <slug> --name <company> --admin-email <email> [--print-link]"
+	die "usage: add-tenant.sh <slug> --name <company> --admin-email <email>"
 }
 
 SLUG="${1:-}"
 [ -n "$SLUG" ] || usage
 shift
-NAME="" EMAIL="" PRINT_LINK=0
+NAME="" EMAIL=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--name) NAME="${2:-}" && shift 2 ;;
 	--admin-email) EMAIL="${2:-}" && shift 2 ;;
-	--print-link) PRINT_LINK=1 && shift ;;
 	*) usage ;;
 	esac
 done
@@ -53,10 +51,10 @@ APP_DOMAIN=$(grep -E '^APP_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
 HOST="${SLUG}.${APP_DOMAIN}"
 
 # The provisioning command itself is built by deploy/lib.sh, which CI's day-one
-# job runs too (#575): no password, a set-password link by email (or printed
-# with --print-link), and --skip-existing so a re-run of a tenant that already
+# job runs too (#575): no password, a set-password link by email only, and
+# --skip-existing so a re-run of a tenant that already
 # exists is a no-op rather than the deliberate duplicate-slug error.
-feoh_tenant_argv "$SLUG" "$NAME" "$EMAIL" "$PRINT_LINK"
+feoh_tenant_argv "$SLUG" "$NAME" "$EMAIL"
 "${COMPOSE[@]}" exec -T api "${FEOH_TENANT_ARGV[@]}"
 
 echo

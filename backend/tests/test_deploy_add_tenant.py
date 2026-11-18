@@ -4,7 +4,7 @@ and CI's day-one job provisions through the same function (#575).
 The command line used to be built inline in add-tenant.sh, so the only way for
 a rehearsal to provision "the way production does" was to copy it — and a copy
 drifts. These pin the function's output (the argv production runs: no password, a
-set-password link by email, `--print-link` only when asked for),
+set-password link by email, with no way to print it instead),
 that add-tenant.sh execs exactly that array into the api container, and that the
 day-one stack calls the function rather than spelling create_tenant.py itself.
 
@@ -70,13 +70,15 @@ def test_the_admin_gets_no_password_and_the_link_goes_by_email() -> None:
     assert password == "password=unset"
 
 
-def test_print_link_is_passed_through_only_when_asked_for() -> None:
+def test_tenant_argv_has_no_print_link_switch() -> None:
+    """The old fourth argument that added `--print-link` is gone: the link
+    must never reach the VM's stdout, which SSM retains."""
     result = _lib(
         'feoh_tenant_argv acme "Acme Corp" a@acme.example 1\n'
         'printf "%s\\n" "${FEOH_TENANT_ARGV[@]}"'
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [*_BASE_ARGV, "--print-link"]
+    assert result.stdout.splitlines() == _BASE_ARGV
 
 
 @pytest.fixture
@@ -132,12 +134,15 @@ def test_add_tenant_execs_the_shared_argv_into_the_api_container(
     assert not [c for c in _calls(log) if "caddy" in c]
 
 
-def test_add_tenant_print_link_reaches_the_cli(deploy_dir: tuple[Path, Path, Path]) -> None:
+def test_add_tenant_refuses_print_link(deploy_dir: tuple[Path, Path, Path]) -> None:
+    """`--print-link` is an unknown flag now, so it hits the usage error and
+    nothing is provisioned: a printed link would be a credential in SSM's log."""
     root, bin_dir, log = deploy_dir
     result = _add_tenant(root, bin_dir, log, "--print-link")
-    assert result.returncode == 0, result.stdout + result.stderr
-    (provision,) = [c for c in _calls(log) if "scripts/create_tenant.py" in c]
-    assert provision[-2:] == ["--skip-existing", "--print-link"]
+    assert result.returncode != 0
+    assert "usage:" in result.stderr
+    assert "print-link" not in result.stderr
+    assert not log.exists() or not [c for c in _calls(log) if "scripts/create_tenant.py" in c]
 
 
 def test_add_tenant_no_longer_takes_a_password(deploy_dir: tuple[Path, Path, Path]) -> None:

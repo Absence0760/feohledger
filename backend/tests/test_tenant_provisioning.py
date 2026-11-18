@@ -1270,13 +1270,21 @@ async def test_create_tenant_emails_the_admin_a_set_password_link(monkeypatch, c
     assert "Password:" not in out
 
 
-async def test_create_tenant_print_link_prints_it_and_sends_nothing(monkeypatch, capsys):
+async def test_create_tenant_refuses_print_link(monkeypatch, capsys):
+    """There is no way to print the link: this CLI runs on the server, often
+    through SSM, whose output is retained. The flag is unknown, so argparse
+    exits 2 before anything is provisioned, minted or printed."""
     cli, _ = _link_cli(monkeypatch, [*_LINK_CLI_ARGS, "--print-link"])
 
-    await cli.main()
+    with pytest.raises(SystemExit) as exc_info:
+        await cli.main()
 
-    cli.send_set_password_email.assert_not_awaited()
-    assert f"    {_LINK}\n" in capsys.readouterr().out
+    assert exc_info.value.code == 2
+    cli.provision_tenant.assert_not_awaited()
+    cli.mint_employee_link.assert_not_awaited()
+    captured = capsys.readouterr()
+    assert "unrecognized arguments: --print-link" in captured.err
+    assert "tok-secret" not in captured.out + captured.err
 
 
 async def test_create_tenant_exits_3_when_the_link_is_not_delivered(monkeypatch, capsys):
@@ -1319,7 +1327,6 @@ async def test_create_tenant_refuses_before_provisioning_with_no_tenant_url(monk
     ("extra", "environment"),
     [
         (["--admin-password", "Aa1-not-used-000000"], "production"),
-        (["--admin-password", "Aa1-not-used-000000", "--print-link"], "development"),
         (["--force-password-change"], "development"),
     ],
 )
