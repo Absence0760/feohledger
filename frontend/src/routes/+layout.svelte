@@ -17,7 +17,7 @@
 	import { browser } from '$app/env';
 	import { initLocale, m } from '#lib/i18n/store.svelte.ts';
 	import { theme } from '#lib/stores/theme.svelte.ts';
-	import { withNext } from '#lib/utils/postLoginRedirect.ts';
+	import { FIND_WORKSPACE_PATH, tenantHostRoute } from '#lib/utils/tenantHostRoute.ts';
 
 	// Tri-state: `undefined` until the browser resolves it (render nothing, no
 	// flash), then true/false. This asks "does this host carry a tenant at all",
@@ -45,14 +45,15 @@
 	// host. `/find-workspace` asks which one (#635 finding 4), and an apex
 	// `/login` — a bookmark, a typed URL, a legal page's "Sign in" — goes
 	// there instead of quietly showing the marketing page.
-	const FIND_WORKSPACE = '/find-workspace';
+	const FIND_WORKSPACE = FIND_WORKSPACE_PATH;
 
 	// Standalone pages that render in their own `AuthShell` whatever the host
 	// and whoever is signed in: the signup flow, and "find your workspace".
 	// Each brings its own `<main>`, so none may fall through to the app shell's
 	// branch below — on a workspace host with a signed-in user /find-workspace
-	// did, for the beat before its own redirect to `/`, and the page briefly
-	// carried two `<main>` landmarks.
+	// once did, and the page briefly carried two `<main>` landmarks. On a
+	// workspace host /find-workspace now renders nothing while the effect
+	// below sends it on.
 	const PUBLIC_PATHS = ['/signup', '/verify', FIND_WORKSPACE];
 
 	// The published legal documents (/legal, /legal/privacy, …). Public by
@@ -98,31 +99,25 @@
 		// data subject with no account is a dead end, not a detour.
 		if (path.startsWith(LEGAL_PREFIX)) return;
 
-		// The page asked for, carried through sign-in as `?next=` so the user
-		// lands back on it (a notification email's /invoices/{id} link) rather
-		// than on the dashboard. `withNext` drops anything that is not a safe
-		// same-origin path, and `/` itself.
-		const here = path + page.url.search;
-
-		if (!auth.loggedIn && !path.startsWith('/login')) {
-			goto(withNext('/login', here), { replace: true });
-			return;
-		}
-
-		// Start loading the account once; the shell's AccountLoadState shows
-		// the load in flight, and a failure waits for the user's Retry rather
-		// than looping here.
-		if (auth.loggedIn && !auth.user) {
+		// Every other path's destination — the auth wall (the page asked for
+		// rides through sign-in as `?next=`), the account load, the forced
+		// password change, and `/find-workspace`, which on a workspace host
+		// goes to `/login` or `/` — is decided in ONE place, so no page races
+		// this effect with a navigation of its own (`tenantHostRoute`).
+		const action = tenantHostRoute({
+			path,
+			search: page.url.search,
+			loggedIn: auth.loggedIn,
+			userLoaded: !!auth.user,
+			mustChangePassword: !!auth.user?.must_change_password
+		});
+		if (action.kind === 'goto') {
+			goto(action.to, { replace: true });
+		} else if (action.kind === 'loadUser') {
+			// Start loading the account once; the shell's AccountLoadState shows
+			// the load in flight, and a failure waits for the user's Retry rather
+			// than looping here.
 			if (auth.userStatus === 'idle') auth.fetchUser();
-			return;
-		}
-
-		if (
-			auth.loggedIn &&
-			auth.user?.must_change_password &&
-			path !== '/change-password'
-		) {
-			goto(withNext('/change-password', here), { replace: true });
 		}
 	});
 
@@ -207,6 +202,9 @@
 	<!-- SSR / hydration: tenant not resolved yet, render nothing to avoid flash -->
 {:else if page.url.pathname.startsWith(PORTAL_PREFIX)}
 	<slot />
+{:else if hasTenant && page.url.pathname === FIND_WORKSPACE}
+	<!-- A workspace host's /find-workspace: on its way to /login or / (the
+	     effect above); the apex-only page never mounts here. -->
 {:else if PUBLIC_PATHS.includes(page.url.pathname)}
 	<slot />
 {:else if hasTenant === false && isLoginPath(page.url.pathname)}

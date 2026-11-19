@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import { tick } from 'svelte';
 	import AuthCard from '#lib/components/auth/AuthCard.svelte';
 	import { api } from '#lib/api.ts';
@@ -33,7 +34,7 @@
 			// A non-2xx here is a real client-side problem (rate limited,
 			// malformed request) — never "email not found", which the backend
 			// deliberately never reports.
-			error = err instanceof Error ? err.message : m('auth.login.failed');
+			error = apiErrorMessage(err, m('auth.login.failed'));
 		} finally {
 			loading = false;
 		}

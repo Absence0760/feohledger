@@ -3378,6 +3378,8 @@ export const messages = {
 	'auth.resetPassword.retry': '再試行',
 	'auth.resetPassword.checkFailed':
 		'現在このリンクを確認できませんでした。もう一度お試しください。',
+	'auth.resetPassword.submitFailed':
+		'現在パスワードを保存できませんでした。もう一度お試しください。',
 	'auth.resetPassword.checking': 'リンクを確認しています…',
 	'auth.resetPassword.setExpiredHint':
 		'パスワード設定リンクは 1 回のみ使用でき、有効期限があります。「パスワードをお忘れですか？」から新しいリンクをリクエストしてください — 新しいアカウントでも利用できます。',

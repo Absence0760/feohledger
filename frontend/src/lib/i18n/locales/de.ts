@@ -3440,6 +3440,8 @@ export const messages = {
 	'auth.resetPassword.retry': 'Erneut versuchen',
 	'auth.resetPassword.checkFailed':
 		'Wir konnten diesen Link gerade nicht prüfen. Bitte versuchen Sie es erneut.',
+	'auth.resetPassword.submitFailed':
+		'Wir konnten Ihr Passwort gerade nicht speichern. Bitte versuchen Sie es erneut.',
 	'auth.resetPassword.checking': 'Link wird geprüft…',
 	'auth.resetPassword.setExpiredHint':
 		'Links zum Festlegen des Passworts funktionieren nur einmal und laufen ab. Fordern Sie über „Passwort vergessen?“ einen neuen an — das funktioniert auch für Ihr neues Konto.',

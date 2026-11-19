@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
 	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
 	import Spinner from '#lib/components/ui/Spinner.svelte';
@@ -367,23 +368,25 @@
 	 */
 	async function showRefusal(err: unknown): Promise<string | null> {
 		if (!(err instanceof ApiError)) {
-			return err instanceof Error ? err.message : m('auth.signup.failed');
+			return apiErrorMessage(err, m('auth.signup.failed'));
 		}
 		let first: Field | null = null;
-		let leftOver: string | null = err.message;
+		// The refusal's display text, never a raw network / 5xx message.
+		const text = apiErrorMessage(err, m('auth.signup.failed'));
+		let leftOver: string | null = text;
 		const coded = refusalField(err.params);
 		if (coded !== null && Object.hasOwn(FIELD_INPUT_IDS, coded)) {
 			first = coded as Field;
 			if (first === 'slug') {
 				slugStatus = 'bad';
-				slugError = err.message;
+				slugError = text;
 			} else {
-				fieldErrors[first] = err.message;
+				fieldErrors[first] = text;
 			}
 			leftOver = null;
 		} else if (err.status === 409) {
 			slugStatus = 'bad';
-			slugError = err.message;
+			slugError = text;
 			first = 'slug';
 			leftOver = null;
 		} else if (err.status === 422 && Array.isArray(err.detail)) {
@@ -416,7 +419,7 @@
 				? unplaced.length
 					? formatApiDetail(unplaced, m('auth.signup.failed'))
 					: null
-				: err.message;
+				: text;
 		}
 		if (first) {
 			// The field's error is its description (aria-describedby), so

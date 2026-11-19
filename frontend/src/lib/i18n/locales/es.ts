@@ -3436,6 +3436,8 @@ export const messages = {
 	'auth.resetPassword.retry': 'Reintentar',
 	'auth.resetPassword.checkFailed':
 		'No pudimos comprobar este enlace en este momento. Inténtalo de nuevo.',
+	'auth.resetPassword.submitFailed':
+		'No pudimos guardar tu contraseña en este momento. Inténtalo de nuevo.',
 	'auth.resetPassword.checking': 'Comprobando tu enlace…',
 	'auth.resetPassword.setExpiredHint':
 		'Los enlaces para establecer la contraseña funcionan una sola vez y caducan. Solicita uno nuevo con «¿Olvidaste tu contraseña?»: también funciona para tu nueva cuenta.',

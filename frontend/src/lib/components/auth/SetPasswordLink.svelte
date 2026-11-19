@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import { onMount, tick, type Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import NewPasswordFields from '#lib/components/auth/NewPasswordFields.svelte';
@@ -118,7 +119,7 @@
 				invalidFocused = pressed;
 				phase = 'invalid';
 			} else {
-				error = err instanceof Error ? err.message : m('auth.resetPassword.checkFailed');
+				error = apiErrorMessage(err, m('auth.resetPassword.checkFailed'));
 				phase = 'unavailable';
 			}
 		}
@@ -170,11 +171,11 @@
 				await tick();
 				invalidEl?.focus();
 			} else if (err instanceof ApiError && err.status === 422) {
-				newServerError = err.message;
+				newServerError = apiErrorMessage(err, m('auth.resetPassword.submitFailed'));
 				await tick();
 				newFields?.focusNew();
 			} else {
-				error = err instanceof Error ? err.message : m('auth.resetPassword.invalidToken');
+				error = apiErrorMessage(err, m('auth.resetPassword.submitFailed'));
 			}
 		} finally {
 			submitting = false;
