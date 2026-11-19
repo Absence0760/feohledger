@@ -46,8 +46,8 @@ TERMINAL_STATUSES: frozenset[PaymentStatus] = frozenset(
 #: Payment statuses whose money is committed but not yet settled — what
 #: `/api/payments/summary` and the dashboard report as `total_pending`.
 #: `pending_compliance` belongs here: the payment is authorized and waiting
-#: on a human, so leaving it out made held money appear in NEITHER KPI (not paid, not pending) — invisible in the
-#: one place a treasurer looks for "what is still out there".
+#: on a human, so leaving it out made held money appear in NEITHER KPI (not
+#: paid, not pending) — invisible in the one place a treasurer looks for "what is still out there".
 PENDING_PAYMENT_STATUSES = ("pending", "processing", "submitted", "pending_compliance")
 
 

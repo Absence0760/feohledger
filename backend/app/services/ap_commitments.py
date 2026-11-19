@@ -41,6 +41,7 @@ from app.services.open_ap_due import (
     latest_schedule_subquery,
 )
 from app.tenant import apply_entity_scope
+from app.utils.currency_code import iso_currency_or_none
 
 # ---------------------------------------------------------------------------
 # Predictive cash-flow forecasting
@@ -254,6 +255,6 @@ async def aging_snapshot_buckets(
     for name, total, unconv in result.all():
         buckets[name] = Decimal(str(total))
         unconverted += int(unconv or 0)
-    buckets["reporting_currency"] = reporting_currency.strip().upper()
+    buckets["reporting_currency"] = iso_currency_or_none(reporting_currency)
     buckets["unconverted_count"] = unconverted
     return buckets
