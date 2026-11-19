@@ -3124,11 +3124,11 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String invoiceWarningPoBilledBeyondReceipt(
-    String billedAmount,
+    String totalBilled,
     String poNumber,
     String receivedValue,
   ) {
-    return '他の請求書が発注 $poNumber に対してすでに $billedAmount を請求していますが、入荷済みの物品は $receivedValue 分です — この請求書で入荷分を超えます';
+    return '発注 $poNumber の請求書は、この請求書を含めて $totalBilled を請求しています。入荷済みの物品は $receivedValue 分です';
   }
 
   @override

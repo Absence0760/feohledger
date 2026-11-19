@@ -1274,7 +1274,35 @@ async def _refresh_po_match(
     # take it past its total (decisions §469), or past the received slice of
     # it (§470). Independent of the amount and receipt legs, which
     # compare this invoice alone with the PO.
-    await _refresh_po_overbilling(db, invoice, warnings, match, rule.tolerance_pct)
+    beyond_receipt_flag = await _refresh_po_overbilling(
+        db, invoice, warnings, match, rule.tolerance_pct
+    )
+    # Past approval the cumulative receipt finding is a HOLD (decisions §470,
+    # amended). Before approval a person reads the warning and no unattended
+    # door approves past it; once approved nobody reads it again, and a
+    # receipt cancelled after the bills were signed off (§262 allows it)
+    # reaches them only through this refresh. So it raises the same
+    # payment-blocking `po_mismatch` the per-invoice receipt leg raises: the
+    # run builder and every dispatch refuse it, clearing it is the SoD-gated
+    # sign-off (§169–§170, §420), and the next refresh that no longer finds
+    # it closes it through `_close_cleared_po_exceptions`, which keeps it
+    # open while an implicated or approving recorder's receipt is what
+    # covered the bills (`receipts_clear_hold`, §262, §389).
+    #
+    # Only a finding the approval did not already see: one that reads the
+    # same as, or better than, the warning the invoice carried into this
+    # refresh was in front of whoever approved it, and holding it would make
+    # their sign-off need a second one. Once raised, the hold stays raised
+    # while the finding stands.
+    if (
+        beyond_receipt_flag is not None
+        and _status_str(invoice.status) not in _PRE_APPROVAL_STATUSES
+        and (
+            _beyond_receipt_worsened(invoice.warnings, beyond_receipt_flag)
+            or await _open_po_mismatch_hold(db, invoice)
+        )
+    ):
+        await _raise("po_mismatch", "warning", beyond_receipt_flag)
 
     # 3-way: the invoice bills beyond what has been received. Independent of
     # the amount leg above, because an invoice can be under the PO total and
@@ -1392,7 +1420,7 @@ PO_OVERBILLED_TYPE = "po_overbilled"
 
 async def _refresh_po_overbilling(
     db: AsyncSession, invoice: Invoice, warnings: list[dict], match, tolerance_pct
-) -> None:
+) -> dict | None:
     """Warn when this invoice and the others citing its PO bill past its total,
     or past what has been received of it.
 
@@ -1426,12 +1454,18 @@ async def _refresh_po_overbilling(
       which the matcher already holds. One finding at most: past the total,
       no receipt could cure it, so only that sentence is written.
 
-    A warning, never a hold: credit memos, corrective re-bills and a sibling
-    rejected after this refresh all move the sum without re-running it here,
-    so a payment-blocking row would go stale in both directions. The reviewer
-    reads it at approval, beside the duplicate and amount findings, and no
-    unattended approval is given while it stands
+    Before approval, a warning and not a hold: credit memos, corrective
+    re-bills and a sibling rejected after this refresh all move the sum
+    without re-running it here, so a payment-blocking row would go stale in
+    both directions. The reviewer reads it at approval, beside the duplicate
+    and amount findings, and no unattended approval is given while it stands
     (:func:`po_match_hold_refusal`, ``UNATTENDED_APPROVAL_PO_OVERBILLED``).
+
+    Returns the ``po_billed_beyond_receipt`` finding when it raised one, so
+    the caller can hold an invoice already PAST approval on it: a receipt
+    cancelled after both bills were signed off reaches them only through
+    this refresh, and no reviewer will read the warning again (decisions
+    §470, amended).
     """
     if (
         _status_str(invoice.status) == InvoiceStatus.rejected.value
@@ -1444,7 +1478,7 @@ async def _refresh_po_overbilling(
         or match.po_not_issued
         or match.po_total_unverifiable_reason
     ):
-        return
+        return None
     po = (
         await db.execute(
             select(
@@ -1456,10 +1490,10 @@ async def _refresh_po_overbilling(
         )
     ).one_or_none()
     if po is None or not po.po_number:
-        return
+        return None
     code = po_currency_code(invoice.currency)
     if code is None:
-        return
+        return None
     po_id = str(po.id)
     matched_po_id = Invoice.po_match["po_id"].astext
     cites = or_(
@@ -1511,7 +1545,7 @@ async def _refresh_po_overbilling(
         if same_entity and po_currency_code(currency) == code:
             billed += Decimal(str(amount))
     if billed <= 0:
-        return
+        return None
     po_total = Decimal(str(match.po_total))
     tolerance = Decimal(str(tolerance_pct))
     total_billed = billed + Decimal(str(invoice.amount))
@@ -1529,7 +1563,7 @@ async def _refresh_po_overbilling(
         )
         # Past the whole PO: no receipt can cure that, so the receipt
         # sentence below would only repeat it with a smaller figure.
-        return
+        return None
     # The receipt leg (decisions §470): the same siblings measured
     # against the received slice of the PO instead of its total. Only on a
     # SHORT receipt (`received_value` is set only then; a full one is the PO
@@ -1537,22 +1571,75 @@ async def _refresh_po_overbilling(
     # invoice alone fits what arrived: if it does not, the matcher's own
     # `billed_beyond_receipt` has already raised the payment-blocking hold.
     if match.received_value is None or match.billed_beyond_receipt:
-        return
+        return None
     received_value = Decimal(str(match.received_value))
     receipt_limit = received_value + received_value * tolerance / Decimal("100")
-    if total_billed > receipt_limit:
-        warnings.append(
-            warning(
-                "po_billed_beyond_receipt",
-                "warning",
-                billedAmount=billed,
-                poNumber=po.po_number,
-                # Display only: the comparison above used the exact share,
-                # which `po_total × received / ordered` can make non-terminating.
-                receivedValue=received_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
-                currency=code,
+    if total_billed <= receipt_limit:
+        return None
+    flag = warning(
+        "po_billed_beyond_receipt",
+        "warning",
+        # Every live bill on the PO, this one included.
+        totalBilled=total_billed,
+        poNumber=po.po_number,
+        # Display only: the comparison above used the exact share,
+        # which `po_total × received / ordered` can make non-terminating.
+        receivedValue=received_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        currency=code,
+    )
+    warnings.append(flag)
+    return flag
+
+
+def _beyond_receipt_worsened(previous: list | None, flag: dict) -> bool:
+    """Whether the cumulative receipt finding ``flag`` is worse than any the
+    invoice carried into this refresh (``previous``, its warnings before the
+    rebuild): none before, a smaller received value, a larger billed total,
+    another PO or currency, or a figure that cannot be read (a row written
+    before ``totalBilled`` existed). Unreadable counts as worse: holding is
+    the safe error."""
+    params = flag.get("params") or {}
+    for w in previous or []:
+        if not isinstance(w, dict) or w.get("code") != "po_billed_beyond_receipt":
+            continue
+        before = w.get("params") or {}
+        if before.get("poNumber") != params.get("poNumber") or before.get("currency") != params.get(
+            "currency"
+        ):
+            continue
+        try:
+            received_before = Decimal(str(before["receivedValue"]))
+            billed_before = Decimal(str(before["totalBilled"]))
+            received_now = Decimal(str(params["receivedValue"]))
+            billed_now = Decimal(str(params["totalBilled"]))
+        except (KeyError, ArithmeticError, ValueError):
+            continue
+        if received_now >= received_before and billed_now <= billed_before:
+            return False
+    return True
+
+
+async def _open_po_mismatch_hold(db: AsyncSession, invoice: Invoice) -> bool:
+    """Whether an open or escalated ``po_mismatch`` is live on ``invoice``,
+    which the standing cumulative receipt finding then keeps found, so the
+    refresh after the one that raised it does not close it again. Any such
+    row, not only one whose sentence is this finding: ``_ensure_exception``
+    folds a finding into the row already open, so a hold raised while
+    another ``po_mismatch`` stood carries the other's sentence."""
+    if invoice.id is None:
+        return False
+    row = (
+        await db.execute(
+            select(APException.id)
+            .where(
+                APException.invoice_id == invoice.id,
+                APException.exception_type == "po_mismatch",
+                APException.status.in_(["open", "escalated"]),
             )
+            .limit(1)
         )
+    ).first()
+    return row is not None
 
 
 def blocking_finding_types(match) -> set[str]:
@@ -2574,6 +2661,22 @@ UNATTENDED_APPROVAL_PO_HOLD_WOULD_REOPEN = "po_match_hold_cleared_by_approver"
 #: The invoice carries the cumulative over-billing warning (decisions §469):
 #: no hold, but no unattended door may approve past it.
 UNATTENDED_APPROVAL_PO_OVERBILLED = "po_overbilled"
+#: A live hand-entered receipt on the matched PO was recorded by someone
+#: implicated in the invoice, or by nobody known (decisions §262, §470
+#: amended): the receipt evidence every receipt finding is measured against
+#: may be the typist's own, so no unattended door approves on it.
+UNATTENDED_APPROVAL_PO_RECEIPT_IMPLICATED = "po_receipt_implicated"
+
+
+def _matched_po_ids(po_match: dict | None) -> list[str]:
+    """The PO ids the last persisted match read receipts on — its split legs,
+    else its single PO (``MatchResult.matched_po_ids`` on the stored JSON)."""
+    if not isinstance(po_match, dict):
+        return []
+    legs = po_match.get("po_ids")
+    if isinstance(legs, list) and legs:
+        return [str(p) for p in legs]
+    return [str(po_match["po_id"])] if po_match.get("po_id") else []
 
 
 def has_po_overbilling_warning(invoice: Invoice) -> bool:
@@ -2615,7 +2718,16 @@ async def po_match_hold_refusal(
       invoice and the others billing its PO pass the PO's total, or what has
       been received of it. It raises no hold, so only a person reading it may
       approve.
+    * a live hand-entered receipt on the matched PO whose recorder is
+      implicated in the invoice or unknown (``receipts_clear_hold``, decisions
+      §262, §470 amended). The receipt findings, per-invoice and cumulative,
+      are measured against what was received, so a receipt the uploader typed
+      in can make either vanish; the auto-close refuses to release a hold on
+      that evidence, and an unattended approval is a release too. The org's
+      ``settings.exceptions.require_segregation: false`` lifts it, as it
+      lifts the auto-close's.
     """
+    from app.services.exception_lifecycle import exception_segregation_enabled
     from app.services.payment_runs import blocking_exception_types
 
     if invoice.id is None:
@@ -2624,6 +2736,10 @@ async def po_match_hold_refusal(
         return UNATTENDED_APPROVAL_PO_HOLD_OPEN
     if has_po_overbilling_warning(invoice):
         return UNATTENDED_APPROVAL_PO_OVERBILLED
+    if exception_segregation_enabled(org_settings) and not await receipts_clear_hold(
+        db, invoice, _matched_po_ids(invoice.po_match)
+    ):
+        return UNATTENDED_APPROVAL_PO_RECEIPT_IMPLICATED
     if approver_id is None:
         # The stamp names nobody, so no clearance changes standing.
         return None

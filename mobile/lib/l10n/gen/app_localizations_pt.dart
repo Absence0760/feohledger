@@ -3312,11 +3312,11 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String invoiceWarningPoBilledBeyondReceipt(
-    String billedAmount,
+    String totalBilled,
     String poNumber,
     String receivedValue,
   ) {
-    return 'Outras faturas já cobram $billedAmount contra o pedido $poNumber, do qual foram recebidas mercadorias no valor de $receivedValue — esta fatura ultrapassa o que foi recebido';
+    return 'As faturas do pedido $poNumber cobram $totalBilled, incluindo esta; foram recebidas mercadorias no valor de $receivedValue';
   }
 
   @override
@@ -7827,11 +7827,11 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String invoiceWarningPoBilledBeyondReceipt(
-    String billedAmount,
+    String totalBilled,
     String poNumber,
     String receivedValue,
   ) {
-    return 'Outras faturas já cobram $billedAmount contra o pedido $poNumber, do qual foram recebidas mercadorias no valor de $receivedValue — esta fatura ultrapassa o que foi recebido';
+    return 'As faturas do pedido $poNumber cobram $totalBilled, incluindo esta; foram recebidas mercadorias no valor de $receivedValue';
   }
 
   @override

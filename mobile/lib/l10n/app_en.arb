@@ -2245,10 +2245,10 @@
       }
     }
   },
-  "invoiceWarningPoBilledBeyondReceipt": "Other invoices already bill {billedAmount} against PO {poNumber}, of which goods worth {receivedValue} have been received — this invoice takes it past what was received",
+  "invoiceWarningPoBilledBeyondReceipt": "Invoices on PO {poNumber} bill {totalBilled}, this one included; goods worth {receivedValue} have been received",
   "@invoiceWarningPoBilledBeyondReceipt": {
     "placeholders": {
-      "billedAmount": {
+      "totalBilled": {
         "type": "String"
       },
       "poNumber": {

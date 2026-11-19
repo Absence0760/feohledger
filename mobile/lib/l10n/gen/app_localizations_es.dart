@@ -3312,11 +3312,11 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String invoiceWarningPoBilledBeyondReceipt(
-    String billedAmount,
+    String totalBilled,
     String poNumber,
     String receivedValue,
   ) {
-    return 'Otras facturas ya cobran $billedAmount contra el pedido $poNumber, del que se han recibido mercancías por valor de $receivedValue — esta factura supera lo recibido';
+    return 'Las facturas del pedido $poNumber suman $totalBilled, incluida esta; se han recibido mercancías por valor de $receivedValue';
   }
 
   @override

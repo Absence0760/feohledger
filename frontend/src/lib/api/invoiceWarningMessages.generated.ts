@@ -83,7 +83,7 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'po_amount_variance': 'invoices.warning.poAmountVariance',
 	// Other invoices already bill {billedAmount} {currency} against PO {poNumber}, whose total is {poTotal} {currency} — this invoice takes it past that total
 	'po_billed_beyond_total': 'invoices.warning.poBilledBeyondTotal',
-	// Other invoices already bill {billedAmount} {currency} against PO {poNumber}, of which goods worth {receivedValue} {currency} have been received — this invoice takes it past what was received
+	// Invoices on PO {poNumber} bill {totalBilled} {currency}, this one included; goods worth {receivedValue} {currency} have been received
 	'po_billed_beyond_receipt': 'invoices.warning.poBilledBeyondReceipt',
 	// Amount variance {variancePct}% vs PO {poNumber}, which records no currency (invoice {invoiceAmount} {currency} vs PO {poTotal})
 	'po_amount_variance_po_currency_unknown': 'invoices.warning.poAmountVariancePoCurrencyUnknown',
@@ -367,7 +367,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'po_not_found': { poNumber: 'text' },
 	'po_amount_variance': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'money', currency: 'currency' },
 	'po_billed_beyond_total': { billedAmount: 'money', poNumber: 'text', poTotal: 'money', currency: 'currency' },
-	'po_billed_beyond_receipt': { billedAmount: 'money', poNumber: 'text', receivedValue: 'money', currency: 'currency' },
+	'po_billed_beyond_receipt': { totalBilled: 'money', poNumber: 'text', receivedValue: 'money', currency: 'currency' },
 	'po_amount_variance_po_currency_unknown': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'number', currency: 'currency' },
 	'po_currency_mismatch': { invoiceCurrency: 'text', poNumber: 'text', poCurrency: 'text' },
 	'po_currency_mismatch_invoice_currency_unknown': { poNumber: 'text', poCurrencies: 'text' },
