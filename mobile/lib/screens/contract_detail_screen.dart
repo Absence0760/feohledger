@@ -1,8 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
-import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/contract.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/contract_store.dart';
@@ -11,6 +11,7 @@ import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/contract_status_badge.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 class ContractDetailScreen extends StatefulWidget {
   final String contractId;
@@ -24,7 +25,8 @@ class ContractDetailScreen extends StatefulWidget {
 class _ContractDetailScreenState extends State<ContractDetailScreen> {
   Contract? _contract;
   bool _loading = true;
-  String? _error;
+  // The caught load error, worded at render time by [describeLoadError].
+  Object? _error;
   // True while a lifecycle network call is in flight — guards against a
   // double-tap firing the transition POST twice and disables the buttons.
   bool _submitting = false;
@@ -52,7 +54,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = describeApiError(e);
+        _error = e;
         _loading = false;
       });
     }
@@ -171,22 +173,9 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
   }
 
   Widget _buildError(AppLocalizations l) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline, size: 48, color: Colors.red.shade400),
-          const SizedBox(height: 12),
-          Text(l.contractDetailErrorPrefix(_error ?? ''),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _load,
-            icon: const Icon(Icons.refresh),
-            label: Text(l.commonRetry),
-          ),
-        ],
-      ),
+    return LoadErrorState(
+      message: describeLoadError(l, _error!, l.contractDetailErrorPrefix),
+      onRetry: _load,
     );
   }
 
@@ -393,8 +382,10 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
             width: 120,
             child: Text(
               label,
+              // onSurfaceVariant clears AA (~8.9:1 on the blue-seed surface);
+              // grey.shade600 read ~4.4:1 there, under the 4.5:1 floor.
               style: TextStyle(
-                color: Colors.grey.shade600,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
               ),
             ),

@@ -13,6 +13,7 @@ mobile/
 │   ├── config.dart              # API URL, tenant slug
 │   ├── l10n/                    # i18n — ARB catalogues + committed gen-l10n output
 │   │   ├── app_en.arb           # source-of-truth catalogue (+ app_{de,fr,es,pt,pt_BR,ja}.arb)
+│   │   ├── load_error_messages.dart # describeLoadError: a failed read as a localized sentence (the server's detail inside the screen's own words, or the connection sentence) — never an exception toString()
 │   │   └── gen/                 # committed AppLocalizations (flutter gen-l10n; non-synthetic)
 │   ├── api/
 │   │   ├── api_client.dart      # HTTP client (JWT + X-Tenant-Slug header, timeout, debug logs)
@@ -112,7 +113,7 @@ mobile/
 │       ├── notification_list_tile.dart # Notification row — unread dot, title, body, event label + relative time; one merged Semantics label
 │       ├── notification_bell.dart      # App-bar bell action with a live unread Badge → opens NotificationsScreen (in the Dashboard app bar; visible to all roles)
 │       ├── kpi_card.dart        # Dashboard metric card
-│       ├── load_error_state.dart # Full-screen first-load failure: localized message + Retry (never a raw exception string); dashboard today, the per-screen `_ErrorState` copies are candidates to migrate
+│       ├── load_error_state.dart # Full-screen first-load failure: localized message + Retry (never a raw exception string). Used by the dashboard, most list screens and the five detail screens (invoice, contract, inspection, workflow, exception), which word the message with `l10n/load_error_messages.dart`'s `describeLoadError`. `test/screens/load_error_rendering_guard_test.dart` bans a hand-built `Icons.error_outline, size:` block and a caught error's `toString()` / `'$e'` in `lib/screens/` (allowlist: the screens not yet converted)
 │       ├── partial_conversion_note.dart # Amber-reading disclosure that a rendered rollup counts unconvertible rows at face value (dashboard + cash flow); caller passes the localized sentence and renders it only for a non-zero count
 │       ├── cash_flow_button.dart # Dashboard app-bar action → CashFlowScreen; gated to CFO/admin (renders nothing otherwise; mirrors backend _CFO_ROLES)
 │       ├── invoice_list_tile.dart # Invoice row with vendor, amount, status

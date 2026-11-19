@@ -57,6 +57,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get commonRetry => 'Erneut versuchen';
 
   @override
+  String get commonLoadErrorConnection =>
+      'FeohLedger ist nicht erreichbar. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“.';
+
+  @override
   String get commonAll => 'Alle';
 
   @override
@@ -1771,7 +1775,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get workflowDetailFallbackTitle => 'Workflow';
 
   @override
-  String get workflowDetailLoadError => 'Workflow konnte nicht geladen werden';
+  String workflowDetailErrorPrefix(String error) {
+    return 'Workflow konnte nicht geladen werden: $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'Dieser Workflow hat keine Schritte.';
@@ -2187,7 +2193,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get exceptionDetailTitle => 'Ausnahme';
 
   @override
-  String get exceptionDetailNotFound => 'Ausnahme nicht gefunden';
+  String exceptionDetailErrorPrefix(String error) {
+    return 'Ausnahme konnte nicht geladen werden: $error';
+  }
 
   @override
   String get exceptionDetailOverdue => 'Überfällig';

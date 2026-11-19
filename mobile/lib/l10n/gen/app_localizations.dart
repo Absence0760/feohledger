@@ -198,6 +198,12 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get commonRetry;
 
+  /// No description provided for @commonLoadErrorConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reach FeohLedger. Check your connection and tap Retry.'**
+  String get commonLoadErrorConnection;
+
   /// No description provided for @commonAll.
   ///
   /// In en, this message translates to:
@@ -2856,11 +2862,11 @@ abstract class AppLocalizations {
   /// **'Workflow'**
   String get workflowDetailFallbackTitle;
 
-  /// No description provided for @workflowDetailLoadError.
+  /// No description provided for @workflowDetailErrorPrefix.
   ///
   /// In en, this message translates to:
-  /// **'Could not load workflow'**
-  String get workflowDetailLoadError;
+  /// **'Could not load the workflow: {error}'**
+  String workflowDetailErrorPrefix(String error);
 
   /// No description provided for @workflowDetailNoSteps.
   ///
@@ -3471,11 +3477,11 @@ abstract class AppLocalizations {
   /// **'Exception'**
   String get exceptionDetailTitle;
 
-  /// No description provided for @exceptionDetailNotFound.
+  /// No description provided for @exceptionDetailErrorPrefix.
   ///
   /// In en, this message translates to:
-  /// **'Exception not found'**
-  String get exceptionDetailNotFound;
+  /// **'Could not load the exception: {error}'**
+  String exceptionDetailErrorPrefix(String error);
 
   /// No description provided for @exceptionDetailOverdue.
   ///

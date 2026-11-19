@@ -57,6 +57,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonRetry => 'Retry';
 
   @override
+  String get commonLoadErrorConnection =>
+      'Couldn\'t reach FeohLedger. Check your connection and tap Retry.';
+
+  @override
   String get commonAll => 'All';
 
   @override
@@ -1758,7 +1762,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get workflowDetailFallbackTitle => 'Workflow';
 
   @override
-  String get workflowDetailLoadError => 'Could not load workflow';
+  String workflowDetailErrorPrefix(String error) {
+    return 'Could not load the workflow: $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'This workflow has no steps.';
@@ -2173,7 +2179,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exceptionDetailTitle => 'Exception';
 
   @override
-  String get exceptionDetailNotFound => 'Exception not found';
+  String exceptionDetailErrorPrefix(String error) {
+    return 'Could not load the exception: $error';
+  }
 
   @override
   String get exceptionDetailOverdue => 'Overdue';

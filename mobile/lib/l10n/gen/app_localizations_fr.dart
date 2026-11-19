@@ -57,6 +57,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get commonRetry => 'Réessayer';
 
   @override
+  String get commonLoadErrorConnection =>
+      'Impossible de joindre FeohLedger. Vérifiez votre connexion et appuyez sur Réessayer.';
+
+  @override
   String get commonAll => 'Toutes';
 
   @override
@@ -1779,8 +1783,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get workflowDetailFallbackTitle => 'Flux de travail';
 
   @override
-  String get workflowDetailLoadError =>
-      'Impossible de charger le flux de travail';
+  String workflowDetailErrorPrefix(String error) {
+    return 'Impossible de charger le flux de travail : $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'Ce flux de travail n\'a aucune étape.';
@@ -2201,7 +2206,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get exceptionDetailTitle => 'Exception';
 
   @override
-  String get exceptionDetailNotFound => 'Exception introuvable';
+  String exceptionDetailErrorPrefix(String error) {
+    return 'Impossible de charger l’exception : $error';
+  }
 
   @override
   String get exceptionDetailOverdue => 'En retard';

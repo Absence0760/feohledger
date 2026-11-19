@@ -1,10 +1,12 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
-import 'package:feohledger_mobile/stores/inspection_store.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/widgets/inspection_result_badge.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 /// One quality inspection, read-only (`GET /api/inspections/{id}`, role-open).
 ///
@@ -26,10 +28,11 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
   Inspection? _inspection;
   bool _loading = true;
 
-  /// The store's error, or null — in which case the screen falls back to its
-  /// "not found" copy. `AppLocalizations.of(context)` isn't available from
-  /// `initState`, so the fallback is resolved at render time.
-  String? _error;
+  /// The caught error, worded at render time by [describeLoadError] —
+  /// `AppLocalizations.of(context)` isn't available from `initState`. Caught
+  /// here rather than read back from `InspectionStore.error`, which holds the
+  /// exception's `toString()` (and whatever the store's last failure was).
+  Object? _error;
 
   @override
   void initState() {
@@ -42,17 +45,22 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
       _loading = true;
       _error = null;
     });
-    final inspection = await InspectionStore.instance.getById(
-      widget.inspectionId,
-    );
-    // The route can be popped while a slow GET (or its 10s timeout) is still in
-    // flight — setState after dispose throws.
-    if (!mounted) return;
-    setState(() {
-      _inspection = inspection;
-      _error = inspection == null ? InspectionStore.instance.error : null;
-      _loading = false;
-    });
+    try {
+      final inspection = await InspectionApi.getById(widget.inspectionId);
+      // The route can be popped while a slow GET (or its 10s timeout) is still
+      // in flight — setState after dispose throws.
+      if (!mounted) return;
+      setState(() {
+        _inspection = inspection;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
   }
 
   @override
@@ -62,36 +70,16 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
       appBar: AppBar(title: Text(l.inspectionDetailTitle)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _inspection == null
-          ? _buildError(l)
+          : _error != null
+          ? LoadErrorState(
+              message: describeLoadError(
+                l,
+                _error!,
+                l.inspectionDetailErrorPrefix,
+              ),
+              onRetry: _load,
+            )
           : _buildDetail(l, _inspection!),
-    );
-  }
-
-  Widget _buildError(AppLocalizations l) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.red.shade700),
-            const SizedBox(height: 12),
-            Text(
-              _error == null
-                  ? l.inspectionDetailNotFound
-                  : l.inspectionDetailErrorPrefix(_error!),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _load,
-              icon: const Icon(Icons.refresh),
-              label: Text(l.commonRetry),
-            ),
-          ],
-        ),
-      ),
     );
   }
 

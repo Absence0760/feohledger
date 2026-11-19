@@ -5,6 +5,7 @@ import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/erp_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/invoice_warning_messages.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/admin_user.dart';
 import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -13,6 +14,7 @@ import 'package:feohledger_mobile/utils/a11y.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/exception_status_badge.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 /// Single-exception detail — full fields, the linked invoice, SLA / due /
 /// overdue, the current assignee, and the three actions (resolve / escalate /
@@ -32,11 +34,11 @@ class ExceptionDetailScreen extends StatefulWidget {
 class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
   ApException? _exception;
   bool _loading = true;
-  // The raw store error (if any) when a load fails. Kept un-localized here —
-  // `AppLocalizations.of(context)` isn't safe to call from initState/_load, so
-  // the "not found" fallback copy is resolved at render time in build()
-  // (`exceptionDetailNotFound`) whenever this is null but there's no exception.
-  String? _error;
+  // The caught load error, worded at render time by [describeLoadError] —
+  // `AppLocalizations.of(context)` isn't safe to call from initState/_load.
+  // Caught here rather than read back from `ExceptionStore.error`, which holds
+  // the exception's `toString()` (and whatever the store's last failure was).
+  Object? _error;
   // True while an action / assign network call is in flight — disables the
   // controls and guards against a double-tap firing twice.
   bool _submitting = false;
@@ -52,14 +54,20 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
       _loading = true;
       _error = null;
     });
-    final exc = await ExceptionStore.instance.getById(widget.exceptionId);
-    if (!mounted) return;
-    setState(() {
-      _exception = exc;
-      // Keep the raw store error (may be null → "not found" fallback in build).
-      _error = exc == null ? ExceptionStore.instance.error : null;
-      _loading = false;
-    });
+    try {
+      final exc = await ExceptionApi.getById(widget.exceptionId);
+      if (!mounted) return;
+      setState(() {
+        _exception = exc;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
   }
 
   @override
@@ -75,18 +83,11 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null || _exception == null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, size: 56, color: Colors.red),
-            const SizedBox(height: 12),
-            Text(_error ?? l.exceptionDetailNotFound),
-            const SizedBox(height: 12),
-            FilledButton(onPressed: _load, child: Text(l.commonRetry)),
-          ],
-        ),
+    final error = _error;
+    if (error != null) {
+      return LoadErrorState(
+        message: describeLoadError(l, error, l.exceptionDetailErrorPrefix),
+        onRetry: _load,
       );
     }
 
@@ -447,7 +448,11 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.exceptionDetailLoadUsersFailed(e.toString()))),
+        SnackBar(
+          content: Text(
+            describeLoadError(l, e, l.exceptionDetailLoadUsersFailed),
+          ),
+        ),
       );
       return;
     }

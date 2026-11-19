@@ -17,6 +17,7 @@
   "commonCancel": "Cancel",
   "commonLoading": "Loading…",
   "commonRetry": "Retry",
+  "commonLoadErrorConnection": "Couldn't reach FeohLedger. Check your connection and tap Retry.",
   "commonAll": "All",
   "commonSearch": "Search",
   "commonClear": "Clear",
@@ -1058,7 +1059,12 @@
     }
   },
   "workflowDetailFallbackTitle": "Workflow",
-  "workflowDetailLoadError": "Could not load workflow",
+  "workflowDetailErrorPrefix": "Could not load the workflow: {error}",
+  "@workflowDetailErrorPrefix": {
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
   "workflowDetailNoSteps": "This workflow has no steps.",
   "workflowDetailDefaultWorkflow": "Default workflow",
   "workflowDetailStepNumber": "Step {number}",
@@ -1322,7 +1328,12 @@
   "contractCancelFailed": "Could not cancel contract — please try again",
 
   "exceptionDetailTitle": "Exception",
-  "exceptionDetailNotFound": "Exception not found",
+  "exceptionDetailErrorPrefix": "Could not load the exception: {error}",
+  "@exceptionDetailErrorPrefix": {
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
   "exceptionDetailOverdue": "Overdue",
   "exceptionDetailSectionDescription": "Description",
   "exceptionDetailPoRematch": "PO {po} changed in {erp} on {date}, and a re-check now matches. Review it to clear the hold.",

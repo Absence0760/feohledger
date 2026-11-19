@@ -57,6 +57,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get commonRetry => 'Reintentar';
 
   @override
+  String get commonLoadErrorConnection =>
+      'No se pudo conectar con FeohLedger. Revise su conexión y toque Reintentar.';
+
+  @override
   String get commonAll => 'Todas';
 
   @override
@@ -1777,7 +1781,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get workflowDetailFallbackTitle => 'Flujo de trabajo';
 
   @override
-  String get workflowDetailLoadError => 'No se pudo cargar el flujo de trabajo';
+  String workflowDetailErrorPrefix(String error) {
+    return 'No se pudo cargar el flujo de trabajo: $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'Este flujo de trabajo no tiene pasos.';
@@ -2199,7 +2205,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get exceptionDetailTitle => 'Excepción';
 
   @override
-  String get exceptionDetailNotFound => 'Excepción no encontrada';
+  String exceptionDetailErrorPrefix(String error) {
+    return 'No se pudo cargar la excepción: $error';
+  }
 
   @override
   String get exceptionDetailOverdue => 'Vencida';

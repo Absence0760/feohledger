@@ -57,6 +57,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get commonRetry => '再試行';
 
   @override
+  String get commonLoadErrorConnection =>
+      'FeohLedger に接続できませんでした。接続を確認して再試行をタップしてください。';
+
+  @override
   String get commonAll => 'すべて';
 
   @override
@@ -1645,7 +1649,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get workflowDetailFallbackTitle => 'ワークフロー';
 
   @override
-  String get workflowDetailLoadError => 'ワークフローを読み込めませんでした';
+  String workflowDetailErrorPrefix(String error) {
+    return 'ワークフローを読み込めませんでした: $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'このワークフローにはステップがありません。';
@@ -2049,7 +2055,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get exceptionDetailTitle => '例外';
 
   @override
-  String get exceptionDetailNotFound => '例外が見つかりません';
+  String exceptionDetailErrorPrefix(String error) {
+    return '例外を読み込めませんでした: $error';
+  }
 
   @override
   String get exceptionDetailOverdue => '期限超過';
