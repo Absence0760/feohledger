@@ -249,8 +249,10 @@ async def test_erp_push_refuses(realdb, stored):
     inv_id = await _seed(realdb, currency=stored, number=f"UC-ERP-{stored!r}")
     async with realdb.client(key=TENANT, role="admin") as c:
         resp = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    # The ERP door names its refusal in its own coded vocabulary
+    # (`services/erp_export_gate.py`), not the run builder's `currency_unknown`.
     assert resp.status_code == 409, resp.text
-    assert "currency_unknown" in resp.text
+    assert resp.json()["detail"]["code"] == "currency_blocks_erp_export"
     async with realdb.sessionmaker(TENANT)() as s:
         assert (await s.get(Invoice, inv_id)).status == InvoiceStatus.approved
 
