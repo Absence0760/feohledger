@@ -91,6 +91,11 @@ function collectImgElements(node: unknown, out: ImgElement[] = []): ImgElement[]
  * by an end tag the pattern failed to anticipate.
  */
 function findImgElements(source: string): ImgElement[] {
+	// Cheap pre-check before the compiler parse, which is the whole cost of a
+	// tree scan (~250 files: past vitest's 5 s budget under a parallel run).
+	// An <img> element is written `<img`, so skipping a file without it cannot hide a finding; the inline
+	// self-tests go through this line too.
+	if (!/<img\b/i.test(source)) return [];
 	const ast = parse(source, { modern: true });
 	return collectImgElements(ast.fragment);
 }

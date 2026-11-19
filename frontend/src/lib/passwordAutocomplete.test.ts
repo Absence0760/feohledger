@@ -133,6 +133,11 @@ function excerpt(input: Node, source: string): string {
 }
 
 function findings(source: string, path = 'inline.svelte'): string[] {
+	// Cheap pre-check before the compiler parse, which is the whole cost of a
+	// tree scan (~250 files: past vitest's 5 s budget under a parallel run).
+	// Every rule below needs the text `password` (a type, a token, a component name), so skipping a file without it cannot hide a finding; the inline
+	// self-tests go through this line too.
+	if (!/password/i.test(source)) return [];
 	const ast = parse(source, { modern: true });
 	const out: string[] = [];
 	for (const input of collect(ast.fragment, 'input')) {

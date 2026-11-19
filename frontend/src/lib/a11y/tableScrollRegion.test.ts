@@ -74,6 +74,11 @@ function attr(element: Element, name: string): Attribute | undefined {
 }
 
 function gridContainers(source: string): Element[] {
+	// Cheap pre-check before the compiler parse, which is the whole cost of a
+	// tree scan (~250 files: past vitest's 5 s budget under a parallel run).
+	// A .grid-container is written with that class name, so skipping a file without it cannot hide a finding; the inline
+	// self-tests go through this line too.
+	if (!source.includes('grid-container')) return [];
 	const ast = parse(source, { modern: true });
 	return collectElements(ast.fragment).filter((el) => {
 		const cls = attr(el, 'class');
@@ -119,6 +124,9 @@ describe('DataTable scroll region (WCAG 2.1.1)', () => {
 		const offenders: string[] = [];
 		const dangling: string[] = [];
 		for (const f of files) {
+			// Only a static tabindex="0" is inspected below, so a file without one
+			// has nothing to report — and skipping it skips its compiler parse.
+			if (!/tabindex\s*=\s*["']?0\b/.test(f.source)) continue;
 			const ast = parse(f.source, { modern: true });
 			const elements = collectElements(ast.fragment);
 			const ids = new Set(
@@ -159,7 +167,7 @@ describe('DataTable scroll region (WCAG 2.1.1)', () => {
 		// scrollers are now among the elements it actually inspects, so a glob
 		// or path change that drops them fails here instead of passing empty.
 		const legalStops = files
-			.filter((f) => f.path.startsWith('routes/legal/'))
+			.filter((f) => f.path.startsWith('routes/legal/') && f.source.includes('table-scroll'))
 			.flatMap((f) => collectElements(parse(f.source, { modern: true }).fragment))
 			.filter((el) => {
 				const cls = attr(el, 'class');
