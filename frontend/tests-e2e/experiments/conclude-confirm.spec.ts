@@ -62,22 +62,31 @@ test.describe('/experiments conclude', () => {
 		await page.goto('/experiments');
 		const tr = page.locator('table tbody tr', { hasText: 'Conclude confirm stub' });
 		await expect(tr).toBeVisible();
+		// Row actions are named `common.rowActionAria` ("{action} for {name}"), and
+		// the row's name itself contains both words, so match the whole name.
+		const concludeBtn = tr.getByRole('button', {
+			name: 'Conclude for Conclude confirm stub',
+			exact: true
+		});
+		const confirmBtn = tr.getByRole('button', {
+			name: 'Confirm for Conclude confirm stub',
+			exact: true
+		});
 
 		// First click arms — nothing sent.
-		await tr.getByRole('button', { name: 'Conclude' }).click();
-		const confirm = tr.getByRole('button', { name: 'Confirm' });
-		await expect(confirm).toBeVisible();
+		await concludeBtn.click();
+		await expect(confirmBtn).toBeVisible();
 		expect(concludes).toBe(0);
 
 		// A click elsewhere disarms.
 		await page.getByRole('heading', { name: 'Workflow Experiments' }).click();
-		await expect(tr.getByRole('button', { name: 'Conclude' })).toBeVisible();
+		await expect(concludeBtn).toBeVisible();
 		expect(concludes).toBe(0);
 
 		// Arm again, confirm: exactly one POST.
 		const posted = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith('/conclude'));
-		await tr.getByRole('button', { name: 'Conclude' }).click();
-		await tr.getByRole('button', { name: 'Confirm' }).click();
+		await concludeBtn.click();
+		await confirmBtn.click();
 		await posted;
 		expect(concludes).toBe(1);
 	});
