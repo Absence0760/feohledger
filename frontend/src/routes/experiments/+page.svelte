@@ -39,7 +39,7 @@
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { page } from '$app/state';
-	import { replaceState } from '$app/navigation';
+	import { afterNavigate, replaceState } from '$app/navigation';
 
 	const canMutate = $derived(auth.isAdmin);
 
@@ -72,10 +72,27 @@
 	// URL-backed (`?status=`), like every other list's chips: Back / reload /
 	// a shared link restore the view. An unknown value falls back to All rather
 	// than an empty table no chip is lit for.
-	const urlStatus = page.url.searchParams.get('status');
-	let statusFilter = $state<string>(
-		urlStatus && (EXPERIMENT_STATUSES as string[]).includes(urlStatus) ? urlStatus : 'all'
-	);
+	function statusFromUrl(params: Pick<URLSearchParams, 'get'>): string {
+		const s = params.get('status');
+		return s && (EXPERIMENT_STATUSES as string[]).includes(s) ? s : 'all';
+	}
+	let statusFilter = $state<string>(statusFromUrl(page.url.searchParams));
+
+	// The one reader of URL state. SvelteKit reuses this component for a
+	// navigation within the route (the sidebar link while filtered, Back /
+	// Forward between two entries), so the mount-time seed above never sees it
+	// (`docs/ui-patterns.md` § "Reading the URL once at mount is only half of
+	// the round trip"). The filter is client-side, so no refetch is needed.
+	function readUrlState(params: Pick<URLSearchParams, 'get'>) {
+		const next = statusFromUrl(params);
+		if (next !== statusFilter) statusFilter = next;
+	}
+
+	afterNavigate(({ from, to }) => {
+		if (from?.route.id && from.route.id === to?.route.id && to?.url) {
+			readUrlState(to.url.searchParams);
+		}
+	});
 
 	// A writer of URL state, never a dependency of it (`docs/ui-patterns.md`):
 	// called from the chip's `onchange`, so it cannot re-trigger itself.
@@ -255,37 +272,17 @@
 		}
 	}
 
-	// One lifecycle call per row at a time: the row's actions disable while it
-	// is in flight, so a double-click cannot start, stop or conclude twice.
-	let busyId = $state<string | null>(null);
+	type RowActionKind = 'start' | 'stop' | 'conclude' | 'delete';
 
-	async function runAction(
-		exp: Experiment,
-		call: (id: string) => Promise<unknown>,
-		done: string,
-		failed: string
-	) {
-		busyId = exp.id;
-		try {
-			await call(exp.id);
-			toast(done, 'success');
-			await load();
-		} catch (e) {
-			// The server's reason (a 409 "already running", a refusal) is the
-			// useful part; the fixed sentence is only the fallback.
-			toast(errorMessage(e, failed), 'error');
-		} finally {
-			busyId = null;
-		}
-	}
-
-	function doStart(exp: Experiment) {
-		return runAction(exp, startExperiment, m('experiments.toast.started'), m('experiments.toast.startFailed'));
-	}
-
-	function doStop(exp: Experiment) {
-		return runAction(exp, stopExperiment, m('experiments.toast.stopped'), m('experiments.toast.stopFailed'));
-	}
+	// One lifecycle call at a time, tracked per action: the button that sent
+	// it is `busy` (aria-disabled, so the keyboard user who pressed it keeps
+	// focus) and every other row action is `disabled` until it settles, so a
+	// double-click cannot start, stop or conclude twice.
+	let inFlight = $state<{ action: RowActionKind; id: string } | null>(null);
+	const isBusy = (action: RowActionKind, id: string) =>
+		inFlight?.action === action && inFlight.id === id;
+	const isHeld = (action: RowActionKind, id: string) =>
+		inFlight !== null && !isBusy(action, id);
 
 	// Two destructive actions, each armed two-click (ui-patterns § RowAction):
 	// Delete (a draft) and Conclude, which is TERMINAL — a concluded experiment
@@ -297,22 +294,55 @@
 	const isArmed = (action: 'delete' | 'conclude', id: string) =>
 		armed?.action === action && armed.id === id;
 
+	async function runAction(
+		exp: Experiment,
+		action: RowActionKind,
+		call: (id: string) => Promise<unknown>,
+		done: string,
+		failed: string
+	) {
+		if (inFlight) return;
+		inFlight = { action, id: exp.id };
+		try {
+			await call(exp.id);
+			toast(done, 'success');
+			await load();
+		} catch (e) {
+			// The server's reason (a 409 "already running", a refusal) is the
+			// useful part; the fixed sentence is only the fallback.
+			toast(errorMessage(e, failed), 'error');
+		} finally {
+			inFlight = null;
+			// Disarmed only once the request settles, so the busy button keeps
+			// reading "Confirm" rather than reverting mid-request.
+			armed = null;
+		}
+	}
+
+	function doStart(exp: Experiment) {
+		return runAction(exp, 'start', startExperiment, m('experiments.toast.started'), m('experiments.toast.startFailed'));
+	}
+
+	function doStop(exp: Experiment) {
+		return runAction(exp, 'stop', stopExperiment, m('experiments.toast.stopped'), m('experiments.toast.stopFailed'));
+	}
+
 	function doConclude(exp: Experiment) {
+		if (inFlight) return;
 		if (!isArmed('conclude', exp.id)) {
 			armed = { action: 'conclude', id: exp.id };
 			return;
 		}
-		armed = null;
-		return runAction(exp, concludeExperiment, m('experiments.toast.concluded'), m('experiments.toast.concludeFailed'));
+		return runAction(exp, 'conclude', concludeExperiment, m('experiments.toast.concluded'), m('experiments.toast.concludeFailed'));
 	}
 
 	function doDelete(exp: Experiment) {
+		if (inFlight) return;
 		if (!isArmed('delete', exp.id)) {
 			armed = { action: 'delete', id: exp.id };
 			return;
 		}
-		armed = null;
-		return runAction(exp, deleteExperiment, m('experiments.toast.deleted'), m('experiments.toast.deleteFailed'));
+		return runAction(exp, 'delete', deleteExperiment, m('experiments.toast.deleted'), m('experiments.toast.deleteFailed'));
 	}
 
 	async function openResults(exp: Experiment) {
@@ -340,7 +370,7 @@
 </script>
 
 <svelte:window onclick={(e) => {
-	if (armed && !(e.target as HTMLElement)?.closest('.row-action')) {
+	if (armed && !inFlight && !(e.target as HTMLElement)?.closest('.row-action')) {
 		armed = null;
 	}
 }} />
@@ -393,14 +423,16 @@
 						{#if canMutate && exp.status === 'draft'}
 							<RowAction
 								variant="success"
-								disabled={busyId === exp.id}
+								busy={isBusy('start', exp.id)}
+								disabled={isHeld('start', exp.id)}
 								ariaLabel={m('common.rowActionAria', { action: m('experiments.row.start'), name: exp.name })}
 								onclick={() => doStart(exp)}
 							>{m('experiments.row.start')}</RowAction>
 							<RowAction
 								variant="danger"
 								armed={isArmed('delete', exp.id)}
-								disabled={busyId === exp.id}
+								busy={isBusy('delete', exp.id)}
+								disabled={isHeld('delete', exp.id)}
 								ariaLabel={m('common.rowActionAria', {
 									action: isArmed('delete', exp.id) ? m('experiments.row.confirm') : m('experiments.row.delete'),
 									name: exp.name
@@ -411,14 +443,16 @@
 							</RowAction>
 						{:else if canMutate && exp.status === 'running'}
 							<RowAction
-								disabled={busyId === exp.id}
+								busy={isBusy('stop', exp.id)}
+								disabled={isHeld('stop', exp.id)}
 								ariaLabel={m('common.rowActionAria', { action: m('experiments.row.stop'), name: exp.name })}
 								onclick={() => doStop(exp)}
 							>{m('experiments.row.stop')}</RowAction>
 							<RowAction
 								variant="danger"
 								armed={isArmed('conclude', exp.id)}
-								disabled={busyId === exp.id}
+								busy={isBusy('conclude', exp.id)}
+								disabled={isHeld('conclude', exp.id)}
 								ariaLabel={m('common.rowActionAria', {
 									action: isArmed('conclude', exp.id) ? m('experiments.row.confirm') : m('experiments.row.conclude'),
 									name: exp.name

@@ -175,13 +175,18 @@
 	}
 
 	function onDeclineClick(offer: PortalDiscountOffer) {
+		if (busy) return;
 		if (armedDeclineId !== offer.id) {
 			armedDeclineId = offer.id;
 			return;
 		}
-		armedDeclineId = null;
 		decline(offer);
 	}
+
+	// The armed Decline whose request is in flight: it stays armed (reading
+	// "Confirm decline") and goes `busy` — aria-disabled, so the keyboard user
+	// who pressed it keeps focus — until the request settles.
+	const isDeclining = (id: string) => busy === id && armedDeclineId === id;
 
 	async function decline(offer: PortalDiscountOffer) {
 		busy = offer.id;
@@ -193,6 +198,7 @@
 			error = err instanceof Error ? err.message : m('portal.discounts.declineFailed');
 		} finally {
 			busy = null;
+			armedDeclineId = null;
 		}
 	}
 
@@ -217,7 +223,7 @@
      (ui-patterns.md § Per-row actions). -->
 <svelte:window
 	onclick={(e) => {
-		if (armedDeclineId && !(e.target as HTMLElement).closest('.row-action')) armedDeclineId = null;
+		if (armedDeclineId && !busy && !(e.target as HTMLElement).closest('.row-action')) armedDeclineId = null;
 	}}
 />
 
@@ -310,7 +316,7 @@
 							{#if o.status === 'offered'}
 								<RowAction
 									variant="success"
-									disabled={busy === o.id || !o.best_tier}
+									disabled={busy !== null || !o.best_tier}
 									ariaLabel={m('common.rowActionAria', { action: m('portal.discounts.accept'), name: offerLabel(o) })}
 									onclick={() => openAccept(o)}
 								>
@@ -319,7 +325,8 @@
 								<RowAction
 									variant="danger"
 									armed={armedDeclineId === o.id}
-									disabled={busy === o.id}
+									busy={isDeclining(o.id)}
+									disabled={busy !== null && !isDeclining(o.id)}
 									ariaLabel={m('common.rowActionAria', {
 										action:
 											armedDeclineId === o.id

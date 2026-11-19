@@ -22,6 +22,7 @@
 	import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
@@ -901,6 +902,7 @@
 	let confirmDeleteId = $state<string | null>(null);
 
 	async function deleteInvoice(id: string) {
+		if (deletingId) return;
 		deletingId = id;
 		try {
 			await api.delete(`/api/invoices/${id}`);
@@ -908,7 +910,7 @@
 			await invoiceStore.fetchCounts(buildParams());
 			toast(m('invoices.toast.deletedOne'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('invoices.toast.deleteFailed'), 'error');
+			toast(errorMessage(err, m('invoices.toast.deleteFailed')), 'error');
 		} finally {
 			deletingId = null;
 			confirmDeleteId = null;
@@ -917,7 +919,7 @@
 
 	function handleWindowClick(e: MouseEvent) {
 		const target = e.target as HTMLElement;
-		if (confirmDeleteId && !target.closest('.row-action')) {
+		if (confirmDeleteId && !deletingId && !target.closest('.row-action')) {
 			confirmDeleteId = null;
 		}
 		if (showBulkStatusSelect && !target.closest('.bulk-status-wrapper')) {
@@ -1226,9 +1228,11 @@
 							<RowAction
 								variant="danger"
 								armed={confirmDeleteId === invoice.id}
-								disabled={deletingId === invoice.id}
+								busy={deletingId === invoice.id}
+								disabled={deletingId !== null && deletingId !== invoice.id}
 								onclick={(e) => {
 									e.stopPropagation();
+									if (deletingId) return;
 									if (confirmDeleteId === invoice.id) {
 										deleteInvoice(invoice.id);
 									} else {
@@ -1236,11 +1240,12 @@
 									}
 								}}
 							>
-								{deletingId === invoice.id
-									? '…'
-									: confirmDeleteId === invoice.id
-										? m('invoices.row.confirm')
-										: m('invoices.row.delete')}
+								<!-- Stays "Confirm" while the request runs: `busy` carries
+								     the in-flight state, and a "…" label left the button
+								     with no accessible name. -->
+								{confirmDeleteId === invoice.id
+									? m('invoices.row.confirm')
+									: m('invoices.row.delete')}
 							</RowAction>
 						{/if}
 					</td>

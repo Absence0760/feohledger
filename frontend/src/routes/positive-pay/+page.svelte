@@ -31,6 +31,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
@@ -192,7 +193,7 @@
 			// edit still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
 			if (opts.append) {
-				toast(e instanceof Error ? e.message : m('positivePay.toast.loadFailed'), 'error');
+				toast(errorMessage(e, m('positivePay.toast.loadFailed')), 'error');
 			} else {
 				files = [];
 				total = 0;
@@ -288,7 +289,8 @@
 			confirmDeleteId = f.id;
 			return;
 		}
-		confirmDeleteId = null;
+		// Stays armed until the request settles, so the busy button keeps
+		// reading "Confirm" rather than reverting mid-request.
 		busyId = f.id;
 		try {
 			await deletePositivePayFile(f.id);
@@ -298,9 +300,10 @@
 			void loadSummary();
 			toast(m('positivePay.toast.deleted'), 'success');
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('positivePay.toast.deleteFailed'), 'error');
+			toast(errorMessage(e, m('positivePay.toast.deleteFailed')), 'error');
 		} finally {
 			busyId = null;
+			confirmDeleteId = null;
 		}
 	}
 
@@ -329,7 +332,7 @@
 
 <svelte:window
 	onclick={(e) => {
-		if (confirmDeleteId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
+		if (confirmDeleteId && !busyId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
 			confirmDeleteId = null;
 		}
 	}}

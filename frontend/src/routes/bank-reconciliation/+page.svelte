@@ -59,6 +59,7 @@
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
@@ -446,11 +447,13 @@
 	let confirmDeleteId = $state<string | null>(null);
 
 	async function deleteStatement(s: BankStatement) {
+		if (busyId) return;
 		if (confirmDeleteId !== s.id) {
 			confirmDeleteId = s.id;
 			return;
 		}
-		confirmDeleteId = null;
+		// Stays armed until the request settles, so the busy button keeps
+		// reading "Confirm" rather than reverting to "Delete" mid-request.
 		busyId = s.id;
 		try {
 			await deleteBankStatement(s.id);
@@ -460,9 +463,10 @@
 			void loadOutstanding();
 			toast(m('bankRecon.toast.deleted'), 'success');
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('bankRecon.toast.deleteFailed'), 'error');
+			toast(errorMessage(e, m('bankRecon.toast.deleteFailed')), 'error');
 		} finally {
 			busyId = null;
+			confirmDeleteId = null;
 		}
 	}
 
@@ -474,7 +478,7 @@
 
 <svelte:window
 	onclick={(e) => {
-		if (confirmDeleteId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
+		if (confirmDeleteId && !busyId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
 			confirmDeleteId = null;
 		}
 	}}
@@ -813,7 +817,8 @@
 										<RowAction
 											variant="danger"
 											armed={confirmDeleteId === s.id}
-											disabled={busyId === s.id}
+											busy={busyId === s.id}
+											disabled={busyId !== null && busyId !== s.id}
 											onclick={() => deleteStatement(s)}
 											ariaLabel={confirmDeleteId === s.id
 												? m('common.rowActionAria', {

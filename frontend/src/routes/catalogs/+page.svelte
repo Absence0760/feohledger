@@ -28,6 +28,7 @@
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	const canCreate = $derived(auth.isManager); // admin | ap_manager
 	// Buyers (admin / ap_manager / ap_clerk) may start a punch-out session.
@@ -194,7 +195,7 @@
 			// table (it used to do so for load-more too, throwing away every
 			// row already loaded).
 			if (opts.append || fetchSequence.wasSupersededByEdit(token)) {
-				toast(err instanceof Error ? err.message : m('catalogs.toast.loadFailed'), 'error');
+				toast(errorMessage(err, m('catalogs.toast.loadFailed')), 'error');
 			} else {
 				errored = true;
 				// Drop the rows this load was replacing: they are the previous
@@ -256,7 +257,7 @@
 			total = Math.max(0, total - 1);
 			toast(m('catalogs.toast.deleted'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('catalogs.toast.deleteFailed'), 'error');
+			toast(errorMessage(err, m('catalogs.toast.deleteFailed')), 'error');
 		} finally {
 			confirmDeleteId = null;
 		}
@@ -270,7 +271,7 @@
 				q: guidedQuery.trim() || undefined
 			});
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('catalogs.toast.guidedFailed'), 'error');
+			toast(errorMessage(err, m('catalogs.toast.guidedFailed')), 'error');
 		} finally {
 			guidedLoading = false;
 		}
