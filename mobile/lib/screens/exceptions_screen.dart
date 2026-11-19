@@ -3,6 +3,7 @@ import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/screens/exception_detail_screen.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -135,14 +136,32 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
               listenable: ExceptionStore.instance,
               builder: (context, _) {
                 final store = ExceptionStore.instance;
+                final loadError = store.loadError;
+                final filter = store.statusFilter;
 
                 return AsyncListBody<ApException>(
                   items: store.exceptions,
                   loading: store.loading,
-                  hasError: store.error != null,
+                  // The fetch's failure only — a refused resolve leaves the
+                  // list live (actionError), so it raises no banner.
+                  hasError: loadError != null,
                   fromCache: store.fromCache,
-                  errorMessage: l.exceptionsLoadError,
+                  // Worded from the cause: the server's reason on a 403 / 500,
+                  // the connection sentence only when no server answered.
+                  errorMessage: loadError == null
+                      ? ''
+                      : describeLoadError(
+                          l,
+                          loadError,
+                          l.exceptionsLoadErrorPrefix,
+                        ),
                   onRefresh: store.fetch,
+                  filteredEmpty: filter == null
+                      ? null
+                      : FilteredEmptyState(
+                          message: l.exceptionsFilteredEmpty(filter),
+                          onShowAll: () => store.setStatusFilter(null),
+                        ),
                   empty: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [

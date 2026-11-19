@@ -1,5 +1,4 @@
 {
-  "@@locale": "en",
   "navDashboard": "Dashboard",
   "navInvoices": "Invoices",
   "navContracts": "Contracts",
@@ -48,7 +47,7 @@
   "dashboardAgingDays90plus": "90+",
   "dashboardCachedBanner": "Showing cached data — couldn't reach the server",
   "dashboardLoadError": "Couldn't load the dashboard. Check your connection and tap Retry.",
-  "dashboardRefreshFailed": "Couldn't refresh — these are the last figures loaded. Pull down to try again.",
+  "dashboardRefreshFailed": "Couldn't refresh — these are the last figures loaded. Tap Retry to try again.",
   "dashboardNeedsAttention": "Needs your attention",
   "dashboardOverview": "Overview",
   "dashboardEmpty": "No invoices yet. Captured and uploaded invoices will appear here.",
@@ -1319,8 +1318,6 @@
     }
   },
   "cashFlowOverdueAmount": "overdue {amount}",
-  "cashFlowOverdueSuffix": ", {amount} already past due",
-  "cashFlowForecastOverdue": "{amount} across {count, plural, one {{count} invoice} other {{count} invoices}} is already past due. Owed now, so counted in the first period.",
   "@cashFlowOverdueAmount": {
     "placeholders": {
       "amount": {
@@ -1328,6 +1325,7 @@
       }
     }
   },
+  "cashFlowOverdueSuffix": ", {amount} already past due",
   "@cashFlowOverdueSuffix": {
     "description": "Appended to a forecast row's screen-reader label when part of the period is already past due.",
     "placeholders": {
@@ -1336,6 +1334,7 @@
       }
     }
   },
+  "cashFlowForecastOverdue": "{amount} across {count, plural, one {{count} invoice} other {{count} invoices}} is already past due. Owed now, so counted in the first period.",
   "@cashFlowForecastOverdue": {
     "placeholders": {
       "count": {
@@ -3559,6 +3558,9 @@
     }
   },
   "codedRefusalInvoiceRecallOneAtATime": "An approval is recalled one invoice at a time, with a reason: use Recall approval on the invoice.",
+  "@codedRefusalInvoiceRecallOneAtATime": {
+    "description": "Coded refusal `invoice_recall_one_at_a_time`: a bulk move to Ready for Review of an approved invoice, which only Recall approval may do. Names the invoiceDetailRecall button."
+  },
   "codedRefusalInvoiceBulkRefused": "This invoice could not be changed to {status}.",
   "@codedRefusalInvoiceBulkRefused": {
     "description": "Coded refusal `invoice_bulk_refused`: a bulk status skip for a row refused without a code of its own; status is the target status label.",
@@ -3567,9 +3569,6 @@
         "type": "String"
       }
     }
-  },
-  "@codedRefusalInvoiceRecallOneAtATime": {
-    "description": "Coded refusal `invoice_recall_one_at_a_time`: a bulk move to Ready for Review of an approved invoice, which only Recall approval may do. Names the invoiceDetailRecall button."
   },
   "codedRefusalInvoiceRequiredFieldsMissing": "Required fields missing: {fields}",
   "@codedRefusalInvoiceRequiredFieldsMissing": {
@@ -3625,6 +3624,9 @@
     "description": "Placeholder in the invoice detail action bar while the server's verdict on Approve / Reject is loading."
   },
   "payRecordOnlyBanner": "FeohLedger records payments but never sends them: pay from your bank or ERP, then record each one here (a run's bank file is on the web app).",
+  "@payRecordOnlyBanner": {
+    "description": "Pay tab banner on a tenant whose payments FeohLedger records but never sends (GET /api/payments/execution-mode = record_only)."
+  },
   "payRecordPrefilledFromErp": "Filled in from the payment {erp} reported. Check the details before you record it.",
   "@payRecordPrefilledFromErp": {
     "description": "Record-as-paid dialog note when the queue row's erp_reported_payment pre-filled the form.",
@@ -3671,9 +3673,6 @@
   "payRecordSplitUnjudged": "Whether this split is kept is decided when the payment is recorded. If it is not kept, the method you choose is recorded for the whole payment.",
   "@payRecordSplitUnjudged": {
     "description": "Note under the split: not judged."
-  },
-  "@payRecordOnlyBanner": {
-    "description": "Pay tab banner on a tenant whose payments FeohLedger records but never sends (GET /api/payments/execution-mode = record_only)."
   },
   "payRecordAction": "Record as paid",
   "@payRecordAction": {
@@ -4034,10 +4033,26 @@
   "@grRecordReceiveLines": {
     "description": "Goods-receipt form: shown when submit is tried with no positive quantity on any line."
   },
-  "listShowingSavedCopy": "Showing a saved copy — couldn't reach the server. Pull down to try again.",
-  "listRefreshFailed": "Couldn't refresh — showing the last list loaded. Pull down to try again.",
-  "exceptionsLoadError": "Couldn't load exceptions. Check your connection and tap Retry.",
-  "contractsLoadError": "Couldn't load contracts. Check your connection and tap Retry.",
+  "listShowingSavedCopy": "Showing a saved copy — couldn't reach the server. Tap Retry to try again.",
+  "listRefreshFailed": "Couldn't refresh — showing the last list loaded. Tap Retry to try again.",
+  "exceptionsLoadErrorPrefix": "Couldn't load exceptions: {error}",
+  "@exceptionsLoadErrorPrefix": {
+    "description": "Exceptions list first-load failure carrying the server's own reason (a 403 / 500 detail). A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "contractsLoadErrorPrefix": "Couldn't load contracts: {error}",
+  "@contractsLoadErrorPrefix": {
+    "description": "Contracts list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "errorNetworkUnreachable": "Couldn't reach the server. Check your connection and try again.",
   "@errorNetworkUnreachable": {
     "description": "A store's error text when the request never reached the server (offline, DNS, timeout, TLS)."
@@ -4055,23 +4070,38 @@
   "@errorUnexpected": {
     "description": "A store's error text for a failure that is neither a server refusal nor a network fault (an unreadable reply)."
   },
-  "payRunCreated": "{count, plural, one {Payment run created with {count} payment.} other {Payment run created with {count} payments.}}",
+  "payRunCreated": "{cfo, select, required{{count, plural, one{Payment run created with {count} payment totalling {amount}. CFO approval is required before it can be executed.} other{Payment run created with {count} payments totalling {amount}. CFO approval is required before it can be executed.}}} other{{count, plural, one{Payment run created with {count} payment totalling {amount}.} other{Payment run created with {count} payments totalling {amount}.}}}}",
   "@payRunCreated": {
+    "description": "Run-created toast. `cfo` is `required` when the run trips the CFO approval threshold, else `none`.",
     "placeholders": {
       "count": {
         "type": "int"
+      },
+      "amount": {
+        "type": "String"
+      },
+      "cfo": {
+        "type": "String"
       }
     }
   },
-  "payRunCreatedPlain": "Payment run created.",
-  "payRunCreatedNeedsCfo": "CFO approval is required before it can be executed.",
-  "@payRunCreatedNeedsCfo": {
-    "description": "Appended to the run-created toast when the run trips the CFO approval threshold."
+  "payRunCreatedPlain": "{cfo, select, required{Payment run created. CFO approval is required before it can be executed.} other{Payment run created.}}",
+  "@payRunCreatedPlain": {
+    "description": "Run-created toast when the reply carries no count or total. `cfo` as in payRunCreated.",
+    "placeholders": {
+      "cfo": {
+        "type": "String"
+      }
+    }
   },
   "payRunApproved": "Run approved by CFO",
-  "payRunExecuted": "Payment run executed: {completed} completed, {inFlight} in flight, {failed} failed.",
+  "payRunExecuted": "Payment run executed via {provider}: {completed, plural, one{{completed} completed} other{{completed} completed}}, {inFlight, plural, one{{inFlight} in flight} other{{inFlight} in flight}}, {failed, plural, one{{failed} failed} other{{failed} failed}}.",
   "@payRunExecuted": {
+    "description": "Run-executed toast. `provider` is the payment adapter's name, as the server reports it.",
     "placeholders": {
+      "provider": {
+        "type": "String"
+      },
       "completed": {
         "type": "int"
       },
@@ -4101,7 +4131,7 @@
     }
   },
   "payRunCancelledPlain": "Payment run cancelled.",
-  "vendorSyncSummary": "Synced {created} new, {updated} updated, {unchanged} unchanged.",
+  "vendorSyncSummary": "Synced {created, plural, one{{created} new} other{{created} new}}, {updated, plural, one{{updated} updated} other{{updated} updated}}, {unchanged, plural, one{{unchanged} unchanged} other{{unchanged} unchanged}}.",
   "@vendorSyncSummary": {
     "placeholders": {
       "created": {
@@ -4116,7 +4146,7 @@
     }
   },
   "vendorSyncComplete": "ERP sync complete.",
-  "vendorSyncNotLinked": "{count} not linked (the name matches more than one vendor).",
+  "vendorSyncNotLinked": "{count, plural, one{{count} not linked (the name matches more than one vendor).} other{{count} not linked (the name matches more than one vendor).}}",
   "@vendorSyncNotLinked": {
     "placeholders": {
       "count": {
@@ -4124,7 +4154,7 @@
       }
     }
   },
-  "vendorSyncUnlinked": "{count} unlinked (linked under another ERP company).",
+  "vendorSyncUnlinked": "{count, plural, one{{count} unlinked (linked under another ERP company).} other{{count} unlinked (linked under another ERP company).}}",
   "@vendorSyncUnlinked": {
     "placeholders": {
       "count": {
@@ -4132,7 +4162,7 @@
       }
     }
   },
-  "vendorSyncRelinked": "{count} relinked (linked when this ERP company was connected before).",
+  "vendorSyncRelinked": "{count, plural, one{{count} relinked (linked when this ERP company was connected before).} other{{count} relinked (linked when this ERP company was connected before).}}",
   "@vendorSyncRelinked": {
     "placeholders": {
       "count": {
@@ -4143,5 +4173,22 @@
   "authInvalidCredentials": "Invalid credentials",
   "authInvalidCode": "Invalid or expired code. Please try again.",
   "authVerifyCodeFailed": "Could not verify the code. Please try again.",
-  "authEmailCodeFailed": "Could not send the email code. Please try again."
+  "authEmailCodeFailed": "Could not send the email code. Please try again.",
+  "exceptionsFilteredEmpty": "{status, select, open{No open exceptions} escalated{No escalated exceptions} resolved{No resolved exceptions} dismissed{No dismissed exceptions} other{No matching exceptions}}",
+  "@exceptionsFilteredEmpty": {
+    "description": "Exceptions list: the status chip filters every row out. `status` is the chip's API value.",
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "contractsFilteredEmpty": "No contracts match your search or filter.",
+  "@contractsFilteredEmpty": {
+    "description": "Contracts list: the search query or status chip filters every row out."
+  },
+  "commonShowAll": "Show all",
+  "@commonShowAll": {
+    "description": "Action on a filtered-to-zero list that clears the filter / search."
+  }
 }

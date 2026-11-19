@@ -1,9 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
-import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
+import 'package:feohledger_mobile/stores/inspection_store.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/widgets/inspection_result_badge.dart';
 import 'package:feohledger_mobile/widgets/load_error_state.dart';
@@ -28,10 +28,10 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
   Inspection? _inspection;
   bool _loading = true;
 
-  /// The caught error, worded at render time by [describeLoadError] —
-  /// `AppLocalizations.of(context)` isn't available from `initState`. Caught
-  /// here rather than read back from `InspectionStore.error`, which holds the
-  /// exception's `toString()` (and whatever the store's last failure was).
+  /// The error [InspectionStore.getById] threw, worded at render time by
+  /// [describeLoadError] — `AppLocalizations.of(context)` isn't available
+  /// from `initState`. The store hands it back rather than recording it, so a
+  /// failed detail read never shows up as the list's error.
   Object? _error;
 
   @override
@@ -46,7 +46,7 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
       _error = null;
     });
     try {
-      final inspection = await InspectionApi.getById(widget.inspectionId);
+      final inspection = await InspectionStore.instance.getById(widget.inspectionId);
       // The route can be popped while a slow GET (or its 10s timeout) is still
       // in flight — setState after dispose throws.
       if (!mounted) return;

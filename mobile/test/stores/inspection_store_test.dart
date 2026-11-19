@@ -207,7 +207,8 @@ void main() {
     expect(store.error, contains('Your role does not permit this.'));
   });
 
-  test('getById returns the row, or null with the error recorded', () async {
+  test('getById returns the row, or throws without touching list state',
+      () async {
     ApiClient().debugConfigure(
       client: MockClient(
         (req) async => _json(_inspectionJson('qi9', number: 'QI-9')),
@@ -218,8 +219,9 @@ void main() {
     ApiClient().debugConfigure(
       client: MockClient((req) async => _json({'detail': 'Not found'}, 404)),
     );
-    expect(await store.getById('nope'), isNull);
-    expect(store.error, contains('Not found'));
+    await expectLater(store.getById('nope'), throwsA(isA<ApiException>()));
+    // The detail screen words it; the list's error state never sees it.
+    expect(store.error, isNull);
   });
 
   test('loadReceiptOptions returns one page plus the whole-set total', () async {

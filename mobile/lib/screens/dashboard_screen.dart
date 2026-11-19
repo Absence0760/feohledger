@@ -5,6 +5,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/stores/dashboard_store.dart';
 import 'package:feohledger_mobile/utils/money.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/cash_flow_button.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/load_error_state.dart';
@@ -100,12 +101,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return [
       // Status first: is the user looking at live figures?
       if (store.fromCache) ...[
-        _Banner(icon: Icons.cloud_off, message: l.dashboardCachedBanner),
+        StaleDataBanner(
+          icon: Icons.cloud_off,
+          message: l.dashboardCachedBanner,
+          onRetry: store.fetch,
+        ),
         const SizedBox(height: 12),
       ] else if (store.error != null) ...[
         // A refresh failed with no cached copy behind it: the figures below
         // are the last ones loaded, and the user should know.
-        _Banner(icon: Icons.sync_problem, message: l.dashboardRefreshFailed),
+        StaleDataBanner(
+          icon: Icons.sync_problem,
+          message: l.dashboardRefreshFailed,
+          onRetry: store.fetch,
+        ),
         const SizedBox(height: 12),
       ],
 
@@ -321,45 +330,6 @@ class _SectionHeader extends StatelessWidget {
     return Semantics(
       header: true,
       child: Text(text, style: Theme.of(context).textTheme.titleMedium),
-    );
-  }
-}
-
-/// The amber "these figures aren't live" strip — the cached-copy notice and
-/// the failed-refresh notice share it. A live region, so the change is spoken
-/// when it appears over figures the user is already reading.
-class _Banner extends StatelessWidget {
-  final IconData icon;
-  final String message;
-
-  const _Banner({required this.icon, required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      liveRegion: true,
-      label: message,
-      excludeSemantics: true,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.amber.shade50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.amber.shade200),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: Colors.amber.shade900),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

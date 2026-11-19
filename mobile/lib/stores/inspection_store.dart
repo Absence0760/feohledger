@@ -77,17 +77,14 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
     }
   }
 
-  /// Fetch one inspection for the detail screen. Returns null and records the
-  /// error (the screen renders a "not found" fallback when the error is null).
-  Future<Inspection?> getById(String id) async {
-    try {
-      return await InspectionApi.getById(id);
-    } catch (e) {
-      _error = describeApiError(e);
-      notifyListeners();
-      return null;
-    }
-  }
+  /// Fetch one inspection for the detail screen.
+  ///
+  /// Throws the caught error as-is (a 404 / 403 [ApiException], or a network
+  /// failure) for the detail screen to word with `describeLoadError` — the
+  /// server's reason or the connection sentence. It writes no store state: a
+  /// failed detail read is not a failed list load, and recording it in
+  /// [error] would put the list's error state over rows that loaded fine.
+  Future<Inspection> getById(String id) => InspectionApi.getById(id);
 
   /// Record an inspection (`POST /api/inspections`, admin / ap_manager).
   ///

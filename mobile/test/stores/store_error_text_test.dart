@@ -159,6 +159,7 @@ void main() {
       ApiClient().debugConfigure(
         client: _paymentsClient({
           'status': 'completed',
+          'provider': 'mock',
           'payments_completed': 2,
           'payments_in_flight': 1,
           'payments_failed': 0,
@@ -169,10 +170,35 @@ void main() {
 
       final message = await PaymentQueueStore.instance.executeRun('run1');
 
+      // Each count takes its own plural ("2 terminés", "0 en échec" — French
+      // treats 0 as singular), never a "terminé(s)" hedge; the provider the
+      // run went through is named, as the server's sentence did.
       expect(
         message,
-        'Lot de paiement exécuté : 2 terminé(s), 1 en cours, 0 en échec. '
-        '1 carte virtuelle émise.',
+        'Lot de paiement exécuté via mock : 2 terminés, 1 en cours, '
+        '0 en échec. 1 carte virtuelle émise.',
+      );
+    });
+
+    test('executeRun pluralizes a single completion in Spanish', () async {
+      await LocaleStore.instance.setLocale(const Locale('es'));
+      ApiClient().debugConfigure(
+        client: _paymentsClient({
+          'status': 'completed',
+          'provider': 'mock',
+          'payments_completed': 1,
+          'payments_in_flight': 0,
+          'payments_failed': 2,
+          'cards_issued': 0,
+        }),
+      );
+
+      final message = await PaymentQueueStore.instance.executeRun('run1');
+
+      expect(
+        message,
+        'Lote de pago ejecutado mediante mock: 1 completado, 0 en curso, '
+        '2 fallidos.',
       );
     });
 

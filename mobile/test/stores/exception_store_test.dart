@@ -63,7 +63,7 @@ void main() {
         expect(store.exceptions.first.id, '1');
         expect(store.exceptions.first.typeLabel, 'Duplicate Invoice');
         expect(store.fromCache, isFalse);
-        expect(store.error, isNull);
+        expect(store.loadError, isNull);
         expect(store.loading, isFalse);
       },
     );
@@ -158,7 +158,7 @@ void main() {
 
         await store.fetch();
 
-        expect(store.error, isNotNull);
+        expect(store.loadError, isNotNull);
         expect(store.fromCache, isFalse);
       },
     );
@@ -307,7 +307,10 @@ void main() {
       final ok = await store.resolve('1');
 
       expect(ok, isFalse);
-      expect(store.error, isNotNull);
+      expect(store.actionError, isNotNull);
+      // A refused action is not a failed load: nothing may raise the list's
+      // "couldn't refresh" banner over rows that are still live.
+      expect(store.loadError, isNull);
     });
   });
 
@@ -334,25 +337,28 @@ void main() {
 
         final exc = await store.getById('1');
 
-        expect(exc, isNotNull);
-        expect(exc!.id, '1');
+        expect(exc.id, '1');
         expect(exc.assignedTo, 'Demo Manager');
         expect(exc.assignedToUserId, 'user-9');
         expect(exc.dueAt, isNotNull);
       },
     );
 
-    test('returns null + records the error on a 404', () async {
+    test('throws the caught error on a 404 and leaves list state alone',
+        () async {
       ApiClient().debugConfigure(
         client: MockClient(
           (req) async => http.Response('{"detail":"not found"}', 404),
         ),
       );
 
-      final exc = await store.getById('missing');
-
-      expect(exc, isNull);
-      expect(store.error, isNotNull);
+      await expectLater(
+        store.getById('missing'),
+        throwsA(isA<ApiException>()),
+      );
+      // The detail screen words the error; the list never sees it.
+      expect(store.loadError, isNull);
+      expect(store.actionError, isNull);
     });
   });
 
@@ -510,7 +516,8 @@ void main() {
         final result = await store.bulkResolveSelected();
 
         expect(result, isNull);
-        expect(store.error, isNotNull);
+        expect(store.actionError, isNotNull);
+        expect(store.loadError, isNull);
         // Selection survives a failure so the user can retry.
         expect(store.selectionMode, isTrue);
       },

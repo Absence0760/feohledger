@@ -6,6 +6,7 @@ import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 
 /// What a record-as-paid call came back with. [ok] or not; on a refusal,
 /// [message] is the server's English sentence and [detail] its raw decoded
@@ -465,20 +466,35 @@ class PaymentQueueStore extends ChangeNotifier {
 String _runCreatedMessage(Map<String, dynamic> result) {
   final l = ambientLocalizations();
   final count = result['payment_count'];
-  final created =
-      count is int ? l.payRunCreated(count) : l.payRunCreatedPlain;
-  return result['requires_cfo_approval'] == true
-      ? '$created ${l.payRunCreatedNeedsCfo}'
-      : created;
+  final total = result['total_amount'];
+  // One key with a `select` on the CFO gate, so a translation can place the
+  // approval note where its grammar wants it rather than after a fixed join.
+  final cfo = result['requires_cfo_approval'] == true ? 'required' : 'none';
+  if (count is int && total is String && total.trim().isNotEmpty) {
+    // The run total through the shared money helper: the run's own currency
+    // symbol when the server could prove one, the bare exact figure when it
+    // sent `currency: null` (a mixed or unknown run — decisions §79/§82).
+    final amount = formatMoneyString(
+      total,
+      currency: result['currency'] as String?,
+    );
+    return l.payRunCreated(count, amount, cfo);
+  }
+  return l.payRunCreatedPlain(cfo);
 }
 
 String _runExecutedMessage(Map<String, dynamic> result) {
   final l = ambientLocalizations();
+  final provider = result['provider'];
   final completed = result['payments_completed'];
   final inFlight = result['payments_in_flight'];
   final failed = result['payments_failed'];
-  final executed = completed is int && inFlight is int && failed is int
-      ? l.payRunExecuted(completed, inFlight, failed)
+  final executed = provider is String &&
+          provider.isNotEmpty &&
+          completed is int &&
+          inFlight is int &&
+          failed is int
+      ? l.payRunExecuted(provider, completed, inFlight, failed)
       : l.payRunExecutedPlain;
   final cards = result['cards_issued'];
   return cards is int && cards > 0

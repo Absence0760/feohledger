@@ -46,8 +46,10 @@ Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
   }
 }
 
+// A 500 the server answered: its reason, not "check your connection".
 const _loadError =
-    "Couldn't load contracts. Check your connection and tap Retry.";
+    "Couldn't load contracts: "
+    "The server couldn't complete the request (HTTP 500).";
 
 void main() {
   setUpAll(() {
@@ -142,9 +144,36 @@ void main() {
     expect(
       find.text(
         "Showing a saved copy — couldn't reach the server. "
-        'Pull down to try again.',
+        'Tap Retry to try again.',
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('a status chip that filters every row out says so, and Show all '
+      'clears it', (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient((req) async =>
+          req.url.queryParameters['status'] == 'expired'
+              ? _list([])
+              : _list([_contractJson('1')])),
+    );
+
+    await tester.pumpWidget(_localized(const ContractsScreen()));
+    await _pumpUntil(tester, find.byType(ContractListTile));
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Expired'));
+    await _pumpUntil(
+      tester,
+      find.text('No contracts match your search or filter.'),
+    );
+    expect(find.text('No contracts found'), findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Show all'));
+    await _pumpUntil(tester, find.byType(ContractListTile));
+
+    expect(ContractStore.instance.statusFilter, isNull);
+    expect(ContractStore.instance.isFiltered, isFalse);
+    expect(find.byType(ContractListTile), findsOneWidget);
   });
 }

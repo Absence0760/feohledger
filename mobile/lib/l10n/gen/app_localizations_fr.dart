@@ -152,7 +152,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get dashboardRefreshFailed =>
-      'Actualisation impossible : voici les derniers chiffres chargés. Tirez vers le bas pour réessayer.';
+      'Actualisation impossible : voici les derniers chiffres chargés. Appuyez sur Réessayer.';
 
   @override
   String get dashboardNeedsAttention => 'Requiert votre attention';
@@ -4561,19 +4561,21 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get listShowingSavedCopy =>
-      'Copie enregistrée affichée — serveur injoignable. Tirez vers le bas pour réessayer.';
+      'Copie enregistrée affichée — serveur injoignable. Appuyez sur Réessayer.';
 
   @override
   String get listRefreshFailed =>
-      'Actualisation impossible — la dernière liste chargée est affichée. Tirez vers le bas pour réessayer.';
+      'Actualisation impossible — la dernière liste chargée est affichée. Appuyez sur Réessayer.';
 
   @override
-  String get exceptionsLoadError =>
-      'Impossible de charger les exceptions. Vérifiez votre connexion et appuyez sur Réessayer.';
+  String exceptionsLoadErrorPrefix(String error) {
+    return 'Impossible de charger les exceptions : $error';
+  }
 
   @override
-  String get contractsLoadError =>
-      'Impossible de charger les contrats. Vérifiez votre connexion et appuyez sur Réessayer.';
+  String contractsLoadErrorPrefix(String error) {
+    return 'Impossible de charger les contrats : $error';
+  }
 
   @override
   String get errorNetworkUnreachable =>
@@ -4589,29 +4591,68 @@ class AppLocalizationsFr extends AppLocalizations {
       'Une erreur s\'est produite. Veuillez réessayer.';
 
   @override
-  String payRunCreated(int count) {
+  String payRunCreated(int count, String amount, String cfo) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Lot de paiement créé avec $count paiements.',
-      one: 'Lot de paiement créé avec $count paiement.',
+      other:
+          'Lot de paiement créé avec $count paiements pour un total de $amount. L\'approbation du directeur financier est requise avant l\'exécution.',
+      one:
+          'Lot de paiement créé avec $count paiement pour un total de $amount. L\'approbation du directeur financier est requise avant l\'exécution.',
     );
-    return '$_temp0';
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Lot de paiement créé avec $count paiements pour un total de $amount.',
+      one:
+          'Lot de paiement créé avec $count paiement pour un total de $amount.',
+    );
+    String _temp2 = intl.Intl.selectLogic(cfo, {
+      'required': '$_temp0',
+      'other': '$_temp1',
+    });
+    return '$_temp2';
   }
 
   @override
-  String get payRunCreatedPlain => 'Lot de paiement créé.';
-
-  @override
-  String get payRunCreatedNeedsCfo =>
-      'L\'approbation du directeur financier est requise avant l\'exécution.';
+  String payRunCreatedPlain(String cfo) {
+    String _temp0 = intl.Intl.selectLogic(cfo, {
+      'required': 'Lot de paiement créé. L\'approbation du directeur financier est requise avant l\'exécution.',
+      'other': 'Lot de paiement créé.',
+    });
+    return '$_temp0';
+  }
 
   @override
   String get payRunApproved => 'Lot approuvé par le directeur financier';
 
   @override
-  String payRunExecuted(int completed, int inFlight, int failed) {
-    return 'Lot de paiement exécuté : $completed terminé(s), $inFlight en cours, $failed en échec.';
+  String payRunExecuted(
+    String provider,
+    int completed,
+    int inFlight,
+    int failed,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      completed,
+      locale: localeName,
+      other: '$completed terminés',
+      one: '$completed terminé',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      inFlight,
+      locale: localeName,
+      other: '$inFlight en cours',
+      one: '$inFlight en cours',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      failed,
+      locale: localeName,
+      other: '$failed en échec',
+      one: '$failed en échec',
+    );
+    return 'Lot de paiement exécuté via $provider : $_temp0, $_temp1, $_temp2.';
   }
 
   @override
@@ -4644,7 +4685,25 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String vendorSyncSummary(int created, int updated, int unchanged) {
-    return 'Synchronisés : $created nouveau(x), $updated mis à jour, $unchanged inchangé(s).';
+    String _temp0 = intl.Intl.pluralLogic(
+      created,
+      locale: localeName,
+      other: '$created nouveaux',
+      one: '$created nouveau',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      updated,
+      locale: localeName,
+      other: '$updated mis à jour',
+      one: '$updated mis à jour',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      unchanged,
+      locale: localeName,
+      other: '$unchanged inchangés',
+      one: '$unchanged inchangé',
+    );
+    return 'Synchronisés : $_temp0, $_temp1, $_temp2.';
   }
 
   @override
@@ -4652,17 +4711,37 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String vendorSyncNotLinked(int count) {
-    return '$count non lié(s) (le nom correspond à plusieurs fournisseurs).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count non liés (le nom correspond à plusieurs fournisseurs).',
+      one: '$count non lié (le nom correspond à plusieurs fournisseurs).',
+    );
+    return '$_temp0';
   }
 
   @override
   String vendorSyncUnlinked(int count) {
-    return '$count délié(s) (liés sous une autre société ERP).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count déliés (liés sous une autre société ERP).',
+      one: '$count délié (lié sous une autre société ERP).',
+    );
+    return '$_temp0';
   }
 
   @override
   String vendorSyncRelinked(int count) {
-    return '$count relié(s) (liés lorsque cette société ERP était connectée auparavant).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count reliés (liés lorsque cette société ERP était connectée auparavant).',
+      one:
+          '$count relié (lié lorsque cette société ERP était connectée auparavant).',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -4679,4 +4758,23 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get authEmailCodeFailed =>
       'Impossible d\'envoyer le code par e-mail. Veuillez réessayer.';
+
+  @override
+  String exceptionsFilteredEmpty(String status) {
+    String _temp0 = intl.Intl.selectLogic(status, {
+      'open': 'Aucune exception ouverte',
+      'escalated': 'Aucune exception escaladée',
+      'resolved': 'Aucune exception résolue',
+      'dismissed': 'Aucune exception ignorée',
+      'other': 'Aucune exception correspondante',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get contractsFilteredEmpty =>
+      'Aucun contrat ne correspond à votre recherche ou à votre filtre.';
+
+  @override
+  String get commonShowAll => 'Tout afficher';
 }

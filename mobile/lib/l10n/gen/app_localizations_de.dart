@@ -153,7 +153,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get dashboardRefreshFailed =>
-      'Aktualisierung fehlgeschlagen – dies sind die zuletzt geladenen Zahlen. Zum erneuten Versuch nach unten ziehen.';
+      'Aktualisierung fehlgeschlagen – dies sind die zuletzt geladenen Zahlen. Tippen Sie auf „Erneut versuchen“.';
 
   @override
   String get dashboardNeedsAttention => 'Ihre Aufmerksamkeit erforderlich';
@@ -4550,19 +4550,21 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get listShowingSavedCopy =>
-      'Gespeicherte Kopie wird angezeigt — Server nicht erreichbar. Zum Aktualisieren nach unten ziehen.';
+      'Gespeicherte Kopie wird angezeigt — Server nicht erreichbar. Tippen Sie auf „Erneut versuchen“.';
 
   @override
   String get listRefreshFailed =>
-      'Aktualisierung fehlgeschlagen — die zuletzt geladene Liste wird angezeigt. Zum erneuten Versuch nach unten ziehen.';
+      'Aktualisierung fehlgeschlagen — die zuletzt geladene Liste wird angezeigt. Tippen Sie auf „Erneut versuchen“.';
 
   @override
-  String get exceptionsLoadError =>
-      'Ausnahmen konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“.';
+  String exceptionsLoadErrorPrefix(String error) {
+    return 'Ausnahmen konnten nicht geladen werden: $error';
+  }
 
   @override
-  String get contractsLoadError =>
-      'Verträge konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“.';
+  String contractsLoadErrorPrefix(String error) {
+    return 'Verträge konnten nicht geladen werden: $error';
+  }
 
   @override
   String get errorNetworkUnreachable =>
@@ -4578,29 +4580,66 @@ class AppLocalizationsDe extends AppLocalizations {
       'Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.';
 
   @override
-  String payRunCreated(int count) {
+  String payRunCreated(int count, String amount, String cfo) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Zahlungslauf mit $count Zahlungen erstellt.',
-      one: 'Zahlungslauf mit $count Zahlung erstellt.',
+      other:
+          'Zahlungslauf mit $count Zahlungen über $amount erstellt. Vor der Ausführung ist eine CFO-Freigabe erforderlich.',
+      one:
+          'Zahlungslauf mit $count Zahlung über $amount erstellt. Vor der Ausführung ist eine CFO-Freigabe erforderlich.',
     );
-    return '$_temp0';
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Zahlungslauf mit $count Zahlungen über $amount erstellt.',
+      one: 'Zahlungslauf mit $count Zahlung über $amount erstellt.',
+    );
+    String _temp2 = intl.Intl.selectLogic(cfo, {
+      'required': '$_temp0',
+      'other': '$_temp1',
+    });
+    return '$_temp2';
   }
 
   @override
-  String get payRunCreatedPlain => 'Zahlungslauf erstellt.';
-
-  @override
-  String get payRunCreatedNeedsCfo =>
-      'Vor der Ausführung ist eine CFO-Freigabe erforderlich.';
+  String payRunCreatedPlain(String cfo) {
+    String _temp0 = intl.Intl.selectLogic(cfo, {
+      'required': 'Zahlungslauf erstellt. Vor der Ausführung ist eine CFO-Freigabe erforderlich.',
+      'other': 'Zahlungslauf erstellt.',
+    });
+    return '$_temp0';
+  }
 
   @override
   String get payRunApproved => 'Lauf vom CFO freigegeben';
 
   @override
-  String payRunExecuted(int completed, int inFlight, int failed) {
-    return 'Zahlungslauf ausgeführt: $completed abgeschlossen, $inFlight in Bearbeitung, $failed fehlgeschlagen.';
+  String payRunExecuted(
+    String provider,
+    int completed,
+    int inFlight,
+    int failed,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      completed,
+      locale: localeName,
+      other: '$completed abgeschlossen',
+      one: '$completed abgeschlossen',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      inFlight,
+      locale: localeName,
+      other: '$inFlight in Bearbeitung',
+      one: '$inFlight in Bearbeitung',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      failed,
+      locale: localeName,
+      other: '$failed fehlgeschlagen',
+      one: '$failed fehlgeschlagen',
+    );
+    return 'Zahlungslauf über $provider ausgeführt: $_temp0, $_temp1, $_temp2.';
   }
 
   @override
@@ -4635,7 +4674,25 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String vendorSyncSummary(int created, int updated, int unchanged) {
-    return 'Synchronisiert: $created neu, $updated aktualisiert, $unchanged unverändert.';
+    String _temp0 = intl.Intl.pluralLogic(
+      created,
+      locale: localeName,
+      other: '$created neu',
+      one: '$created neu',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      updated,
+      locale: localeName,
+      other: '$updated aktualisiert',
+      one: '$updated aktualisiert',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      unchanged,
+      locale: localeName,
+      other: '$unchanged unverändert',
+      one: '$unchanged unverändert',
+    );
+    return 'Synchronisiert: $_temp0, $_temp1, $_temp2.';
   }
 
   @override
@@ -4643,17 +4700,41 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String vendorSyncNotLinked(int count) {
-    return '$count nicht verknüpft (der Name passt zu mehr als einem Lieferanten).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count nicht verknüpft (der Name passt zu mehr als einem Lieferanten).',
+      one:
+          '$count nicht verknüpft (der Name passt zu mehr als einem Lieferanten).',
+    );
+    return '$_temp0';
   }
 
   @override
   String vendorSyncUnlinked(int count) {
-    return '$count Verknüpfung aufgehoben (unter einem anderen ERP-Unternehmen verknüpft).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count Verknüpfungen aufgehoben (unter einem anderen ERP-Unternehmen verknüpft).',
+      one:
+          '$count Verknüpfung aufgehoben (unter einem anderen ERP-Unternehmen verknüpft).',
+    );
+    return '$_temp0';
   }
 
   @override
   String vendorSyncRelinked(int count) {
-    return '$count neu verknüpft (verknüpft, als dieses ERP-Unternehmen zuvor verbunden war).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count neu verknüpft (verknüpft, als dieses ERP-Unternehmen zuvor verbunden war).',
+      one:
+          '$count neu verknüpft (verknüpft, als dieses ERP-Unternehmen zuvor verbunden war).',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -4670,4 +4751,23 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get authEmailCodeFailed =>
       'Der E-Mail-Code konnte nicht gesendet werden. Bitte versuchen Sie es erneut.';
+
+  @override
+  String exceptionsFilteredEmpty(String status) {
+    String _temp0 = intl.Intl.selectLogic(status, {
+      'open': 'Keine offenen Ausnahmen',
+      'escalated': 'Keine eskalierten Ausnahmen',
+      'resolved': 'Keine gelösten Ausnahmen',
+      'dismissed': 'Keine verworfenen Ausnahmen',
+      'other': 'Keine passenden Ausnahmen',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get contractsFilteredEmpty =>
+      'Keine Verträge passen zu Ihrer Suche oder Ihrem Filter.';
+
+  @override
+  String get commonShowAll => 'Alle anzeigen';
 }

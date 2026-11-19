@@ -74,7 +74,12 @@ build screens from the widget library rather than duplicating markup.
 A list screen backed by a store builds its body with `AsyncListBody`
 (`lib/widgets/async_list_body.dart`), never a hand-rolled spinner → error →
 empty → `RefreshIndicator` chain; `test/screens/async_list_body_adoption_test.dart`
-enforces it outside an allowlist of not-yet-converted screens.
+enforces it outside an allowlist of not-yet-converted screens. Its
+`hasError` is the store's **fetch** failure only (`loadError`): a store whose
+actions can fail keeps them in a separate `actionError`, or a refused resolve
+raises "couldn't refresh" over a live list. Slots and wording:
+`docs/project-structure.md` (`async_list_body.dart`).
+
 ## Architecture patterns
 
 - **ChangeNotifier singletons** for stores — `AuthStore.instance`, `InvoiceStore.instance`, etc.
@@ -293,8 +298,11 @@ Follow these conventions on every new screen/widget:
   approvals swipe-approve.
 - **Colour contrast ≥4.5:1.** Status/payment badges render the text in a
   *darkened* variant (`.shade700`/`.shade800`/`.shade900`) of the accent over
-  the 0.15-alpha tint — the full-saturation hue fails AA. Muted greys use
-  `grey.shade700` (not `shade500`/`shade600`, which fail at 11-14px).
+  the 0.15-alpha tint — the full-saturation hue fails AA. Muted text uses
+  `Theme.of(context).colorScheme.onSurfaceVariant` (it tracks light / dark;
+  a fixed grey does not), never `grey.shade500`/`shade600`. Compute any
+  hand-picked pair: the amber stale banner's `amber.shade900` on
+  `amber.shade50` was 2.6:1; it is `brown.shade700` (8.8:1).
 - **Decorative icons** (the `BrandMark` widget, placeholder camera glyph, aging dots) are
   wrapped in `ExcludeSemantics` so they aren't announced.
 - **Tap targets ≥48dp** — use `IconButton` defaults; don't shrink hit areas.
