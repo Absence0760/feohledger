@@ -4558,4 +4558,125 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get grRecordReceiveLines =>
       'Saisissez une quantité sur au moins une ligne';
+
+  @override
+  String get listShowingSavedCopy =>
+      'Copie enregistrée affichée — serveur injoignable. Tirez vers le bas pour réessayer.';
+
+  @override
+  String get listRefreshFailed =>
+      'Actualisation impossible — la dernière liste chargée est affichée. Tirez vers le bas pour réessayer.';
+
+  @override
+  String get exceptionsLoadError =>
+      'Impossible de charger les exceptions. Vérifiez votre connexion et appuyez sur Réessayer.';
+
+  @override
+  String get contractsLoadError =>
+      'Impossible de charger les contrats. Vérifiez votre connexion et appuyez sur Réessayer.';
+
+  @override
+  String get errorNetworkUnreachable =>
+      'Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.';
+
+  @override
+  String errorRequestFailed(int status) {
+    return 'Le serveur n\'a pas pu traiter la demande (HTTP $status).';
+  }
+
+  @override
+  String get errorUnexpected =>
+      'Une erreur s\'est produite. Veuillez réessayer.';
+
+  @override
+  String payRunCreated(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Lot de paiement créé avec $count paiements.',
+      one: 'Lot de paiement créé avec $count paiement.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunCreatedPlain => 'Lot de paiement créé.';
+
+  @override
+  String get payRunCreatedNeedsCfo =>
+      'L\'approbation du directeur financier est requise avant l\'exécution.';
+
+  @override
+  String get payRunApproved => 'Lot approuvé par le directeur financier';
+
+  @override
+  String payRunExecuted(int completed, int inFlight, int failed) {
+    return 'Lot de paiement exécuté : $completed terminé(s), $inFlight en cours, $failed en échec.';
+  }
+
+  @override
+  String get payRunExecutedPlain => 'Lot de paiement exécuté.';
+
+  @override
+  String payRunExecutedCards(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count cartes virtuelles émises.',
+      one: '$count carte virtuelle émise.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String payRunCancelled(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Lot brouillon annulé ; $count factures remises dans la file.',
+      one: 'Lot brouillon annulé ; $count facture remise dans la file.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunCancelledPlain => 'Lot de paiement annulé.';
+
+  @override
+  String vendorSyncSummary(int created, int updated, int unchanged) {
+    return 'Synchronisés : $created nouveau(x), $updated mis à jour, $unchanged inchangé(s).';
+  }
+
+  @override
+  String get vendorSyncComplete => 'Synchronisation ERP terminée.';
+
+  @override
+  String vendorSyncNotLinked(int count) {
+    return '$count non lié(s) (le nom correspond à plusieurs fournisseurs).';
+  }
+
+  @override
+  String vendorSyncUnlinked(int count) {
+    return '$count délié(s) (liés sous une autre société ERP).';
+  }
+
+  @override
+  String vendorSyncRelinked(int count) {
+    return '$count relié(s) (liés lorsque cette société ERP était connectée auparavant).';
+  }
+
+  @override
+  String get authInvalidCredentials => 'Identifiants non valides';
+
+  @override
+  String get authInvalidCode =>
+      'Code non valide ou expiré. Veuillez réessayer.';
+
+  @override
+  String get authVerifyCodeFailed =>
+      'Impossible de vérifier le code. Veuillez réessayer.';
+
+  @override
+  String get authEmailCodeFailed =>
+      'Impossible d\'envoyer le code par e-mail. Veuillez réessayer.';
 }

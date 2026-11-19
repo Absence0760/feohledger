@@ -4337,4 +4337,114 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get grRecordReceiveLines => '少なくとも 1 つの明細に数量を入力してください';
+
+  @override
+  String get listShowingSavedCopy =>
+      '保存済みのコピーを表示中 — サーバーに接続できませんでした。下に引いて再試行してください。';
+
+  @override
+  String get listRefreshFailed =>
+      '更新できませんでした — 最後に読み込んだ一覧を表示しています。下に引いて再試行してください。';
+
+  @override
+  String get exceptionsLoadError => '例外を読み込めませんでした。接続を確認して「再試行」をタップしてください。';
+
+  @override
+  String get contractsLoadError => '契約を読み込めませんでした。接続を確認して「再試行」をタップしてください。';
+
+  @override
+  String get errorNetworkUnreachable => 'サーバーに接続できませんでした。接続を確認して、もう一度お試しください。';
+
+  @override
+  String errorRequestFailed(int status) {
+    return 'サーバーはリクエストを完了できませんでした (HTTP $status)。';
+  }
+
+  @override
+  String get errorUnexpected => '問題が発生しました。もう一度お試しください。';
+
+  @override
+  String payRunCreated(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件の支払いで支払いランを作成しました。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunCreatedPlain => '支払いランを作成しました。';
+
+  @override
+  String get payRunCreatedNeedsCfo => '実行する前に CFO の承認が必要です。';
+
+  @override
+  String get payRunApproved => 'CFO がランを承認しました';
+
+  @override
+  String payRunExecuted(int completed, int inFlight, int failed) {
+    return '支払いランを実行しました: 完了 $completed 件、処理中 $inFlight 件、失敗 $failed 件。';
+  }
+
+  @override
+  String get payRunExecutedPlain => '支払いランを実行しました。';
+
+  @override
+  String payRunExecutedCards(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'バーチャルカードを $count 枚発行しました。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String payRunCancelled(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '下書きランを取り消しました。$count 件の請求書がキューに戻りました。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunCancelledPlain => '支払いランを取り消しました。';
+
+  @override
+  String vendorSyncSummary(int created, int updated, int unchanged) {
+    return '同期しました: 新規 $created 件、更新 $updated 件、変更なし $unchanged 件。';
+  }
+
+  @override
+  String get vendorSyncComplete => 'ERP の同期が完了しました。';
+
+  @override
+  String vendorSyncNotLinked(int count) {
+    return '$count 件は未リンク (名前が複数の取引先に一致)。';
+  }
+
+  @override
+  String vendorSyncUnlinked(int count) {
+    return '$count 件のリンクを解除 (別の ERP 会社でリンク済み)。';
+  }
+
+  @override
+  String vendorSyncRelinked(int count) {
+    return '$count 件を再リンク (この ERP 会社が以前接続されていたときのリンク)。';
+  }
+
+  @override
+  String get authInvalidCredentials => '認証情報が正しくありません';
+
+  @override
+  String get authInvalidCode => 'コードが無効か期限切れです。もう一度お試しください。';
+
+  @override
+  String get authVerifyCodeFailed => 'コードを確認できませんでした。もう一度お試しください。';
+
+  @override
+  String get authEmailCodeFailed => 'メールのコードを送信できませんでした。もう一度お試しください。';
 }

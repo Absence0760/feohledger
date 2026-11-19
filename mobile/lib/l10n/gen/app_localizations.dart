@@ -6650,6 +6650,156 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enter a quantity on at least one line'**
   String get grRecordReceiveLines;
+
+  /// No description provided for @listShowingSavedCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing a saved copy — couldn\'t reach the server. Pull down to try again.'**
+  String get listShowingSavedCopy;
+
+  /// No description provided for @listRefreshFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t refresh — showing the last list loaded. Pull down to try again.'**
+  String get listRefreshFailed;
+
+  /// No description provided for @exceptionsLoadError.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load exceptions. Check your connection and tap Retry.'**
+  String get exceptionsLoadError;
+
+  /// No description provided for @contractsLoadError.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load contracts. Check your connection and tap Retry.'**
+  String get contractsLoadError;
+
+  /// A store's error text when the request never reached the server (offline, DNS, timeout, TLS).
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reach the server. Check your connection and try again.'**
+  String get errorNetworkUnreachable;
+
+  /// A store's error text when the server refused without a sentence of its own.
+  ///
+  /// In en, this message translates to:
+  /// **'The server couldn\'t complete the request (HTTP {status}).'**
+  String errorRequestFailed(int status);
+
+  /// A store's error text for a failure that is neither a server refusal nor a network fault (an unreadable reply).
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong. Please try again.'**
+  String get errorUnexpected;
+
+  /// No description provided for @payRunCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Payment run created with {count} payment.} other {Payment run created with {count} payments.}}'**
+  String payRunCreated(int count);
+
+  /// No description provided for @payRunCreatedPlain.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment run created.'**
+  String get payRunCreatedPlain;
+
+  /// Appended to the run-created toast when the run trips the CFO approval threshold.
+  ///
+  /// In en, this message translates to:
+  /// **'CFO approval is required before it can be executed.'**
+  String get payRunCreatedNeedsCfo;
+
+  /// No description provided for @payRunApproved.
+  ///
+  /// In en, this message translates to:
+  /// **'Run approved by CFO'**
+  String get payRunApproved;
+
+  /// No description provided for @payRunExecuted.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment run executed: {completed} completed, {inFlight} in flight, {failed} failed.'**
+  String payRunExecuted(int completed, int inFlight, int failed);
+
+  /// No description provided for @payRunExecutedPlain.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment run executed.'**
+  String get payRunExecutedPlain;
+
+  /// No description provided for @payRunExecutedCards.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} virtual card issued.} other {{count} virtual cards issued.}}'**
+  String payRunExecutedCards(int count);
+
+  /// No description provided for @payRunCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Draft run cancelled; {count} invoice returned to the queue.} other {Draft run cancelled; {count} invoices returned to the queue.}}'**
+  String payRunCancelled(int count);
+
+  /// No description provided for @payRunCancelledPlain.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment run cancelled.'**
+  String get payRunCancelledPlain;
+
+  /// No description provided for @vendorSyncSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Synced {created} new, {updated} updated, {unchanged} unchanged.'**
+  String vendorSyncSummary(int created, int updated, int unchanged);
+
+  /// No description provided for @vendorSyncComplete.
+  ///
+  /// In en, this message translates to:
+  /// **'ERP sync complete.'**
+  String get vendorSyncComplete;
+
+  /// No description provided for @vendorSyncNotLinked.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} not linked (the name matches more than one vendor).'**
+  String vendorSyncNotLinked(int count);
+
+  /// No description provided for @vendorSyncUnlinked.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} unlinked (linked under another ERP company).'**
+  String vendorSyncUnlinked(int count);
+
+  /// No description provided for @vendorSyncRelinked.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} relinked (linked when this ERP company was connected before).'**
+  String vendorSyncRelinked(int count);
+
+  /// No description provided for @authInvalidCredentials.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid credentials'**
+  String get authInvalidCredentials;
+
+  /// No description provided for @authInvalidCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid or expired code. Please try again.'**
+  String get authInvalidCode;
+
+  /// No description provided for @authVerifyCodeFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not verify the code. Please try again.'**
+  String get authVerifyCodeFailed;
+
+  /// No description provided for @authEmailCodeFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send the email code. Please try again.'**
+  String get authEmailCodeFailed;
 }
 
 class _AppLocalizationsDelegate
