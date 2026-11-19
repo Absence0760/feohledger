@@ -1,4 +1,5 @@
 import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { InvoiceStatus } from './invoice';
 import type { PaymentStatus } from './payment';
 
@@ -117,6 +118,35 @@ export function portalInvoiceStatusLabelKey(status: string): MessageKey {
 	return PORTAL_INVOICE_PHASE_LABEL_KEYS[portalInvoicePhase(status)];
 }
 
+/**
+ * The `<Badge>` tone each vendor-facing invoice phase renders in — keyed on the
+ * PHASE, not the internal status, so every status a supplier sees under one
+ * label also gets one colour (two statuses that read "Processing" can never
+ * tint differently). Total over {@link PortalInvoicePhase}, so a new phase is
+ * a compile error until it is toned.
+ *
+ * Green is reserved for "the decision went your way" (approved / paid /
+ * completed) and red for the one outcome a supplier must act on (rejected).
+ * The in-flight phases are `accent`, not `warning`: nothing is wrong and
+ * nothing is asked of the supplier. `submitted` is flat `neutral` — received,
+ * not yet acted on.
+ */
+export const PORTAL_INVOICE_PHASE_TONES: Record<PortalInvoicePhase, BadgeTone> = {
+	submitted: 'neutral',
+	processing: 'accent',
+	under_review: 'accent',
+	approved: 'success',
+	payment_scheduled: 'accent',
+	paid: 'success',
+	completed: 'success',
+	rejected: 'danger'
+};
+
+/** The badge tone for an internal invoice status, via its phase. Fail-soft. */
+export function portalInvoiceStatusTone(status: string): BadgeTone {
+	return PORTAL_INVOICE_PHASE_TONES[portalInvoicePhase(status)];
+}
+
 export interface PortalInvoicePhaseChip {
 	phase: PortalInvoicePhase;
 	labelKey: MessageKey;
@@ -189,6 +219,24 @@ export function portalPaymentPhase(status: string): PortalPaymentPhase {
 
 export function portalPaymentStatusLabelKey(status: string): MessageKey {
 	return PORTAL_PAYMENT_PHASE_LABEL_KEYS[portalPaymentPhase(status)];
+}
+
+/**
+ * Payment-phase tones. `scheduled` is `warning` like the internal `pending`
+ * (money promised, not yet moving); `cancelled` is the grey `muted` tint the
+ * internal app gives `cancelled` / `voided` — an inert money state, distinct
+ * from a failure the supplier should chase.
+ */
+export const PORTAL_PAYMENT_PHASE_TONES: Record<PortalPaymentPhase, BadgeTone> = {
+	scheduled: 'warning',
+	processing: 'accent',
+	completed: 'success',
+	failed: 'danger',
+	cancelled: 'muted'
+};
+
+export function portalPaymentStatusTone(status: string): BadgeTone {
+	return PORTAL_PAYMENT_PHASE_TONES[portalPaymentPhase(status)];
 }
 
 export interface PortalPaymentPhaseChip {
