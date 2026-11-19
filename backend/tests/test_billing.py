@@ -39,6 +39,7 @@ from app.services.billing_adapters.base import (
 from app.services.billing_adapters.mock_adapter import MockBillingAdapter
 from app.services.billing_adapters.stripe_billing import (
     BillingNotConfigured,
+    BillingProviderError,
     StripeBillingAdapter,
 )
 
@@ -991,4 +992,69 @@ async def test_rollup_groups_rebates_by_the_currency_of_their_card(realdb):
         assert meters["card_rebate_total.EUR"] == "7.00"
         assert "card_rebate_total" not in meters
     finally:
+        await _cleanup_billing(realdb, org_id)
+
+
+class _FailingPaymentMethodsAdapter(MockBillingAdapter):
+    """A configured provider whose read fails (an outage, a 5xx)."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def list_payment_methods(self, customer_id):
+        raise self._exc
+
+
+@pytest.mark.asyncio
+async def test_payment_methods_provider_failure_is_a_logged_502_not_no_cards(
+    realdb, monkeypatch, caplog
+):
+    """An outage must not read as "no saved cards" (an admin would add another).
+
+    The failure is logged by exception CLASS only — the message can carry
+    customer detail and must never reach the log.
+    """
+    import app.api.billing as billing_api
+
+    org_id = realdb.info("a").org_id
+    secret = "cus_detail_that_must_not_be_logged"
+    monkeypatch.setattr(
+        billing_api,
+        "get_billing_adapter",
+        lambda _p: _FailingPaymentMethodsAdapter(BillingProviderError(secret)),
+    )
+    try:
+        await _set_customer_id(realdb, org_id, "mock_cus_test")
+        with caplog.at_level("WARNING", logger="app.api.billing"):
+            async with realdb.client(key="a", role="admin") as c:
+                resp = await c.get("/api/billing/payment-methods")
+        assert resp.status_code == 502, resp.text
+        assert resp.json()["detail"] == billing_api.BILLING_PROVIDER_UNAVAILABLE_DETAIL
+        assert "BillingProviderError" in caplog.text
+        assert secret not in caplog.text
+        assert secret not in resp.text
+    finally:
+        await _clear_billing_settings(realdb, org_id)
+        await _cleanup_billing(realdb, org_id)
+
+
+@pytest.mark.asyncio
+async def test_payment_methods_unconfigured_provider_is_still_an_empty_list(realdb, monkeypatch):
+    """Not configured (no key) is not a failure: the empty list stays."""
+    import app.api.billing as billing_api
+
+    org_id = realdb.info("a").org_id
+    monkeypatch.setattr(
+        billing_api,
+        "get_billing_adapter",
+        lambda _p: _FailingPaymentMethodsAdapter(BillingNotConfigured("no key")),
+    )
+    try:
+        await _set_customer_id(realdb, org_id, "mock_cus_test")
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.get("/api/billing/payment-methods")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["payment_methods"] == []
+    finally:
+        await _clear_billing_settings(realdb, org_id)
         await _cleanup_billing(realdb, org_id)
