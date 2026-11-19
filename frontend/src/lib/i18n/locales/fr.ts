@@ -752,6 +752,7 @@ export const messages = {
 		'{n, plural, one {# facture n\'a} other {# factures n\'ont}} pas de taux de change vers la devise de reporting ; les totaux de la file les excluent donc. Les lignes restent affichées et payables, chacune dans sa propre devise.',
 	'payments.summary.pending': 'En attente',
 	'payments.summary.loadFailed': "Impossible de charger le récapitulatif des paiements.",
+	'payments.summary.refreshFailedStale': 'Impossible d’actualiser le récapitulatif des paiements : les montants affichés ne sont peut-être plus à jour.',
 	'payments.summary.readyToPay': 'Prêt à payer',
 	'payments.summary.payments': 'Paiements',
 	'payments.summary.rebatesEarned': 'Remises obtenues',
@@ -774,6 +775,7 @@ export const messages = {
 	'payments.queue.createFailed': 'Échec de la campagne de paiement',
 	'payments.queue.draftCreated': "Lot de paiement créé en brouillon — vérifiez-le puis exécutez-le",
 	'payments.queue.loadFailed': "Impossible de charger la file d’attente des paiements.",
+	'payments.queue.refreshFailedStale': 'Impossible d’actualiser la file d’attente des paiements : les lignes affichées ne sont peut-être plus à jour. {reason}',
 	'payments.queue.loadMoreFailed': "Impossible de charger la suite de la file d’attente des paiements.",
 	'payments.queue.mixedCurrency':
 		'Cette sélection couvre {n} devises : les sous-totaux sont donc affichés séparément et NE sont PAS additionnés. Une campagne de paiement doit être dans une seule devise — réduisez la sélection à une devise pour continuer.',
@@ -794,9 +796,9 @@ export const messages = {
 	'payments.queue.blocked.liveVirtualCard': 'Une carte virtuelle active couvre cette facture — payez-la par carte',
 	'payments.queue.blocked.generic': 'Une exception non résolue bloque le paiement',
 	'payments.queue.discountSave': 'Économiser {amount}',
-	'payments.queue.discountBy': '{percent}% avant le {date}',
+	'payments.queue.discountBy': '{percent} avant le {date}',
 	'payments.queue.methodAria': 'Mode de paiement pour {invoice}',
-	'payments.queue.discountTitle': 'La remise de {percent}% expire le {date}',
+	'payments.queue.discountTitle': 'La remise de {percent} expire le {date}',
 	'payments.queue.acceptedDiscount': 'Offre acceptée : paie {amount} avant le {date}',
 	'payments.queue.loadMore': 'Charger plus ({shown} sur {total})',
 	'payments.queue.showingAll':

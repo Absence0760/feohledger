@@ -749,6 +749,7 @@ export const messages = {
 		'{n, plural, one {# Rechnung hat} other {# Rechnungen haben}} keinen Wechselkurs in die Berichtswährung, daher bleiben sie in den Summen der Warteschlange unberücksichtigt. Die Zeilen selbst werden angezeigt und sind zahlbar — jeweils in ihrer eigenen Währung.',
 	'payments.summary.pending': 'Ausstehend',
 	'payments.summary.loadFailed': "Die Zahlungsübersicht konnte nicht geladen werden.",
+	'payments.summary.refreshFailedStale': 'Die Zahlungsübersicht konnte nicht aktualisiert werden; die angezeigten Werte sind möglicherweise veraltet.',
 	'payments.summary.readyToPay': 'Zahlbereit',
 	'payments.summary.payments': 'Zahlungen',
 	'payments.summary.rebatesEarned': 'Erzielte Rückvergütungen',
@@ -771,6 +772,7 @@ export const messages = {
 	'payments.queue.createFailed': 'Zahlungslauf fehlgeschlagen',
 	'payments.queue.draftCreated': "Zahlungslauf als Entwurf angelegt — prüfen und ausführen",
 	'payments.queue.loadFailed': "Die Zahlungswarteschlange konnte nicht geladen werden.",
+	'payments.queue.refreshFailedStale': 'Die Zahlungswarteschlange konnte nicht aktualisiert werden; die angezeigten Zeilen sind möglicherweise veraltet. {reason}',
 	'payments.queue.loadMoreFailed': "Weitere Einträge der Zahlungswarteschlange konnten nicht geladen werden.",
 	'payments.queue.mixedCurrency':
 		'Diese Auswahl umfasst {n} Währungen. Die Zwischensummen werden daher getrennt angezeigt und NICHT addiert. Ein Zahlungslauf muss eine einzige Währung haben — reduzieren Sie die Auswahl auf eine Währung, um fortzufahren.',
@@ -791,9 +793,9 @@ export const messages = {
 	'payments.queue.blocked.liveVirtualCard': 'Eine aktive virtuelle Karte beansprucht diese Rechnung — per Karte bezahlen',
 	'payments.queue.blocked.generic': 'Ungeklärte Ausnahme blockiert die Zahlung',
 	'payments.queue.discountSave': '{amount} sparen',
-	'payments.queue.discountBy': '{percent}% bis {date}',
+	'payments.queue.discountBy': '{percent} bis {date}',
 	'payments.queue.methodAria': 'Zahlungsart für {invoice}',
-	'payments.queue.discountTitle': '{percent}% Rabatt läuft am {date} ab',
+	'payments.queue.discountTitle': '{percent} Rabatt läuft am {date} ab',
 	'payments.queue.acceptedDiscount': 'Angenommenes Angebot: zahlt {amount} bis {date}',
 	'payments.queue.loadMore': 'Mehr laden ({shown} von {total})',
 	'payments.queue.showingAll':

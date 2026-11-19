@@ -830,6 +830,7 @@ export const en = {
 		'{n, plural, one {# invoice has} other {# invoices have}} no exchange rate into the reporting currency, so the queue totals leave them out. The rows themselves are listed and payable, each in its own currency.',
 	'payments.summary.pending': 'Pending',
 	'payments.summary.loadFailed': "Could not load the payment summary.",
+	'payments.summary.refreshFailedStale': 'Could not refresh the payment summary, so the figures shown may be out of date.',
 	'payments.summary.readyToPay': 'Ready to Pay',
 	'payments.summary.payments': 'Payments',
 	'payments.summary.rebatesEarned': 'Rebates Earned',
@@ -852,6 +853,7 @@ export const en = {
 	'payments.queue.createFailed': 'Payment run failed',
 	'payments.queue.draftCreated': "Draft payment run created — review and execute",
 	'payments.queue.loadFailed': "Could not load the payment queue.",
+	'payments.queue.refreshFailedStale': 'Could not refresh the payment queue, so the rows shown may be out of date. {reason}',
 	'payments.queue.loadMoreFailed': "Could not load more of the payment queue.",
 	'payments.queue.mixedCurrency':
 		'This selection spans {n} currencies, so the subtotals are shown separately and are NOT added together. A payment run must be a single currency — clear the selection down to one currency to continue.',
@@ -872,9 +874,9 @@ export const en = {
 	'payments.queue.blocked.liveVirtualCard': 'A live virtual card claims this invoice — pay it by card',
 	'payments.queue.blocked.generic': 'Unresolved exception blocks payment',
 	'payments.queue.discountSave': 'Save {amount}',
-	'payments.queue.discountBy': '{percent}% by {date}',
+	'payments.queue.discountBy': '{percent} by {date}',
 	'payments.queue.methodAria': 'Payment method for {invoice}',
-	'payments.queue.discountTitle': '{percent}% discount expires {date}',
+	'payments.queue.discountTitle': '{percent} discount expires {date}',
 	'payments.queue.acceptedDiscount': 'Accepted offer: pays {amount} by {date}',
 	'payments.queue.loadMore': 'Load more ({shown} of {total})',
 	'payments.queue.showingAll':

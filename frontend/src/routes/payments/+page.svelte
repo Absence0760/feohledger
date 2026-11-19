@@ -50,6 +50,7 @@
 	} from '#lib/utils/currencyGroups.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
@@ -1431,6 +1432,11 @@
 
 	async function loadSummary() {
 		const token = summarySequence.start();
+		// Cleared when the request STARTS, as the lists below do: Retry takes
+		// `LoadError` down while the request is out (the cards fall back to
+		// their pending dash when nothing is shown yet), and a second failure
+		// remounts it, so it is announced again rather than looking inert.
+		summaryFailed = false;
 		try {
 			const data = await api.get<Summary>('/api/payments/summary');
 			if (!summarySequence.canCommit(token)) return; // superseded by a newer load
@@ -1439,7 +1445,7 @@
 		} catch (err) {
 			if (summarySequence.isCurrentRequest(token)) {
 				summaryFailed = true;
-				toast(err instanceof Error ? err.message : m('payments.summary.loadFailed'), 'error');
+				toast(errorMessage(err, m('payments.summary.loadFailed')), 'error');
 			}
 		}
 	}
@@ -1472,7 +1478,18 @@
 		} catch (err) {
 			if (queueSequence.isCurrentRequest(token)) {
 				queueErrored = true;
-				toast(err instanceof Error ? err.message : m('payments.queue.loadFailed'), 'error');
+				// A failed RELOAD keeps the rows already shown (a selection may be
+				// live on them, and dropping it mid-build is worse — the in-place
+				// `LoadError` is for an empty queue only). So the toast is the one
+				// sign, and it has to say those rows may no longer be current.
+				toast(
+					queue.length > 0
+						? m('payments.queue.refreshFailedStale', {
+								reason: errorMessage(err, m('payments.queue.loadFailed'))
+							})
+						: errorMessage(err, m('payments.queue.loadFailed')),
+					'error'
+				);
 			}
 		} finally {
 			// `isCurrentRequest`, not `canCommit`: a local edit that supersedes
@@ -2093,6 +2110,19 @@
 	     only once it had, inserting a ~94px strip ABOVE the tabs and the table
 	     on every visit and dropping both under the reader
 	     (tests-e2e/reactivity/layout-stability.spec.ts). -->
+	{#if summaryFailed}
+		<!-- In place, with a Retry: the toast fades, and the cards alone read
+		     as a dash (or as figures from an earlier load) with no way back.
+		     When an earlier load's figures are still on the cards, say they
+		     may be out of date rather than that nothing loaded. -->
+		<LoadError
+			message={summary
+				? m('payments.summary.refreshFailedStale')
+				: m('payments.summary.loadFailed')}
+			onretry={loadSummary}
+			testId="summary-error"
+		/>
+	{/if}
 	<div class="summary-cards" aria-busy={summaryPending ? 'true' : undefined}>
 		<div class="scard">
 			<span class="scard-value">
@@ -2462,12 +2492,12 @@
 								<span
 									class="discount-chip"
 									title={m('payments.queue.discountTitle', {
-										percent: item.discount_percent,
+										percent: formatPercent(item.discount_percent, { maximumFractionDigits: 2 }),
 										date: formatDate(item.discount_date)
 									})}
 								>
 									{m('payments.queue.discountSave', { amount: formatCurrency(item.discount_amount, item.currency) })}
-									<span class="discount-pct">{m('payments.queue.discountBy', { percent: item.discount_percent, date: formatDate(item.discount_date) })}</span>
+									<span class="discount-pct">{m('payments.queue.discountBy', { percent: formatPercent(item.discount_percent, { maximumFractionDigits: 2 }), date: formatDate(item.discount_date) })}</span>
 								</span>
 							{:else}
 								<span class="muted">—</span>
@@ -3310,7 +3340,7 @@
 						data-testid="void-reason"
 						aria-invalid={voidReasonError ? 'true' : undefined}
 						aria-describedby="void-reason-error"
-						autofocus
+						data-autofocus
 					/>
 				</label>
 				<!-- Always in the DOM, so `aria-describedby` always resolves; empty
@@ -3372,7 +3402,7 @@
 						data-testid="compliance-reason"
 						aria-invalid={complianceReasonError ? 'true' : undefined}
 						aria-describedby="compliance-reason-error"
-						autofocus
+						data-autofocus
 					/>
 				</label>
 				<p class="field-error" id="compliance-reason-error" data-testid="compliance-reason-error">{complianceReasonError}</p>
@@ -3460,7 +3490,7 @@
 					data-testid="settlement-reason"
 					aria-invalid={settlementReasonError ? 'true' : undefined}
 					aria-describedby="settlement-reason-error"
-					autofocus
+					data-autofocus
 				/>
 			</label>
 			<p class="field-error" id="settlement-reason-error" data-testid="settlement-reason-error">{settlementReasonError}</p>

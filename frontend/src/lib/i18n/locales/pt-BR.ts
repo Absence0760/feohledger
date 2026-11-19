@@ -753,6 +753,7 @@ export const messages = {
 		'{n, plural, one {# fatura não tem} other {# faturas não têm}} taxa de câmbio para a moeda de relatório, então os totais da fila as deixam de fora. As linhas continuam listadas e pagáveis, cada uma na sua própria moeda.',
 	'payments.summary.pending': 'Pendente',
 	'payments.summary.loadFailed': "Não foi possível carregar o resumo de pagamentos.",
+	'payments.summary.refreshFailedStale': 'Não foi possível atualizar o resumo de pagamentos; os valores exibidos podem estar desatualizados.',
 	'payments.summary.readyToPay': 'Pronto para pagar',
 	'payments.summary.payments': 'Pagamentos',
 	'payments.summary.rebatesEarned': 'Reembolsos obtidos',
@@ -775,6 +776,7 @@ export const messages = {
 	'payments.queue.createFailed': 'Falha ao criar a remessa de pagamentos',
 	'payments.queue.draftCreated': "Lote de pagamento criado como rascunho — revise e execute",
 	'payments.queue.loadFailed': "Não foi possível carregar a fila de pagamentos.",
+	'payments.queue.refreshFailedStale': 'Não foi possível atualizar a fila de pagamentos; as linhas exibidas podem estar desatualizadas. {reason}',
 	'payments.queue.loadMoreFailed': "Não foi possível carregar mais itens da fila de pagamentos.",
 	'payments.queue.mixedCurrency':
 		'Esta seleção abrange {n} moedas, portanto os subtotais são exibidos separadamente e NÃO são somados. Uma remessa de pagamentos precisa ter uma única moeda — reduza a seleção a uma moeda para continuar.',
@@ -795,9 +797,9 @@ export const messages = {
 	'payments.queue.blocked.liveVirtualCard': 'Um cartão virtual ativo reserva esta fatura — pague com o cartão',
 	'payments.queue.blocked.generic': 'Uma exceção não resolvida bloqueia o pagamento',
 	'payments.queue.discountSave': 'Economize {amount}',
-	'payments.queue.discountBy': '{percent}% até {date}',
+	'payments.queue.discountBy': '{percent} até {date}',
 	'payments.queue.methodAria': 'Método de pagamento para {invoice}',
-	'payments.queue.discountTitle': 'O desconto de {percent}% expira em {date}',
+	'payments.queue.discountTitle': 'O desconto de {percent} expira em {date}',
 	'payments.queue.acceptedDiscount': 'Oferta aceita: paga {amount} até {date}',
 	'payments.queue.loadMore': 'Carregar mais ({shown} de {total})',
 	'payments.queue.showingAll':

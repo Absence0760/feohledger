@@ -751,6 +751,7 @@ export const messages = {
 		'{n, plural, one {# factura no tiene} other {# facturas no tienen}} tipo de cambio a la moneda de reporte, por lo que los totales de la cola las omiten. Las filas siguen listadas y son pagaderas, cada una en su propia moneda.',
 	'payments.summary.pending': 'Pendiente',
 	'payments.summary.loadFailed': "No se pudo cargar el resumen de pagos.",
+	'payments.summary.refreshFailedStale': 'No se pudo actualizar el resumen de pagos, por lo que las cifras mostradas pueden estar desactualizadas.',
 	'payments.summary.readyToPay': 'Listo para pagar',
 	'payments.summary.payments': 'Pagos',
 	'payments.summary.rebatesEarned': 'Reembolsos obtenidos',
@@ -773,6 +774,7 @@ export const messages = {
 	'payments.queue.createFailed': 'Error al crear la remesa de pagos',
 	'payments.queue.draftCreated': "Lote de pago creado como borrador: revíselo y ejecútelo",
 	'payments.queue.loadFailed': "No se pudo cargar la cola de pagos.",
+	'payments.queue.refreshFailedStale': 'No se pudo actualizar la cola de pagos, por lo que las filas mostradas pueden estar desactualizadas. {reason}',
 	'payments.queue.loadMoreFailed': "No se pudieron cargar más elementos de la cola de pagos.",
 	'payments.queue.mixedCurrency':
 		'Esta selección abarca {n} monedas, por lo que los subtotales se muestran por separado y NO se suman. Una remesa de pagos debe tener una sola moneda: reduzca la selección a una moneda para continuar.',
@@ -793,9 +795,9 @@ export const messages = {
 	'payments.queue.blocked.liveVirtualCard': 'Una tarjeta virtual activa reclama esta factura — págala con la tarjeta',
 	'payments.queue.blocked.generic': 'Una excepción sin resolver bloquea el pago',
 	'payments.queue.discountSave': 'Ahorra {amount}',
-	'payments.queue.discountBy': '{percent}% hasta el {date}',
+	'payments.queue.discountBy': '{percent} hasta el {date}',
 	'payments.queue.methodAria': 'Método de pago para {invoice}',
-	'payments.queue.discountTitle': 'El descuento del {percent}% vence el {date}',
+	'payments.queue.discountTitle': 'El descuento del {percent} vence el {date}',
 	'payments.queue.acceptedDiscount': 'Oferta aceptada: paga {amount} hasta el {date}',
 	'payments.queue.loadMore': 'Cargar más ({shown} de {total})',
 	'payments.queue.showingAll':
