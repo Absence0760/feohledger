@@ -463,7 +463,7 @@
 				toast(m('vendors.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.toast.selectAllFailed'), 'error');
+			toast(errorMessage(err, m('vendors.toast.selectAllFailed')), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -472,6 +472,7 @@
 	function clearSelection() {
 		selected = new Set();
 		selectedAllMatching = false;
+		bulkRejectArmed = false;
 	}
 
 	async function bulkVerify() {
@@ -485,7 +486,7 @@
 				: m('vendors.bulk.verified', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.bulk.verifyFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bulk.verifyFailed')), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -503,7 +504,7 @@
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.bulk.rejectFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bulk.rejectFailed')), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -521,7 +522,7 @@
 			toast(msg, res.screened > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.bulk.screenFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bulk.screenFailed')), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -534,7 +535,7 @@
 			await exportVendorsCsv(ids);
 			toast(m('vendors.bulk.exported', { n: ids.length }), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.bulk.exportFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bulk.exportFailed')), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -570,12 +571,18 @@
 			await fetchVendors();
 			toast(m('vendors.toast.verified'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.toast.verifyFailed'), 'error');
+			toast(errorMessage(err, m('vendors.toast.verifyFailed')), 'error');
 		}
 	}
 
 	/** The row whose Reject is armed (one click from committing), or null. */
 	let rejectArmedId = $state<string | null>(null);
+	// The bulk bar's Reject is armed the same way: it does to every selected
+	// vendor what the row Reject does to one — stops their payments and
+	// revokes their live cards — so it must not commit on a single click
+	// either. Any click outside a `.row-action` (a checkbox included, so the
+	// selection can't change under an armed confirm) un-arms it.
+	let bulkRejectArmed = $state(false);
 
 	async function rejectVendor(id: string) {
 		try {
@@ -584,7 +591,7 @@
 			toast(m('vendors.toast.rejected'), 'success');
 			toastCardRevocations([rejected.card_revocation]);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.toast.rejectFailed'), 'error');
+			toast(errorMessage(err, m('vendors.toast.rejectFailed')), 'error');
 		}
 	}
 
@@ -599,7 +606,7 @@
 				toast(line.text, line.tone, line.tone === 'warning' ? 12_000 : undefined);
 			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.toast.syncFailed'), 'error');
+			toast(errorMessage(err, m('vendors.toast.syncFailed')), 'error');
 		} finally {
 			syncing = false;
 		}
@@ -669,8 +676,9 @@
 <svelte:window
 	onclick={(e) => {
 		// Outside-click un-arms a pending Reject confirmation.
-		if (rejectArmedId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
-			rejectArmedId = null;
+		if (!(e.target as HTMLElement)?.closest?.('.row-action')) {
+			if (rejectArmedId) rejectArmedId = null;
+			if (bulkRejectArmed) bulkRejectArmed = false;
 		}
 	}}
 />
@@ -788,11 +796,11 @@
 								checked={selected.has(v.id)}
 								onclick={(e) => e.stopPropagation()}
 								onchange={() => toggleSelect(v.id)}
-								aria-label={`Select ${v.name}`}
+								aria-label={m('vendors.selectRowAria', { vendor: v.name })}
 							/>
 						</td>
 						<td class="vendor-name">
-							<RowLink onclick={() => (detailVendor = v)} ariaLabel={`Open vendor ${v.name}`}>
+							<RowLink onclick={() => (detailVendor = v)} ariaLabel={m('vendors.row.openAria', { vendor: v.name })}>
 								{v.name}
 							</RowLink>
 						</td>
@@ -908,7 +916,19 @@
 					<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 				{/if}
 				<RowAction variant="success" disabled={bulkBusy} onclick={bulkVerify}>{m('vendors.row.verify')}</RowAction>
-				<RowAction variant="danger" disabled={bulkBusy} onclick={bulkReject}>{m('vendors.row.reject')}</RowAction>
+				<RowAction
+					variant="danger"
+					armed={bulkRejectArmed}
+					disabled={bulkBusy}
+					onclick={() => {
+						if (bulkRejectArmed) {
+							bulkRejectArmed = false;
+							bulkReject();
+						} else bulkRejectArmed = true;
+					}}
+				>
+					{bulkRejectArmed ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
+				</RowAction>
 				<div class="bulk-divider"></div>
 				<RowAction disabled={bulkBusy} onclick={bulkScreen}>{m('vendors.bulk.screen')}</RowAction>
 				<RowAction disabled={bulkBusy} onclick={bulkExport}>{m('vendors.bulk.exportCsv')}</RowAction>

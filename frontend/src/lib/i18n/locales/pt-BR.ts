@@ -1108,6 +1108,8 @@ export const messages = {
 	'vendors.onboarding.description': "Adicione um fornecedor para começar a receber e conciliar as notas fiscais dele — ou importe um CSV.",
 	'vendors.onboarding.descriptionErp': 'Adicione um fornecedor para começar a receber e conciliar as notas fiscais dele — ou sincronize do seu ERP / importe um CSV.',
 	'vendors.selectAllAria': 'Selecionar todos os fornecedores desta página',
+	'vendors.selectRowAria': 'Selecionar {vendor}',
+	'vendors.row.openAria': 'Abrir fornecedor {vendor}',
 	'vendors.row.verify': 'Verificar',
 	'vendors.row.reject': 'Rejeitar',
 	'vendors.row.confirmReject': 'Confirmar rejeição',

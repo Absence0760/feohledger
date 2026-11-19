@@ -18,7 +18,9 @@
 	// proposer. That is knowable client-side (`requested_by_user_id`), so the
 	// row says so instead of offering a button that can only fail — and the 403
 	// is still mapped to the specific message, because the UI is not the gate.
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
+	import { untrack } from 'svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { api, ApiError } from '#lib/api.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -37,6 +39,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
@@ -44,6 +47,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	const PAGE_SIZE = 20;
 
@@ -63,7 +67,23 @@
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let errored = $state(false);
-	let statusFilter = $state('pending');
+	// URL-backed (`?status=`) like the `/vendors` list it hangs off, so a
+	// reload, Back, or a link shared with a second approver lands on the same
+	// filter. `pending` is the default and is left out of the URL.
+	const STATUS_KEYS = ['all', 'pending', 'approved', 'rejected'];
+	const initialStatus = page.url.searchParams.get('status') ?? '';
+	let statusFilter = $state(STATUS_KEYS.includes(initialStatus) ? initialStatus : 'pending');
+
+	/** Writes the filter into the URL. A writer only: every read is untracked so
+	 *  the filter `$effect` that calls it never depends on the URL it replaces. */
+	function syncUrl() {
+		untrack(() => {
+			const url = new URL(page.url.href);
+			if (statusFilter !== 'pending') url.searchParams.set('status', statusFilter);
+			else url.searchParams.delete('status');
+			if (url.search !== page.url.search) replaceState(`${url.pathname}${url.search}`, {});
+		});
+	}
 
 	// Whole-set tallies for the chips. `total` on the list response counts the
 	// ACTIVE filter's result set, so rendering it on a chip would label the
@@ -218,7 +238,11 @@
 		const nextPage = opts.append ? pageNum + 1 : 1;
 		const token = fetchSequence.start();
 		if (opts.append) loadingMore = true;
-		else loading = true;
+		else {
+			loading = true;
+			// Retry unmounts `LoadError` back to the loading line (its contract).
+			errored = false;
+		}
 		try {
 			const params = new URLSearchParams({
 				status: statusFilter,
@@ -253,14 +277,15 @@
 			// rows already loaded ARE the current filter's answer, and only the
 			// next page failed to arrive. `/gl-accounts` and `/exceptions` set
 			// the clearing precedent; neither of them paginates.
+			//
+			// A fresh-load failure is stated in place by `LoadError` (with a
+			// Retry); only a failed Load-more, which keeps the rows shown, toasts.
 			if (!opts.append) {
 				items = [];
 				total = 0;
+			} else {
+				toast(errorMessage(err, m('vendors.changeRequests.toast.loadFailed')), 'error');
 			}
-			toast(
-				err instanceof Error ? err.message : m('vendors.changeRequests.toast.loadFailed'),
-				'error'
-			);
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -274,6 +299,7 @@
 	$effect(() => {
 		statusFilter;
 		if (!allowed) return;
+		syncUrl();
 		// `.catch` on both: neither is awaited here, and each already renders its
 		// own failure (`errored` for the list, label-only chips for the tallies).
 		load().catch(() => {});
@@ -311,11 +337,13 @@
 			// Already resolved by someone else; the row on screen is stale.
 			if (err.status === 409) return m('vendors.changeRequests.toast.resolved');
 		}
-		if (err instanceof Error) return err.message;
-		return m(
-			decision === 'approve'
-				? 'vendors.changeRequests.toast.approveFailed'
-				: 'vendors.changeRequests.toast.rejectFailed'
+		return errorMessage(
+			err,
+			m(
+				decision === 'approve'
+					? 'vendors.changeRequests.toast.approveFailed'
+					: 'vendors.changeRequests.toast.rejectFailed'
+			)
 		);
 	}
 
@@ -425,14 +453,22 @@
 		<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
 	</div>
 
+	{#if errored && items.length === 0}
+		<LoadError
+			message={m('vendors.changeRequests.empty.errored')}
+			onretry={() => {
+				load().catch(() => {});
+				loadCounts().catch(() => {});
+			}}
+			testId="change-requests-load-error"
+		/>
+	{:else}
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
 		empty={loading
 			? m('common.loading')
-			: errored
-				? m('vendors.changeRequests.empty.errored')
-				: statusFilter === 'pending'
+			: statusFilter === 'pending'
 					? m('vendors.changeRequests.empty.pending')
 					: m('vendors.changeRequests.empty.filtered')}
 	>
@@ -524,6 +560,7 @@
 		<div class="load-more-row">
 			<span class="load-more-end">{m('vendors.changeRequests.showingAll', { total })}</span>
 		</div>
+	{/if}
 	{/if}
 </PageHeader>
 
@@ -720,7 +757,7 @@
 	/* --- Detail modal --- */
 	.meta {
 		display: grid;
-		grid-template-columns: repeat(2, 1fr);
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px 24px;
 		margin: 0 0 16px;
 	}
@@ -735,10 +772,14 @@
 		letter-spacing: 0.03em;
 		color: var(--text-muted);
 	}
+	/* `minmax(0, 1fr)` tracks above + `anywhere` here: a long unbroken value
+	   (a list name, an id) wraps inside its column instead of widening the
+	   dialog past a 320px viewport (WCAG 1.4.10). */
 	.meta dd {
 		margin: 0;
 		font-size: 0.9rem;
 		color: var(--text);
+		overflow-wrap: anywhere;
 	}
 
 	h3 {
@@ -794,7 +835,7 @@
 
 	.proposed-fields {
 		display: grid;
-		grid-template-columns: repeat(2, 1fr);
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px 24px;
 		margin: 0 0 14px;
 		padding: 10px 12px;

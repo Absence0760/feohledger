@@ -1106,6 +1106,8 @@ export const messages = {
 	'vendors.onboarding.description': "Fügen Sie einen Lieferanten hinzu, um dessen Rechnungen zu empfangen und abzugleichen – oder importieren Sie eine CSV.",
 	'vendors.onboarding.descriptionErp': 'Fügen Sie einen Lieferanten hinzu, um dessen Rechnungen zu empfangen und abzugleichen – oder synchronisieren Sie aus Ihrem ERP / importieren Sie eine CSV.',
 	'vendors.selectAllAria': 'Alle Lieferanten auf dieser Seite auswählen',
+	'vendors.selectRowAria': '{vendor} auswählen',
+	'vendors.row.openAria': 'Lieferant {vendor} öffnen',
 	'vendors.row.verify': 'Verifizieren',
 	'vendors.row.reject': 'Ablehnen',
 	'vendors.row.confirmReject': 'Ablehnen bestätigen',

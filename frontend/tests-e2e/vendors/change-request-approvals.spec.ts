@@ -137,6 +137,28 @@ test.describe('/vendors/change-requests — dual-control bank-change approvals',
 		).toBeVisible();
 	});
 
+	test('the status filter round-trips through the URL', async ({ page }) => {
+		// A reload or a link shared with a second approver must land on the
+		// same filter, like every other list page's `?status=`.
+		await page.goto('/vendors/change-requests?status=rejected');
+		await expect(page.getByRole('button', { name: /^Rejected/ })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+
+		await page.getByRole('button', { name: /^Approved/ }).click();
+		await expect(page).toHaveURL(/[?&]status=approved\b/);
+		await page.reload();
+		await expect(page.getByRole('button', { name: /^Approved/ })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+
+		// The default (Pending) is left out of the URL.
+		await page.getByRole('button', { name: /^Pending/ }).click();
+		await expect(page).not.toHaveURL(/[?&]status=/);
+	});
+
 	test('a staged bank change only applies after a SECOND approver signs it off', async ({
 		page,
 		tenantManager

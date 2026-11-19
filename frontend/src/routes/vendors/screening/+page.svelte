@@ -38,6 +38,11 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import { untrack } from 'svelte';
+	// Aliased: `page` below is the loaded queue page number.
+	import { page as urlStore } from '$app/state';
+	import { replaceState } from '$app/navigation';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
@@ -66,6 +71,15 @@
 	// two above: a verdict this build has no wording for renders de-underscored
 	// rather than blank — a dropped verdict is the one outcome a compliance
 	// reviewer must never get.
+	// The verdict's tone on the shared `Badge` — the hand-rolled pill this
+	// replaced set the base token as text on its own tint, which is the pairing
+	// the colour rules reserve for `-on-tint` (light theme amber read ~2.5:1).
+	const RESULT_TONES: Record<string, BadgeTone> = {
+		match: 'danger',
+		review_required: 'warning',
+		clear: 'success'
+	};
+
 	const resultLabel = (result: string) => {
 		const key = sanctionsResultLabelKey(result);
 		return key ? m(key) : result.replace(/_/g, ' ');
@@ -96,7 +110,9 @@
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let loadError = $state(false);
-	let search = $state('');
+	// URL-backed (`?search=`) like the `/vendors` list, so a reload or a shared
+	// link reproduces the queue the reviewer was looking at.
+	let search = $state(urlStore.url.searchParams.get('search') ?? '');
 	// The term the newest ISSUED request carried, so the debounce effect's first
 	// run (mount) doesn't fire a duplicate load behind the initial fetch.
 	let appliedSearch = $state('');
@@ -243,6 +259,7 @@
 		// un-debounced request on every keystroke (issue #168).
 		const term = untrack(() => search).trim();
 		appliedSearch = term;
+		if (!opts.append) syncUrl(term);
 		if (opts.append) loadingMore = true;
 		else loading = true;
 		loadError = false;
@@ -272,14 +289,35 @@
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// edit still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			loadError = true;
-			toast(m('vendors.screening.queue.toast.loadFailed'), 'error');
+			// A failed fresh load has nothing true to show, so it is stated in
+			// place by `LoadError` (with a Retry) and the rows go: left up, they
+			// would read as the answer to a search that never ran. A failed
+			// Load-more keeps the rows it did load, so a toast is enough.
+			if (opts.append) {
+				toast(m('vendors.screening.queue.toast.loadFailed'), 'error');
+			} else {
+				loadError = true;
+				items = [];
+				total = 0;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
 				loadingMore = false;
 			}
 		}
+	}
+
+	/** Writes the issued search term into the URL. A writer only, never a
+	 *  dependency: it runs inside `loadQueue`, which the mount and debounce
+	 *  effects call, so every URL read is untracked. */
+	function syncUrl(term: string) {
+		untrack(() => {
+			const url = new URL(urlStore.url.href);
+			if (term) url.searchParams.set('search', term);
+			else url.searchParams.delete('search');
+			if (url.search !== urlStore.url.search) replaceState(`${url.pathname}${url.search}`, {});
+		});
 	}
 
 	async function loadMore() {
@@ -474,14 +512,22 @@
 		/>
 	</div>
 
+	{#if loadError}
+		<LoadError
+			message={m('vendors.screening.queue.empty.errored')}
+			onretry={() => {
+				loadQueue();
+				loadCounts();
+			}}
+			testId="screening-queue-load-error"
+		/>
+	{:else}
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
 		empty={loading
 			? m('common.loading')
-			: loadError
-				? m('vendors.screening.queue.empty.errored')
-				: search.trim()
+			: search.trim()
 					? m('vendors.screening.queue.empty.filtered')
 					: m('vendors.screening.queue.empty.clean')}
 	>
@@ -538,6 +584,7 @@
 		<div class="load-more-row">
 			<span class="load-more-end">{m('vendors.showingAll', { total })}</span>
 		</div>
+	{/if}
 	{/if}
 </PageHeader>
 
@@ -664,7 +711,9 @@
 			<ul class="history" data-testid="screening-history" data-vendor-id={historyVendorId}>
 				{#each history as h (h.id)}
 					<li>
-						<span class="history-result {h.result}">{resultLabel(h.result)}</span>
+						<Badge tone={RESULT_TONES[h.result] ?? 'neutral'} variant="history-result {h.result}">
+							{resultLabel(h.result)}
+						</Badge>
 						<span class="history-meta">
 							{h.check_type} · {h.provider}
 							{#if h.matched_list}· {h.matched_list}{/if}
@@ -721,7 +770,7 @@
 	}
 	.meta {
 		display: grid;
-		grid-template-columns: repeat(2, 1fr);
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px 24px;
 		margin: 0 0 16px;
 	}
@@ -736,10 +785,14 @@
 		letter-spacing: 0.03em;
 		color: var(--text-muted);
 	}
+	/* `minmax(0, 1fr)` tracks above + `anywhere` here: a long unbroken value
+	   (a list name, an id) wraps inside its column instead of widening the
+	   dialog past a 320px viewport (WCAG 1.4.10). */
 	.meta dd {
 		margin: 0;
 		font-size: 0.9rem;
 		color: var(--text);
+		overflow-wrap: anywhere;
 	}
 
 	.review-actions {
@@ -768,12 +821,16 @@
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 	}
+	/* Tinted buttons take the `-tint` fill and its `-on-tint` text partner — the
+	   base token on its own tint is the pairing the colour rules forbid (it
+	   drops under 4.5:1 in the light theme). Hover thickens the border rather
+	   than deepening the fill, so the text pairing never changes. */
 	.btn-block {
 		padding: 8px 16px;
 		border-radius: 6px;
-		border: 1px solid var(--danger);
-		background: color-mix(in srgb, var(--danger) 12%, transparent);
-		color: var(--danger);
+		border: 1px solid var(--danger-on-tint);
+		background: var(--danger-tint);
+		color: var(--danger-on-tint);
 		font-size: 0.85rem;
 		font-weight: 500;
 		cursor: pointer;
@@ -781,15 +838,15 @@
 		white-space: nowrap;
 	}
 	.btn-block:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--danger) 20%, transparent);
+		box-shadow: inset 0 0 0 1px var(--danger-on-tint);
 	}
 	.btn-block.unblock {
-		border-color: var(--success);
-		background: color-mix(in srgb, var(--success) 12%, transparent);
-		color: var(--success);
+		border-color: var(--success-on-tint);
+		background: var(--success-tint);
+		color: var(--success-on-tint);
 	}
 	.btn-block.unblock:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--success) 20%, transparent);
+		box-shadow: inset 0 0 0 1px var(--success-on-tint);
 	}
 	.btn-block:disabled {
 		opacity: 0.5;
@@ -827,31 +884,6 @@
 		flex-wrap: wrap;
 		padding-bottom: 8px;
 		border-bottom: 1px solid var(--border);
-	}
-	.history-result {
-		font-size: 0.72rem;
-		font-weight: 600;
-		/* No `text-transform: capitalize` — it existed to dress up the raw
-		   `review_required` this badge used to print, and the label is properly
-		   cased at the source now. Left in, it would title-case a translated
-		   phrase mid-sentence ("Prüfung Erforderlich"). */
-		padding: 2px 8px;
-		border-radius: 10px;
-		background: var(--bg);
-		color: var(--text-muted);
-		white-space: nowrap;
-	}
-	.history-result.match {
-		background: color-mix(in srgb, var(--danger) 12%, transparent);
-		color: var(--danger);
-	}
-	.history-result.review_required {
-		background: color-mix(in srgb, var(--warning) 12%, transparent);
-		color: var(--warning);
-	}
-	.history-result.clear {
-		background: color-mix(in srgb, var(--success) 12%, transparent);
-		color: var(--success);
 	}
 	.history-meta {
 		font-size: 0.8rem;

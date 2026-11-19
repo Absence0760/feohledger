@@ -1095,6 +1095,8 @@ export const messages = {
 	'vendors.onboarding.description': "仕入先を追加すると、その請求書の受信と照合を開始できます。CSV インポートも可能です。",
 	'vendors.onboarding.descriptionErp': '仕入先を追加すると、その請求書の受信と照合を開始できます。ERP からの同期や CSV インポートも可能です。',
 	'vendors.selectAllAria': 'このページのすべての取引先を選択',
+	'vendors.selectRowAria': '{vendor} を選択',
+	'vendors.row.openAria': '取引先 {vendor} を開く',
 	'vendors.row.verify': '確認',
 	'vendors.row.reject': '却下',
 	'vendors.row.confirmReject': '却下を確定',

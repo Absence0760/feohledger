@@ -1107,6 +1107,8 @@ export const messages = {
 	'vendors.onboarding.description': "Ajoutez un fournisseur pour commencer à recevoir et rapprocher ses factures — ou importez un CSV.",
 	'vendors.onboarding.descriptionErp': 'Ajoutez un fournisseur pour commencer à recevoir et rapprocher ses factures — ou synchronisez depuis votre ERP / importez un CSV.',
 	'vendors.selectAllAria': 'Sélectionner tous les fournisseurs de cette page',
+	'vendors.selectRowAria': 'Sélectionner {vendor}',
+	'vendors.row.openAria': 'Ouvrir le fournisseur {vendor}',
 	'vendors.row.verify': 'Vérifier',
 	'vendors.row.reject': 'Rejeter',
 	'vendors.row.confirmReject': 'Confirmer le rejet',
