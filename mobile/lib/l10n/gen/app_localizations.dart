@@ -381,7 +381,7 @@ abstract class AppLocalizations {
   /// No description provided for @dashboardRefreshFailed.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t refresh — these are the last figures loaded. Pull down to try again.'**
+  /// **'Couldn\'t refresh — these are the last figures loaded. Tap Retry to try again.'**
   String get dashboardRefreshFailed;
 
   /// No description provided for @dashboardNeedsAttention.
@@ -6654,26 +6654,26 @@ abstract class AppLocalizations {
   /// No description provided for @listShowingSavedCopy.
   ///
   /// In en, this message translates to:
-  /// **'Showing a saved copy — couldn\'t reach the server. Pull down to try again.'**
+  /// **'Showing a saved copy — couldn\'t reach the server. Tap Retry to try again.'**
   String get listShowingSavedCopy;
 
   /// No description provided for @listRefreshFailed.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t refresh — showing the last list loaded. Pull down to try again.'**
+  /// **'Couldn\'t refresh — showing the last list loaded. Tap Retry to try again.'**
   String get listRefreshFailed;
 
-  /// No description provided for @exceptionsLoadError.
+  /// Exceptions list first-load failure carrying the server's own reason (a 403 / 500 detail). A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t load exceptions. Check your connection and tap Retry.'**
-  String get exceptionsLoadError;
+  /// **'Couldn\'t load exceptions: {error}'**
+  String exceptionsLoadErrorPrefix(String error);
 
-  /// No description provided for @contractsLoadError.
+  /// Contracts list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t load contracts. Check your connection and tap Retry.'**
-  String get contractsLoadError;
+  /// **'Couldn\'t load contracts: {error}'**
+  String contractsLoadErrorPrefix(String error);
 
   /// A store's error text when the request never reached the server (offline, DNS, timeout, TLS).
   ///
@@ -6693,23 +6693,17 @@ abstract class AppLocalizations {
   /// **'Something went wrong. Please try again.'**
   String get errorUnexpected;
 
-  /// No description provided for @payRunCreated.
+  /// Run-created toast. `cfo` is `required` when the run trips the CFO approval threshold, else `none`.
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, one {Payment run created with {count} payment.} other {Payment run created with {count} payments.}}'**
-  String payRunCreated(int count);
+  /// **'{cfo, select, required{{count, plural, one{Payment run created with {count} payment totalling {amount}. CFO approval is required before it can be executed.} other{Payment run created with {count} payments totalling {amount}. CFO approval is required before it can be executed.}}} other{{count, plural, one{Payment run created with {count} payment totalling {amount}.} other{Payment run created with {count} payments totalling {amount}.}}}}'**
+  String payRunCreated(int count, String amount, String cfo);
 
-  /// No description provided for @payRunCreatedPlain.
+  /// Run-created toast when the reply carries no count or total. `cfo` as in payRunCreated.
   ///
   /// In en, this message translates to:
-  /// **'Payment run created.'**
-  String get payRunCreatedPlain;
-
-  /// Appended to the run-created toast when the run trips the CFO approval threshold.
-  ///
-  /// In en, this message translates to:
-  /// **'CFO approval is required before it can be executed.'**
-  String get payRunCreatedNeedsCfo;
+  /// **'{cfo, select, required{Payment run created. CFO approval is required before it can be executed.} other{Payment run created.}}'**
+  String payRunCreatedPlain(String cfo);
 
   /// No description provided for @payRunApproved.
   ///
@@ -6717,11 +6711,16 @@ abstract class AppLocalizations {
   /// **'Run approved by CFO'**
   String get payRunApproved;
 
-  /// No description provided for @payRunExecuted.
+  /// Run-executed toast. `provider` is the payment adapter's name, as the server reports it.
   ///
   /// In en, this message translates to:
-  /// **'Payment run executed: {completed} completed, {inFlight} in flight, {failed} failed.'**
-  String payRunExecuted(int completed, int inFlight, int failed);
+  /// **'Payment run executed via {provider}: {completed, plural, one{{completed} completed} other{{completed} completed}}, {inFlight, plural, one{{inFlight} in flight} other{{inFlight} in flight}}, {failed, plural, one{{failed} failed} other{{failed} failed}}.'**
+  String payRunExecuted(
+    String provider,
+    int completed,
+    int inFlight,
+    int failed,
+  );
 
   /// No description provided for @payRunExecutedPlain.
   ///
@@ -6750,7 +6749,7 @@ abstract class AppLocalizations {
   /// No description provided for @vendorSyncSummary.
   ///
   /// In en, this message translates to:
-  /// **'Synced {created} new, {updated} updated, {unchanged} unchanged.'**
+  /// **'Synced {created, plural, one{{created} new} other{{created} new}}, {updated, plural, one{{updated} updated} other{{updated} updated}}, {unchanged, plural, one{{unchanged} unchanged} other{{unchanged} unchanged}}.'**
   String vendorSyncSummary(int created, int updated, int unchanged);
 
   /// No description provided for @vendorSyncComplete.
@@ -6762,19 +6761,19 @@ abstract class AppLocalizations {
   /// No description provided for @vendorSyncNotLinked.
   ///
   /// In en, this message translates to:
-  /// **'{count} not linked (the name matches more than one vendor).'**
+  /// **'{count, plural, one{{count} not linked (the name matches more than one vendor).} other{{count} not linked (the name matches more than one vendor).}}'**
   String vendorSyncNotLinked(int count);
 
   /// No description provided for @vendorSyncUnlinked.
   ///
   /// In en, this message translates to:
-  /// **'{count} unlinked (linked under another ERP company).'**
+  /// **'{count, plural, one{{count} unlinked (linked under another ERP company).} other{{count} unlinked (linked under another ERP company).}}'**
   String vendorSyncUnlinked(int count);
 
   /// No description provided for @vendorSyncRelinked.
   ///
   /// In en, this message translates to:
-  /// **'{count} relinked (linked when this ERP company was connected before).'**
+  /// **'{count, plural, one{{count} relinked (linked when this ERP company was connected before).} other{{count} relinked (linked when this ERP company was connected before).}}'**
   String vendorSyncRelinked(int count);
 
   /// No description provided for @authInvalidCredentials.
@@ -6800,6 +6799,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not send the email code. Please try again.'**
   String get authEmailCodeFailed;
+
+  /// Exceptions list: the status chip filters every row out. `status` is the chip's API value.
+  ///
+  /// In en, this message translates to:
+  /// **'{status, select, open{No open exceptions} escalated{No escalated exceptions} resolved{No resolved exceptions} dismissed{No dismissed exceptions} other{No matching exceptions}}'**
+  String exceptionsFilteredEmpty(String status);
+
+  /// Contracts list: the search query or status chip filters every row out.
+  ///
+  /// In en, this message translates to:
+  /// **'No contracts match your search or filter.'**
+  String get contractsFilteredEmpty;
+
+  /// Action on a filtered-to-zero list that clears the filter / search.
+  ///
+  /// In en, this message translates to:
+  /// **'Show all'**
+  String get commonShowAll;
 }
 
 class _AppLocalizationsDelegate

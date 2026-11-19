@@ -152,7 +152,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get dashboardRefreshFailed =>
-      'Couldn\'t refresh — these are the last figures loaded. Pull down to try again.';
+      'Couldn\'t refresh — these are the last figures loaded. Tap Retry to try again.';
 
   @override
   String get dashboardNeedsAttention => 'Needs your attention';
@@ -4521,19 +4521,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get listShowingSavedCopy =>
-      'Showing a saved copy — couldn\'t reach the server. Pull down to try again.';
+      'Showing a saved copy — couldn\'t reach the server. Tap Retry to try again.';
 
   @override
   String get listRefreshFailed =>
-      'Couldn\'t refresh — showing the last list loaded. Pull down to try again.';
+      'Couldn\'t refresh — showing the last list loaded. Tap Retry to try again.';
 
   @override
-  String get exceptionsLoadError =>
-      'Couldn\'t load exceptions. Check your connection and tap Retry.';
+  String exceptionsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load exceptions: $error';
+  }
 
   @override
-  String get contractsLoadError =>
-      'Couldn\'t load contracts. Check your connection and tap Retry.';
+  String contractsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load contracts: $error';
+  }
 
   @override
   String get errorNetworkUnreachable =>
@@ -4548,29 +4550,66 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorUnexpected => 'Something went wrong. Please try again.';
 
   @override
-  String payRunCreated(int count) {
+  String payRunCreated(int count, String amount, String cfo) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: 'Payment run created with $count payments.',
-      one: 'Payment run created with $count payment.',
+      other:
+          'Payment run created with $count payments totalling $amount. CFO approval is required before it can be executed.',
+      one:
+          'Payment run created with $count payment totalling $amount. CFO approval is required before it can be executed.',
     );
-    return '$_temp0';
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Payment run created with $count payments totalling $amount.',
+      one: 'Payment run created with $count payment totalling $amount.',
+    );
+    String _temp2 = intl.Intl.selectLogic(cfo, {
+      'required': '$_temp0',
+      'other': '$_temp1',
+    });
+    return '$_temp2';
   }
 
   @override
-  String get payRunCreatedPlain => 'Payment run created.';
-
-  @override
-  String get payRunCreatedNeedsCfo =>
-      'CFO approval is required before it can be executed.';
+  String payRunCreatedPlain(String cfo) {
+    String _temp0 = intl.Intl.selectLogic(cfo, {
+      'required': 'Payment run created. CFO approval is required before it can be executed.',
+      'other': 'Payment run created.',
+    });
+    return '$_temp0';
+  }
 
   @override
   String get payRunApproved => 'Run approved by CFO';
 
   @override
-  String payRunExecuted(int completed, int inFlight, int failed) {
-    return 'Payment run executed: $completed completed, $inFlight in flight, $failed failed.';
+  String payRunExecuted(
+    String provider,
+    int completed,
+    int inFlight,
+    int failed,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      completed,
+      locale: localeName,
+      other: '$completed completed',
+      one: '$completed completed',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      inFlight,
+      locale: localeName,
+      other: '$inFlight in flight',
+      one: '$inFlight in flight',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      failed,
+      locale: localeName,
+      other: '$failed failed',
+      one: '$failed failed',
+    );
+    return 'Payment run executed via $provider: $_temp0, $_temp1, $_temp2.';
   }
 
   @override
@@ -4603,7 +4642,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String vendorSyncSummary(int created, int updated, int unchanged) {
-    return 'Synced $created new, $updated updated, $unchanged unchanged.';
+    String _temp0 = intl.Intl.pluralLogic(
+      created,
+      locale: localeName,
+      other: '$created new',
+      one: '$created new',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      updated,
+      locale: localeName,
+      other: '$updated updated',
+      one: '$updated updated',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      unchanged,
+      locale: localeName,
+      other: '$unchanged unchanged',
+      one: '$unchanged unchanged',
+    );
+    return 'Synced $_temp0, $_temp1, $_temp2.';
   }
 
   @override
@@ -4611,17 +4668,37 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String vendorSyncNotLinked(int count) {
-    return '$count not linked (the name matches more than one vendor).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count not linked (the name matches more than one vendor).',
+      one: '$count not linked (the name matches more than one vendor).',
+    );
+    return '$_temp0';
   }
 
   @override
   String vendorSyncUnlinked(int count) {
-    return '$count unlinked (linked under another ERP company).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count unlinked (linked under another ERP company).',
+      one: '$count unlinked (linked under another ERP company).',
+    );
+    return '$_temp0';
   }
 
   @override
   String vendorSyncRelinked(int count) {
-    return '$count relinked (linked when this ERP company was connected before).';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count relinked (linked when this ERP company was connected before).',
+      one:
+          '$count relinked (linked when this ERP company was connected before).',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -4637,4 +4714,23 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get authEmailCodeFailed =>
       'Could not send the email code. Please try again.';
+
+  @override
+  String exceptionsFilteredEmpty(String status) {
+    String _temp0 = intl.Intl.selectLogic(status, {
+      'open': 'No open exceptions',
+      'escalated': 'No escalated exceptions',
+      'resolved': 'No resolved exceptions',
+      'dismissed': 'No dismissed exceptions',
+      'other': 'No matching exceptions',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get contractsFilteredEmpty =>
+      'No contracts match your search or filter.';
+
+  @override
+  String get commonShowAll => 'Show all';
 }
