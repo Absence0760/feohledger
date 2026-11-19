@@ -8,7 +8,9 @@
 //      block whose branch is chosen by Intl.PluralRules for the ACTIVE
 //      locale, so "{n, plural, one {# invoice} other {# invoices}}"
 //      renders "1 invoice" / "2 invoices" without per-call-site ternaries.
-//      `#` inside the chosen branch is replaced by the count. Locales
+//      `#` inside the chosen branch is replaced by the count, grouped for
+//      the locale as ICU specifies ("1,234" / "1.234" / "1 234" via
+//      `formatCount`), so a plural never prints raw "1234". Locales
 //      declare only the CLDR categories they need; a missing selected
 //      category falls back to `other`.
 //   2. Plain `{placeholder}` substitution over whatever the plural layer
@@ -16,6 +18,8 @@
 //      string (not regex), so a value with regex-special characters is
 //      substituted verbatim, and an unreferenced placeholder is left
 //      intact rather than blanked.
+
+import { formatCount } from '#lib/utils/count.ts';
 
 const PLURAL_OPEN = /\{(\w+),\s*plural,\s*/g;
 
@@ -80,7 +84,12 @@ function resolvePlural(
 			chosen = exact ?? branches[pluralCategory(count, locale)] ?? branches.other;
 		}
 		chosen ??= branches.other ?? '';
-		const rendered = chosen.replaceAll('#', String(count));
+		// A whole count is grouped for the locale; a fractional plural value
+		// (none today) keeps its digits rather than being rounded to a count.
+		const shown = Number.isInteger(count)
+			? formatCount(count, { locale, fallback: String(count) })
+			: String(count);
+		const rendered = chosen.replaceAll('#', shown);
 		out = out.slice(0, blockStart) + rendered + out.slice(blockEnd + 1);
 	}
 	return out;

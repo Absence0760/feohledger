@@ -7,7 +7,7 @@
 	import UsageMeter from '#lib/components/assistant/UsageMeter.svelte';
 	import ChatLayout from '#lib/components/assistant/ChatLayout.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import type {
 		ChatResponse,
 		ConversationDetail,
@@ -143,13 +143,6 @@
 			conversation_id: conversationId ?? undefined
 		});
 		applyFinal(payload, assistantId);
-	}
-
-	/** A token count in the in-app locale. A bare `toLocaleString()` reads the
-	 *  BROWSER's locale, so a German UI on an English browser printed
-	 *  "12,000" inside a German sentence. */
-	function formatCount(n: number): string {
-		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
 	}
 
 	/** The over-budget notice, in place of the empty in-progress bubble. */

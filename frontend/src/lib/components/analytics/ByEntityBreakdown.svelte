@@ -7,6 +7,7 @@
 	import MoneyByCurrency from '#lib/components/ui/MoneyByCurrency.svelte';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
 	import type { AnalyticsByEntity } from '#lib/types/analytics.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// Consolidated reporting ACROSS entities — a side-by-side per-entity AP
 	// rollup plus a consolidated total (the cross-check). Renders only when the
@@ -113,7 +114,7 @@
 									mono
 								/>
 							</td>
-							<td class="num">{e.invoice_count}</td>
+							<td class="num">{formatCount(e.invoice_count)}</td>
 							<td class="num" class:be-alert={e.open_exceptions > 0}>{e.open_exceptions}</td>
 							<td class="num" data-testid="open-pos"><MoneyByCurrency figures={e.open_po_by_currency} mono /></td>
 						</tr>
@@ -132,7 +133,7 @@
 									mono
 								/>
 							</td>
-							<td class="num">{c.invoice_count}</td>
+							<td class="num">{formatCount(c.invoice_count)}</td>
 							<td class="num" class:be-alert={c.open_exceptions > 0}>{c.open_exceptions}</td>
 							<td class="num" data-testid="open-pos"><MoneyByCurrency figures={c.open_po_by_currency} mono /></td>
 						</tr>

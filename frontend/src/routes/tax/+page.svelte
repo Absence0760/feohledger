@@ -27,6 +27,7 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// `POST /api/tax/vendors/{id}/{w9,tin-verify}` and `POST /api/tax/1099/file`
 	// are all `require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)` — a CFO can read this
@@ -522,7 +523,7 @@
 								<Badge tone="danger" variant="chip-warn">{m('tax.chip.missing')}</Badge>
 							{/if}
 						</td>
-						<td class="right mono">{r.payment_count}</td>
+						<td class="right mono">{formatCount(r.payment_count)}</td>
 						<td class="right mono ytd-reportable">
 							<span class:over={r.over_threshold}>
 								<Money amount={r.ytd_paid} currency={reportCurrency} />

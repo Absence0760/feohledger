@@ -36,6 +36,7 @@
 	import { currentLocale, m } from '#lib/i18n/store.svelte.ts';
 	import { firstName, greetingKey, localDateKey } from '#lib/utils/greeting.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// The response shape lives in `#lib/types/analytics.ts` (`DashboardData`,
 	// `ReportingAgingBuckets`, `AgingBuckets`) rather than here. Declared
@@ -468,7 +469,7 @@
 							<div class="pipeline-bar-bg">
 								<div class="pipeline-bar" data-status={status} style="width:{pct}%"></div>
 							</div>
-							<span class="pipeline-count">{count}</span>
+							<span class="pipeline-count">{formatCount(count)}</span>
 						</div>
 					{/each}
 				</div>
