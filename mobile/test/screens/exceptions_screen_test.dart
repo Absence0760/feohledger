@@ -144,6 +144,32 @@ void main() {
     expect(find.byType(ExceptionListTile), findsNothing);
   });
 
+  testWidgets('a failed load shows Retry, not the queue-clear copy',
+      (tester) async {
+    var fail = true;
+    ApiClient().debugConfigure(
+      client: MockClient((req) async => fail
+          ? http.Response('boom', 500)
+          : _list([_exceptionJson('1', typeLabel: 'Duplicate Invoice')])),
+    );
+
+    await tester.pumpWidget(_localized(const ExceptionsScreen()));
+    await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Retry'));
+
+    expect(
+      find.text("Couldn't load exceptions. Check your connection and tap Retry."),
+      findsOneWidget,
+    );
+    expect(find.text('No exceptions'), findsNothing);
+    expect(find.text('The exception queue is clear'), findsNothing);
+
+    // Retry refetches, and the rows replace the error.
+    fail = false;
+    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+    await _pumpUntil(tester, find.byType(ExceptionListTile));
+    expect(find.byType(ExceptionListTile), findsOneWidget);
+  });
+
   testWidgets('renders the status filter chips', (tester) async {
     ApiClient().debugConfigure(
       client: MockClient((req) async => _list([])),
