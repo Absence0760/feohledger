@@ -136,7 +136,7 @@ void main() {
 
     expect(
       tester.getSemantics(find.byType(StaleDataBanner)),
-      containsSemantics(label: _savedCopy, isLiveRegion: true),
+      isSemantics(label: _savedCopy, isLiveRegion: true),
     );
     handle.dispose();
   });
