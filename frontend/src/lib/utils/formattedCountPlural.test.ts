@@ -124,7 +124,6 @@ describe('the scanner catches what it is for', () => {
 				shown: formatCount(items.length),
 				total: big ? formatCount(total) : '—',
 				raw: total,
-				nested: { inner: formatCount(1) }
 			});
 			// m('x.comment', { n: formatCount(1) })
 			const c = m('x.raw', { n: rows.length });
