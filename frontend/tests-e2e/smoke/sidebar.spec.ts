@@ -27,6 +27,26 @@ test.describe('sidebar profile popover', () => {
 		await expect(page.locator('.profile-btn')).toBeFocused();
 	});
 
+	test('is a disclosure: aria-expanded + aria-controls, no menu popup, Tab moves in', async ({
+		page
+	}) => {
+		await page.goto('/');
+		const trigger = page.locator('.profile-btn');
+		// Its contents are identity, links and Log out, not menuitems, so the
+		// trigger must not promise an ARIA menu (WAI-ARIA APG § Disclosure).
+		await expect(trigger).not.toHaveAttribute('aria-haspopup', /.*/);
+		await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+		await trigger.click();
+		await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+		const popover = page.locator('.profile-popover');
+		await expect(trigger).toHaveAttribute('aria-controls', (await popover.getAttribute('id'))!);
+
+		// The content follows its trigger, so Tab goes into it, not past it.
+		await page.keyboard.press('Tab');
+		await expect(popover.locator('a[href="/profile"]')).toBeFocused();
+	});
+
 	test('backdrop click still closes the popover', async ({ page }) => {
 		await page.goto('/');
 		await page.locator('.profile-btn').click();
