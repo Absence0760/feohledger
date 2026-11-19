@@ -69,6 +69,7 @@ from app.config import settings
 from app.database import control_session_factory, get_tenant_engine
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice_status import PAYABLE_STATUSES
 from app.models.organization import Organization
 from app.models.payment import Payment
 from app.models.workflow import WorkflowInstance
@@ -102,9 +103,7 @@ ERP_PAID_RECORDABLE = frozenset(
 
 #: Statuses at which FeohLedger may still pay the invoice — where a bill paid,
 #: part-paid or removed in the ERP must stop our payment runs.
-PAYABLE_HERE = frozenset(
-    {InvoiceStatus.approved, InvoiceStatus.posted_in_erp, InvoiceStatus.payment_scheduled}
-)
+PAYABLE_HERE = frozenset(PAYABLE_STATUSES)
 
 #: Refusals meaning FeohLedger still holds its own claim on paying the invoice
 #: (`services/external_payment`). Raised as the BLOCKING `payment_reconciliation`

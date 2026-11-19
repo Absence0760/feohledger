@@ -34,6 +34,7 @@ from app.models.organization import Organization
 from app.models.payment import Payment
 from app.services.invoice_warning_catalog import exception_finding
 from app.services.payment_adapters import PaymentStatus, SettlementReport, get_payment_adapter
+from app.services.payment_adapters.base import TERMINAL_STATUSES
 from app.services.payment_settlement_record import (
     SettlementCompletion,
     open_settlement_mismatch_exception,
@@ -554,11 +555,7 @@ async def _reconcile_tenant(org: Organization, now: datetime) -> dict[str, int]:
                     # Webhooks could have raced us — only accept terminal
                     # status updates from the poll. The async webhook path
                     # handles the in-flight transitions.
-                    if upstream in (
-                        PaymentStatus.completed,
-                        PaymentStatus.failed,
-                        PaymentStatus.cancelled,
-                    ):
+                    if upstream in TERMINAL_STATUSES:
                         # Resolve the settled figure BEFORE the lock. This is a
                         # live rail round trip, and running it under
                         # `SELECT ... FOR UPDATE` blocked `payment_webhook`'s own

@@ -82,7 +82,7 @@ from app.models.credit_memo import CreditMemo
 from app.models.discount import DiscountOffer
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_embedding import InvoiceEmbedding
-from app.models.invoice_status import PRE_APPROVAL_STATUSES
+from app.models.invoice_status import PRE_APPROVAL_STATUSES, SETTLED_STATUSES
 from app.models.procurement import (
     Catalog,
     CatalogItem,
@@ -171,7 +171,7 @@ VENDOR_MERGE_INVALID_ID = "vendor_merge_invalid_id"
 #: Where an invoice's money has already left: its payee is history, and a merge
 #: folds it into the canonical vendor's (the same reading as the bank-change
 #: flag's, `api/vendors._MONEY_MOVED_STATUSES`).
-_MONEY_MOVED_STATUSES = (InvoiceStatus.paid, InvoiceStatus.done)
+_MONEY_MOVED_STATUSES = SETTLED_STATUSES
 
 
 def approved_unpaid_clause():

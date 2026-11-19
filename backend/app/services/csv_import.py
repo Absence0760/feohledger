@@ -43,6 +43,7 @@ from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice_status import SETTLED_STATUSES
 from app.models.vendor import Vendor
 from app.services.audit_dispatch import dispatch_audit
 from app.services.gl_chart import load_invoice_chart
@@ -105,7 +106,7 @@ _INVOICE_COLUMNS = {
 # carries `uploaded_by_id` (the AP user who ran the import): segregation of
 # duties is keyed on that column, so a row that landed without it was exempt
 # from the very gate this status allowlist exists to force it through.
-_IMPORTABLE_INVOICE_STATUSES = frozenset({"new", "done", "paid", "rejected"})
+_IMPORTABLE_INVOICE_STATUSES = frozenset({"new", "rejected", *(s.value for s in SETTLED_STATUSES)})
 
 # The importable statuses a row can never leave for a live stage again: `done`
 # is terminal, and an imported `paid` row has no `Payment` for the void path to
@@ -116,7 +117,7 @@ _IMPORTABLE_INVOICE_STATUSES = frozenset({"new", "done", "paid", "rejected"})
 # `rejected` are NOT history: both reach approval (`rejected` via
 # `POST /api/invoices/{id}/resubmit`), and an approved code is what the ERP push
 # books to, so they take the full rule like any other write.
-_HISTORICAL_INVOICE_STATUSES = frozenset({"done", "paid"})
+_HISTORICAL_INVOICE_STATUSES = frozenset(s.value for s in SETTLED_STATUSES)
 
 # ---------------------------------------------------------------------------
 # Import provenance

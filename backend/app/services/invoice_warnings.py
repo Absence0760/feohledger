@@ -20,6 +20,7 @@ from app.models.invoice_status import (
     APPROVED_OR_BEYOND_STATUSES,
     IN_REVIEW_STATUSES,
     PRE_APPROVAL_STATUSES,
+    SETTLED_STATUSES,
 )
 from app.models.procurement import PurchaseOrder, po_currency_code
 from app.services.invoice_warning_catalog import (
@@ -1083,7 +1084,7 @@ _PRE_APPROVAL_STATUSES = PRE_APPROVAL_STATUSES
 #: Invoices the ERP PO sync's re-match (and any ``skip_settled`` one) leaves
 #: alone: the money has gone, so a hold would stop nothing
 #: (``invoices_citing_pos``).
-_ERP_SYNC_SKIPPED_STATUSES = (InvoiceStatus.paid.value, InvoiceStatus.done.value)
+_ERP_SYNC_SKIPPED_STATUSES = tuple(s.value for s in SETTLED_STATUSES)
 
 #: ``Exception.erp_report["kind"]`` of an open PO-match row that an ERP PO
 #: sync's re-match no longer finds (decisions §323, amended). The sync never
