@@ -84,9 +84,7 @@
   "notificationsCouldNotMarkAll": "Impossible de tout marquer comme lu",
   "notificationsEmptyUnread": "Aucune notification non lue",
   "notificationsEmpty": "Aucune notification",
-  "notificationsCaughtUp": "Vous êtes à jour",
   "notificationsNothingYet": "Rien pour le moment",
-  "notificationsLoadError": "Impossible de charger les notifications",
   "vendorsTitle": "Fournisseurs",
   "vendorsSyncErp": "Synchroniser depuis l'ERP",
   "vendorsSyncErpLabel": "Synchroniser les fournisseurs depuis l'ERP",
@@ -96,7 +94,6 @@
   "vendorsFilterInactive": "Inactifs",
   "vendorsFilterRejected": "Rejetés",
   "vendorsEmpty": "Aucun fournisseur trouvé",
-  "vendorsLoadError": "Impossible de charger les fournisseurs",
   "vendorActionVerify": "Vérifier",
   "vendorActionReject": "Rejeter",
   "vendorUnverifiedLabel": "Fournisseur non vérifié",
@@ -697,7 +694,6 @@
   "inspectionsRecord": "Enregistrer une inspection",
   "inspectionsEmpty": "Aucune inspection qualité enregistrée.",
   "inspectionsEmptyFiltered": "Aucune inspection avec ce résultat.",
-  "inspectionsLoadError": "Échec du chargement des inspections",
   "inspectionsResultPass": "Conforme",
   "inspectionsResultFail": "Non conforme",
   "inspectionsResultPartial": "Acceptation partielle",
@@ -1088,5 +1084,9 @@
   "listLoadMoreFailed": "Impossible de charger la suite.",
   "invoicesLoadErrorPrefix": "Impossible de charger les factures : {error}",
   "approvalsLoadErrorPrefix": "Impossible de charger les approbations en attente : {error}",
-  "invoicesFilteredEmpty": "Aucune facture ne correspond à ces filtres"
+  "invoicesFilteredEmpty": "Aucune facture ne correspond à ces filtres",
+  "notificationsLoadErrorPrefix": "Impossible de charger les notifications: {error}",
+  "vendorsLoadErrorPrefix": "Impossible de charger les fournisseurs: {error}",
+  "inspectionsLoadErrorPrefix": "Échec du chargement des inspections: {error}",
+  "vendorsFilteredEmpty": "Aucun fournisseur ne correspond à votre recherche ou à votre filtre."
 }

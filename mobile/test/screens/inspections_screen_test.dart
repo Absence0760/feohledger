@@ -14,6 +14,7 @@ import 'package:feohledger_mobile/screens/inspection_detail_screen.dart';
 import 'package:feohledger_mobile/screens/inspections_screen.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/inspection_store.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/inspection_list_tile.dart';
 import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
@@ -190,8 +191,68 @@ void main() {
 
         expect(find.text('No inspections with this outcome.'), findsOneWidget);
         expect(find.text('No quality inspections recorded.'), findsNothing);
+
+        // Show all clears the chip and refetches the whole set.
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Show all'));
+        await _pumpUntil(tester, find.text('No quality inspections recorded.'));
+
+        expect(InspectionStore.instance.resultFilter, isNull);
+        expect(find.text('No quality inspections recorded.'), findsOneWidget);
       },
     );
+
+    testWidgets('the empty state can be pulled to refresh', (tester) async {
+      var calls = 0;
+      await loginThen(
+        ['ap_manager'],
+        MockClient((req) async {
+          calls++;
+          return _list([]);
+        }),
+      );
+
+      await tester.pumpWidget(_localized(const InspectionsScreen()));
+      await _pumpUntil(tester, find.text('No quality inspections recorded.'));
+      expect(calls, 1);
+
+      await tester.fling(
+        find.text('No quality inspections recorded.'),
+        const Offset(0, 300),
+        1000,
+      );
+      await tester.pumpAndSettle();
+      await _pumpUntilTrue(tester, () => calls >= 2);
+
+      expect(calls, 2);
+    });
+
+    testWidgets('a failed action over a loaded list raises no stale banner', (
+      tester,
+    ) async {
+      await loginThen(
+        ['admin'],
+        MockClient((req) async {
+          if (req.url.path == '/api/goods-receipts') {
+            return _json({'detail': 'Not permitted'}, 403);
+          }
+          return _list([_inspectionJson('1')]);
+        }),
+      );
+
+      await tester.pumpWidget(_localized(const InspectionsScreen()));
+      await _pumpUntil(tester, find.byType(InspectionListTile));
+
+      Object? options = 'pending';
+      InspectionStore.instance.loadReceiptOptions().then((v) => options = v);
+      await _pumpUntilTrue(tester, () => options != 'pending');
+
+      expect(options, isNull);
+      expect(InspectionStore.instance.actionError, 'Not permitted');
+      expect(InspectionStore.instance.loadError, isNull);
+      // The rows are live: the refusal is the action's, not the list's.
+      expect(find.byType(StaleDataBanner), findsNothing);
+      expect(find.byType(InspectionListTile), findsOneWidget);
+    });
 
     testWidgets('shows an error state with Retry, and Retry refetches', (
       tester,
@@ -208,12 +269,21 @@ void main() {
       );
 
       await tester.pumpWidget(_localized(const InspectionsScreen()));
-      await _pumpUntil(tester, find.text('Could not load inspections'));
+      await _pumpUntil(tester, find.byType(LoadErrorState));
 
-      // The shared first-load state, carrying the localized sentence and never
-      // the description the store holds (a bare 500 has no server sentence).
+      // The shared first-load state, worded from the cause (a server answered,
+      // with no sentence of its own) — never the exception, and never the
+      // empty copy, which would claim nothing has been inspected.
       expect(find.byType(LoadErrorState), findsOneWidget);
-      expect(InspectionStore.instance.error, contains('HTTP 500'));
+      expect(
+        find.text(
+          "Couldn't load inspections: "
+          "The server couldn't complete the request (HTTP 500).",
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('No quality inspections recorded.'), findsNothing);
+      expect(InspectionStore.instance.loadError, isA<ApiException>());
       expect(find.textContaining('boom'), findsNothing);
       expect(find.textContaining('ApiException'), findsNothing);
       expect(find.textContaining('Request failed'), findsNothing);

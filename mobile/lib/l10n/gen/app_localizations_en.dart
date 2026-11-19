@@ -310,13 +310,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notificationsEmpty => 'No notifications';
 
   @override
-  String get notificationsCaughtUp => 'You\'re all caught up';
-
-  @override
   String get notificationsNothingYet => 'Nothing here yet';
 
   @override
-  String get notificationsLoadError => 'Couldn\'t load notifications';
+  String notificationsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load notifications: $error';
+  }
 
   @override
   String get vendorsTitle => 'Vendors';
@@ -346,7 +345,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get vendorsEmpty => 'No vendors found';
 
   @override
-  String get vendorsLoadError => 'Could not load vendors';
+  String vendorsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load vendors: $error';
+  }
 
   @override
   String get vendorActionVerify => 'Verify';
@@ -2754,7 +2755,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get inspectionsEmptyFiltered => 'No inspections with this outcome.';
 
   @override
-  String get inspectionsLoadError => 'Could not load inspections';
+  String inspectionsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load inspections: $error';
+  }
 
   @override
   String get inspectionsResultPass => 'Pass';
@@ -4731,6 +4734,9 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get contractsFilteredEmpty =>
       'No contracts match your search or filter.';
+
+  @override
+  String get vendorsFilteredEmpty => 'No vendors match your search or filter.';
 
   @override
   String get commonShowAll => 'Show all';

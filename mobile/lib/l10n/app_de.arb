@@ -84,9 +84,7 @@
   "notificationsCouldNotMarkAll": "Konnte nicht alle als gelesen markieren",
   "notificationsEmptyUnread": "Keine ungelesenen Benachrichtigungen",
   "notificationsEmpty": "Keine Benachrichtigungen",
-  "notificationsCaughtUp": "Sie sind auf dem neuesten Stand",
   "notificationsNothingYet": "Hier ist noch nichts",
-  "notificationsLoadError": "Benachrichtigungen konnten nicht geladen werden",
   "vendorsTitle": "Lieferanten",
   "vendorsSyncErp": "Aus ERP synchronisieren",
   "vendorsSyncErpLabel": "Lieferanten aus ERP synchronisieren",
@@ -96,7 +94,6 @@
   "vendorsFilterInactive": "Inaktiv",
   "vendorsFilterRejected": "Abgelehnt",
   "vendorsEmpty": "Keine Lieferanten gefunden",
-  "vendorsLoadError": "Lieferanten konnten nicht geladen werden",
   "vendorActionVerify": "Bestätigen",
   "vendorActionReject": "Ablehnen",
   "vendorUnverifiedLabel": "Ungeprüfter Lieferant",
@@ -697,7 +694,6 @@
   "inspectionsRecord": "Prüfung erfassen",
   "inspectionsEmpty": "Keine Qualitätsprüfungen erfasst.",
   "inspectionsEmptyFiltered": "Keine Prüfungen mit diesem Ergebnis.",
-  "inspectionsLoadError": "Prüfungen konnten nicht geladen werden",
   "inspectionsResultPass": "Bestanden",
   "inspectionsResultFail": "Nicht bestanden",
   "inspectionsResultPartial": "Teilannahme",
@@ -1088,5 +1084,9 @@
   "listLoadMoreFailed": "Weitere Einträge konnten nicht geladen werden.",
   "invoicesLoadErrorPrefix": "Rechnungen konnten nicht geladen werden: {error}",
   "approvalsLoadErrorPrefix": "Ausstehende Freigaben konnten nicht geladen werden: {error}",
-  "invoicesFilteredEmpty": "Keine Rechnungen entsprechen diesen Filtern"
+  "invoicesFilteredEmpty": "Keine Rechnungen entsprechen diesen Filtern",
+  "notificationsLoadErrorPrefix": "Benachrichtigungen konnten nicht geladen werden: {error}",
+  "vendorsLoadErrorPrefix": "Lieferanten konnten nicht geladen werden: {error}",
+  "inspectionsLoadErrorPrefix": "Prüfungen konnten nicht geladen werden: {error}",
+  "vendorsFilteredEmpty": "Keine Lieferanten passen zu Ihrer Suche oder Ihrem Filter."
 }

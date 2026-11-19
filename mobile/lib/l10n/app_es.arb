@@ -84,9 +84,7 @@
   "notificationsCouldNotMarkAll": "No se pudo marcar todo como leído",
   "notificationsEmptyUnread": "No hay notificaciones sin leer",
   "notificationsEmpty": "No hay notificaciones",
-  "notificationsCaughtUp": "Estás al día",
   "notificationsNothingYet": "Aún no hay nada aquí",
-  "notificationsLoadError": "No se pudieron cargar las notificaciones",
   "vendorsTitle": "Proveedores",
   "vendorsSyncErp": "Sincronizar desde ERP",
   "vendorsSyncErpLabel": "Sincronizar proveedores desde ERP",
@@ -96,7 +94,6 @@
   "vendorsFilterInactive": "Inactivos",
   "vendorsFilterRejected": "Rechazados",
   "vendorsEmpty": "No se encontraron proveedores",
-  "vendorsLoadError": "No se pudieron cargar los proveedores",
   "vendorActionVerify": "Verificar",
   "vendorActionReject": "Rechazar",
   "vendorUnverifiedLabel": "Proveedor sin verificar",
@@ -697,7 +694,6 @@
   "inspectionsRecord": "Registrar inspección",
   "inspectionsEmpty": "No hay inspecciones de calidad registradas.",
   "inspectionsEmptyFiltered": "No hay inspecciones con este resultado.",
-  "inspectionsLoadError": "No se pudieron cargar las inspecciones",
   "inspectionsResultPass": "Aprobada",
   "inspectionsResultFail": "Rechazada",
   "inspectionsResultPartial": "Aceptación parcial",
@@ -1088,5 +1084,9 @@
   "listLoadMoreFailed": "No se pudieron cargar más.",
   "invoicesLoadErrorPrefix": "No se pudieron cargar las facturas: {error}",
   "approvalsLoadErrorPrefix": "No se pudieron cargar las aprobaciones pendientes: {error}",
-  "invoicesFilteredEmpty": "Ninguna factura coincide con estos filtros"
+  "invoicesFilteredEmpty": "Ninguna factura coincide con estos filtros",
+  "notificationsLoadErrorPrefix": "No se pudieron cargar las notificaciones: {error}",
+  "vendorsLoadErrorPrefix": "No se pudieron cargar los proveedores: {error}",
+  "inspectionsLoadErrorPrefix": "No se pudieron cargar las inspecciones: {error}",
+  "vendorsFilteredEmpty": "Ningún proveedor coincide con tu búsqueda o filtro."
 }

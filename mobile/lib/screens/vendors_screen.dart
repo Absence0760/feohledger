@@ -2,12 +2,13 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/vendor.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
 import 'package:feohledger_mobile/utils/debouncer.dart';
-import 'package:feohledger_mobile/widgets/load_error_state.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 
 /// Vendor management — list with status filters + search, verify / reject an
@@ -114,31 +115,33 @@ class _VendorsScreenState extends State<VendorsScreen> {
               listenable: VendorStore.instance,
               builder: (context, _) {
                 final store = VendorStore.instance;
+                final loadError = store.loadError;
 
-                if (store.loading && store.vendors.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (store.error != null && store.vendors.isEmpty) {
-                  return LoadErrorState(
-                    message: AppLocalizations.of(context).vendorsLoadError,
-                    onRetry: store.fetch,
-                  );
-                }
-
-                if (store.vendors.isEmpty) {
-                  return Center(child: Text(l.vendorsEmpty));
-                }
-
-                return RefreshIndicator(
+                return AsyncListBody<Vendor>(
+                  items: store.vendors,
+                  loading: store.loading,
+                  // The fetch's failure only — a refused verify leaves the
+                  // list live (actionError), so it raises no banner.
+                  hasError: loadError != null,
+                  fromCache: store.fromCache,
+                  // Worded from the cause: the server's reason on a 403 / 500,
+                  // the connection sentence only when no server answered.
+                  errorMessage: loadError == null
+                      ? ''
+                      : describeLoadError(
+                          l,
+                          loadError,
+                          l.vendorsLoadErrorPrefix,
+                        ),
                   onRefresh: store.fetch,
-                  child: ListView.separated(
-                    itemCount: store.vendors.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      return _buildRow(store.vendors[index]);
-                    },
-                  ),
+                  empty: Text(l.vendorsEmpty, textAlign: TextAlign.center),
+                  filteredEmpty: store.isFiltered
+                      ? FilteredEmptyState(
+                          message: l.vendorsFilteredEmpty,
+                          onShowAll: _showAll,
+                        )
+                      : null,
+                  itemBuilder: (context, vendor) => _buildRow(vendor),
                 );
               },
             ),
@@ -167,12 +170,14 @@ class _VendorsScreenState extends State<VendorsScreen> {
       key: ValueKey(vendor.id),
       background: _swipeBackground(
         Colors.green.shade700,
+        Colors.green.shade900,
         Icons.check,
         Alignment.centerLeft,
         l.vendorActionVerify,
       ),
       secondaryBackground: _swipeBackground(
         Colors.red.shade700,
+        Colors.red.shade900,
         Icons.block,
         Alignment.centerRight,
         l.vendorActionReject,
@@ -200,24 +205,33 @@ class _VendorsScreenState extends State<VendorsScreen> {
     );
   }
 
+  /// The swipe affordance: what the gesture will do, as text beside the
+  /// icon so the icon is never an unlabelled glyph (WCAG 1.1.1).
+  ///
+  /// [tint] colours the 15% wash; [ink] the icon and the label, one shade
+  /// darker so the copy stays readable on that wash: green.shade900 on the
+  /// green.shade700 wash is 6.5:1 and red.shade900 on the red.shade700 wash
+  /// 5.2:1, where the shade700 ink this used to share with the wash read
+  /// 3.4:1 and 3.9:1 and failed AA (1.4.3).
   Widget _swipeBackground(
-    Color color,
+    Color tint,
+    Color ink,
     IconData icon,
     Alignment alignment,
     String action,
   ) {
     return Container(
-      color: color.withValues(alpha: 0.15),
+      color: tint.withValues(alpha: 0.15),
       alignment: alignment,
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color),
+          Icon(icon, color: ink),
           const SizedBox(width: 8),
           Text(
             action,
-            style: TextStyle(color: color, fontWeight: FontWeight.w600),
+            style: TextStyle(color: ink, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -307,9 +321,17 @@ class _VendorsScreenState extends State<VendorsScreen> {
     if (!mounted) return;
     setState(() => _syncing = false);
     final text =
-        message ?? l.vendorSyncFailed(VendorStore.instance.error ?? '');
+        message ?? l.vendorSyncFailed(VendorStore.instance.actionError ?? '');
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
     A11y.announce(context, text);
+  }
+
+  /// The filtered-empty state's "Show all": clear the search box with the
+  /// chip, or the field would keep a query the list no longer applies.
+  void _showAll() {
+    _searchDebouncer.cancel();
+    _searchController.clear();
+    VendorStore.instance.clearFilters();
   }
 
   Widget _filterChip(String label, String? value, String? current) {

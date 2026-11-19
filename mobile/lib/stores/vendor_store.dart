@@ -15,14 +15,29 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
 
   List<Vendor> _vendors = [];
   bool _loading = false;
-  String? _error;
+
+  /// The last **fetch** failure, as caught — the list screen words it with
+  /// `describeLoadError` (the server's reason vs the connection sentence) and
+  /// it alone drives the list's error state and "couldn't refresh" banner.
+  /// Actions never write it.
+  Object? _loadError;
+
+  /// The last failed **action** (verify / reject / ERP sync), as a sentence
+  /// ([describeApiError]). Kept apart from [loadError] so a refused verify
+  /// over a loaded list is not reported as a failed refresh.
+  String? _actionError;
   String? _statusFilter;
   String? _searchQuery;
   bool _fromCache = false;
 
   List<Vendor> get vendors => _vendors;
   bool get loading => _loading;
-  String? get error => _error;
+  Object? get loadError => _loadError;
+  String? get actionError => _actionError;
+
+  /// Whether a status chip or search query is narrowing the list — the
+  /// screen shows the filtered-empty state, not "No vendors found", when it is.
+  bool get isFiltered => _statusFilter != null || _searchQuery != null;
   String? get statusFilter => _statusFilter;
   String? get searchQuery => _searchQuery;
   bool get fromCache => _fromCache;
@@ -34,7 +49,8 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
   void reset() {
     _vendors = [];
     _loading = false;
-    _error = null;
+    _loadError = null;
+    _actionError = null;
     _statusFilter = null;
     _searchQuery = null;
     _fromCache = false;
@@ -52,12 +68,20 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
     fetch();
   }
 
+  /// Drop the status chip and the search query together and refetch — the
+  /// filtered-empty state's "Show all".
+  void clearFilters() {
+    _statusFilter = null;
+    _searchQuery = null;
+    fetch();
+  }
+
   Future<void> fetch() async {
     // See SequencedFetch — discards a response superseded by a newer fetch()
     // (e.g. a stale search result resolving after a later keystroke's).
     final token = nextRequestToken();
     _loading = true;
-    _error = null;
+    _loadError = null;
     notifyListeners();
 
     final cacheKey = 'vendors_${_statusFilter ?? 'all'}_${_searchQuery ?? ''}';
@@ -96,7 +120,7 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
       if (!isCurrentRequest(token)) return;
       _fromCache = false;
       _loading = false;
-      _error = describeApiError(e);
+      _loadError = e;
       notifyListeners();
     }
   }
@@ -114,12 +138,13 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
   }
 
   Future<bool> _act(Future<void> Function() action) async {
+    _actionError = null;
     try {
       await action();
       await fetch();
       return true;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return false;
     }
@@ -127,14 +152,15 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
 
   /// Pull vendors from the connected ERP, then refetch the list. Returns the
   /// sync's counts as a localized summary on success, or null on failure
-  /// (with [error] set). A 400 (no ERP configured) is a failure here.
+  /// (with [actionError] set). A 400 (no ERP configured) is a failure here.
   Future<String?> syncErp() async {
+    _actionError = null;
     try {
       final result = await VendorApi.syncErp();
       await fetch();
       return _syncMessage(result);
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return null;
     }

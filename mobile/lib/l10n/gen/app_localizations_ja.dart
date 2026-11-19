@@ -301,13 +301,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get notificationsEmpty => '通知はありません';
 
   @override
-  String get notificationsCaughtUp => 'すべて確認済みです';
-
-  @override
   String get notificationsNothingYet => 'まだ何もありません';
 
   @override
-  String get notificationsLoadError => '通知を読み込めませんでした';
+  String notificationsLoadErrorPrefix(String error) {
+    return '通知を読み込めませんでした: $error';
+  }
 
   @override
   String get vendorsTitle => '取引先';
@@ -337,7 +336,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get vendorsEmpty => '取引先が見つかりません';
 
   @override
-  String get vendorsLoadError => '取引先を読み込めませんでした';
+  String vendorsLoadErrorPrefix(String error) {
+    return '取引先を読み込めませんでした: $error';
+  }
 
   @override
   String get vendorActionVerify => '確認';
@@ -2623,7 +2624,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get inspectionsEmptyFiltered => 'この結果の検査はありません。';
 
   @override
-  String get inspectionsLoadError => '検査の読み込みに失敗しました';
+  String inspectionsLoadErrorPrefix(String error) {
+    return '検査の読み込みに失敗しました: $error';
+  }
 
   @override
   String get inspectionsResultPass => '合格';
@@ -4529,6 +4532,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get contractsFilteredEmpty => '検索またはフィルターに一致する契約はありません。';
+
+  @override
+  String get vendorsFilteredEmpty => '検索またはフィルターに一致する取引先はありません。';
 
   @override
   String get commonShowAll => 'すべて表示';

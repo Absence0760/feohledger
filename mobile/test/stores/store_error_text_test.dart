@@ -110,7 +110,7 @@ void main() {
 
       expect(ok, isNull);
       expect(
-        VendorStore.instance.error,
+        VendorStore.instance.actionError,
         'Der Server ist nicht erreichbar. Prüfen Sie Ihre Verbindung und '
         'versuchen Sie es erneut.',
       );

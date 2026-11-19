@@ -133,9 +133,16 @@
   "notificationsCouldNotMarkAll": "Could not mark all read",
   "notificationsEmptyUnread": "No unread notifications",
   "notificationsEmpty": "No notifications",
-  "notificationsCaughtUp": "You're all caught up",
   "notificationsNothingYet": "Nothing here yet",
-  "notificationsLoadError": "Couldn't load notifications",
+  "notificationsLoadErrorPrefix": "Couldn't load notifications: {error}",
+  "@notificationsLoadErrorPrefix": {
+    "description": "Notifications list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "vendorsTitle": "Vendors",
   "vendorsSyncErp": "Sync from ERP",
   "vendorsSyncErpLabel": "Sync vendors from ERP",
@@ -145,7 +152,15 @@
   "vendorsFilterInactive": "Inactive",
   "vendorsFilterRejected": "Rejected",
   "vendorsEmpty": "No vendors found",
-  "vendorsLoadError": "Could not load vendors",
+  "vendorsLoadErrorPrefix": "Couldn't load vendors: {error}",
+  "@vendorsLoadErrorPrefix": {
+    "description": "Vendors list first-load failure carrying the server's own reason (a 403 / 500 detail). A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "vendorActionVerify": "Verify",
   "vendorActionReject": "Reject",
   "vendorUnverifiedLabel": "Unverified vendor",
@@ -2183,7 +2198,15 @@
   "inspectionsRecord": "Record inspection",
   "inspectionsEmpty": "No quality inspections recorded.",
   "inspectionsEmptyFiltered": "No inspections with this outcome.",
-  "inspectionsLoadError": "Could not load inspections",
+  "inspectionsLoadErrorPrefix": "Couldn't load inspections: {error}",
+  "@inspectionsLoadErrorPrefix": {
+    "description": "Inspections list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "inspectionsResultPass": "Pass",
   "inspectionsResultFail": "Fail",
   "inspectionsResultPartial": "Partial acceptance",
@@ -4202,6 +4225,10 @@
   "contractsFilteredEmpty": "No contracts match your search or filter.",
   "@contractsFilteredEmpty": {
     "description": "Contracts list: the search query or status chip filters every row out."
+  },
+  "vendorsFilteredEmpty": "No vendors match your search or filter.",
+  "@vendorsFilteredEmpty": {
+    "description": "Vendors list: the search query or status chip filters every row out."
   },
   "commonShowAll": "Show all",
   "@commonShowAll": {

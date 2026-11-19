@@ -612,23 +612,17 @@ abstract class AppLocalizations {
   /// **'No notifications'**
   String get notificationsEmpty;
 
-  /// No description provided for @notificationsCaughtUp.
-  ///
-  /// In en, this message translates to:
-  /// **'You\'re all caught up'**
-  String get notificationsCaughtUp;
-
   /// No description provided for @notificationsNothingYet.
   ///
   /// In en, this message translates to:
   /// **'Nothing here yet'**
   String get notificationsNothingYet;
 
-  /// No description provided for @notificationsLoadError.
+  /// Notifications list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t load notifications'**
-  String get notificationsLoadError;
+  /// **'Couldn\'t load notifications: {error}'**
+  String notificationsLoadErrorPrefix(String error);
 
   /// No description provided for @vendorsTitle.
   ///
@@ -684,11 +678,11 @@ abstract class AppLocalizations {
   /// **'No vendors found'**
   String get vendorsEmpty;
 
-  /// No description provided for @vendorsLoadError.
+  /// Vendors list first-load failure carrying the server's own reason (a 403 / 500 detail). A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Could not load vendors'**
-  String get vendorsLoadError;
+  /// **'Couldn\'t load vendors: {error}'**
+  String vendorsLoadErrorPrefix(String error);
 
   /// No description provided for @vendorActionVerify.
   ///
@@ -4305,11 +4299,11 @@ abstract class AppLocalizations {
   /// **'No inspections with this outcome.'**
   String get inspectionsEmptyFiltered;
 
-  /// No description provided for @inspectionsLoadError.
+  /// Inspections list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Could not load inspections'**
-  String get inspectionsLoadError;
+  /// **'Couldn\'t load inspections: {error}'**
+  String inspectionsLoadErrorPrefix(String error);
 
   /// No description provided for @inspectionsResultPass.
   ///
@@ -6805,6 +6799,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No contracts match your search or filter.'**
   String get contractsFilteredEmpty;
+
+  /// Vendors list: the search query or status chip filters every row out.
+  ///
+  /// In en, this message translates to:
+  /// **'No vendors match your search or filter.'**
+  String get vendorsFilteredEmpty;
 
   /// Action on a filtered-to-zero list that clears the filter / search.
   ///

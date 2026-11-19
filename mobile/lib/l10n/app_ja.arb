@@ -84,9 +84,7 @@
   "notificationsCouldNotMarkAll": "すべてを既読にできませんでした",
   "notificationsEmptyUnread": "未読の通知はありません",
   "notificationsEmpty": "通知はありません",
-  "notificationsCaughtUp": "すべて確認済みです",
   "notificationsNothingYet": "まだ何もありません",
-  "notificationsLoadError": "通知を読み込めませんでした",
   "vendorsTitle": "取引先",
   "vendorsSyncErp": "ERPから同期",
   "vendorsSyncErpLabel": "ERPから取引先を同期",
@@ -96,7 +94,6 @@
   "vendorsFilterInactive": "無効",
   "vendorsFilterRejected": "却下",
   "vendorsEmpty": "取引先が見つかりません",
-  "vendorsLoadError": "取引先を読み込めませんでした",
   "vendorActionVerify": "確認",
   "vendorActionReject": "却下",
   "vendorUnverifiedLabel": "未確認の取引先",
@@ -891,7 +888,6 @@
   "inspectionsRecord": "検査を登録",
   "inspectionsEmpty": "品質検査は登録されていません。",
   "inspectionsEmptyFiltered": "この結果の検査はありません。",
-  "inspectionsLoadError": "検査の読み込みに失敗しました",
   "inspectionsResultPass": "合格",
   "inspectionsResultFail": "不合格",
   "inspectionsResultPartial": "一部受入",
@@ -1282,5 +1278,9 @@
   "listLoadMoreFailed": "続きを読み込めませんでした。",
   "invoicesLoadErrorPrefix": "請求書を読み込めませんでした: {error}",
   "approvalsLoadErrorPrefix": "承認待ちの請求書を読み込めませんでした: {error}",
-  "invoicesFilteredEmpty": "この条件に一致する請求書はありません"
+  "invoicesFilteredEmpty": "この条件に一致する請求書はありません",
+  "notificationsLoadErrorPrefix": "通知を読み込めませんでした: {error}",
+  "vendorsLoadErrorPrefix": "取引先を読み込めませんでした: {error}",
+  "inspectionsLoadErrorPrefix": "検査の読み込みに失敗しました: {error}",
+  "vendorsFilteredEmpty": "検索またはフィルターに一致する取引先はありません。"
 }
