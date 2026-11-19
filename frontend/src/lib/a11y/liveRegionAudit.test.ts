@@ -157,6 +157,11 @@ function walk(
 }
 
 function scan(path: string, source: string): SilentFeedback[] {
+	// Cheap pre-check before the compiler parse, which is the whole cost of a
+	// tree scan (~250 files: past vitest's 5 s budget under a parallel run).
+	// A finding is an element inside an {#if} whose class has a feedback token, so skipping a file without it cannot hide a finding; the inline
+	// self-tests go through this line too.
+	if (!/\{#if\b/.test(source) || !/\b(?:error|message|msg|success)\b/.test(source)) return [];
 	const ast = parse(source, { modern: true });
 	const found: SilentFeedback[] = [];
 	walk(ast.fragment, false, (block, insideLive) => {

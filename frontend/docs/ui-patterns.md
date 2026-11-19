@@ -786,6 +786,12 @@ for every per-row button across every grid page. Variants:
 Renders as `<a>` when given `href`, otherwise `<button>`. Never copy
 the `padding: 4px 12px; ...` recipe inline — use the component.
 
+While the row's own request is in flight pass `busy` (and `disabled` on the
+other rows until it settles), so an armed two-click confirm cannot send its
+request twice. `busy` is `aria-disabled`, not native `disabled`, so focus stays
+on the button the keyboard user just pressed. The contract and its adopters are
+in `component-library.md` § `RowAction.svelte`.
+
 An action the server would refuse for a reason the reader can act on is
 rendered `disabled`, not hidden, with the reason as its accessible
 description: pass `describedby` naming a `.visually-hidden` element that holds

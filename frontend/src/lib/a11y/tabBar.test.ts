@@ -68,6 +68,11 @@ function staticText(a: Attribute | undefined): string | null {
 }
 
 function unlabelledTabs(path: string, source: string): string[] {
+	// Cheap pre-check before the compiler parse, which is the whole cost of a
+	// tree scan (~250 files: past vitest's 5 s budget under a parallel run).
+	// A flagged button carries a static `tab` class token, so skipping a file without it cannot hide a finding; the inline
+	// self-tests go through this line too.
+	if (!/\btab\b/.test(source)) return [];
 	const ast = parse(source, { modern: true });
 	return collectElements(ast.fragment)
 		.filter((el) => el.name === 'button')

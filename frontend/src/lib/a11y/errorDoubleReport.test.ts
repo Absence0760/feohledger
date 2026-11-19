@@ -109,6 +109,11 @@ const nearestBlock = (chain: Node[]) => [...chain].reverse().find((p) => p.type 
 
 /** `toast(…, 'error')` calls that repeat an error the template states in place. */
 function doubleReports(source: string): string[] {
+	// Cheap pre-check before the compiler parse, which is the whole cost of a
+	// tree scan (~250 files: past vitest's 5 s budget under a parallel run).
+	// A double report needs a static role="alert" and a `toast(` call, so skipping a file without it cannot hide a finding; the inline
+	// self-tests go through this line too.
+	if (!/role\s*=\s*["']?alert\b/.test(source) || !/\btoast\s*\(/.test(source)) return [];
 	const ast = parse(source, { modern: true }) as unknown as Node;
 	const { text, flags } = alertVariables(ast);
 	if (text.size === 0 && flags.size === 0) return [];
