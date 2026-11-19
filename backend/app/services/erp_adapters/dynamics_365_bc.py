@@ -78,6 +78,7 @@ from app.services.erp_adapters.bill_allocation import (
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.payment_adapters.base import exponent_for
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.json_money import dumps_exact_json, loads_exact_json
 
 #: List syncs page at 100 rows (``Prefer: odata.maxpagesize``). Every listing
@@ -770,14 +771,18 @@ class BusinessCentralAdapter(ErpAdapter):
         ``posted_total_mismatch`` with the record left in BC; a failed LCY
         read is a retryable failure naming the record (decisions §391).
         """
-        wanted = (payload.currency or "").strip().upper()
-        stated = str(record.get("currencyCode") or "").strip().upper()
-        if not stated:
+        wanted = iso_currency_or_none(payload.currency)
+        raw_stated = record.get("currencyCode")
+        if raw_stated is None or not str(raw_stated).strip():
             lcy = await self._local_currency(client, headers)
             if isinstance(lcy, ErpPostResult):
                 lcy.erp_document_id = doc_id
                 return lcy
             stated = lcy
+        else:
+            # A stated code that is not one is a mismatch, never "states
+            # none" (which would fall through to the LCY and could match).
+            stated = iso_currency_or_none(raw_stated)
         if stated and wanted and stated == wanted:
             return None
         if not posted:
@@ -809,7 +814,7 @@ class BusinessCentralAdapter(ErpAdapter):
             body = rows[0] if len(rows) == 1 else None
         if not isinstance(body, dict):
             return ErpPostResult(success=False, message=erp_failure_message(_PROVIDER, 200))
-        return str(body.get("currencyCode") or "").strip().upper()
+        return iso_currency_or_none(body.get("currencyCode")) or ""
 
     async def _reprice_to_net(
         self,
@@ -1528,7 +1533,7 @@ def _bc_po_to_payload(raw: dict) -> PoPayload | None:
     total = _bc_decimal(raw.get("totalAmountIncludingTax"))
     if not number or total is None:
         return None
-    currency = str(raw.get("currencyCode") or "").strip().upper()
+    currency = iso_currency_or_none(raw.get("currencyCode"))
     lines: list[PoLinePayload] = []
     for line in raw.get("purchaseOrderLines") or []:
         if not isinstance(line, dict) or line.get("lineType") == "Comment":

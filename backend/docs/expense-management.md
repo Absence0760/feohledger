@@ -599,7 +599,15 @@ two things did:
 - `""` is read by `expense_currency.normalize_currency(code, default=…)` as
   "whatever the target currency is" — the silent assume-the-default that
   locked-FX exists to eliminate. A blank-currency expense attached to a USD
-  report was locked at rate 1 as if it had been filed in USD.
+  report was locked at rate 1 as if it had been filed in USD. Nothing decided
+  that default, so `normalize_currency` now delegates to the shared rule and
+  returns `None` for a blank or malformed code (a legacy row the validator
+  never saw), and every caller fails closed on it: the lock raises
+  `ExpenseConversionError` (the `expense_fx_rate_unavailable` refusal), the
+  line counts as unconverted (blocking submission), the CFO-gate figure is
+  unknown (CFO sign-off required), and a policy comparison counts as a breach.
+  Only an unset `ExpensePolicy.threshold_currency` still falls back to the
+  reporting currency; a set but malformed one is never re-denominated.
 - `"usd"` and `"USD"` are two `GROUP BY` keys, so `GET /api/expenses/summary`
   emitted two `by_currency` entries which the response then relabelled
   identically — one currency's money split across two rows both reading `USD`.

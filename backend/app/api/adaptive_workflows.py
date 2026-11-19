@@ -97,6 +97,7 @@ from app.tenant import (
     get_tenant,
     get_tenant_db,
 )
+from app.utils.currency_code import iso_currency_or_none
 
 router = APIRouter(prefix="/adaptive", tags=["adaptive-workflows"])
 
@@ -580,8 +581,8 @@ def _anomaly_amount_currency(
     never the one it could not be converted into.
     """
     if subject is not None:
-        return (reporting_currency or "").strip().upper()
-    return (inv.currency or "").strip().upper()
+        return iso_currency_or_none(reporting_currency) or ""
+    return iso_currency_or_none(inv.currency) or ""
 
 
 def _anomaly_dict(a: InvoiceAnomaly, *, amount_currency: str) -> dict:

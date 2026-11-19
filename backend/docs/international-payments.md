@@ -44,8 +44,12 @@ outright — while the compliance gate, reading the same setting through its own
 stripping helper, saw an ordinary domestic payment.
 
 `international_payments.resolve_home_currency(org_settings)` is now the one
-owner, built on `normalize_currency_code` (trim + upper, `None` for anything
-blank). It never returns a blank code — a blank compares equal to nothing,
+owner, built on `normalize_currency_code`, which delegates to the one ISO 4217
+rule (`utils/currency_code.iso_currency_or_none`, decisions §381): `None` for
+anything blank or not exactly three ASCII letters, so `"ÄÖÜ"` or `"US DOLLARS"`
+is unknown — a payment or card leg refuses it (`currency_unknown`), the KYC
+gate requires KYC, and a malformed `home_currency` setting reads as unset. It
+never returns a blank code — a blank compares equal to nothing,
 which is how the wrong corridor got picked — degrading to
 `DEFAULT_HOME_CURRENCY` (`USD`) instead. `compliance._home_currency` delegates
 to it, `prepare_international_payment` normalises both sides of its comparison

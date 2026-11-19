@@ -33,6 +33,7 @@ from decimal import Decimal
 from fastapi import status
 
 from app.api.refusals import ActionRefusal
+from app.utils.currency_code import iso_currency_or_none
 
 
 def run_segregation_enabled(payment_config: dict | None) -> bool:
@@ -722,7 +723,7 @@ def cfo_approval_decision(
     comparison. Pure: no DB, no clock, no FX call.
     """
     raw = (payment_config or {}).get("cfo_approval_above")
-    currency = (reporting_currency or "USD").strip().upper()
+    currency = iso_currency_or_none(reporting_currency) or "USD"
     if raw is None:
         return CfoThresholdDecision(required=False, currency=currency)
 

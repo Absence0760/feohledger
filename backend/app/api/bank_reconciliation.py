@@ -78,6 +78,7 @@ from app.services.bank_reconciliation import (
     match_statement_transactions,
     match_variance,
     parse_csv_statement,
+    reconciliation_currency,
     settlement_amount_and_currency,
     settlement_amount_sql,
 )
@@ -167,7 +168,7 @@ def _comparable_variance(
 ) -> Decimal | None:
     """The signed gap, or ``None`` when the two sides aren't in the same
     currency. Subtracting €1,000 from $1,000 produces a number, not a fact."""
-    bank_ccy = (bank_currency or "").strip().upper()
+    bank_ccy = reconciliation_currency(bank_currency)
     if bank_ccy and ctx.currency and bank_ccy != ctx.currency:
         return None
     return match_variance(bank_amount, ctx.amount)

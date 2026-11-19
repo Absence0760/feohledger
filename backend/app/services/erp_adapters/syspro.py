@@ -121,6 +121,7 @@ from app.services.erp_adapters.base import (
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.log_redaction import redact_query_strings_containing
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.url_safety import UnsafeUrlError
 
 logger = logging.getLogger(__name__)
@@ -656,10 +657,11 @@ def po_is_foreign(header_currency: str | None, local_currency: str | None) -> bo
     the local currency could not be read — the caller must then skip the PO,
     never guess which side of the line it is on.
     """
-    code = (header_currency or "").strip().upper()
-    if not code:
+    if header_currency is None or not header_currency.strip():
         return False
-    if local_currency is None:
+    code = iso_currency_or_none(header_currency)
+    # A label that is not a currency code is unknown, never local.
+    if code is None or local_currency is None:
         return None
     return code != local_currency
 
