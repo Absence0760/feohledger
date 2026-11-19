@@ -45,6 +45,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
 	// approve / reject = admin | ap_manager | CFO. One predicate used to cover
@@ -557,7 +558,7 @@
 			>
 				{loadingMore
 					? m('common.loading')
-					: m('requisitions.loadMore', { shown: requisitions.length, total })}
+					: m('requisitions.loadMore', { shown: formatCount(requisitions.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0 && !errored}

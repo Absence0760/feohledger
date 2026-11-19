@@ -33,6 +33,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const PAGE_SIZE = 20;
 
@@ -468,7 +469,7 @@
 				<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
 					{loadingMore
 						? m('common.loading')
-						: m('exceptions.agents.loadMore', { shown: decisions.length, total })}
+						: m('exceptions.agents.loadMore', { shown: formatCount(decisions.length), total: formatCount(total) })}
 				</button>
 			</div>
 		{:else if total > 0}

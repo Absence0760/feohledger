@@ -100,6 +100,7 @@
 	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
 	// Policy CRUD + report/pre-approval REJECT = admin | ap_manager.
@@ -468,7 +469,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('expenses.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
+					m('expenses.toast.selectedTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -1403,7 +1404,7 @@
 		{#if expenseStore.hasMore && !expenseStore.errored}
 			<div class="load-more-row">
 				<button class="btn-load-more" onclick={() => expenseStore.loadMore()} disabled={expenseStore.loading}>
-					{expenseStore.loading ? m('expenses.loading') : m('expenses.loadMore', { shown: expenseStore.all.length, total: expenseStore.total })}
+					{expenseStore.loading ? m('expenses.loading') : m('expenses.loadMore', { shown: formatCount(expenseStore.all.length), total: formatCount(expenseStore.total) })}
 				</button>
 			</div>
 		{:else if expenseStore.total > 0 && !expenseStore.errored}
@@ -1617,10 +1618,7 @@
 					>
 						{reportsLoadingMore
 							? m('common.loading')
-							: m('expenses.reports.loadMore', {
-									shown: reports.length,
-									total: reportsTotal
-								})}
+							: m('expenses.reports.loadMore', { shown: formatCount(reports.length), total: formatCount(reportsTotal) })}
 					</button>
 				</div>
 			{:else if reportsTotal > 0}
@@ -1866,7 +1864,7 @@
 				>
 					{cardsLoadingMore
 						? m('common.loading')
-						: m('expenses.cards.loadMore', { shown: cardTxns.length, total: cardsTotal })}
+						: m('expenses.cards.loadMore', { shown: formatCount(cardTxns.length), total: formatCount(cardsTotal) })}
 				</button>
 			</div>
 		{:else if cardsTotal > 0}

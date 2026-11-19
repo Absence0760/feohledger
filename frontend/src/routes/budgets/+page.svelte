@@ -33,6 +33,7 @@
 	import { untrack } from 'svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const PAGE_SIZE = 50;
 
@@ -375,7 +376,7 @@
 			>
 				{loadingMore
 					? m('common.loading')
-					: m('budgets.loadMore', { shown: budgets.length, total })}
+					: m('budgets.loadMore', { shown: formatCount(budgets.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0 && !errored}

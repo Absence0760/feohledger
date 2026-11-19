@@ -1,4 +1,5 @@
 import type { Action } from 'svelte/action';
+import { formatCount } from '#lib/utils/count.ts';
 
 export interface RevealParams {
 	/**
@@ -127,7 +128,7 @@ export const countUp: Action<HTMLElement, { value: string; duration?: number } |
 				// Ease-out cubic: fast first, settling into the final value, which
 				// is what makes the last digit readable rather than a blur.
 				const eased = 1 - Math.pow(1 - t, 3);
-				node.textContent = `${Math.round(target * eased).toLocaleString()}${suffix}`;
+				node.textContent = `${formatCount(Math.round(target * eased))}${suffix}`;
 				if (t < 1) frame = requestAnimationFrame(step);
 			};
 			frame = requestAnimationFrame(step);

@@ -16,6 +16,7 @@
 	import { EVENT_LABEL_KEYS } from '#lib/types/notification.ts';
 	import { notificationHref } from '#lib/utils/notificationHref.ts';
 	import type { Notification } from '#lib/types/notification.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// The relative "When" cell carries the exact instant in its title, in the
 	// active locale — never the raw ISO string.
@@ -228,7 +229,7 @@
 				<button class="btn-load-more" onclick={loadMore} disabled={loading}>
 					{loading
 						? m('common.loading')
-						: m('notifications.loadMore', { shown: items.length, total: filteredTotal })}
+						: m('notifications.loadMore', { shown: formatCount(items.length), total: formatCount(filteredTotal) })}
 				</button>
 			</div>
 		{:else if filteredTotal > 0}

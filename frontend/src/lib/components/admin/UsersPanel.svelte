@@ -17,6 +17,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let showCreateModal = $state(false);
 	let editingUser = $state<AdminUser | null>(null);
@@ -501,7 +502,7 @@
 {#if adminStore.hasMore}
 	<div class="load-more-row">
 		<button class="btn-load-more" onclick={loadMore} disabled={adminStore.loading}>
-			{adminStore.loading ? m('common.loading') : m('admin.users.loadMore', { shown: adminStore.users.length, total: adminStore.total })}
+			{adminStore.loading ? m('common.loading') : m('admin.users.loadMore', { shown: formatCount(adminStore.users.length), total: formatCount(adminStore.total) })}
 		</button>
 	</div>
 {:else if adminStore.total > 0}

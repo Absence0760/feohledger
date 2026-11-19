@@ -20,6 +20,7 @@
 		startBillingSetupIntent
 	} from '#lib/api/billing.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	// The published-address registry, not a literal typed here. All three
@@ -43,7 +44,6 @@
 	import { rebateMeterGroups } from '#lib/types/billing.ts';
 	import { formatDate, formatMonth } from '#lib/utils/time.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { PLAN_FEATURES, isPlanFeature, planFeatureLabelKey } from '#lib/types/planFeatures.ts';
 
 	// RBAC: the backend gates `GET /api/billing/subscription` to admin / cfo and
@@ -272,8 +272,7 @@
 	/** Whole-number usage counter rendered defensively (the API sends strings). */
 	function asCount(n: string | undefined): string {
 		if (n === undefined || n === '') return '0';
-		const v = Number(n);
-		return Number.isFinite(v) ? v.toLocaleString(getActiveFormatLocale()) : n;
+		return formatCount(n, { fallback: n });
 	}
 
 	/**

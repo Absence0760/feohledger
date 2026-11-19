@@ -37,6 +37,7 @@
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.isManager);
 
@@ -444,7 +445,7 @@
 	{#if hasMore && !loadError}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('vendorStatements.loadMore', { shown: recons.length, total })}
+				{loadingMore ? m('common.loading') : m('vendorStatements.loadMore', { shown: formatCount(recons.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}

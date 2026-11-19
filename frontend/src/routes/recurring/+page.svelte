@@ -46,6 +46,7 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { daysUntil } from './relativeRun.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.isManager);
 
@@ -577,7 +578,7 @@
 							<span class="rel">{relativeRun(template.next_run_on)}</span>
 						{/if}
 					</td>
-					<td class="right mono">{template.generated_count}</td>
+					<td class="right mono">{formatCount(template.generated_count)}</td>
 					<td>
 						<!-- The 6px that used to live on `.badge.skipped`'s own margin now
 						     lives on this row: `<Badge>` owns colour and pill metrics, the
@@ -668,7 +669,7 @@
 	{#if hasMore}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('recurring.loadMore', { shown: templates.length, total })}
+				{loadingMore ? m('common.loading') : m('recurring.loadMore', { shown: formatCount(templates.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}

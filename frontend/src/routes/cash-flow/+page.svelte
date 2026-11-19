@@ -9,7 +9,7 @@
 	import CopilotChatMessage from '#lib/components/cash-flow/CopilotChatMessage.svelte';
 	import SavedPlansPanel from '#lib/components/cash-flow/SavedPlansPanel.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import type { ChatResponse, ToolInvocation, UiMessage, UsageResponse } from '#lib/types/assistant.ts';
 
 	// Cash-flow copilot starter prompts. The first two route to `get_cash_position`
@@ -125,13 +125,6 @@
 			conversation_id: conversationId ?? undefined
 		});
 		applyFinal(payload, assistantId);
-	}
-
-	/** A token count in the in-app locale. A bare `toLocaleString()` reads the
-	 *  BROWSER's locale, so a German UI on an English browser printed
-	 *  "12,000" inside a German sentence. */
-	function formatCount(n: number): string {
-		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
 	}
 
 	/** The over-budget notice, in place of the empty in-progress bubble. */

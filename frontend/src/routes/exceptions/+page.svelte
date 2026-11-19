@@ -65,6 +65,7 @@
 	import { localToday } from '#lib/types/paymentExecution.ts';
 	import RecordPaymentFields from '#lib/components/payments/RecordPaymentFields.svelte';
 	import ErpPaymentSplit from '#lib/components/payments/ErpPaymentSplit.svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	interface ExceptionItem {
 		id: string;
@@ -902,7 +903,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('exceptions.toast.selectAllTruncated', { shown: res.ids.length, total: res.total }),
+					m('exceptions.toast.selectAllTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -1327,7 +1328,7 @@
 	{#if hasMore}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={loadMoreExceptions} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('exceptions.loadMore', { shown: exceptions.length, total })}
+				{loadingMore ? m('common.loading') : m('exceptions.loadMore', { shown: formatCount(exceptions.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}

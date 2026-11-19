@@ -59,6 +59,8 @@
 	import { formatAmountWithoutCurrency } from '#lib/utils/discountRecommendation.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
+	import { formatCount } from '#lib/utils/count.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	let {
 		runId,
@@ -571,9 +573,9 @@
 		return currency ? formatMoney(amount, { currency }) : formatAmountWithoutCurrency(amount);
 	}
 
+	// The in-app locale, not a pinned 'en-US' (a German UI read US dates here).
 	function fmtDate(s: string | null): string {
-		if (!s) return '—';
-		return new Date(s).toLocaleString('en-US', {
+		return formatDate(s, '—', {
 			month: 'short',
 			day: 'numeric',
 			year: 'numeric',
@@ -645,7 +647,7 @@
 						<dd data-testid="run-discount-total">{fmt(run.discount_total, run.currency)}</dd>
 					{/if}
 					<dt>{m('paymentRuns.runDetail.payments')}</dt>
-					<dd>{run.payments.length}</dd>
+					<dd>{formatCount(run.payments.length)}</dd>
 					<dt>{m('paymentRuns.runDetail.created')}</dt>
 					<dd>{fmtDate(run.created_at)}</dd>
 					{#if run.executed_at}

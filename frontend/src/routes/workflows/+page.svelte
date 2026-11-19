@@ -32,6 +32,7 @@
 	import ImportExportControls, {
 		exportWorkflowToFile,
 	} from '#lib/components/workflow-mgmt/ImportExportControls.svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let showCreate = $state(false);
 	let newName = $state('');
@@ -360,10 +361,7 @@
 			<button class="btn-load-more" onclick={loadMore} disabled={workflowStore.loading}>
 				{workflowStore.loading
 					? m('common.loading')
-					: m('workflows.list.loadMore', {
-							shown: workflowStore.all.length,
-							total: workflowStore.total,
-						})}
+					: m('workflows.list.loadMore', { shown: formatCount(workflowStore.all.length), total: formatCount(workflowStore.total) })}
 			</button>
 		</div>
 	{:else if workflowStore.total > 0}

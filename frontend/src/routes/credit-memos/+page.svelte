@@ -36,6 +36,7 @@
 	import type { SearchPickerLoad } from '#lib/utils/searchPicker.ts';
 	import { creditAmountParam } from '#lib/utils/invoicePicker.ts';
 	import { isAllowed, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// Create / edit / apply / void are all `require_roles(ADMIN, AP_MANAGER)` on
 	// the backend, while the LIST (and its chip summary) is open to all four
@@ -765,7 +766,7 @@
 	{:else if hasMore}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={loadMoreMemos} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('creditMemos.loadMore', { shown: memos.length, total })}
+				{loadingMore ? m('common.loading') : m('creditMemos.loadMore', { shown: formatCount(memos.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}

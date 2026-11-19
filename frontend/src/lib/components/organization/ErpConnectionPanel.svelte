@@ -94,8 +94,8 @@
 		type OAuthReturn,
 		type StoredErpConfig
 	} from '#lib/types/erpConnection.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { formatList } from '#lib/utils/list.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 
 	let {
@@ -218,7 +218,7 @@
 	const callUsageText = $derived(
 		provider
 			? callUsageLines(callUsage, providerLabel(provider), m, {
-					count: (n) => new Intl.NumberFormat(getActiveFormatLocale()).format(n),
+					count: (n) => formatCount(n),
 					time: (iso) =>
 						formatDate(iso, '—', {
 							month: 'short',

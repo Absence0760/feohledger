@@ -102,6 +102,7 @@
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { kpiDisplayValue } from '#lib/utils/kpiValue.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let RUNS_COLUMNS = $derived([
 		{ label: m('payments.col.run') },
@@ -602,7 +603,7 @@
 			createRunError = '';
 			if (res.truncated) {
 				toast(
-					m('payments.queue.selectAllTruncated', { shown: res.ids.length, total: res.total }),
+					m('payments.queue.selectAllTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -2596,7 +2597,7 @@
 				<button class="btn-load-more" onclick={loadMoreQueue} disabled={queueLoadingMore}>
 					{queueLoadingMore
 						? m('common.loading')
-						: m('payments.queue.loadMore', { shown: queue.length, total: queueTotal })}
+						: m('payments.queue.loadMore', { shown: formatCount(queue.length), total: formatCount(queueTotal) })}
 				</button>
 			</div>
 		{:else if queueTotal > 0}
@@ -2750,7 +2751,7 @@
 				<button class="btn-load-more" onclick={() => paymentStore.loadMore()} disabled={paymentStore.loading}>
 					{paymentStore.loading
 						? m('common.loading')
-						: m('payments.history.loadMore', { shown: paymentStore.all.length, total: paymentStore.total })}
+						: m('payments.history.loadMore', { shown: formatCount(paymentStore.all.length), total: formatCount(paymentStore.total) })}
 				</button>
 			</div>
 		{:else if paymentStore.total > 0}
@@ -2955,7 +2956,7 @@
 					disabled={loadingMoreRebates}
 					data-testid="load-more-rebates"
 				>
-					{loadingMoreRebates ? m('common.loading') : m('payments.rebates.loadMore', { shown: rebates.length, total: rebateCount })}
+					{loadingMoreRebates ? m('common.loading') : m('payments.rebates.loadMore', { shown: formatCount(rebates.length), total: formatCount(rebateCount) })}
 				</button>
 			</div>
 		{:else if rebateCount > 0}
@@ -3046,7 +3047,7 @@
 		{#if hasMoreCards}
 			<div class="load-more-row">
 				<button class="btn-load-more" onclick={loadMoreCards} disabled={loadingMoreCards}>
-					{loadingMoreCards ? m('common.loading') : m('payments.cards.loadMore', { shown: cards.length, total: cardsTotal })}
+					{loadingMoreCards ? m('common.loading') : m('payments.cards.loadMore', { shown: formatCount(cards.length), total: formatCount(cardsTotal) })}
 				</button>
 			</div>
 		{:else if cardsTotal > 0}

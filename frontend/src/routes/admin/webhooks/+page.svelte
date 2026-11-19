@@ -41,6 +41,7 @@
 		OVERLAP_DEFAULT_MINUTES,
 		isOverlapLive
 	} from '#lib/utils/webhookRotation.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// RBAC: the backend gates every /api/webhooks endpoint to admin only and
 	// 403s the rest. Wait for `auth.user` to resolve before redirecting so we
@@ -614,7 +615,7 @@
 						<tr>
 							<td>{d.event_type}</td>
 							<td class="mono">{d.event_id}</td>
-							<td>{d.attempt_count}</td>
+							<td>{formatCount(d.attempt_count)}</td>
 							<td>{d.response_code ?? '—'}</td>
 							<td>{formatDate(d.last_attempt_at)}</td>
 							<td>

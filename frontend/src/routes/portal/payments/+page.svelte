@@ -23,6 +23,7 @@
 	import PortalListFilters from '#lib/components/portal/PortalListFilters.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { paymentMethodLabelKey } from '#lib/types/payment.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	type PortalPayment = PortalPaymentListItem;
 
@@ -274,7 +275,7 @@
 				>
 					{loadingMore
 						? m('portal.common.loading')
-						: m('portal.payments.loadMore', { shown: items.length, total })}
+						: m('portal.payments.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
 				</button>
 			</div>
 		{:else if total > 0}

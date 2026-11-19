@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatCount } from '#lib/utils/count.ts';
 	type Tab = {
 		key: string;
 		label: string;
@@ -72,7 +73,7 @@
 			tabindex={active === tab.key ? 0 : -1}
 			onclick={() => select(tab.key)}
 		>
-			{tab.label}{#if tab.count !== undefined}{' '}<span class="tab-count">{tab.count}</span>{/if}
+			{tab.label}{#if tab.count !== undefined}{' '}<span class="tab-count">{formatCount(tab.count, { fallback: String(tab.count) })}</span>{/if}
 		</button>
 	{/each}
 </div>

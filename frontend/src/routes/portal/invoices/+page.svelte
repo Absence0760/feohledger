@@ -33,6 +33,7 @@
 		postPortalChatMessage,
 		uploadPortalChatAttachment,
 	} from '#lib/portalChat.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	type PortalInvoice = PortalInvoiceListItem;
 
@@ -570,7 +571,7 @@
 				>
 					{loadingMore
 						? m('portal.common.loading')
-						: m('portal.invoices.loadMore', { shown: items.length, total })}
+						: m('portal.invoices.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
 				</button>
 			</div>
 		{:else if total > 0}

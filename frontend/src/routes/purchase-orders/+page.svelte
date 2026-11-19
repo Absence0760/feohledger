@@ -23,6 +23,7 @@
 	import { poStatusLabel, poStatusTone } from '#lib/types/purchaseOrder.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { untrack } from 'svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const COLUMNS = $derived([
 		{ label: m('purchaseOrders.col.poNumber'), class: 'col-number' },
@@ -422,7 +423,7 @@
 	{#if hasMore && !errored}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('purchaseOrders.loadMore', { shown: pos.length, total })}
+				{loadingMore ? m('common.loading') : m('purchaseOrders.loadMore', { shown: formatCount(pos.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0 && !errored}

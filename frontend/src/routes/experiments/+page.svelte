@@ -35,19 +35,13 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatPercent } from '#lib/utils/percent.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { page } from '$app/state';
 	import { afterNavigate, replaceState } from '$app/navigation';
 
 	const canMutate = $derived(auth.isAdmin);
-
-	// Counts group by the active locale ("1,234" / "1.234" / "1 234"), the
-	// same holder money, dates and `formatPercent` read.
-	function formatCount(n: number): string {
-		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
-	}
 
 	const METRICS: PrimaryMetric[] = [
 		'time_to_approval_days',
