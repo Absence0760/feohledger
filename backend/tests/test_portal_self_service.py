@@ -1254,3 +1254,28 @@ async def test_a_rejected_flip_still_reads_as_invoiced_and_its_reopen_mints_noth
     assert reopened_detail["flip_verdict"] == _ALREADY_INVOICED
     assert reopened_replay.json()["id"] == flipped_id
     assert await _invoices_citing(mk, number) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_flip_edited_to_cite_another_po_does_not_invoice_it(realdb):
+    """A rejected flip counts as invoiced for its OWN PO only (its
+    `po-flip:<po_id>` marker). Re-pointed at another PO's number while
+    rejected, it bills nothing there, so that PO can still be flipped."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+    po_a, _ = await _seed_open_po(mk, org_id, vendor_id, prefix="PO-EDA")
+    po_b, number_b = await _seed_open_po(mk, org_id, vendor_id, prefix="PO-EDB")
+
+    async with _portal_client(realdb, vu_id, vendor_id) as client:
+        first = await client.post(f"/api/portal/purchase-orders/{po_a}/flip")
+        assert first.status_code == 202, first.text
+        flipped_id = first.json()["id"]
+        async with mk() as s:
+            inv = await s.get(Invoice, uuid.UUID(flipped_id))
+            inv.po_number = number_b
+            inv.status = InvoiceStatus.rejected
+            await s.commit()
+        other_detail = (await client.get(f"/api/portal/purchase-orders/{po_b}")).json()
+
+    assert other_detail["flip_verdict"] is None

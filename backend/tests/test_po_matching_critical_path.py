@@ -899,3 +899,114 @@ async def test_realdb_partial_bills_within_the_po_total_do_not_warn(realdb):
         warnings = await _overbilling_codes(s, second_half)
 
     assert warnings == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("amount", "warns"), [("550.00", False), ("550.01", True)])
+async def test_realdb_over_billing_boundary_is_the_match_tolerance(realdb, amount, warns):
+    """The limit is the PO total plus the match rule's tolerance (5 % by
+    default): 500.00 + 550.00 on a 1000.00 PO is exactly 1050.00 and passes; a
+    cent more warns. The invoice's currency is named in its normalised code,
+    never as it was keyed."""
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-EDGE-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        await _add_po(s, org_id, ent, po_number=number, total="1000.00", currency="USD")
+        await _add_invoice(s, org_id, ent, po_number=number, amount="500.00")
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount=amount, currency="usd ")
+        await s.commit()
+
+        warnings = await _overbilling_codes(s, inv)
+
+    if not warns:
+        assert warnings == []
+        return
+    assert [w["code"] for w in warnings] == ["po_billed_beyond_total"]
+    assert warnings[0]["params"]["currency"] == "USD"
+    assert warnings[0]["params"]["billedAmount"] == "500.00"
+
+
+@pytest.mark.asyncio
+async def test_realdb_refresh_po_match_only_twice_keeps_one_over_billing_warning(realdb):
+    """The PO-match-only refresh rebuilds the finding rather than appending to
+    the one already on the row."""
+    from app.models.invoice import InvoiceStatus
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-TWICE-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        await _add_po(s, org_id, ent, po_number=number, total="500.00", currency="USD")
+        await _add_invoice(s, org_id, ent, po_number=number, amount="500.00")
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="500.00")
+        inv.status = InvoiceStatus.ready_for_review
+        await s.commit()
+
+        await invoice_warnings.refresh_po_match_only(s, inv)
+        await invoice_warnings.refresh_po_match_only(s, inv)
+
+    codes = [w.get("code") for w in inv.warnings or []]
+    assert codes.count("po_billed_beyond_total") == 1
+
+
+@pytest.mark.asyncio
+async def test_realdb_a_split_citing_the_po_counts_at_its_whole_amount(realdb):
+    """A multi-PO split's combined number resolves to no PO; its recorded legs
+    (`split_po_ids`) are what cite this one. Its whole amount counts, since it
+    cannot be attributed to one leg and overcounting is the safe side."""
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-LEG-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        po = await _add_po(s, org_id, ent, po_number=number, total="1000.00", currency="USD")
+        split = await _add_invoice(
+            s, org_id, ent, po_number=f"{number},PO-OTHER-LEG", amount="600.00"
+        )
+        split.split_po_ids = [str(po.id), str(uuid.uuid4())]
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="500.00")
+        await s.commit()
+
+        warnings = await _overbilling_codes(s, inv)
+
+    assert [w["code"] for w in warnings] == ["po_billed_beyond_total"]
+    assert warnings[0]["params"]["billedAmount"] == "600.00"
+
+
+@pytest.mark.asyncio
+async def test_realdb_another_vendors_same_numbered_po_does_not_count(realdb):
+    """Two suppliers can use the same PO number. An unmatched invoice from the
+    other supplier citing it bills THEIR order, not this one."""
+    from app.models.vendor import Vendor
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-SHARED-{uuid.uuid4().hex[:6]}"
+    mine, theirs = uuid.uuid4(), uuid.uuid4()
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        for vid, name in ((mine, "Overbill Mine"), (theirs, "Overbill Theirs")):
+            s.add(
+                Vendor(
+                    id=vid,
+                    name=f"{name} {number}",
+                    organization_id=org_id,
+                    entity_id=ent,
+                    status="active",
+                    source="manual",
+                )
+            )
+        await s.flush()
+        await _add_po(
+            s, org_id, ent, po_number=number, total="500.00", currency="USD", vendor_id=mine
+        )
+        await _add_invoice(s, org_id, ent, po_number=number, amount="500.00", vendor_id=theirs)
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="500.00", vendor_id=mine)
+        await s.commit()
+
+        warnings = await _overbilling_codes(s, inv)
+
+    assert warnings == []

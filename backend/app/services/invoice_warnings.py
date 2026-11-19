@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1403,19 +1403,25 @@ async def _refresh_po_overbilling(
       invoice's own currency (``CURRENCY_SAME``). A split's legs share one amount
       that cannot be attributed to any one of them, and a cancelled, unissued,
       unvouched or other-currency PO already raises its own finding.
-    - **Which others.** The same rule the flip's "already invoiced" refusal reads
-      (``api/portal._pos_already_invoiced``): an invoice citing the PO's number
-      within the PO's entity (either side unstamped spans entities), in every
-      status but ``rejected``, which bills nothing while it stays rejected. Only
-      the PO's currency is summed. Unlike the portal's refusal it is not scoped
-      to one vendor: AP reads it, and any bill against the order counts.
+    - **Which others.** Every other invoice billing this PO, in every status
+      but ``rejected`` (which bills nothing while it stays rejected), in the
+      PO's currency: one whose last match resolved to this PO
+      (``po_match->>'po_id'``); one a multi-PO split linked to it
+      (``split_po_ids``), counted at its whole amount because a split's amount
+      cannot be attributed to one leg, and overcounting is the safe direction;
+      and one not yet matched to any PO (a ``new`` invoice, or one reopened to
+      it) that cites the PO's number within the PO's entity (either side
+      unstamped spans entities) and names the PO's vendor or no vendor. Another
+      vendor's invoice citing the same number is another vendor's PO.
     - **The limit.** The match rule's own tolerance over the PO total, as the
       amount leg uses.
 
     A warning, never a hold: credit memos, corrective re-bills and a sibling
     rejected after this refresh all move the sum without re-running it here,
     so a payment-blocking row would go stale in both directions. The reviewer
-    reads it at approval, beside the duplicate and amount findings.
+    reads it at approval, beside the duplicate and amount findings, and no
+    unattended approval is given while it stands
+    (:func:`po_match_hold_refusal`, ``UNATTENDED_APPROVAL_PO_OVERBILLED``).
     """
     if (
         _status_str(invoice.status) == InvoiceStatus.rejected.value
@@ -1431,28 +1437,67 @@ async def _refresh_po_overbilling(
         return
     po = (
         await db.execute(
-            select(PurchaseOrder.po_number, PurchaseOrder.entity_id).where(
-                PurchaseOrder.id == uuid.UUID(str(match.po_id))
-            )
+            select(
+                PurchaseOrder.id,
+                PurchaseOrder.po_number,
+                PurchaseOrder.entity_id,
+                PurchaseOrder.vendor_id,
+            ).where(PurchaseOrder.id == uuid.UUID(str(match.po_id)))
         )
     ).one_or_none()
     if po is None or not po.po_number:
         return
     code = po_currency_code(invoice.currency)
+    if code is None:
+        return
+    po_id = str(po.id)
+    matched_po_id = Invoice.po_match["po_id"].astext
+    cites = or_(
+        matched_po_id == po_id,
+        Invoice.split_po_ids.has_any(array([po_id])),
+    )
+    # Not yet matched to any PO: the number it cites, from the PO's vendor or
+    # from no vendor yet. Entity is checked below, as the matcher does.
+    vendor_ok = Invoice.vendor_id.is_(None)
+    if po.vendor_id is not None:
+        vendor_ok = or_(vendor_ok, Invoice.vendor_id == po.vendor_id)
+    cites = or_(
+        cites,
+        and_(
+            Invoice.po_number == po.po_number,
+            # NULL for a NULL column and a JSON null alike.
+            matched_po_id.is_(None),
+            vendor_ok,
+        ),
+    )
     rows = (
         await db.execute(
-            select(Invoice.amount, Invoice.entity_id, Invoice.currency).where(
+            select(
+                Invoice.amount,
+                Invoice.entity_id,
+                Invoice.currency,
+                matched_po_id,
+                Invoice.split_po_ids,
+            ).where(
                 Invoice.organization_id == invoice.organization_id,
                 Invoice.id != invoice.id,
-                Invoice.po_number == po.po_number,
                 Invoice.status != InvoiceStatus.rejected,
                 Invoice.amount.isnot(None),
+                cites,
             )
         )
     ).all()
     billed = Decimal("0")
-    for amount, entity_id, currency in rows:
-        same_entity = entity_id is None or po.entity_id is None or entity_id == po.entity_id
+    for amount, entity_id, currency, row_po_id, split in rows:
+        # A row matched to this PO, or a split leg of it, is this PO's by id;
+        # a number-only citation must also sit in the PO's entity.
+        same_entity = (
+            row_po_id == po_id
+            or (isinstance(split, list) and po_id in split)
+            or entity_id is None
+            or po.entity_id is None
+            or entity_id == po.entity_id
+        )
         if same_entity and po_currency_code(currency) == code:
             billed += Decimal(str(amount))
     if billed <= 0:
@@ -1468,7 +1513,7 @@ async def _refresh_po_overbilling(
                 billedAmount=billed,
                 poNumber=po.po_number,
                 poTotal=po_total,
-                currency=invoice.currency,
+                currency=code,
             )
         )
 
@@ -2484,10 +2529,25 @@ async def _cleared_holds_still_fingerprinted(
 
 
 #: Why an unattended approval (``/complete``'s amount floor, extraction's
-#: auto-approve) stood aside for a PO-match hold (decisions §425). Recorded on
+#: auto-approve) stood aside for a PO-match hold (decisions §425) or the PO
+#: over-billing warning (§469). Recorded on
 #: the audit row's ``auto_approve_suppressed``.
 UNATTENDED_APPROVAL_PO_HOLD_OPEN = "po_match_hold"
 UNATTENDED_APPROVAL_PO_HOLD_WOULD_REOPEN = "po_match_hold_cleared_by_approver"
+#: The invoice carries the cumulative over-billing warning (decisions §469):
+#: no hold, but no unattended door may approve past it.
+UNATTENDED_APPROVAL_PO_OVERBILLED = "po_overbilled"
+
+
+def has_po_overbilling_warning(invoice: Invoice) -> bool:
+    """Whether the last refresh left ``po_billed_beyond_total`` on ``invoice``.
+
+    Read from ``invoice.warnings``, so asked after the refresh that ran the
+    match, as :func:`po_match_hold_refusal` is."""
+    return any(
+        isinstance(w, dict) and w.get("type") == PO_OVERBILLED_TYPE
+        for w in (invoice.warnings or [])
+    )
 
 
 async def po_match_hold_refusal(
@@ -2512,6 +2572,9 @@ async def po_match_hold_refusal(
       approve an invoice the next statement re-holds. Asked with the would-be
       approver added to the approver set, the question
       :func:`_finding_cleared_by_a_person` asks after the stamp.
+    * the cumulative over-billing warning (decisions §469): this invoice and
+      the others billing its PO pass the PO's total. It raises no hold, so
+      only a person reading it may approve.
     """
     from app.services.payment_runs import blocking_exception_types
 
@@ -2519,6 +2582,8 @@ async def po_match_hold_refusal(
         return None
     if await blocking_exception_types(db, [invoice.id], types=PO_MATCH_EXCEPTION_TYPES):
         return UNATTENDED_APPROVAL_PO_HOLD_OPEN
+    if has_po_overbilling_warning(invoice):
+        return UNATTENDED_APPROVAL_PO_OVERBILLED
     if approver_id is None:
         # The stamp names nobody, so no clearance changes standing.
         return None

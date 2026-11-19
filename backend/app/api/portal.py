@@ -1002,7 +1002,8 @@ async def _pos_already_invoiced(
     told to re-bill needs a way to (decisions §468).
 
     Except the PO's OWN rejected flip (``reference_number`` is its
-    ``po-flip:<po_id>`` marker), which still counts (decisions §469).
+    ``po-flip:<po_id>`` marker), which still counts (decisions §469), and for
+    that PO only.
     The marker is unique in every status (migration 0024), so a second flip
     could never mint an invoice anyway: the endpoint replays the rejected one.
     And a rejected flip is reopened, not replaced (``rejected → new`` by AP, or
@@ -1023,7 +1024,13 @@ async def _pos_already_invoiced(
     own_flips = [f"po-flip:{po.id}" for po in pos]
     rows = (
         await db.execute(
-            select(Invoice.po_number, Invoice.entity_id, Invoice.split_po_ids).where(
+            select(
+                Invoice.po_number,
+                Invoice.entity_id,
+                Invoice.split_po_ids,
+                Invoice.status,
+                Invoice.reference_number,
+            ).where(
                 Invoice.vendor_id == vendor_id,
                 or_(
                     Invoice.status != InvoiceStatus.rejected,
@@ -1035,7 +1042,11 @@ async def _pos_already_invoiced(
     ).all()
     invoiced: set[uuid.UUID] = set()
     for po in pos:
-        for number, entity_id, split in rows:
+        for number, entity_id, split, inv_status, reference in rows:
+            if inv_status == InvoiceStatus.rejected and reference != f"po-flip:{po.id}":
+                # A rejected flip counts for its OWN PO only, so a flip whose
+                # PO number was edited cannot mark another order invoiced.
+                continue
             same_entity = entity_id is None or po.entity_id is None or entity_id == po.entity_id
             by_number = number == po.po_number and same_entity
             by_leg = isinstance(split, list) and str(po.id) in split
