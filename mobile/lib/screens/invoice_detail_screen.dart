@@ -5,6 +5,7 @@ import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/gl_chart_refusal_messages.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
@@ -18,6 +19,7 @@ import 'package:feohledger_mobile/widgets/erp_status_panel.dart';
 import 'package:feohledger_mobile/widgets/invoice_edit_sheet.dart';
 import 'package:feohledger_mobile/widgets/invoice_file_viewer.dart';
 import 'package:feohledger_mobile/widgets/invoice_warnings_panel.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 import 'package:feohledger_mobile/widgets/reject_reason_dialog.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 
@@ -33,7 +35,8 @@ class InvoiceDetailScreen extends StatefulWidget {
 class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   Invoice? _invoice;
   bool _loading = true;
-  String? _error;
+  // The caught load error, worded at render time by [describeLoadError].
+  Object? _error;
   // True while an approve/reject network call is in flight — guards against a
   // double-tap firing the money-path POST twice and disables the buttons.
   bool _submitting = false;
@@ -58,7 +61,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   // body so a slow / failed trail never blocks the detail view.
   List<AuditEntry> _activity = [];
   bool _activityLoading = true;
-  String? _activityError;
+  bool _activityFailed = false;
 
   @override
   void initState() {
@@ -85,7 +88,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = describeApiError(e);
+        _error = e;
         _loading = false;
       });
     }
@@ -179,7 +182,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   Future<void> _loadActivity() async {
     setState(() {
       _activityLoading = true;
-      _activityError = null;
+      _activityFailed = false;
     });
     try {
       final entries =
@@ -189,10 +192,10 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         _activity = entries;
         _activityLoading = false;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
-        _activityError = e.toString();
+        _activityFailed = true;
         _activityLoading = false;
       });
     }
@@ -342,22 +345,9 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
 
   Widget _buildError() {
     final l = AppLocalizations.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline, size: 48, color: Colors.red.shade400),
-          const SizedBox(height: 12),
-          Text(l.invoiceDetailErrorPrefix(_error ?? ''),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _load,
-            icon: const Icon(Icons.refresh),
-            label: Text(l.invoiceDetailRetry),
-          ),
-        ],
-      ),
+    return LoadErrorState(
+      message: describeLoadError(l, _error!, l.invoiceDetailErrorPrefix),
+      onRetry: _load,
     );
   }
 
@@ -480,7 +470,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       );
     }
     final l = AppLocalizations.of(context);
-    if (_activityError != null) {
+    if (_activityFailed) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
@@ -514,8 +504,10 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             width: 120,
             child: Text(
               label,
+              // onSurfaceVariant clears AA (~8.9:1 on the blue-seed surface);
+              // grey.shade600 read ~4.4:1 there, under the 4.5:1 floor.
               style: TextStyle(
-                color: Colors.grey.shade600,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
               ),
             ),
