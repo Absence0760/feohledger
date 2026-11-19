@@ -131,7 +131,6 @@ def test_currency_code_or_unset_reads_blank_as_none():
 #: `max_length=3` (which admits "ÄÖÜ" and "US") fails here without building
 #: the whole request body.
 REQUEST_CURRENCY_FIELDS: list[tuple[type[BaseModel], str]] = [
-    (InvoiceCreate, "currency"),
     (CreditMemoCreate, "currency"),
     (CreditMemoUpdate, "currency"),
     (ContractCreate, "currency"),
@@ -194,6 +193,24 @@ def test_invoice_update_currency_reaches_the_handler_raw():
     """The PATCH's `currency` is checked by `invoice_currency` in the handler,
     so a malformed code is a coded 422 rather than Pydantic's list."""
     assert InvoiceUpdate(currency="EURO").currency == "EURO"
+
+
+def test_invoice_create_currency_reaches_the_handler_raw_with_no_default():
+    """The create's `currency` is checked by `invoice_currency(..., creating=True)`
+    in the handler, the same coded 422s as the PATCH, and an omitted one is
+    `None` for the handler to refuse, never a USD default (decisions §473)."""
+    base = {"vendor": "Acme", "invoice_number": "INV-1", "amount": "1.00"}
+    assert InvoiceCreate(**base).currency is None
+    assert InvoiceCreate(**base, currency="EURO").currency == "EURO"
+
+
+@pytest.mark.parametrize("raw", [None, "", "   "])
+def test_invoice_currency_refuses_a_missing_code_on_create(raw):
+    with pytest.raises(HTTPException) as exc:
+        invoice_currency(raw, creating=True)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == INVOICE_CURRENCY_REQUIRED
+    assert "cleared" not in exc.value.detail["message"]
 
 
 @pytest.mark.parametrize("raw", [None, "", "   "])

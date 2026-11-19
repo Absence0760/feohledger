@@ -158,7 +158,12 @@ async def test_ap_clerk_can_manually_create_an_invoice_and_is_its_uploader(reald
     async with realdb.client(key="a", role="ap_clerk") as c:
         resp = await c.post(
             "/api/invoices",
-            json={"vendor": "X", "invoice_number": "CLERK-001", "amount": "1.00"},
+            json={
+                "currency": "USD",
+                "vendor": "X",
+                "invoice_number": "CLERK-001",
+                "amount": "1.00",
+            },
         )
     assert resp.status_code == 201, resp.text
 
@@ -174,6 +179,7 @@ async def test_attach_file_to_manual_invoice_succeeds_once(realdb):
         create = await c.post(
             "/api/invoices",
             json={
+                "currency": "USD",
                 "vendor": "File Vendor Co",
                 "invoice_number": "MANUAL-FILE-001",
                 "amount": "125.00",
@@ -222,7 +228,12 @@ async def test_attach_file_rejects_disallowed_content_type(realdb):
     async with realdb.client(key="a", role="admin") as c:
         create = await c.post(
             "/api/invoices",
-            json={"vendor": "V", "invoice_number": "MANUAL-BAD-001", "amount": "1.00"},
+            json={
+                "currency": "USD",
+                "vendor": "V",
+                "invoice_number": "MANUAL-BAD-001",
+                "amount": "1.00",
+            },
         )
         invoice_id = create.json()["id"]
 
@@ -310,6 +321,7 @@ async def test_manual_create_audit_row_is_on_the_invoice_trail(realdb):
         resp = await c.post(
             "/api/invoices",
             json={
+                "currency": "USD",
                 "vendor": "Trail Vendor",
                 "invoice_number": f"MANUAL-TRAIL-{uuid.uuid4().hex[:8]}",
                 "amount": "10.00",
@@ -360,6 +372,37 @@ async def test_an_invoice_due_before_it_is_dated_is_refused_at_entry(realdb):
         assert both.status_code == 200, both.text
         other = await c.patch(f"/api/invoices/{inv_id}", json={"description": "fine"})
         assert other.status_code == 200, other.text
+
+
+async def test_a_create_must_state_its_currency(realdb):
+    """`POST /api/invoices` used to book an omitted currency as USD (decisions
+    §473). An omitted, null or blank code is now the coded 422
+    `invoice_currency_required`, a malformed one `invoice_currency_invalid`,
+    and none of them writes a row."""
+    number = f"CUR-CREATE-{uuid.uuid4().hex[:8]}"
+    base = {"vendor": "Currency Create Co", "invoice_number": number, "amount": "10.00"}
+    async with realdb.client(key="a", role="ap_manager") as c:
+        for body, code in [
+            (base, "invoice_currency_required"),
+            ({**base, "currency": None}, "invoice_currency_required"),
+            ({**base, "currency": "  "}, "invoice_currency_required"),
+            ({**base, "currency": "EURO"}, "invoice_currency_invalid"),
+        ]:
+            resp = await c.post("/api/invoices", json=body)
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["detail"]["code"] == code
+
+        created = await c.post("/api/invoices", json={**base, "currency": " eur "})
+        assert created.status_code == 201, created.text
+        assert created.json()["currency"] == "EUR"
+
+    async with realdb.sessionmaker("a")() as s:
+        rows = (
+            (await s.execute(select(Invoice).where(Invoice.invoice_number == number)))
+            .scalars()
+            .all()
+        )
+    assert [r.currency for r in rows] == ["EUR"]
 
 
 async def test_an_edit_cannot_clear_or_garble_the_currency(realdb):

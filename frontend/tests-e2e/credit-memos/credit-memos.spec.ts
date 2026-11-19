@@ -293,6 +293,7 @@ test.describe('/credit-memos', () => {
 				vendor: vendorB.name,
 				invoice_number: `MISMATCH-${Date.now()}`,
 				amount: 100,
+				currency: 'USD',
 				status: 'new'
 			}
 		});

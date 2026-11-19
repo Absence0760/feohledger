@@ -49,6 +49,7 @@ async def test_by_entity_per_entity_and_consolidated(realdb):
             r = await c.post(
                 "/api/invoices",
                 json={
+                    "currency": "USD",
                     "invoice_number": num,
                     "vendor": "Acme",
                     "amount": amt,
@@ -113,14 +114,24 @@ async def test_by_entity_open_exceptions_scope(realdb):
         inv_us = (
             await c.post(
                 "/api/invoices",
-                json={"invoice_number": "EX-US", "vendor": "X", "amount": "1.00"},
+                json={
+                    "currency": "USD",
+                    "invoice_number": "EX-US",
+                    "vendor": "X",
+                    "amount": "1.00",
+                },
                 headers={"X-Entity-ID": us},
             )
         ).json()
         inv_def = (
             await c.post(
                 "/api/invoices",
-                json={"invoice_number": "EX-DEF", "vendor": "Y", "amount": "1.00"},
+                json={
+                    "currency": "USD",
+                    "invoice_number": "EX-DEF",
+                    "vendor": "Y",
+                    "amount": "1.00",
+                },
             )
         ).json()
 
@@ -163,6 +174,7 @@ async def test_by_entity_single_entity_tenant(realdb):
         r = await c.post(
             "/api/invoices",
             json={
+                "currency": "USD",
                 "invoice_number": "S-1",
                 "vendor": "Acme",
                 "amount": "75.00",

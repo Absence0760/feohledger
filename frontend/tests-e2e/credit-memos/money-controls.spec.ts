@@ -54,7 +54,8 @@ async function makeInvoice(
 		data: {
 			vendor: vendor.name,
 			invoice_number: `CM-MC-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-			amount
+			amount,
+			currency: 'USD'
 		}
 	});
 	const inv = (await resp.json()) as { id: string };

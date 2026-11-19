@@ -245,27 +245,32 @@ def statement_currency(raw: str | None) -> str:
     )
 
 
-#: ``PATCH /api/invoices/{id}`` setting ``currency`` to a blank (or ``null``).
-#: ``invoices.currency`` is NOT NULL, so a blank used to land as ``""``, a
-#: "no currency" every money path then had to know about (decisions §457).
-#: An edit may change the currency, never erase it.
+#: ``PATCH /api/invoices/{id}`` setting ``currency`` to a blank (or ``null``),
+#: or ``POST /api/invoices`` omitting it. A blank edit used to land as ``""``, a
+#: "no currency" every money path then had to know about (decisions §457), and
+#: an omitted create was booked in USD (§473). An edit may change the currency,
+#: never erase it; a create must state it.
 INVOICE_CURRENCY_REQUIRED = "invoice_currency_required"
 #: The same field holding something that is not a three-letter ISO 4217 code.
 #: Params: ``value``.
 INVOICE_CURRENCY_INVALID = "invoice_currency_invalid"
 
 
-def invoice_currency(raw: str | None) -> str:
-    """The normalized currency an invoice edit writes, or a coded 422.
+def invoice_currency(raw: str | None, *, creating: bool = False) -> str:
+    """The normalized currency an invoice create or edit writes, or a coded 422.
 
-    Only called when the edit names ``currency``: a PATCH that leaves it out
-    never reaches here, so a legacy row already holding ``""`` stays editable.
+    A PATCH only calls it when the edit names ``currency``: one that leaves it
+    out never reaches here, so a row whose currency is unknown stays editable.
+    A create always calls it (``creating=True``), so an omitted code is refused
+    rather than defaulted.
     """
     return _currency_or_refusal(
         raw,
         required=(
             INVOICE_CURRENCY_REQUIRED,
-            "An invoice's currency cannot be cleared. Choose a three-letter code "
+            "Choose the invoice's currency (a three-letter code such as USD or EUR)."
+            if creating
+            else "An invoice's currency cannot be cleared. Choose a three-letter code "
             "such as USD or EUR.",
         ),
         invalid_code=INVOICE_CURRENCY_INVALID,

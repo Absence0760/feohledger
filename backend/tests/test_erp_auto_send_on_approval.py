@@ -363,7 +363,12 @@ async def test_an_extraction_auto_approval_runs_the_auto_send_after_its_commit(
     async with realdb.client(key=TENANT, role="ap_manager") as c:
         created = await c.post(
             "/api/invoices",
-            json={"vendor": "Northwind Supplies", "invoice_number": "AUTO-EXT-1", "amount": "50"},
+            json={
+                "currency": "USD",
+                "vendor": "Northwind Supplies",
+                "invoice_number": "AUTO-EXT-1",
+                "amount": "50",
+            },
         )
         assert created.status_code == 201, created.text
         inv_id = uuid.UUID(created.json()["id"])

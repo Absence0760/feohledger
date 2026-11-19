@@ -49,13 +49,23 @@ async def test_invoice_list_and_counts_scope_by_entity(realdb, header_role):
         # One invoice under US, one under the default entity (no header).
         r_us = await c.post(
             "/api/invoices",
-            json={"invoice_number": "US-1", "vendor": "Acme", "amount": "100.00"},
+            json={
+                "currency": "USD",
+                "invoice_number": "US-1",
+                "vendor": "Acme",
+                "amount": "100.00",
+            },
             headers={"X-Entity-ID": us},
         )
         assert r_us.status_code == 201, r_us.text
         r_def = await c.post(
             "/api/invoices",
-            json={"invoice_number": "DEF-1", "vendor": "Beta", "amount": "200.00"},
+            json={
+                "currency": "USD",
+                "invoice_number": "DEF-1",
+                "vendor": "Beta",
+                "amount": "200.00",
+            },
         )
         assert r_def.status_code == 201, r_def.text
 
@@ -91,7 +101,7 @@ async def test_invoice_create_unknown_entity_header_is_400(realdb):
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.post(
             "/api/invoices",
-            json={"invoice_number": "X-1", "vendor": "Acme", "amount": "1.00"},
+            json={"currency": "USD", "invoice_number": "X-1", "vendor": "Acme", "amount": "1.00"},
             headers={"X-Entity-ID": str(uuid.uuid4())},
         )
     assert resp.status_code == 400
@@ -139,7 +149,7 @@ async def test_payment_list_and_summary_scope_by_entity(realdb):
         async def _invoice_and_payment(headers, num, amt):
             inv = await c.post(
                 "/api/invoices",
-                json={"invoice_number": num, "vendor": "Acme", "amount": amt},
+                json={"currency": "USD", "invoice_number": num, "vendor": "Acme", "amount": amt},
                 headers=headers,
             )
             assert inv.status_code == 201, inv.text
@@ -192,12 +202,22 @@ async def test_dashboard_scopes_by_entity(realdb):
 
         await c.post(
             "/api/invoices",
-            json={"invoice_number": "D-US", "vendor": "Acme", "amount": "100.00"},
+            json={
+                "currency": "USD",
+                "invoice_number": "D-US",
+                "vendor": "Acme",
+                "amount": "100.00",
+            },
             headers={"X-Entity-ID": us},
         )
         await c.post(
             "/api/invoices",
-            json={"invoice_number": "D-DEF", "vendor": "Beta", "amount": "200.00"},
+            json={
+                "currency": "USD",
+                "invoice_number": "D-DEF",
+                "vendor": "Beta",
+                "amount": "200.00",
+            },
         )
 
         scoped = (await c.get("/api/dashboard", headers={"X-Entity-ID": us})).json()
@@ -231,6 +251,7 @@ async def test_cfo_analytics_and_cashflow_scope_by_entity(realdb):
             r = await c.post(
                 "/api/invoices",
                 json={
+                    "currency": "USD",
                     "invoice_number": num,
                     "vendor": "Acme",
                     "amount": amt,
@@ -363,14 +384,19 @@ async def test_exception_list_and_summary_scope_by_entity(realdb):
         inv_us = (
             await c.post(
                 "/api/invoices",
-                json={"invoice_number": "E-US", "vendor": "X", "amount": "1.00"},
+                json={"currency": "USD", "invoice_number": "E-US", "vendor": "X", "amount": "1.00"},
                 headers={"X-Entity-ID": us},
             )
         ).json()
         inv_def = (
             await c.post(
                 "/api/invoices",
-                json={"invoice_number": "E-DEF", "vendor": "Y", "amount": "1.00"},
+                json={
+                    "currency": "USD",
+                    "invoice_number": "E-DEF",
+                    "vendor": "Y",
+                    "amount": "1.00",
+                },
             )
         ).json()
 

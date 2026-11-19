@@ -66,6 +66,7 @@ async function seedHistory(page: import('@playwright/test').Page): Promise<Creat
 				vendor: vendorName,
 				invoice_number: `${MARKER}-HIST-${stamp}-${i}`,
 				amount: '250.00',
+				currency: 'USD',
 				gl_account: glCode,
 				cost_center: `${MARKER}-CC`
 			}
@@ -82,7 +83,7 @@ async function seedHistory(page: import('@playwright/test').Page): Promise<Creat
 	const draftNumber = `${MARKER}-DRAFT-${stamp}`;
 	const dResp = await page.request.post(`${API_BASE}/api/invoices`, {
 		headers,
-		data: { vendor: vendorName, invoice_number: draftNumber, amount: '250.00' }
+		data: { vendor: vendorName, invoice_number: draftNumber, amount: '250.00', currency: 'USD' }
 	});
 	expect(dResp.status()).toBe(201);
 	const draftId = ((await dResp.json()) as { id: string }).id;

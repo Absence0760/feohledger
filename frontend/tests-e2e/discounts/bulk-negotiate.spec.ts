@@ -69,7 +69,8 @@ async function makeApprovedInvoice(
 		data: {
 			vendor: vendor.name,
 			invoice_number: `BULKNEG-${RUN}-${amount}`,
-			amount
+			amount,
+			currency: 'USD'
 		}
 	});
 	expect(resp.status(), await resp.text()).toBeLessThan(300);

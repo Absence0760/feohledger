@@ -83,7 +83,8 @@ async function seed(page: Page): Promise<Fixture> {
 		data: {
 			vendor: `${MARK} Vendor ${suffix}`,
 			invoice_number: `${MARK}-INV-${suffix}`,
-			amount: '42.00'
+			amount: '42.00',
+			currency: 'USD'
 		}
 	});
 	expect(inv.ok(), await inv.text()).toBe(true);

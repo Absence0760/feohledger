@@ -53,7 +53,7 @@ async function createInvoice(
 ): Promise<string> {
 	const resp = await page.request.post(`${API_BASE}/api/invoices`, {
 		headers: await authedTenantHeaders(page),
-		data: { vendor: vendorName, invoice_number: number, amount: '500.00' }
+		data: { vendor: vendorName, invoice_number: number, amount: '500.00', currency: 'USD' }
 	});
 	expect(resp.status()).toBe(201);
 	return ((await resp.json()) as { id: string }).id;

@@ -206,6 +206,7 @@ def _create_body(number: str, gl: str | None) -> dict:
         "vendor": "Chart Vendor",
         "invoice_number": number,
         "amount": "100.00",
+        "currency": "USD",
         "gl_account": gl,
     }
 

@@ -26,6 +26,7 @@ async def _create_invoice_with_file(c, invoice_number: str) -> str:
     create = await c.post(
         "/api/invoices",
         json={
+            "currency": "USD",
             "vendor": "File Mgmt Vendor Co",
             "invoice_number": invoice_number,
             "amount": "250.00",
@@ -140,7 +141,12 @@ async def test_replace_file_404_when_no_file(realdb):
     async with realdb.client(key="a", role="admin") as c:
         create = await c.post(
             "/api/invoices",
-            json={"vendor": "V", "invoice_number": "REPLACE-NOFILE-001", "amount": "1.00"},
+            json={
+                "currency": "USD",
+                "vendor": "V",
+                "invoice_number": "REPLACE-NOFILE-001",
+                "amount": "1.00",
+            },
         )
         invoice_id = create.json()["id"]
 
@@ -303,7 +309,12 @@ async def test_delete_file_404_when_no_file(realdb):
     async with realdb.client(key="a", role="admin") as c:
         create = await c.post(
             "/api/invoices",
-            json={"vendor": "V", "invoice_number": "DELETE-NOFILE-001", "amount": "1.00"},
+            json={
+                "currency": "USD",
+                "vendor": "V",
+                "invoice_number": "DELETE-NOFILE-001",
+                "amount": "1.00",
+            },
         )
         invoice_id = create.json()["id"]
 

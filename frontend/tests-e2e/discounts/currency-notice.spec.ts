@@ -76,7 +76,8 @@ test.describe('/discounts foreign-currency notice', () => {
 			data: {
 				vendor: vendor.name,
 				invoice_number: `DISC-FX-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-				amount: 1000
+				amount: 1000,
+				currency: 'USD'
 			}
 		});
 		const invoiceId = ((await invResp.json()) as { id: string }).id;

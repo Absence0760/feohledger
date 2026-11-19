@@ -86,7 +86,8 @@ async function makeInvoice(
 		data: {
 			vendor: vendor.name,
 			invoice_number: `DISC-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-			amount
+			amount,
+			currency: 'USD'
 		}
 	});
 	const inv = (await resp.json()) as { id: string };
@@ -348,6 +349,7 @@ test.describe('discounting money path (API)', () => {
 					vendor: vendor.name,
 					invoice_number: `OPT-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
 					amount,
+					currency: 'USD',
 					status: 'approved'
 				}
 			});
