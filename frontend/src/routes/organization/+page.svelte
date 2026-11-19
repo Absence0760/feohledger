@@ -1292,6 +1292,19 @@
 		return h;
 	}
 
+	// One answer for every panel's failed READ. A 4xx carries a refusal the
+	// server wrote for this reader (already localized when it is coded), so it
+	// is worth showing. A 5xx's message is only its status reason — a 500 read
+	// "Internal Server Error" — and a network failure's is the browser's
+	// ("Failed to fetch"); neither says more than the panel's own translated
+	// fallback, and both are English in five locales.
+	function panelLoadError(err: unknown, fallback: string): string {
+		if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+			return errorMessage(err, fallback);
+		}
+		return fallback;
+	}
+
 	async function loadCustomDomains() {
 		loadingDomains = true;
 		domainsError = '';
@@ -1301,7 +1314,7 @@
 			);
 			customDomains = data.custom_domains ?? [];
 		} catch (err) {
-			domainsError = errorMessage(err, m('org.customDomains.toast.loadFailed'));
+			domainsError = panelLoadError(err, m('org.customDomains.toast.loadFailed'));
 		} finally {
 			loadingDomains = false;
 		}
@@ -1411,7 +1424,7 @@
 		try {
 			applyResidency(await api.get<ResidencyResponse>('/api/organization/data-residency'));
 		} catch (err) {
-			residencyError = errorMessage(err, m('org.residency.toast.loadFailed'));
+			residencyError = panelLoadError(err, m('org.residency.toast.loadFailed'));
 		} finally {
 			loadingResidency = false;
 		}
@@ -1537,7 +1550,7 @@
 		try {
 			applyChat(await getChatNotifications());
 		} catch (err) {
-			chatError = errorMessage(err, m('org.chat.toast.loadFailed'));
+			chatError = panelLoadError(err, m('org.chat.toast.loadFailed'));
 		} finally {
 			loadingChat = false;
 		}
@@ -1685,7 +1698,7 @@
 		try {
 			applySso(await getSsoSettings());
 		} catch (err) {
-			ssoLoadError = errorMessage(err, m('orgSso.toast.loadFailed'));
+			ssoLoadError = panelLoadError(err, m('orgSso.toast.loadFailed'));
 		} finally {
 			loadingSso = false;
 		}
@@ -1794,7 +1807,7 @@
 			// available, not silently reporting a working one as switched off.
 			intakeDomainConfigured = data.domain_configured ?? true;
 		} catch (err) {
-			intakeError = errorMessage(err, m('org.emailIntake.toast.loadFailed'));
+			intakeError = panelLoadError(err, m('org.emailIntake.toast.loadFailed'));
 		} finally {
 			loadingIntake = false;
 		}
@@ -1912,6 +1925,49 @@
 		<div class="settings-layout">
 			<SettingsRail groups={railGroups} active={section} label={m('org.rail.label')} />
 
+			{#snippet customDomainsIntro()}
+				<h2>{m('org.section.customDomains')}</h2>
+				<p class="card-hint">
+					{m('org.customDomains.hint', { example: 'ap.acmecorp.com', slug: org?.slug ?? 'tenant' })}
+				</p>
+				<p class="card-hint">
+					{m('org.customDomains.setupHint', {
+						runbook: 'docs/founder-runbooks/custom-domain-provisioning.md'
+					})}
+				</p>
+			{/snippet}
+			{#snippet residencyIntro()}
+				<div class="help-row">
+					<h2>{m('org.section.dataResidency')}</h2>
+					<HelpTip term="data-residency" />
+				</div>
+				<p class="card-hint">{m('org.residency.hint')}</p>
+			{/snippet}
+
+			<!-- A failed panel READ renders here, OUTSIDE the lock below. Retry
+			     only re-reads, and a disabled <fieldset> disables every
+			     descendant control with no per-control opt-out, so inside it a
+			     non-admin was shown a Retry they could not press. Only the
+			     panels a non-admin actually loads are listed: chat, email
+			     intake, SSO and the close panel make no read for a non-admin
+			     (they show their admin-only note instead), so their LoadError
+			     can never meet the lock. A new panel a non-admin loads joins
+			     this chain, not the fieldset. -->
+			{#if section === 'custom-domains' && !loadingDomains && domainsError}
+				<div class="sections">
+					<section class="card">
+						{@render customDomainsIntro()}
+						<LoadError message={domainsError} onretry={loadCustomDomains} testId="custom-domains-load-error" />
+					</section>
+				</div>
+			{:else if section === 'residency' && !loadingResidency && residencyError}
+				<div class="sections">
+					<section class="card">
+						{@render residencyIntro()}
+						<LoadError message={residencyError} onretry={loadResidency} testId="residency-load-error" />
+					</section>
+				</div>
+			{:else}
 			<!-- A single disabled <fieldset> is the whole read-only mode: the
 			     attribute natively disables every descendant control, so a panel
 			     added later is covered without anyone remembering to gate it.
@@ -2155,20 +2211,10 @@
 
 				{#if section === 'custom-domains'}
 					<section class="card">
-						<h2>{m('org.section.customDomains')}</h2>
-						<p class="card-hint">
-							{m('org.customDomains.hint', { example: 'ap.acmecorp.com', slug: org?.slug ?? 'tenant' })}
-						</p>
-						<p class="card-hint">
-							{m('org.customDomains.setupHint', {
-								runbook: 'docs/founder-runbooks/custom-domain-provisioning.md'
-							})}
-						</p>
+						{@render customDomainsIntro()}
 
 						{#if loadingDomains}
 							<p class="card-hint">{m('org.customDomains.loading')}</p>
-						{:else if domainsError}
-							<LoadError message={domainsError} onretry={loadCustomDomains} testId="custom-domains-load-error" />
 						{:else}
 							{#if domainSaveError}
 								<p class="domain-error" role="alert" data-testid="custom-domain-error">
@@ -2429,16 +2475,10 @@
 
 				{#if section === 'residency'}
 					<section class="card">
-						<div class="help-row">
-							<h2>{m('org.section.dataResidency')}</h2>
-							<HelpTip term="data-residency" />
-						</div>
-						<p class="card-hint">{m('org.residency.hint')}</p>
+						{@render residencyIntro()}
 
 						{#if loadingResidency}
 							<p class="card-hint">{m('org.residency.loading')}</p>
-						{:else if residencyError}
-							<LoadError message={residencyError} onretry={loadResidency} testId="residency-load-error" />
 						{:else}
 							<div class="form-grid">
 								<label>
@@ -2561,9 +2601,9 @@
 							</div>
 
 							{#if extractionProgramType === 'platform'}
-								<p class="card-hint" style="margin-top: 10px;">{m('org.extraction.platformHint')}</p>
+								<p class="card-hint after-control">{m('org.extraction.platformHint')}</p>
 							{:else if extractionProvider === 'claude_vision' || extractionProvider === 'openai_vision'}
-								<div class="form-grid" style="margin-top: 14px;">
+								<div class="form-grid">
 									<SecretField
 										id="extraction-api-key"
 										label={extractionProvider === 'claude_vision' ? m('org.extraction.anthropicKey') : m('org.extraction.openaiKey')}
@@ -2584,7 +2624,7 @@
 									</p>
 								{/if}
 							{:else if extractionProvider === 'aws_textract'}
-								<div class="form-grid" style="margin-top: 14px;">
+								<div class="form-grid">
 									<label>
 										<span>{m('org.extraction.awsKeyId')}</span>
 										<input
@@ -2617,7 +2657,7 @@
 									</p>
 								{/if}
 							{:else if extractionProvider === 'ollama'}
-								<div class="form-grid" style="margin-top: 14px;">
+								<div class="form-grid">
 									<label>
 										<span>{m('org.extraction.ollamaUrl')}</span>
 										<input type="url" bind:value={extractionOllamaUrl} placeholder={'http://localhost:11434'} />
@@ -2631,7 +2671,7 @@
 										</select>
 									</label>
 								</div>
-								<p class="card-hint" style="margin-top: 8px;">{m('org.extraction.ollamaHint')} <code>{`brew install ollama && ollama pull ${extractionOllamaModel}`}</code></p>
+								<p class="card-hint after-control">{m('org.extraction.ollamaHint')} <code>{`brew install ollama && ollama pull ${extractionOllamaModel}`}</code></p>
 							{/if}
 
 							{#if unopenable.extraction && auth.isAdmin}
@@ -2970,11 +3010,11 @@
 							</div>
 
 							{#if cardsEnabled && cardsProgramType === 'platform'}
-								<p class="card-hint" style="margin-top: 10px;">{m('org.cards.platformHint', { provider: autoProvider === 'lithic' ? 'Lithic' : 'Nium' })}</p>
+								<p class="card-hint after-control">{m('org.cards.platformHint', { provider: autoProvider === 'lithic' ? 'Lithic' : 'Nium' })}</p>
 							{/if}
 
 							{#if cardsEnabled && cardsProgramType === 'byok'}
-								<div class="form-grid" style="margin-top: 14px;">
+								<div class="form-grid">
 									<label>
 										<span>{m('org.cards.provider')}</span>
 										<select bind:value={cardsProvider}>
@@ -2986,7 +3026,7 @@
 								</div>
 
 								{#if effectiveProvider === 'lithic'}
-									<div class="form-grid" style="margin-top: 14px;">
+									<div class="form-grid">
 										<SecretField
 											id="cards-api-key"
 											label={m('org.cards.lithicApiKey')}
@@ -3005,7 +3045,7 @@
 										</label>
 									</div>
 								{:else if effectiveProvider === 'nium'}
-									<div class="form-grid" style="margin-top: 14px;">
+									<div class="form-grid">
 										<label>
 											<span>{m('org.cards.clientId')}</span>
 											<input type="text" bind:value={cardsClientId} />
@@ -3562,6 +3602,7 @@
 					<CloseWorkspacePanel {readOnly} {userLoaded} />
 				{/if}
 			</fieldset>
+			{/if}
 		</div>
 	{:else if orgLoadFailed}
 		<LoadError message={m('org.error.loadFailed')} onretry={loadOrg} testId="org-load-error" />
@@ -3716,6 +3757,11 @@
 		font-size: 0.82rem;
 		color: var(--text-muted);
 		margin: 0 0 14px;
+	}
+
+	/* A hint under the provider picker it qualifies, not at the top of a card. */
+	.card-hint.after-control {
+		margin-top: 10px;
 	}
 
 	/* First-time-admin wayfinding — links jump to the sections a new tenant
