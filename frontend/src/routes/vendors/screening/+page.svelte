@@ -425,11 +425,14 @@
 			unblockArmedFor = selected.vendor_id;
 			return;
 		}
-		unblockArmedFor = null;
 		// Bind the action to the vendor that was on screen when it was fired.
 		// Everything after the first await must read THIS, never `selected` —
 		// the modal can be closed and re-opened on another vendor mid-flight.
 		const target = selected;
+		// The arm is held through the request, not dropped before it: a busy
+		// commit keeps `.armed` (ui-patterns § `.armed`, the third look), and
+		// dropping it here repainted an in-flight unblock as the muted unarmed
+		// secondary. `finally` releases it.
 		busy = { vendorId: target.vendor_id, action: 'block' };
 		try {
 			const updated = target.payments_blocked
@@ -455,12 +458,18 @@
 			toast(errorMessage(err, m('vendors.screening.queue.toast.actionFailed')), 'error');
 		} finally {
 			if (busy?.vendorId === target.vendor_id) busy = null;
+			if (unblockArmedFor === target.vendor_id) unblockArmedFor = null;
 		}
 	}
 
 	async function rescreen() {
 		if (!selected) return;
 		const target = selected;
+		// A fresh screen can change the verdict the Confirm unblock was armed
+		// against, and while it runs the commit cannot be pressed — a red fill
+		// on a disabled button reads as "ready". Disarm; the reviewer re-arms
+		// against the new result.
+		if (unblockArmedFor === target.vendor_id) unblockArmedFor = null;
 		busy = { vendorId: target.vendor_id, action: 'rescreen' };
 		try {
 			const updated = await screenVendor(target.vendor_id);

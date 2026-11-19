@@ -4,8 +4,8 @@ import {
 	currentTenantSlug,
 	deleteVendorsWhere,
 	expect,
+	flagVendorForScreeningReview,
 	signInAndWait,
-	tenantPsql,
 	test
 } from '../fixtures/helpers';
 import type { Page } from '@playwright/test';
@@ -50,20 +50,7 @@ async function createVendor(page: Page, name: string): Promise<{ id: string }> {
 /** Flip a vendor to a `match` screening verdict + seed one history row so it
  *  lands on the review queue with a visible history timeline. */
 function flagForReview(vendorId: string): void {
-	tenantPsql(
-		`UPDATE vendors SET screening_status='match', last_screened_at=now(), ` +
-			`risk_level='high', risk_score=90 WHERE id='${vendorId}'`,
-		SLUG
-	);
-	tenantPsql(
-		`INSERT INTO sanctions_checks ` +
-			`(id, vendor_id, organization_id, provider, check_type, result, ` +
-			`risk_score, matched_list, checked_at) ` +
-			`SELECT gen_random_uuid(), v.id, v.organization_id, 'mock', 'manual', ` +
-			`'match', 90, 'MOCK_TEST_SDN', now() ` +
-			`FROM vendors v WHERE v.id='${vendorId}'`,
-		SLUG
-	);
+	flagVendorForScreeningReview(vendorId, SLUG);
 }
 
 function deleteVendorCascade(vendorId: string): void {

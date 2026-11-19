@@ -835,6 +835,36 @@ export function deleteInvoicesWhere(predicate: string, slug?: string): void {
 }
 
 /**
+ * Put a vendor on the `/vendors/screening` review queue: a `match` verdict at
+ * high risk plus one `sanctions_checks` history row, so the queue row and the
+ * modal's timeline both have something to show. The mock screener only flags
+ * a fixed fixture-name set, so the verdict is written directly; that keeps the
+ * vendor's name unique per run. `blocked` also sets `payments_blocked`, which
+ * is what an auto-blocking `match` does, so the modal opens on Unblock.
+ */
+export function flagVendorForScreeningReview(
+	vendorId: string,
+	slug?: string,
+	opts: { blocked?: boolean } = {}
+): void {
+	const blocked = opts.blocked ? ', payments_blocked=true' : '';
+	tenantPsql(
+		`UPDATE vendors SET screening_status='match', last_screened_at=now(), ` +
+			`risk_level='high', risk_score=90${blocked} WHERE id='${vendorId}'`,
+		slug
+	);
+	tenantPsql(
+		`INSERT INTO sanctions_checks ` +
+			`(id, vendor_id, organization_id, provider, check_type, result, ` +
+			`risk_score, matched_list, checked_at) ` +
+			`SELECT gen_random_uuid(), v.id, v.organization_id, 'mock', 'manual', ` +
+			`'match', 90, 'MOCK_TEST_SDN', now() ` +
+			`FROM vendors v WHERE v.id='${vendorId}'`,
+		slug
+	);
+}
+
+/**
  * Delete the vendors matching `predicate`, and everything that references them.
  *
  * `vendors` is referenced by 17 foreign keys and only two of them cascade

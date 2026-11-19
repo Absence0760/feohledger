@@ -4,8 +4,11 @@ import {
 	authedTenantHeaders,
 	deleteInvoicesWhere,
 	deletePaymentRunsWhere,
+	deleteVendorsWhere,
 	expect,
 	firstPayableQueueInvoice,
+	flagVendorForScreeningReview,
+	selectVendorInPicker,
 	signInAndWait,
 	tenantPsql,
 	test
@@ -239,4 +242,146 @@ test.describe('armed commits follow their precondition', () => {
 		await expect(submit).toHaveClass(/\barmed\b/);
 		release();
 	});
+});
+
+/** A uniquely named vendor through the real API; callers tear it down with
+ *  `deleteVendorsWhere`, which cascades its screening history and offers. */
+async function makeVendor(page: Page, name: string): Promise<string> {
+	const resp = await page.request.post(`${API_BASE}/api/vendors`, {
+		headers: await authedTenantHeaders(page),
+		data: { name }
+	});
+	expect(resp.status(), `POST /api/vendors: ${await resp.text()}`).toBe(201);
+	return ((await resp.json()) as { id: string }).id;
+}
+
+/** Hold every request matching `url` until the returned release is called,
+ *  then let it through to the real backend. */
+async function holdRoute(page: Page, url: string): Promise<() => void> {
+	let release!: () => void;
+	const held = new Promise<void>((r) => (release = r));
+	await page.route(url, async (route) => {
+		await held;
+		await route.fallback();
+	});
+	return release;
+}
+
+/**
+ * The same three looks, plus axe in both themes, on the two armed commits the
+ * siblings above do not reach: `/vendors/screening`'s Confirm unblock (it
+ * releases payments a screen stopped) and `BulkNegotiationModal`'s Confirm —
+ * propose (it covers every open invoice the vendor has). Real backend; the
+ * held routes only pause a request so its busy state can be read.
+ */
+test.describe('armed commits follow their precondition — screening and bulk discounts', () => {
+	for (const theme of THEMES) {
+		test(`/vendors/screening Confirm unblock in ${theme}`, async ({ page }) => {
+			await useTheme(page, theme);
+			await page.goto('/vendors');
+			const name = `E2E Armed Unblock ${theme} ${Date.now()}`;
+			const vendorId = await makeVendor(page, name);
+			try {
+				flagVendorForScreeningReview(vendorId, undefined, { blocked: true });
+				await page.goto('/vendors/screening');
+				await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+				await page.locator('table tbody tr', { hasText: name }).locator('.row-link').click();
+				const modal = page.getByRole('dialog', { name: 'Vendor screening review' });
+				const actions = modal.getByTestId('screening-actions');
+
+				// Unarmed: the plain secondary trigger.
+				const unblock = actions.getByRole('button', { name: 'Unblock payments' });
+				await expect(unblock).toBeEnabled();
+				await expect(unblock).not.toHaveClass(/\barmed\b/);
+
+				// Ready: armed fill under the armed name.
+				await unblock.click();
+				const confirm = actions.getByRole('button', { name: 'Confirm unblock' });
+				await expect(confirm).toBeEnabled();
+				await expect(confirm).toHaveClass(/\barmed\b/);
+				await expectNoA11yViolations(page);
+
+				// Disabled by a re-screen in flight: the commit cannot be pressed, so
+				// it is disarmed — muted, under the unarmed name — not a red fill.
+				const releaseScreen = await holdRoute(page, `**/api/vendors/${vendorId}/screen`);
+				const screened = page.waitForResponse(
+					(r) => r.request().method() === 'POST' && r.url().endsWith(`/api/vendors/${vendorId}/screen`)
+				);
+				await actions.getByRole('button', { name: 'Re-screen now' }).click();
+				await expect(actions.getByRole('button', { name: 'Re-screening…' })).toBeDisabled();
+				await expect(unblock).toBeDisabled();
+				await expect(unblock).not.toHaveClass(/\barmed\b/);
+				releaseScreen();
+				expect((await screened).status()).toBe(200);
+				await expect(unblock).toBeEnabled();
+
+				// Busy: re-armed and committed, it stays armed while the unblock is held.
+				await unblock.click();
+				await expect(confirm).toHaveClass(/\barmed\b/);
+				const releaseUnblock = await holdRoute(page, `**/api/vendors/${vendorId}/unblock`);
+				const unblocked = page.waitForResponse(
+					(r) => r.request().method() === 'POST' && r.url().endsWith(`/api/vendors/${vendorId}/unblock`)
+				);
+				await confirm.click();
+				const busy = actions.getByRole('button', { name: 'Working…' });
+				await expect(busy).toBeDisabled();
+				await expect(busy).toHaveClass(/\barmed\b/);
+				await expectNoA11yViolations(page);
+				releaseUnblock();
+				expect((await unblocked).status()).toBe(200);
+				await expect(actions.getByRole('button', { name: 'Block payments' })).toBeVisible();
+			} finally {
+				deleteVendorsWhere(`id='${vendorId}'`);
+			}
+		});
+
+		test(`BulkNegotiationModal Confirm — propose in ${theme}`, async ({ page }) => {
+			await useTheme(page, theme);
+			await page.goto('/discounts');
+			// No open invoices: the real endpoint answers 409, so the held commit
+			// creates nothing and its refusal is the end state.
+			const name = `E2E Armed BulkNeg ${theme} ${Date.now()}`;
+			const vendorId = await makeVendor(page, name);
+			try {
+				await page.goto('/discounts');
+				await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+				await page.getByRole('button', { name: 'Propose vendor offer' }).click();
+				const submit = page.getByTestId('bulk-negotiate-submit');
+
+				// Disabled, precondition unmet (no vendor, no tier): not armed.
+				await expect(submit).toBeDisabled();
+				await expect(submit).toHaveAccessibleName('Propose offer');
+				await expect(submit).not.toHaveClass(/\barmed\b/);
+
+				await selectVendorInPicker(page.getByTestId('bulk-negotiate-vendor'), name);
+				await page.getByLabel('Tier 1 — pay within days').fill('10');
+				await page.getByLabel('Tier 1 — discount percent').fill('2.00');
+				await expect(submit).toBeEnabled();
+				await expect(submit).not.toHaveClass(/\barmed\b/);
+
+				// Ready: the first click arms, under the name that says what commits.
+				await submit.click();
+				await expect(submit).toHaveAccessibleName(`Confirm — propose to ${name}`);
+				await expect(submit).toHaveClass(/\barmed\b/);
+				await expectNoA11yViolations(page);
+
+				// Busy: held in flight, still armed, disabled under its busy name.
+				const release = await holdRoute(page, '**/api/discounts/bulk-negotiate');
+				const proposed = page.waitForResponse(
+					(r) =>
+						r.request().method() === 'POST' && r.url().includes('/api/discounts/bulk-negotiate')
+				);
+				await submit.click();
+				await expect(submit).toBeDisabled();
+				await expect(submit).toHaveAccessibleName('Proposing…');
+				await expect(submit).toHaveClass(/\barmed\b/);
+				await expectNoA11yViolations(page);
+				release();
+				expect((await proposed).status()).toBe(409);
+				await expect(page.getByTestId('bulk-negotiate-error')).toBeVisible();
+			} finally {
+				deleteVendorsWhere(`id='${vendorId}'`);
+			}
+		});
+	}
 });
