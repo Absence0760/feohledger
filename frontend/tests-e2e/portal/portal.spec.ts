@@ -402,6 +402,12 @@ test.describe("/portal — self-service (PO flip, remittance, company)", () => {
                 currency: "USD",
                 line_item_count: 1,
                 created_at: "2026-09-01T10:00:00",
+                flip_verdict: {
+                  code: "po_total_unverifiable",
+                  message:
+                    "This purchase order's total could not be confirmed. Submit your invoice instead.",
+                  params: {},
+                },
               },
             ],
             total: 1,
@@ -421,6 +427,55 @@ test.describe("/portal — self-service (PO flip, remittance, company)", () => {
     await expect(page.locator("#po-unverifiable-note")).toContainText(
       "Submit your own invoice",
     );
+  });
+
+  test("a closed or cancelled PO offers no Create invoice, and its status reads as a label", async ({
+    page,
+  }) => {
+    // The server refuses to flip a PO that no longer commits spend
+    // (`po_not_invoiceable`) and says so per row as `flip_verdict`; the page
+    // reads that verdict instead of a status list of its own. Real backend,
+    // real rows: a closed and an open PO seeded for the portal vendor.
+    await portalSignIn(page);
+    await expect(page).toHaveURL(/\/portal\/invoices/, { timeout: 15_000 });
+
+    const vendorId = tenantPsql(
+      `SELECT vendor_id FROM vendor_users WHERE email='${PORTAL_EMAIL}'`,
+    ).trim();
+    const orgId = tenantPsql(
+      `SELECT organization_id FROM vendors WHERE id='${vendorId}'`,
+    ).trim();
+    const stamp = Date.now();
+    const closedPo = `E2E-CLOSED-${stamp}`;
+    const openPo = `E2E-OPEN-${stamp}`;
+    tenantPsql(
+      `INSERT INTO purchase_orders (id, po_number, vendor_id, total, status, organization_id)
+       VALUES (gen_random_uuid(), '${closedPo}', '${vendorId}', 90.00, 'closed', '${orgId}'),
+              (gen_random_uuid(), '${openPo}', '${vendorId}', 90.00, 'open', '${orgId}')`,
+    );
+
+    try {
+      await page.getByRole("link", { name: "Purchase Orders" }).click();
+      const closedRow = page.locator("table tbody tr", { hasText: closedPo });
+      const openRow = page.locator("table tbody tr", { hasText: openPo });
+      await expect(closedRow).toBeVisible();
+      await expect(closedRow).toContainText("Closed");
+      await expect(closedRow).not.toContainText("closed");
+      await expect(
+        closedRow.getByRole("button", { name: "Create invoice" }),
+      ).toHaveCount(0);
+      await expect(closedRow.getByTestId("po-flip-refusal")).toHaveText(
+        "No longer open for invoicing",
+      );
+      await expect(openRow).toContainText("Open");
+      await expect(
+        openRow.getByRole("button", { name: "Create invoice" }),
+      ).toBeEnabled();
+    } finally {
+      tenantPsql(
+        `DELETE FROM purchase_orders WHERE po_number IN ('${closedPo}', '${openPo}')`,
+      );
+    }
   });
 
   test("a vendor downloads a remittance PDF for a completed payment", async ({
