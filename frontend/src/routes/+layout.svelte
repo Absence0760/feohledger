@@ -19,6 +19,10 @@
 	import { theme } from '#lib/stores/theme.svelte.ts';
 	import { FIND_WORKSPACE_PATH, tenantHostRoute } from '#lib/utils/tenantHostRoute.ts';
 
+	import type { Snippet } from 'svelte';
+
+	let { children }: { children: Snippet } = $props();
+
 	// Tri-state: `undefined` until the browser resolves it (render nothing, no
 	// flash), then true/false. This asks "does this host carry a tenant at all",
 	// NOT "what is its slug" — a white-label vanity host has a tenant but no
@@ -197,22 +201,22 @@
 		them for a beat on load, and on the apex would hand the reader the
 		marketing Landing page instead of the document they asked for.
 	-->
-	<slot />
+	{@render children()}
 {:else if hasTenant === undefined}
 	<!-- SSR / hydration: tenant not resolved yet, render nothing to avoid flash -->
 {:else if page.url.pathname.startsWith(PORTAL_PREFIX)}
-	<slot />
+	{@render children()}
 {:else if hasTenant && page.url.pathname === FIND_WORKSPACE}
 	<!-- A workspace host's /find-workspace: on its way to /login or / (the
 	     effect above); the apex-only page never mounts here. -->
 {:else if PUBLIC_PATHS.includes(page.url.pathname)}
-	<slot />
+	{@render children()}
 {:else if hasTenant === false && isLoginPath(page.url.pathname)}
 	<!-- Apex /login: on its way to /find-workspace (above); nothing to flash. -->
 {:else if hasTenant === false}
 	<Landing />
 {:else if page.url.pathname.startsWith('/login') || page.url.pathname === '/change-password'}
-	<slot />
+	{@render children()}
 {:else if auth.loggedIn && auth.user && !auth.user.must_change_password}
 	<div class="app-shell">
 		<!-- WCAG 2.4.1 Bypass Blocks: first focusable element jumps past the
@@ -231,7 +235,7 @@
 			style="margin-left: {sidebar.collapsed || sidebar.narrow ? 60 : 220}px"
 		>
 			<SectionTabs />
-			<slot />
+			{@render children()}
 		</main>
 	</div>
 {:else if auth.loggedIn && !auth.user}
@@ -249,10 +253,10 @@
 <UnsavedChangesDialog />
 
 <!--
-	Consent banner is mounted here, outside the routed `<slot />`, so it renders
+	Consent banner is mounted here, outside the routed `{@render children()}`, so it renders
 	on every surface — the app shell, the no-tenant marketing landing, the
 	signup/verify flow, and the supplier portal (whose `/portal/+layout.svelte`
-	only owns the slot content; this root layout still wraps it). It governs
+	only owns the routed content; this root layout still wraps it). It governs
 	non-essential/analytics storage only — essential JWT auth is exempt.
 -->
 <ConsentBanner />

@@ -89,9 +89,8 @@ function notifyModals() {
  *
  * This is the single shared implementation used by `ui/Modal.svelte` AND the
  * feature dialogs that pre-date it and still hand-roll their own shell
- * (`InvoiceModal`, `RunDetailModal`, `BulkRecodeGLModal`, the supplier-portal
- * discount-accept dialog) — so every dialog gets identical focus management
- * without a risky structural rewrite of those e2e-load-bearing modals.
+ * (`InvoiceModal`, `RunDetailModal`; `src/lib/modalShell.test.ts` lists them)
+ * — so every dialog gets identical focus management.
  */
 /**
  * Where focus goes when a dialog closes (WCAG 2.4.3 Focus Order).

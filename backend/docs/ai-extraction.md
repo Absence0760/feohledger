@@ -519,7 +519,7 @@ default priors-only pass to size how many priors the chart rejected.
 
 Each persisted change writes an `invoice.gl_recoded` audit-log row with `{old_gl, new_gl, source, bulk_run_at}` so the activity is traceable on the invoice's history.
 
-Frontend: "Bulk Re-code GL" toolbar button on `/invoices` (admin-only) opens a preview-then-apply modal in `frontend/src/lib/components/BulkRecodeGLModal.svelte`.
+Frontend: "Bulk Re-code GL" toolbar button on `/invoices` (admin-only) opens a preview-then-apply modal in `frontend/src/lib/components/modals/BulkRecodeGLModal.svelte`.
 
 ## ExtractionResult Structure
 

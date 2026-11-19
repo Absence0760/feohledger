@@ -8,6 +8,10 @@
 	import { hasTenantContext } from '#lib/tenant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
+	import type { Snippet } from 'svelte';
+
+	let { children }: { children: Snippet } = $props();
+
 	// Tri-state: `undefined` until the browser resolves it, then true/false.
 	// "Does this host carry a tenant", NOT "what is its slug" — a white-label
 	// vanity host has a tenant but no slug in the URL (the backend resolves it
@@ -84,7 +88,7 @@
 {:else if page.url.pathname === '/portal/login' || page.url.pathname === '/portal/change-password' || page.url.pathname === '/portal/reset-password' || page.url.pathname === '/portal/forgot-password' || page.url.pathname.startsWith('/portal/cards/')}
 	<div class="portal-shell">
 		<div class="portal-standalone">
-			<slot />
+			{@render children()}
 		</div>
 		<!--
 			The legal links belong on the SIGNED-OUT surfaces too, and this is the
@@ -181,7 +185,7 @@
 			</div>
 		</header>
 		<main id="main-content" tabindex="-1" class="portal-main">
-			<slot />
+			{@render children()}
 		</main>
 		<!--
 			The footer now always renders, because two of its links are ours and
