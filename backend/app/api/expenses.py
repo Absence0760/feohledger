@@ -1877,7 +1877,9 @@ async def submit_report(
         entity_id=report.id,
         details={
             "total": str(report.total_amount),
-            "currency": normalize_currency(report.currency),
+            # As stored: an audit row records what the report carried, even a
+            # malformed legacy code the normaliser would read as unknown.
+            "currency": report.currency,
             "reporting_total": (
                 str(report.reporting_amount) if report.reporting_amount is not None else None
             ),
@@ -1938,7 +1940,9 @@ async def approve_report(
         entity_id=report.id,
         details={
             "total": str(report.total_amount),
-            "currency": normalize_currency(report.currency),
+            # As stored: an audit row records what the report carried, even a
+            # malformed legacy code the normaliser would read as unknown.
+            "currency": report.currency,
             # The exact figure the CFO gate compared, so an auditor can replay
             # the decision without re-deriving an FX rate.
             "gate_total": str(gate_total) if gate_total is not None else None,
