@@ -842,7 +842,12 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
      --danger-on-tint over --danger-tint on --surface  5.36 / 5.77
      --text-muted (disabled) on --surface  5.38 / 5.75
    Disabled swaps to --text-muted and a neutral border, never `opacity`:
-   group opacity takes --text-muted to 2.33:1 (a11y/opacityAudit.test.ts). */
+   group opacity takes --text-muted to 2.33:1 (a11y/opacityAudit.test.ts).
+
+   Every rule here is one class of specificity (states inside :where()), so
+   a route still carrying its own scoped copy (/payments' filled
+   .btn-danger, /tax's armed one) keeps winning on every property it sets
+   until it migrates, instead of picking up a tint on hover. */
 .btn-secondary,
 .btn-danger {
 	display: inline-flex;
@@ -862,7 +867,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	cursor: pointer;
 	font-family: inherit;
 }
-.btn-secondary:hover:not(:disabled) {
+.btn-secondary:where(:hover:not(:disabled)) {
 	border-color: var(--accent);
 	color: var(--accent);
 }
@@ -871,12 +876,12 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	color: var(--danger);
 	font-weight: 600;
 }
-.btn-danger:hover:not(:disabled) {
+.btn-danger:where(:hover:not(:disabled)) {
 	background: var(--danger-tint);
 	color: var(--danger-on-tint);
 }
-.btn-secondary:disabled,
-.btn-danger:disabled {
+.btn-secondary:where(:disabled),
+.btn-danger:where(:disabled) {
 	border-color: var(--border);
 	background: var(--surface);
 	color: var(--text-muted);
