@@ -206,6 +206,7 @@ export const messages = {
 
 	// ポータルの会社情報 (routes/portal/company/+page.svelte)
 	'portal.company.title': '会社情報',
+	'portal.company.loadFailed': "会社情報を読み込めませんでした。もう一度お試しください。",
 	'portal.company.pendingBanner':
 		'{changeType} の変更が買掛金（AP）の承認待ちです。お客様が承認すると有効になります。',
 	'portal.company.contact.title': '連絡先情報',

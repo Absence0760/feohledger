@@ -191,6 +191,7 @@ export const messages = {
 	'portal.discounts.dialog.accept': 'Skonto annehmen',
 	'portal.discounts.dialog.accepting': 'Wird angenommen…',
 	'portal.company.title': 'Unternehmensdaten',
+	'portal.company.loadFailed': "Ihre Unternehmensdaten konnten nicht geladen werden. Versuchen Sie es erneut.",
 	'portal.company.pendingBanner': 'Eine Änderung Ihrer Angabe „{changeType}“ wartet auf die Genehmigung der Kreditorenbuchhaltung. Sie wird wirksam, sobald Ihr Kunde sie genehmigt.',
 	'portal.company.contact.title': 'Kontaktdaten',
 	'portal.company.contact.note': 'Diese werden sofort gespeichert.',

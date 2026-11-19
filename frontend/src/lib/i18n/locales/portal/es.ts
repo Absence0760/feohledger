@@ -211,6 +211,7 @@ export const messages = {
 
 	// Empresa del portal (routes/portal/company/+page.svelte)
 	'portal.company.title': 'Información de la empresa',
+	'portal.company.loadFailed': "No se pudieron cargar los datos de su empresa. Inténtelo de nuevo.",
 	'portal.company.pendingBanner':
 		'Un cambio en tu {changeType} está pendiente de aprobación de cuentas por pagar. Tendrá efecto una vez que tu cliente lo apruebe.',
 	'portal.company.contact.title': 'Datos de contacto',

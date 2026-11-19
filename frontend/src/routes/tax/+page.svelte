@@ -65,13 +65,24 @@
 	const urlFilter = page.url.searchParams.get('filter') ?? 'all';
 	let rowFilter = $state(ROW_FILTERS.includes(urlFilter) ? urlFilter : 'all');
 
+	// The search term as the URL carries it. Filtering is client-side and stays
+	// instant, but the address bar follows the term only once typing pauses:
+	// writing it per keystroke spent a replaceState per character, and Safari
+	// throws once a page passes 100 of those in 30 seconds.
+	let urlSearch = $state((page.url.searchParams.get('search') ?? '').trim());
+	$effect(() => {
+		const q = search.trim();
+		if (q === untrack(() => urlSearch)) return;
+		const timer = setTimeout(() => (urlSearch = q), 300);
+		return () => clearTimeout(timer);
+	});
+
 	// A WRITER, never a dependency source: the URL read is untracked so this
-	// effect does not re-fire on its own replaceState. Filtering is client-side,
-	// so there is no fetch to debounce here.
+	// effect does not re-fire on its own replaceState.
 	$effect(() => {
 		const y = year;
 		const f = rowFilter;
-		const q = search.trim();
+		const q = urlSearch;
 		untrack(() => {
 			const url = new URL(page.url.href);
 			if (y !== currentYear) url.searchParams.set('year', String(y));

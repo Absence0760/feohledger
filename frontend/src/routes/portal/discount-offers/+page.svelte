@@ -68,6 +68,14 @@
 	// Declining is not reversible from the portal, so it takes two clicks:
 	// the first arms the row's button, the second commits.
 	let armedDeclineId = $state<string | null>(null);
+
+	// What the row's "Applies to" cell shows; it also names the row's Accept /
+	// Decline buttons so a screen reader hears which offer each one acts on.
+	function offerLabel(o: PortalDiscountOffer): string {
+		return o.scope === 'invoice'
+			? m('portal.discounts.scopeInvoice', { number: o.invoice_number || m('portal.common.dash') })
+			: m('portal.discounts.scopeAll');
+	}
 	// The offer whose tier the vendor is choosing in the accept dialog.
 	let accepting = $state<PortalDiscountOffer | null>(null);
 	let chosenTierDays = $state<number | null>(null);
@@ -274,11 +282,7 @@
 				{#each items as o (o.id)}
 					<tr>
 						<td>
-							{#if o.scope === 'invoice'}
-								{m('portal.discounts.scopeInvoice', { number: o.invoice_number || m('portal.common.dash') })}
-							{:else}
-								{m('portal.discounts.scopeAll')}
-							{/if}
+							{offerLabel(o)}
 						</td>
 						<td class="num"><Money amount={o.base_amount} currency={o.currency} /></td>
 						<td class="tiers">
@@ -311,6 +315,7 @@
 								<RowAction
 									variant="success"
 									disabled={busy === o.id || !o.best_tier}
+									ariaLabel={m('common.rowActionAria', { action: m('portal.discounts.accept'), name: offerLabel(o) })}
 									onclick={() => openAccept(o)}
 								>
 									{m('portal.discounts.accept')}
@@ -319,6 +324,13 @@
 									variant="danger"
 									armed={armedDeclineId === o.id}
 									disabled={busy === o.id}
+									ariaLabel={m('common.rowActionAria', {
+										action:
+											armedDeclineId === o.id
+												? m('portal.discounts.declineConfirm')
+												: m('portal.discounts.decline'),
+										name: offerLabel(o)
+									})}
 									onclick={() => onDeclineClick(o)}
 								>
 									{armedDeclineId === o.id

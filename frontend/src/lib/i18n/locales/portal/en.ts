@@ -212,6 +212,7 @@ export const enPortal = {
 
 	// Portal company (routes/portal/company/+page.svelte)
 	'portal.company.title': 'Company Info',
+	'portal.company.loadFailed': "Couldn’t load your company details. Try again.",
 	'portal.company.pendingBanner':
 		'A change to your {changeType} is pending AP approval. It takes effect once your customer approves it.',
 	'portal.company.contact.title': 'Contact details',

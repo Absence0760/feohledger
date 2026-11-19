@@ -258,25 +258,28 @@
 	// Two destructive actions, each armed two-click (ui-patterns § RowAction):
 	// Delete (a draft) and Conclude, which is TERMINAL — a concluded experiment
 	// takes no new assignments and cannot be restarted — and used to fire on a
-	// single click beside the reversible Stop.
-	let confirmDeleteId = $state<string | null>(null);
-	let confirmConcludeId = $state<string | null>(null);
+	// single click beside the reversible Stop. One armed slot for the page, so
+	// arming one row's action disarms every other — two separate slots let a
+	// Delete on one row and a Conclude on another sit armed at once.
+	let armed = $state<{ action: 'delete' | 'conclude'; id: string } | null>(null);
+	const isArmed = (action: 'delete' | 'conclude', id: string) =>
+		armed?.action === action && armed.id === id;
 
 	function doConclude(exp: Experiment) {
-		if (confirmConcludeId !== exp.id) {
-			confirmConcludeId = exp.id;
+		if (!isArmed('conclude', exp.id)) {
+			armed = { action: 'conclude', id: exp.id };
 			return;
 		}
-		confirmConcludeId = null;
+		armed = null;
 		return runAction(exp, concludeExperiment, m('experiments.toast.concluded'), m('experiments.toast.concludeFailed'));
 	}
 
 	function doDelete(exp: Experiment) {
-		if (confirmDeleteId !== exp.id) {
-			confirmDeleteId = exp.id;
+		if (!isArmed('delete', exp.id)) {
+			armed = { action: 'delete', id: exp.id };
 			return;
 		}
-		confirmDeleteId = null;
+		armed = null;
 		return runAction(exp, deleteExperiment, m('experiments.toast.deleted'), m('experiments.toast.deleteFailed'));
 	}
 
@@ -305,9 +308,8 @@
 </script>
 
 <svelte:window onclick={(e) => {
-	if ((confirmDeleteId || confirmConcludeId) && !(e.target as HTMLElement)?.closest('.row-action')) {
-		confirmDeleteId = null;
-		confirmConcludeId = null;
+	if (armed && !(e.target as HTMLElement)?.closest('.row-action')) {
+		armed = null;
 	}
 }} />
 
@@ -353,24 +355,41 @@
 					</td>
 					<td class="actions">
 						{#if canMutate && exp.status === 'draft'}
-							<RowAction variant="success" disabled={busyId === exp.id} onclick={() => doStart(exp)}>{m('experiments.row.start')}</RowAction>
+							<RowAction
+								variant="success"
+								disabled={busyId === exp.id}
+								ariaLabel={m('common.rowActionAria', { action: m('experiments.row.start'), name: exp.name })}
+								onclick={() => doStart(exp)}
+							>{m('experiments.row.start')}</RowAction>
 							<RowAction
 								variant="danger"
-								armed={confirmDeleteId === exp.id}
+								armed={isArmed('delete', exp.id)}
 								disabled={busyId === exp.id}
+								ariaLabel={m('common.rowActionAria', {
+									action: isArmed('delete', exp.id) ? m('experiments.row.confirm') : m('experiments.row.delete'),
+									name: exp.name
+								})}
 								onclick={() => doDelete(exp)}
 							>
-								{confirmDeleteId === exp.id ? m('experiments.row.confirm') : m('experiments.row.delete')}
+								{isArmed('delete', exp.id) ? m('experiments.row.confirm') : m('experiments.row.delete')}
 							</RowAction>
 						{:else if canMutate && exp.status === 'running'}
-							<RowAction disabled={busyId === exp.id} onclick={() => doStop(exp)}>{m('experiments.row.stop')}</RowAction>
+							<RowAction
+								disabled={busyId === exp.id}
+								ariaLabel={m('common.rowActionAria', { action: m('experiments.row.stop'), name: exp.name })}
+								onclick={() => doStop(exp)}
+							>{m('experiments.row.stop')}</RowAction>
 							<RowAction
 								variant="danger"
-								armed={confirmConcludeId === exp.id}
+								armed={isArmed('conclude', exp.id)}
 								disabled={busyId === exp.id}
+								ariaLabel={m('common.rowActionAria', {
+									action: isArmed('conclude', exp.id) ? m('experiments.row.confirm') : m('experiments.row.conclude'),
+									name: exp.name
+								})}
 								onclick={() => doConclude(exp)}
 							>
-								{confirmConcludeId === exp.id ? m('experiments.row.confirm') : m('experiments.row.conclude')}
+								{isArmed('conclude', exp.id) ? m('experiments.row.confirm') : m('experiments.row.conclude')}
 							</RowAction>
 						{/if}
 					</td>
