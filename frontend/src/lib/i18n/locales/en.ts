@@ -4667,6 +4667,7 @@ export const en = {
 	'experiments.status.concluded': 'Concluded',
 
 	'experiments.table.empty': 'No experiments yet.',
+	'experiments.table.emptyFiltered': 'No experiments with this status.',
 	'experiments.title': 'Workflow Experiments',
 	'experiments.toast.concludeFailed': 'Failed to conclude experiment.',
 	'experiments.toast.concluded': 'Experiment concluded.',

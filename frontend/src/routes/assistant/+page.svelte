@@ -29,15 +29,6 @@
 
 	let isEmpty = $derived(messages.length === 0);
 
-	// Starter prompts, in the active locale: each is both a button label and the
-	// message it sends. The shared default (`EXAMPLE_PROMPTS`) is English-only,
-	// so it would show English buttons in all six locales.
-	const examples = $derived([
-		m('assistant.example.approvals'),
-		m('assistant.example.topVendors'),
-		m('assistant.example.poMismatch')
-	]);
-
 	// Bubbles carry a stable client-side id (see `UiMessage.id`). A turn in
 	// flight resolves its own placeholder through `assistantMessage()`, never
 	// through a captured array index — `messages` can be REPLACED wholesale
@@ -316,7 +307,7 @@
 
 		{#snippet log()}
 			{#if isEmpty}
-				<ExamplePrompts prompts={examples} onpick={pickPrompt} />
+				<ExamplePrompts onpick={pickPrompt} />
 			{:else}
 				<div class="msg-stream">
 					{#each messages as message (message.id)}

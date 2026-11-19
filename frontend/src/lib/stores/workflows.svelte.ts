@@ -69,6 +69,10 @@ function createWorkflowStore() {
 		const nextPage = opts.nextPage ?? 1;
 		const token = fetchSequence.start();
 		loading = true;
+		// A fresh load (mount, entity switch, Retry) starts clean: a stale `true`
+		// from an earlier failure would otherwise flash the error over a load that
+		// is about to succeed. Load more leaves it alone — it never set it.
+		if (!opts.append) errored = false;
 		try {
 			const res = await api.get<WorkflowListResponse>(
 				`/api/workflows?page=${nextPage}&page_size=${PAGE_SIZE}`
@@ -78,9 +82,22 @@ function createWorkflowStore() {
 			workflows = opts.append ? appendUnique(workflows, res.items) : res.items;
 			total = res.total;
 			page = nextPage;
-			errored = false;
 		} catch (err) {
-			if (fetchSequence.isCurrentRequest(token)) errored = true;
+			// A failed FRESH load drops the rows it was replacing. Kept, they are
+			// the previous entity's workflows presented as this one's, with nothing
+			// saying the refetch failed (the route shows `LoadError` only over an
+			// empty list). A failed Load more keeps its rows; the route toasts.
+			// A newer load owns the error state (`isCurrentRequest`); a local edit
+			// applied since (`supersedeInFlight`) owns the rows, so they are only
+			// dropped while `canCommit` still holds. Mirrors `/exceptions`.
+			if (!opts.append && fetchSequence.isCurrentRequest(token)) {
+				errored = true;
+				if (fetchSequence.canCommit(token)) {
+					workflows = [];
+					total = 0;
+					page = 1;
+				}
+			}
 			throw err;
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) loading = false;

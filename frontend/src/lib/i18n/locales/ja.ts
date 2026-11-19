@@ -4421,6 +4421,7 @@ export const messages = {
 	'experiments.status.concluded': '終了',
 
 	'experiments.table.empty': 'まだ実験はありません。',
+	'experiments.table.emptyFiltered': 'このステータスの実験はありません。',
 	'experiments.title': 'ワークフロー実験',
 	'experiments.toast.concludeFailed': '実験の完了に失敗しました。',
 	'experiments.toast.concluded': '実験を完了しました。',

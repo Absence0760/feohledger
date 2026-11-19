@@ -4486,6 +4486,7 @@ export const messages = {
 	'experiments.status.concluded': 'Concluído',
 
 	'experiments.table.empty': 'Ainda não há experimentos.',
+	'experiments.table.emptyFiltered': 'Nenhum experimento com este status.',
 	'experiments.title': 'Experimentos de fluxo de trabalho',
 	'experiments.toast.concludeFailed': 'Falha ao concluir o experimento.',
 	'experiments.toast.concluded': 'Experimento concluído.',

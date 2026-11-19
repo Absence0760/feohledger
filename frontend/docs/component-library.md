@@ -219,7 +219,8 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
 - `ExamplePrompts.svelte` — the chat empty state: icon, heading, sub-line and
   one `.prompt-btn` per starter prompt; `onpick(prompt)` fills + sends.
   `<ExamplePrompts onpick prompts? heading? sub? />` — defaults are the AP
-  assistant's three `EXAMPLE_PROMPTS` and `assistant.empty.*` copy; `/cash-flow`
+  assistant's three `assistant.example.*` prompts (localized, re-derived on a
+  locale switch) and `assistant.empty.*` copy; `/cash-flow`
   passes its own four prompts and `cashFlow.empty.*` strings (already
   localized). Both chat pages render this one component — don't restyle a
   local prompt-chip copy.
