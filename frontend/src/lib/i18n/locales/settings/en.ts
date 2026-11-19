@@ -62,6 +62,9 @@ export const enSettings = {
 	'org.defaults.hint': 'These defaults are applied to new invoices.',
 	'org.defaults.currency': 'Currency',
 	'org.defaults.paymentTerms': 'Payment Terms',
+	'org.defaults.terms.dueOnReceipt': 'Due on Receipt',
+	'org.defaults.terms.net': 'Net {days}',
+	'org.defaults.terms.twoTenNet30': '2/10 Net 30',
 	'org.defaults.numberPrefix': 'Invoice Number Prefix',
 	'org.defaults.defaultGl': 'Default GL Account',
 	'org.defaults.defaultGlPlaceholder': 'e.g. 6100',
@@ -246,6 +249,7 @@ export const enSettings = {
 	'org.extraction.awsRegion': 'AWS Region',
 	'org.extraction.ollamaUrl': 'Ollama URL',
 	'org.extraction.model': 'Model',
+	'org.extraction.providerOllama': 'Ollama (local)',
 	'org.extraction.ollamaHint': 'Runs locally — no data leaves your machine. Install:',
 	'org.extraction.save': 'Save Extraction Settings',
 	'org.extraction.switchDropsKey':
@@ -486,6 +490,7 @@ export const enSettings = {
 	'org.cards.programPlatform': 'Platform (recommended)',
 	'org.cards.programByok': 'Bring Your Own Keys',
 	'org.cards.region': 'Region',
+	'org.cards.regionEu': '{country} (EU)',
 	'org.cards.expiryDays': 'Card Expiry (days)',
 	'org.cards.platformHint':
 		'Cards are issued through our platform. Provider is auto-selected based on your region ({provider}). No API keys needed.',

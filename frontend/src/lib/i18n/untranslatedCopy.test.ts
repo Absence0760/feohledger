@@ -76,6 +76,7 @@ const TRANSLATED = [
 	'/src/routes/budgets/+page.svelte',
 	'/src/routes/credit-memos/+page.svelte',
 	'/src/routes/exceptions/+page.svelte',
+	'/src/routes/organization/+page.svelte',
 	'/src/routes/find-workspace/+page.svelte',
 	'/src/routes/reports/+page.svelte',
 	'/src/routes/vendors/+page.svelte'
@@ -112,6 +113,7 @@ const TOASTS_TRANSLATED = [
 	'/src/routes/admin/privacy/+page.svelte',
 	'/src/routes/admin/access-review/+page.svelte',
 	'/src/routes/invoices/+page.svelte',
+	'/src/routes/organization/+page.svelte',
 	// Was "Payment voided", "Draft payment run created…" and six English
 	// load-failure fallbacks (#635).
 	'/src/routes/payments/+page.svelte',

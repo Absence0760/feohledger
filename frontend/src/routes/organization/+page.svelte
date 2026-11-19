@@ -21,7 +21,7 @@
 	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
 	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
 	import { normalizeCurrencyCode, currencyCodeProblem } from '#lib/utils/currencyCode.ts';
-	import { m } from '#lib/i18n/store.svelte.ts';
+	import { m, currentLocale } from '#lib/i18n/store.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
@@ -145,6 +145,32 @@
 	// touched once loaded also shows a malformed stored code as an error.
 	let currencyTouched = $state(false);
 	let paymentTerms = $state('Net 30');
+	// The stored value is the English term the backend and the ERP exports
+	// read, so it stays the option's `value`; only the label is localized.
+	const PAYMENT_TERMS = [
+		'Due on Receipt',
+		'Net 10',
+		'Net 15',
+		'Net 30',
+		'Net 45',
+		'Net 60',
+		'Net 90',
+		'2/10 Net 30'
+	] as const;
+	// A term saved through the API (or before this list) that is not one of the
+	// presets is still offered, so the select shows what is actually stored
+	// rather than a blank box that silently overwrites it on the next save.
+	const paymentTermOptions = $derived(
+		(PAYMENT_TERMS as readonly string[]).includes(paymentTerms)
+			? [...PAYMENT_TERMS]
+			: [...PAYMENT_TERMS, paymentTerms]
+	);
+	function paymentTermLabel(term: string): string {
+		if (term === 'Due on Receipt') return m('org.defaults.terms.dueOnReceipt');
+		if (term === '2/10 Net 30') return m('org.defaults.terms.twoTenNet30');
+		const net = /^Net (\d+)$/.exec(term);
+		return net ? m('org.defaults.terms.net', { days: Number(net[1]) }) : term;
+	}
 	let numberPrefix = $state('INV-');
 	let defaultGl = $state('');
 	let defaultCostCenter = $state('');
@@ -245,7 +271,9 @@
 				? 'api_key'
 				: null;
 	const extractionProviderLabel = (provider: string): string =>
-		EXTRACTION_PROVIDERS.find((p) => p.value === provider)?.label ?? provider;
+		provider === 'ollama'
+			? m('org.extraction.providerOllama')
+			: (EXTRACTION_PROVIDERS.find((p) => p.value === provider)?.name ?? provider);
 	let testingExtraction = $state(false);
 	let extractionTestResult = $state<{ success: boolean; message: string } | null>(null);
 
@@ -269,11 +297,21 @@
 		}
 	}
 
+	// Product names, not copy, except Ollama's "(local)" note, which is keyed
+	// (`extractionProviderLabel`).
 	const EXTRACTION_PROVIDERS = [
-		{ value: 'claude_vision', label: 'Claude Vision (Anthropic)' },
-		{ value: 'openai_vision', label: 'GPT-4V (OpenAI)' },
-		{ value: 'aws_textract', label: 'AWS Textract' },
-		{ value: 'ollama', label: 'Ollama (Local)' },
+		{ value: 'claude_vision', name: 'Claude Vision (Anthropic)' },
+		{ value: 'openai_vision', name: 'GPT-4V (OpenAI)' },
+		{ value: 'aws_textract', name: 'AWS Textract' },
+		{ value: 'ollama', name: 'Ollama' },
+	];
+	// Product and model names, not copy: they read the same in every locale.
+	const MODERN_TREASURY = 'Modern Treasury';
+	const OLLAMA_MODELS = [
+		{ value: 'llama3.2-vision:11b', name: 'Llama 3.2 Vision 11B' },
+		{ value: 'llama3.2-vision:90b', name: 'Llama 3.2 Vision 90B' },
+		{ value: 'llava:13b', name: 'LLaVA 13B' },
+		{ value: 'llava:34b', name: 'LLaVA 34B' }
 	];
 	let extractionOllamaUrl = $state('http://localhost:11434');
 	let extractionOllamaModel = $state('llama3.2-vision:11b');
@@ -290,21 +328,28 @@
 	let cardsExpiryDays = $state(30);
 	let cardsSandbox = $state(true);
 	let savingCards = $state(false);
+	// `value` is the stored card-program region (the backend keeps `UK`, not
+	// ISO's `GB`); `iso` is what Intl names in the reader's language.
 	const CARD_REGIONS = [
-		{ value: 'US', label: 'United States', default_provider: 'lithic' },
-		{ value: 'UK', label: 'United Kingdom', default_provider: 'lithic' },
-		{ value: 'DE', label: 'Germany (EU)', default_provider: 'lithic' },
-		{ value: 'FR', label: 'France (EU)', default_provider: 'lithic' },
-		{ value: 'NL', label: 'Netherlands (EU)', default_provider: 'lithic' },
-		{ value: 'ZA', label: 'South Africa', default_provider: 'nium' },
-		{ value: 'AU', label: 'Australia', default_provider: 'nium' },
-		{ value: 'SG', label: 'Singapore', default_provider: 'nium' },
-		{ value: 'HK', label: 'Hong Kong', default_provider: 'nium' },
-		{ value: 'IN', label: 'India', default_provider: 'nium' },
-		{ value: 'CA', label: 'Canada', default_provider: 'nium' },
-		{ value: 'AE', label: 'UAE', default_provider: 'nium' },
-		{ value: 'JP', label: 'Japan', default_provider: 'nium' },
+		{ value: 'US', iso: 'US', eu: false, default_provider: 'lithic' },
+		{ value: 'UK', iso: 'GB', eu: false, default_provider: 'lithic' },
+		{ value: 'DE', iso: 'DE', eu: true, default_provider: 'lithic' },
+		{ value: 'FR', iso: 'FR', eu: true, default_provider: 'lithic' },
+		{ value: 'NL', iso: 'NL', eu: true, default_provider: 'lithic' },
+		{ value: 'ZA', iso: 'ZA', eu: false, default_provider: 'nium' },
+		{ value: 'AU', iso: 'AU', eu: false, default_provider: 'nium' },
+		{ value: 'SG', iso: 'SG', eu: false, default_provider: 'nium' },
+		{ value: 'HK', iso: 'HK', eu: false, default_provider: 'nium' },
+		{ value: 'IN', iso: 'IN', eu: false, default_provider: 'nium' },
+		{ value: 'CA', iso: 'CA', eu: false, default_provider: 'nium' },
+		{ value: 'AE', iso: 'AE', eu: false, default_provider: 'nium' },
+		{ value: 'JP', iso: 'JP', eu: false, default_provider: 'nium' },
 	];
+	const regionNames = $derived(new Intl.DisplayNames([currentLocale()], { type: 'region' }));
+	function cardRegionLabel(r: (typeof CARD_REGIONS)[number]): string {
+		const country = regionNames.of(r.iso) ?? r.value;
+		return r.eu ? m('org.cards.regionEu', { country }) : country;
+	}
 
 	let autoProvider = $derived(
 		CARD_REGIONS.find(r => r.value === cardsRegion)?.default_provider ?? 'nium'
@@ -1921,7 +1966,7 @@
 							</label>
 							<label>
 								<span>{m('org.company.website')}</span>
-								<input type="url" bind:value={website} placeholder="https://" />
+								<input type="url" bind:value={website} placeholder={'https://'} />
 							</label>
 						</div>
 						<div class="section-footer">
@@ -1951,19 +1996,14 @@
 							<label>
 								<span>{m('org.defaults.paymentTerms')}</span>
 								<select bind:value={paymentTerms}>
-									<option value="Due on Receipt">Due on Receipt</option>
-									<option value="Net 10">Net 10</option>
-									<option value="Net 15">Net 15</option>
-									<option value="Net 30">Net 30</option>
-									<option value="Net 45">Net 45</option>
-									<option value="Net 60">Net 60</option>
-									<option value="Net 90">Net 90</option>
-									<option value="2/10 Net 30">2/10 Net 30</option>
+									{#each paymentTermOptions as term (term)}
+										<option value={term}>{paymentTermLabel(term)}</option>
+									{/each}
 								</select>
 							</label>
 							<label>
 								<span>{m('org.defaults.numberPrefix')}</span>
-								<input type="text" bind:value={numberPrefix} placeholder="INV-" />
+								<input type="text" bind:value={numberPrefix} placeholder={'INV-'} />
 							</label>
 							<label>
 								<span>{m('org.defaults.defaultGl')}</span>
@@ -2512,7 +2552,7 @@
 										<span>{m('org.extraction.provider')}</span>
 										<select bind:value={extractionProvider}>
 											{#each EXTRACTION_PROVIDERS as p}
-												<option value={p.value}>{p.label}</option>
+												<option value={p.value}>{extractionProviderLabel(p.value)}</option>
 											{/each}
 										</select>
 									</label>
@@ -2534,7 +2574,7 @@
 										bind:value={extractionApiKey}
 										bind:clear={secretClear['extraction.api_key']}
 										configured={extractionKeyStored('api_key')}
-										placeholder="sk-..."
+										placeholder={'sk-...'}
 										testId="extraction-api-key"
 										required={extractionSwitchDropsKey}
 										invalid={extractionKeyInvalid}
@@ -2572,7 +2612,7 @@
 									/>
 									<label>
 										<span>{m('org.extraction.awsRegion')}</span>
-										<input type="text" bind:value={extractionAwsRegion} placeholder="us-east-1" />
+										<input type="text" bind:value={extractionAwsRegion} placeholder={'us-east-1'} />
 									</label>
 								</div>
 								{#if extractionSwitchDropsKey}
@@ -2584,19 +2624,18 @@
 								<div class="form-grid" style="margin-top: 14px;">
 									<label>
 										<span>{m('org.extraction.ollamaUrl')}</span>
-										<input type="url" bind:value={extractionOllamaUrl} placeholder="http://localhost:11434" />
+										<input type="url" bind:value={extractionOllamaUrl} placeholder={'http://localhost:11434'} />
 									</label>
 									<label>
 										<span>{m('org.extraction.model')}</span>
 										<select bind:value={extractionOllamaModel}>
-											<option value="llama3.2-vision:11b">Llama 3.2 Vision 11B</option>
-											<option value="llama3.2-vision:90b">Llama 3.2 Vision 90B</option>
-											<option value="llava:13b">LLaVA 13B</option>
-											<option value="llava:34b">LLaVA 34B</option>
+											{#each OLLAMA_MODELS as model (model.value)}
+												<option value={model.value}>{model.name}</option>
+											{/each}
 										</select>
 									</label>
 								</div>
-								<p class="card-hint" style="margin-top: 8px;">{m('org.extraction.ollamaHint')} <code>brew install ollama && ollama pull {extractionOllamaModel}</code></p>
+								<p class="card-hint" style="margin-top: 8px;">{m('org.extraction.ollamaHint')} <code>{`brew install ollama && ollama pull ${extractionOllamaModel}`}</code></p>
 							{/if}
 
 							{#if unopenable.extraction && auth.isAdmin}
@@ -2799,7 +2838,7 @@
 									<span>{m('org.payments.provider')}</span>
 									<select bind:value={paymentsProvider}>
 										<option value="mock">{m('org.payments.providerMock')}</option>
-										<option value="modern_treasury">Modern Treasury</option>
+										<option value="modern_treasury">{MODERN_TREASURY}</option>
 									</select>
 								</label>
 							</div>
@@ -2808,7 +2847,7 @@
 								<div class="form-grid">
 									<label>
 										<span>{m('org.payments.orgId')}</span>
-										<input type="text" bind:value={paymentsOrgId} placeholder="org_..." />
+										<input type="text" bind:value={paymentsOrgId} placeholder={'org_...'} />
 									</label>
 									<SecretField
 										id="payments-api-key"
@@ -2923,8 +2962,8 @@
 								<label>
 									<span>{m('org.cards.region')}</span>
 									<select bind:value={cardsRegion}>
-										{#each CARD_REGIONS as r}
-											<option value={r.value}>{r.label}</option>
+										{#each CARD_REGIONS as r (r.value)}
+											<option value={r.value}>{cardRegionLabel(r)}</option>
 										{/each}
 									</select>
 								</label>
@@ -2958,7 +2997,7 @@
 											bind:value={cardsApiKey}
 											bind:clear={secretClear['cards.api_key']}
 											configured={isStored('cards', 'api_key')}
-											placeholder="api-key-..."
+											placeholder={'api-key-...'}
 											testId="cards-api-key"
 										/>
 										<label>
@@ -3111,7 +3150,7 @@
 										<input
 											type="url"
 											bind:value={ssoDiscoveryUrl}
-											placeholder="https://example.okta.com/.well-known/openid-configuration"
+											placeholder={'https://example.okta.com/.well-known/openid-configuration'}
 											autocomplete="off"
 											spellcheck="false"
 										/>
@@ -3177,7 +3216,7 @@
 											bind:value={ssoIdpCert}
 											rows="4"
 											spellcheck="false"
-											placeholder="-----BEGIN CERTIFICATE-----"
+											placeholder={'-----BEGIN CERTIFICATE-----'}
 										></textarea>
 									</label>
 									<label>
@@ -3207,7 +3246,7 @@
 										<input
 											type="text"
 											bind:value={ssoDomains}
-											placeholder="example.com, example.co.uk"
+											placeholder={'example.com, example.co.uk'}
 											autocomplete="off"
 											spellcheck="false"
 											aria-describedby="sso-domains-hint"
