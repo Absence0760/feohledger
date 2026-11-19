@@ -133,7 +133,6 @@
   "approvalsTitle": "Aprovações pendentes",
   "approvalsAllCaughtUp": "Tudo em dia!",
   "approvalsNoneWaiting": "Nenhuma fatura aguardando aprovação",
-  "approvalsLoadError": "Não foi possível carregar as aprovações pendentes",
   "approvalsPendingCount": "{count, plural, one {{count} fatura pendente} other {{count} faturas pendentes}}",
   "approvalActionApprove": "Aprovar",
   "approvalActionReject": "Rejeitar",
@@ -1276,5 +1275,12 @@
   "authEmailCodeFailed": "Não foi possível enviar o código por e-mail. Tente novamente.",
   "exceptionsFilteredEmpty": "{status, select, open{Nenhuma exceção aberta} escalated{Nenhuma exceção escalada} resolved{Nenhuma exceção resolvida} dismissed{Nenhuma exceção descartada} other{Nenhuma exceção correspondente}}",
   "contractsFilteredEmpty": "Nenhum contrato corresponde à sua pesquisa ou filtro.",
-  "commonShowAll": "Mostrar tudo"
+  "commonShowAll": "Mostrar tudo",
+  "listLoadMore": "Carregar mais",
+  "listShowingCount": "Mostrando {shown} de {total}",
+  "listShowingAll": "{count, plural, one {Mostrando o único item} other {Mostrando todos os {count}}}",
+  "listLoadMoreFailed": "Não foi possível carregar mais.",
+  "invoicesLoadErrorPrefix": "Não foi possível carregar as faturas: {error}",
+  "approvalsLoadErrorPrefix": "Não foi possível carregar as aprovações pendentes: {error}",
+  "invoicesFilteredEmpty": "Nenhuma fatura corresponde a estes filtros"
 }

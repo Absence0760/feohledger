@@ -906,12 +906,6 @@ abstract class AppLocalizations {
   /// **'No invoices waiting for approval'**
   String get approvalsNoneWaiting;
 
-  /// No description provided for @approvalsLoadError.
-  ///
-  /// In en, this message translates to:
-  /// **'Could not load pending approvals'**
-  String get approvalsLoadError;
-
   /// No description provided for @approvalsPendingCount.
   ///
   /// In en, this message translates to:
@@ -6817,6 +6811,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Show all'**
   String get commonShowAll;
+
+  /// Button under a paged list that reads its next page.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get listLoadMore;
+
+  /// Footer of a paged list while more rows exist on the server: rows shown of the server's total. Announced as a live region.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing {shown} of {total}'**
+  String listShowingCount(int shown, int total);
+
+  /// Footer of a paged list once every row is loaded; count is the server's total.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Showing the only item} other {Showing all {count}}}'**
+  String listShowingAll(int count);
+
+  /// Footer of a paged list when reading the next page failed; the rows shown are still live and Load more retries.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load more.'**
+  String get listLoadMoreFailed;
+
+  /// Invoices list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load invoices: {error}'**
+  String invoicesLoadErrorPrefix(String error);
+
+  /// Approvals queue first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load pending approvals: {error}'**
+  String approvalsLoadErrorPrefix(String error);
+
+  /// Invoices list: a status chip, search or advanced filter leaves no rows.
+  ///
+  /// In en, this message translates to:
+  /// **'No invoices match these filters'**
+  String get invoicesFilteredEmpty;
 }
 
 class _AppLocalizationsDelegate

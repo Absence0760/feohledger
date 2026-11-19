@@ -481,9 +481,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get approvalsNoneWaiting => 'No invoices waiting for approval';
 
   @override
-  String get approvalsLoadError => 'Could not load pending approvals';
-
-  @override
   String approvalsPendingCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -4733,4 +4730,39 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get commonShowAll => 'Show all';
+
+  @override
+  String get listLoadMore => 'Load more';
+
+  @override
+  String listShowingCount(int shown, int total) {
+    return 'Showing $shown of $total';
+  }
+
+  @override
+  String listShowingAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Showing all $count',
+      one: 'Showing the only item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get listLoadMoreFailed => 'Couldn\'t load more.';
+
+  @override
+  String invoicesLoadErrorPrefix(String error) {
+    return 'Couldn\'t load invoices: $error';
+  }
+
+  @override
+  String approvalsLoadErrorPrefix(String error) {
+    return 'Could not load pending approvals: $error';
+  }
+
+  @override
+  String get invoicesFilteredEmpty => 'No invoices match these filters';
 }

@@ -489,10 +489,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get approvalsNoneWaiting => 'Aucune facture en attente d\'approbation';
 
   @override
-  String get approvalsLoadError =>
-      'Impossible de charger les approbations en attente';
-
-  @override
   String approvalsPendingCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -4777,4 +4773,40 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get commonShowAll => 'Tout afficher';
+
+  @override
+  String get listLoadMore => 'Charger plus';
+
+  @override
+  String listShowingCount(int shown, int total) {
+    return '$shown sur $total affichés';
+  }
+
+  @override
+  String listShowingAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Les $count sont affichés',
+      one: 'Le seul élément est affiché',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get listLoadMoreFailed => 'Impossible de charger la suite.';
+
+  @override
+  String invoicesLoadErrorPrefix(String error) {
+    return 'Impossible de charger les factures : $error';
+  }
+
+  @override
+  String approvalsLoadErrorPrefix(String error) {
+    return 'Impossible de charger les approbations en attente : $error';
+  }
+
+  @override
+  String get invoicesFilteredEmpty =>
+      'Aucune facture ne correspond à ces filtres';
 }

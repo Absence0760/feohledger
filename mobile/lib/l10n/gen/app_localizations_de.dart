@@ -486,10 +486,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get approvalsNoneWaiting => 'Keine Rechnungen warten auf Freigabe';
 
   @override
-  String get approvalsLoadError =>
-      'Ausstehende Freigaben konnten nicht geladen werden';
-
-  @override
   String approvalsPendingCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -4770,4 +4766,41 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get commonShowAll => 'Alle anzeigen';
+
+  @override
+  String get listLoadMore => 'Mehr laden';
+
+  @override
+  String listShowingCount(int shown, int total) {
+    return '$shown von $total angezeigt';
+  }
+
+  @override
+  String listShowingAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Alle $count angezeigt',
+      one: 'Der einzige Eintrag wird angezeigt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get listLoadMoreFailed =>
+      'Weitere Einträge konnten nicht geladen werden.';
+
+  @override
+  String invoicesLoadErrorPrefix(String error) {
+    return 'Rechnungen konnten nicht geladen werden: $error';
+  }
+
+  @override
+  String approvalsLoadErrorPrefix(String error) {
+    return 'Ausstehende Freigaben konnten nicht geladen werden: $error';
+  }
+
+  @override
+  String get invoicesFilteredEmpty =>
+      'Keine Rechnungen entsprechen diesen Filtern';
 }

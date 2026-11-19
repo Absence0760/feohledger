@@ -18,7 +18,6 @@ import 'package:flutter_test/flutter_test.dart';
 const _notYetConverted = <String>{
   'adaptive_screen.dart',
   'admin_users_screen.dart',
-  'approvals_screen.dart',
   'cash_flow_screen.dart',
   'contract_detail_screen.dart',
   'dashboard_screen.dart',
@@ -26,7 +25,6 @@ const _notYetConverted = <String>{
   'inspection_detail_screen.dart',
   'inspections_screen.dart',
   'invoice_detail_screen.dart',
-  'invoices_screen.dart',
   'notifications_screen.dart',
   'payment_queue_screen.dart',
   'payments_screen.dart',

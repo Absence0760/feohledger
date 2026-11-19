@@ -24,6 +24,13 @@ import 'package:feohledger_mobile/widgets/load_error_state.dart';
 /// refresh failed ([hasError] with rows still on screen). The banner carries a
 /// Retry button wired to [onRefresh], so retrying never depends on finding the
 /// pull gesture.
+///
+/// A paged list passes [onLoadMore] (with [hasMore], [loadingMore], [total]
+/// and [loadMoreFailed] from its `PagedFetch` store): under the rows a footer
+/// then says how many of the server's total are shown — "Showing 20 of 57" as
+/// a live region, so the count a screen-reader user hears grows with each page
+/// — with a 48dp "Load more" button while a next page exists, and "Showing all
+/// N" once none does.
 class AsyncListBody<T> extends StatelessWidget {
   final List<T> items;
   final bool loading;
@@ -48,6 +55,26 @@ class AsyncListBody<T> extends StatelessWidget {
   final Widget? filteredEmpty;
   final Widget Function(BuildContext context, T item) itemBuilder;
 
+  /// Shown above the rows (not over the empty state) — a list's own summary
+  /// line, such as the approvals queue's count.
+  final Widget? header;
+
+  /// Reads the next page. Null for an unpaged list: no footer is drawn.
+  final Future<void> Function()? onLoadMore;
+
+  /// The server holds rows past [items].
+  final bool hasMore;
+
+  /// A next page is being read.
+  final bool loadingMore;
+
+  /// The last next-page read failed; the rows shown are still live.
+  final bool loadMoreFailed;
+
+  /// Every row the request matches, per the server. Defaults to
+  /// `items.length`.
+  final int? total;
+
   const AsyncListBody({
     super.key,
     required this.items,
@@ -59,6 +86,12 @@ class AsyncListBody<T> extends StatelessWidget {
     required this.empty,
     this.filteredEmpty,
     required this.itemBuilder,
+    this.header,
+    this.onLoadMore,
+    this.hasMore = false,
+    this.loadingMore = false,
+    this.loadMoreFailed = false,
+    this.total,
   });
 
   @override
@@ -95,6 +128,8 @@ class AsyncListBody<T> extends StatelessWidget {
                 ),
               ),
             ),
+          if (header != null && items.isNotEmpty)
+            SliverToBoxAdapter(child: header),
           if (items.isEmpty)
             // Fills the viewport so the empty copy sits centred, and grows
             // past it (scrolling) at a large text scale instead of
@@ -115,6 +150,109 @@ class AsyncListBody<T> extends StatelessWidget {
               itemBuilder: (context, index) =>
                   itemBuilder(context, items[index]),
             ),
+          if (onLoadMore != null && items.isNotEmpty)
+            SliverToBoxAdapter(
+              child: LoadMoreFooter(
+                shown: items.length,
+                total: total ?? items.length,
+                hasMore: hasMore,
+                loadingMore: loadingMore,
+                failed: loadMoreFailed,
+                onLoadMore: onLoadMore!,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The foot of a paged list: how many of the server's [total] rows are shown,
+/// and a "Load more" button while [hasMore].
+///
+/// The count is a live region, so a screen-reader user who taps Load more
+/// hears the new count when the page lands (WCAG 4.1.3) rather than nothing.
+/// The button keeps Material's 48dp target (WCAG 2.5.8) and gives way to a
+/// spinner of the same size while the page loads, so the footer doesn't jump.
+class LoadMoreFooter extends StatelessWidget {
+  final int shown;
+  final int total;
+  final bool hasMore;
+  final bool loadingMore;
+  final bool failed;
+  final Future<void> Function() onLoadMore;
+
+  const LoadMoreFooter({
+    super.key,
+    required this.shown,
+    required this.total,
+    required this.hasMore,
+    required this.loadingMore,
+    required this.failed,
+    required this.onLoadMore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final status = hasMore
+        ? l.listShowingCount(shown, total)
+        : l.listShowingAll(total);
+    final message = failed ? '${l.listLoadMoreFailed} $status' : status;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+            container: true,
+            liveRegion: true,
+            label: message,
+            excludeSemantics: true,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (failed)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      l.listLoadMoreFailed,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: scheme.error),
+                    ),
+                  ),
+                Text(
+                  status,
+                  key: const ValueKey('list-load-more-status'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          if (hasMore) ...[
+            const SizedBox(height: 8),
+            if (loadingMore)
+              const SizedBox(
+                width: 48,
+                height: 48,
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
+              )
+            else
+              OutlinedButton(
+                key: const ValueKey('list-load-more'),
+                onPressed: onLoadMore,
+                style: OutlinedButton.styleFrom(
+                  // WCAG 2.5.8 / Material's 48dp touch target.
+                  minimumSize: const Size(48, 48),
+                ),
+                child: Text(l.listLoadMore),
+              ),
+          ],
         ],
       ),
     );
