@@ -12,6 +12,7 @@ from app.services.billing_adapters import stripe_billing as _stripe  # noqa: F40
 from app.services.billing_adapters.base import (
     AI_INVOICE_OVERAGE_EVENT,
     BillingAdapter,
+    BillingNotConfigured,
     BillingWebhookEvent,
     CreateSubscriptionRequest,
     MeterEvent,
@@ -30,6 +31,7 @@ from app.services.billing_adapters.dispatcher import (
 __all__ = [
     "AI_INVOICE_OVERAGE_EVENT",
     "BillingAdapter",
+    "BillingNotConfigured",
     "BillingWebhookEvent",
     "CreateSubscriptionRequest",
     "MeterEvent",

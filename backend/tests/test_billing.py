@@ -1030,6 +1030,9 @@ async def test_payment_methods_provider_failure_is_a_logged_502_not_no_cards(
                 resp = await c.get("/api/billing/payment-methods")
         assert resp.status_code == 502, resp.text
         assert resp.json()["detail"] == billing_api.BILLING_PROVIDER_UNAVAILABLE_DETAIL
+        # Coded, so the web states it in the reader's language (codedRefusals.ts).
+        assert resp.json()["detail"]["code"] == "billing_provider_unavailable"
+        assert resp.json()["detail"]["params"] == {}
         assert "BillingProviderError" in caplog.text
         assert secret not in caplog.text
         assert secret not in resp.text

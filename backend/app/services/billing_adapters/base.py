@@ -137,6 +137,15 @@ class BillingWebhookEvent:
     status: str | None = None
 
 
+class BillingNotConfigured(RuntimeError):
+    """Raised when a live billing provider is selected without its credential.
+
+    Every provider's fail-closed signal, so it lives on the interface rather
+    than in one provider's module: a caller (``api/billing``, the provisioning
+    and plan-change services) catches it without importing a provider.
+    """
+
+
 class BillingAdapter:
     """Base class for billing providers."""
 

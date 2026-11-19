@@ -31,6 +31,7 @@ import httpx
 from app.services.billing_adapters.base import (
     AI_INVOICE_OVERAGE_EVENT,
     BillingAdapter,
+    BillingNotConfigured,
     BillingWebhookEvent,
     CreateSubscriptionRequest,
     MeterEvent,
@@ -59,10 +60,6 @@ def _to_minor_units(amount: Decimal) -> int:
     integer minor units, so $49.00 -> 4900.
     """
     return int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-
-class BillingNotConfigured(RuntimeError):
-    """Raised when the Stripe adapter is selected without a configured key."""
 
 
 class BillingProviderError(RuntimeError):
