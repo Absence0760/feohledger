@@ -30,9 +30,8 @@ export interface ChatNotificationSettingsUpdate {
 }
 
 /**
- * Display labels for the chat-notifiable events. Data-driven English, the same
- * convention as `notification.ts`'s `EVENT_LABELS` — deliberately NOT that map,
- * because a chat post goes to a shared channel, so "Invoice assigned to me" is
+ * Display labels for the chat-notifiable events. Data-driven English,
+ * deliberately NOT `notification.ts`'s `EVENT_LABEL_KEYS` wording, because a chat post goes to a shared channel, so "Invoice assigned to me" is
  * the wrong sentence here.
  *
  * The server owns the vocabulary (`supported_events`); an unmapped key renders
