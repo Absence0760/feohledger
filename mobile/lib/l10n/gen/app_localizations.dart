@@ -312,6 +312,12 @@ abstract class AppLocalizations {
   /// **'For Review'**
   String get dashboardForReview;
 
+  /// Dashboard KPI title: open invoices past their due date, counted over the whole book.
+  ///
+  /// In en, this message translates to:
+  /// **'Overdue'**
+  String get dashboardOverdue;
+
   /// No description provided for @dashboardApproved.
   ///
   /// In en, this message translates to:

@@ -114,6 +114,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dashboardForReview => '確認待ち';
 
   @override
+  String get dashboardOverdue => '期限超過';
+
+  @override
   String get dashboardApproved => '承認済み';
 
   @override

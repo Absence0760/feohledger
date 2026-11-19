@@ -116,6 +116,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get dashboardForReview => 'Zur Prüfung';
 
   @override
+  String get dashboardOverdue => 'Überfällig';
+
+  @override
   String get dashboardApproved => 'Freigegeben';
 
   @override

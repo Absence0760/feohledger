@@ -38,6 +38,7 @@
   "dashboardTotalInvoices": "Total de facturas",
   "dashboardUpcoming": "Próximas",
   "dashboardForReview": "Para revisar",
+  "dashboardOverdue": "Vencidas",
   "dashboardApproved": "Aprobadas",
   "dashboardAging": "Antigüedad de facturas",
   "dashboardTopVendors": "Principales proveedores",

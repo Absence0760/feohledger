@@ -24,7 +24,16 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   and one for the top-five vendor ranking (the sum over the rows it renders)
   with each affected row's subtitle naming its own count. Nothing renders at
   zero. The monthly trend's per-bar count is not read, because mobile draws no
-  trend
+  trend. **Overdue and Upcoming are whole-book counts, never read off the
+  `upcoming_payments` list** (the server caps it at ten rows, overdue first):
+  the Overdue card reads `overdue_count` / `overdue_total`, the Upcoming card
+  `due_soon_count` / `due_soon_total` (due today through seven days out), each
+  money line one compact figure per currency in the invoices' own code
+  (`€1K · $2.1K`, `DueRollup`), summed on the server and converting nothing. A
+  payload (or offline cache) predating those fields shows no Overdue card and
+  the legacy Upcoming figure, never a `0` nobody reported. The Overdue card does
+  not tap through: `GET /api/payments/queue` has no overdue filter and holds
+  approved invoices only, while the count includes the in-review pipeline
 - Invoice list with search + status filter chips
 - Advanced search — `AdvancedSearchSheet` (app-bar `tune` action; a dot badge marks an active advanced filter) filters the list by vendor, PO number, amount range and due-date range via `InvoiceStore.setFilters` → `GET /api/invoices` (`vendor` / `po_number` / `amount_min` / `amount_max` / `due_date_from` / `due_date_to`). Seeded from the live filters; validates min ≤ max + plain-decimal amounts; Apply / Clear / dismiss. The advanced filters compose with the quick status chips + search box (all carried into the same request + offline cache key)
 - Invoice detail with approve/reject

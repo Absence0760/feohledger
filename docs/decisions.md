@@ -23714,3 +23714,62 @@ a run refuses them, a refresh keeps one row and a new receipt lifts it; an
 implicated recorder's receipt does not; `po_receipt_implicated` and its
 opt-out; an approval over the unchanged warning raises no hold; the
 new-or-worse comparison).
+
+Tests: `backend/tests/test_po_matching_critical_path.py` (two 400.00 invoices
+against 400.00 received both warn with exact params and neither is held
+alone; the 5 % boundary to the cent; past the total only the total finding;
+one of three units received named as 333.33; two PO-only refreshes keep one
+finding, unattended approval answers `po_overbilled`, and a receipt for the
+rest of the delivery clears both on the next refresh).
+
+## 471. The dashboard counts overdue and due-soon AP over the whole book, by the /cfo card's predicate (round 27, 2026-11-19)
+
+The mobile dashboard had no overdue figure, and its "Upcoming" card read
+`upcoming_payments`, which the server caps at ten rows ordered by due date.
+Overdue rows sort first, so a count read off that list stops at ten, and a
+due-soon count read off it can be zero in a week when invoices fall due.
+`GET /api/dashboard` now serves `overdue_count` / `overdue_total` and
+`due_soon_count` / `due_soon_total`, counted in SQL over the whole book and
+scoped to the selected entity.
+
+**One predicate, the /cfo card's.** `services/open_ap_due.py` holds the
+population, the effective due date (the latest payment schedule's, else the
+invoice's own) and "overdue" (strictly before today). The cash-flow forecast
+(`api/analytics._commitment_rows`, and with it the /cfo "Overdue (owed now)"
+card, §449) and the dashboard both read it. So `overdue_count` equals the
+forecast's `totals.overdue_count`, and a test pins that equality.
+
+**In-review invoices count as overdue.** The population is open AP plus the
+in-review pipeline (`new`, `pending`, `ready_for_review`), which is what the
+/cfo card counts with the forecast's default `include_pending=true`. An
+invoice still in review past its due date is still late. Leaving it out
+would make the two surfaces disagree, and it would hide the invoices most
+likely to need chasing.
+
+**Totals are face value, per currency.** Each `*_total` is a list of
+`{currency, amount, count}`, grouped on the invoice's own code and never
+converted. A count of invoices owed now should not depend on whether each
+one has a rate lock, and a converted total that is partly face value needs
+its own disclosure (§35). A row with no code groups under `null`, and a
+client renders it without a symbol rather than a guessed one (§160). The
+mobile card shows one compact figure per currency (`€1K · $2.1K`).
+
+**`due_soon_*` lets "Upcoming" mean due soon.** The brief asked only for the
+overdue pair, but the capped list also counted overdue rows as "Upcoming",
+and it could not answer "due this week" either. `due_soon_*` is the same
+population, due today through seven days out. Mobile's Upcoming card reads
+it. A payload or cache without the fields shows the legacy figure and no
+Overdue card, never a `0` that nobody reported.
+
+**Left alone.** The web dashboard still renders its own upcoming list; it
+could read these fields and was not changed in this round. The mobile
+Overdue card does not tap through, because `GET /api/payments/queue` has no
+overdue filter and lists approved invoices only. That is tracked in
+`docs/followups.md`.
+
+Tests: `backend/tests/test_dashboard_aggregates.py` § 5 (fifteen overdue
+against the ten-row list, equality with the forecast, schedule dates winning
+both ways, in-review in, rejected, paid and undated out, per-currency
+totals, entity scope); `mobile/test/screens/dashboard_screen_test.dart`
+(overdue and due-soon cards, zero, absent fields, offline cache,
+currency-less group).

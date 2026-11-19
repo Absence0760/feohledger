@@ -116,6 +116,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get dashboardForReview => 'Para revisão';
 
   @override
+  String get dashboardOverdue => 'Vencidas';
+
+  @override
   String get dashboardApproved => 'Aprovadas';
 
   @override
@@ -4629,6 +4632,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get dashboardForReview => 'Para revisão';
+
+  @override
+  String get dashboardOverdue => 'Vencidas';
 
   @override
   String get dashboardApproved => 'Aprovadas';

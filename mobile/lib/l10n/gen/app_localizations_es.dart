@@ -115,6 +115,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get dashboardForReview => 'Para revisar';
 
   @override
+  String get dashboardOverdue => 'Vencidas';
+
+  @override
   String get dashboardApproved => 'Aprobadas';
 
   @override
