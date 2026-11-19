@@ -1,7 +1,7 @@
 """Tests for multi-page PDF extraction support.
 
 Verifies that:
-- _pdf_to_images() returns all pages (not just page 0)
+- pdf_reader.rasterize_pages_sync() returns all pages (not just page 0)
 - Vision-mode requests include all page images
 - max_pages cap is respected
 """
@@ -9,6 +9,13 @@ Verifies that:
 import base64
 
 import pytest
+
+from app.services import pdf_reader
+
+
+async def _no_text_layer(_pdf_bytes: bytes, **_kw) -> None:
+    """Stand-in for `pdf_reader.pdf_text` on a scan: forces vision mode."""
+    return None
 
 
 def _make_pdf(num_pages: int) -> bytes:
@@ -25,49 +32,49 @@ def _make_pdf(num_pages: int) -> bytes:
 
 
 class TestPdfToImages:
-    """Tests for OllamaAdapter._pdf_to_images()."""
+    """Tests for pdf_reader.rasterize_pages_sync()."""
 
     def test_returns_all_pages(self):
-        from app.services.extraction_adapters.ollama import OllamaAdapter
+        from app.services.pdf_reader import rasterize_pages_sync
 
         pdf = _make_pdf(3)
-        images = OllamaAdapter._pdf_to_images(pdf)
+        images = rasterize_pages_sync(pdf)
         assert len(images) == 3
         for img in images:
             # Each should be valid PNG (starts with PNG magic bytes)
             assert img[:4] == b"\x89PNG"
 
     def test_single_page(self):
-        from app.services.extraction_adapters.ollama import OllamaAdapter
+        from app.services.pdf_reader import rasterize_pages_sync
 
         pdf = _make_pdf(1)
-        images = OllamaAdapter._pdf_to_images(pdf)
+        images = rasterize_pages_sync(pdf)
         assert len(images) == 1
 
     def test_respects_max_pages(self):
-        from app.services.extraction_adapters.ollama import OllamaAdapter
+        from app.services.pdf_reader import rasterize_pages_sync
 
         pdf = _make_pdf(25)
-        images = OllamaAdapter._pdf_to_images(pdf, max_pages=5)
+        images = rasterize_pages_sync(pdf, max_pages=5)
         assert len(images) == 5
 
     def test_default_max_pages_is_20(self):
-        from app.services.extraction_adapters.ollama import OllamaAdapter
+        from app.services.pdf_reader import rasterize_pages_sync
 
         pdf = _make_pdf(22)
-        images = OllamaAdapter._pdf_to_images(pdf)
+        images = rasterize_pages_sync(pdf)
         assert len(images) == 20
 
     def test_empty_pdf_returns_empty_list(self):
-        from app.services.extraction_adapters.ollama import OllamaAdapter
+        from app.services.pdf_reader import rasterize_pages_sync
 
-        images = OllamaAdapter._pdf_to_images(b"not a pdf")
+        images = rasterize_pages_sync(b"not a pdf")
         assert images == []
 
     def test_corrupt_bytes_returns_empty_list(self):
-        from app.services.extraction_adapters.ollama import OllamaAdapter
+        from app.services.pdf_reader import rasterize_pages_sync
 
-        images = OllamaAdapter._pdf_to_images(b"")
+        images = rasterize_pages_sync(b"")
         assert images == []
 
 
@@ -85,7 +92,7 @@ class TestOllamaVisionMultiPage:
         adapter = OllamaAdapter({"model": "test-model", "base_url": "http://localhost:11434"})
 
         # Force vision mode by making text extraction return None
-        monkeypatch.setattr(adapter, "_extract_pdf_text", staticmethod(lambda _: None))
+        monkeypatch.setattr(pdf_reader, "pdf_text", _no_text_layer)
 
         # Capture the request body
         captured_body = {}
@@ -176,9 +183,7 @@ class TestOpenAIVisionMultiPage:
         adapter = OpenAIVisionAdapter({"api_key": "test-key", "model": "gpt-4o"})
 
         # Force vision mode
-        from app.services.extraction_adapters.ollama import OllamaAdapter
-
-        monkeypatch.setattr(OllamaAdapter, "_extract_pdf_text", staticmethod(lambda _: None))
+        monkeypatch.setattr(pdf_reader, "pdf_text", _no_text_layer)
 
         captured_body = {}
 

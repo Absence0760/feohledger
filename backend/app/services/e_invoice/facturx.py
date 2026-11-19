@@ -6,15 +6,16 @@ UN/CEFACT CII XML attachment. The conventional attachment name is
 ``xrechnung.xml`` (German XRechnung-in-PDF). We match those names first, then
 fall back to sniffing any attachment whose bytes parse as a CII document.
 
-Uses PyMuPDF (``pymupdf``), already pinned in ``pyproject.toml`` — no new
-dependency. Never raises: any PyMuPDF / parse error returns ``None`` so a corrupt
-or password-protected PDF degrades cleanly to "no embedded XML" (the caller
-then falls back to vision OCR on the rendered pages).
+Opens the PDF through ``services/pdf_reader.open_pdf``, the one owner of
+PyMuPDF, which closes the document on exit. Sync: its callers (the e-invoice
+detect / parse probe) run in the extraction worker. Never raises: any PyMuPDF /
+parse error returns ``None`` so a corrupt or password-protected PDF degrades
+cleanly to "no embedded XML" (the caller then falls back to vision OCR on the rendered pages).
 """
 
 from __future__ import annotations
 
-import pymupdf
+from app.services.pdf_reader import open_pdf
 
 # Conventional embedded-XML filenames, lower-cased for case-insensitive match.
 _CII_FILENAMES = {
@@ -47,35 +48,28 @@ def extract_embedded_cii_xml(pdf_bytes: bytes) -> bytes | None:
     """
     if not pdf_bytes:
         return None
-    doc = None
     try:
-        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-        names = doc.embfile_names()
-        if not names:
-            return None
+        with open_pdf(pdf_bytes) as doc:
+            names = doc.embfile_names()
+            if not names:
+                return None
 
-        # First pass: match the conventional Factur-X/ZUGFeRD filename.
-        for name in names:
-            if (name or "").strip().lower() in _CII_FILENAMES:
-                data = doc.embfile_get(name)
-                if data:
+            # First pass: match the conventional Factur-X/ZUGFeRD filename.
+            for name in names:
+                if (name or "").strip().lower() in _CII_FILENAMES:
+                    data = doc.embfile_get(name)
+                    if data:
+                        return bytes(data)
+
+            # Second pass: any attachment whose bytes detect as CII.
+            for name in names:
+                try:
+                    data = doc.embfile_get(name)
+                except Exception:
+                    continue
+                if data and _looks_like_cii(bytes(data)):
                     return bytes(data)
 
-        # Second pass: any attachment whose bytes detect as CII.
-        for name in names:
-            try:
-                data = doc.embfile_get(name)
-            except Exception:
-                continue
-            if data and _looks_like_cii(bytes(data)):
-                return bytes(data)
-
-        return None
+            return None
     except Exception:
         return None
-    finally:
-        if doc is not None:
-            try:
-                doc.close()
-            except Exception:
-                pass

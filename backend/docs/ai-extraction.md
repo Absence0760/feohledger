@@ -127,6 +127,14 @@ cd backend && .venv/bin/pip install -e ".[dev]"
 
 PyMuPDF is included in the project dependencies (`pyproject.toml`).
 
+Every read goes through `app/services/pdf_reader.py`, the one module that opens
+a PDF with PyMuPDF. Adapters `await pdf_reader.pdf_text(...)` for the text layer
+and `await pdf_reader.rasterize_pages(...)` for the page images (with the
+auto-rotate pass above); both run on a worker thread, because rendering a
+20-page scan at 200 dpi on the event loop would stall every other request on
+the worker. `tests/test_pdf_render_offloaded.py` refuses a `pymupdf.open`
+anywhere else and a coroutine calling one of the sync cores directly.
+
 ## Extraction Flow
 
 ```
