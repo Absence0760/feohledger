@@ -38,6 +38,7 @@
   "dashboardTotalInvoices": "Rechnungen gesamt",
   "dashboardUpcoming": "Anstehend",
   "dashboardForReview": "Zur Prüfung",
+  "dashboardOverdue": "Überfällig",
   "dashboardApproved": "Freigegeben",
   "dashboardAging": "Rechnungsalter",
   "dashboardTopVendors": "Top-Lieferanten",

@@ -94,6 +94,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       0,
       (n, v) => n + v.unconvertedCount,
     );
+    final overdue = data.overdue;
+    final dueSoon = data.dueSoon;
 
     return [
       // Status first: is the user looking at live figures?
@@ -130,23 +132,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: KpiCard(
-              title: l.dashboardUpcoming,
-              value: data.upcoming.count.toString(),
-              subtitle: formatMoneyCompact(
-                data.upcoming.totalAmount,
-                currency: data.reportingCurrency,
-              ),
-              icon: Icons.schedule,
-              color: Colors.orange,
-            ),
+            // Upcoming means due soon: today through seven days out, counted
+            // over the whole book (`due_soon_*`). Only a payload predating
+            // those fields falls back to the capped upcoming list, which also
+            // holds the overdue rows.
+            child: dueSoon != null
+                ? KpiCard(
+                    title: l.dashboardUpcoming,
+                    value: dueSoon.count.toString(),
+                    subtitle: _perCurrency(dueSoon),
+                    icon: Icons.schedule,
+                    color: Colors.orange,
+                  )
+                : KpiCard(
+                    title: l.dashboardUpcoming,
+                    value: data.upcoming.count.toString(),
+                    subtitle: formatMoneyCompact(
+                      data.upcoming.totalAmount,
+                      currency: data.reportingCurrency,
+                    ),
+                    icon: Icons.schedule,
+                    color: Colors.orange,
+                  ),
           ),
         ],
       ),
-      // Each money KPI is a reporting-currency rollup that keeps an
-      // unconvertible row in at FACE value rather than drop it (dropping would
-      // understate what is due), so it says so beside itself when it happened.
-      if (data.upcoming.unconvertedCount > 0)
+      // Owed now, over the whole book (`overdue_*`, the predicate the web's
+      // /cfo overdue card reads). Absent, not `0`, when the payload predates
+      // the field.
+      if (overdue != null) ...[
+        const SizedBox(height: 12),
+        KpiCard(
+          title: l.dashboardOverdue,
+          value: overdue.count.toString(),
+          subtitle: _perCurrency(overdue),
+          icon: Icons.warning_amber_rounded,
+          color: Colors.red.shade700,
+        ),
+      ],
+      // The legacy Upcoming figure is a reporting-currency rollup that keeps
+      // an unconvertible row in at FACE value rather than drop it (dropping
+      // would understate what is due), so it says so beside itself when it
+      // happened. The due-soon figure is per currency and converts nothing.
+      if (dueSoon == null && data.upcoming.unconvertedCount > 0)
         PartialConversionNote(
           l.dashboardKpiUnconverted(
             l.dashboardUpcoming,
@@ -245,6 +273,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ...vendors.map((v) => _vendorRow(l, v, data.reportingCurrency)),
     ];
+  }
+
+  /// A due rollup's money, one figure per currency in the invoices' own code
+  /// (`€1.2K · $3.4K`), or `null` when nothing is due. Never one converted
+  /// total: the server did not convert these, and no sum crosses currencies.
+  String? _perCurrency(DueRollup rollup) {
+    if (rollup.byCurrency.isEmpty) return null;
+    return rollup.byCurrency
+        .map((c) => formatMoneyCompact(c.amount, currency: c.currency))
+        .join(' · ');
   }
 
   Widget _vendorRow(AppLocalizations l, VendorSpend v, String? currency) {

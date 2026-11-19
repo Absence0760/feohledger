@@ -34,6 +34,7 @@
   "dashboardTotalInvoices": "請求書合計",
   "dashboardUpcoming": "予定",
   "dashboardForReview": "確認待ち",
+  "dashboardOverdue": "期限超過",
   "dashboardApproved": "承認済み",
   "dashboardAging": "請求書の経過日数",
   "dashboardTopVendors": "上位の取引先",

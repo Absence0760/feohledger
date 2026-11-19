@@ -126,6 +126,19 @@ class DashboardData {
   final List<MonthlyTrend> trends;
   final UpcomingPayments upcoming;
 
+  /// Open AP past its due date, over the WHOLE book (`overdue_count` /
+  /// `overdue_total`), counted in SQL by the same predicate the web's /cfo
+  /// overdue card reads. Never derived from `upcoming_payments`, which the
+  /// server caps at ten rows. `null` against a backend (or an offline cache)
+  /// predating the fields: the screen then shows no Overdue figure rather
+  /// than a `0` nobody reported.
+  final DueRollup? overdue;
+
+  /// The same population, due today through seven days out (`due_soon_count`
+  /// / `due_soon_total`) — what the Upcoming card means. `null` as above, in
+  /// which case Upcoming falls back to the capped list it used to read.
+  final DueRollup? dueSoon;
+
   /// What every money figure on this payload is denominated in, straight from
   /// `reporting.reporting_currency` — the server's own answer, so no client
   /// resolution is involved and there is nothing to disagree with it about.
@@ -148,6 +161,8 @@ class DashboardData {
     required this.aging,
     required this.trends,
     required this.upcoming,
+    this.overdue,
+    this.dueSoon,
     this.reportingCurrency,
     this.unconvertedCount = 0,
   });
@@ -197,6 +212,14 @@ class DashboardData {
                 ?.toDouble() ??
             0,
         unconvertedCount: unconvertedCountOf(json['upcoming_unconverted_count']),
+      ),
+      overdue: DueRollup.fromJsonOrNull(
+        json['overdue_count'],
+        json['overdue_total'],
+      ),
+      dueSoon: DueRollup.fromJsonOrNull(
+        json['due_soon_count'],
+        json['due_soon_total'],
       ),
       reportingCurrency: reporting['reporting_currency'] as String?,
       unconvertedCount: unconvertedCountOf(reporting['unconverted_count']),
@@ -314,6 +337,59 @@ class UpcomingPayments {
       unconvertedCount: unconvertedCountOf(json['unconverted_count']),
     );
   }
+}
+
+/// A count of invoices and their FACE amount per currency — the dashboard's
+/// `overdue_*` and `due_soon_*` pairs.
+///
+/// Per currency, never one converted total: the backend groups on each
+/// invoice's own code, so `€1.2K · $3.4K` is what the figure is. The money is
+/// summed on the server; nothing here adds amounts across currencies.
+class DueRollup {
+  final int count;
+  final List<DueByCurrency> byCurrency;
+
+  const DueRollup({required this.count, this.byCurrency = const []});
+
+  /// `null` when the payload carries no count — a backend or cached copy
+  /// predating the field, which must not read as "nothing overdue".
+  static DueRollup? fromJsonOrNull(Object? count, Object? totals) {
+    if (count is! num) return null;
+    return DueRollup(
+      count: count.toInt(),
+      byCurrency: totals is List
+          ? totals
+                .whereType<Map<String, dynamic>>()
+                .map(DueByCurrency.fromJson)
+                .toList()
+          : const [],
+    );
+  }
+
+  /// The wire shape [fromJsonOrNull] reads, for the offline cache.
+  List<Map<String, dynamic>> totalsToJson() => byCurrency
+      .map((c) => {'currency': c.currency, 'amount': c.amount, 'count': c.count})
+      .toList();
+}
+
+class DueByCurrency {
+  /// The invoices' own code; `null` for invoices recording none, whose figure
+  /// renders without a symbol rather than a guessed one.
+  final String? currency;
+  final double amount;
+  final int count;
+
+  const DueByCurrency({
+    required this.currency,
+    required this.amount,
+    required this.count,
+  });
+
+  factory DueByCurrency.fromJson(Map<String, dynamic> json) => DueByCurrency(
+    currency: json['currency'] as String?,
+    amount: (json['amount'] as num?)?.toDouble() ?? 0,
+    count: (json['count'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// A row COUNT off a rollup payload's `unconverted_count`, never money.

@@ -38,6 +38,8 @@
   "dashboardTotalInvoices": "Total Invoices",
   "dashboardUpcoming": "Upcoming",
   "dashboardForReview": "For Review",
+  "dashboardOverdue": "Overdue",
+  "@dashboardOverdue": {"description": "Dashboard KPI title: open invoices past their due date, counted over the whole book."},
   "dashboardApproved": "Approved",
   "dashboardAging": "Invoice Aging",
   "dashboardTopVendors": "Top Vendors",
