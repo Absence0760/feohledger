@@ -2134,6 +2134,7 @@ export const messages = {
 
 	'expenses.reports.openAria': 'レポート {number} を開く',
 	'expenses.reports.empty': '経費レポートはまだありません。',
+	'expenses.reports.toast.loadFailed': '経費レポートを読み込めませんでした',
 	'expenses.reports.loadMore': 'さらに読み込む（{total}件中{shown}件）',
 	'expenses.reports.showingAll': '{total, plural, other {全 # 件のレポートを表示中}}',
 	'expenses.reports.toast.created': 'レポートを作成しました',
@@ -2840,6 +2841,10 @@ export const messages = {
 	'goodsReceipts.col.po': '発注書',
 	'goodsReceipts.col.received': '入荷日',
 	'goodsReceipts.col.status': 'ステータス',
+	'goodsReceipts.status.received': '受領済み',
+	'goodsReceipts.status.cancelled': 'キャンセル済み',
+	'goodsReceipts.status.void': '無効',
+	'goodsReceipts.status.reversed': '取消済み',
 	'goodsReceipts.col.lines': '明細',
 	'goodsReceipts.col.created': '作成日',
 	'goodsReceipts.empty': '入荷がありません。',

@@ -54,12 +54,20 @@
 	import {
 		GR_SOURCE_MANUAL,
 		RECEIPT_ENTRY_ROLES,
-		isCancelledGoodsReceipt
+		isCancelledGoodsReceipt,
+		goodsReceiptStatusLabelKey
 	} from '#lib/types/goodsReceipt.ts';
 	import type { InspectableReceipt } from './RecordInspectionModal.svelte';
 	import { page as pageStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
+
+	// The status column is free-form, so an unknown spelling renders raw rather
+	// than disappearing; every value the backend writes has a label.
+	const statusLabel = (status: string) => {
+		const key = goodsReceiptStatusLabelKey(status);
+		return key ? m(key) : status;
+	};
 
 	const canMutate = $derived(auth.isManager);
 	const canRecordReceipt = $derived(auth.hasAnyRole(...RECEIPT_ENTRY_ROLES));
@@ -627,7 +635,7 @@
 							</td>
 							<td class="mono">{gr.po_number ?? '—'}</td>
 							<td>{formatDate(gr.received_date)}</td>
-							<td><Badge tone={goodsReceiptTone(gr.status)} variant={gr.status}>{gr.status}</Badge></td>
+							<td><Badge tone={goodsReceiptTone(gr.status)} variant={gr.status}>{statusLabel(gr.status)}</Badge></td>
 							<td class="muted">{gr.line_count}</td>
 							<td class="muted">{formatDate(gr.created_at)}</td>
 						</tr>
@@ -745,7 +753,7 @@
 				<HelpTip term="goods-receipt" />
 				{#if detail}
 					<span class="num-badge">{detail.gr_number}</span>
-					<Badge tone={goodsReceiptTone(detail.status)} variant={detail.status}>{detail.status}</Badge>
+					<Badge tone={goodsReceiptTone(detail.status)} variant={detail.status}>{statusLabel(detail.status)}</Badge>
 				{/if}
 			</div>
 			<button class="close-btn" onclick={() => (detailId = null)} aria-label={m('goodsReceipts.modal.close')}>&times;</button>

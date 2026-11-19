@@ -2331,6 +2331,7 @@ export const en = {
 
 	'expenses.reports.openAria': 'Open report {number}',
 	'expenses.reports.empty': 'No expense reports yet.',
+	'expenses.reports.toast.loadFailed': 'Failed to load expense reports',
 	'expenses.reports.loadMore': 'Load more ({shown} of {total})',
 	'expenses.reports.showingAll': '{total, plural, one {Showing all # report} other {Showing all # reports}}',
 	'expenses.reports.toast.created': 'Report created',
@@ -3059,6 +3060,10 @@ export const en = {
 	'goodsReceipts.col.po': 'PO',
 	'goodsReceipts.col.received': 'Received',
 	'goodsReceipts.col.status': 'Status',
+	'goodsReceipts.status.received': 'Received',
+	'goodsReceipts.status.cancelled': 'Cancelled',
+	'goodsReceipts.status.void': 'Void',
+	'goodsReceipts.status.reversed': 'Reversed',
 	'goodsReceipts.col.lines': 'Lines',
 	'goodsReceipts.col.created': 'Created',
 	'goodsReceipts.empty': 'No goods receipts.',

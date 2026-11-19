@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
 	CANCELLED_GR_STATUSES,
 	isCancelledGoodsReceipt,
-	goodsReceiptTone
+	goodsReceiptTone,
+	goodsReceiptStatusLabelKey
 } from './goodsReceipt';
 
 // Mirrors `backend/app/services/po_matching.py::CANCELLED_GR_STATUSES`. If that
@@ -35,5 +36,30 @@ describe('goods-receipt status semantics', () => {
 			expect(goodsReceiptTone(s), s).toBe('muted');
 		}
 		expect(goodsReceiptTone('received')).toBe('success');
+	});
+});
+
+describe('goodsReceiptStatusLabelKey', () => {
+	it('labels the statuses the backend writes', () => {
+		expect(goodsReceiptStatusLabelKey('received')).toBe('goodsReceipts.status.received');
+		expect(goodsReceiptStatusLabelKey('cancelled')).toBe('goodsReceipts.status.cancelled');
+	});
+
+	it('labels every cancelled spelling, synonyms sharing one label', () => {
+		for (const s of BACKEND_CANCELLED_GR_STATUSES) {
+			expect(goodsReceiptStatusLabelKey(s)).not.toBeNull();
+		}
+		expect(goodsReceiptStatusLabelKey('canceled')).toBe('goodsReceipts.status.cancelled');
+		expect(goodsReceiptStatusLabelKey('voided')).toBe('goodsReceipts.status.void');
+	});
+
+	it('matches like isCancelledGoodsReceipt: trimmed and case-folded', () => {
+		expect(goodsReceiptStatusLabelKey('  Received ')).toBe('goodsReceipts.status.received');
+	});
+
+	it('returns null for an unknown or missing status, so the caller shows it raw', () => {
+		expect(goodsReceiptStatusLabelKey('partially_received')).toBeNull();
+		expect(goodsReceiptStatusLabelKey(null)).toBeNull();
+		expect(goodsReceiptStatusLabelKey('')).toBeNull();
 	});
 });
