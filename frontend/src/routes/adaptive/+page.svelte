@@ -46,6 +46,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import {
 		getApprovalPatterns,
@@ -198,7 +199,7 @@
 				staleFrom = sent;
 				await loadThreshold();
 			} else {
-				toast(e instanceof Error ? e.message : m('adaptive.threshold.applyFailed'), 'error');
+				toast(errorMessage(e, m('adaptive.threshold.applyFailed')), 'error');
 			}
 		} finally {
 			applying = false;
@@ -260,7 +261,7 @@
 			);
 			await loadRouting();
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('adaptive.routing.applyFailed'), 'error');
+			toast(errorMessage(e, m('adaptive.routing.applyFailed')), 'error');
 		} finally {
 			routingApplying = false;
 		}

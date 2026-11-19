@@ -20,6 +20,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
@@ -156,7 +157,7 @@
 				);
 			}
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('workflows.list.bulkDeleteFailed'), 'error');
+			toast(errorMessage(e, m('workflows.list.bulkDeleteFailed')), 'error');
 		} finally {
 			bulkDeleting = false;
 		}
@@ -221,7 +222,7 @@
 			newDescription = '';
 			window.location.href = `/workflows/${created.id}`;
 		} catch (e: unknown) {
-			toast(e instanceof Error ? e.message : m('workflows.list.createFailed'), 'error');
+			toast(errorMessage(e, m('workflows.list.createFailed')), 'error');
 		} finally {
 			creating = false;
 		}
@@ -233,7 +234,7 @@
 			await workflowStore.remove(wf.id);
 			toast(m('workflows.list.deleted'), 'success');
 		} catch (e: unknown) {
-			toast(e instanceof Error ? e.message : m('workflows.list.deleteFailed'), 'error');
+			toast(errorMessage(e, m('workflows.list.deleteFailed')), 'error');
 		}
 	}
 </script>
