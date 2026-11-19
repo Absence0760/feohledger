@@ -24,8 +24,9 @@ function createInvoiceStore() {
 	// request (`isCurrentRequest`, the same rule the `loading` flag uses), and
 	// the error is re-thrown so callers that await a refresh keep their own
 	// error handling. Cleared the moment a fresh load starts, so a Retry (or a
-	// filter change) shows the loading line rather than the old failure — or
-	// the stale rows behind it — until the new answer lands.
+	// filter change) shows the loading line rather than the old failure until
+	// the new answer lands. There are no stale rows behind it to reappear: a
+	// failed fresh load also empties the list (see `fetch`'s catch).
 	let errored = $state(false);
 	// Did the most recent Load-more fail? Kept apart from `errored` on purpose:
 	// a failed page 2 leaves page 1 on screen and still true, so it must not
@@ -64,7 +65,22 @@ function createInvoiceStore() {
 			lastParams = params ?? {};
 			errored = false;
 		} catch (err) {
-			if (fetchSequence.isCurrentRequest(token)) errored = true;
+			// A failed fresh load drops the rows it was replacing. Kept, they are
+			// the previous filter's invoices: hidden behind `LoadError` only while
+			// `errored` holds, so the Retry that clears it would redraw them —
+			// clickable and selectable — as this filter's answer until it lands.
+			// A newer request owns the error state (`isCurrentRequest`); a local
+			// edit applied since (`supersedeInFlight`) owns the rows, so they are
+			// only dropped while `canCommit` still holds. Mirrors the workflows
+			// store.
+			if (fetchSequence.isCurrentRequest(token)) {
+				errored = true;
+				if (fetchSequence.canCommit(token)) {
+					invoices = [];
+					total = 0;
+					page = 1;
+				}
+			}
 			throw err;
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) loading = false;

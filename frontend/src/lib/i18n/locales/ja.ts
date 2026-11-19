@@ -2776,7 +2776,6 @@ export const messages = {
 	'glAccounts.empty.errored': '勘定科目表を読み込めませんでした。',
 	'glAccounts.onboarding.heading': '勘定科目表がまだありません',
 	'glAccounts.onboarding.description': '請求書明細、経費、購買依頼はGL勘定コードに仕訳されます。接続済みのERPから同期するか、ここで1件ずつ追加してください。',
-	'glAccounts.toast.loadFailed': '勘定科目表を読み込めませんでした',
 	'glAccounts.toast.syncFailed': 'ERP同期に失敗しました',
 	'glAccounts.createModal.aria': '新規GL勘定科目',
 	'glAccounts.createModal.title': '新規GL勘定科目',

@@ -571,6 +571,7 @@
 	let voidingId = $state<string | null>(null);
 
 	async function handleVoid(id: string) {
+		if (voidingId) return;
 		if (confirmVoidId !== id) {
 			confirmVoidId = id;
 			return;
@@ -742,7 +743,8 @@
 								<RowAction
 									variant="danger"
 									armed={confirmVoidId === memo.id}
-									disabled={voidingId === memo.id}
+									busy={voidingId === memo.id}
+									disabled={voidingId !== null && voidingId !== memo.id}
 									onclick={() => handleVoid(memo.id)}
 								>
 									{confirmVoidId === memo.id ? m('creditMemos.row.confirm') : m('creditMemos.row.void')}

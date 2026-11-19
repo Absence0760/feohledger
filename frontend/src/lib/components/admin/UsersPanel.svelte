@@ -459,6 +459,7 @@
 							variant="danger"
 							armed={confirmRevokeId === user.id}
 							busy={revokingId === user.id}
+							disabled={revokingId !== null && revokingId !== user.id}
 							onclick={(e) => {
 								e.stopPropagation();
 								if (confirmRevokeId === user.id) {
@@ -477,6 +478,7 @@
 							variant="danger"
 							armed={confirmDeleteId === user.id}
 							busy={deletingId === user.id}
+							disabled={deletingId !== null && deletingId !== user.id}
 							onclick={(e) => {
 								e.stopPropagation();
 								if (confirmDeleteId === user.id) {

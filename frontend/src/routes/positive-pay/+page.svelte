@@ -283,6 +283,7 @@
 	let confirmDeleteId = $state<string | null>(null);
 
 	async function deleteFile(f: PositivePayFile) {
+		if (busyId) return;
 		if (confirmDeleteId !== f.id) {
 			confirmDeleteId = f.id;
 			return;
@@ -407,7 +408,8 @@
 								<RowAction
 									variant="danger"
 									armed={confirmDeleteId === file.id}
-									disabled={busyId === file.id}
+									busy={busyId === file.id}
+									disabled={busyId !== null && busyId !== file.id}
 									onclick={() => deleteFile(file)}
 									ariaLabel={m('common.rowActionAria', { action: confirmDeleteId === file.id ? m('positivePay.row.confirm') : m('positivePay.row.delete'), name: fileLabel(file) })}
 								>

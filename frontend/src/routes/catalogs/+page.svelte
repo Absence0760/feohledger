@@ -20,7 +20,7 @@
 	import CatalogModal from '#lib/components/modals/CatalogModal.svelte';
 	import PunchoutModal from '#lib/components/modals/PunchoutModal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
-	import { goto, replaceState } from '$app/navigation';
+	import { afterNavigate, goto, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
@@ -67,14 +67,33 @@
 	let hasMore = $derived(catalogs.length < total);
 	// Search and type filter round-trip through the URL (`?search=`, `?type=`)
 	// like every sibling list, so back / reload / a shared link restore the
-	// view. Read ONCE here; `syncUrl()` is the only writer.
+	// view. `readUrlState` is the one reader — at mount, and again from
+	// `afterNavigate` for a navigation that reuses this page (a sidebar click
+	// while filtered, Back/Forward between two of its history entries), which
+	// a mount-only read never sees. `syncUrl()` is the only writer.
 	const TYPE_KEYS = ['all', 'internal', 'punchout', 'preferred'] as const;
-	function initialType(): string {
-		const t = page.url.searchParams.get('type');
-		return t && (TYPE_KEYS as readonly string[]).includes(t) ? t : 'all';
+	function readUrlState(params: Pick<URLSearchParams, 'get'>) {
+		const t = params.get('type');
+		return {
+			search: params.get('search') ?? '',
+			type: t && (TYPE_KEYS as readonly string[]).includes(t) ? t : 'all'
+		};
 	}
-	let search = $state(page.url.searchParams.get('search') ?? '');
-	let typeFilter = $state<string>(initialType());
+	const initialUrl = readUrlState(page.url.searchParams);
+	let search = $state(initialUrl.search);
+	let typeFilter = $state<string>(initialUrl.type);
+
+	afterNavigate(({ from, to, type }) => {
+		if (type === 'enter' || !from || !to || from.route.id !== to.route.id) return;
+		const next = readUrlState(to.url.searchParams);
+		const typeChanged = next.type !== typeFilter;
+		const searchChanged = next.search !== search;
+		if (typeChanged) typeFilter = next.type;
+		// A search change reloads through the search effect, which reads the
+		// type filter too; only a type-only change needs its own fetch.
+		if (searchChanged) search = next.search;
+		else if (typeChanged) load();
+	});
 
 	// A WRITER, never a dependency: everything is read untracked, `page.url`
 	// included, or the replaceState would re-trigger the effect that called it.
@@ -178,6 +197,12 @@
 				toast(err instanceof Error ? err.message : m('catalogs.toast.loadFailed'), 'error');
 			} else {
 				errored = true;
+				// Drop the rows this load was replacing: they are the previous
+				// filter's catalogs, and the Retry that clears `errored` would
+				// redraw them — clickable — as this filter's answer until it lands.
+				catalogs = [];
+				total = 0;
+				pageNum = 1;
 			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {

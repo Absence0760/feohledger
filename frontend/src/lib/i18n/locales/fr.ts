@@ -2826,7 +2826,6 @@ export const messages = {
 	'glAccounts.empty.errored': 'Impossible de charger le plan comptable.',
 	'glAccounts.onboarding.heading': 'Pas encore de plan comptable',
 	'glAccounts.onboarding.description': 'Les comptes généraux sont ceux sur lesquels sont imputées les lignes de facture, les dépenses et les demandes d\'achat. Synchronisez-les depuis un ERP connecté, ou ajoutez-les ici un par un.',
-	'glAccounts.toast.loadFailed': 'Impossible de charger le plan comptable',
 	'glAccounts.toast.syncFailed': 'La synchronisation ERP a échoué',
 	'glAccounts.createModal.aria': 'Nouveau compte général',
 	'glAccounts.createModal.title': 'Nouveau compte général',

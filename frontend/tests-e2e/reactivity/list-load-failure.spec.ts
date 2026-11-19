@@ -483,3 +483,62 @@ test('payments history: a failed RE-load replaces the previous filter\'s rows', 
 	await expect(page.getByText(STALE_VENDOR)).toHaveCount(0);
 	await expect(page.getByText(/Showing all 1/)).toHaveCount(0);
 });
+
+/**
+ * /invoices: a held Retry after a failed RE-load shows no stale row.
+ *
+ * The store kept its rows on a failed fresh load, hidden only while `errored`
+ * held. Retry clears `errored` the moment it starts, so the PREVIOUS filter's
+ * invoices redrew — clickable and selectable — as the answer to a filter the
+ * server had not yet run, until the retry answered. The store now empties the
+ * list on a failed fresh load (as the workflows store does), so the held retry
+ * shows the loading line and nothing else.
+ */
+test('invoices: a held Retry after a failed RE-load shows no stale row', async ({ page }) => {
+	const PATHNAME = '/api/invoices';
+	const rows = page.locator('tbody tr.clickable');
+	let mode: 'real' | 'fail' | 'hold' = 'real';
+	let release: () => void = () => {};
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+
+	await page.route(`**${PATHNAME}*`, async (route) => {
+		// Exact pathname only — `/api/invoices/counts` keeps loading normally.
+		if (new URL(route.request().url()).pathname !== PATHNAME || mode === 'real') {
+			await route.continue();
+			return;
+		}
+		if (mode === 'hold') {
+			await held;
+			await route.continue();
+			return;
+		}
+		await route.fulfill({
+			status: 500,
+			contentType: 'application/json',
+			body: JSON.stringify({ detail: 'boom' })
+		});
+	});
+
+	await page.goto('/invoices');
+	// The seed's invoices landed — these are the rows that must not come back.
+	await expect(rows.first()).toBeVisible();
+
+	// A chip click re-queries the server, and that query fails.
+	mode = 'fail';
+	await page.locator('nav.filters .filter-chip', { hasText: /^New(\s|$)/ }).click();
+	const error = page.getByTestId('invoices-load-error');
+	await expect(error).toBeVisible();
+	await expect(rows).toHaveCount(0);
+
+	// Retry, held: the error comes down and the loading line stands alone.
+	mode = 'hold';
+	await error.getByRole('button', { name: 'Retry' }).click();
+	await expect(error).toHaveCount(0);
+	await expect(page.getByTestId('table-empty')).toHaveText('Loading…');
+	await expect(rows).toHaveCount(0);
+
+	release();
+	await expect(page.getByTestId('table-empty').or(rows.first())).toBeVisible();
+});
