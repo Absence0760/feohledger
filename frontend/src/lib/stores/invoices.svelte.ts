@@ -23,8 +23,16 @@ function createInvoiceStore() {
 	// filter that matched nothing. Set only when this is still the newest
 	// request (`isCurrentRequest`, the same rule the `loading` flag uses), and
 	// the error is re-thrown so callers that await a refresh keep their own
-	// error handling.
+	// error handling. Cleared the moment a fresh load starts, so a Retry (or a
+	// filter change) shows the loading line rather than the old failure — or
+	// the stale rows behind it — until the new answer lands.
 	let errored = $state(false);
+	// Did the most recent Load-more fail? Kept apart from `errored` on purpose:
+	// a failed page 2 leaves page 1 on screen and still true, so it must not
+	// swap the table for the list-level `LoadError`. `loadMore` settles this
+	// instead of re-throwing, so a caller reads the outcome here rather than
+	// having to remember a `.catch`. Cleared when any new list request starts.
+	let loadMoreErrored = $state(false);
 
 	// Sequences `fetch`/`loadMore` calls (they share one counter — whichever
 	// was issued last wins) so a slow response for an earlier search/filter
@@ -40,6 +48,8 @@ function createInvoiceStore() {
 	async function fetch(params?: Record<string, string>) { // noqa: raw-fetch-in-component — store method name; routes through api.get
 		const token = fetchSequence.start();
 		loading = true;
+		errored = false;
+		loadMoreErrored = false;
 		try {
 			const merged = { ...(params ?? {}) };
 			if (!merged.page) merged.page = '1';
@@ -61,9 +71,12 @@ function createInvoiceStore() {
 		}
 	}
 
-	async function loadMore() {
+	/** Append the next page. Never rejects: a failure sets `loadMoreErrored`
+	 *  (when this is still the newest request) and keeps the rows shown. */
+	async function loadMore(): Promise<void> {
 		const token = fetchSequence.start();
 		loading = true;
+		loadMoreErrored = false;
 		try {
 			const merged = { ...lastParams };
 			merged.page = String(page + 1);
@@ -75,6 +88,8 @@ function createInvoiceStore() {
 			invoices = appendUnique(invoices, res.items);
 			total = res.total;
 			page = res.page;
+		} catch {
+			if (fetchSequence.isCurrentRequest(token)) loadMoreErrored = true;
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) loading = false;
 		}
@@ -132,6 +147,7 @@ function createInvoiceStore() {
 		get page() { return page; },
 		get hasMore() { return invoices.length < total; },
 		get errored() { return errored; },
+		get loadMoreErrored() { return loadMoreErrored; },
 		get statusCounts() { return statusCounts; },
 		fetch,
 		loadMore,
