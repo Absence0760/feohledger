@@ -23438,3 +23438,58 @@ Tests: `backend/tests/test_portal_self_service.py` (each dead status refused
 with the coded detail and verdict, the replay after closing, the unvouched
 total's verdict); `frontend/src/lib/types/purchaseOrder.test.ts`;
 `frontend/tests-e2e/portal/portal.spec.ts` (a closed PO offers no control).
+
+## §NEW-N1. A supplier cannot flip a purchase order they have already invoiced (round 24, 2026-11-18)
+
+**Problem.** §467 stopped the flip on a dead PO, but an `open` PO is often
+already billed: the supplier submitted an ordinary invoice through the portal
+(or AP keyed theirs) and the ERP has not synced the order to `closed` yet. A
+flip then minted a second invoice for the whole `po.total`. Nothing downstream
+caught it: the flipped invoice has an empty `invoice_number`, so number-based
+duplicate detection (`services/invoice_warnings`) has nothing to match, and PO
+matching compares an invoice with the PO, not with what is already invoiced
+against it.
+
+**Decision.** The flip refuses with a coded 409 `po_already_invoiced` while a
+live invoice of the caller's own vendor cites the PO, from the same gate
+(`api/portal.po_flip_refusal`) that ships per row as `flip_verdict`.
+"Cites" is what the matcher resolves by: the PO's number within the invoice's
+entity, or the PO's id among a split's `split_po_ids`. "Live" is every status
+but `rejected`. From `new` to `done` an invoice is, or can still become, a
+payable, and `failed` is either a stalled extraction or an approved bill whose
+ERP push is retried. A rejected invoice bills nothing while it stays rejected,
+and a supplier whose bill was rejected needs a way to bill again.
+
+**Why refuse, not bill the remainder.** Flipping only the unbilled remainder
+was considered. It would need a trustworthy "already billed" figure: invoice
+amounts include tax and freight the PO total may not, currencies can differ,
+credit memos reduce what was billed, and line-level remainders need quantity
+matching the portal does not do. A wrong remainder is a wrong payable with no
+document behind it. The flip is a convenience for billing a whole order. A
+partial bill is the supplier's own invoice, which carries a number the
+duplicate detector and PO matching then check. So the refusal tells them to
+submit one.
+
+**Order and replay.** The check runs after the per-PO idempotency
+short-circuit. A flipped invoice cites its own PO, so without that order a
+retry would be refused by the invoice it created. The row stops offering
+"Create invoice" once the flip went through, and a replay still returns the
+invoice. The dead-PO refusal comes first (a closed order is not open for
+anything) and the unvouched-total one last, because its advice to submit an
+invoice is wrong once the order is billed.
+
+**Vendor scoping.** Only the caller's vendor's invoices are read, and the
+refusal carries no params. Another supplier's invoice citing the same number
+neither blocks the flip nor shows up in the verdict. An invoice with no
+`vendor_id` yet (unresolved email intake) is not counted. Counting it would
+mean matching on a number another supplier may have written.
+
+**Left open.** The reverse order is not refused: a supplier who flips and then
+submits an ordinary invoice for the same PO. Partial and corrective invoices
+against one PO are legitimate there, so it is a review-side check, not a
+portal refusal.
+
+Tests: `backend/tests/test_portal_self_service.py` (live statuses refused with
+the coded detail and verdict, a split leg, a rejected or foreign-vendor invoice
+not blocking, the flipped PO's verdict and its replay);
+`frontend/src/lib/types/purchaseOrder.test.ts`.

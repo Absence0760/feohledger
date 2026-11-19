@@ -214,13 +214,23 @@ verdict). It refuses, with 409:
   already hidden). Wider than the matcher's `UNMATCHABLE_PO_STATUSES` on
   purpose: a flip bills the whole total again, so on a closed (fully billed)
   order it is a second bill (`docs/decisions.md` §467);
+- `po_already_invoiced` (coded detail, no params) — the PO is open but a live
+  invoice of the caller's own vendor already cites it: by number within the
+  invoice's entity, or as a multi-PO split's recorded leg (`split_po_ids`).
+  Live is every status but `rejected`. The flip bills the whole total under an
+  empty invoice number, so number-based duplicate detection could never catch
+  the second bill; the supplier submits an ordinary invoice for any remainder
+  (`docs/decisions.md` §NEW-N1). One query per list page
+  (`api/portal._pos_already_invoiced`). Once a PO is flipped, its own invoice
+  cites it, so the row stops offering "Create invoice" too;
 - `po_total_unverifiable` — the ERP could not vouch for the total
   (decisions §323); the endpoint keeps its plain-string detail.
 
-Both are checked after the replay short-circuit, so retrying a flip that went
+All are checked after the replay short-circuit, so retrying a flip that went
 through still returns its invoice even if the PO has since closed. The PO is
 vendor-scoped (404 for any other vendor's) before the gate runs, so the
-refusal only ever names the caller's own order's status. The portal page shows
+refusal only ever names the caller's own order's status, and the
+already-invoiced check reads only the caller's own vendor's invoices. The portal page shows
 the status through the shared label map `frontend/src/lib/types/purchaseOrder.ts`.
 
 ### Company self-service (`portal.py`)
