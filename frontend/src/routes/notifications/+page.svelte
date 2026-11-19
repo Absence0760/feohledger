@@ -13,6 +13,7 @@
 	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { EVENT_LABEL_KEYS } from '#lib/types/notification.ts';
+	import { notificationHref } from '#lib/utils/notificationHref.ts';
 	import type { Notification } from '#lib/types/notification.ts';
 
 	// The relative "When" cell carries the exact instant in its title, in the
@@ -101,16 +102,14 @@
 		}
 	}
 
-	async function open(n: Notification) {
-		// Mark read first so the badge + row update, then navigate to the invoice.
+	async function open(n: Notification, href: string) {
+		// Mark read first so the badge + row update, then navigate to the record.
 		try {
 			if (!n.read_at) await notificationStore.markRead(n.id);
 		} catch {
 			/* navigation should still happen even if mark-read failed */
 		}
-		if (n.entity_type === 'invoice' && n.entity_id) {
-			goto(`/invoices?id=${n.entity_id}`);
-		}
+		goto(href);
 	}
 
 	async function markAll() {
@@ -160,18 +159,25 @@
 		<DataTable columns={COLUMNS} isEmpty={items.length === 0} empty={emptyMessage} colspan={2}>
 			{#snippet body()}
 				{#each items as n (n.id)}
+					{@const href = notificationHref(n)}
+					<!-- A row with nowhere to go is plain text: no `.clickable`,
+					     no RowLink, nothing that looks openable. -->
 					<tr
-						class="clickable"
+						class:clickable={href !== null}
 						class:unread-row={!n.read_at}
-						onclick={(e) => { if (isRowOpenClick(e)) open(n); }}
+						onclick={(e) => { if (href && isRowOpenClick(e)) open(n, href); }}
 					>
 						<td>
 							<div class="notif-cell">
 								<span class="notif-dot" class:on={!n.read_at} aria-hidden="true"></span>
 								<div class="notif-text">
-									<RowLink onclick={() => open(n)} ariaLabel={m('notifications.open', { title: n.title })}>
+									{#if href}
+										<RowLink onclick={() => open(n, href)} ariaLabel={m('notifications.open', { title: n.title })}>
+											<span class="notif-title">{n.title}</span>
+										</RowLink>
+									{:else}
 										<span class="notif-title">{n.title}</span>
-									</RowLink>
+									{/if}
 									{#if n.body}<span class="notif-body">{n.body}</span>{/if}
 									<span class="notif-event">
 										{EVENT_LABEL_KEYS[n.event_type] ? m(EVENT_LABEL_KEYS[n.event_type]) : n.event_type}

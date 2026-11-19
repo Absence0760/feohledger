@@ -1,3 +1,5 @@
+import type { NotificationListResponse } from '#lib/types/notification.ts';
+
 import { expect, signInAndWait, test } from '../fixtures/helpers';
 import { clearNotifications, currentUserId, orgId, seedNotifications } from './seed';
 
@@ -109,5 +111,56 @@ test.describe('notification center', () => {
 		await page.getByRole('button', { name: /^All/ }).click();
 		await expect(page).not.toHaveURL(/filter=/);
 		await expect(page.getByText('No notifications yet.')).toBeVisible();
+	});
+
+	test('a non-invoice row opens its own screen; a row with nowhere to go is not a link', async ({
+		page
+	}) => {
+		// Stubbed by EXACT pathname (tests-e2e/README.md § Stubbing an API route)
+		// so `/api/notifications/unread-count` still reaches the backend.
+		const read = '2026-01-01T00:00:00Z';
+		const list: NotificationListResponse = {
+			items: [
+				{
+					id: '00000000-0000-0000-0000-0000000ca5f1',
+					event_type: 'cash_shortfall_projected',
+					entity_type: 'cash_position',
+					entity_id: null,
+					title: 'Projected shortfall spec row',
+					body: null,
+					read_at: read,
+					created_at: read
+				},
+				{
+					id: '00000000-0000-0000-0000-0000000ca5f2',
+					event_type: 'contract_renewal_due',
+					entity_type: 'contract',
+					entity_id: null,
+					title: 'Orphaned contract spec row',
+					body: null,
+					read_at: read,
+					created_at: read
+				}
+			],
+			total: 2,
+			unread: 0,
+			page: 1,
+			page_size: 20
+		};
+		await signInAndWait(page);
+		await page.route(
+			(url) => url.pathname === '/api/notifications',
+			(route) => route.fulfill({ json: list })
+		);
+		await page.goto('/notifications');
+
+		// The contract row has no id, so no route: plain text, no open control.
+		await expect(page.getByText('Orphaned contract spec row')).toBeVisible();
+		await expect(page.getByRole('button', { name: /^Open Orphaned contract spec row/ })).toHaveCount(0);
+		await expect(page.locator('tr.clickable', { hasText: 'Orphaned contract spec row' })).toHaveCount(0);
+
+		// The shortfall alert is org-wide (entity_id NULL) and opens the forecast.
+		await page.getByRole('button', { name: /^Open Projected shortfall spec row/ }).click();
+		await expect(page).toHaveURL(/\/cash-flow$/);
 	});
 });

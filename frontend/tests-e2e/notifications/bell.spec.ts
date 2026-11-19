@@ -19,7 +19,7 @@ import { expect, test } from '../fixtures/helpers';
 
 const LIST = (url: URL) => url.pathname === '/api/notifications';
 
-/** One already-read contract notification — it navigates nowhere when opened. */
+/** One already-read contract notification with no entity_id — it has nowhere to open. */
 const CONTRACT_ITEM: NotificationListResponse = {
 	items: [
 		{
@@ -130,14 +130,31 @@ test.describe('notification bell popover', () => {
 		await expect(popover.getByText('Renewal due: bell spec contract')).toBeVisible();
 	});
 
-	test('opening an item that navigates nowhere returns focus to the bell', async ({ page }) => {
+	test('an item with nowhere to go is plain text, not a button', async ({ page }) => {
+		// CONTRACT_ITEM carries no entity_id, so `notificationHref` has no route
+		// for it. It used to be a button that marked itself read and went nowhere.
 		await page.route(LIST, (route) => route.fulfill({ json: CONTRACT_ITEM }));
 		await page.goto('/');
-		const bell = page.locator('.bell-btn');
-		await bell.click();
+		await page.locator('.bell-btn').click();
+		const popover = page.getByRole('dialog', { name: 'Notifications' });
+		await expect(popover.getByTestId('bell-item-static')).toContainText(
+			'Renewal due: bell spec contract'
+		);
+		await expect(popover.getByRole('button', { name: /Renewal due: bell spec contract/ })).toHaveCount(0);
+	});
+
+	test('a non-invoice item opens its own record and closes the popover', async ({ page }) => {
+		const contractId = '00000000-0000-0000-0000-00000000c0de';
+		const withId: NotificationListResponse = {
+			...CONTRACT_ITEM,
+			items: [{ ...CONTRACT_ITEM.items[0], entity_id: contractId }]
+		};
+		await page.route(LIST, (route) => route.fulfill({ json: withId }));
+		await page.goto('/');
+		await page.locator('.bell-btn').click();
 		await page.getByRole('button', { name: /Renewal due: bell spec contract/ }).click();
 		await expect(page.getByRole('dialog', { name: 'Notifications' })).toHaveCount(0);
-		await expect(bell).toBeFocused();
+		await expect(page).toHaveURL(new RegExp(`/contracts\\?id=${contractId}$`));
 	});
 
 	test('tabbing out of the popover closes it', async ({ page }) => {
