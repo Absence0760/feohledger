@@ -1,3 +1,5 @@
+import type { Catalog, CatalogListResponse } from '#lib/types/catalog.ts';
+
 import { expect, test } from '../fixtures/helpers';
 
 /**
@@ -70,5 +72,91 @@ test.describe('/catalogs load states', () => {
 		await error.getByRole('button', { name: 'Retry' }).click();
 		await expect(page.getByTestId('table-empty')).toHaveText('No catalogs.', { timeout: 10_000 });
 		expect(attempts).toBeGreaterThan(1);
+	});
+
+	/**
+	 * A failed "Load more" is not a failed list. It used to set the same flag a
+	 * failed first page sets, so LoadError replaced the table and every row
+	 * already on screen was thrown away. The rows stay; the failure toasts.
+	 */
+	test('a failed LOAD MORE keeps the rows already loaded', async ({ page }) => {
+		const row = (i: number): Catalog => ({
+			id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+			name: `Paged Catalog ${i}`,
+			catalog_type: 'internal',
+			vendor_id: null,
+			vendor_name: null,
+			punchout_url: null,
+			is_active: true,
+			is_preferred: false,
+			description: null,
+			item_count: 0,
+			items: [],
+			created_at: '2026-01-01T00:00:00Z',
+			updated_at: '2026-01-01T00:00:00Z'
+		});
+		await page.route('**/api/catalogs?**', async (route) => {
+			const pageNum = new URL(route.request().url()).searchParams.get('page');
+			if (pageNum === '2') {
+				await route.fulfill({
+					status: 500,
+					contentType: 'application/json',
+					body: JSON.stringify({ detail: 'boom' })
+				});
+				return;
+			}
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					items: [row(1), row(2)],
+					total: 5,
+					page: 1,
+					page_size: 100
+				} satisfies CatalogListResponse)
+			});
+		});
+
+		await page.goto('/catalogs');
+		await expect(page.getByText('Paged Catalog 1')).toBeVisible();
+
+		await page.getByRole('button', { name: /Load more/ }).click();
+
+		await expect(page.getByText('Could not load catalogs').first()).toBeVisible();
+		await expect(page.getByTestId('catalogs-error')).toHaveCount(0);
+		await expect(page.getByText('Paged Catalog 1')).toBeVisible();
+		await expect(page.getByText('Paged Catalog 2')).toBeVisible();
+	});
+
+	/** Search and type filter round-trip through the URL, like every sibling list. */
+	test('search and type filter survive a reload via the URL', async ({ page }) => {
+		const seen: URL[] = [];
+		await page.route('**/api/catalogs?**', async (route) => {
+			seen.push(new URL(route.request().url()));
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ items: [], total: 0, page: 1, page_size: 100 })
+			});
+		});
+
+		await page.goto('/catalogs');
+		await expect(page.getByTestId('table-empty')).toHaveText('No catalogs.');
+
+		await page.getByRole('button', { name: 'Punch-out', exact: true }).click();
+		await expect(page).toHaveURL(/[?&]type=punchout/);
+		await page.getByRole('textbox', { name: 'Search catalogs' }).fill('paper');
+		await expect(page).toHaveURL(/[?&]search=paper/);
+
+		seen.length = 0;
+		await page.reload();
+		await expect(page.getByRole('textbox', { name: 'Search catalogs' })).toHaveValue('paper');
+		await expect(page.getByRole('button', { name: 'Punch-out', exact: true })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		await expect.poll(() => seen.length).toBeGreaterThan(0);
+		expect(seen[0].searchParams.get('search')).toBe('paper');
+		expect(seen[0].searchParams.get('catalog_type')).toBe('punchout');
 	});
 });
