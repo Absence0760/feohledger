@@ -493,6 +493,12 @@
 				if (deepLinkId !== id) return;
 				if (err instanceof ApiError && err.status === 404) {
 					toast(m('invoices.toast.notFound'), 'error');
+					// Nothing will ever open for this id, so drop it from the URL:
+					// left there, Back or a reload re-runs the lookup and re-toasts.
+					// `deepLinkLoaded` keeps the id, as on close, so the effect
+					// does not retry it off the unchanged `page.url`.
+					deepLinkId = null;
+					syncUrl();
 				} else {
 					deepLinkFailedId = id;
 				}

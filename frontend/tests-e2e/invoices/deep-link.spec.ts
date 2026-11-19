@@ -69,6 +69,24 @@ test.describe('/invoices?id deep-link', () => {
 		await expect(page.getByTestId('invoices-deeplink-error')).toHaveCount(0);
 	});
 
+	test('a 404 drops id from the URL, keeping the filters, so a reload does not re-toast', async ({
+		page
+	}) => {
+		await page.goto('/invoices?status=new&id=00000000-0000-0000-0000-000000000000');
+		await expect(page.locator('.toast-text', { hasText: 'Invoice not found' })).toBeVisible();
+		// The dead id goes; the filter the link carried stays.
+		await expect(page).toHaveURL(/\/invoices\?status=new$/);
+
+		// Wait on the reloaded list itself, so the no-toast check below runs
+		// after the page has done everything a reload does.
+		const listLoaded = page.waitForResponse(
+			(r) => new URL(r.url()).pathname === '/api/invoices' && r.request().method() === 'GET'
+		);
+		await page.reload();
+		await listLoaded;
+		await expect(page.locator('.toast-text', { hasText: 'Invoice not found' })).toHaveCount(0);
+	});
+
 	test('a server failure is a failed load with Retry, not "not found"', async ({ page }) => {
 		const headers = await authedTenantHeaders(page);
 		const listResp = await page.request.get(`${API_BASE}/api/invoices`, { headers });
