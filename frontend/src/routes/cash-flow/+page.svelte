@@ -9,17 +9,21 @@
 	import CopilotChatMessage from '#lib/components/cash-flow/CopilotChatMessage.svelte';
 	import SavedPlansPanel from '#lib/components/cash-flow/SavedPlansPanel.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import type { ChatResponse, ToolInvocation, UiMessage, UsageResponse } from '#lib/types/assistant.ts';
 
 	// Cash-flow copilot starter prompts. The first two route to `get_cash_position`
 	// (running-balance chart); the third exercises the discount optimizer; the
 	// fourth routes to the Phase 2 `propose_payment_plan` tool (plan card).
-	const EXAMPLES: readonly string[] = [
-		'When are we going to run low on cash?',
-		"What's our cash position over the next 90 days?",
-		'Which discounts should I capture to save the most?',
-		'Propose a payment plan for the next quarter'
-	] as const;
+	// Each is a button label AND the message it sends, so it follows the active
+	// locale like the rest of the page (they were English literals in every
+	// locale); the copilot answers in the language it is asked in.
+	const examples = $derived([
+		m('cashFlow.example.runLow'),
+		m('cashFlow.example.position'),
+		m('cashFlow.example.discounts'),
+		m('cashFlow.example.plan')
+	]);
 
 	let messages = $state<UiMessage[]>([]);
 	let input = $state('');
@@ -123,11 +127,18 @@
 		applyFinal(payload, assistantId);
 	}
 
+	/** A token count in the in-app locale. A bare `toLocaleString()` reads the
+	 *  BROWSER's locale, so a German UI on an English browser printed
+	 *  "12,000" inside a German sentence. */
+	function formatCount(n: number): string {
+		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
+	}
+
 	/** The over-budget notice, in place of the empty in-progress bubble. */
 	function showBudgetNotice(err: AssistantBudgetError, assistantId: string) {
 		budgetNotice = m('assistant.budget.reached', {
-			used: err.used.toLocaleString(),
-			budget: err.budget.toLocaleString()
+			used: formatCount(err.used),
+			budget: formatCount(err.budget)
 		});
 		dropMessage(assistantId);
 	}
@@ -274,7 +285,7 @@
 		{#snippet log()}
 			{#if isEmpty}
 				<ExamplePrompts
-					prompts={EXAMPLES}
+					prompts={examples}
 					heading={m('cashFlow.empty.heading')}
 					sub={m('cashFlow.empty.sub')}
 					onpick={pickPrompt}
