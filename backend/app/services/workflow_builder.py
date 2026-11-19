@@ -100,7 +100,9 @@ def build_invoice_context(invoice: Any) -> dict:
 
     return {
         "amount": _to_decimal(_get("amount")),
-        "currency": (_get("currency") or "USD"),
+        # None when the invoice records no currency (decisions §473): a
+        # condition on `currency` then matches nothing rather than USD.
+        "currency": _get("currency") or None,
         "vendor_id": _str_or_none(_get("vendor_id")),
         "gl_account": _str_or_none(_get("gl_account")),
         "cost_center": _str_or_none(_get("cost_center")),

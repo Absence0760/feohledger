@@ -19,7 +19,9 @@ from app.schemas.money import MoneyAmount
 
 
 class ReportingByCurrency(BaseModel):
-    currency: str
+    #: ``None`` groups the invoices that record no currency, every one of them
+    #: counted in ``unconverted_count`` (decisions §473).
+    currency: str | None
     original_amount: MoneyAmount
     reporting_amount: MoneyAmount
     count: int

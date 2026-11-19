@@ -178,6 +178,40 @@ async def test_portal_pos_carry_their_own_currency_and_the_flip_inherits_it(real
 
 
 @pytest.mark.asyncio
+async def test_flipping_a_currency_less_po_books_an_unknown_currency_invoice(realdb):
+    """A PO that records no currency yields an invoice that records none
+    either — NULL, "unknown" (decisions §473) — never the old `"USD"`
+    placeholder, which billed a EUR order's figure as dollars."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+    po_id = uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            PurchaseOrder(
+                id=po_id,
+                po_number="PO-P-NOCUR",
+                vendor_id=vendor_id,
+                total=Decimal("300.00"),
+                currency=None,
+                status="open",
+                organization_id=org_id,
+            )
+        )
+        await s.commit()
+
+    async with _portal_client(realdb, vu_id, vendor_id) as client:
+        flipped = await client.post(f"/api/portal/purchase-orders/{po_id}/flip")
+    assert flipped.status_code == 202, flipped.text
+    async with mk() as s:
+        inv = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(flipped.json()["id"])))
+        ).scalar_one()
+    assert inv.currency is None
+    assert inv.reporting_amount is None
+
+
+@pytest.mark.asyncio
 async def test_po_flip_is_idempotent(realdb):
     """Two flips of the same PO from the same vendor return the same invoice
     — a double-click can't mint two invoices that each seed the payment path."""

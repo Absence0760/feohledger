@@ -58,7 +58,11 @@
 		})();
 	});
 
-	const canSubmit = $derived(vendor.trim() !== '' && invoice_number.trim() !== '' && !!amount && amount > 0);
+	// A cleared currency field blocks submit rather than posting a guessed
+	// default (decisions §473).
+	const canSubmit = $derived(
+		vendor.trim() !== '' && invoice_number.trim() !== '' && currency.trim() !== '' && !!amount && amount > 0
+	);
 
 	function handleFileChange(e: Event) {
 		const input = e.target as HTMLInputElement;
@@ -73,7 +77,7 @@
 				vendor: vendor.trim(),
 				invoice_number: invoice_number.trim(),
 				amount,
-				currency: currency.trim() || DEFAULT_CURRENCY,
+				currency: currency.trim(),
 				invoice_date: invoice_date || null,
 				due_date: due_date || null,
 				po_number: po_number.trim() || null,

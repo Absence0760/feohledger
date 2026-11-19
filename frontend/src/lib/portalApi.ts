@@ -193,7 +193,8 @@ export interface PortalPaymentListItem {
 	invoice_id: string;
 	invoice_number: string;
 	amount: number | string;
-	currency: string;
+	/** `null` when the paid invoice records no currency (decisions §473). */
+	currency: string | null;
 	method: string | null;
 	status: string;
 	reference: string | null;

@@ -23885,3 +23885,27 @@ row, and an explicit `null` or blank is still the coded 422.
 Rejected: keeping `""` as the sentinel and only fixing the upload, which keeps
 two spellings of unknown; and backfilling a code from the org's home or
 reporting currency, which is the substitution with a different default.
+
+Amended in the round 28 gate review. **Rollups.** An unknown currency (NULL,
+blank or malformed, judged by `payment_runs.payable_currency_code`, and in SQL
+by `currency_conversion.invoice_currency_key_sql` with the same trim set and
+pattern) is never the reporting currency. Every invoice rollup groups such
+rows under a `None` key and counts each in `unconverted_count`, whatever lock
+it carries; `materialize_reporting_amount` never locks one and clears a 1:1
+lock written before this decision; the payment-amount resolver behind the
+1099, risk and cash-flow totals reads it as not expressible; and the
+unrealized-FX report counts it without valuing it. **More doors closed.** Email
+intake creates its invoice with `currency=None`; inbound PEPPOL records a
+missing or malformed `DocumentCurrencyCode` as NULL (UBL requires the code, so
+it is a malformed document, not a USD one); a PO flip on a PO with no currency
+books NULL; an invoice warning carries an unknown currency as `""`, which both
+clients render as bare digits; the supplier portal's payment list, the
+email-approval page, the virtual-card email and the workflow builder's context
+omit the code instead of saying USD; and a linked credit memo or
+invoice-scoped discount offer on such an invoice is refused
+(`credit_memo_currency_required`, `discount_offer_currency_required`) unless
+the caller names a currency. `tests/test_invoice_currency_explicit.py` also
+refuses a literal or `or`-defaulted currency, `Invoice(**kwargs)` and
+`module.Invoice(...)` at an application construction site. `InvoiceCreate`
+still defaults `currency` to USD for an API caller that omits it (the web form
+no longer relies on it); that is tracked in `docs/followups.md`.

@@ -57,6 +57,7 @@ from app.services.e_invoice import (
 from app.services.peppol_adapters import UnknownPeppolProviderError, get_peppol_adapter
 from app.services.webhook_security import verify_hmac_sha256
 from app.services.workflow_engine import create_workflow_instance
+from app.utils.currency_code import iso_currency_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +209,10 @@ async def receive_peppol_message(
                 vendor_name=(doc.seller.name or ""),
                 description=f"Received via PEPPOL from {message.sender_scheme}",
                 amount=amount,
-                currency=doc.currency or "USD",
+                # UBL requires DocumentCurrencyCode, so a missing or malformed
+                # one is a malformed document: recorded as unknown (NULL), never
+                # a guessed USD (decisions §473).
+                currency=iso_currency_or_none(doc.currency),
                 status=InvoiceStatus.new,
                 organization_id=org.id,
                 entity_id=entity_id,
@@ -255,7 +259,7 @@ async def receive_peppol_message(
                 status="delivered",  # inbound is already delivered to us (C4)
                 provider=adapter.provider_name,
                 amount=amount,
-                currency=doc.currency or "USD",
+                currency=iso_currency_or_none(doc.currency),
                 raw_response={
                     "direction": _DIRECTION_INBOUND,
                     "doc_type": message.doc_type_id,

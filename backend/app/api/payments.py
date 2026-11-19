@@ -935,7 +935,8 @@ async def _payment_queue_rollup(
                 "total_savings": str(save.quantize(q2)),
             }
         )
-    by_currency.sort(key=lambda e: e["currency"])
+    # The unknown-currency group (`None`, decisions §473) sorts last.
+    by_currency.sort(key=lambda e: (e["currency"] is None, e["currency"] or ""))
     return {
         "total": total,
         "total_amount": str(total_amount.quantize(q2)),

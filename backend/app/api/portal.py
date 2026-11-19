@@ -43,6 +43,7 @@ from app.models.procurement import (
     UNISSUED_PO_STATUS,
     POLineItem,
     PurchaseOrder,
+    po_currency_code,
     po_vouched_money,
 )
 from app.models.supplier_chat import ChatAuthorRole, ChatThreadStatus, SupplierChatMessage
@@ -904,7 +905,9 @@ async def list_my_payments(
                 invoice_id=str(p.invoice_id),
                 invoice_number=inv_num or "",
                 amount=p.amount,
-                currency=inv_currency or "USD",
+                # NULL when the paid invoice records no currency (decisions
+                # §473): the portal renders the figure bare, never as dollars.
+                currency=inv_currency,
                 method=p.method,
                 status=p.status,
                 reference=p.reference,
@@ -1250,11 +1253,11 @@ async def flip_purchase_order(
         amount=po.total,
         # The invoice bills the PO's own total, so it is in the PO's currency.
         # A PO that records none (created before migration 0099 with no
-        # requisition behind it) falls back to the column's historical "USD":
-        # `invoices.currency` is NOT NULL and cannot say "unknown". That pairing
-        # is never mistaken for proof — `po_matching` reads the PO's NULL, not
-        # this placeholder, and reports the currency leg as unverified.
-        currency=po.currency or "USD",
+        # requisition behind it) yields an invoice that records none either:
+        # NULL is "unknown" (decisions §473), so a run refuses it as
+        # `currency_unknown` until someone states the code, rather than paying
+        # it in a guessed USD.
+        currency=po_currency_code(po.currency),
         status=InvoiceStatus.new,
         po_number=po.po_number,
         # Stable per-PO marker — drives the idempotency guard above.

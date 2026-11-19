@@ -49,6 +49,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
+from app.utils.currency_code import iso_currency_or_none
+
 #: What a placeholder holds, which is what the client needs to format it.
 #:
 #: ``money``    exact decimal digits; formatted with the warning's ``currency``
@@ -60,9 +62,12 @@ from typing import Literal
 #: ``text``     opaque — an identifier, a name, a sentence we cannot key
 ParamKind = Literal["text", "currency", "money", "number", "percent", "count", "date"]
 
-#: ISO 4217 fallback, matching `frontend/src/lib/utils/money.ts::DEFAULT_CURRENCY`
-#: and the `invoice.currency or "USD"` reads already in `invoice_warnings`.
-DEFAULT_CURRENCY = "USD"
+#: What a ``currency`` param carries when the invoice records no currency
+#: (NULL, blank or malformed — decisions §473): the empty string, which both
+#: clients' money formatters already render as bare digits with no symbol.
+#: Never a borrowed code: naming USD for an amount nobody recorded a currency
+#: for is the substitution §160/§196 forbid.
+UNKNOWN_CURRENCY = ""
 
 
 @dataclass(frozen=True)
@@ -1434,8 +1439,7 @@ def _coerce(kind: ParamKind, value: object) -> str | int:
     if kind == "money":
         return _money(value)
     if kind == "currency":
-        code = str(value or "").strip().upper()
-        return code if len(code) == 3 else DEFAULT_CURRENCY
+        return iso_currency_or_none(value) or UNKNOWN_CURRENCY
     if kind == "date":
         if isinstance(value, (date, datetime)):
             return value.isoformat()

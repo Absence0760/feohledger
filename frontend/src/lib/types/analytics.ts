@@ -276,7 +276,8 @@ export interface CfoUnrealizedFx {
 }
 
 export interface CfoReportingSpendByCurrency {
-	currency: string;
+	/** `null` groups the invoices that record no currency; all of them are unconverted (decisions §473). */
+	currency: string | null;
 	original_amount: MoneyString;
 	reporting_amount: MoneyString;
 	count: number;

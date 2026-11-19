@@ -416,6 +416,31 @@ async def test_create_with_invoice_currency_mismatch_409(realdb):
     assert "currency" in resp.json()["detail"]["message"].lower()
 
 
+async def test_linked_create_on_an_unknown_currency_invoice_needs_a_named_currency(realdb):
+    """An invoice that records no currency (decisions §473) leaves a linked
+    memo nothing to inherit: refused unless the caller names one, never
+    stamped with the reporting currency."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id, name="No Currency Vendor")
+    invoice_id = await _add_invoice(
+        mk, org_id, vendor_id=vendor_id, number="INV-NOCUR", currency=None
+    )
+    body = {
+        "memo_number": "CM-NOCUR",
+        "vendor_id": vendor_id,
+        "invoice_id": invoice_id,
+        "amount": "50.00",
+    }
+    async with realdb.client(key="a", role="ap_manager") as c:
+        refused = await c.post("/api/credit-memos", json=body)
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["detail"]["code"] == "credit_memo_currency_required"
+        named = await c.post("/api/credit-memos", json={**body, "currency": "EUR"})
+    assert named.status_code == 201, named.text
+    assert named.json()["currency"] == "EUR"
+
+
 async def test_apply_invoice_without_vendor_refused(realdb):
     """An invoice with no resolved vendor cannot be credited — fail-closed.
 
