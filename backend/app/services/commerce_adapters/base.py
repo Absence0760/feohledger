@@ -29,7 +29,7 @@ registers with ``registry.register_commerce_adapter``. See
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, ClassVar, Literal
 from urllib.parse import urlsplit
@@ -391,13 +391,3 @@ class CommerceAdapter(ABC):
                 f"{self.spec.label} address does not resolve to a public host."
             ) from None
         return base
-
-
-@dataclass
-class ConnectionReport:
-    """``POST /api/commerce/test``'s answer (no credential, no response body)."""
-
-    success: bool
-    code: str | None = None
-    message: str = ""
-    locations: list[CommerceLocation] = field(default_factory=list)

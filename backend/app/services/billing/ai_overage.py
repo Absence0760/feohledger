@@ -200,10 +200,6 @@ def read_marker(org_settings: dict | None, period: str) -> PeriodMarker:
     return PeriodMarker.parse((billing.get(REPORTED_KEY) or {}).get(period))
 
 
-def reported_units(org_settings: dict | None, period: str) -> int:
-    return read_marker(org_settings, period).units
-
-
 def terms_of(allowance: AiAllowance, cap: Decimal | None) -> dict:
     """The pricing a period's overage is computed from, as JSON-safe strings."""
     return {

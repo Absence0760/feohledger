@@ -694,11 +694,6 @@ async def applied_credit_totals(
     return {invoice_id: total for invoice_id, total in rows.all() if invoice_id is not None}
 
 
-async def applied_credit_total(db: AsyncSession, invoice_id: uuid.UUID) -> Decimal:
-    """Sum of the credit memos already APPLIED against an invoice."""
-    return (await applied_credit_totals(db, [invoice_id])).get(invoice_id, Decimal("0"))
-
-
 async def net_payable_amounts(
     db: AsyncSession, invoices: Iterable[Invoice]
 ) -> dict[uuid.UUID, Decimal]:

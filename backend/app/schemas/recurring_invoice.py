@@ -25,12 +25,6 @@ class Cadence(StrEnum):
     annual = "annual"
 
 
-class TemplateStatus(StrEnum):
-    active = "active"
-    paused = "paused"
-    ended = "ended"
-
-
 class RecurringTemplateCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     vendor_id: str | None = None

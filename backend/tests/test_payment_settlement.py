@@ -32,7 +32,7 @@ from app.services.payment_settlement import (
     SETTLED_AMOUNT_NUMERIC,
     SETTLEMENT_AMOUNT_TOLERANCE,
     build_authorized_legs,
-    describe_discrepancy,
+    discrepancy_finding,
     persistable_settled_amount,
     settlement_coverage,
     verify_settlement,
@@ -306,26 +306,26 @@ def test_as_details_is_json_safe_when_nothing_was_reported():
     ("reported", "expect_word"),
     [(Decimal("600.00"), "MORE than"), (Decimal("400.00"), "LESS than")],
 )
-def test_describe_discrepancy_names_the_direction(reported, expect_word):
+def test_discrepancy_message_names_the_direction(reported, expect_word):
     v = verify_settlement(
         reported_amount=reported,
         reported_currency="USD",
         target_amount=Decimal("500.00"),
         target_currency="USD",
     )
-    text = describe_discrepancy(v)
+    text = discrepancy_finding(v)["message"]
     assert expect_word in text
     assert "500.00 USD" in text
 
 
-def test_describe_discrepancy_covers_the_currency_case():
+def test_discrepancy_message_covers_the_currency_case():
     v = verify_settlement(
         reported_amount=Decimal("500.00"),
         reported_currency="EUR",
         target_amount=Decimal("500.00"),
         target_currency="USD",
     )
-    text = describe_discrepancy(v)
+    text = discrepancy_finding(v)["message"]
     assert "currency mismatch" in text.lower()
     assert "EUR" in text and "USD" in text
 
@@ -342,7 +342,6 @@ def test_the_discrepancy_is_a_catalogue_finding(reported, currency, code, varian
     """Decisions §358: the exception is keyed, MORE / LESS picks the code, and
     each side's figure rides beside its own currency code (a currency mismatch
     has two)."""
-    from app.services.payment_settlement import discrepancy_finding
 
     v = verify_settlement(
         reported_amount=reported,
@@ -361,11 +360,9 @@ def test_the_discrepancy_is_a_catalogue_finding(reported, currency, code, varian
     if variance is not None:
         expected["variance"] = variance
     assert finding["params"] == expected
-    assert finding["message"] == describe_discrepancy(v)
 
 
 def test_a_matched_settlement_has_no_discrepancy_finding():
-    from app.services.payment_settlement import discrepancy_finding
 
     v = verify_settlement(
         reported_amount=Decimal("500.00"),
@@ -386,7 +383,7 @@ def test_description_carries_no_pii():
         target_amount=Decimal("1.00"),
         target_currency="USD",
     )
-    text = describe_discrepancy(v).lower()
+    text = discrepancy_finding(v)["message"].lower()
     for banned in ("iban", "account", "routing", "tax", "swift"):
         assert banned not in text
 
