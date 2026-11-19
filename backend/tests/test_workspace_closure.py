@@ -930,8 +930,8 @@ async def test_an_existing_row_cannot_be_changed_while_the_closure_runs(realdb, 
 
 
 async def test_a_token_without_a_workspace_claim_cannot_close_another_workspace(realdb, trial):
-    """`get_tenant` skips a token with no `org` claim; the route checks the
-    account's own workspace itself."""
+    """`get_tenant` refuses a token with no `org` claim, and the route checks
+    the account's own workspace itself behind it."""
     from app.utils import jwt_hs256
 
     token = jwt_hs256.encode(
