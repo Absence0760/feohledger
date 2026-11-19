@@ -209,6 +209,30 @@ test.describe('/invoices — e-invoice export', () => {
 		expect(file.suggestedFilename()).toBe(`einvoice-${inv.invoice_number}-cii.xml`);
 	});
 
+	test('the download menu is an APG menu button inside the dialog', async ({ page }) => {
+		const inv = await createValidInvoice(page);
+		const modal = await openModal(page, inv.id);
+
+		// The shared MenuButton: haspopup="menu", menuitems, arrow keys.
+		const toggle = modal.getByTestId('einvoice-menu-toggle');
+		await expect(toggle).toHaveAttribute('aria-haspopup', 'menu');
+		await toggle.focus();
+		await page.keyboard.press('ArrowDown');
+		const menu = modal.getByTestId('einvoice-menu');
+		await expect(menu).toHaveAttribute('role', 'menu');
+		await expect(menu.getByTestId('einvoice-format-ubl')).toHaveAttribute('role', 'menuitem');
+		await expect(menu.getByTestId('einvoice-format-ubl')).toBeFocused();
+		await page.keyboard.press('ArrowDown');
+		await expect(menu.getByTestId('einvoice-format-cii')).toBeFocused();
+
+		// Escape closes the menu back to its trigger, and the invoice dialog
+		// stays open (MenuButton stops the press before Modal's focus trap).
+		await page.keyboard.press('Escape');
+		await expect(menu).toHaveCount(0);
+		await expect(toggle).toBeFocused();
+		await expect(modal).toBeVisible();
+	});
+
 	test('a refused dialect names the fields that made it non-compliant', async ({ page }) => {
 		const inv = await createInvalidInvoice(page);
 		const modal = await openModal(page, inv.id);

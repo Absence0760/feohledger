@@ -32,11 +32,13 @@
 		variant = 'secondary',
 		icon,
 		menuLabel,
-		testId
+		testId,
+		menuTestId
 	}: {
 		/** The trigger's text, which is also its accessible name. */
 		label: string;
-		items: readonly { value: T; label: string }[];
+		/** `testId` becomes the item's `data-testid`. */
+		items: readonly { value: T; label: string; testId?: string }[];
 		onselect: (value: T) => void;
 		disabled?: boolean;
 		/** Which shared button class the trigger wears (`btn-<variant>`). */
@@ -47,6 +49,8 @@
 		menuLabel?: string;
 		/** `data-testid` on the trigger; the menu gets `<testId>-menu`. */
 		testId?: string;
+		/** Overrides the menu's `data-testid` (a caller keeping an older selector). */
+		menuTestId?: string;
 	} = $props();
 
 	const uid = $props.id();
@@ -190,7 +194,7 @@
 			tabindex="-1"
 			aria-label={menuLabel}
 			aria-labelledby={menuLabel ? undefined : triggerId}
-			data-testid={testId ? `${testId}-menu` : undefined}
+			data-testid={menuTestId ?? (testId ? `${testId}-menu` : undefined)}
 			onkeydown={onMenuKeydown}
 		>
 			{#each items as item, i (item.value)}
@@ -200,6 +204,7 @@
 					class="menu-item"
 					role="menuitem"
 					tabindex="-1"
+					data-testid={item.testId}
 					onclick={() => choose(item.value)}
 					onfocus={() => (active = i)}
 				>

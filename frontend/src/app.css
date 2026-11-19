@@ -1305,6 +1305,20 @@ html.has-bulk-bar body {
 .modal.modal-lg {
 	width: min(820px, 95vw);
 }
+/* `<Modal fullscreen>`: no gutter, the whole viewport, square corners. The
+   selector outranks a caller's own `.modal.<class>` sizing, so the toggle
+   wins without each caller restating it. */
+.backdrop.backdrop-flush {
+	--backdrop-pad: 0px;
+}
+.backdrop.backdrop-flush > .modal.modal-fullscreen {
+	width: 100vw;
+	height: 100vh;
+	max-width: none;
+	max-height: none;
+	border-radius: 0;
+	border: none;
+}
 .modal h2 {
 	margin: 0 0 4px;
 	font-size: 1.2rem;

@@ -4664,6 +4664,7 @@ export const messages = {
 	'invoices.modal.verdictsLoadError': "この請求書で実行できる操作を確認できなかったため、金額・支払先・明細・ファイル・ワークフロー操作はロックされたままです。",
 	'invoices.modal.fullscreen': '全画面表示',
 	'invoices.modal.header': '請求書を編集 — {number}',
+	'invoices.modal.dialogLabel': '請求書 {number} を編集',
 	'invoices.modal.imageAlt': '請求書 — {number}',
 	'invoices.modal.lineItems.addLine': '+ 明細を追加',
 	'invoices.modal.lineItems.colDescription': '説明',

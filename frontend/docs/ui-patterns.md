@@ -724,6 +724,12 @@ centred dialog with backdrop-click + Esc to close:
   `{#snippet header()}…{/snippet}` instead of `title`. If the body
   dereferences a nullable var, gate `open={x !== null}` and wrap the
   children in `{#if x}…{/if}`.
+- `class="<name>"` puts a class on the dialog element beside `modal`, for a
+  dialog with its own size or layout (style it as `:global(.modal.<name>)`);
+  `fullscreen` drops the backdrop's gutter and fills the viewport (the
+  invoice dialog's toggle). Both are no-ops when omitted. `InvoiceModal`
+  (`invoice-dialog`) and `RunDetailModal` (`run-detail-dialog`) use them; a
+  `<svelte:window>` listener a dialog needs stays in the caller.
 - Cancel sits left of the primary action. Required-field markers use
   `<em class="required">*</em>`.
 - **A long dialog keeps its decisions out of the scroll.** When a dialog's body

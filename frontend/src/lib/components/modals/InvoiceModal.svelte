@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { formatPercent, formatRatioPercent } from '#lib/utils/percent.ts';
-	import { focusTrap } from '#lib/actions/focusTrap.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import MenuButton from '#lib/components/ui/MenuButton.svelte';
 	import type { Invoice, AuditSummary } from '#lib/types/invoice.ts';
 	import {
 		INVOICE_ENTRY_ROLES,
@@ -450,17 +451,6 @@
 	let fullscreen = $state(false);
 	let formPaneWidth = $state(480);
 	let resizing = $state(false);
-
-	// Lock the background page from scrolling while the modal is open, so a
-	// wheel event over the PDF pane (which has no internal scroll) can't bleed
-	// through to the invoice grid behind the backdrop. Restored on close.
-	$effect(() => {
-		const prev = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.body.style.overflow = prev;
-		};
-	});
 
 	function toggleFullscreen() {
 		fullscreen = !fullscreen;
@@ -1213,9 +1203,6 @@
 		if (confirmDeleteFile && !(e.target as HTMLElement).closest('.row-action')) {
 			confirmDeleteFile = false;
 		}
-		if (showEinvoiceMenu && !(e.target as HTMLElement).closest('.export-wrapper')) {
-			showEinvoiceMenu = false;
-		}
 	}
 
 	// ---------------------------------------------------------------- e-invoice
@@ -1227,7 +1214,6 @@
 	// interesting outcome, not an edge case: it goes to a persistent alert
 	// region beside the control, not a toast that fades before it's read.
 
-	let showEinvoiceMenu = $state(false);
 	let einvoiceBusy = $state<EInvoiceFormat | null>(null);
 	let einvoiceError = $state<{
 		format: EInvoiceFormat;
@@ -1243,7 +1229,6 @@
 	}
 
 	async function handleEinvoiceDownload(format: EInvoiceFormat) {
-		showEinvoiceMenu = false;
 		einvoiceError = null;
 		einvoiceBusy = format;
 		try {
@@ -1861,1277 +1846,1252 @@
 		if (!iso) return '';
 		return formatDate(iso, '', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 	}
-
-	function handleBackdrop(e: MouseEvent) {
-		if (e.target === e.currentTarget) onclose();
-	}
-
-	// Esc + focus trap/restore are handled by the shared `focusTrap` action.
 </script>
 
 <svelte:window onclick={handleFileActionsWindowClick} />
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-<div class="backdrop" onclick={handleBackdrop}>
-	<div
-		use:focusTrap={{ onEscape: onclose }}
-		class="modal"
-		class:fullscreen
-		role="dialog"
-		aria-modal="true"
-		aria-label="Edit invoice {invoice.invoice_number}"
-		tabindex="-1"
-	>
-		<header>
-			<h2>{m('invoices.modal.header', { number: invoice.invoice_number })}</h2>
-			<div class="header-actions">
-				<!-- A toggle: one name, its state in aria-pressed (a name that flips with
-				     the state would announce the state twice, or contradict it). -->
-				<button
-					type="button"
-					class="btn-icon"
-					onclick={toggleFullscreen}
-					aria-label={m('invoices.modal.fullscreen')}
-					aria-pressed={fullscreen}
-				>
-					{#if fullscreen}
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-							<polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
-							<line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
-						</svg>
-					{:else}
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-							<polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
-							<line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
-						</svg>
-					{/if}
-				</button>
-				<button type="button" class="btn-icon" onclick={onclose} aria-label={m('invoices.modal.close')}>&times;</button>
-			</div>
-		</header>
-
-		<div class="split" class:resizing>
-			<div class="pdf-pane">
-				{#if canManageFile}
-					<div class="file-actions">
-						{#if !currentFileUrl}
-							<button
-								type="button"
-								class="btn-secondary"
-								disabled={uploadingFile}
-								onclick={() => fileInput?.click()}
-							>
-								{m('invoices.modal.file.upload')}
-							</button>
-						{:else}
-							<button
-								type="button"
-								class="btn-secondary"
-								disabled={uploadingFile}
-								onclick={() => fileInput?.click()}
-							>
-								{m('invoices.modal.file.replace')}
-							</button>
-							<RowAction
-								variant="danger"
-								armed={confirmDeleteFile}
-								disabled={deletingFile}
-								onclick={handleDeleteFile}
-							>
-								{confirmDeleteFile ? m('invoices.modal.file.deleteConfirm') : m('invoices.modal.file.delete')}
-							</RowAction>
-						{/if}
-						<input
-							type="file"
-							accept={INVOICE_FILE_ACCEPT}
-							bind:this={fileInput}
-							onchange={handleFileSelected}
-							hidden
-						/>
-					</div>
-				{:else if documentLocked}
-					<p class="file-locked" data-testid="file-locked">
-						{refusalText(verdicts?.manage_file ?? null, m)}
-					</p>
-				{/if}
-				{#if currentFileUrl}
-					{@const isImage = /\.(png|jpg|jpeg|tiff?)$/i.test(currentFileUrl)}
-					{#if fileLoadError}
-						<div class="no-pdf">{m('invoices.modal.fileLoadError')}</div>
-					{:else if !fileBlobUrl}
-						<div class="no-pdf">{m('common.loading')}</div>
-					{:else if isImage}
-						<img src={fileBlobUrl} alt={m('invoices.modal.imageAlt', { number: invoice.invoice_number })} class="invoice-image" />
-					{:else}
-						<iframe src={fileBlobUrl} title={m('invoices.modal.pdfTitle', { number: invoice.invoice_number })}></iframe>
-					{/if}
+<!-- The shell (backdrop, focus trap, Esc / backdrop-click close, page-scroll
+     lock, so a wheel over the PDF pane can't scroll the grid behind) is the
+     shared Modal. The aria-label's English is what the e2e suite selects by. -->
+<Modal
+	ariaLabel={m('invoices.modal.dialogLabel', { number: invoice.invoice_number })}
+	class="invoice-dialog"
+	{fullscreen}
+	{onclose}
+>
+	<header>
+		<h2>{m('invoices.modal.header', { number: invoice.invoice_number })}</h2>
+		<div class="header-actions">
+			<!-- A toggle: one name, its state in aria-pressed (a name that flips with
+			     the state would announce the state twice, or contradict it). -->
+			<button
+				type="button"
+				class="btn-icon"
+				onclick={toggleFullscreen}
+				aria-label={m('invoices.modal.fullscreen')}
+				aria-pressed={fullscreen}
+			>
+				{#if fullscreen}
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
+						<line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
+					</svg>
 				{:else}
-					<div class="no-pdf">
-						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-							<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-							<polyline points="14 2 14 8 20 8" />
-							<line x1="9" y1="15" x2="15" y2="15" />
-						</svg>
-						<span>{m('invoices.modal.noPdf')}</span>
-					</div>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+						<line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+					</svg>
 				{/if}
-			</div>
+			</button>
+			<button type="button" class="btn-icon" onclick={onclose} aria-label={m('invoices.modal.close')}>&times;</button>
+		</div>
+	</header>
 
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="resize-handle" onmousedown={startResize}></div>
-			<div class="form-pane" style="width:{formPaneWidth}px">
-				<!-- Enter in a field submits too, so the form honours the Save button's
-				     own gate rather than firing a PATCH the server refuses. -->
-				<!-- The pane is two regions: everything below scrolls in .form-scroll,
-				     and .form-actions sits UNDER it in the flex column — never over it —
-				     so Save / Submit / Approve / Reject are on screen the moment the
-				     dialog opens without overlaying a focused field (decisions §181,
-				     WCAG 2.4.11). The footer stays inside the <form> so Save submits. -->
-				<form class="invoice-form" onsubmit={(e) => { e.preventDefault(); if (canWrite && !isDone) save(); }}>
-					<div class="form-scroll" data-testid="invoice-form-scroll">
-					{#if summaryLoading && !summary}
-						<div class="audit-summary" data-testid="audit-summary">
-							<div class="audit-summary-skeleton"></div>
-							<div class="audit-summary-skeleton short"></div>
-						</div>
-					{:else if summary}
-						<section class="audit-summary" data-testid="audit-summary" aria-label={m('invoices.modal.summaryAria')}>
-							<div class="audit-summary-head">
-								<span class="help-row">
-									<span class="audit-summary-label">{m('invoices.modal.summary')}</span>
-									<HelpTip term="confidence-score" />
-								</span>
-								{#if canRegenerateSummary}
-									<button
-										type="button"
-										class="audit-summary-regen"
-										onclick={regenerateSummary}
-										disabled={summaryRegenerating}
-										data-testid="audit-summary-regenerate"
-									>
-										{summaryRegenerating ? m('invoices.modal.regenerating') : m('invoices.modal.regenerate')}
-									</button>
-								{/if}
-							</div>
-							<!-- Plain-text binding only — never {@html} — so the model
-							     output can't inject markup (XSS invariant). -->
-							<p class="audit-summary-text" data-testid="audit-summary-text">{summary.text}</p>
-							{#if summary.confidence_context}
-								<p class="audit-summary-context" data-testid="audit-summary-context">
-									{summary.confidence_context}
-								</p>
-							{/if}
-						</section>
+	<div class="split" class:resizing>
+		<div class="pdf-pane">
+			{#if canManageFile}
+				<div class="file-actions">
+					{#if !currentFileUrl}
+						<button
+							type="button"
+							class="btn-secondary"
+							disabled={uploadingFile}
+							onclick={() => fileInput?.click()}
+						>
+							{m('invoices.modal.file.upload')}
+						</button>
+					{:else}
+						<button
+							type="button"
+							class="btn-secondary"
+							disabled={uploadingFile}
+							onclick={() => fileInput?.click()}
+						>
+							{m('invoices.modal.file.replace')}
+						</button>
+						<RowAction
+							variant="danger"
+							armed={confirmDeleteFile}
+							disabled={deletingFile}
+							onclick={handleDeleteFile}
+						>
+							{confirmDeleteFile ? m('invoices.modal.file.deleteConfirm') : m('invoices.modal.file.delete')}
+						</RowAction>
 					{/if}
+					<input
+						type="file"
+						accept={INVOICE_FILE_ACCEPT}
+						bind:this={fileInput}
+						onchange={handleFileSelected}
+						hidden
+					/>
+				</div>
+			{:else if documentLocked}
+				<p class="file-locked" data-testid="file-locked">
+					{refusalText(verdicts?.manage_file ?? null, m)}
+				</p>
+			{/if}
+			{#if currentFileUrl}
+				{@const isImage = /\.(png|jpg|jpeg|tiff?)$/i.test(currentFileUrl)}
+				{#if fileLoadError}
+					<div class="no-pdf">{m('invoices.modal.fileLoadError')}</div>
+				{:else if !fileBlobUrl}
+					<div class="no-pdf">{m('common.loading')}</div>
+				{:else if isImage}
+					<img src={fileBlobUrl} alt={m('invoices.modal.imageAlt', { number: invoice.invoice_number })} class="invoice-image" />
+				{:else}
+					<iframe src={fileBlobUrl} title={m('invoices.modal.pdfTitle', { number: invoice.invoice_number })}></iframe>
+				{/if}
+			{:else}
+				<div class="no-pdf">
+					<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+						<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+						<polyline points="14 2 14 8 20 8" />
+						<line x1="9" y1="15" x2="15" y2="15" />
+					</svg>
+					<span>{m('invoices.modal.noPdf')}</span>
+				</div>
+			{/if}
+		</div>
 
-					{#if verdictsFailed}
-						<!-- The verdict read failed: every control it gates stays
-						     disabled (fail closed), and this says why, with a way back. -->
-						<LoadError
-							message={m('invoices.modal.verdictsLoadError')}
-							onretry={() => void loadVerdicts()}
-							testId="invoice-verdicts-error"
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="resize-handle" onmousedown={startResize}></div>
+		<div class="form-pane" style="width:{formPaneWidth}px">
+			<!-- Enter in a field submits too, so the form honours the Save button's
+			     own gate rather than firing a PATCH the server refuses. -->
+			<!-- The pane is two regions: everything below scrolls in .form-scroll,
+			     and .form-actions sits UNDER it in the flex column — never over it —
+			     so Save / Submit / Approve / Reject are on screen the moment the
+			     dialog opens without overlaying a focused field (decisions §181,
+			     WCAG 2.4.11). The footer stays inside the <form> so Save submits. -->
+			<form class="invoice-form" onsubmit={(e) => { e.preventDefault(); if (canWrite && !isDone) save(); }}>
+				<div class="form-scroll" data-testid="invoice-form-scroll">
+				{#if summaryLoading && !summary}
+					<div class="audit-summary" data-testid="audit-summary">
+						<div class="audit-summary-skeleton"></div>
+						<div class="audit-summary-skeleton short"></div>
+					</div>
+				{:else if summary}
+					<section class="audit-summary" data-testid="audit-summary" aria-label={m('invoices.modal.summaryAria')}>
+						<div class="audit-summary-head">
+							<span class="help-row">
+								<span class="audit-summary-label">{m('invoices.modal.summary')}</span>
+								<HelpTip term="confidence-score" />
+							</span>
+							{#if canRegenerateSummary}
+								<button
+									type="button"
+									class="audit-summary-regen"
+									onclick={regenerateSummary}
+									disabled={summaryRegenerating}
+									data-testid="audit-summary-regenerate"
+								>
+									{summaryRegenerating ? m('invoices.modal.regenerating') : m('invoices.modal.regenerate')}
+								</button>
+							{/if}
+						</div>
+						<!-- Plain-text binding only — never {@html} — so the model
+						     output can't inject markup (XSS invariant). -->
+						<p class="audit-summary-text" data-testid="audit-summary-text">{summary.text}</p>
+						{#if summary.confidence_context}
+							<p class="audit-summary-context" data-testid="audit-summary-context">
+								{summary.confidence_context}
+							</p>
+						{/if}
+					</section>
+				{/if}
+
+				{#if verdictsFailed}
+					<!-- The verdict read failed: every control it gates stays
+					     disabled (fail closed), and this says why, with a way back. -->
+					<LoadError
+						message={m('invoices.modal.verdictsLoadError')}
+						onretry={() => void loadVerdicts()}
+						testId="invoice-verdicts-error"
+					/>
+				{/if}
+				{#if financialsLockedNote}
+					<p class="financials-locked" data-testid="financials-locked">{financialsLockedNote}</p>
+				{/if}
+				<div class="form-grid">
+					<label class:field-error={submitOffered && !vendor.trim()}>
+						<span>{m('invoices.modal.field.vendor')} <em class="required">*</em> {#if dot('vendor_name', vendor)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_name)}" data-tip="{Math.round(fieldConfidence.vendor_name * 100)}% — {confidenceLabel(fieldConfidence.vendor_name)}"></span>{/if}</span>
+						<input type="text" bind:value={vendor} required disabled={financiallyLocked} />
+					</label>
+					<label class:field-error={submitOffered && !invoice_number.trim()}>
+						<span>{m('invoices.modal.field.invoiceNumber')} <em class="required">*</em> {#if dot('invoice_number', invoice_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.invoice_number)}" data-tip="{Math.round(fieldConfidence.invoice_number * 100)}% — {confidenceLabel(fieldConfidence.invoice_number)}"></span>{/if}</span>
+						<input type="text" bind:value={invoice_number} required />
+					</label>
+					<label class:field-error={submitOffered && !isPositiveAmount(amount)}>
+						<span>{m('invoices.modal.field.amount')} <em class="required">*</em> {#if dot('amount', amount)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.amount)}" data-tip="{Math.round(fieldConfidence.amount * 100)}% — {confidenceLabel(fieldConfidence.amount)}"></span>{/if}</span>
+						<input type="number" step="0.01" bind:value={amount} required disabled={financiallyLocked} />
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.dueDate')} {#if dot('due_date', due_date)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.due_date)}" data-tip="{Math.round(fieldConfidence.due_date * 100)}% — {confidenceLabel(fieldConfidence.due_date)}"></span>{/if}</span>
+						<input type="date" bind:value={due_date} />
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.poNumber')} {#if dot('po_number', po_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.po_number)}" data-tip="{Math.round(fieldConfidence.po_number * 100)}% — {confidenceLabel(fieldConfidence.po_number)}"></span>{/if}</span>
+						<input type="text" bind:value={po_number} />
+					</label>
+					<!-- Read-only for EVERY role. This was a `<select>` of all twelve
+					     statuses for anyone but a clerk, bound to the local `status`
+					     and never sent: `PATCH /api/invoices/{id}` deliberately does
+					     not accept `status` (schemas/invoice.py `InvoiceUpdate`) —
+					     transitions go through the workflow endpoints the buttons
+					     below call. So "Save" after picking Paid reported success
+					     and changed nothing, and because every gate in this modal
+					     reads `status`, the pick also re-dressed it: Approve/Reject
+					     on a `new` invoice (a guaranteed 409), and on a fake
+					     `approved` the financial-lock dropped vendor/amount edits
+					     from the save without a word. -->
+					<label>
+						<span>{m('invoices.modal.field.status')}</span>
+						<input
+							type="text"
+							value={m(INVOICE_STATUS_LABEL_KEYS[status])}
+							disabled
+							data-testid="invoice-modal-status"
 						/>
-					{/if}
-					{#if financialsLockedNote}
-						<p class="financials-locked" data-testid="financials-locked">{financialsLockedNote}</p>
-					{/if}
-					<div class="form-grid">
-						<label class:field-error={submitOffered && !vendor.trim()}>
-							<span>{m('invoices.modal.field.vendor')} <em class="required">*</em> {#if dot('vendor_name', vendor)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_name)}" data-tip="{Math.round(fieldConfidence.vendor_name * 100)}% — {confidenceLabel(fieldConfidence.vendor_name)}"></span>{/if}</span>
-							<input type="text" bind:value={vendor} required disabled={financiallyLocked} />
-						</label>
-						<label class:field-error={submitOffered && !invoice_number.trim()}>
-							<span>{m('invoices.modal.field.invoiceNumber')} <em class="required">*</em> {#if dot('invoice_number', invoice_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.invoice_number)}" data-tip="{Math.round(fieldConfidence.invoice_number * 100)}% — {confidenceLabel(fieldConfidence.invoice_number)}"></span>{/if}</span>
-							<input type="text" bind:value={invoice_number} required />
-						</label>
-						<label class:field-error={submitOffered && !isPositiveAmount(amount)}>
-							<span>{m('invoices.modal.field.amount')} <em class="required">*</em> {#if dot('amount', amount)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.amount)}" data-tip="{Math.round(fieldConfidence.amount * 100)}% — {confidenceLabel(fieldConfidence.amount)}"></span>{/if}</span>
-							<input type="number" step="0.01" bind:value={amount} required disabled={financiallyLocked} />
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.dueDate')} {#if dot('due_date', due_date)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.due_date)}" data-tip="{Math.round(fieldConfidence.due_date * 100)}% — {confidenceLabel(fieldConfidence.due_date)}"></span>{/if}</span>
-							<input type="date" bind:value={due_date} />
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.poNumber')} {#if dot('po_number', po_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.po_number)}" data-tip="{Math.round(fieldConfidence.po_number * 100)}% — {confidenceLabel(fieldConfidence.po_number)}"></span>{/if}</span>
-							<input type="text" bind:value={po_number} />
-						</label>
-						<!-- Read-only for EVERY role. This was a `<select>` of all twelve
-						     statuses for anyone but a clerk, bound to the local `status`
-						     and never sent: `PATCH /api/invoices/{id}` deliberately does
-						     not accept `status` (schemas/invoice.py `InvoiceUpdate`) —
-						     transitions go through the workflow endpoints the buttons
-						     below call. So "Save" after picking Paid reported success
-						     and changed nothing, and because every gate in this modal
-						     reads `status`, the pick also re-dressed it: Approve/Reject
-						     on a `new` invoice (a guaranteed 409), and on a fake
-						     `approved` the financial-lock dropped vendor/amount edits
-						     from the save without a word. -->
-						<label>
-							<span>{m('invoices.modal.field.status')}</span>
-							<input
-								type="text"
-								value={m(INVOICE_STATUS_LABEL_KEYS[status])}
-								disabled
-								data-testid="invoice-modal-status"
-							/>
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.referenceNumber')} {#if dot('reference_number', reference_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.reference_number)}" data-tip="{Math.round(fieldConfidence.reference_number * 100)}% — {confidenceLabel(fieldConfidence.reference_number)}"></span>{/if}</span>
-							<input type="text" bind:value={reference_number} />
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.paymentMethod')} {#if dot('payment_method', payment_method)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.payment_method)}" data-tip="{Math.round(fieldConfidence.payment_method * 100)}% — {confidenceLabel(fieldConfidence.payment_method)}"></span>{/if}</span>
-							<select bind:value={payment_method}>
-								<option value="">—</option>
-								<option value="ach">{m('invoices.modal.method.ach')}</option>
-								<option value="wire">{m('invoices.modal.method.wire')}</option>
-								<option value="check">{m('invoices.modal.method.check')}</option>
-								<option value="credit_card">{m('invoices.modal.method.creditCard')}</option>
-								<option value="other">{m('invoices.modal.method.other')}</option>
-							</select>
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.taxRate')} {#if dot('tax_rate', tax_rate)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.tax_rate)}" data-tip="{Math.round(fieldConfidence.tax_rate * 100)}% — {confidenceLabel(fieldConfidence.tax_rate)}"></span>{/if}</span>
-							<input type="number" step="0.01" min="0" max="100" bind:value={tax_rate} disabled={financiallyLocked} />
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.vendorTaxId')} {#if dot('vendor_tax_id', vendor_tax_id)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_tax_id)}" data-tip="{Math.round(fieldConfidence.vendor_tax_id * 100)}% — {confidenceLabel(fieldConfidence.vendor_tax_id)}"></span>{/if}</span>
-							<input type="text" bind:value={vendor_tax_id} placeholder={m('invoices.modal.field.vendorTaxIdPlaceholder')} />
-						</label>
-						<label class="full-width">
-							<span>{m('invoices.modal.field.vendorAddress')} {#if dot('vendor_address', vendor_address)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_address)}" data-tip="{Math.round(fieldConfidence.vendor_address * 100)}% — {confidenceLabel(fieldConfidence.vendor_address)}"></span>{/if}</span>
-							<input type="text" bind:value={vendor_address} />
-						</label>
-						<label class="full-width">
-							<span>{m('invoices.modal.field.shipToAddress')} {#if dot('ship_to_address', ship_to_address)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.ship_to_address)}" data-tip="{Math.round(fieldConfidence.ship_to_address * 100)}% — {confidenceLabel(fieldConfidence.ship_to_address)}"></span>{/if}</span>
-							<input type="text" bind:value={ship_to_address} />
-						</label>
-						<label class="full-width">
-							<span>{m('invoices.modal.field.description')} {#if dot('description', description)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.description)}" data-tip="{Math.round(fieldConfidence.description * 100)}% — {confidenceLabel(fieldConfidence.description)}"></span>{/if}</span>
-							<input type="text" bind:value={description} />
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.glAccount')} {#if dot('suggested_gl_account', gl_account)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.suggested_gl_account)}" data-tip="{Math.round(fieldConfidence.suggested_gl_account * 100)}% — {confidenceLabel(fieldConfidence.suggested_gl_account)}"></span>{/if}</span>
-							{#if glAccounts.length > 0}
-								<select bind:value={gl_account}>
-									<option value="">{m('invoices.modal.field.glSelect')}</option>
-									<!-- A value the catalog doesn't carry (an older code, or an
-									     applied history suggestion coded before the account was
-									     retired) still has to be visible: without its own option
-									     the select renders blank and the field silently reads as
-									     unset while the form still holds it. -->
-									{#if gl_account && !glAccounts.some((a) => a.code === gl_account)}
-										<option value={gl_account}>{gl_account}</option>
-									{/if}
-									<!-- Keyed by `id`, not `code`: this invoice's chart is
-									     shared ∪ its entity's own, and an entity may override a
-									     shared `6000` with its own — two rows, one code. -->
-									{#each glAccounts as acct (acct.id)}
-										<option value={acct.code}>{glLabel(acct, true)}</option>
-									{/each}
-								</select>
-							{:else}
-								<input type="text" bind:value={gl_account} placeholder={m('invoices.modal.field.glPlaceholder')} />
-							{/if}
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.costCenter')} {#if dot('suggested_cost_center', cost_center)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.suggested_cost_center)}" data-tip="{Math.round(fieldConfidence.suggested_cost_center * 100)}% — {confidenceLabel(fieldConfidence.suggested_cost_center)}"></span>{/if}</span>
-							<input type="text" bind:value={cost_center} placeholder={m('invoices.modal.field.costCenterPlaceholder')} />
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.paymentTerms')}</span>
-							<input type="text" bind:value={payment_terms} placeholder={m('invoices.modal.field.paymentTermsPlaceholder')} />
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.department')}</span>
-							<input type="text" bind:value={department} placeholder={m('invoices.modal.field.departmentPlaceholder')} />
-						</label>
-						<label>
-							<span>{m('invoices.modal.field.project')}</span>
-							<input type="text" bind:value={project} placeholder={m('invoices.modal.field.projectPlaceholder')} />
-						</label>
-					</div>
-
-					{#if codingSuggestions.length > 0 || appliedSuggestionFields.length > 0}
-						<section class="coding-suggestions" data-testid="coding-suggestions" aria-label={m('invoices.modal.suggestions.aria')}>
-							<div class="coding-suggestions-head">
-								<span class="help-row">
-									<span class="coding-suggestions-title">{m('invoices.modal.suggestions.title')}</span>
-									<HelpTip term="gl-coding" />
-								</span>
-							</div>
-							<p class="coding-suggestions-hint">{m('invoices.modal.suggestions.hint')}</p>
-							{#each codingSuggestions as s (s.field)}
-								<div class="coding-suggestion" data-testid="coding-suggestion-{s.field}">
-									<div class="coding-suggestion-main">
-										<span class="coding-suggestion-field">{suggestionFieldLabel(s.field)}</span>
-										<span class="coding-suggestion-value">{s.value}</span>
-									</div>
-									<!-- Provenance, built from the response's own counts rather
-									     than restating the backend's English sentence, so it
-									     localizes. Without it this is an unexplained value
-									     asking to be trusted. -->
-									<p class="coding-suggestion-why">
-										{m('invoices.modal.suggestions.provenance', {
-											occurrences: s.occurrences,
-											sample: s.sample_size,
-											confidence: formatPercent(s.confidence, { minimumFractionDigits: 1 }),
-										})}
-										{#if s.runner_up}
-											<span class="coding-suggestion-runner">
-												{m('invoices.modal.suggestions.runnerUp', { value: s.runner_up })}
-											</span>
-										{/if}
-									</p>
-									<button
-										type="button"
-										class="coding-suggestion-apply"
-										onclick={() => applySuggestion(s)}
-									>
-										{m('invoices.modal.suggestions.apply')}
-									</button>
-								</div>
-							{/each}
-							{#if appliedSuggestionFields.length > 0}
-								<p class="coding-suggestion-applied" data-testid="coding-suggestion-applied">
-									{m('invoices.modal.suggestions.appliedNotSaved', {
-										fields: formatList(appliedSuggestionFields.map(suggestionFieldLabel)),
-									})}
-								</p>
-							{/if}
-						</section>
-					{/if}
-
-					<div class="line-items-section">
-						<div class="line-items-header">
-							<span class="line-items-title">{m('invoices.modal.lineItems.title')}</span>
-							{#if canEditLines}
-								<button type="button" class="btn-secondary" onclick={addLineItem}>{m('invoices.modal.lineItems.addLine')}</button>
-							{/if}
-						</div>
-						{#if lineItems.length > 0}
-							<div class="line-items-scroll">
-							<table class="line-items-table">
-								<thead>
-									<tr>
-										<th>#</th>
-										<th>{m('invoices.modal.lineItems.colDescription')}</th>
-										<th class="right">{m('invoices.modal.lineItems.colQty')}</th>
-										<th class="right">{m('invoices.modal.lineItems.colUnitPrice')}</th>
-										<th class="right">{m('invoices.modal.lineItems.colTax')}</th>
-										<th class="right">{m('invoices.modal.lineItems.colTotal')}</th>
-										<th>{m('invoices.modal.lineItems.colGl')}</th>
-										<th></th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each lineItems as li, idx}
-										<tr>
-											<td class="li-num">{idx + 1}</td>
-											<td><input type="text" class="li-input" aria-label={m('invoices.modal.lineItems.descriptionAria', { n: idx + 1 })} value={li.description ?? ''} oninput={(e) => updateLineItem(idx, 'description', e.currentTarget.value)} /></td>
-											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.quantityAria', { n: idx + 1 })} value={li.quantity ?? ''} oninput={(e) => updateLineItem(idx, 'quantity', e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)} /></td>
-											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.unitPriceAria', { n: idx + 1 })} value={li.unit_price ?? ''} oninput={(e) => updateLineItem(idx, 'unit_price', e.currentTarget.value || null)} /></td>
-											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.taxAria', { n: idx + 1 })} value={li.tax ?? ''} oninput={(e) => updateLineItem(idx, 'tax', e.currentTarget.value || null)} /></td>
-											<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.totalAria', { n: idx + 1 })} value={li.total ?? ''} oninput={(e) => updateLineItem(idx, 'total', e.currentTarget.value || null)} /></td>
-											<td>
-											{#if glAccounts.length > 0}
-												<select class="li-input li-gl" aria-label={m('invoices.modal.lineItems.glAria', { n: idx + 1 })} value={li.gl_account ?? ''} onchange={(e) => updateLineItem(idx, 'gl_account', e.currentTarget.value)}>
-													<option value="">—</option>
-													<!-- A line coded before its account was retired keeps
-													     that code through every save (only a code NEW to the
-													     lines is judged), so it needs its own option, as the
-													     header's does: without one the cell renders blank while
-													     the row still carries the code. -->
-													{#if li.gl_account && !glAccounts.some((a) => a.code === li.gl_account)}
-														<option value={li.gl_account}>{li.gl_account}</option>
-													{/if}
-													{#each glAccounts as acct (acct.id)}
-														<option value={acct.code}>{glLabel(acct, false)}</option>
-													{/each}
-												</select>
-											{:else}
-												<input type="text" class="li-input li-gl" aria-label={m('invoices.modal.lineItems.glAria', { n: idx + 1 })} value={li.gl_account ?? ''} oninput={(e) => updateLineItem(idx, 'gl_account', e.currentTarget.value)} />
-											{/if}
-										</td>
-											<td>
-												{#if canEditLines}
-												<button type="button" class="li-delete" aria-label={m('invoices.modal.lineItems.removeAria', { n: idx + 1 })} onclick={() => removeLineItem(idx)}>&times;</button>
-												{/if}
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-							</div>
-						{:else}
-							<p class="line-items-empty">{m('invoices.modal.lineItems.empty')}</p>
-						{/if}
-						{#if lineItemsDirty && canEditLines}
-							<div class="line-items-actions">
-								<button type="button" class="btn-primary" disabled={savingLines} onclick={saveLineItems}>
-									{savingLines ? m('invoices.modal.lineItems.saving') : m('invoices.modal.lineItems.save')}
-								</button>
-							</div>
-						{/if}
-						{#if lineTotalMismatch}
-							<!-- role="alert" so the divergence is announced the moment the
-							     save returns; the heading + the "cannot enter a payment run"
-							     line carry the meaning in text, never by colour alone. -->
-							<div class="line-total-mismatch" role="alert" data-testid="line-total-mismatch">
-								<div class="ltm-head">
-									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-										<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-									</svg>
-									<span class="ltm-title">{m('invoices.modal.lineItems.mismatchTitle')}</span>
-								</div>
-								<dl class="ltm-figures">
-									<div>
-										<dt>{m('invoices.modal.lineItems.mismatchLinesLabel')}</dt>
-										<dd><Money amount={lineTotalMismatch.line_items_total} currency={invoice.currency} mono /></dd>
-									</div>
-									<div>
-										<dt>{m('invoices.modal.lineItems.mismatchHeaderLabel')}</dt>
-										<dd><Money amount={lineTotalMismatch.header_amount} currency={invoice.currency} mono /></dd>
-									</div>
-								</dl>
-								<p class="ltm-blocking">{m('invoices.modal.lineItems.mismatchBlocking')}</p>
-								<p class="ltm-hint">{m('invoices.modal.lineItems.mismatchHint')}</p>
-							</div>
-						{/if}
-					</div>
-
-					<div class="contract-section">
-						<span class="contract-label">{m('invoices.modal.contract.label')}</span>
-						{#if contractId}
-							<span class="contract-linked mono">{linkedContract?.contract_number ?? m('invoices.modal.contract.linked')}</span>
-							{#if canManageInvoice}
-								<button type="button" class="btn-danger" disabled={linkingContract} onclick={unlinkContract}>
-									{linkingContract ? '…' : m('invoices.modal.contract.unlink')}
-								</button>
-							{/if}
-						{:else if !canManageInvoice}
-							<span class="contract-empty">{m('invoices.modal.contract.empty')}</span>
-						{:else}
-							<select class="contract-select" aria-label={m('invoices.modal.contract.selectAria')} bind:value={pickContractId}>
-								<option value="">{m('invoices.modal.contract.selectPlaceholder')}</option>
-								{#each contracts as c (c.id)}
-									<option value={c.id}>{c.contract_number}{c.vendor_name ? ` — ${c.vendor_name}` : ''}</option>
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.referenceNumber')} {#if dot('reference_number', reference_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.reference_number)}" data-tip="{Math.round(fieldConfidence.reference_number * 100)}% — {confidenceLabel(fieldConfidence.reference_number)}"></span>{/if}</span>
+						<input type="text" bind:value={reference_number} />
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.paymentMethod')} {#if dot('payment_method', payment_method)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.payment_method)}" data-tip="{Math.round(fieldConfidence.payment_method * 100)}% — {confidenceLabel(fieldConfidence.payment_method)}"></span>{/if}</span>
+						<select bind:value={payment_method}>
+							<option value="">—</option>
+							<option value="ach">{m('invoices.modal.method.ach')}</option>
+							<option value="wire">{m('invoices.modal.method.wire')}</option>
+							<option value="check">{m('invoices.modal.method.check')}</option>
+							<option value="credit_card">{m('invoices.modal.method.creditCard')}</option>
+							<option value="other">{m('invoices.modal.method.other')}</option>
+						</select>
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.taxRate')} {#if dot('tax_rate', tax_rate)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.tax_rate)}" data-tip="{Math.round(fieldConfidence.tax_rate * 100)}% — {confidenceLabel(fieldConfidence.tax_rate)}"></span>{/if}</span>
+						<input type="number" step="0.01" min="0" max="100" bind:value={tax_rate} disabled={financiallyLocked} />
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.vendorTaxId')} {#if dot('vendor_tax_id', vendor_tax_id)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_tax_id)}" data-tip="{Math.round(fieldConfidence.vendor_tax_id * 100)}% — {confidenceLabel(fieldConfidence.vendor_tax_id)}"></span>{/if}</span>
+						<input type="text" bind:value={vendor_tax_id} placeholder={m('invoices.modal.field.vendorTaxIdPlaceholder')} />
+					</label>
+					<label class="full-width">
+						<span>{m('invoices.modal.field.vendorAddress')} {#if dot('vendor_address', vendor_address)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.vendor_address)}" data-tip="{Math.round(fieldConfidence.vendor_address * 100)}% — {confidenceLabel(fieldConfidence.vendor_address)}"></span>{/if}</span>
+						<input type="text" bind:value={vendor_address} />
+					</label>
+					<label class="full-width">
+						<span>{m('invoices.modal.field.shipToAddress')} {#if dot('ship_to_address', ship_to_address)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.ship_to_address)}" data-tip="{Math.round(fieldConfidence.ship_to_address * 100)}% — {confidenceLabel(fieldConfidence.ship_to_address)}"></span>{/if}</span>
+						<input type="text" bind:value={ship_to_address} />
+					</label>
+					<label class="full-width">
+						<span>{m('invoices.modal.field.description')} {#if dot('description', description)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.description)}" data-tip="{Math.round(fieldConfidence.description * 100)}% — {confidenceLabel(fieldConfidence.description)}"></span>{/if}</span>
+						<input type="text" bind:value={description} />
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.glAccount')} {#if dot('suggested_gl_account', gl_account)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.suggested_gl_account)}" data-tip="{Math.round(fieldConfidence.suggested_gl_account * 100)}% — {confidenceLabel(fieldConfidence.suggested_gl_account)}"></span>{/if}</span>
+						{#if glAccounts.length > 0}
+							<select bind:value={gl_account}>
+								<option value="">{m('invoices.modal.field.glSelect')}</option>
+								<!-- A value the catalog doesn't carry (an older code, or an
+								     applied history suggestion coded before the account was
+								     retired) still has to be visible: without its own option
+								     the select renders blank and the field silently reads as
+								     unset while the form still holds it. -->
+								{#if gl_account && !glAccounts.some((a) => a.code === gl_account)}
+									<option value={gl_account}>{gl_account}</option>
+								{/if}
+								<!-- Keyed by `id`, not `code`: this invoice's chart is
+								     shared ∪ its entity's own, and an entity may override a
+								     shared `6000` with its own — two rows, one code. -->
+								{#each glAccounts as acct (acct.id)}
+									<option value={acct.code}>{glLabel(acct, true)}</option>
 								{/each}
 							</select>
-							<button type="button" class="btn-secondary" disabled={linkingContract || !pickContractId} onclick={linkContract}>
-								{linkingContract ? '…' : m('invoices.modal.contract.link')}
-							</button>
+						{:else}
+							<input type="text" bind:value={gl_account} placeholder={m('invoices.modal.field.glPlaceholder')} />
+						{/if}
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.costCenter')} {#if dot('suggested_cost_center', cost_center)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.suggested_cost_center)}" data-tip="{Math.round(fieldConfidence.suggested_cost_center * 100)}% — {confidenceLabel(fieldConfidence.suggested_cost_center)}"></span>{/if}</span>
+						<input type="text" bind:value={cost_center} placeholder={m('invoices.modal.field.costCenterPlaceholder')} />
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.paymentTerms')}</span>
+						<input type="text" bind:value={payment_terms} placeholder={m('invoices.modal.field.paymentTermsPlaceholder')} />
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.department')}</span>
+						<input type="text" bind:value={department} placeholder={m('invoices.modal.field.departmentPlaceholder')} />
+					</label>
+					<label>
+						<span>{m('invoices.modal.field.project')}</span>
+						<input type="text" bind:value={project} placeholder={m('invoices.modal.field.projectPlaceholder')} />
+					</label>
+				</div>
+
+				{#if codingSuggestions.length > 0 || appliedSuggestionFields.length > 0}
+					<section class="coding-suggestions" data-testid="coding-suggestions" aria-label={m('invoices.modal.suggestions.aria')}>
+						<div class="coding-suggestions-head">
+							<span class="help-row">
+								<span class="coding-suggestions-title">{m('invoices.modal.suggestions.title')}</span>
+								<HelpTip term="gl-coding" />
+							</span>
+						</div>
+						<p class="coding-suggestions-hint">{m('invoices.modal.suggestions.hint')}</p>
+						{#each codingSuggestions as s (s.field)}
+							<div class="coding-suggestion" data-testid="coding-suggestion-{s.field}">
+								<div class="coding-suggestion-main">
+									<span class="coding-suggestion-field">{suggestionFieldLabel(s.field)}</span>
+									<span class="coding-suggestion-value">{s.value}</span>
+								</div>
+								<!-- Provenance, built from the response's own counts rather
+								     than restating the backend's English sentence, so it
+								     localizes. Without it this is an unexplained value
+								     asking to be trusted. -->
+								<p class="coding-suggestion-why">
+									{m('invoices.modal.suggestions.provenance', {
+										occurrences: s.occurrences,
+										sample: s.sample_size,
+										confidence: formatPercent(s.confidence, { minimumFractionDigits: 1 }),
+									})}
+									{#if s.runner_up}
+										<span class="coding-suggestion-runner">
+											{m('invoices.modal.suggestions.runnerUp', { value: s.runner_up })}
+										</span>
+									{/if}
+								</p>
+								<button
+									type="button"
+									class="coding-suggestion-apply"
+									onclick={() => applySuggestion(s)}
+								>
+									{m('invoices.modal.suggestions.apply')}
+								</button>
+							</div>
+						{/each}
+						{#if appliedSuggestionFields.length > 0}
+							<p class="coding-suggestion-applied" data-testid="coding-suggestion-applied">
+								{m('invoices.modal.suggestions.appliedNotSaved', {
+									fields: formatList(appliedSuggestionFields.map(suggestionFieldLabel)),
+								})}
+							</p>
+						{/if}
+					</section>
+				{/if}
+
+				<div class="line-items-section">
+					<div class="line-items-header">
+						<span class="line-items-title">{m('invoices.modal.lineItems.title')}</span>
+						{#if canEditLines}
+							<button type="button" class="btn-secondary" onclick={addLineItem}>{m('invoices.modal.lineItems.addLine')}</button>
 						{/if}
 					</div>
-
-					{#if invoice.warnings?.filter(w => w.type !== 'missing_field' && w.type !== 'po_mismatch').length}
-						<div class="warnings-list">
-							{#each invoice.warnings.filter(w => w.type !== 'missing_field' && w.type !== 'po_mismatch') as w}
-								<div class="warning-item {w.severity}">
-									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-										<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-								</svg>
-								<!-- Same resolver as the `/invoices` row icon, so a finding cannot
-								     read as German in the list and English in the tooltip. -->
-								{invoiceWarningText(w, m)}
-								{#if w.type === 'duplicate'}<HelpTip term="duplicate-invoice" />{/if}
-							</div>
-							{/each}
-						</div>
-					{/if}
-
-					{#if invoice.po_match}
-						{@const pm = invoice.po_match}
-						<div class="po-match {pm.status}">
-							<div class="po-match-header">
-								<span class="help-row po-match-title-row">
-									<span class="po-match-title">{m('invoices.modal.poMatch.title')}</span>
-									<HelpTip
-										term={pm.match_type === '2-way'
-											? 'two-way-match'
-											: pm.match_type === '4-way'
-												? 'four-way-match'
-												: 'three-way-match'}
-									/>
-								</span>
-								<span class="po-match-status {pm.status}">
-									{#if pm.status === 'matched'}{m('invoices.modal.poMatch.matched')}
-									{:else if pm.status === 'mismatch'}{m('invoices.modal.poMatch.mismatch')}
-									{:else if pm.status === 'partial'}{m('invoices.modal.poMatch.partialReceipt')}
-									{:else}{m('invoices.modal.poMatch.notFound')}
-									{/if}
-								</span>
-								{#if pm.match_type !== 'none'}
-									<span class="po-match-type">{pm.match_type}</span>
-								{/if}
-							</div>
-							{#if pm.po_number}
-								<div class="po-match-grid">
-									<div>
-										<span class="po-match-label">{m('invoices.modal.poMatch.poNumber')}</span>
-										<span class="po-match-value mono">{pm.po_number}</span>
-									</div>
-									{#if pm.po_total !== null && !pm.po_total_unverifiable_reason}
-										<!-- The PO's OWN currency, not the invoice's: the two can
-										     differ, and that difference is what the currency guard
-										     flags. Bare when the PO records none (decisions §197).
-										     Hidden when the ERP's last sync could not confirm the
-										     total: the figure on record is not the PO's any more,
-										     and the issue line says so (decisions §323). -->
-										<div>
-											<span class="po-match-label">{m('invoices.modal.poMatch.poTotal')}</span>
-											<span class="po-match-value mono" data-testid="po-match-total">{formatMoney(pm.po_total, { currency: pm.po_currency ?? null })}</span>
-										</div>
-									{/if}
-									{#if pm.amount_variance_pct !== null && (isPositiveAmount(pm.amount_variance) || isNegativeAmount(pm.amount_variance))}
-										<!-- invoice − PO. In the invoice's currency only when the PO
-										     is proven to share it; against a PO with no currency it is
-										     a face-value difference, so it is shown bare. A currency
-										     mismatch has no variance at all (`null`). -->
-										<div>
-											<span class="help-row">
-												<span class="po-match-label">{m('invoices.modal.poMatch.variance')}</span>
-												<HelpTip term="match-tolerance" />
-											</span>
-											<span
-												class="po-match-value mono"
-												class:variance-pos={isPositiveAmount(pm.amount_variance)}
-												class:variance-neg={isNegativeAmount(pm.amount_variance)}
-											>
-												{isPositiveAmount(pm.amount_variance) ? '+' : ''}{formatMoney(pm.amount_variance, {
-													currency: pm.currency_check === 'same' ? invoice.currency : null
-												})}
-												({pm.amount_variance_pct > 0 ? '+' : ''}{formatPercent(pm.amount_variance_pct, { minimumFractionDigits: 1 })})
-											</span>
-										</div>
-									{/if}
-								</div>
-								{#if pm.currency_check === 'unknown'}
-									<p class="po-match-note" data-testid="po-match-currency-unknown">
-										{m('invoices.modal.poMatch.currencyUnknown')}
-									</p>
-								{/if}
-							{/if}
-							{#if pm.match_type === '4-way' || pm.inspection_result || pm.inspection_required}
-								<div class="po-match-inspection">
-									<span class="po-match-label">{m('invoices.modal.poMatch.qualityInspection')}</span>
-									<HelpTip term="quality-inspection" />
-									{#if pm.inspection_result}
-										<Badge tone={INSPECTION_TONES[pm.inspection_result]} variant={pm.inspection_result}>
-											{#if pm.inspection_result === 'pass'}{m('invoices.modal.poMatch.passed')}
-											{:else if pm.inspection_result === 'fail'}{m('invoices.modal.poMatch.failed')}
-											{:else}{m('invoices.modal.poMatch.partial')}
-											{/if}
-										</Badge>
-										{#if pm.inspection_accepted_quantity !== null}
-											<span class="po-match-value mono">
-												{m('invoices.modal.poMatch.accepted', { qty: pm.inspection_accepted_quantity })}
-											</span>
-										{/if}
-									{:else if pm.inspection_required}
-										<Badge tone="danger" variant="missing">{m('invoices.modal.poMatch.requiredMissing')}</Badge>
-									{/if}
-								</div>
-							{/if}
-							{#if pm.issues.length > 0}
-								<!-- Localized like the warnings list above it, so the
-								     panel never shows a German finding over an English
-								     issue. A string entry is a match persisted before
-								     issues carried codes, and renders as written. -->
-								<ul class="po-match-issues">
-									{#each pm.issues as issue}
-										<li>{poMatchIssueText(issue, m)}</li>
-									{/each}
-								</ul>
-							{/if}
-						</div>
-					{/if}
-
-					{#if submitOffered && missingFields.length > 0}
-						<div class="validation-hint">{m('invoices.modal.requiredHint', { fields: formatList(missingFields) })}</div>
-					{/if}
-
-					{#if invoice.approved_by || invoice.rejected_by || invoice.assigned_to}
-						<div class="meta-section">
-							{#if invoice.assigned_to}
-								<div class="meta-item">
-									<span class="meta-label">{m('invoices.modal.meta.assignedTo')}</span>
-									<span class="meta-value">{invoice.assigned_to}</span>
-								</div>
-							{/if}
-							{#if invoice.approved_by}
-								<div class="meta-item">
-									<span class="meta-label">{m('invoices.modal.meta.approvedBy')}</span>
-									<span class="meta-value approved">{invoice.approved_by}</span>
-									{#if invoice.approval_date}
-										<span class="meta-date">{invoice.approval_date}</span>
-									{/if}
-								</div>
-							{/if}
-							{#if invoice.rejected_by}
-								<div class="meta-item">
-									<span class="meta-label">{m('invoices.modal.meta.rejectedBy')}</span>
-									<span class="meta-value rejected">{invoice.rejected_by}</span>
-								</div>
-							{/if}
-						</div>
-					{/if}
-
-					{#if chainLevels.length > 0}
-						<ApprovalChainProgress
-							levels={chainLevels}
-							currentLevel={chainCurrentLevel}
-							{resolveApproverName}
-							statusLabel={chainStatusLabel}
-							formatProgress={chainProgressLabel}
-							anyApproverLabel={m('invoices.modal.chain.anyApprover')}
-							title={m('invoices.modal.chain.title')}
-							helpTerm="approval-chain"
-						/>
-					{/if}
-
-					<!-- A posted invoice keeps its bill of record after it moves on
-					     (`done`, or voided back to `approved`), so the column, not the
-					     status, decides whether there is a reference to show. -->
-					{#if isErpStatus || invoice.erp_document_id || (status === 'failed' && erpInfo)}
-						<div class="erp-section">
-							<div class="help-row erp-title-row">
-								<div class="erp-title">{m('invoices.modal.erp.title')}</div>
-								<HelpTip term="erp-sync" />
-							</div>
-							<div class="erp-details">
-								{#if invoice.erp_document_id}
-									<!-- The URL is the backend's (`erp_adapters/deep_links.py`,
-									     the one provider → URL mapping); none is built here. -->
-									<div class="erp-row" data-testid="erp-reference">
-										<span class="erp-label">{m('invoices.modal.erp.reference')}</span>
-										{#if invoice.erp_document_url}
-											<a
-												class="erp-value erp-link"
-												href={invoice.erp_document_url}
-												target="_blank"
-												rel="noopener noreferrer"
-												data-testid="erp-reference-link"
-											>
-												<code>{invoice.erp_document_id}</code>
-												<span class="visually-hidden">{m('invoices.modal.erp.opensInErp')}</span>
-											</a>
+					{#if lineItems.length > 0}
+						<div class="line-items-scroll">
+						<table class="line-items-table">
+							<thead>
+								<tr>
+									<th>#</th>
+									<th>{m('invoices.modal.lineItems.colDescription')}</th>
+									<th class="right">{m('invoices.modal.lineItems.colQty')}</th>
+									<th class="right">{m('invoices.modal.lineItems.colUnitPrice')}</th>
+									<th class="right">{m('invoices.modal.lineItems.colTax')}</th>
+									<th class="right">{m('invoices.modal.lineItems.colTotal')}</th>
+									<th>{m('invoices.modal.lineItems.colGl')}</th>
+									<th></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each lineItems as li, idx}
+									<tr>
+										<td class="li-num">{idx + 1}</td>
+										<td><input type="text" class="li-input" aria-label={m('invoices.modal.lineItems.descriptionAria', { n: idx + 1 })} value={li.description ?? ''} oninput={(e) => updateLineItem(idx, 'description', e.currentTarget.value)} /></td>
+										<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.quantityAria', { n: idx + 1 })} value={li.quantity ?? ''} oninput={(e) => updateLineItem(idx, 'quantity', e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)} /></td>
+										<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.unitPriceAria', { n: idx + 1 })} value={li.unit_price ?? ''} oninput={(e) => updateLineItem(idx, 'unit_price', e.currentTarget.value || null)} /></td>
+										<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.taxAria', { n: idx + 1 })} value={li.tax ?? ''} oninput={(e) => updateLineItem(idx, 'tax', e.currentTarget.value || null)} /></td>
+										<td><input type="number" class="li-input right" step="0.01" aria-label={m('invoices.modal.lineItems.totalAria', { n: idx + 1 })} value={li.total ?? ''} oninput={(e) => updateLineItem(idx, 'total', e.currentTarget.value || null)} /></td>
+										<td>
+										{#if glAccounts.length > 0}
+											<select class="li-input li-gl" aria-label={m('invoices.modal.lineItems.glAria', { n: idx + 1 })} value={li.gl_account ?? ''} onchange={(e) => updateLineItem(idx, 'gl_account', e.currentTarget.value)}>
+												<option value="">—</option>
+												<!-- A line coded before its account was retired keeps
+												     that code through every save (only a code NEW to the
+												     lines is judged), so it needs its own option, as the
+												     header's does: without one the cell renders blank while
+												     the row still carries the code. -->
+												{#if li.gl_account && !glAccounts.some((a) => a.code === li.gl_account)}
+													<option value={li.gl_account}>{li.gl_account}</option>
+												{/if}
+												{#each glAccounts as acct (acct.id)}
+													<option value={acct.code}>{glLabel(acct, false)}</option>
+												{/each}
+											</select>
 										{:else}
-											<code class="erp-value">{invoice.erp_document_id}</code>
+											<input type="text" class="li-input li-gl" aria-label={m('invoices.modal.lineItems.glAria', { n: idx + 1 })} value={li.gl_account ?? ''} oninput={(e) => updateLineItem(idx, 'gl_account', e.currentTarget.value)} />
 										{/if}
+									</td>
+										<td>
+											{#if canEditLines}
+											<button type="button" class="li-delete" aria-label={m('invoices.modal.lineItems.removeAria', { n: idx + 1 })} onclick={() => removeLineItem(idx)}>&times;</button>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+						</div>
+					{:else}
+						<p class="line-items-empty">{m('invoices.modal.lineItems.empty')}</p>
+					{/if}
+					{#if lineItemsDirty && canEditLines}
+						<div class="line-items-actions">
+							<button type="button" class="btn-primary" disabled={savingLines} onclick={saveLineItems}>
+								{savingLines ? m('invoices.modal.lineItems.saving') : m('invoices.modal.lineItems.save')}
+							</button>
+						</div>
+					{/if}
+					{#if lineTotalMismatch}
+						<!-- role="alert" so the divergence is announced the moment the
+						     save returns; the heading + the "cannot enter a payment run"
+						     line carry the meaning in text, never by colour alone. -->
+						<div class="line-total-mismatch" role="alert" data-testid="line-total-mismatch">
+							<div class="ltm-head">
+								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+									<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+								</svg>
+								<span class="ltm-title">{m('invoices.modal.lineItems.mismatchTitle')}</span>
+							</div>
+							<dl class="ltm-figures">
+								<div>
+									<dt>{m('invoices.modal.lineItems.mismatchLinesLabel')}</dt>
+									<dd><Money amount={lineTotalMismatch.line_items_total} currency={invoice.currency} mono /></dd>
+								</div>
+								<div>
+									<dt>{m('invoices.modal.lineItems.mismatchHeaderLabel')}</dt>
+									<dd><Money amount={lineTotalMismatch.header_amount} currency={invoice.currency} mono /></dd>
+								</div>
+							</dl>
+							<p class="ltm-blocking">{m('invoices.modal.lineItems.mismatchBlocking')}</p>
+							<p class="ltm-hint">{m('invoices.modal.lineItems.mismatchHint')}</p>
+						</div>
+					{/if}
+				</div>
+
+				<div class="contract-section">
+					<span class="contract-label">{m('invoices.modal.contract.label')}</span>
+					{#if contractId}
+						<span class="contract-linked mono">{linkedContract?.contract_number ?? m('invoices.modal.contract.linked')}</span>
+						{#if canManageInvoice}
+							<button type="button" class="btn-danger" disabled={linkingContract} onclick={unlinkContract}>
+								{linkingContract ? '…' : m('invoices.modal.contract.unlink')}
+							</button>
+						{/if}
+					{:else if !canManageInvoice}
+						<span class="contract-empty">{m('invoices.modal.contract.empty')}</span>
+					{:else}
+						<select class="contract-select" aria-label={m('invoices.modal.contract.selectAria')} bind:value={pickContractId}>
+							<option value="">{m('invoices.modal.contract.selectPlaceholder')}</option>
+							{#each contracts as c (c.id)}
+								<option value={c.id}>{c.contract_number}{c.vendor_name ? ` — ${c.vendor_name}` : ''}</option>
+							{/each}
+						</select>
+						<button type="button" class="btn-secondary" disabled={linkingContract || !pickContractId} onclick={linkContract}>
+							{linkingContract ? '…' : m('invoices.modal.contract.link')}
+						</button>
+					{/if}
+				</div>
+
+				{#if invoice.warnings?.filter(w => w.type !== 'missing_field' && w.type !== 'po_mismatch').length}
+					<div class="warnings-list">
+						{#each invoice.warnings.filter(w => w.type !== 'missing_field' && w.type !== 'po_mismatch') as w}
+							<div class="warning-item {w.severity}">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+									<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+							</svg>
+							<!-- Same resolver as the `/invoices` row icon, so a finding cannot
+							     read as German in the list and English in the tooltip. -->
+							{invoiceWarningText(w, m)}
+							{#if w.type === 'duplicate'}<HelpTip term="duplicate-invoice" />{/if}
+						</div>
+						{/each}
+					</div>
+				{/if}
+
+				{#if invoice.po_match}
+					{@const pm = invoice.po_match}
+					<div class="po-match {pm.status}">
+						<div class="po-match-header">
+							<span class="help-row po-match-title-row">
+								<span class="po-match-title">{m('invoices.modal.poMatch.title')}</span>
+								<HelpTip
+									term={pm.match_type === '2-way'
+										? 'two-way-match'
+										: pm.match_type === '4-way'
+											? 'four-way-match'
+											: 'three-way-match'}
+								/>
+							</span>
+							<span class="po-match-status {pm.status}">
+								{#if pm.status === 'matched'}{m('invoices.modal.poMatch.matched')}
+								{:else if pm.status === 'mismatch'}{m('invoices.modal.poMatch.mismatch')}
+								{:else if pm.status === 'partial'}{m('invoices.modal.poMatch.partialReceipt')}
+								{:else}{m('invoices.modal.poMatch.notFound')}
+								{/if}
+							</span>
+							{#if pm.match_type !== 'none'}
+								<span class="po-match-type">{pm.match_type}</span>
+							{/if}
+						</div>
+						{#if pm.po_number}
+							<div class="po-match-grid">
+								<div>
+									<span class="po-match-label">{m('invoices.modal.poMatch.poNumber')}</span>
+									<span class="po-match-value mono">{pm.po_number}</span>
+								</div>
+								{#if pm.po_total !== null && !pm.po_total_unverifiable_reason}
+									<!-- The PO's OWN currency, not the invoice's: the two can
+									     differ, and that difference is what the currency guard
+									     flags. Bare when the PO records none (decisions §197).
+									     Hidden when the ERP's last sync could not confirm the
+									     total: the figure on record is not the PO's any more,
+									     and the issue line says so (decisions §323). -->
+									<div>
+										<span class="po-match-label">{m('invoices.modal.poMatch.poTotal')}</span>
+										<span class="po-match-value mono" data-testid="po-match-total">{formatMoney(pm.po_total, { currency: pm.po_currency ?? null })}</span>
 									</div>
 								{/if}
-								{#if erpInfo?.erp_document_id}
-									<div class="erp-row">
-										<span class="erp-label">{m('invoices.modal.erp.documentId')}</span>
-										<code class="erp-value">{erpInfo.erp_document_id}</code>
-									</div>
-								{/if}
-								{#if erpInfo?.last_error}
-									<div class="erp-row erp-error">
-										<span class="erp-label">{m('invoices.modal.erp.error')}</span>
-										<span class="erp-value" data-testid="erp-error">
-											{erpRefusalText(erpInfo.refusal, m) ?? erpInfo.last_error}
+								{#if pm.amount_variance_pct !== null && (isPositiveAmount(pm.amount_variance) || isNegativeAmount(pm.amount_variance))}
+									<!-- invoice − PO. In the invoice's currency only when the PO
+									     is proven to share it; against a PO with no currency it is
+									     a face-value difference, so it is shown bare. A currency
+									     mismatch has no variance at all (`null`). -->
+									<div>
+										<span class="help-row">
+											<span class="po-match-label">{m('invoices.modal.poMatch.variance')}</span>
+											<HelpTip term="match-tolerance" />
+										</span>
+										<span
+											class="po-match-value mono"
+											class:variance-pos={isPositiveAmount(pm.amount_variance)}
+											class:variance-neg={isNegativeAmount(pm.amount_variance)}
+										>
+											{isPositiveAmount(pm.amount_variance) ? '+' : ''}{formatMoney(pm.amount_variance, {
+												currency: pm.currency_check === 'same' ? invoice.currency : null
+											})}
+											({pm.amount_variance_pct > 0 ? '+' : ''}{formatPercent(pm.amount_variance_pct, { minimumFractionDigits: 1 })})
 										</span>
 									</div>
 								{/if}
 							</div>
-							{#if retryOffered}
-								<button
-									type="button"
-									class="btn-secondary retry-erp"
-									data-testid="retry-erp"
-									disabled={retryingErp || !isAllowed(retryVerdict)}
-									aria-describedby={retryRefusal ? 'retry-erp-refusal' : undefined}
-									onclick={handleRetryErp}
-								>
-									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-									{retryingErp ? m('invoices.modal.erp.retrying') : m('invoices.modal.erp.retrySend')}
-								</button>
-								{#if retryRefusal}
-									<!-- Why Retry is disabled, from the server's verdict: the same
-									     sentence the retry would 409 with (an open exception, a live
-									     payment, a held vendor, the plan). -->
-									<p class="review-refusal" id="retry-erp-refusal" data-testid="retry-erp-refusal">
-										{refusalText(retryRefusal, m)}
-									</p>
-								{/if}
+							{#if pm.currency_check === 'unknown'}
+								<p class="po-match-note" data-testid="po-match-currency-unknown">
+									{m('invoices.modal.poMatch.currencyUnknown')}
+								</p>
 							{/if}
-						</div>
-					{/if}
-
-					{#if canRouteIntercompany && entityStore.multiEntity}
-						<section class="ic-section" data-testid="intercompany">
-							<div class="help-row">
-								<div class="ic-title">{m('invoices.modal.intercompany.title')}</div>
-								<HelpTip term="intercompany" />
-							</div>
-							{#if mirrorInvoiceId}
-								<!-- Already routed. The pairing is settled: the backend only
-								     stamps a counterparty while unrouted and returns the same
-								     mirror on a repeat call, so there is no action left to
-								     offer here — only the state. -->
-								<p class="ic-routed" data-testid="intercompany-routed">
-									{m('invoices.modal.intercompany.routed', {
-										entity: entityName(counterpartyEntityId),
-									})}
-								</p>
-								<p class="ic-mirror">
-									{m('invoices.modal.intercompany.mirrorId')}
-									<code class="ic-mirror-id" data-testid="intercompany-mirror-id">{mirrorInvoiceId}</code>
-								</p>
-							{:else}
-								<p class="ic-hint">{m('invoices.modal.intercompany.hint')}</p>
-								<label class="ic-picker">
-									<span>{m('invoices.modal.intercompany.counterparty')}</span>
-									<select
-										bind:value={selectedCounterparty}
-										onchange={() => { icArmed = false; icError = ''; }}
-										data-testid="intercompany-counterparty"
-									>
-										<option value="">{m('invoices.modal.intercompany.selectEntity')}</option>
-										{#each counterpartyOptions as e (e.id)}
-											<option value={e.id}>{e.name}</option>
-										{/each}
-									</select>
-								</label>
-								<div class="ic-actions">
-									<RowAction
-										variant="danger"
-										armed={icArmed}
-										disabled={icBusy || !selectedCounterparty}
-										onclick={handleRouteIntercompany}
-									>
-										{#if icBusy}
-											{m('invoices.modal.intercompany.routing')}
-										{:else if icArmed}
-											{m('invoices.modal.intercompany.confirm', {
-												entity: entityName(selectedCounterparty),
-											})}
-										{:else}
-											{m('invoices.modal.intercompany.route')}
+						{/if}
+						{#if pm.match_type === '4-way' || pm.inspection_result || pm.inspection_required}
+							<div class="po-match-inspection">
+								<span class="po-match-label">{m('invoices.modal.poMatch.qualityInspection')}</span>
+								<HelpTip term="quality-inspection" />
+								{#if pm.inspection_result}
+									<Badge tone={INSPECTION_TONES[pm.inspection_result]} variant={pm.inspection_result}>
+										{#if pm.inspection_result === 'pass'}{m('invoices.modal.poMatch.passed')}
+										{:else if pm.inspection_result === 'fail'}{m('invoices.modal.poMatch.failed')}
+										{:else}{m('invoices.modal.poMatch.partial')}
 										{/if}
-									</RowAction>
-									{#if icArmed}
-										<button type="button" class="ic-cancel" onclick={() => (icArmed = false)}>
-											{m('common.cancel')}
-										</button>
+									</Badge>
+									{#if pm.inspection_accepted_quantity !== null}
+										<span class="po-match-value mono">
+											{m('invoices.modal.poMatch.accepted', { qty: pm.inspection_accepted_quantity })}
+										</span>
 									{/if}
-								</div>
-								{#if icError}
-									<p class="ic-error" data-testid="intercompany-error">{icError}</p>
-								{/if}
-							{/if}
-						</section>
-					{/if}
-
-					{#if priors.vendor_cache_applied.length > 0 || priors.rag_neighbors.length > 0}
-						<div class="priors-section">
-							<button
-								type="button"
-								class="priors-toggle"
-								onclick={() => (priorsOpen = !priorsOpen)}
-								aria-expanded={priorsOpen}
-							>
-								<span class="priors-title">{m('invoices.modal.priors.title')}</span>
-								<span class="priors-chips">
-									{#if priors.vendor_cache_applied.length > 0}
-										<Badge tone="accent" variant="priors-chip">{m('invoices.modal.priors.vendorCacheChip', { count: priors.vendor_cache_applied.length })}</Badge>
-									{/if}
-									{#if priors.rag_neighbors.length > 0}
-										<Badge tone="accent" variant="priors-chip">{m('invoices.modal.priors.ragChip', { count: priors.rag_neighbors.length })}</Badge>
-									{/if}
-								</span>
-								<span class="priors-caret">{priorsOpen ? '▾' : '▸'}</span>
-							</button>
-
-							{#if priorsOpen}
-								<div class="priors-body">
-									{#if priors.vendor_cache_applied.length > 0}
-										<div class="priors-group">
-											<div class="priors-group-title">{m('invoices.modal.priors.cacheGroupTitle')}</div>
-											<div class="priors-tags">
-												{#each priors.vendor_cache_applied as field}
-													<span class="priors-tag">{field}</span>
-												{/each}
-											</div>
-											<div class="priors-help">
-												{m('invoices.modal.priors.cacheHelp')}
-											</div>
-										</div>
-									{/if}
-
-									{#if priors.rag_neighbors.length > 0}
-										<div class="priors-group">
-											<div class="priors-group-title">{m('invoices.modal.priors.ragGroupTitle')}</div>
-											<table class="priors-table">
-												<thead>
-													<tr>
-														<th>{m('invoices.modal.priors.colSimilarity')}</th>
-														<th>{m('invoices.modal.priors.colVendor')}</th>
-														<th>{m('invoices.modal.priors.colInvoice')}</th>
-														<th>{m('invoices.modal.priors.colAmount')}</th>
-													</tr>
-												</thead>
-												<tbody>
-													{#each priors.rag_neighbors as n}
-														<tr>
-															<td>{formatRatioPercent(n.similarity, { maximumFractionDigits: 0 })}</td>
-															<td>{n.vendor_name ?? '—'}</td>
-															<td>{n.invoice_number ?? '—'}</td>
-															<td>{formatMoney(n.amount, { currency: invoice.currency })}</td>
-														</tr>
-													{/each}
-												</tbody>
-											</table>
-											<div class="priors-help">
-												{m('invoices.modal.priors.ragHelp')}
-											</div>
-										</div>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					{/if}
-
-					{#if auditLog.length > 0}
-						<div class="activity-section">
-							<div class="activity-title">{m('invoices.modal.activity.title')}</div>
-							<div class="activity-list">
-								{#each auditLog as entry}
-									<div class="activity-item">
-										<div class="activity-dot"></div>
-										<div class="activity-content">
-											<span class="activity-action">{actionLabel(entry.action)}</span>
-											{#if entry.actor_name}
-												<span class="activity-actor">{m('invoices.modal.activity.by', { actor: entry.actor_name })}</span>
-											{/if}
-											{#if entry.details?.reason}
-												<span class="activity-detail">— {entry.details.reason}</span>
-											{/if}
-											{#if entry.action === 'invoice.extraction_completed' && entry.details?.confidence}
-												<span class="activity-detail">{m('invoices.modal.activity.confidence', { method: String(entry.details.method), pct: formatRatioPercent(entry.details.confidence as number, { maximumFractionDigits: 0 }) })}</span>
-											{/if}
-											{#if entry.action === 'invoice.extraction_completed' && entry.details?.gl_suggested}
-												<span class="activity-detail">{m('invoices.modal.activity.glSuggested', { gl: String(entry.details.gl_suggested) })}</span>
-											{/if}
-											{#if entry.action === 'invoice.extraction_completed' && entry.details?.vendor_action === 'created'}
-												<span class="activity-detail">{m('invoices.modal.activity.newVendor')}</span>
-											{/if}
-											{#if entry.action === 'invoice.extraction_failed' && entry.details?.error}
-												<span class="activity-detail error">— {entry.details.error}</span>
-											{/if}
-											{#if fieldChanges(entry).length > 0}
-												<ul class="activity-changes">
-													{#each fieldChanges(entry) as [field, change] (field)}
-														<li>
-															<span class="change-field">{fieldLabel(field)}:</span>
-															<span class="change-old">{change.old ?? '—'}</span>
-															<span class="change-arrow">→</span>
-															<span class="change-new">{change.new ?? '—'}</span>
-														</li>
-													{/each}
-												</ul>
-											{/if}
-										</div>
-										<span class="activity-time">{formatAuditDate(entry.created_at)}</span>
-									</div>
-								{/each}
-							</div>
-						</div>
-					{/if}
-
-					<div class="chat-section">
-						<SupplierChatThread
-							surface="ap"
-							thread={chatThread}
-							currentUserId={auth.user?.id}
-							members={chatMembers}
-							templates={chatTemplates}
-							loading={chatLoading}
-							onsend={handleChatSend}
-							onresolve={handleChatResolve}
-							onreopen={handleChatReopen}
-							ondownload={handleChatDownload}
-						/>
-					</div>
-
-					<!-- Structured e-invoicing. Distinct from the invoice's own source
-					     document (the PDF in the left pane): this GENERATES a
-					     standards-compliant XML from the invoice's data, in the dialect
-					     the receiver's jurisdiction expects. -->
-					<div class="einvoice-section" data-testid="einvoice-section">
-						<div class="help-row review-title-row">
-							<div class="review-title">{m('invoices.modal.einvoice.title')}</div>
-							<HelpTip term="e-invoice" />
-						</div>
-						<p class="einvoice-hint">{m('invoices.modal.einvoice.hint')}</p>
-
-						<div class="export-wrapper">
-							<button
-								type="button"
-								class="btn-secondary"
-								data-testid="einvoice-menu-toggle"
-								aria-haspopup="true"
-								aria-expanded={showEinvoiceMenu}
-								disabled={einvoiceBusy !== null}
-								onclick={() => (showEinvoiceMenu = !showEinvoiceMenu)}
-							>
-								{einvoiceBusy
-									? m('invoices.modal.einvoice.preparing')
-									: m('invoices.modal.einvoice.download')}
-							</button>
-							{#if showEinvoiceMenu}
-								<div
-									class="export-menu"
-									data-testid="einvoice-menu"
-									role="group"
-									aria-label={m('invoices.modal.einvoice.download')}
-								>
-									{#each E_INVOICE_FORMATS as opt (opt.format)}
-										<button
-											type="button"
-											data-testid="einvoice-format-{opt.format}"
-											onclick={() => handleEinvoiceDownload(opt.format)}
-										>
-											{m(opt.labelKey)}
-										</button>
-									{/each}
-								</div>
-							{/if}
-						</div>
-
-						{#if einvoiceError}
-							<div class="einvoice-error" role="alert" data-testid="einvoice-error">
-								<p class="einvoice-error-title">
-									{einvoiceError.invalid
-										? m('invoices.modal.einvoice.invalidTitle', {
-												format: einvoiceFormatLabel(einvoiceError.format)
-											})
-										: m('invoices.modal.einvoice.failed', {
-												format: einvoiceFormatLabel(einvoiceError.format)
-											})}
-								</p>
-								{#if einvoiceError.issues.length > 0}
-									<EInvoiceIssueList issues={einvoiceError.issues} />
-								{:else if einvoiceError.detail}
-									<p class="einvoice-error-detail">{einvoiceError.detail}</p>
+								{:else if pm.inspection_required}
+									<Badge tone="danger" variant="missing">{m('invoices.modal.poMatch.requiredMissing')}</Badge>
 								{/if}
 							</div>
 						{/if}
+						{#if pm.issues.length > 0}
+							<!-- Localized like the warnings list above it, so the
+							     panel never shows a German finding over an English
+							     issue. A string entry is a match persisted before
+							     issues carried codes, and renders as written. -->
+							<ul class="po-match-issues">
+								{#each pm.issues as issue}
+									<li>{poMatchIssueText(issue, m)}</li>
+								{/each}
+							</ul>
+						{/if}
+					</div>
+				{/if}
 
-						{#if canSendPeppol}
-							<div class="peppol-block">
-								<div class="help-row peppol-title-row">
-									<div class="peppol-title">{m('invoices.modal.peppol.title')}</div>
-									<HelpTip term="peppol" />
-								</div>
-								{#if !peppolStatusReady}
-									<p class="einvoice-hint" data-testid="peppol-not-sendable">
-										{m('invoices.modal.peppol.notSendable')}
-									</p>
-								{:else if !peppolResult}
-									<!--
-										The transmission state on OPEN, from the invoice's own
-										transmission log. Four distinct states — a read that
-										failed says so rather than degrading into "not yet
-										transmitted", and attempts that all FAILED are re-sendable
-										(the backend's partial unique index excludes them), so
-										they must not read as done.
-									-->
-									<p class="peppol-state" data-testid="peppol-state">
-										{#if peppolTransmissionsErrored}
-											{m('invoices.modal.peppol.state.unknown')}
-										{:else if peppolTransmissions === null}
-											{m('invoices.modal.peppol.state.loading')}
-										{:else if peppolLive}
-											{m('invoices.modal.peppol.state.transmitted', {
-												date: formatAuditDate(peppolLive.transmitted_at ?? peppolLive.created_at)
-											})}
-											{#if peppolLive.message_id}
-												<span class="peppol-msgid"
-													>{m('invoices.modal.peppol.messageId', {
-														id: peppolLive.message_id
-													})}</span
-												>
-											{/if}
-										{:else if peppolTransmissions.length > 0}
-											{m('invoices.modal.peppol.state.failedOnly')}
-										{:else}
-											{m('invoices.modal.peppol.state.none')}
-										{/if}
-									</p>
+				{#if submitOffered && missingFields.length > 0}
+					<div class="validation-hint">{m('invoices.modal.requiredHint', { fields: formatList(missingFields) })}</div>
+				{/if}
+
+				{#if invoice.approved_by || invoice.rejected_by || invoice.assigned_to}
+					<div class="meta-section">
+						{#if invoice.assigned_to}
+							<div class="meta-item">
+								<span class="meta-label">{m('invoices.modal.meta.assignedTo')}</span>
+								<span class="meta-value">{invoice.assigned_to}</span>
+							</div>
+						{/if}
+						{#if invoice.approved_by}
+							<div class="meta-item">
+								<span class="meta-label">{m('invoices.modal.meta.approvedBy')}</span>
+								<span class="meta-value approved">{invoice.approved_by}</span>
+								{#if invoice.approval_date}
+									<span class="meta-date">{invoice.approval_date}</span>
 								{/if}
-								{#if !peppolStatusReady}
-									<!-- The send controls stay behind the same gate the backend
-									     enforces; only the state line above is independent of it. -->
-								{:else if peppolResult}
-									<p class="peppol-result" data-testid="peppol-result">
-										{peppolResult.already_sent
-											? m('invoices.modal.peppol.alreadySent')
-											: m('invoices.modal.peppol.sent')}
-										{#if peppolResult.message_id}
+							</div>
+						{/if}
+						{#if invoice.rejected_by}
+							<div class="meta-item">
+								<span class="meta-label">{m('invoices.modal.meta.rejectedBy')}</span>
+								<span class="meta-value rejected">{invoice.rejected_by}</span>
+							</div>
+						{/if}
+					</div>
+				{/if}
+
+				{#if chainLevels.length > 0}
+					<ApprovalChainProgress
+						levels={chainLevels}
+						currentLevel={chainCurrentLevel}
+						{resolveApproverName}
+						statusLabel={chainStatusLabel}
+						formatProgress={chainProgressLabel}
+						anyApproverLabel={m('invoices.modal.chain.anyApprover')}
+						title={m('invoices.modal.chain.title')}
+						helpTerm="approval-chain"
+					/>
+				{/if}
+
+				<!-- A posted invoice keeps its bill of record after it moves on
+				     (`done`, or voided back to `approved`), so the column, not the
+				     status, decides whether there is a reference to show. -->
+				{#if isErpStatus || invoice.erp_document_id || (status === 'failed' && erpInfo)}
+					<div class="erp-section">
+						<div class="help-row erp-title-row">
+							<div class="erp-title">{m('invoices.modal.erp.title')}</div>
+							<HelpTip term="erp-sync" />
+						</div>
+						<div class="erp-details">
+							{#if invoice.erp_document_id}
+								<!-- The URL is the backend's (`erp_adapters/deep_links.py`,
+								     the one provider → URL mapping); none is built here. -->
+								<div class="erp-row" data-testid="erp-reference">
+									<span class="erp-label">{m('invoices.modal.erp.reference')}</span>
+									{#if invoice.erp_document_url}
+										<a
+											class="erp-value erp-link"
+											href={invoice.erp_document_url}
+											target="_blank"
+											rel="noopener noreferrer"
+											data-testid="erp-reference-link"
+										>
+											<code>{invoice.erp_document_id}</code>
+											<span class="visually-hidden">{m('invoices.modal.erp.opensInErp')}</span>
+										</a>
+									{:else}
+										<code class="erp-value">{invoice.erp_document_id}</code>
+									{/if}
+								</div>
+							{/if}
+							{#if erpInfo?.erp_document_id}
+								<div class="erp-row">
+									<span class="erp-label">{m('invoices.modal.erp.documentId')}</span>
+									<code class="erp-value">{erpInfo.erp_document_id}</code>
+								</div>
+							{/if}
+							{#if erpInfo?.last_error}
+								<div class="erp-row erp-error">
+									<span class="erp-label">{m('invoices.modal.erp.error')}</span>
+									<span class="erp-value" data-testid="erp-error">
+										{erpRefusalText(erpInfo.refusal, m) ?? erpInfo.last_error}
+									</span>
+								</div>
+							{/if}
+						</div>
+						{#if retryOffered}
+							<button
+								type="button"
+								class="btn-secondary retry-erp"
+								data-testid="retry-erp"
+								disabled={retryingErp || !isAllowed(retryVerdict)}
+								aria-describedby={retryRefusal ? 'retry-erp-refusal' : undefined}
+								onclick={handleRetryErp}
+							>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+								{retryingErp ? m('invoices.modal.erp.retrying') : m('invoices.modal.erp.retrySend')}
+							</button>
+							{#if retryRefusal}
+								<!-- Why Retry is disabled, from the server's verdict: the same
+								     sentence the retry would 409 with (an open exception, a live
+								     payment, a held vendor, the plan). -->
+								<p class="review-refusal" id="retry-erp-refusal" data-testid="retry-erp-refusal">
+									{refusalText(retryRefusal, m)}
+								</p>
+							{/if}
+						{/if}
+					</div>
+				{/if}
+
+				{#if canRouteIntercompany && entityStore.multiEntity}
+					<section class="ic-section" data-testid="intercompany">
+						<div class="help-row">
+							<div class="ic-title">{m('invoices.modal.intercompany.title')}</div>
+							<HelpTip term="intercompany" />
+						</div>
+						{#if mirrorInvoiceId}
+							<!-- Already routed. The pairing is settled: the backend only
+							     stamps a counterparty while unrouted and returns the same
+							     mirror on a repeat call, so there is no action left to
+							     offer here — only the state. -->
+							<p class="ic-routed" data-testid="intercompany-routed">
+								{m('invoices.modal.intercompany.routed', {
+									entity: entityName(counterpartyEntityId),
+								})}
+							</p>
+							<p class="ic-mirror">
+								{m('invoices.modal.intercompany.mirrorId')}
+								<code class="ic-mirror-id" data-testid="intercompany-mirror-id">{mirrorInvoiceId}</code>
+							</p>
+						{:else}
+							<p class="ic-hint">{m('invoices.modal.intercompany.hint')}</p>
+							<label class="ic-picker">
+								<span>{m('invoices.modal.intercompany.counterparty')}</span>
+								<select
+									bind:value={selectedCounterparty}
+									onchange={() => { icArmed = false; icError = ''; }}
+									data-testid="intercompany-counterparty"
+								>
+									<option value="">{m('invoices.modal.intercompany.selectEntity')}</option>
+									{#each counterpartyOptions as e (e.id)}
+										<option value={e.id}>{e.name}</option>
+									{/each}
+								</select>
+							</label>
+							<div class="ic-actions">
+								<RowAction
+									variant="danger"
+									armed={icArmed}
+									disabled={icBusy || !selectedCounterparty}
+									onclick={handleRouteIntercompany}
+								>
+									{#if icBusy}
+										{m('invoices.modal.intercompany.routing')}
+									{:else if icArmed}
+										{m('invoices.modal.intercompany.confirm', {
+											entity: entityName(selectedCounterparty),
+										})}
+									{:else}
+										{m('invoices.modal.intercompany.route')}
+									{/if}
+								</RowAction>
+								{#if icArmed}
+									<button type="button" class="ic-cancel" onclick={() => (icArmed = false)}>
+										{m('common.cancel')}
+									</button>
+								{/if}
+							</div>
+							{#if icError}
+								<p class="ic-error" data-testid="intercompany-error">{icError}</p>
+							{/if}
+						{/if}
+					</section>
+				{/if}
+
+				{#if priors.vendor_cache_applied.length > 0 || priors.rag_neighbors.length > 0}
+					<div class="priors-section">
+						<button
+							type="button"
+							class="priors-toggle"
+							onclick={() => (priorsOpen = !priorsOpen)}
+							aria-expanded={priorsOpen}
+						>
+							<span class="priors-title">{m('invoices.modal.priors.title')}</span>
+							<span class="priors-chips">
+								{#if priors.vendor_cache_applied.length > 0}
+									<Badge tone="accent" variant="priors-chip">{m('invoices.modal.priors.vendorCacheChip', { count: priors.vendor_cache_applied.length })}</Badge>
+								{/if}
+								{#if priors.rag_neighbors.length > 0}
+									<Badge tone="accent" variant="priors-chip">{m('invoices.modal.priors.ragChip', { count: priors.rag_neighbors.length })}</Badge>
+								{/if}
+							</span>
+							<span class="priors-caret">{priorsOpen ? '▾' : '▸'}</span>
+						</button>
+
+						{#if priorsOpen}
+							<div class="priors-body">
+								{#if priors.vendor_cache_applied.length > 0}
+									<div class="priors-group">
+										<div class="priors-group-title">{m('invoices.modal.priors.cacheGroupTitle')}</div>
+										<div class="priors-tags">
+											{#each priors.vendor_cache_applied as field}
+												<span class="priors-tag">{field}</span>
+											{/each}
+										</div>
+										<div class="priors-help">
+											{m('invoices.modal.priors.cacheHelp')}
+										</div>
+									</div>
+								{/if}
+
+								{#if priors.rag_neighbors.length > 0}
+									<div class="priors-group">
+										<div class="priors-group-title">{m('invoices.modal.priors.ragGroupTitle')}</div>
+										<table class="priors-table">
+											<thead>
+												<tr>
+													<th>{m('invoices.modal.priors.colSimilarity')}</th>
+													<th>{m('invoices.modal.priors.colVendor')}</th>
+													<th>{m('invoices.modal.priors.colInvoice')}</th>
+													<th>{m('invoices.modal.priors.colAmount')}</th>
+												</tr>
+											</thead>
+											<tbody>
+												{#each priors.rag_neighbors as n}
+													<tr>
+														<td>{formatRatioPercent(n.similarity, { maximumFractionDigits: 0 })}</td>
+														<td>{n.vendor_name ?? '—'}</td>
+														<td>{n.invoice_number ?? '—'}</td>
+														<td>{formatMoney(n.amount, { currency: invoice.currency })}</td>
+													</tr>
+												{/each}
+											</tbody>
+										</table>
+										<div class="priors-help">
+											{m('invoices.modal.priors.ragHelp')}
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/if}
+
+				{#if auditLog.length > 0}
+					<div class="activity-section">
+						<div class="activity-title">{m('invoices.modal.activity.title')}</div>
+						<div class="activity-list">
+							{#each auditLog as entry}
+								<div class="activity-item">
+									<div class="activity-dot"></div>
+									<div class="activity-content">
+										<span class="activity-action">{actionLabel(entry.action)}</span>
+										{#if entry.actor_name}
+											<span class="activity-actor">{m('invoices.modal.activity.by', { actor: entry.actor_name })}</span>
+										{/if}
+										{#if entry.details?.reason}
+											<span class="activity-detail">— {entry.details.reason}</span>
+										{/if}
+										{#if entry.action === 'invoice.extraction_completed' && entry.details?.confidence}
+											<span class="activity-detail">{m('invoices.modal.activity.confidence', { method: String(entry.details.method), pct: formatRatioPercent(entry.details.confidence as number, { maximumFractionDigits: 0 }) })}</span>
+										{/if}
+										{#if entry.action === 'invoice.extraction_completed' && entry.details?.gl_suggested}
+											<span class="activity-detail">{m('invoices.modal.activity.glSuggested', { gl: String(entry.details.gl_suggested) })}</span>
+										{/if}
+										{#if entry.action === 'invoice.extraction_completed' && entry.details?.vendor_action === 'created'}
+											<span class="activity-detail">{m('invoices.modal.activity.newVendor')}</span>
+										{/if}
+										{#if entry.action === 'invoice.extraction_failed' && entry.details?.error}
+											<span class="activity-detail error">— {entry.details.error}</span>
+										{/if}
+										{#if fieldChanges(entry).length > 0}
+											<ul class="activity-changes">
+												{#each fieldChanges(entry) as [field, change] (field)}
+													<li>
+														<span class="change-field">{fieldLabel(field)}:</span>
+														<span class="change-old">{change.old ?? '—'}</span>
+														<span class="change-arrow">→</span>
+														<span class="change-new">{change.new ?? '—'}</span>
+													</li>
+												{/each}
+											</ul>
+										{/if}
+									</div>
+									<span class="activity-time">{formatAuditDate(entry.created_at)}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				<div class="chat-section">
+					<SupplierChatThread
+						surface="ap"
+						thread={chatThread}
+						currentUserId={auth.user?.id}
+						members={chatMembers}
+						templates={chatTemplates}
+						loading={chatLoading}
+						onsend={handleChatSend}
+						onresolve={handleChatResolve}
+						onreopen={handleChatReopen}
+						ondownload={handleChatDownload}
+					/>
+				</div>
+
+				<!-- Structured e-invoicing. Distinct from the invoice's own source
+				     document (the PDF in the left pane): this GENERATES a
+				     standards-compliant XML from the invoice's data, in the dialect
+				     the receiver's jurisdiction expects. -->
+				<div class="einvoice-section" data-testid="einvoice-section">
+					<div class="help-row review-title-row">
+						<div class="review-title">{m('invoices.modal.einvoice.title')}</div>
+						<HelpTip term="e-invoice" />
+					</div>
+					<p class="einvoice-hint">{m('invoices.modal.einvoice.hint')}</p>
+
+					<!-- The shared APG menu button: arrows, Home / End, typeahead, Esc back to
+					     the trigger (stopped there, so the invoice dialog stays open). -->
+					<MenuButton
+						label={einvoiceBusy
+							? m('invoices.modal.einvoice.preparing')
+							: m('invoices.modal.einvoice.download')}
+						menuLabel={m('invoices.modal.einvoice.download')}
+						items={E_INVOICE_FORMATS.map((opt) => ({
+							value: opt.format,
+							label: m(opt.labelKey),
+							testId: `einvoice-format-${opt.format}`
+						}))}
+						onselect={handleEinvoiceDownload}
+						disabled={einvoiceBusy !== null}
+						testId="einvoice-menu-toggle"
+						menuTestId="einvoice-menu"
+					/>
+
+					{#if einvoiceError}
+						<div class="einvoice-error" role="alert" data-testid="einvoice-error">
+							<p class="einvoice-error-title">
+								{einvoiceError.invalid
+									? m('invoices.modal.einvoice.invalidTitle', {
+											format: einvoiceFormatLabel(einvoiceError.format)
+										})
+									: m('invoices.modal.einvoice.failed', {
+											format: einvoiceFormatLabel(einvoiceError.format)
+										})}
+							</p>
+							{#if einvoiceError.issues.length > 0}
+								<EInvoiceIssueList issues={einvoiceError.issues} />
+							{:else if einvoiceError.detail}
+								<p class="einvoice-error-detail">{einvoiceError.detail}</p>
+							{/if}
+						</div>
+					{/if}
+
+					{#if canSendPeppol}
+						<div class="peppol-block">
+							<div class="help-row peppol-title-row">
+								<div class="peppol-title">{m('invoices.modal.peppol.title')}</div>
+								<HelpTip term="peppol" />
+							</div>
+							{#if !peppolStatusReady}
+								<p class="einvoice-hint" data-testid="peppol-not-sendable">
+									{m('invoices.modal.peppol.notSendable')}
+								</p>
+							{:else if !peppolResult}
+								<!--
+									The transmission state on OPEN, from the invoice's own
+									transmission log. Four distinct states — a read that
+									failed says so rather than degrading into "not yet
+									transmitted", and attempts that all FAILED are re-sendable
+									(the backend's partial unique index excludes them), so
+									they must not read as done.
+								-->
+								<p class="peppol-state" data-testid="peppol-state">
+									{#if peppolTransmissionsErrored}
+										{m('invoices.modal.peppol.state.unknown')}
+									{:else if peppolTransmissions === null}
+										{m('invoices.modal.peppol.state.loading')}
+									{:else if peppolLive}
+										{m('invoices.modal.peppol.state.transmitted', {
+											date: formatAuditDate(peppolLive.transmitted_at ?? peppolLive.created_at)
+										})}
+										{#if peppolLive.message_id}
 											<span class="peppol-msgid"
 												>{m('invoices.modal.peppol.messageId', {
-													id: peppolResult.message_id
+													id: peppolLive.message_id
 												})}</span
 											>
 										{/if}
-									</p>
-								{:else if showPeppolForm}
-									<div class="peppol-form" data-testid="peppol-form">
-										<p class="einvoice-hint">{m('invoices.modal.peppol.hint')}</p>
-										<label class="peppol-field">
-											<span>{m('invoices.modal.peppol.receiverScheme')}</span>
-											<input
-												type="text"
-												data-testid="peppol-receiver-scheme"
-												bind:value={peppolReceiverScheme}
-												placeholder="9930"
-											/>
-										</label>
-										<label class="peppol-field">
-											<span>{m('invoices.modal.peppol.receiverValue')}</span>
-											<input
-												type="text"
-												data-testid="peppol-receiver-value"
-												bind:value={peppolReceiverValue}
-											/>
-										</label>
-										<p class="einvoice-hint">{m('invoices.modal.peppol.idempotentNote')}</p>
-										<div class="reject-actions">
-											<button
-												type="button"
-												class="btn-cancel"
-												onclick={() => {
-													showPeppolForm = false;
-													peppolError = null;
-												}}>{m('common.cancel')}</button
-											>
-											<button
-												type="button"
-												class="btn-primary"
-												data-testid="peppol-confirm"
-												disabled={peppolSending ||
-													!peppolReceiverScheme.trim() ||
-													!peppolReceiverValue.trim()}
-												onclick={handlePeppolSend}
-											>
-												{peppolSending
-													? m('invoices.modal.peppol.sending')
-													: m('invoices.modal.peppol.confirm')}
-											</button>
-										</div>
-									</div>
-								{:else}
-									<button
-										type="button"
-										class="btn-secondary"
-										data-testid="peppol-send"
-										onclick={() => {
-											showPeppolForm = true;
-											peppolError = null;
-										}}
-									>
-										{m('invoices.modal.peppol.send')}
-									</button>
-								{/if}
-								{#if peppolError}
-									<div class="einvoice-error" role="alert" data-testid="peppol-error">
-										<p class="einvoice-error-title">{m('invoices.modal.peppol.failed')}</p>
-										{#if peppolError.issues.length > 0}
-											<EInvoiceIssueList issues={peppolError.issues} />
-										{:else}
-											<p class="einvoice-error-detail">{peppolError.detail}</p>
-										{/if}
-									</div>
-								{/if}
-							</div>
-						{/if}
-					</div>
-					</div>
-
-					<footer class="form-actions" data-testid="invoice-modal-actions">
-					{#if canReview}
-						<div class="review-section">
-							<div class="help-row review-title-row">
-								<div class="review-title">{m('invoices.modal.review.title')}</div>
-								<HelpTip term="segregation-of-duties" />
-							</div>
-							{#if showRejectForm}
-								<div class="reject-form">
-									<textarea
-										class="reject-input"
-										placeholder={m('invoices.modal.review.rejectPlaceholder')}
-										aria-label={m('invoices.modal.review.rejectAria')}
-										bind:value={rejectReason}
-										rows="2"
-									></textarea>
+									{:else if peppolTransmissions.length > 0}
+										{m('invoices.modal.peppol.state.failedOnly')}
+									{:else}
+										{m('invoices.modal.peppol.state.none')}
+									{/if}
+								</p>
+							{/if}
+							{#if !peppolStatusReady}
+								<!-- The send controls stay behind the same gate the backend
+								     enforces; only the state line above is independent of it. -->
+							{:else if peppolResult}
+								<p class="peppol-result" data-testid="peppol-result">
+									{peppolResult.already_sent
+										? m('invoices.modal.peppol.alreadySent')
+										: m('invoices.modal.peppol.sent')}
+									{#if peppolResult.message_id}
+										<span class="peppol-msgid"
+											>{m('invoices.modal.peppol.messageId', {
+												id: peppolResult.message_id
+											})}</span
+										>
+									{/if}
+								</p>
+							{:else if showPeppolForm}
+								<div class="peppol-form" data-testid="peppol-form">
+									<p class="einvoice-hint">{m('invoices.modal.peppol.hint')}</p>
+									<label class="peppol-field">
+										<span>{m('invoices.modal.peppol.receiverScheme')}</span>
+										<input
+											type="text"
+											data-testid="peppol-receiver-scheme"
+											bind:value={peppolReceiverScheme}
+											placeholder="9930"
+										/>
+									</label>
+									<label class="peppol-field">
+										<span>{m('invoices.modal.peppol.receiverValue')}</span>
+										<input
+											type="text"
+											data-testid="peppol-receiver-value"
+											bind:value={peppolReceiverValue}
+										/>
+									</label>
+									<p class="einvoice-hint">{m('invoices.modal.peppol.idempotentNote')}</p>
 									<div class="reject-actions">
-										<button type="button" class="btn-cancel" onclick={() => { showRejectForm = false; rejectReason = ''; }}>{m('common.cancel')}</button>
-										<button type="button" class="btn-danger" class:armed={!!rejectReason.trim()} disabled={reviewing || !rejectReason.trim()} onclick={handleReject}>
-											{reviewing ? m('invoices.modal.review.rejecting') : m('invoices.modal.review.confirmReject')}
+										<button
+											type="button"
+											class="btn-cancel"
+											onclick={() => {
+												showPeppolForm = false;
+												peppolError = null;
+											}}>{m('common.cancel')}</button
+										>
+										<button
+											type="button"
+											class="btn-primary"
+											data-testid="peppol-confirm"
+											disabled={peppolSending ||
+												!peppolReceiverScheme.trim() ||
+												!peppolReceiverValue.trim()}
+											onclick={handlePeppolSend}
+										>
+											{peppolSending
+												? m('invoices.modal.peppol.sending')
+												: m('invoices.modal.peppol.confirm')}
 										</button>
 									</div>
 								</div>
 							{:else}
-								<div class="review-actions">
-									{#if isOffered(verdicts?.approve)}
-										<button
-											type="button"
-											class="btn-primary review-choice"
-											disabled={reviewing || !isAllowed(verdicts?.approve)}
-											aria-describedby={approveRefusal ? 'approve-refusal' : undefined}
-											onclick={handleApprove}
-										>
-											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-											{reviewing ? m('invoices.modal.review.approving') : m('invoices.modal.review.approve')}
-										</button>
-									{/if}
-									{#if isOffered(verdicts?.reject)}
-										<button
-											type="button"
-											class="btn-danger review-choice"
-											disabled={reviewing || !isAllowed(verdicts?.reject)}
-											onclick={() => (showRejectForm = true)}
-										>
-											<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-											{m('invoices.modal.review.reject')}
-										</button>
+								<button
+									type="button"
+									class="btn-secondary"
+									data-testid="peppol-send"
+									onclick={() => {
+										showPeppolForm = true;
+										peppolError = null;
+									}}
+								>
+									{m('invoices.modal.peppol.send')}
+								</button>
+							{/if}
+							{#if peppolError}
+								<div class="einvoice-error" role="alert" data-testid="peppol-error">
+									<p class="einvoice-error-title">{m('invoices.modal.peppol.failed')}</p>
+									{#if peppolError.issues.length > 0}
+										<EInvoiceIssueList issues={peppolError.issues} />
+									{:else}
+										<p class="einvoice-error-detail">{peppolError.detail}</p>
 									{/if}
 								</div>
-								{#if approveRefusal}
-									<!-- The server's own reason, localized from its code: the
-									     reader learns WHO must approve instead of meeting a
-									     403 after the click. -->
-									<p class="review-refusal" id="approve-refusal" data-testid="approve-refusal">
-										{refusalText(approveRefusal, m)}
-									</p>
-								{/if}
 							{/if}
-						</div>
-					{:else if isReadyForReview && invoice.assigned_to}
-						<div class="review-section">
-							<p class="review-assigned-hint">{m('invoices.modal.review.assignedHintPre')}<strong>{invoice.assigned_to}</strong>{m('invoices.modal.review.assignedHintPost')}</p>
 						</div>
 					{/if}
+				</div>
+				</div>
 
-						<div class="footer-right">
-							<button type="button" class="btn-cancel" onclick={onclose}>{m('common.cancel')}</button>
-							{#if canExtract || extracting}
-								<button type="button" class="btn-secondary" disabled={extracting} onclick={handleExtract}>
-									{#if extracting}
-										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg>
-										{extractionStatus || m('invoices.modal.extracting')}
-									{:else}
-										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-										{status === 'failed' ? m('invoices.modal.reExtract') : m('invoices.modal.extract')}
-									{/if}
-								</button>
-							{/if}
-							{#if canWrite && isExtracting && !extracting}
-								<button type="button" class="btn-secondary" disabled={resettingExtraction} onclick={handleResetExtraction}>
-									{resettingExtraction ? m('invoices.modal.resetting') : m('invoices.modal.reset')}
-								</button>
-							{/if}
-							{#if canWrite && !isDone}
-								<!-- `.btn-save` / `.btn-submit` are e2e hooks with no CSS. Submit (or, for a
-								     reviewer, Approve in the review row) is the footer's lead action when
-								     offered, so Save steps back to secondary: one .btn-primary per footer. -->
-								<button
-									type="submit"
-									class="btn-save {canSubmit || resubmitOffered || (canReview && isOffered(verdicts?.approve)) ? 'btn-secondary' : 'btn-primary'}"
-									disabled={saving}
-								>
-									{saving ? m('common.saving') : m('common.save')}
-								</button>
-							{/if}
-							{#if canSubmit}
-								{#if needsApproverSelect && reviewerOptions.length > 0}
-									<select class="approver-select" aria-label={m('invoices.modal.assignApprover')} bind:value={selectedApproverId}>
-										<option value="">{m('invoices.modal.approverPlaceholder')}</option>
-										{#each reviewerOptions as user}
-											<option value={user.id}>{user.full_name}</option>
-										{/each}
-									</select>
-								{:else if approverNote}
-									<!-- No picker to offer. Say what Submit will do instead of
-									     leaving a disabled button with no explanation. -->
-									<p class="approver-note">{approverNote}</p>
-								{/if}
-								<button
-									type="button"
-									class="btn-primary btn-submit"
-									disabled={submitting || awaitingApprover || !isAllowed(completeVerdict)}
-									aria-describedby={submitRefusal
-										? 'submit-refusal'
-										: awaitingApprover
-											? 'approver-required-hint'
-											: undefined}
-									onclick={submitDone}
-								>
-									{submitting ? m('invoices.modal.submitting') : submitLabel}
-								</button>
-								{#if submitRefusal}
-									<!-- The server's reason Submit would be refused (an ERP export
-									     gate, a clerk past the entry window), localized from its
-									     code, instead of a 409 after the click. -->
-									<p class="approver-hint" id="submit-refusal" data-testid="submit-refusal">
-										{refusalText(submitRefusal, m)}
-									</p>
-								{:else if awaitingApprover}
-									<!-- The one reason Submit is disabled that the reader can fix
-									     here: say so beside the button rather than leaving it greyed. -->
-									<p class="approver-hint" id="approver-required-hint" data-testid="approver-required-hint">
-										{m('invoices.modal.approverRequiredHint')}
-									</p>
-								{/if}
-							{/if}
-							{#if resubmitOffered}
-								<button
-									type="button"
-									class="btn-primary btn-submit"
-									data-testid="resubmit-for-review"
-									disabled={resubmitting || saving || !isAllowed(resubmitVerdict)}
-									aria-describedby={resubmitRefusal ? 'resubmit-refusal' : undefined}
-									onclick={handleResubmit}
-								>
-									{resubmitting ? m('invoices.modal.submitting') : m('invoices.modal.submit.resubmit')}
-								</button>
-								{#if resubmitRefusal}
-									<p class="approver-hint" id="resubmit-refusal" data-testid="resubmit-refusal">
-										{refusalText(resubmitRefusal, m)}
-									</p>
-								{/if}
-							{/if}
-							{#if recallOffered}
-								<button
-									type="button"
-									class="btn-cancel"
-									data-testid="recall-approval"
-									disabled={saving || !isAllowed(recallVerdict)}
-									aria-describedby={recallRefusal ? 'recall-refusal' : undefined}
-									onclick={() => (showRecallDialog = true)}
-								>
-									{m('invoices.modal.recall.open')}
-								</button>
-								{#if recallRefusal}
-									<!-- Why the approval can't be taken back, from the server's
-									     verdict: a bill the ERP may hold, or a rail paying it. -->
-									<p class="approver-hint" id="recall-refusal" data-testid="recall-refusal">
-										{refusalText(recallRefusal, m)}
-									</p>
-								{/if}
-							{/if}
+				<footer class="form-actions" data-testid="invoice-modal-actions">
+				{#if canReview}
+					<div class="review-section">
+						<div class="help-row review-title-row">
+							<div class="review-title">{m('invoices.modal.review.title')}</div>
+							<HelpTip term="segregation-of-duties" />
 						</div>
-					</footer>
-				</form>
-			</div>
+						{#if showRejectForm}
+							<div class="reject-form">
+								<textarea
+									class="reject-input"
+									placeholder={m('invoices.modal.review.rejectPlaceholder')}
+									aria-label={m('invoices.modal.review.rejectAria')}
+									bind:value={rejectReason}
+									rows="2"
+								></textarea>
+								<div class="reject-actions">
+									<button type="button" class="btn-cancel" onclick={() => { showRejectForm = false; rejectReason = ''; }}>{m('common.cancel')}</button>
+									<button type="button" class="btn-danger" class:armed={!!rejectReason.trim()} disabled={reviewing || !rejectReason.trim()} onclick={handleReject}>
+										{reviewing ? m('invoices.modal.review.rejecting') : m('invoices.modal.review.confirmReject')}
+									</button>
+								</div>
+							</div>
+						{:else}
+							<div class="review-actions">
+								{#if isOffered(verdicts?.approve)}
+									<button
+										type="button"
+										class="btn-primary review-choice"
+										disabled={reviewing || !isAllowed(verdicts?.approve)}
+										aria-describedby={approveRefusal ? 'approve-refusal' : undefined}
+										onclick={handleApprove}
+									>
+										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+										{reviewing ? m('invoices.modal.review.approving') : m('invoices.modal.review.approve')}
+									</button>
+								{/if}
+								{#if isOffered(verdicts?.reject)}
+									<button
+										type="button"
+										class="btn-danger review-choice"
+										disabled={reviewing || !isAllowed(verdicts?.reject)}
+										onclick={() => (showRejectForm = true)}
+									>
+										<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+										{m('invoices.modal.review.reject')}
+									</button>
+								{/if}
+							</div>
+							{#if approveRefusal}
+								<!-- The server's own reason, localized from its code: the
+								     reader learns WHO must approve instead of meeting a
+								     403 after the click. -->
+								<p class="review-refusal" id="approve-refusal" data-testid="approve-refusal">
+									{refusalText(approveRefusal, m)}
+								</p>
+							{/if}
+						{/if}
+					</div>
+				{:else if isReadyForReview && invoice.assigned_to}
+					<div class="review-section">
+						<p class="review-assigned-hint">{m('invoices.modal.review.assignedHintPre')}<strong>{invoice.assigned_to}</strong>{m('invoices.modal.review.assignedHintPost')}</p>
+					</div>
+				{/if}
+
+					<div class="footer-right">
+						<button type="button" class="btn-cancel" onclick={onclose}>{m('common.cancel')}</button>
+						{#if canExtract || extracting}
+							<button type="button" class="btn-secondary" disabled={extracting} onclick={handleExtract}>
+								{#if extracting}
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg>
+									{extractionStatus || m('invoices.modal.extracting')}
+								{:else}
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+									{status === 'failed' ? m('invoices.modal.reExtract') : m('invoices.modal.extract')}
+								{/if}
+							</button>
+						{/if}
+						{#if canWrite && isExtracting && !extracting}
+							<button type="button" class="btn-secondary" disabled={resettingExtraction} onclick={handleResetExtraction}>
+								{resettingExtraction ? m('invoices.modal.resetting') : m('invoices.modal.reset')}
+							</button>
+						{/if}
+						{#if canWrite && !isDone}
+							<!-- `.btn-save` / `.btn-submit` are e2e hooks with no CSS. Submit (or, for a
+							     reviewer, Approve in the review row) is the footer's lead action when
+							     offered, so Save steps back to secondary: one .btn-primary per footer. -->
+							<button
+								type="submit"
+								class="btn-save {canSubmit || resubmitOffered || (canReview && isOffered(verdicts?.approve)) ? 'btn-secondary' : 'btn-primary'}"
+								disabled={saving}
+							>
+								{saving ? m('common.saving') : m('common.save')}
+							</button>
+						{/if}
+						{#if canSubmit}
+							{#if needsApproverSelect && reviewerOptions.length > 0}
+								<select class="approver-select" aria-label={m('invoices.modal.assignApprover')} bind:value={selectedApproverId}>
+									<option value="">{m('invoices.modal.approverPlaceholder')}</option>
+									{#each reviewerOptions as user}
+										<option value={user.id}>{user.full_name}</option>
+									{/each}
+								</select>
+							{:else if approverNote}
+								<!-- No picker to offer. Say what Submit will do instead of
+								     leaving a disabled button with no explanation. -->
+								<p class="approver-note">{approverNote}</p>
+							{/if}
+							<button
+								type="button"
+								class="btn-primary btn-submit"
+								disabled={submitting || awaitingApprover || !isAllowed(completeVerdict)}
+								aria-describedby={submitRefusal
+									? 'submit-refusal'
+									: awaitingApprover
+										? 'approver-required-hint'
+										: undefined}
+								onclick={submitDone}
+							>
+								{submitting ? m('invoices.modal.submitting') : submitLabel}
+							</button>
+							{#if submitRefusal}
+								<!-- The server's reason Submit would be refused (an ERP export
+								     gate, a clerk past the entry window), localized from its
+								     code, instead of a 409 after the click. -->
+								<p class="approver-hint" id="submit-refusal" data-testid="submit-refusal">
+									{refusalText(submitRefusal, m)}
+								</p>
+							{:else if awaitingApprover}
+								<!-- The one reason Submit is disabled that the reader can fix
+								     here: say so beside the button rather than leaving it greyed. -->
+								<p class="approver-hint" id="approver-required-hint" data-testid="approver-required-hint">
+									{m('invoices.modal.approverRequiredHint')}
+								</p>
+							{/if}
+						{/if}
+						{#if resubmitOffered}
+							<button
+								type="button"
+								class="btn-primary btn-submit"
+								data-testid="resubmit-for-review"
+								disabled={resubmitting || saving || !isAllowed(resubmitVerdict)}
+								aria-describedby={resubmitRefusal ? 'resubmit-refusal' : undefined}
+								onclick={handleResubmit}
+							>
+								{resubmitting ? m('invoices.modal.submitting') : m('invoices.modal.submit.resubmit')}
+							</button>
+							{#if resubmitRefusal}
+								<p class="approver-hint" id="resubmit-refusal" data-testid="resubmit-refusal">
+									{refusalText(resubmitRefusal, m)}
+								</p>
+							{/if}
+						{/if}
+						{#if recallOffered}
+							<button
+								type="button"
+								class="btn-cancel"
+								data-testid="recall-approval"
+								disabled={saving || !isAllowed(recallVerdict)}
+								aria-describedby={recallRefusal ? 'recall-refusal' : undefined}
+								onclick={() => (showRecallDialog = true)}
+							>
+								{m('invoices.modal.recall.open')}
+							</button>
+							{#if recallRefusal}
+								<!-- Why the approval can't be taken back, from the server's
+								     verdict: a bill the ERP may hold, or a rail paying it. -->
+								<p class="approver-hint" id="recall-refusal" data-testid="recall-refusal">
+									{refusalText(recallRefusal, m)}
+								</p>
+							{/if}
+						{/if}
+					</div>
+				</footer>
+			</form>
 		</div>
 	</div>
-</div>
+</Modal>
 
 {#if showRecallDialog}
 	<!-- A sibling of the invoice dialog, not a child: its Esc and focus trap
@@ -3148,16 +3108,10 @@
 {/if}
 
 <style>
-	.backdrop {
-		position: fixed;
-		inset: 0;
-		background: var(--overlay);
-		display: grid;
-		place-items: center;
-		z-index: 100;
-	}
-
-	.modal {
+	/* The dialog element is Modal's, so its sizing is reached through the class
+	   this component hands it. `<Modal fullscreen>` (app.css) takes over the
+	   width, height, radius and border when the toggle is on. */
+	:global(.modal.invoice-dialog) {
 		background: var(--surface);
 		border: 1px solid var(--border);
 		border-radius: 8px;
@@ -3169,14 +3123,6 @@
 		overflow: hidden;
 		transition: width 0.2s ease, height 0.2s ease;
 	}
-
-	.modal.fullscreen {
-		width: 100vw;
-		height: 100vh;
-		border-radius: 0;
-		border: none;
-	}
-
 
 	header {
 		display: flex;
@@ -3870,41 +3816,6 @@
 		margin-top: 3px;
 		font-size: 0.72rem;
 		color: var(--text-muted);
-	}
-
-	.export-wrapper {
-		position: relative;
-	}
-
-	.export-menu {
-		position: absolute;
-		bottom: 100%;
-		left: 0;
-		margin-bottom: 4px;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-		overflow: hidden;
-		z-index: 10;
-	}
-
-	.export-menu button {
-		display: block;
-		width: 100%;
-		padding: 8px 20px;
-		border: none;
-		background: none;
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		text-align: left;
-		font-family: inherit;
-	}
-
-	.export-menu button:hover {
-		background: color-mix(in srgb, var(--accent) 10%, transparent);
-		color: var(--accent);
 	}
 
 	.warnings-list {

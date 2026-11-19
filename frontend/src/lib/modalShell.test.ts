@@ -27,10 +27,6 @@ const OWNER = 'lib/components/ui/Modal.svelte';
  * list cannot outlive the debt it records.
  */
 const ALLOWLIST: Record<string, string> = {
-	'lib/components/modals/InvoiceModal.svelte':
-		'Pre-dates Modal; the largest e2e-load-bearing dialog. Scheduled to move onto Modal next round.',
-	'lib/components/modals/RunDetailModal.svelte':
-		'Pre-dates Modal; scheduled to move onto Modal next round with InvoiceModal.',
 	'lib/components/layout/NotificationBell.svelte':
 		'A non-modal disclosure popover (role="dialog" without aria-modal, no backdrop, the page stays usable) — not a modal shell.',
 	'routes/portal/login/+page.svelte':

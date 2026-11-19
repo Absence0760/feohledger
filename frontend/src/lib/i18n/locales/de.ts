@@ -4734,6 +4734,7 @@ export const messages = {
 	'invoices.modal.verdictsLoadError': "Es konnte nicht geprüft werden, welche Aktionen Sie für diese Rechnung ausführen dürfen. Betrag, Zahlungsempfänger, Positionen, Datei und Workflow-Aktionen bleiben daher gesperrt.",
 	'invoices.modal.fullscreen': 'Vollbild',
 	'invoices.modal.header': 'Rechnung bearbeiten — {number}',
+	'invoices.modal.dialogLabel': 'Rechnung {number} bearbeiten',
 	'invoices.modal.imageAlt': 'Rechnung — {number}',
 	'invoices.modal.lineItems.addLine': '+ Position hinzufügen',
 	'invoices.modal.lineItems.colDescription': 'Beschreibung',

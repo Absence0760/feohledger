@@ -93,6 +93,32 @@ test.describe('/invoices invoice detail modal', () => {
 		await expect.poll(bodyOverflow).toBe(before);
 	});
 
+	test('the fullscreen toggle fills the viewport edge to edge', async ({ page }) => {
+		// The dialog is the shared Modal now; `<Modal fullscreen>` drops the
+		// backdrop's gutter so the toggle really reaches every edge (the old
+		// hand-rolled shell kept the gutter's max-width cap).
+		await page.locator('table tbody tr').first().getByRole('button', { name: 'Edit' }).click();
+		const modal = page.locator('div.modal[role="dialog"][aria-label*="Edit invoice"]');
+		await expect(modal).toBeVisible();
+		const viewport = page.viewportSize()!;
+
+		const toggle = modal.getByRole('button', { name: 'Fullscreen' });
+		await toggle.click();
+		await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+		await expect
+			.poll(async () => {
+				const box = await modal.boundingBox();
+				return box && [box.x, box.y, Math.round(box.width), Math.round(box.height)];
+			})
+			.toEqual([0, 0, viewport.width, viewport.height]);
+
+		await toggle.click();
+		await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+		await expect
+			.poll(async () => Math.round((await modal.boundingBox())?.width ?? 0))
+			.toBeLessThan(viewport.width);
+	});
+
 	test('Activity timeline renders the per-field before/after change diff', async ({
 		page
 	}) => {

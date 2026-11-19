@@ -4728,6 +4728,7 @@ export const messages = {
 	'invoices.modal.verdictsLoadError': "Não foi possível verificar quais ações você pode realizar nesta fatura, por isso o valor, o beneficiário, os itens, o arquivo e as ações do fluxo continuam bloqueados.",
 	'invoices.modal.fullscreen': 'Tela cheia',
 	'invoices.modal.header': 'Editar fatura — {number}',
+	'invoices.modal.dialogLabel': 'Editar fatura {number}',
 	'invoices.modal.imageAlt': 'Fatura — {number}',
 	'invoices.modal.lineItems.addLine': '+ Adicionar item',
 	'invoices.modal.lineItems.colDescription': 'Descrição',
