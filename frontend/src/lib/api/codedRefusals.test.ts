@@ -124,6 +124,15 @@ describe('codedRefusalText', () => {
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
 		['mfa_code_invalid', 'refusal.mfaCodeInvalid'],
 		['mfa_email_code_invalid', 'refusal.mfaEmailCodeInvalid'],
+		['password_needs_uppercase', 'refusal.passwordNeedsUppercase'],
+		['password_needs_lowercase', 'refusal.passwordNeedsLowercase'],
+		['password_needs_digit', 'refusal.passwordNeedsDigit'],
+		['mfa_challenge_invalid', 'refusal.mfaChallengeInvalid'],
+		['passkey_registration_failed', 'refusal.passkeyRegistrationFailed'],
+		['sso_session_expired', 'refusal.ssoSessionExpired'],
+		['sso_login_rejected', 'refusal.ssoLoginRejected'],
+		['sso_token_invalid', 'refusal.ssoTokenInvalid'],
+		['sso_link_expired', 'refusal.ssoLinkExpired'],
 		['payment_run_awaiting_cfo', 'refusal.paymentRunAwaitingCfo'],
 		['payment_cfo_required', 'refusal.paymentCfoRequired'],
 		['erp_not_connected', 'erpRefusal.notConnected'],
@@ -157,6 +166,14 @@ describe('codedRefusalText', () => {
 		['status_sync_needs_reconnect', 'refusal.statusSyncNeedsReconnect']
 	] as [string, RefusalTestKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
+	});
+
+	it('states a too-short password with its minimum, and only with one', () => {
+		expect(codedRefusalText('password_too_short', { min_length: 12 }, deT)).toBe(
+			de['refusal.passwordTooShort'].replace('{min}', '12')
+		);
+		expect(codedRefusalText('password_too_short', {}, deT)).toBeNull();
+		expect(codedRefusalText('password_too_short', { min_length: '12' }, deT)).toBeNull();
 	});
 
 	it('states a refused workspace closure only when it can read the blockers', () => {

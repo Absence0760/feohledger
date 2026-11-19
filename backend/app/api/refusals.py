@@ -496,3 +496,68 @@ SET_PASSWORD_EMAIL_FAILED_DETAIL = coded_refusal(
     "The set-password email could not be sent, so nothing was changed. "
     "Check the email provider configuration and try again.",
 )
+
+
+# --- auth refusals that used to send an exception's text --------------------
+# Each replaces a ``detail=str(exc)``: library or internal wording no client
+# can translate, which `tests/test_no_exception_text_in_detail.py` now bans.
+# Every one folds the raising function's cases into ONE code, so no code
+# distinguishes what the old English did not need to (an expired challenge
+# from a replayed one, a bad nonce from a bad signature);
+# the exception class is logged server-side instead.
+
+
+def password_refusal(exc) -> dict:
+    """The coded 422 for a password that broke a complexity rule.
+
+    ``exc`` is a ``utils.passwords.PasswordError``, which names its rule:
+    ``password_too_short`` (params ``min_length``), ``password_needs_uppercase``,
+    ``password_needs_lowercase`` or ``password_needs_digit``. The rule is the
+    user's own input, so naming it enumerates nothing.
+    """
+    return coded_refusal(exc.code, str(exc), **exc.params)
+
+
+#: The login MFA challenge token could not be redeemed — expired, already
+#: spent, malformed or of the wrong type (``mfa.decode_challenge_token`` /
+#: ``decode_vendor_challenge_token``). A 401: there is no session yet, and the
+#: only way on is to sign in again, whatever the reason.
+MFA_CHALLENGE_INVALID = "mfa_challenge_invalid"
+MFA_CHALLENGE_INVALID_DETAIL = coded_refusal(
+    MFA_CHALLENGE_INVALID, "This sign-in attempt has expired. Sign in again."
+)
+
+#: A passkey registration ceremony that did not verify (challenge expired,
+#: origin not allowed, attestation rejected). A 400.
+PASSKEY_REGISTRATION_FAILED = "passkey_registration_failed"
+PASSKEY_REGISTRATION_FAILED_DETAIL = coded_refusal(
+    PASSKEY_REGISTRATION_FAILED, "The passkey could not be registered. Try again."
+)
+
+#: The SSO login's server-minted state (OIDC ``state`` / SAML ``RelayState``)
+#: is unknown, spent or expired. A 400.
+SSO_SESSION_EXPIRED = "sso_session_expired"
+SSO_SESSION_EXPIRED_DETAIL = coded_refusal(
+    SSO_SESSION_EXPIRED, "Login session expired or was tampered with. Please try again."
+)
+
+#: The OIDC token exchange failed: the identity provider refused the code, or
+#: its configuration could not be used to reach it. A 400.
+SSO_LOGIN_REJECTED = "sso_login_rejected"
+SSO_LOGIN_REJECTED_DETAIL = coded_refusal(
+    SSO_LOGIN_REJECTED, "Identity provider rejected the login. Please try again."
+)
+
+#: The identity provider's ID token did not verify (signature, issuer,
+#: audience, expiry or nonce). A 400.
+SSO_TOKEN_INVALID = "sso_token_invalid"
+SSO_TOKEN_INVALID_DETAIL = coded_refusal(
+    SSO_TOKEN_INVALID, "Identity provider token could not be verified. Please try again."
+)
+
+#: The one-time SSO handoff code the sign-in bridge swaps for a session is
+#: unknown, spent or expired. A 400.
+SSO_LINK_EXPIRED = "sso_link_expired"
+SSO_LINK_EXPIRED_DETAIL = coded_refusal(
+    SSO_LINK_EXPIRED, "This login link has expired. Please sign in again."
+)

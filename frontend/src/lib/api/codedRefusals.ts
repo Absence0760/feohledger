@@ -645,6 +645,23 @@ const BUILDERS: Record<string, Builder> = {
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
 	// The sign-in challenge's emailed code missed: wrong, expired or spent.
 	mfa_email_code_invalid: fixed('refusal.mfaEmailCodeInvalid'),
+	// The auth refusals that used to send an exception's own text
+	// (`api/refusals.py` § auth refusals): a password complexity rule (employee
+	// and portal), a spent MFA challenge, a passkey that would not register,
+	// and the SSO legs (state, code exchange, ID token, SAML handoff link).
+	password_too_short: (p, t) =>
+		typeof p.min_length === 'number' && p.min_length > 0
+			? t('refusal.passwordTooShort', { min: p.min_length })
+			: null,
+	password_needs_uppercase: fixed('refusal.passwordNeedsUppercase'),
+	password_needs_lowercase: fixed('refusal.passwordNeedsLowercase'),
+	password_needs_digit: fixed('refusal.passwordNeedsDigit'),
+	mfa_challenge_invalid: fixed('refusal.mfaChallengeInvalid'),
+	passkey_registration_failed: fixed('refusal.passkeyRegistrationFailed'),
+	sso_session_expired: fixed('refusal.ssoSessionExpired'),
+	sso_login_rejected: fixed('refusal.ssoLoginRejected'),
+	sso_token_invalid: fixed('refusal.ssoTokenInvalid'),
+	sso_link_expired: fixed('refusal.ssoLinkExpired'),
 	// `api/auth.py::_refuse_other_workspace` — signing in on another
 	// workspace's page. `sign_in_url` is the account's own sign-in page, query
 	// string (`?email=`) included; the sentence names only its host, which is

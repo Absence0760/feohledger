@@ -1093,6 +1093,10 @@ async def test_portal_mfa_challenge_endpoint_422s_on_unknown_factor(mfa_on):
                     "/api/portal/auth/mfa/challenge", json={**payload, "method": method}
                 )
                 assert ok.status_code == 401, (method, ok.status_code, ok.text)
+                # A coded refusal the page localizes — never the decoder's
+                # own wording about the token.
+                assert ok.json()["detail"]["code"] == "mfa_challenge_invalid", ok.text
+                assert "token" not in ok.json()["detail"]["message"].lower()
     finally:
         app.dependency_overrides.pop(get_tenant_slug, None)
         app.dependency_overrides.pop(get_tenant_db, None)

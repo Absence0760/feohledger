@@ -324,16 +324,32 @@ async def dummy_verify() -> None:
 
 
 class PasswordError(ValueError):
-    """Raised when a user-supplied password doesn't meet complexity rules."""
+    """Raised when a user-supplied password doesn't meet complexity rules.
+
+    Carries the rule it broke as a stable ``code`` (plus ``params``) so the
+    routers answer with ``api/refusals.password_refusal`` — a coded refusal
+    the client localizes — rather than this English sentence.
+    """
+
+    def __init__(self, code: str, message: str, **params: object) -> None:
+        super().__init__(message)
+        self.code = code
+        self.params = params
 
 
 def validate_password_complexity(password: str) -> None:
     """Enforce minimum complexity for user-chosen passwords. Raises PasswordError."""
     if len(password) < MIN_LENGTH:
-        raise PasswordError(f"Password must be at least {MIN_LENGTH} characters.")
+        raise PasswordError(
+            "password_too_short",
+            f"Password must be at least {MIN_LENGTH} characters.",
+            min_length=MIN_LENGTH,
+        )
     if not _UPPER.search(password):
-        raise PasswordError("Password must contain an uppercase letter.")
+        raise PasswordError(
+            "password_needs_uppercase", "Password must contain an uppercase letter."
+        )
     if not _LOWER.search(password):
-        raise PasswordError("Password must contain a lowercase letter.")
+        raise PasswordError("password_needs_lowercase", "Password must contain a lowercase letter.")
     if not _DIGIT.search(password):
-        raise PasswordError("Password must contain a digit.")
+        raise PasswordError("password_needs_digit", "Password must contain a digit.")

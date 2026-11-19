@@ -448,6 +448,10 @@ async def test_reset_password_weak_password_rejected(realdb, fake_redis, monkeyp
             json={"token": token, "new_password": "short"},
         )
     assert weak_resp.status_code == 422
+    # The broken rule as a coded refusal the page localizes (with its figure),
+    # not the validator's English sentence.
+    assert weak_resp.json()["detail"]["code"] == "password_too_short"
+    assert weak_resp.json()["detail"]["params"] == {"min_length": 12}
 
 
 async def _user_id_for(realdb, email: str) -> uuid.UUID:
