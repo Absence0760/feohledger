@@ -382,7 +382,7 @@
 </div>
 
 <style>
-	/* This component is mounted standalone (not via <slot>), so it needs its
+	/* This component is mounted standalone (not as a layout's routed children), so it needs its
 	   own copy of the .chart-card / .cf-bar* / .empty recipe rather than
 	   relying on the parent route's scoped <style> — Svelte scoped CSS never
 	   reaches into a child component's own template. Kept in sync with

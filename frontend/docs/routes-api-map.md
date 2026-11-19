@@ -57,7 +57,7 @@ is `backend/docs/api-surface.md`.
 | `/profile` (notifications prefs) | `routes/profile/+page.svelte` | `GET/PATCH /api/notifications/preferences` — per-event in-app/email toggles |
 
 Root layout (`+layout.svelte`) routing logic:
-- No tenant subdomain → Landing component (public) or `<slot />` for `/signup` / `/verify`
+- No tenant subdomain → Landing component (public) or the routed children (`{@render children()}`) for `/signup` / `/verify`
 - Tenant present, not logged in → redirect to `/login` (or `/login/mfa` if a challenge is pending in `sessionStorage`)
 - Tenant present, logged in, `must_change_password=true` → redirect to `/change-password`
 - Tenant present, logged in, flag clear → app shell with sidebar

@@ -453,7 +453,7 @@ The rules that hold everywhere, so you know when you need to go read the detail:
 - **Class names follow the documented convention** rather than utility soup; the conventions section is the reference.
 ## Conventions
 
-- **Svelte 5 runes** — `$state`, `$derived`, `$effect`, `$props`. No legacy options API.
+- **Svelte 5 runes** — `$state`, `$derived`, `$effect`, `$props`. No legacy options API, and no `<slot>`: passed content renders with `{@render children()}` (guard: `src/lib/noLegacySlot.test.ts`).
 - **TypeScript** — `lang="ts"` on all `<script>` blocks.
 - **SvelteKit 3 shapes** — there is no `svelte.config.js`: Kit + compiler options live in the `sveltekit({...})` call in `vite.config.ts` (an existing `svelte.config.js` is a hard error). Import from `#lib/...` (a package.json `imports` entry) **with the file's real extension** — `#lib/api.ts`, `#lib/i18n/store.svelte.ts`, `#lib/components/ui/Modal.svelte`; extensionless specifiers do not resolve. The route/URL state is `page` from `$app/state` (read `page.url`, never `$page`); `browser` comes from `$app/env`. A new environment variable is declared in `src/env.ts` (`static: true` — there is no runtime to read it) and imported from `$app/env/public`. `asset('logo.svg')` takes a path with no leading slash.
 - **API access** — always through `src/lib/api.ts`, never raw `fetch()`.
