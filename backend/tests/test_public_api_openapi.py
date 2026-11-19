@@ -86,7 +86,7 @@ def test_spec_publishes_v1_invoice_money_as_string():
 
 
 def test_spec_publishes_v1_invoice_currency_as_nullable():
-    """An invoice may record no currency (decisions §TBD-currency); the contract
+    """An invoice may record no currency (decisions §473); the contract
     says so rather than promising a code it would then break with a 500."""
     currency = _spec()["components"]["schemas"]["V1Invoice"]["properties"]["currency"]
     assert {"type": "null"} in currency.get("anyOf", []), currency

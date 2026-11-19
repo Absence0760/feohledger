@@ -364,7 +364,7 @@ export interface Invoice {
 	invoice_number: string;
 	amount: MoneyAmount;
 	/** `null` = currency unknown: an upload nothing has read yet, or a document
-	 *  that names none (decisions §TBD-currency). Render the amount bare, never
+	 *  that names none (decisions §473). Render the amount bare, never
 	 *  with a guessed symbol (§160 / §196 / §200). */
 	currency: string | null;
 	invoice_date: string | null;

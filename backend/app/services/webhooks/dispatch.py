@@ -334,7 +334,7 @@ def _invoice_fields(invoice) -> dict:
         "vendor_name": getattr(invoice, "vendor_name", None),
         "amount": _money_str(getattr(invoice, "amount", None)),
         # NULL = the invoice records no currency: sent as null, never a guessed
-        # USD (decisions §160 / §196 / §TBD-currency).
+        # USD (decisions §160 / §196 / §473).
         "currency": getattr(invoice, "currency", None) or None,
         "status": getattr(getattr(invoice, "status", None), "value", None),
     }

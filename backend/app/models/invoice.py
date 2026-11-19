@@ -55,7 +55,7 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     vendor_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    # NULL means "currency unknown" (migration 0136, decisions §TBD-currency): a
+    # NULL means "currency unknown" (migration 0136, decisions §473): a
     # document nobody has read yet, or one whose extraction found no code, records
     # no currency rather than a guessed one (§160/§196/§200). Every money path
     # refuses it as `currency_unknown` through `payment_runs.payable_currency_code`.

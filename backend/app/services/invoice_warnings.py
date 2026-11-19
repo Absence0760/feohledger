@@ -441,7 +441,7 @@ async def refresh_warnings(
             # foreign-currency invoice reads as a huge outlier) and mask
             # real anomalies (a mixed-currency history inflates stdev).
             # An invoice that records no currency has no comparable history:
-            # reading it as USD would score it against USD invoices (§TBD-currency).
+            # reading it as USD would score it against USD invoices (§473).
             from app.services.payment_runs import payable_currency_code
 
             anomaly_currency = payable_currency_code(invoice.currency)

@@ -1,4 +1,4 @@
-"""Migration 0136 — an invoice may record "currency unknown" as NULL (§TBD-currency).
+"""Migration 0136 — an invoice may record "currency unknown" as NULL (§473).
 
 The realdb harness builds tenants with ``create_all``, so the nullable column
 exists there without the revision ever executing; that is the fresh-tenant half

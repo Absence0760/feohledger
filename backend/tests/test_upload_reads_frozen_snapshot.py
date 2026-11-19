@@ -221,7 +221,7 @@ async def test_upload_does_not_mint_a_second_definition(realdb, stub_upload):
 async def test_upload_records_the_currency_as_unknown_not_usd(realdb, stub_upload):
     """Nothing has read the document when the row is created, so the upload
     records no currency (NULL) rather than the USD default (decisions §160 /
-    §196 / §200, §TBD-currency). The invoice reads back with `currency: null`
+    §196 / §200, §473). The invoice reads back with `currency: null`
     on the detail and the list, rather than a 500 or a guessed code."""
     async with realdb.client(key=TENANT, role="ap_manager") as c:
         resp = await c.post(

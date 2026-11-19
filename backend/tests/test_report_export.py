@@ -180,7 +180,7 @@ def test_invoice_register_emits_one_data_row_per_invoice():
 @pytest.mark.parametrize("currency", [None, ""])
 def test_invoice_register_leaves_an_unknown_currency_blank(currency):
     """An invoice that records no currency exports a blank cell, never a
-    guessed USD (decisions §160 / §196 / §TBD-currency)."""
+    guessed USD (decisions §160 / §196 / §473)."""
     inv = SimpleNamespace(
         id=uuid.uuid4(),
         invoice_number="NOCUR",

@@ -1,4 +1,4 @@
-"""Every `Invoice(...)` built under `app/` names its currency (decisions §TBD-currency).
+"""Every `Invoice(...)` built under `app/` names its currency (decisions §473).
 
 `Invoice.__init__` falls back to "USD" when `currency` is not mentioned at all,
 which keeps old test fixtures working. That fallback is the substitution

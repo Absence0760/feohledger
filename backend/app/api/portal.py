@@ -573,7 +573,7 @@ async def submit_invoice(
         vendor_id=vendor.id,
         description="",
         amount=Decimal("0"),
-        # Unknown until extraction reads the document (§TBD-currency).
+        # Unknown until extraction reads the document (§473).
         currency=None,
         status=InvoiceStatus.new,
         organization_id=vendor.organization_id,

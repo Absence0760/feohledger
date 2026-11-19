@@ -1173,7 +1173,7 @@ async def test_redeliver_claims_the_row_so_a_sweep_tick_cannot_double_send(reald
 def test_an_unknown_invoice_currency_is_sent_as_null_never_usd(currency):
     """An invoice that records no currency (an upload not yet extracted, or a
     document naming none) is sent as `currency: null` on both invoice-bearing
-    event shapes, never a guessed USD (decisions §160 / §196 / §TBD-currency)."""
+    event shapes, never a guessed USD (decisions §160 / §196 / §473)."""
     from decimal import Decimal
 
     from app.schemas.webhook_events import WebhookExceptionData, WebhookInvoiceData
