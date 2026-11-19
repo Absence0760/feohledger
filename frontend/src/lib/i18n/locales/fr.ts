@@ -2796,7 +2796,7 @@ export const messages = {
 	'glAccounts.count': '{n, plural, one {# compte} other {# comptes}}',
 	'glAccounts.empty': 'Aucun compte dans ce plan comptable.',
 	'glAccounts.empty.filtered': 'Aucun compte ne correspond à vos filtres.',
-	'glAccounts.empty.errored': 'Impossible de charger le plan comptable. Actualisez la page pour réessayer.',
+	'glAccounts.empty.errored': 'Impossible de charger le plan comptable.',
 	'glAccounts.onboarding.heading': 'Pas encore de plan comptable',
 	'glAccounts.onboarding.description': 'Les comptes généraux sont ceux sur lesquels sont imputées les lignes de facture, les dépenses et les demandes d\'achat. Synchronisez-les depuis un ERP connecté, ou ajoutez-les ici un par un.',
 	'glAccounts.toast.loadFailed': 'Impossible de charger le plan comptable',

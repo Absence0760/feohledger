@@ -218,12 +218,22 @@ test.describe('/gl-accounts', () => {
 
 		await page.getByRole('button', { name: 'Asset', exact: true }).click();
 
-		await expect(page.getByTestId('table-empty')).toHaveText(
-			/Couldn.t load the chart of accounts/
-		);
+		const failed = page.getByTestId('gl-accounts-error');
+		await expect(failed).toHaveText(/Couldn.t load the chart of accounts/);
 		await expect(page.locator('table tbody td.mono')).toHaveCount(0);
 		// …and the footer stops asserting a count it no longer has.
 		await expect(page.locator('.count-line')).toHaveCount(0);
+
+		// A way back that is not a page reload: Retry re-runs the SAME filter.
+		await page.unroute('**/api/gl-accounts*');
+		const retried = page.waitForResponse(
+			(r) =>
+				new URL(r.url()).pathname === '/api/gl-accounts' && r.url().includes('account_type=asset')
+		);
+		await failed.getByRole('button', { name: 'Retry' }).click();
+		expect((await retried).status()).toBe(200);
+		await expect(page.getByTestId('gl-accounts-error')).toHaveCount(0);
+		await expect(page.locator('table tbody tr').first()).toBeVisible();
 	});
 
 	test('an admin gets both writes; the create dialog opens and cancels clean', async ({ page }) => {

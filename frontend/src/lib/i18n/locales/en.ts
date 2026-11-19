@@ -2959,7 +2959,7 @@ export const en = {
 	'glAccounts.count': '{n, plural, one {# account} other {# accounts}}',
 	'glAccounts.empty': 'No accounts in this chart.',
 	'glAccounts.empty.filtered': 'No accounts match your filters.',
-	'glAccounts.empty.errored': 'Couldn’t load the chart of accounts. Refresh to try again.',
+	'glAccounts.empty.errored': 'Couldn’t load the chart of accounts.',
 	'glAccounts.onboarding.heading': 'No chart of accounts yet',
 	'glAccounts.onboarding.description': 'GL codes are what invoice lines, expenses and requisitions get coded to. Sync them from a connected ERP, or add them here one at a time.',
 	'glAccounts.toast.loadFailed': 'Failed to load the chart of accounts',
