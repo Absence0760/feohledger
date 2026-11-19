@@ -743,8 +743,7 @@ export const messages = {
 	'admin.entities.statusInactive': 'Inactive',
 	'admin.entities.row.makeDefault': 'Définir par défaut',
 	'admin.entities.row.confirm': 'Confirmer',
-	// Retention policy (routes/admin/retention) + the shared row-action name
-	'admin.rowActionAria': "{action} de {name}",
+	// Retention policy (routes/admin/retention)
 	'admin.retention.title': "Politique de conservation",
 	'admin.retention.reset': "Réinitialiser",
 	'admin.retention.save': "Enregistrer les modifications",

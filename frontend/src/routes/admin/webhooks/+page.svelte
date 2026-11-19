@@ -96,8 +96,9 @@
 
 	// Delete confirm (armed two-click on the row action).
 	let confirmDeleteId = $state<string | null>(null);
-	// The subscription whose delete is in flight; the armed button stays
-	// pressable otherwise and a third click sends a second DELETE.
+	// The subscription whose delete is in flight. Its button goes `busy` — the
+	// armed button stays pressable otherwise and a third click sends a second
+	// DELETE — and the other rows' Delete is disabled until it settles.
 	let deletingId = $state<string | null>(null);
 
 	// ── Secret rotation ──────────────────────────────────────────────────────
@@ -561,14 +562,15 @@
 								<RowAction
 									variant="danger"
 									armed={confirmDeleteId === sub.id}
-								disabled={deletingId !== null}
-								ariaLabel={m('admin.rowActionAria', {
-									action:
-										confirmDeleteId === sub.id
-											? m('admin.webhooks.row.confirm')
-											: m('admin.webhooks.row.delete'),
-									name: sub.name
-								})}
+									busy={deletingId === sub.id}
+									disabled={deletingId !== null && deletingId !== sub.id}
+									ariaLabel={m('common.rowActionAria', {
+										action:
+											confirmDeleteId === sub.id
+												? m('admin.webhooks.row.confirm')
+												: m('admin.webhooks.row.delete'),
+										name: sub.name
+									})}
 									onclick={(e) => {
 										e.stopPropagation();
 										if (confirmDeleteId === sub.id) {

@@ -733,8 +733,7 @@ export const messages = {
 	'admin.entities.statusInactive': '無効',
 	'admin.entities.row.makeDefault': 'デフォルトにする',
 	'admin.entities.row.confirm': '確認',
-	// Retention policy (routes/admin/retention) + the shared row-action name
-	'admin.rowActionAria': "{name}: {action}",
+	// Retention policy (routes/admin/retention)
 	'admin.retention.title': "保持ポリシー",
 	'admin.retention.reset': "リセット",
 	'admin.retention.save': "変更を保存",

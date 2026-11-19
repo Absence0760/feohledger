@@ -79,8 +79,9 @@
 
 	// Make-default row action (armed two-click, mirroring the api-keys revoke).
 	let confirmDefaultId = $state<string | null>(null);
-	// The entity whose make-default is in flight; the armed button stays
-	// pressable otherwise and a third click sends the request twice.
+	// The entity whose make-default is in flight. Its button goes `busy` — the
+	// armed button stays pressable otherwise and a third click sends the request
+	// twice — and the other rows' make-default is disabled until it settles.
 	let settingDefaultId = $state<string | null>(null);
 
 	/** Auto-suggest a slug while the admin types a name, until they edit the
@@ -273,8 +274,9 @@
 							{#if !entity.is_default}
 								<RowAction
 									armed={confirmDefaultId === entity.id}
-									disabled={settingDefaultId !== null}
-									ariaLabel={m('admin.rowActionAria', {
+									busy={settingDefaultId === entity.id}
+									disabled={settingDefaultId !== null && settingDefaultId !== entity.id}
+									ariaLabel={m('common.rowActionAria', {
 										action:
 											confirmDefaultId === entity.id
 												? m('admin.entities.row.confirm')

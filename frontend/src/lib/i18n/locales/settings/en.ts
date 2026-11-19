@@ -760,8 +760,7 @@ export const enSettings = {
 	'admin.entities.statusInactive': 'Inactive',
 	'admin.entities.row.makeDefault': 'Make default',
 	'admin.entities.row.confirm': 'Confirm',
-	// Retention policy (routes/admin/retention) + the shared row-action name
-	'admin.rowActionAria': "{action} for {name}",
+	// Retention policy (routes/admin/retention)
 	'admin.retention.title': "Retention Policy",
 	'admin.retention.reset': "Reset",
 	'admin.retention.save': "Save changes",

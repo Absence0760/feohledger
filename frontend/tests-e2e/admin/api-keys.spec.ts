@@ -172,6 +172,53 @@ test.describe('/admin/api-keys (admin)', () => {
 		purgeKey(id);
 	});
 
+	test('the armed Confirm is busy while its revoke runs, keeps focus, and sends one DELETE', async ({
+		page
+	}) => {
+		const headers = await apiHeaders(page);
+		const name = `e2e-revoke-busy-${Date.now()}`;
+		const created = (await (
+			await page.request.post(`${API_BASE}/api/api-keys`, { headers, data: { name } })
+		).json()) as { api_key: ApiKeyResponse; key: string };
+		const id = created.api_key.id;
+
+		try {
+			// Hold the DELETE until the in-flight state has been asserted, so the
+			// test observes it deterministically rather than racing the request.
+			let deletes = 0;
+			let release!: () => void;
+			const held = new Promise<void>((resolve) => (release = resolve));
+			await page.route(`**/api/api-keys/${id}`, async (route: Route) => {
+				if (route.request().method() !== 'DELETE') return route.fallback();
+				deletes++;
+				await held;
+				await route.fallback();
+			});
+
+			await page.goto('/admin/api-keys');
+			const row = page.locator('tr', { hasText: name });
+			await row.getByRole('button', { name: `Revoke for ${name}`, exact: true }).click();
+			const confirm = row.getByRole('button', { name: `Confirm for ${name}`, exact: true });
+			await confirm.focus();
+			await page.keyboard.press('Enter');
+
+			await expect(confirm).toHaveAttribute('aria-busy', 'true');
+			await expect(confirm).toBeDisabled();
+			await expect(confirm).toBeFocused();
+			// A third press on the still-armed button must not send a second DELETE.
+			await page.keyboard.press('Enter');
+			await confirm.click({ force: true });
+			expect(deletes).toBe(1);
+
+			release();
+			await expect(row.getByText('Revoked')).toBeVisible();
+			expect(deletes).toBe(1);
+		} finally {
+			await page.unroute(`**/api/api-keys/${id}`).catch(() => {});
+			purgeKey(id);
+		}
+	});
+
 	/**
 	 * The METER, not just the panel.
 	 *

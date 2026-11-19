@@ -69,8 +69,9 @@
 	let minted = $state<ApiKeyCreated | null>(null);
 
 	// Revoke confirm (armed two-click on the row action). `revokingId` holds the
-	// key whose revoke is in flight, so a third click on the still-armed button
-	// cannot send a second DELETE.
+	// key whose revoke is in flight: its button goes `busy` (a third click on the
+	// still-armed button cannot send a second DELETE) and every other row's
+	// Revoke is disabled until it settles.
 	let confirmRevokeId = $state<string | null>(null);
 	let revokingId = $state<string | null>(null);
 
@@ -247,8 +248,9 @@
 								<RowAction
 									variant="danger"
 									armed={confirmRevokeId === key.id}
-									disabled={revokingId !== null}
-									ariaLabel={m('admin.rowActionAria', {
+									busy={revokingId === key.id}
+									disabled={revokingId !== null && revokingId !== key.id}
+									ariaLabel={m('common.rowActionAria', {
 										action:
 											confirmRevokeId === key.id
 												? m('admin.apiKeys.row.confirm')
