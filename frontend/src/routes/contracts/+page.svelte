@@ -21,6 +21,7 @@
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import BulkBar from '#lib/components/ui/BulkBar.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
@@ -59,13 +60,9 @@
 
 	// Modal state: null = create; a Contract = detail/edit.
 	// Three states, not two: a failed load must not read as "nothing matched".
-	let emptyMessage = $derived(
-		contractStore.loading
-			? m('common.loading')
-			: contractStore.errored
-				? m('contracts.empty.errored')
-				: m('contracts.empty')
-	);
+	// The failed state renders `ui/LoadError` (with a Retry) in the table's
+	// place, so the empty line only has loading vs. empty to say.
+	let emptyMessage = $derived(contractStore.loading ? m('common.loading') : m('contracts.empty'));
 
 	let showCreate = $state(false);
 	let editing = $state<Contract | null>(null);
@@ -198,14 +195,14 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					`Selected the first ${res.ids.length} of ${res.total} matching — narrow your filters to select the rest.`,
+					m('contracts.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
 					'error'
 				);
 			} else {
-				toast(`Selected all ${res.ids.length} matching contract(s)`, 'success');
+				toast(m('contracts.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Failed to select all matching', 'error');
+			toast(err instanceof Error ? err.message : m('contracts.toast.selectAllFailed'), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -222,7 +219,7 @@
 				: m('contracts.bulk.updated', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk status change failed', 'error');
+			toast(err instanceof Error ? err.message : m('contracts.toast.bulkStatusFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -235,7 +232,7 @@
 			await exportContractsCsv(ids);
 			toast(m('contracts.bulk.exported', { n: ids.length }), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Bulk export failed', 'error');
+			toast(err instanceof Error ? err.message : m('contracts.toast.bulkExportFailed'), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -344,6 +341,13 @@
 		<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
 	</div>
 
+	{#if contractStore.errored}
+		<LoadError
+			message={m('contracts.empty.errored')}
+			onretry={() => contractStore.fetch(buildParams()).catch(() => {})}
+			testId="contracts-error"
+		/>
+	{:else}
 	<DataTable
 		isEmpty={contractStore.all.length === 0}
 		empty={emptyMessage}
@@ -418,8 +422,9 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	{/if}
 
-	{#if contractStore.hasMore}
+	{#if contractStore.hasMore && !contractStore.errored}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={() => contractStore.loadMore()} disabled={contractStore.loading}>
 				{contractStore.loading
