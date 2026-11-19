@@ -69,7 +69,7 @@
 	// instant, but the address bar follows the term only once typing pauses:
 	// writing it per keystroke spent a replaceState per character, and Safari
 	// throws once a page passes 100 of those in 30 seconds.
-	let urlSearch = $state(search.trim());
+	let urlSearch = $state((page.url.searchParams.get('search') ?? '').trim());
 	$effect(() => {
 		const q = search.trim();
 		if (q === untrack(() => urlSearch)) return;
