@@ -942,6 +942,28 @@ the per-account MFA failure budget counts the miss whatever the status
 sentence also covers an expired code — and is a `401` for the same reason
 (§465).
 
+**No auth refusal sends an exception's own text.** The auth routers
+(`api/auth.py`, `api/portal_auth.py`, `api/auth_sso.py`, `api/auth_saml.py`)
+used to answer several failures with `detail=str(exc)` — the validator's,
+decoder's or SSO service's English, which no client could translate. Each is a
+coded refusal now (`api/refusals.py` § auth refusals), status unchanged, with
+the exception class logged server-side instead:
+
+| Code | Status | Where |
+|------|--------|-------|
+| `password_too_short` (`min_length`), `password_needs_uppercase`, `password_needs_lowercase`, `password_needs_digit` | 422 | reset / change / set password, employee and portal (`PasswordError.code`) |
+| `mfa_challenge_invalid` | 401 | every route that redeems a login MFA challenge token, employee and portal — expired, spent, malformed and wrong-type fold into one |
+| `passkey_registration_failed` | 400 | `POST /api/auth/mfa/passkey/register/verify` |
+| `sso_session_expired` | 400 | OIDC callback state, SAML ACS RelayState |
+| `sso_login_rejected` | 400 | OIDC code exchange |
+| `sso_token_invalid` | 400 | OIDC ID-token validation (signature, claims, nonce) |
+| `sso_link_expired` | 400 | SAML bridge `/exchange` handoff code |
+
+Each code folds every case its raising function distinguishes, so none can tell
+a caller more than the step it failed at. `tests/test_no_exception_text_in_detail.py`
+keeps the auth routers clean and ratchets the remaining sites elsewhere in
+`app/api` (a per-file count that may only shrink).
+
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
 `api/auth._org_closes_password_sign_in`, which is `is_sso_only`: the function

@@ -735,6 +735,75 @@ async def test_sso_authorize_broken_config_is_400_not_500(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stage", "code"),
+    [
+        ("state", "sso_session_expired"),
+        ("exchange", "sso_login_rejected"),
+        ("id_token", "sso_token_invalid"),
+    ],
+)
+async def test_sso_callback_failures_are_coded_not_exception_text(monkeypatch, stage, code):
+    """Each OIDC callback leg that used to send ``str(exc)`` answers a coded
+    400 instead: one code per leg, whatever the SSO service objected to, and
+    none of its wording."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.api import auth_sso
+    from app.services import sso
+
+    secret_text = "internal wording that must not reach the client"
+
+    async def _boom(*_a, **_k):
+        raise sso.SSOValidationError(secret_text)
+
+    async def _consume_state(state):
+        return {"tenant": "acme", "nonce": "nonce-y"}
+
+    async def _fetch_org(slug, db):
+        return SimpleNamespace(id=uuid.uuid4(), slug="acme", settings={})
+
+    async def _discovery(url):
+        return {"issuer": "https://idp.example.com"}
+
+    async def _tokens(*_a, **_k):
+        return {"id_token": "a.b.c"}
+
+    async def _noop(*_a, **_k):
+        return None
+
+    config = SimpleNamespace(discovery_url="https://idp.example.com", client_id="cid")
+    monkeypatch.setattr(auth_sso, "consume_state", _boom if stage == "state" else _consume_state)
+    monkeypatch.setattr(auth_sso, "_fetch_org_by_slug", _fetch_org)
+
+    async def _settings(db, org):
+        return {}
+
+    async def _secret(*_a, **_k):
+        return "s3cret"
+
+    monkeypatch.setattr(auth_sso, "sign_in_settings", _settings)
+    monkeypatch.setattr(auth_sso, "_resolve_sso_or_none", lambda s: config)
+    monkeypatch.setattr(auth_sso, "load_client_secret", _secret)
+    monkeypatch.setattr(auth_sso, "fetch_discovery", _discovery)
+    monkeypatch.setattr(
+        auth_sso, "exchange_code_for_tokens", _boom if stage == "exchange" else _tokens
+    )
+    monkeypatch.setattr(auth_sso, "validate_id_token", _boom)
+    monkeypatch.setattr(auth_sso, "dispatch_auth_audit", _noop)
+
+    fake_request = SimpleNamespace(client=SimpleNamespace(host="1.2.3.4"), headers={})
+    body = auth_sso.SSOCallbackRequest(code="the-code", state="the-state")
+    with pytest.raises(HTTPException) as exc:
+        await auth_sso.sso_callback(body, fake_request, db=None)
+    assert exc.value.status_code == 400
+    assert exc.value.detail["code"] == code
+    assert secret_text not in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_sso_callback_broken_config_is_400_not_500(monkeypatch):
     from types import SimpleNamespace
 

@@ -19,9 +19,12 @@ from app.api.deps import (
 )
 from app.api.permissions import effective_permissions
 from app.api.refusals import (
+    MFA_CHALLENGE_INVALID_DETAIL,
     MFA_CODE_INVALID_DETAIL,
     MFA_EMAIL_CODE_INVALID_DETAIL,
+    PASSKEY_REGISTRATION_FAILED_DETAIL,
     coded_refusal,
+    password_refusal,
 )
 from app.config import settings
 from app.database import control_session_factory, get_control_db
@@ -329,6 +332,17 @@ async def _send_email_otp(user: User, code: str) -> None:
     )
     adapter = get_email_adapter()
     await adapter.send(msg)
+
+
+def _challenge_refused(exc: ValueError) -> HTTPException:
+    """The 401 for an MFA challenge token that cannot be redeemed.
+
+    One coded refusal whatever ``mfa.decode_challenge_token`` objected to
+    (expired, spent, malformed, wrong type): the next step is the same — sign in
+    again — and the reason stays in the server log, by exception class.
+    """
+    logger.info("MFA challenge refused: %s", type(exc).__name__)
+    return HTTPException(status_code=401, detail=MFA_CHALLENGE_INVALID_DETAIL)
 
 
 def _client_ip(request: Request | None) -> str | None:
@@ -852,7 +866,7 @@ async def reset_password(
     try:
         validate_password_complexity(body.new_password)
     except PasswordError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=password_refusal(exc)) from exc
 
     user_id = await password_reset.consume_reset_token(body.token)
     if user_id is None:
@@ -900,7 +914,7 @@ async def request_email_otp(
     try:
         claims = await mfa.decode_challenge_token(body.challenge_token)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise _challenge_refused(exc) from exc
 
     user = (await db.execute(select(User).where(User.id == claims.subject_id))).scalar_one_or_none()
     if not user:
@@ -941,7 +955,7 @@ async def verify_mfa(
     try:
         claims = await mfa.decode_challenge_token(body.challenge_token)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise _challenge_refused(exc) from exc
 
     user = (await db.execute(select(User).where(User.id == claims.subject_id))).scalar_one_or_none()
     if not user or not user.is_active:
@@ -1602,7 +1616,8 @@ async def passkey_register_finish(
             rp=rp,
         )
     except webauthn.WebAuthnError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("Passkey registration refused: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail=PASSKEY_REGISTRATION_FAILED_DETAIL) from exc
 
     cred = WebAuthnCredential(
         user_id=user.id,
@@ -1735,7 +1750,7 @@ async def passkey_authenticate_start(
     try:
         claims = await mfa.decode_challenge_token(body.challenge_token)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise _challenge_refused(exc) from exc
 
     creds = await _user_passkeys(db, claims.subject_id)
     if not creds:
@@ -1832,7 +1847,7 @@ async def passkey_authenticate_finish(
     try:
         claims = await mfa.decode_challenge_token(body.challenge_token)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise _challenge_refused(exc) from exc
 
     user = (await db.execute(select(User).where(User.id == claims.subject_id))).scalar_one_or_none()
     if not user or not user.is_active:
@@ -2051,7 +2066,7 @@ async def _apply_new_password(user: User, new_password: str) -> bool:
     try:
         validate_password_complexity(new_password)
     except PasswordError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=password_refusal(exc)) from exc
     was_forced = bool(user.must_change_password)
     user.hashed_password = await hash_password(new_password)
     user.must_change_password = False

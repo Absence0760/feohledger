@@ -69,6 +69,8 @@ from app.api.refusals import (
     SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL,
     SSO_EMAIL_UNUSABLE,
     SSO_EMAIL_UNUSABLE_DETAIL,
+    SSO_LINK_EXPIRED_DETAIL,
+    SSO_SESSION_EXPIRED_DETAIL,
 )
 from app.config import settings
 from app.database import get_control_db
@@ -428,7 +430,8 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
     try:
         bound = await consume_saml_relay_state(str(relay_state))
     except SSOValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("SAML RelayState refused: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail=SSO_SESSION_EXPIRED_DETAIL) from exc
 
     tenant_slug = bound["tenant"]
     request_id = bound.get("request_id")
@@ -569,7 +572,8 @@ async def saml_exchange(body: SAMLExchangeRequest):
     try:
         data = await consume_saml_handoff(body.code)
     except SSOValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("SAML handoff code refused: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail=SSO_LINK_EXPIRED_DETAIL) from exc
     if "refusal" in data or "access_token" not in data:
         # The ACS refused the sign-in and parked the refusal behind this code
         # (`create_saml_refusal_handoff`); there is no token to hand over.

@@ -420,6 +420,35 @@ async def test_handoff_single_use(fake_redis):
         await consume_saml_handoff(code)
 
 
+async def test_a_spent_handoff_code_is_a_coded_refusal(fake_redis):
+    """The bridge's exchange answers a spent code with a coded refusal the
+    sign-in page localizes, never the SSO service's own exception text."""
+    code = await create_saml_handoff("jwt-token", False, "acme")
+    await consume_saml_handoff(code)
+    with pytest.raises(HTTPException) as exc:
+        await auth_saml.saml_exchange(auth_saml.SAMLExchangeRequest(code=code))
+    assert exc.value.status_code == 400
+    assert exc.value.detail["code"] == "sso_link_expired"
+    assert exc.value.detail["params"] == {}
+
+
+async def test_an_unknown_relay_state_at_the_acs_is_a_coded_refusal(fake_redis):
+    """The ACS refuses an unknown RelayState with the coded session-expired
+    refusal — one code whatever the SSO service objected to."""
+
+    class _Request:
+        client = SimpleNamespace(host="203.0.113.7")
+        headers: dict[str, str] = {}
+
+        async def form(self):
+            return {"SAMLResponse": "PHNhbWw+", "RelayState": "never-minted"}
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_saml.saml_acs(_Request(), db=None)
+    assert exc.value.status_code == 400
+    assert exc.value.detail["code"] == "sso_session_expired"
+
+
 async def test_replay_dedup_per_tenant(fake_redis):
     from app.services.webhook_security import is_event_already_processed
 

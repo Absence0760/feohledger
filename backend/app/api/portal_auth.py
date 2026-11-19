@@ -17,9 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import create_vendor_access_token, decode_token
 from app.api.portal_deps import get_current_vendor_user
 from app.api.refusals import (
+    MFA_CHALLENGE_INVALID_DETAIL,
     MFA_CODE_INVALID_DETAIL,
     MFA_EMAIL_CODE_INVALID_DETAIL,
     coded_refusal,
+    password_refusal,
 )
 from app.config import settings
 from app.models.organization import Organization
@@ -443,7 +445,7 @@ async def portal_change_password(
     try:
         validate_password_complexity(body.new_password)
     except PasswordError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=password_refusal(exc)) from exc
 
     was_forced = bool(vu.must_change_password)
     vu.hashed_password = await hash_password(body.new_password)
@@ -561,7 +563,7 @@ async def portal_reset_password(
     try:
         validate_password_complexity(body.new_password)
     except PasswordError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=password_refusal(exc)) from exc
 
     vu_id = await password_reset.consume_portal_reset_token(body.token, slug)
     vu = await _vendor_user_for_link(db, vu_id)
@@ -767,7 +769,8 @@ async def portal_request_email_otp(
     try:
         claims = await mfa.decode_vendor_challenge_token(body.challenge_token)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        logger.info("Portal MFA challenge refused: %s", type(exc).__name__)
+        raise HTTPException(status_code=401, detail=MFA_CHALLENGE_INVALID_DETAIL) from exc
 
     vu = (
         await db.execute(select(VendorUser).where(VendorUser.id == claims.subject_id))
@@ -812,7 +815,8 @@ async def portal_mfa_challenge(
     try:
         claims = await mfa.decode_vendor_challenge_token(body.challenge_token)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        logger.info("Portal MFA challenge refused: %s", type(exc).__name__)
+        raise HTTPException(status_code=401, detail=MFA_CHALLENGE_INVALID_DETAIL) from exc
 
     vu = (
         await db.execute(select(VendorUser).where(VendorUser.id == claims.subject_id))

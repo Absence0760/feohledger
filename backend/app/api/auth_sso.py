@@ -41,6 +41,9 @@ from app.api.refusals import (
     SSO_EMAIL_IN_OTHER_WORKSPACE,
     SSO_EMAIL_IN_OTHER_WORKSPACE_DETAIL,
     SSO_EMAIL_UNUSABLE_DETAIL,
+    SSO_LOGIN_REJECTED_DETAIL,
+    SSO_SESSION_EXPIRED_DETAIL,
+    SSO_TOKEN_INVALID_DETAIL,
 )
 from app.database import get_control_db
 from app.models.organization import Organization
@@ -259,7 +262,8 @@ async def sso_callback(
     try:
         bound = await consume_state(body.state)
     except SSOValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("OIDC callback state refused: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail=SSO_SESSION_EXPIRED_DETAIL) from exc
 
     tenant_slug = bound["tenant"]
     expected_nonce = bound["nonce"]
@@ -316,7 +320,8 @@ async def sso_callback(
             action="auth.sso.login.failure",
             details={"tenant": tenant_slug, "ip": ip, "reason": "code_exchange_failed"},
         )
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("OIDC code exchange refused: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail=SSO_LOGIN_REJECTED_DETAIL) from exc
 
     id_token = tokens.get("id_token")
     if not id_token:
@@ -337,7 +342,8 @@ async def sso_callback(
             action="auth.sso.login.failure",
             details={"tenant": tenant_slug, "ip": ip, "reason": "id_token_invalid"},
         )
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info("OIDC ID token refused: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail=SSO_TOKEN_INVALID_DETAIL) from exc
 
     # Entra sometimes uses `upn` (user principal name) instead of `email`
     email = claims.get("email") or claims.get("preferred_username") or claims.get("upn")
