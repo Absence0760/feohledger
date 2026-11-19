@@ -1001,6 +1001,15 @@ async def _pos_already_invoiced(
     invoice bills nothing while it stays rejected, and the supplier who is
     told to re-bill needs a way to (decisions §468).
 
+    Except the PO's OWN rejected flip (``reference_number`` is its
+    ``po-flip:<po_id>`` marker), which still counts (decisions §TBD-billing).
+    The marker is unique in every status (migration 0024), so a second flip
+    could never mint an invoice anyway: the endpoint replays the rejected one.
+    And a rejected flip is reopened, not replaced (``rejected → new`` by AP, or
+    the supplier's ``/resubmit``), so a second live flip beside it would be a
+    double bill the moment it reopens. Offering "Create invoice" there would
+    promise a creation the endpoint never performs.
+
     Scoped to the caller's own vendor, so the verdict says nothing about any
     other supplier's invoices.
     """
@@ -1011,11 +1020,15 @@ async def _pos_already_invoiced(
     cites = Invoice.split_po_ids.has_any(array(ids))
     if numbers:
         cites = or_(Invoice.po_number.in_(numbers), cites)
+    own_flips = [f"po-flip:{po.id}" for po in pos]
     rows = (
         await db.execute(
             select(Invoice.po_number, Invoice.entity_id, Invoice.split_po_ids).where(
                 Invoice.vendor_id == vendor_id,
-                Invoice.status != InvoiceStatus.rejected,
+                or_(
+                    Invoice.status != InvoiceStatus.rejected,
+                    Invoice.reference_number.in_(own_flips),
+                ),
                 cites,
             )
         )

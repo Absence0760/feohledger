@@ -607,6 +607,7 @@ export const messages = {
 	'invoices.warning.priceVarianceUnder': 'Precio unitario {deltaPct} por debajo de la referencia de este proveedor para {item} ({unitPrice} frente a {baselineUnitPrice})',
 	'invoices.warning.poNotFound': 'No se encontró el pedido {poNumber}',
 	'invoices.warning.poAmountVariance': 'Variación de importe {variancePct} frente al pedido {poNumber} (factura {invoiceAmount} frente a pedido {poTotal})',
+	'invoices.warning.poBilledBeyondTotal': 'Otras facturas ya cobran {billedAmount} contra el pedido {poNumber}, cuyo total es {poTotal} — esta factura supera ese total',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Variación de importe {variancePct} frente al pedido {poNumber}, que no registra ninguna moneda (factura {invoiceAmount} frente a pedido {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'La factura está en {invoiceCurrency}, pero el pedido {poNumber} está en {poCurrency}; los importes no se compararon',
 	'invoices.warning.poCurrencyMismatchInvoiceCurrencyUnknown': 'La factura no registra una moneda válida y los pedidos de {poNumber} están en monedas distintas ({poCurrencies}); los importes no se compararon',

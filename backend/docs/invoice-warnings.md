@@ -17,7 +17,7 @@ Four fields, and each carries its own job:
 
 | Field | What it is |
 |-------|------------|
-| `type` | The CATEGORY. Several codes share one, and code paths key on this (`UPSTREAM_WARNING_TYPES`, the modal's `missing_field` / `po_mismatch` filter, `EntityMixin`-free row filters). A new code never needs a new type. |
+| `type` | The CATEGORY. Several codes share one, and code paths key on this (`UPSTREAM_WARNING_TYPES`, the modal's `missing_field` / `po_mismatch` filter, `EntityMixin`-free row filters). A new code never needs a new type, unless one of those filters must treat it differently: `po_billed_beyond_total` is `po_overbilled`, not `po_mismatch`, because the modal hides `po_mismatch` warnings in favour of the PO-match panel's own issues, and this cross-invoice finding is not one of them (`decisions.md` §TBD-billing). |
 | `severity` | `error` \| `warning` \| `info`. Chosen at the call site, not by the catalogue — the same code can be `info` or `warning` depending on which threshold it crossed (`price_variance_*`). |
 | `message` | The backend's rendered English. It is the **fallback**, not the thing to render. |
 | `code` | Stable identity for the SENTENCE. This is what a client localizes on. |

@@ -305,6 +305,22 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
     # kind would format it with the invoice's code and assert the PO is in it.
     # `poTotal` is a `number` for the reason the self-correction figures below
     # are (decisions §197).
+    # Cumulative: the OTHER live invoices citing the PO plus this one bill
+    # past its total (`invoice_warnings._refresh_po_overbilling`, decisions
+    # §TBD-billing). Its own type so the modal lists it beside the other
+    # findings rather than leaving it to the PO-match panel's issues.
+    WarningSpec(
+        "po_billed_beyond_total",
+        "po_overbilled",
+        "Other invoices already bill {billedAmount} {currency} against PO {poNumber}, "
+        "whose total is {poTotal} {currency} — this invoice takes it past that total",
+        {
+            "billedAmount": "money",
+            "poNumber": "text",
+            "poTotal": "money",
+            "currency": "currency",
+        },
+    ),
     WarningSpec(
         "po_amount_variance_po_currency_unknown",
         "po_mismatch",

@@ -5015,6 +5015,16 @@ abstract class AppLocalizations {
     String poTotal,
   );
 
+  /// No description provided for @invoiceWarningPoBilledBeyondTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Other invoices already bill {billedAmount} against PO {poNumber}, whose total is {poTotal} — this invoice takes it past that total'**
+  String invoiceWarningPoBilledBeyondTotal(
+    String billedAmount,
+    String poNumber,
+    String poTotal,
+  );
+
   /// No description provided for @invoiceWarningPoAmountVariancePoCurrencyUnknown.
   ///
   /// In en, this message translates to:

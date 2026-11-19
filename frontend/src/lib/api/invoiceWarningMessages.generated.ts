@@ -81,6 +81,8 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'po_not_found': 'invoices.warning.poNotFound',
 	// Amount variance {variancePct}% vs PO {poNumber} (invoice {invoiceAmount} {currency} vs PO {poTotal} {currency})
 	'po_amount_variance': 'invoices.warning.poAmountVariance',
+	// Other invoices already bill {billedAmount} {currency} against PO {poNumber}, whose total is {poTotal} {currency} — this invoice takes it past that total
+	'po_billed_beyond_total': 'invoices.warning.poBilledBeyondTotal',
 	// Amount variance {variancePct}% vs PO {poNumber}, which records no currency (invoice {invoiceAmount} {currency} vs PO {poTotal})
 	'po_amount_variance_po_currency_unknown': 'invoices.warning.poAmountVariancePoCurrencyUnknown',
 	// Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared
@@ -362,6 +364,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'price_variance_under': { deltaPct: 'percent', item: 'text', unitPrice: 'money', baselineUnitPrice: 'money', currency: 'currency' },
 	'po_not_found': { poNumber: 'text' },
 	'po_amount_variance': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'money', currency: 'currency' },
+	'po_billed_beyond_total': { billedAmount: 'money', poNumber: 'text', poTotal: 'money', currency: 'currency' },
 	'po_amount_variance_po_currency_unknown': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'number', currency: 'currency' },
 	'po_currency_mismatch': { invoiceCurrency: 'text', poNumber: 'text', poCurrency: 'text' },
 	'po_currency_mismatch_invoice_currency_unknown': { poNumber: 'text', poCurrencies: 'text' },

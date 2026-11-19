@@ -30,6 +30,7 @@ from app.services.invoice_warning_catalog import (
 from app.services.matching_rules import resolve_match_rule, strictest_rule_for_any_commodity
 from app.services.po_matching import (
     CURRENCY_DIFFERENT,
+    CURRENCY_SAME,
     CURRENCY_UNKNOWN,
     format_quantity,
     match_invoice_to_po,
@@ -575,7 +576,9 @@ async def refresh_po_match_only(
     no match, as in the full refresh.
     """
     warnings: list[dict] = [
-        w for w in (invoice.warnings or []) if w.get("type") not in PO_MATCH_EXCEPTION_TYPES
+        w
+        for w in (invoice.warnings or [])
+        if w.get("type") not in PO_MATCH_EXCEPTION_TYPES and w.get("type") != PO_OVERBILLED_TYPE
     ]
     await _void_stale_finding_stamps(db, invoice)
     if invoice.po_number and _status_str(invoice.status) != "new":
@@ -1267,6 +1270,11 @@ async def _refresh_po_match(
         )
         warnings.append(partial_receipt_flag)
 
+    # Cumulative billing: this invoice plus the others already citing the PO
+    # take it past its total (decisions §TBD-billing). Independent of the
+    # amount leg, which compares this invoice alone with the whole PO.
+    await _refresh_po_overbilling(db, invoice, warnings, match, rule.tolerance_pct)
+
     # 3-way: the invoice bills beyond what has been received. Independent of
     # the amount leg above, because an invoice can be under the PO total and
     # still over what arrived (half the PO billed, a third delivered). A short
@@ -1371,6 +1379,98 @@ async def _refresh_po_match(
         rule=rule,
         erp_po_sync=erp_po_sync,
     )
+
+
+#: The warning type of the cumulative over-billing finding. Its own type,
+#: not ``po_mismatch``: the invoice modal shows ``po_mismatch`` warnings through
+#: the PO-match panel's own ``issues``, which this cross-invoice finding is not
+#: one of, and it raises no hold (decisions §TBD-billing).
+PO_OVERBILLED_TYPE = "po_overbilled"
+
+
+async def _refresh_po_overbilling(
+    db: AsyncSession, invoice: Invoice, warnings: list[dict], match, tolerance_pct
+) -> None:
+    """Warn when this invoice and the others citing its PO bill past its total.
+
+    PO matching compares ONE invoice with the whole PO, so two invoices that
+    each fit (a supplier's PO flip, then the same supplier's own invoice for
+    that order, or AP keying a copy) pass both legs, and a flipped invoice has
+    no number for duplicate detection to match (decisions §468). This sums the
+    other live invoices citing the same PO.
+
+    - **Which PO.** Only a single-PO match whose total is trustworthy and in the
+      invoice's own currency (``CURRENCY_SAME``). A split's legs share one amount
+      that cannot be attributed to any one of them, and a cancelled, unissued,
+      unvouched or other-currency PO already raises its own finding.
+    - **Which others.** The same rule the flip's "already invoiced" refusal reads
+      (``api/portal._pos_already_invoiced``): an invoice citing the PO's number
+      within the PO's entity (either side unstamped spans entities), in every
+      status but ``rejected``, which bills nothing while it stays rejected. Only
+      the PO's currency is summed. Unlike the portal's refusal it is not scoped
+      to one vendor: AP reads it, and any bill against the order counts.
+    - **The limit.** The match rule's own tolerance over the PO total, as the
+      amount leg uses.
+
+    A warning, never a hold: credit memos, corrective re-bills and a sibling
+    rejected after this refresh all move the sum without re-running it here,
+    so a payment-blocking row would go stale in both directions. The reviewer
+    reads it at approval, beside the duplicate and amount findings.
+    """
+    if (
+        _status_str(invoice.status) == InvoiceStatus.rejected.value
+        or invoice.amount is None
+        or not match.po_id
+        or match.po_ids
+        or match.po_total is None
+        or match.currency_check != CURRENCY_SAME
+        or match.po_cancelled
+        or match.po_not_issued
+        or match.po_total_unverifiable_reason
+    ):
+        return
+    po = (
+        await db.execute(
+            select(PurchaseOrder.po_number, PurchaseOrder.entity_id).where(
+                PurchaseOrder.id == uuid.UUID(str(match.po_id))
+            )
+        )
+    ).one_or_none()
+    if po is None or not po.po_number:
+        return
+    code = po_currency_code(invoice.currency)
+    rows = (
+        await db.execute(
+            select(Invoice.amount, Invoice.entity_id, Invoice.currency).where(
+                Invoice.organization_id == invoice.organization_id,
+                Invoice.id != invoice.id,
+                Invoice.po_number == po.po_number,
+                Invoice.status != InvoiceStatus.rejected,
+                Invoice.amount.isnot(None),
+            )
+        )
+    ).all()
+    billed = Decimal("0")
+    for amount, entity_id, currency in rows:
+        same_entity = entity_id is None or po.entity_id is None or entity_id == po.entity_id
+        if same_entity and po_currency_code(currency) == code:
+            billed += Decimal(str(amount))
+    if billed <= 0:
+        return
+    po_total = Decimal(str(match.po_total))
+    tolerance = Decimal(str(tolerance_pct))
+    limit = po_total + po_total * tolerance / Decimal("100")
+    if billed + Decimal(str(invoice.amount)) > limit:
+        warnings.append(
+            warning(
+                "po_billed_beyond_total",
+                "warning",
+                billedAmount=billed,
+                poNumber=po.po_number,
+                poTotal=po_total,
+                currency=invoice.currency,
+            )
+        )
 
 
 def blocking_finding_types(match) -> set[str]:

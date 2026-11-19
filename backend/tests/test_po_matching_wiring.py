@@ -63,10 +63,17 @@ def _no_reconcile():
     session; closing rows a refresh no longer finds is its own step, proven
     against real rows in `test_po_match_exception_reconciliation.py`. Patched
     here so a bare `AsyncMock` db is never asked for a result set, and exposed
-    so a test can assert which types the refresh reported as still found."""
+    so a test can assert which types the refresh reported as still found.
+
+    The cumulative over-billing check reads the OTHER invoices citing the PO,
+    so it is patched out for the same reason and proven against real rows in
+    `test_po_matching_critical_path.py`."""
     from app.services import invoice_warnings
 
-    with patch.object(invoice_warnings, "_reconcile_po_exceptions", AsyncMock()) as close:
+    with (
+        patch.object(invoice_warnings, "_reconcile_po_exceptions", AsyncMock()) as close,
+        patch.object(invoice_warnings, "_refresh_po_overbilling", AsyncMock()),
+    ):
         yield close
 
 

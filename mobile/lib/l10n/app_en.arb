@@ -2231,6 +2231,20 @@
       }
     }
   },
+  "invoiceWarningPoBilledBeyondTotal": "Other invoices already bill {billedAmount} against PO {poNumber}, whose total is {poTotal} — this invoice takes it past that total",
+  "@invoiceWarningPoBilledBeyondTotal": {
+    "placeholders": {
+      "billedAmount": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningPoAmountVariancePoCurrencyUnknown": "Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})",
   "@invoiceWarningPoAmountVariancePoCurrencyUnknown": {
     "placeholders": {
