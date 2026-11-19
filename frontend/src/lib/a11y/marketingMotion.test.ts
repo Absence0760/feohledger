@@ -1,3 +1,4 @@
+import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -130,9 +131,22 @@ function spinnerExempt(file: string, selector: string): boolean {
 	return file === SPINNER && selector === '.spinner';
 }
 
-/** Markup only: no `<style>`, no `<script>`. */
-const markupOf = (source: string) =>
-	source.replace(/<style[^>]*>[\s\S]*?<\/style>/g, '').replace(/<script[^>]*>[\s\S]*?<\/script>/g, '');
+/**
+ * Markup only: the `<style>` and `<script>` blocks blanked out by the
+ * compiler's own offsets (not a tag regex, which misses `<SCRIPT>` and nested
+ * look-alikes). Blanked with spaces / newlines kept, so line numbers hold.
+ */
+function markupOf(source: string): string {
+	const ast = parse(source, { modern: true });
+	const blocks = [ast.instance, ast.module, ast.css].filter(
+		(b): b is NonNullable<typeof b> => b != null
+	);
+	let out = source;
+	for (const { start, end } of blocks) {
+		out = out.slice(0, start) + out.slice(start, end).replace(/[^\n]/g, ' ') + out.slice(end);
+	}
+	return out;
+}
 
 /** Each `<Spinner` a file renders outside any `{#if}` (by line). */
 function unconditionalSpinners(source: string): number[] {
