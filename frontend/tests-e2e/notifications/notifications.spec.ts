@@ -87,4 +87,27 @@ test.describe('notification center', () => {
 		await page.getByRole('button', { name: /^Unread/ }).click();
 		await expect(page.getByText('No unread notifications.')).toBeVisible();
 	});
+
+	test('the Unread filter round-trips through the URL', async ({ page }) => {
+		await signInAndWait(page);
+		const me = await currentUserId(page);
+		clearNotifications(me);
+
+		await page.goto('/notifications');
+		await expect(page.getByText('No notifications yet.')).toBeVisible();
+
+		// Pressing the chip writes the view into the address bar...
+		await page.getByRole('button', { name: /^Unread/ }).click();
+		await expect(page).toHaveURL(/[?&]filter=unread\b/);
+
+		// ...so a reload lands back on it instead of resetting to All.
+		await page.reload();
+		await expect(page.getByText('No unread notifications.')).toBeVisible();
+		await expect(page.getByRole('button', { name: /^Unread/ })).toHaveAttribute('aria-pressed', 'true');
+
+		// And All clears it again.
+		await page.getByRole('button', { name: /^All/ }).click();
+		await expect(page).not.toHaveURL(/filter=/);
+		await expect(page.getByText('No notifications yet.')).toBeVisible();
+	});
 });
