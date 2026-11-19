@@ -2,11 +2,11 @@ import { expect, TENANT_ROOT_URL, test } from '../fixtures/helpers';
 
 /**
  * `/find-workspace` on a workspace host, signed in (the default storage
- * state). The page redirects to `/` on mount — a workspace host already is a
- * workspace — but for the beat before that the root layout used to classify
- * it as an app route and wrap its `AuthShell` in the app shell, so the
+ * state). The root layout sends it to `/` — a workspace host already is a
+ * workspace. It used to classify the page as an app route and wrap its
+ * `AuthShell` in the app shell for the beat before the redirect, so the
  * document briefly held two `<main>` landmarks (the shell's and the
- * AuthShell's). The layout now renders it standalone on every host.
+ * AuthShell's). On a workspace host the layout now renders nothing for it.
  *
  * A late assertion would only see the settled dashboard, so a mutation
  * observer installed before any script runs records the most `<main>`
