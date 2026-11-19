@@ -23926,3 +23926,36 @@ credit then all but decided which code that would be. This supersedes the
 "blank invoice currency admitted" clause of the currency leg in §202 for
 create, apply and both pickers. §214's edit guard keeps its legacy-blank
 admission, which now only ever covers a credit applied before this amendment.
+
+## 474. An employee access token with no `org` claim is refused, not trusted to a later lookup (round 30, 2026-11-19)
+
+`tenant.get_tenant` cross-checks the JWT's `org` claim against the tenant the
+`X-Tenant-Slug` header resolves. It used to let an employee token *without* an
+`org` claim through, on the reasoning that the user lookup afterwards would
+fail closed. It does not: `get_current_user` finds the account by `sub` alone
+and never compares its organisation with the resolved tenant. A signed token
+with no `org` would therefore open whichever tenant the header named.
+
+Not exploitable today: every access token we mint carries `org`, and the only
+same-key tokens without it (the MFA challenge tokens) are refused by
+`get_current_user`. Forging a claim-less token needs the signing key. But the
+skip turned the tenant chokepoint into a check that depends on how tokens
+happen to be minted elsewhere, and `organization_close.py` had already grown
+its own compensating check because of it.
+
+**Decision:** `get_tenant` refuses an employee token with no `org` claim with
+the same 403 `token_tenant_mismatch` as a mismatched one. The MFA challenge
+token types stay exempt, because they are scoped to the challenge flow, never
+to tenant data. The chokepoint now stands on its own.
+
+Rejected: comparing the user's organisation inside `get_current_user` instead.
+That moves the tenant rule out of the one place the invariant names
+(root CLAUDE.md, Project invariants), and every other dependency that reads
+the tenant would still trust the header.
+
+Tests: `tests/test_tenant_auth_sweep.py` sweeps every tenant-resolving
+employee route with a cross-tenant token and with a claim-less one, through the
+production dependency chain. `tests/test_portal_cross_vendor.py` covers every
+by-id portal route, so one supplier gets the same 404 for another's id as for
+an unknown one. `tests/test_tenant_isolation.py` pins the refusal and the MFA
+exemption.
