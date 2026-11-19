@@ -12,6 +12,12 @@
 		title?: string;
 		/** Width preset: sm = 440px, md = 480px (default), lg = 820px. */
 		width?: 'sm' | 'md' | 'lg';
+		/** Extra class(es) on the dialog element, for a caller's own sizing / layout
+		 *  (style it with `:global(.modal.<class>)`). */
+		class?: string;
+		/** Fill the viewport: the backdrop drops its gutter and the dialog takes
+		 *  100vw x 100vh with no radius (the invoice dialog's fullscreen toggle). */
+		fullscreen?: boolean;
 		onclose: () => void;
 		/** Replaces the default `<h2>{title}</h2>` heading. */
 		header?: Snippet;
@@ -20,7 +26,17 @@
 		children: Snippet;
 	};
 
-	let { open = true, ariaLabel, title, width = 'md', onclose, header, children }: Props = $props();
+	let {
+		open = true,
+		ariaLabel,
+		title,
+		width = 'md',
+		class: className = '',
+		fullscreen = false,
+		onclose,
+		header,
+		children
+	}: Props = $props();
 
 	// Freeze the background page from scrolling while the dialog is open, so a
 	// wheel event over the backdrop (or a non-scrolling area of the dialog) can't
@@ -41,12 +57,13 @@
 
 {#if open}
 	<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-	<div class="backdrop" onclick={onBackdrop}>
+	<div class="backdrop" class:backdrop-flush={fullscreen} onclick={onBackdrop}>
 		<!-- focusTrap: focus into the dialog on open, Tab/Shift+Tab wrap (WCAG
 		     2.1.2), Esc to close, focus restored to the trigger on close (2.4.3). -->
 		<div
 			use:focusTrap={{ onEscape: onclose }}
-			class="modal"
+			class="modal {className}"
+			class:modal-fullscreen={fullscreen}
 			class:modal-sm={width === 'sm'}
 			class:modal-lg={width === 'lg'}
 			role="dialog"

@@ -4913,6 +4913,7 @@ export const en = {
 	'invoices.modal.verdictsLoadError': "Couldn't check which actions you can take on this invoice, so its amount, payee, lines, file and workflow actions stay locked.",
 	'invoices.modal.fullscreen': 'Fullscreen',
 	'invoices.modal.header': 'Edit Invoice — {number}',
+	'invoices.modal.dialogLabel': 'Edit invoice {number}',
 	'invoices.modal.imageAlt': 'Invoice — {number}',
 	'invoices.modal.lineItems.addLine': '+ Add Line',
 	'invoices.modal.lineItems.colDescription': 'Description',

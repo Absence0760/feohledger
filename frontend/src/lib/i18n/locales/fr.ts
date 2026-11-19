@@ -4733,6 +4733,7 @@ export const messages = {
 	'invoices.modal.verdictsLoadError': "Impossible de vérifier les actions que vous pouvez effectuer sur cette facture : le montant, le bénéficiaire, les lignes, le fichier et les actions du workflow restent verrouillés.",
 	'invoices.modal.fullscreen': 'Plein écran',
 	'invoices.modal.header': 'Modifier la facture — {number}',
+	'invoices.modal.dialogLabel': 'Modifier la facture {number}',
 	'invoices.modal.imageAlt': 'Facture — {number}',
 	'invoices.modal.lineItems.addLine': '+ Ajouter une ligne',
 	'invoices.modal.lineItems.colDescription': 'Description',

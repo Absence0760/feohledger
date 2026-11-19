@@ -128,9 +128,11 @@ The structural follow-ups from the initial pass are now **resolved**:
   buttons (keyboard + single-pointer) on every step; covered by
   `workflow-builder.spec.ts`.
 - ~~Hand-rolled-modal focus management (2.1.2 / 2.4.3)~~ — **Done.** The shared
-  `#lib/actions/focusTrap` action gives `InvoiceModal`, `RunDetailModal`,
-  `BulkRecodeGLModal`, and the portal discount-accept dialog the same focus
-  trap + restore as `ui/Modal`; covered by `screen-reader.spec.ts`.
+  `#lib/actions/focusTrap` action gives the portal discount-accept dialog the
+  same focus trap + restore as `ui/Modal`, and `InvoiceModal`,
+  `RunDetailModal` and `BulkRecodeGLModal` now render `ui/Modal` itself
+  (`modalShell.test.ts` refuses a hand-rolled shell); covered by
+  `screen-reader.spec.ts`.
 - ~~`autocomplete` tokens (1.3.5)~~ and ~~320px reflow (1.4.10)~~ — **Done** and
   guarded by `screen-reader.spec.ts`.
 
