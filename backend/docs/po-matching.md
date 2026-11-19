@@ -601,8 +601,10 @@ so with 400.00 of a 1000.00 PO received, two invoices of 400.00 each fit it.
 On a SHORT receipt the same refresh measures the same siblings plus this
 invoice against `received_value` at the same tolerance, and when they exceed
 it adds `po_billed_beyond_receipt` (type `po_overbilled`, severity `warning`),
-naming what the others already bill, the received value (to the cent; the
-comparison uses the exact share) and the currency code.
+naming what every live bill on the PO comes to, this one included
+(`totalBilled`), the received value (to the cent; the comparison uses the
+exact share, so 3 of 7 units of 1000.00 is a limit of exactly 450.00 at 5 %)
+and the currency code.
 
 - **One finding at most.** Past the PO total, only `po_billed_beyond_total` is
   written: no receipt could cure that bill.
@@ -617,10 +619,37 @@ comparison uses the exact share) and the currency code.
   re-matches every invoice citing the PO in the same transaction, so a
   delivery that covers the bills drops the finding at once, and cancelling a
   receipt raises it.
-- **A warning, not a hold**, for §469's staleness reason, and one more: the
-  finding cannot say which of the bills is the excess one, so every bill on
-  the PO carries it, and a hold would stop the legitimate first bill with the
-  second.
+- **A warning, not a hold, before approval**, for §469's staleness reason,
+  and one more: the finding cannot say which of the bills is the excess one,
+  so every bill on the PO carries it, and a hold would stop the legitimate
+  first bill with the second.
+- **A hold past approval, when new or worse.** A receipt cancelled after both
+  bills were approved (§262 allows it) reaches them only through the
+  re-match, and nobody reads the warning again. So on an invoice outside
+  `PRE_APPROVAL_STATUSES` the finding also raises the payment-blocking
+  `po_mismatch`, with the warning's own sentence, when it is new or worse than
+  the one the invoice carried into the refresh
+  (`_beyond_receipt_worsened`: none before, less received, more billed,
+  another PO, or an unreadable figure). A finding unchanged since the
+  approver read it raises nothing, so their sign-off needs no second one.
+  Once raised, the hold is kept found while the finding stands
+  (`_open_po_mismatch_hold`), so one row survives any number of refreshes.
+  It closes like every PO-match hold, on the refresh that no longer finds it,
+  through `_close_cleared_po_exceptions` and therefore `receipts_clear_hold`:
+  a covering receipt typed in by someone implicated in the invoice, or by an
+  approver, leaves it for a person. A new run refuses the invoice; a draft
+  run's payment is refused at dispatch, NACHA export or the paid-elsewhere
+  close-out (`dispatch_preflight`, `invoice_blocked:po_mismatch`); a file
+  already exported has left with the customer's upload, and the hold only
+  puts the invoice in the queue.
+- **An implicated receipt stops unattended approval.** While any live
+  hand-entered receipt on the matched PO was recorded by someone implicated
+  in the invoice or by nobody known (`receipts_clear_hold`),
+  `po_match_hold_refusal` answers `po_receipt_implicated`: such a receipt can
+  make the per-invoice and cumulative receipt findings vanish. The org's
+  `settings.exceptions.require_segregation: false` lifts it.
+- **The total leg gets no post-approval hold.** A PO total rarely moves after
+  approval, and §469's warning already covers that leg.
 
 Receipts are still valued pro rata across the PO's lines, not per line; see
 `docs/followups.md`. Reasoning: `docs/decisions.md` §470.

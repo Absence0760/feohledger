@@ -23646,9 +23646,71 @@ both the per-invoice hold and this warning. That is the narrowed
 `docs/followups.md` entry: value receipts per line in the matcher's
 `received_value`, which both read. Credit memos are not netted, as in §469.
 
-Tests: `backend/tests/test_po_matching_critical_path.py` (two 400.00 invoices
-against 400.00 received both warn with exact params and neither is held
-alone; the 5 % boundary to the cent; past the total only the total finding;
-one of three units received named as 333.33; two PO-only refreshes keep one
-finding, unattended approval answers `po_overbilled`, and a receipt for the
-rest of the delivery clears both on the next refresh).
+**Amended (round 26 gate): a hold past approval, and the implicated
+receipt.** A money-path review found the warning-only rule open after
+approval. Two receipts of 4 units (800.00 of a 1000.00 PO) and two bills of
+400.00, both approved with no finding; the second receipt is cancelled
+(§262 allows it). The re-match finds each bill alone within 400.00, so no
+per-invoice hold, only this warning, which no reviewer will read again and
+nothing on the payment path reads. A run would pay 800.00 for 400.00
+received. So:
+
+- **Past approval, a new or worse finding is a hold.** On an invoice outside
+  `PRE_APPROVAL_STATUSES`, `_refresh_po_match` raises the payment-blocking
+  `po_mismatch` with the warning's own sentence, through the same
+  `_ensure_exception` the per-invoice receipt leg uses. The run builder and
+  every dispatch refuse it, and clearing it is the SoD-gated sign-off
+  (§169–§170, §420). §249's principle wins here because the staleness reason
+  is weakest: the event that raises it (a receipt cancelled) re-matches every
+  bill on the PO in the same transaction, and the hold, once raised, closes
+  on the refresh that no longer finds it.
+- **Only when new or worse since the last refresh**
+  (`_beyond_receipt_worsened`): no such finding before, less received, more
+  billed, another PO or currency, or an unreadable old figure (fail closed).
+  An approver who signed off with the unchanged warning in front of them was
+  the review the warning asked for; holding that bill would make their
+  approval need a second sign-off for nothing new. The cost: a figure that
+  worsens and recovers to its old value between two refreshes is not
+  re-held. Once raised, any open `po_mismatch` is kept found while the
+  finding stands (`_open_po_mismatch_hold`; any row, because
+  `_ensure_exception` folds a finding into the row already open), so repeated
+  refreshes keep one row.
+- **Clearing follows the existing rule.** The refresh that no longer finds it
+  closes it through `_close_cleared_po_exceptions`, which keeps it while a
+  live manual receipt on the PO was typed in by someone implicated in the
+  invoice, by nobody known, or by an approver (`receipts_clear_hold`, §262,
+  §389).
+- **An implicated receipt stops unattended approval.** Before approval no row
+  exists for that rule to hold, so a receipt typed in by the uploader could
+  make the warning (or the per-invoice hold) vanish before anyone read it.
+  `po_match_hold_refusal` now answers `po_receipt_implicated`
+  (`UNATTENDED_APPROVAL_PO_RECEIPT_IMPLICATED`) while
+  `receipts_clear_hold` is False for the matched PO ids, lifted by
+  `settings.exceptions.require_segregation: false` as the auto-close's
+  rule is. A NULL recorder on a manual receipt counts as unknown, as it
+  already did there; a receipt with no `source` (an ERP or pre-entry row) is
+  trusted.
+- **Runs.** A new run refuses the invoice (`run_refusal_reasons`). A draft
+  run's payment is refused before money moves, at rail dispatch, NACHA export
+  and the paid-elsewhere close-out (`payment_runs.dispatch_preflight`,
+  `invoice_blocked:po_mismatch`, retry-safe). A NACHA file already exported
+  has gone with the customer's upload; the hold cannot recall it and only
+  puts the invoice in the exception queue.
+- **The total leg gets no post-approval hold.** A PO total rarely moves after
+  approval, and §469's warning already covers that leg.
+- **Wording.** The sentence now states every live bill on the PO, this one
+  included (`totalBilled`), against the value received; it used to read as
+  if the received value were part of what the others billed.
+
+Tests: `backend/tests/test_po_matching_critical_path.py` (two 400.00
+invoices against 400.00 received both warn with exact params and neither is
+held alone; the 5 % boundary to the cent; 3 of 7 units with two 225.00 bills
+does not warn; past the total only the total finding; one of three units
+received named as 333.33; two PO-only refreshes keep one finding, unattended
+approval answers `po_overbilled`, and a receipt for the rest of the delivery
+clears both on the next refresh; through `create_goods_receipt` /
+`cancel_goods_receipt`, a receipt cancelled after approval holds both bills,
+a run refuses them, a refresh keeps one row and a new receipt lifts it; an
+implicated recorder's receipt does not; `po_receipt_implicated` and its
+opt-out; an approval over the unchanged warning raises no hold; the
+new-or-worse comparison).

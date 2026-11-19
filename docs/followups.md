@@ -980,7 +980,8 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       most of the value received (decisions §249). The leg is now cumulative:
       invoices that together bill past that received value raise
       `po_billed_beyond_receipt`, a review warning that stops every unattended
-      approval (§470), as `po_billed_beyond_total` does for the PO
+      approval and, newly past approval, a payment-blocking `po_mismatch`
+      (§470), as `po_billed_beyond_total` warns for the PO
       total (§469). Both inherit the pro-rata figure. **Durable fix:** value
       receipts per PO line (cheapest-first as a lower bound) in the matcher's
       `received_value`, which both the per-invoice hold and the cumulative
