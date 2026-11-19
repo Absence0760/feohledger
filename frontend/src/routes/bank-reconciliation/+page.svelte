@@ -800,7 +800,12 @@
 											armed={confirmDeleteId === s.id}
 											disabled={busyId === s.id}
 											onclick={() => deleteStatement(s)}
-											ariaLabel={m('bankRecon.row.deleteAria', { label: statementLabel(s) })}
+											ariaLabel={confirmDeleteId === s.id
+												? m('common.rowActionAria', {
+														action: m('bankRecon.row.confirmDelete'),
+														name: statementLabel(s)
+													})
+												: m('bankRecon.row.deleteAria', { label: statementLabel(s) })}
 										>
 											{confirmDeleteId === s.id
 												? m('bankRecon.row.confirmDelete')

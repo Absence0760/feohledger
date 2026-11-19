@@ -484,7 +484,10 @@
 											variant="danger"
 											armed={confirmRetireId === acct.id}
 											ariaLabel={confirmRetireId === acct.id
-												? undefined
+												? m('common.rowActionAria', {
+														action: m('glAccounts.row.confirm'),
+														name: acct.code
+													})
 												: m('glAccounts.row.retireAria', { code: acct.code })}
 											disabled={busyId === acct.id}
 											onclick={(e) => {

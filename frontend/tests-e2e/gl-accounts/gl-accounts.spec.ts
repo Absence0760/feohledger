@@ -404,7 +404,7 @@ test.describe('/gl-accounts — row actions', () => {
 		const row = await rowFor(page, code);
 		await row.getByRole('button', { name: `Retire GL account ${code}` }).click();
 		// Armed, not fired: the first click only asks.
-		const confirm = row.getByRole('button', { name: 'Confirm' });
+		const confirm = row.getByRole('button', { name: `Confirm for ${code}` });
 		await expect(confirm).toBeVisible();
 		expect(tenantPsql(`SELECT is_active FROM gl_accounts WHERE code = '${code}'`).trim()).toBe(
 			't'
@@ -437,7 +437,7 @@ test.describe('/gl-accounts — row actions', () => {
 
 		const row = await rowFor(page, code);
 		await row.getByRole('button', { name: `Retire GL account ${code}` }).click();
-		await expect(row.getByRole('button', { name: 'Confirm' })).toBeVisible();
+		await expect(row.getByRole('button', { name: `Confirm for ${code}` })).toBeVisible();
 
 		await page.getByRole('heading', { name: 'Chart of Accounts' }).click();
 		await expect(row.getByRole('button', { name: `Retire GL account ${code}` })).toBeVisible();
