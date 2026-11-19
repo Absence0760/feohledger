@@ -455,9 +455,9 @@ meant smuggling the invoice number into `item_code`, and losing the date.
 
 | Adapter | `extract_statement` |
 |---|---|
-| `mock` | Deterministic offline reader — no network, no credential. Pulls the document's text layer (PyMuPDF) and scans `number [date] amount` rows (`statement_extraction.scan_statement_text`). One money column per row, or it skips the row — see below. |
+| `mock` | Deterministic offline reader — no network, no credential. Pulls the document's text layer (`pdf_reader.pdf_text`, on a worker thread so the upload never blocks the event loop) and scans `number [date] amount` rows (`statement_extraction.scan_statement_text`). One money column per row, or it skips the row — see below. |
 | `claude_vision` | Sends the shared statement prompt down the same document channel `extract` uses. |
-| `ollama` | Same prompt against a **local** model — text mode when the PDF has a text layer, page images when it doesn't. The no-cloud path for a scanned statement. |
+| `ollama` | Same prompt against a **local** model — text mode when the PDF has a text layer, page images when it doesn't (both read through `pdf_reader`, off the event loop). The no-cloud path for a scanned statement. |
 | `openai_vision`, `aws_textract`, `einvoice` | Inherit the honest `not_supported` default. |
 
 The prompt and the JSON→dataclass parser are shared

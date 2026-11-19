@@ -15,6 +15,7 @@ import json
 
 import pytest
 
+from app.services import pdf_reader
 from app.services.extraction_adapters.base import (
     STATEMENT_REASON_EMPTY_FILE,
     STATEMENT_REASON_NO_LINES,
@@ -23,7 +24,6 @@ from app.services.extraction_adapters.base import (
     STATEMENT_REASON_PROVIDER_ERROR,
     STATEMENT_REASON_UNREADABLE,
     ExtractionAdapter,
-    pdf_text_layer,
 )
 from app.services.extraction_adapters.claude_vision import ClaudeVisionAdapter
 from app.services.extraction_adapters.mock_adapter import MockExtractionAdapter
@@ -32,6 +32,16 @@ from app.services.extraction_adapters.statement_extraction import (
     parse_statement_payload,
     scan_statement_text,
 )
+
+
+def _returns(value):
+    """An async stand-in for a `pdf_reader` coroutine that answers ``value``."""
+
+    async def _stub(_pdf_bytes: bytes, **_kw):
+        return value
+
+    return _stub
+
 
 _STATEMENT_TEXT = """\
 Globex Industrial
@@ -598,7 +608,7 @@ async def test_mock_reports_an_empty_upload():
 
 
 def test_pdf_text_layer_returns_none_on_non_pdf_bytes():
-    assert pdf_text_layer(b"this is not a pdf") is None
+    assert pdf_reader.text_layer_sync(b"this is not a pdf") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -712,7 +722,7 @@ async def test_claude_vision_statement_unparseable_response(monkeypatch):
 async def test_ollama_extract_statement_uses_the_text_layer_when_present(monkeypatch):
     from app.services.extraction_adapters import ollama as mod
 
-    monkeypatch.setattr(OllamaAdapter, "_extract_pdf_text", staticmethod(lambda _: _STATEMENT_TEXT))
+    monkeypatch.setattr(pdf_reader, "pdf_text", _returns(_STATEMENT_TEXT))
     client = _patch_httpx(
         monkeypatch,
         mod,
@@ -729,8 +739,8 @@ async def test_ollama_extract_statement_uses_the_text_layer_when_present(monkeyp
 async def test_ollama_extract_statement_falls_back_to_page_images(monkeypatch):
     from app.services.extraction_adapters import ollama as mod
 
-    monkeypatch.setattr(OllamaAdapter, "_extract_pdf_text", staticmethod(lambda _: None))
-    monkeypatch.setattr(OllamaAdapter, "_pdf_to_images", staticmethod(lambda b, **kw: [b"png"]))
+    monkeypatch.setattr(pdf_reader, "pdf_text", _returns(None))
+    monkeypatch.setattr(pdf_reader, "rasterize_pages", _returns([b"png"]))
     client = _patch_httpx(
         monkeypatch,
         mod,
@@ -742,8 +752,8 @@ async def test_ollama_extract_statement_falls_back_to_page_images(monkeypatch):
 
 
 async def test_ollama_extract_statement_unreadable_pdf(monkeypatch):
-    monkeypatch.setattr(OllamaAdapter, "_extract_pdf_text", staticmethod(lambda _: None))
-    monkeypatch.setattr(OllamaAdapter, "_pdf_to_images", staticmethod(lambda b, **kw: []))
+    monkeypatch.setattr(pdf_reader, "pdf_text", _returns(None))
+    monkeypatch.setattr(pdf_reader, "rasterize_pages", _returns([]))
     result = await OllamaAdapter({}).extract_statement(b"%PDF-1.4", "s.pdf", "application/pdf")
     assert result.success is False
     assert result.reason == STATEMENT_REASON_NO_TEXT_LAYER

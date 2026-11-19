@@ -2,7 +2,8 @@
 
 Three entry points:
 
-  - extract_invoice_text(file_bytes) — PyMuPDF text extraction for embedding.
+  - extract_invoice_text(file_bytes) — a PDF's text layer for embedding, read
+    through services/pdf_reader (``read_invoice_text`` is the awaitable form).
   - store_embedding(db, invoice, file_bytes) — embed + upsert at correction time.
   - retrieve_similar(db, query_text, k) — cosine-nearest search for few-shot context.
 
@@ -11,6 +12,7 @@ See backend/docs/ai-extraction.md § RAG with pgvector.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
@@ -22,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.invoice import Invoice
 from app.models.invoice_embedding import InvoiceEmbedding
+from app.services import pdf_reader
 from app.services.embedding_adapters import get_embedding_adapter
 
 logger = logging.getLogger(__name__)
@@ -64,23 +67,24 @@ def extract_invoice_text(file_bytes: bytes) -> str:
     if not file_bytes or b"%PDF-" not in file_bytes[:1024]:
         return ""
     try:
-        import pymupdf  # PyMuPDF
+        return pdf_reader.document_text_sync(file_bytes)
     except ImportError:
         logger.warning("PyMuPDF not available — skipping text extraction for RAG.")
         return ""
-
-    text_chunks: list[str] = []
-    try:
-        with pymupdf.open(stream=file_bytes, filetype="pdf") as doc:
-            for page in doc:
-                text_chunks.append(page.get_text("text"))
     except Exception as exc:
         # Class only, never the message — a parser error on an uploaded invoice
         # PDF could otherwise echo document content into the log (PII-out-of-logs).
         logger.warning("PyMuPDF text extraction failed: %s", exc.__class__.__name__)
         return ""
 
-    return "\n".join(text_chunks).strip()
+
+async def read_invoice_text(file_bytes: bytes) -> str:
+    """:func:`extract_invoice_text` on a worker thread, for a coroutine caller.
+
+    The sync form stays for code already off the request loop; anything on an
+    ``async def`` path awaits this instead (``services/pdf_reader``).
+    """
+    return await asyncio.to_thread(extract_invoice_text, file_bytes)
 
 
 def _snapshot(invoice: Invoice) -> dict[str, Any]:
@@ -111,7 +115,7 @@ async def store_embedding(
 
     text = text_content
     if text is None:
-        text = extract_invoice_text(file_bytes or b"")
+        text = await read_invoice_text(file_bytes or b"")
     if not text:
         logger.debug("No text available for invoice %s — skipping embedding.", invoice.id)
         return None

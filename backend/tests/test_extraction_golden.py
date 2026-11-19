@@ -39,10 +39,10 @@ from app.services.extraction import (
     extracted_line_values,
     extraction_amount_convention,
 )
-from app.services.extraction_adapters.base import pdf_text_layer
 from app.services.extraction_adapters.claude_vision import ClaudeVisionAdapter
 from app.services.extraction_self_correction import run_self_correction
 from app.services.invoice_warnings import reconcile_line_totals
+from app.services.pdf_reader import text_layer_sync
 
 GOLDEN = Path(__file__).parent / "fixtures" / "extraction_golden"
 
@@ -303,7 +303,7 @@ def test_golden_pdf_matches_its_recorded_answer(case: Golden):
     pdf, _ = _load(case)
     doc = pymupdf.open(stream=pdf, filetype="pdf")
     assert doc.page_count == case.pages
-    text = pdf_text_layer(pdf)
+    text = text_layer_sync(pdf)
     if case.scanned:
         # A scan: no text layer, so a text-mode adapter would have nothing.
         assert text is None

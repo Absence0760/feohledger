@@ -3,6 +3,7 @@
 import uuid
 from datetime import timedelta
 
+from app.services import pdf_reader
 from app.services.extraction_adapters.base import (
     STATEMENT_REASON_EMPTY_FILE,
     STATEMENT_REASON_NO_LINES,
@@ -12,7 +13,6 @@ from app.services.extraction_adapters.base import (
     ExtractionAdapter,
     ExtractionResult,
     StatementExtractionResult,
-    pdf_text_layer,
 )
 from app.services.extraction_adapters.dispatcher import register_extraction_adapter
 from app.services.extraction_adapters.statement_extraction import scan_statement_text
@@ -90,7 +90,7 @@ class MockExtractionAdapter(ExtractionAdapter):
             or file_bytes[:5] == b"%PDF-"
         )
         if is_pdf:
-            text = pdf_text_layer(file_bytes)
+            text = await pdf_reader.pdf_text(file_bytes)
         else:
             try:
                 text = file_bytes.decode("utf-8")

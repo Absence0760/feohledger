@@ -32,6 +32,7 @@ would create reconciliation drift with the ERP.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -96,7 +97,10 @@ async def recode_gl_with_ai(
         org_settings, organization_id=invoice.organization_id, announce=False
     )
     file_bytes, _content_type = await _get_object(invoice.file_key)
-    if _detect_structured_format(file_bytes, invoice.file_key) is not None:
+    # The probe opens a PDF to look for a Factur-X attachment: PyMuPDF work,
+    # so it runs on a worker thread (services/pdf_reader).
+    structured = await asyncio.to_thread(_detect_structured_format, file_bytes, invoice.file_key)
+    if structured is not None:
         # A structured e-invoice carries no model suggestion to re-read.
         raise AiRecodeRefused("structured e-invoice")
 

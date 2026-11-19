@@ -26,32 +26,6 @@ STATEMENT_REASON_UNREADABLE = "unreadable_response"
 STATEMENT_REASON_PROVIDER_UNKNOWN = "provider_not_registered"
 
 
-def pdf_text_layer(pdf_bytes: bytes, *, min_chars: int = 50) -> str | None:
-    """Return a PDF's embedded text layer, or ``None`` when there isn't one.
-
-    ``None`` means "this is a scan" (or PyMuPDF is unavailable / the bytes
-    aren't a readable PDF) — the caller must fall back to a vision model rather
-    than treat an empty read as an empty document. ``min_chars`` is the
-    "basically no text" floor: a scanned page often yields a few stray
-    characters from a header stamp.
-
-    Never raises.
-    """
-    try:
-        import pymupdf  # PyMuPDF
-
-        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-        text = ""
-        for page in doc:
-            text += page.get_text()
-        text = text.strip()
-        return text if len(text) > min_chars else None
-    except ImportError:
-        return None
-    except Exception:
-        return None
-
-
 def coerce_confidence(raw) -> float:
     """A model's self-rated confidence, forced into the 0.0–1.0 contract.
 
