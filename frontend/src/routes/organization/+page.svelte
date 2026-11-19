@@ -2170,7 +2170,7 @@
 						{#if loadingDomains}
 							<p class="card-hint">{m('org.customDomains.loading')}</p>
 						{:else if domainsError}
-							<p class="domain-error" role="alert">{domainsError}</p>
+							<LoadError message={domainsError} onretry={loadCustomDomains} testId="custom-domains-load-error" />
 						{:else}
 							{#if domainSaveError}
 								<p class="domain-error" role="alert" data-testid="custom-domain-error">
@@ -2240,7 +2240,7 @@
 								{m('org.chat.adminOnly')}
 							</p>
 						{:else if chatError}
-							<p class="chat-error" role="alert">{chatError}</p>
+							<LoadError message={chatError} onretry={loadChat} testId="chat-load-error" />
 						{:else if chat}
 							<div class="form-grid">
 								<label class="switch-row">
@@ -2364,9 +2364,7 @@
 								{m('org.emailIntake.adminOnly')}
 							</p>
 						{:else if intakeError}
-							<p class="domain-error" role="alert" data-testid="email-intake-error">
-								{intakeError}
-							</p>
+							<LoadError message={intakeError} onretry={loadEmailIntake} testId="email-intake-error" />
 						{:else if intakeUnavailable}
 							<!-- Proven: a token exists and the server still renders no
 							     address, which only happens when the platform has no
@@ -2442,7 +2440,7 @@
 						{#if loadingResidency}
 							<p class="card-hint">{m('org.residency.loading')}</p>
 						{:else if residencyError}
-							<p class="residency-error" role="alert">{residencyError}</p>
+							<LoadError message={residencyError} onretry={loadResidency} testId="residency-load-error" />
 						{:else}
 							<div class="form-grid">
 								<label>
@@ -3099,7 +3097,7 @@
 								{m('org.readOnly.sectionAdminOnly')}
 							</p>
 						{:else if ssoLoadError}
-							<p class="chat-error" role="alert">{ssoLoadError}</p>
+							<LoadError message={ssoLoadError} onretry={loadSso} testId="sso-load-error" />
 						{:else if sso}
 							{#if sso.password_sign_in_closed}
 								<p class="sso-status" data-testid="sso-status-closed">
@@ -3895,11 +3893,10 @@
 		flex: 1;
 	}
 
-	/* Panel-level load failure (custom domains, data residency, chat) — a
-	   persistent region rather than a toast, because it explains why the panel
-	   is empty. */
+	/* An in-panel save refusal (a domain add, an SSO save). A panel's failed
+	   LOAD is `ui/LoadError` instead, which carries the Retry this line had no
+	   room for. */
 	.domain-error,
-	.residency-error,
 	.chat-error {
 		color: var(--danger);
 		font-size: 0.88rem;
