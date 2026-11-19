@@ -557,6 +557,15 @@ Tenant table `notifications` (`models/notification.py`):
 - indexes: `(recipient_user_id)` and `(recipient_user_id, read_at)` for the
   unread-count query
 
+`entity_type` decides where the row opens in the web app: the bell and
+`/notifications` both resolve it through
+`frontend/src/lib/utils/notificationHref.ts` (`NOTIFICATION_ROUTES`), and a row
+whose type has no route there (or whose `entity_id` is missing for a
+record-scoped type) renders as plain text. A new `entity_type` passed to
+`notify_event` therefore needs an entry in that map:
+`notificationHref.test.ts` scans every `notify_event` call under
+`backend/app/services/` and fails when one is missing.
+
 ## API
 
 All endpoints require auth and are tenant-scoped to `recipient_user_id ==
