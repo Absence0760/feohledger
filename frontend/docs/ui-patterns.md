@@ -782,8 +782,8 @@ centred dialog with backdrop-click + Esc to close:
   `role="dialog"` in a component, stop and use `<Modal>`. Guard:
   `src/lib/modalShell.test.ts` fails on a `role="dialog"` attribute or a
   `class="backdrop"` in any `.svelte` file but `ui/Modal.svelte`; its
-  allowlist (`InvoiceModal`, `RunDetailModal`, `NotificationBell`'s non-modal
-  popover, the portal login's decorative backdrop) is shrink-only and fails
+  allowlist (`NotificationBell`'s non-modal popover, the portal login's
+  decorative backdrop) is shrink-only and fails
   when a listed file no longer needs its entry.
 - **The page behind an open dialog is `inert`** (decisions §384). While any
   modal dialog is open, everything outside the topmost one carries `inert`:
@@ -1372,9 +1372,9 @@ inherit it for free. Reuse these; don't re-solve them per page.
   The page outside the topmost dialog is `inert` while it is open (§ Modals,
   decisions §384), and that is taken off before the restore runs, so the
   trigger can take focus again.
-  Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` uses it, and so do
-  the two hand-rolled feature shells still waiting to move onto it
-  (`InvoiceModal`, `RunDetailModal`), so every dialog gets identical focus
+  Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` is its only
+  caller, and every dialog (`InvoiceModal` and `RunDetailModal` included)
+  renders through `ui/Modal`, so every dialog gets identical focus
   management. New dialogs use `ui/Modal`; `src/lib/modalShell.test.ts` refuses
   a new hand-rolled shell.
 - **Reorder controls** (WCAG 2.5.7 Dragging Movements) — any drag-to-reorder
