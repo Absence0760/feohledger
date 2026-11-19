@@ -266,9 +266,19 @@ void main() {
       (['cfo'], false),
     ]) {
       await _loginAs(roles: roles);
+      // A fresh screen per role: re-pumping the same tree keeps the previous
+      // login's build, so the CFO pass would see the admin's row.
+      await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(wrap());
       await tester.pump();
-      await scrollToBottom(tester);
+      // Scroll to the row's neighbour, not the list's bottom: an admin's
+      // Administration section sits below Procurement, and the list only
+      // builds rows near the viewport.
+      await tester.scrollUntilVisible(
+        find.widgetWithText(ListTile, 'Quality Inspections'),
+        200,
+      );
+      await tester.pumpAndSettle();
 
       expect(
         find.byKey(const Key('settings-record-goods-receipt')),
@@ -369,6 +379,10 @@ void main() {
       find.widgetWithText(ListTile, 'Sign Out'),
       200,
     );
+    // scrollUntilVisible stops at the first partial view; the tap must land
+    // on the whole row, not just past the bottom edge.
+    await tester.ensureVisible(find.widgetWithText(ListTile, 'Sign Out'));
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ListTile, 'Sign Out'));
     await tester.pumpAndSettle();
 
