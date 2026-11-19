@@ -96,6 +96,9 @@
 
 	// Delete confirm (armed two-click on the row action).
 	let confirmDeleteId = $state<string | null>(null);
+	// The subscription whose delete is in flight; the armed button stays
+	// pressable otherwise and a third click sends a second DELETE.
+	let deletingId = $state<string | null>(null);
 
 	// ── Secret rotation ──────────────────────────────────────────────────────
 	// Rotating mints a replacement signing secret while KEEPING the subscription
@@ -313,6 +316,8 @@
 	}
 
 	async function handleDelete(id: string) {
+		if (deletingId) return;
+		deletingId = id;
 		try {
 			await deleteWebhookSubscription(id);
 			toast(m('admin.webhooks.toast.deleted'), 'success');
@@ -321,6 +326,7 @@
 			toast(e instanceof Error ? e.message : m('admin.webhooks.toast.deleteFailed'), 'error');
 		} finally {
 			confirmDeleteId = null;
+			deletingId = null;
 		}
 	}
 
@@ -555,6 +561,14 @@
 								<RowAction
 									variant="danger"
 									armed={confirmDeleteId === sub.id}
+								disabled={deletingId !== null}
+								ariaLabel={m('admin.rowActionAria', {
+									action:
+										confirmDeleteId === sub.id
+											? m('admin.webhooks.row.confirm')
+											: m('admin.webhooks.row.delete'),
+									name: sub.name
+								})}
 									onclick={(e) => {
 										e.stopPropagation();
 										if (confirmDeleteId === sub.id) {

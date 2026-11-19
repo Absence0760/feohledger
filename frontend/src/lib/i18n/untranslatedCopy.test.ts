@@ -73,6 +73,8 @@ const TRANSLATED = [
 	'/src/lib/components/ui/VendorPicker.svelte',
 	'/src/routes/admin/access-review/+page.svelte',
 	'/src/routes/admin/privacy/+page.svelte',
+	// Was all English, labels, hints, toasts and the unit (round 22).
+	'/src/routes/admin/retention/+page.svelte',
 	'/src/routes/budgets/+page.svelte',
 	'/src/routes/credit-memos/+page.svelte',
 	'/src/routes/exceptions/+page.svelte',
@@ -111,6 +113,7 @@ const TOASTS_TRANSLATED = [
 	// count (decisions §360).
 	'/src/routes/admin/privacy/+page.svelte',
 	'/src/routes/admin/access-review/+page.svelte',
+	'/src/routes/admin/retention/+page.svelte',
 	'/src/routes/invoices/+page.svelte',
 	// Was "Payment voided", "Draft payment run created…" and six English
 	// load-failure fallbacks (#635).

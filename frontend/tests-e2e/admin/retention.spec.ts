@@ -74,6 +74,42 @@ test.describe('/admin/retention (admin)', () => {
 		});
 	});
 
+	test('a cleared or zero window is refused at the field, not after a round trip', async ({
+		page
+	}) => {
+		// The PUT accepts only a positive whole number of months. A cleared field
+		// parsed to 0 and used to enable Save, so the refusal arrived as a toast
+		// after the request; now Save stays off and the field says why.
+		let puts = 0;
+		page.on('request', (req) => {
+			if (req.method() === 'PUT' && req.url().includes('/api/retention-policy')) puts += 1;
+		});
+
+		await page.goto('/admin/retention');
+		await expect(page.getByTestId('retention-loading')).toHaveCount(0, { timeout: 10_000 });
+
+		const input = page.getByTestId('retention-input-invoices');
+		const saveBtn = page.getByRole('button', { name: 'Save changes' });
+
+		await input.fill('');
+		await expect(page.getByTestId('retention-error-invoices')).toHaveText(
+			'Enter a whole number of months, 1 or more.'
+		);
+		await expect(input).toHaveAttribute('aria-invalid', 'true');
+		await expect(saveBtn).toBeDisabled();
+
+		await input.fill('0');
+		await expect(saveBtn).toBeDisabled();
+
+		await input.fill('12');
+		await expect(page.getByTestId('retention-error-invoices')).toHaveCount(0);
+		await expect(input).not.toHaveAttribute('aria-invalid', 'true');
+
+		// Reset puts the saved value back without sending anything.
+		await page.getByRole('button', { name: 'Reset' }).click();
+		expect(puts).toBe(0);
+	});
+
 	test('reload reflects the persisted value', async ({ page }) => {
 		const headers = await apiHeaders(page);
 		const before = (await (

@@ -79,6 +79,9 @@
 
 	// Make-default row action (armed two-click, mirroring the api-keys revoke).
 	let confirmDefaultId = $state<string | null>(null);
+	// The entity whose make-default is in flight; the armed button stays
+	// pressable otherwise and a third click sends the request twice.
+	let settingDefaultId = $state<string | null>(null);
 
 	/** Auto-suggest a slug while the admin types a name, until they edit the
 	 *  slug themselves — then leave their value alone. */
@@ -183,6 +186,8 @@
 	}
 
 	async function handleSetDefault(id: string) {
+		if (settingDefaultId) return;
+		settingDefaultId = id;
 		try {
 			await setDefaultEntity(id);
 			toast(m('admin.entities.toast.defaultChanged'), 'success');
@@ -195,6 +200,7 @@
 			);
 		} finally {
 			confirmDefaultId = null;
+			settingDefaultId = null;
 		}
 	}
 
@@ -267,6 +273,14 @@
 							{#if !entity.is_default}
 								<RowAction
 									armed={confirmDefaultId === entity.id}
+									disabled={settingDefaultId !== null}
+									ariaLabel={m('admin.rowActionAria', {
+										action:
+											confirmDefaultId === entity.id
+												? m('admin.entities.row.confirm')
+												: m('admin.entities.row.makeDefault'),
+										name: entity.name
+									})}
 									onclick={(e) => {
 										e.stopPropagation();
 										if (confirmDefaultId === entity.id) {

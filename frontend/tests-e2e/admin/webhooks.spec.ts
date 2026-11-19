@@ -315,9 +315,10 @@ test.describe('/admin/webhooks (admin)', () => {
 		await expect(row).toBeVisible();
 
 		// Two-click armed delete: first click arms ("Confirm"), second commits.
-		// `exact` so the "Edit <name>" row link (no overlap, but be safe) isn't matched.
-		await row.getByRole('button', { name: 'Delete', exact: true }).click();
-		await row.getByRole('button', { name: 'Confirm', exact: true }).click();
+		// Named for its subscription ("Delete for <name>"); `exact` so the
+		// "Edit <name>" row link isn't matched.
+		await row.getByRole('button', { name: `Delete for ${name}`, exact: true }).click();
+		await row.getByRole('button', { name: `Confirm for ${name}`, exact: true }).click();
 
 		// Row is gone from the list.
 		await expect(page.locator('tr', { hasText: name })).toHaveCount(0, { timeout: 10_000 });
