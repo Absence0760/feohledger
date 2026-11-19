@@ -16,8 +16,8 @@ import { extractStyleBlocks, parseRules } from './a11y/cssAudit';
  *
  * In a covered file:
  *   1. No scoped rule names a local button class — `btn-*` other than the
- *      shared ones, or `*-btn` — unless `LOCAL_ALLOWED` says why it is not one
- *      of the shared variants.
+ *      shared ones, or `*-btn`. An icon-only control is `.btn-icon`, so
+ *      there is no variant left a local copy could stand in for.
  *   2. A scoped rule that names a shared class may place it (margin,
  *      `align-self`, padding to fill a slot) but never paint it: no colour,
  *      background, border, shadow, opacity, filter, font or cursor.
@@ -28,7 +28,14 @@ import { extractStyleBlocks, parseRules } from './a11y/cssAudit';
  * copies.
  */
 
-const SHARED = ['btn-primary', 'btn-cancel', 'btn-secondary', 'btn-danger', 'btn-ghost'] as const;
+const SHARED = [
+	'btn-primary',
+	'btn-cancel',
+	'btn-secondary',
+	'btn-danger',
+	'btn-ghost',
+	'btn-icon'
+] as const;
 
 const COVERED = [
 	'lib/components/layout/AccountLoadState.svelte',
@@ -62,23 +69,6 @@ const COVERED = [
 	'routes/vendors/change-requests/+page.svelte',
 	'routes/vendors/screening/+page.svelte'
 ];
-
-/** `<file> .<class>` → why it is not one of the shared variants. */
-const ICON_DISMISS =
-	'The header ✕ glyph with its own aria-label: an icon dismiss, not a boxed ' +
-	'action, so none of the shared variants fits it.';
-
-const LOCAL_ALLOWED: Record<string, string> = {
-	'lib/components/modals/RunDetailModal.svelte .close-btn': ICON_DISMISS,
-	'lib/components/modals/BulkRecodeGLModal.svelte .close-btn': ICON_DISMISS,
-	'lib/components/modals/InvoiceModal.svelte .close-btn': ICON_DISMISS,
-	'lib/components/modals/InvoiceModal.svelte .icon-btn':
-		'The header glyph buttons (fullscreen, ✕), each with its own aria-label: ' +
-		'icon controls, not boxed actions.',
-	'routes/invoices/+page.svelte .advanced-btn':
-		'The round filter-glyph toggle beside the search box, with a dot when ' +
-		'advanced filters are set: an icon toggle, not a boxed action.'
-};
 
 /** Properties that paint a button; a scoped rule on a shared class sets none. */
 const PAINT =
@@ -148,13 +138,26 @@ describe('shared button classes', () => {
 		expect(busy![1]).toMatch(/color: var\(--danger-on-tint\);/);
 	});
 
+	it('app.css declares the icon button: a 24px target, a pressed state, no opacity', () => {
+		const rules = parseRules(appCss);
+		const base = rules.find((r) => r.selector === '.btn-icon');
+		expect(base, '.btn-icon is declared').toBeDefined();
+		const decl = new Map(base!.declarations);
+		expect(decl.get('min-width')).toBe('24px');
+		expect(decl.get('min-height')).toBe('24px');
+		const pressed = rules.find((r) => r.selector === ".btn-icon:where([aria-pressed='true'])");
+		expect(pressed, 'the toggle-on state is declared').toBeDefined();
+		expect(new Map(pressed!.declarations).get('color')).toBe('var(--accent-on-tint)');
+		const iconRules = rules.filter((r) => classesIn(r.selector).includes('btn-icon'));
+		expect(iconRules.flatMap((r) => r.declarations).filter(([p]) => p === 'opacity')).toEqual([]);
+	});
+
 	it.each(COVERED)('%s carries no local button class', (path) => {
 		const local = new Set<string>();
 		for (const rule of scopedRules(path)) {
 			for (const cls of classesIn(rule.selector)) {
 				const isButtonish = cls.startsWith('btn-') || cls.endsWith('-btn');
 				if (!isButtonish || (SHARED as readonly string[]).includes(cls)) continue;
-				if (`${path} .${cls}` in LOCAL_ALLOWED) continue;
 				local.add(cls);
 			}
 		}

@@ -34,6 +34,7 @@
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { type MatchingIdsResponse } from '#lib/utils/pagination.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
@@ -195,7 +196,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('contracts.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
+					m('contracts.toast.selectedTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -429,7 +430,7 @@
 			<button class="btn-load-more" onclick={() => contractStore.loadMore()} disabled={contractStore.loading}>
 				{contractStore.loading
 					? m('common.loading')
-					: m('contracts.loadMore', { shown: contractStore.all.length, total: contractStore.total })}
+					: m('contracts.loadMore', { shown: formatCount(contractStore.all.length), total: formatCount(contractStore.total) })}
 			</button>
 		</div>
 	{:else if contractStore.total > 0 && !contractStore.errored}

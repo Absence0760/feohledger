@@ -1079,7 +1079,7 @@ the `ui/` primitive in the Source column.
 | Filter pill | `.filter-chip` (+ `.active`, `.count`) | `ui/FilterChips.svelte` |
 | Tab bar | `.tab-row` / `.tab` (+ `.active`) | `ui/Tabs.svelte` |
 | Load more | `.btn-load-more` / `.load-more-row` / `.load-more-end` | per-route, copy /admin |
-| Buttons: lead / dismiss / other action / destructive trigger / link-like | `.btn-primary` / `.btn-cancel` / `.btn-secondary` / `.btn-danger` / `.btn-ghost` (+ `.armed`) | `src/app.css` (see below) |
+| Buttons: lead / dismiss / other action / destructive trigger / link-like / icon-only | `.btn-primary` / `.btn-cancel` / `.btn-secondary` / `.btn-danger` / `.btn-ghost` / `.btn-icon` (+ `.armed`) | `src/app.css` (see below) |
 | Modal dialog | `.modal[role="dialog"]` + `.backdrop` | `ui/Modal.svelte` |
 | KPI card | `.kpi` / `.kpi-value` / `.kpi-label` | `ui/KpiCard.svelte` |
 | Status badge (invoice) | `<StatusBadge>` (tone from `INVOICE_STATUS_TONES`) | `ui/StatusBadge.svelte` |
@@ -1092,7 +1092,7 @@ the `ui/` primitive in the Source column.
 | Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |
 
-**Buttons** are five shared classes in `src/app.css`; the four boxed ones
+**Buttons** are six shared classes in `src/app.css`; the four boxed ones
 share one box size so a toolbar mixing them is one height. Never re-declare
 one per route, and never paint one from a scoped rule (placing it — margin,
 `align-self`, padding to fill a slot — is fine). The `/vendors` `.btn-outline`,
@@ -1100,9 +1100,8 @@ one per route, and never paint one from a scoped rule (placing it — margin,
 `RunDetailModal`'s `.btn-execute` / `.btn-discard` / `.btn-approve`, every
 bulk-bar `.bulk-action-btn`, `/vendors/screening`'s `.btn-block`, and the
 per-modal copies in `InvoiceModal`, `ContractModal`, the workflow-management
-modals and the rest were folded into these. An icon-only control (a header ✕,
-the `/invoices` filter toggle) is not one of the variants and is listed, with
-its reason, in the guard's `LOCAL_ALLOWED`. Guard:
+modals and the rest, and every header `.close-btn` / `.icon-btn` and the
+`/invoices` `.advanced-btn`, were folded into these. Guard:
 `src/lib/sharedButtonClasses.test.ts` — a file joins its `COVERED` list in
 the change that migrates it:
 - `.btn-primary` — the page's one lead action (white on `--accent-strong`).
@@ -1119,6 +1118,16 @@ the change that migrates it:
   Download inside the sentence that explains it. No box, underlined in
   `--accent` so colour is not the only cue (WCAG 1.4.1). `inline-flex` with a
   24px `min-height`, so standing alone it meets WCAG 2.5.8.
+- `.btn-icon` — a control whose whole label is a glyph: a header ✕, the
+  `InvoiceModal` fullscreen toggle, the `/invoices` advanced-filter button.
+  The name goes in `aria-label`. No box at rest; hover and press add one. A
+  24px minimum target both ways (WCAG 2.5.8), the global `:focus-visible`
+  ring, and a text glyph at 1.25rem (an `<svg>` keeps its own size). A
+  toggle sets `aria-pressed` and keeps ONE name: the on state is an
+  `--accent-tint` fill with `--accent-on-tint` glyph and an `--accent`
+  border, so a name that flipped with it ("Exit fullscreen") would say the
+  state twice. Scoped CSS may size it (`/invoices` makes its toggle 34px)
+  or style a child (that toggle's filters-set dot), never paint it.
 - `.armed` on `.btn-primary` / `.btn-danger` — the second, committing click
   of a two-click confirm (execute a run, file 1099s, cancel a run, propose
   bulk discounts, unblock a vendor's payments on `/vendors/screening`):

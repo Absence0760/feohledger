@@ -2,6 +2,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import type { WorkflowVersion, WorkflowDiff } from '#lib/types/workflow.ts';
 
@@ -90,14 +91,14 @@
 		}
 	}
 
+	// The active in-app locale, not a pinned 'en-US' (countFormatAudit.test.ts).
 	function fmtDate(iso: string): string {
-		if (!iso) return '—';
-		return new Date(iso).toLocaleString('en-US', {
+		return formatDate(iso, '—', {
 			month: 'short',
 			day: 'numeric',
 			year: 'numeric',
 			hour: 'numeric',
-			minute: '2-digit',
+			minute: '2-digit'
 		});
 	}
 
