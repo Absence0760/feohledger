@@ -1254,34 +1254,6 @@ scope (§260) — do not fold them into any of these.
       from the workflow's existing repository variables.
       **Trigger:** the next change to `vm-deploy.yml`.
 
-### Surfaced by giving backend rules a single owner (2026-10-20, issue #575 §3)
-
-- [ ] **(c) An invoice cannot say "currency unknown", so a missing code reads
-      as `USD`.** `Invoice.currency` is `Mapped[str]` (NOT NULL, default
-      `"USD"`), and `POST /api/workflow/upload` creates the row with
-      `currency="USD"` before anything has read the document. So an extraction
-      whose model returns no currency field, and no code beside the amounts,
-      leaves a non-US invoice labelled USD, which is the default decisions
-      §160/§196/§200 forbid. Since §308 the printed code fills the gap when the
-      page has one; this entry is the case where it doesn't. Two readers then
-      stamp the same default again: `invoice_warnings` scopes the
-      statistical-anomaly history with `Invoice.currency == (invoice.currency
-      or "USD")`, and `extraction.resolve_gate_aggregate` passes
-      `currency=… or "USD"` to the structuring sum. Each `or "USD"` is
-      unreachable for a flushed row (the column is NOT NULL) and only mirrors
-      the column default, so removing them alone changes nothing. **Durable
-      fix:** make `invoices.currency` nullable (tenant migration; no backfill,
-      because no honest value exists for the rows already stamped), have the
-      upload create the row with `NULL`, and have every reader of an unknown
-      currency fail closed. That means the anomaly and structuring lookups
-      compare nothing and the approval gates read `GateAmount(expressible=False)`,
-      which `reporting_gate_amount` already supports. Schemas, the web and
-      mobile types, ERP push and payment-run building must then refuse or
-      label a NULL currency, which is why this is sized work rather than a
-      one-line fix. **Trigger:** the next change to the upload's invoice
-      construction, or the first tenant reporting a non-USD invoice extracted
-      as USD.
-
 ### Surfaced by replacing signup's temporary password (2026-10-19, decisions §283)
 
 
@@ -1663,21 +1635,6 @@ user-visible halves still open.
 
 ### Surfaced by round 15 (2026-11-18, round PR #731, decisions §445–§453)
 
-- [ ] **(c) Invoices already holding `""` as "no currency" stay blank.**
-      `invoices.currency` is NOT NULL, so a currency blanked before round 17
-      landed as `""` rather than NULL. The PATCH no longer writes it: a blank,
-      `null` or malformed `currency` is a coded 422 (decisions §460), and
-      create, CSV import and approve-with-corrections never could. What is
-      left is the rows already blank: every money path refuses them (`/draft-run`
-      skips them, §453; the run builder, the payment queue, `POST
-      /api/payments` and dispatch refuse them as `currency_unknown`, §457), but
-      each reader still has to know that `""` means unknown, and the PATCH lets
-      a blank row be edited without naming a currency. **Durable fix:** the
-      nullable column of the "currency unknown" entry above, with a tenant
-      migration turning `""` into NULL so the one explicit unknown replaces the
-      sentinel. **Trigger:** that entry's migration, or the next change to the
-      `invoices.currency` column.
-
 ### Surfaced by round 20 (2026-11-18, round PR #732)
 
 - [ ] **(c) The mobile dashboard cannot say how much is overdue.** Its
@@ -1689,6 +1646,31 @@ user-visible halves still open.
       then an "Overdue" figure and a tap-through to the payment queue on
       mobile. **Trigger:** the next change to the dashboard endpoint or the
       mobile dashboard.
+
+### Surfaced by recording an unknown invoice currency as NULL (round 28, 2026-11-19, decisions §TBD-currency)
+
+- [ ] **(c) `Invoice(...)` without `currency` still falls back to USD.**
+      `Invoice.__init__` sets `"USD"` when a construction does not mention
+      `currency`, because about a hundred test fixtures (51 files) build
+      invoices that way and pay them. No application site reaches it
+      (`tests/test_invoice_currency_explicit.py` pins that every `Invoice(...)`
+      under `app/` names its currency), so it labels no real document, but it
+      is the last default of its kind in the model. **Durable fix:** give each
+      fixture an explicit `currency="USD"`, then delete the `__init__` override
+      so an omitted currency is NULL. **Trigger:** the next change to the
+      `Invoice` model's constructor or columns.
+- [ ] **(c) An invoice warning's `currency` param reads an unknown currency as
+      USD.** `invoice_warning_catalog._coerce` turns any currency param that is
+      not three characters into `DEFAULT_CURRENCY` ("USD"). Since migration
+      0136 an uploaded invoice records NULL until extraction reads a code, so a
+      warning raised on it (`round_amount`, the duplicate and PO-variance
+      sentences) can name USD for an amount nobody recorded a currency for.
+      Left alone in round 28 because another lane was editing that catalogue.
+      **Durable fix:** a currency param that is unknown renders the amount bare,
+      the way the web formatter does (§196): either a nullable `currency` kind
+      the clients render without a symbol, or a `*_currency_unknown` sentence
+      variant as §458 did for PO currency. Regenerate the web and mobile message
+      catalogues. **Trigger:** the next change to `invoice_warning_catalog.py`.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

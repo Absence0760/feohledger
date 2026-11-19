@@ -23714,3 +23714,49 @@ a run refuses them, a refresh keeps one row and a new receipt lifts it; an
 implicated recorder's receipt does not; `po_receipt_implicated` and its
 opt-out; an approval over the unchanged warning raises no hold; the
 new-or-worse comparison).
+
+## §TBD-currency. An invoice records "currency unknown" as NULL, and the upload creates it that way (closes two followups; extends §453, §457, §460; round 28, 2026-11-19)
+
+`invoices.currency` was NOT NULL with a column default of `"USD"`. `POST
+/api/invoices/upload` and the supplier-portal submit created the row as USD
+before anything had read the document, and an extraction that found no code
+(§308 fills it from a printed code when there is one) left it there: the
+default §160/§196/§200 forbid. Rows blanked by the invoice PATCH before §460
+held `""` instead, a sentinel every money path had to know.
+
+Migration 0136 (tenant) drops NOT NULL and turns every value that is blank
+after trimming whitespace into NULL, so NULL is the one spelling of unknown.
+The upload and the portal submit pass `currency=None`. No code is backfilled
+or removed: a row the old upload stamped USD cannot be told apart from a real
+USD invoice, and guessing either way manufactures a refusal or a currency
+nobody recorded (§141).
+
+The column default is gone, because a SQLAlchemy column `default` also
+replaces an explicit `None` at INSERT, which turned the upload's NULL back into
+USD (the migration test caught it). `Invoice.__init__` keeps `"USD"` only for
+a construction that does not mention `currency` at all, which about a hundred
+test fixtures rely on. `tests/test_invoice_currency_explicit.py` pins that
+every `Invoice(...)` under `app/` names its currency, so that fallback never
+labels a real document.
+
+Readers. Every money-path refusal already went through
+`payment_runs.payable_currency_code`, which answers `None` for NULL, blank and
+malformed alike, and `api/payments._queue_currency_unknown` coalesces NULL, so
+`currency_unknown` fires unchanged on the run builder, the payment queue,
+`POST /api/payments`, dispatch, `/draft-run` and the card mint, and the
+approval gates read the amount as inexpressible (§466). The tests now drive
+those refusals with NULL as well as the legacy blanks. Five readers stamped
+USD on an unknown currency and now do not: the statistical-anomaly history
+(an unknown-currency invoice has no comparable history, so it is not scored),
+the `invoice.*` and `exception.raised` webhook payloads (`currency: null`), the
+invoice-register CSV (a blank cell) and the assistant's invoice and
+pending-approval rows. The response schemas that carry an invoice's currency
+(`InvoiceResponse`, the credit-memo picker's eligible invoice, the supplier
+portal's invoice list, the public `V1Invoice`) are `str | None`, so a NULL row
+reads back as `null` rather than a 500, and the published v1 OpenAPI says so.
+The invoice PATCH is unchanged (§460): leaving `currency` out edits an unknown
+row, and an explicit `null` or blank is still the coded 422.
+
+Rejected: keeping `""` as the sentinel and only fixing the upload, which keeps
+two spellings of unknown; and backfilling a code from the org's home or
+reporting currency, which is the substitution with a different default.
