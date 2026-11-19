@@ -816,7 +816,7 @@
 									</button>
 									<button
 										type="submit"
-										class="btn-discard armed"
+										class="btn-danger armed"
 										disabled={rejecting || !rejectReason.trim()}
 										data-testid="nacha-reject-confirm"
 									>
@@ -864,7 +864,7 @@
 								{#if showReject}
 									<button
 										type="button"
-										class="btn-discard"
+										class="btn-danger"
 										disabled={downloadingNacha || !isAllowed(run.actions?.nacha_void)}
 										aria-describedby={run.actions?.nacha_void
 											? 'run-nacha-void-refusal'
@@ -879,7 +879,7 @@
 									{#if confirmRegenerate}
 										<button
 											type="button"
-											class="btn-discard armed"
+											class="btn-danger armed"
 											disabled={downloadingNacha ||
 												!isAllowed(run.actions?.nacha_regenerate) ||
 												!nachaDateOk}
@@ -994,7 +994,7 @@
 									</button>
 									<button
 										type="submit"
-										class="btn-approve"
+										class="btn-primary"
 										disabled={recordingRun ||
 											!isAllowed(run.actions?.record_outside) ||
 											!recordReference.trim() ||
@@ -1016,7 +1016,7 @@
 								     so it becomes the primary control. -->
 								<button
 									type="button"
-									class={fileOut ? 'btn-approve' : 'btn-secondary'}
+									class={fileOut ? 'btn-primary' : 'btn-secondary'}
 									disabled={executing ||
 										cancelling ||
 										downloadingNacha ||
@@ -1080,7 +1080,7 @@
 					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
 					{#if confirmCancel}
 						<button
-							class="btn-discard armed"
+							class="btn-danger armed"
 							disabled={cancelling}
 							onclick={cancelDraft}
 						>
@@ -1088,7 +1088,7 @@
 						</button>
 					{:else if isOffered(run.actions?.cancel)}
 						<button
-							class="btn-discard"
+							class="btn-danger"
 							disabled={cancelling || executing || approving || !isAllowed(run.actions?.cancel)}
 							onclick={() => arm('cancel')}
 						>
@@ -1107,7 +1107,7 @@
 					     verdict alone. -->
 					{#if pendingCfo && isOffered(run.actions?.approve)}
 						<button
-							class="btn-approve"
+							class="btn-primary"
 							disabled={approving || !isAllowed(run.actions?.approve)}
 							aria-describedby={run.actions?.approve ? 'run-approve-refusal' : undefined}
 							onclick={approveCfo}
@@ -1128,7 +1128,7 @@
 							     a test can wait on the armed control by name instead
 							     of on a timer. -->
 							<button
-								class="btn-execute armed"
+								class="btn-primary armed"
 								disabled={executing || cancelling || !isAllowed(run.actions?.execute)}
 								aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
 								onclick={execute}
@@ -1141,7 +1141,7 @@
 							</button>
 						{:else}
 							<button
-								class="btn-execute"
+								class="btn-primary"
 								disabled={executing || cancelling || !isAllowed(run.actions?.execute) || recordingRun}
 								aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
 								title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
@@ -1216,7 +1216,7 @@
 					{#if showRetry}
 						{#if confirmRetry}
 							<button
-								class="btn-execute armed"
+								class="btn-primary armed"
 								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
 								onclick={retryFailed}
 							>
@@ -1226,7 +1226,7 @@
 							</button>
 						{:else}
 							<button
-								class="btn-execute"
+								class="btn-primary"
 								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
 								aria-describedby={run?.actions?.retry_failed ? 'run-retry-refusal' : undefined}
 								onclick={() => (confirmRetry = true)}
@@ -1434,82 +1434,9 @@
 		gap: 8px;
 	}
 
-	.btn-cancel {
-		padding: 8px 16px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-cancel:hover {
-		background: var(--bg);
-	}
-
-	.btn-execute {
-		padding: 8px 20px;
-		border-radius: 4px;
-		border: none;
-		background: var(--success-strong);
-		color: #fff;
-		font-size: 0.88rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-execute:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-execute:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	/* Armed: the next click moves money. Reads as a warning, not as the
-	   calm green "ready" state, and mirrors how `.btn-discard.armed`
-	   changes appearance one step before it commits. */
-	.btn-execute.armed {
-		/* --danger-strong, not --danger: this is a fill carrying white text
-		   (5.37:1), the same call `app.css` records for every red fill. */
-		background: var(--danger-strong);
-		box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 30%, transparent);
-	}
-
 	.footer-note.armed-note {
 		color: var(--danger);
 		font-weight: 600;
-	}
-
-	.btn-discard {
-		padding: 8px 16px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-discard:hover:not(:disabled):not(.armed) {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-
-	.btn-discard.armed {
-		border-color: var(--danger);
-		background: color-mix(in srgb, var(--danger) 10%, transparent);
-		color: var(--danger);
-	}
-
-	.btn-discard:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	/* --- Paying the run outside FeohLedger --- */
@@ -1586,29 +1513,6 @@
 		margin-top: 10px;
 	}
 
-	.btn-secondary {
-		padding: 8px 16px;
-		border-radius: 4px;
-		/* --accent for text on the surface (--accent-strong is a FILL token only,
-		   and fails 4.5:1 as text on --surface — app.css). */
-		border: 1px solid var(--accent);
-		background: var(--surface);
-		color: var(--accent);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		background: var(--bg);
-	}
-
-	.btn-secondary:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
 	.footer-note.pending {
 		color: var(--warning);
 	}
@@ -1617,24 +1521,4 @@
 		color: var(--success);
 	}
 
-	.btn-approve {
-		padding: 8px 16px;
-		border-radius: 4px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-approve:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-
-	.btn-approve:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
 </style>

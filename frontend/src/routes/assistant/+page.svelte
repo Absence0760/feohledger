@@ -439,26 +439,6 @@
 		outline: none;
 		border-color: var(--accent);
 	}
-	.btn-secondary {
-		padding: 8px 14px;
-		border-radius: 8px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-family: inherit;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-	}
-	.btn-secondary:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-secondary:disabled,
-	.composer .btn-primary:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
 	.composer .btn-primary {
 		align-self: stretch;
 		padding: 0 22px;

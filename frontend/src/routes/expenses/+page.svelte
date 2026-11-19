@@ -1416,7 +1416,7 @@
 		{#if activeReport}
 			<div class="report-detail">
 				<div class="report-detail-head">
-					<button class="btn-back" onclick={closeReport}>{m('expenses.reports.back')}</button>
+					<button type="button" class="btn-ghost" onclick={closeReport}>{m('expenses.reports.back')}</button>
 					<div class="report-title-block">
 						<h2>{activeReport.report_number}</h2>
 						<Badge tone={EXPENSE_REPORT_STATUS_TONES[activeReport.status as ExpenseReportStatus]} variant={activeReport.status}>{reportStatusLabel(activeReport.status)}</Badge>
@@ -1434,7 +1434,7 @@
 							<button class="btn-primary" disabled aria-describedby="approve-refusal">{m('expenses.reports.approve')}</button>
 						{/if}
 						{#if isAllowed(activeReport.actions?.reject)}
-							<button class="btn-secondary danger" disabled={reportBusy} onclick={() => (showReject = true)}>{m('expenses.reports.reject')}</button>
+							<button class="btn-danger" disabled={reportBusy} onclick={() => (showReject = true)}>{m('expenses.reports.reject')}</button>
 						{/if}
 					</div>
 				</div>
@@ -1460,7 +1460,7 @@
 							bind:value={rejectReason}
 							aria-label={m('expenses.reports.rejectAria')}
 						/>
-						<button class="btn-secondary danger" disabled={reportBusy} onclick={rejectActiveReport}>{m('expenses.reports.confirmReject')}</button>
+						<button class="btn-danger" disabled={reportBusy} onclick={rejectActiveReport}>{m('expenses.reports.confirmReject')}</button>
 						<button class="btn-secondary" disabled={reportBusy} onclick={() => { showReject = false; rejectReason = ''; }}>{m('expenses.reports.cancel')}</button>
 					</div>
 				{/if}
@@ -1890,7 +1890,7 @@
 	>
 		{#snippet actions()}
 			{#if allSelected && !selectedAllMatching && expenseStore.total > expenseStore.all.length}
-				<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
+				<button type="button" class="btn-secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
 					{selectingAllMatching
 						? m('common.loading')
 						: m('common.selectAllMatching', { total: expenseStore.total })}
@@ -1904,7 +1904,7 @@
 					<option value={g.id}>{g.code} — {g.name}</option>
 				{/each}
 			</select>
-			<button class="bulk-action-btn" disabled={bulkBusy} onclick={applyBulkGl}>
+			<button type="button" class="btn-primary" disabled={bulkBusy} onclick={applyBulkGl}>
 				{bulkBusy ? m('expenses.bulk.applying') : m('expenses.bulk.glCode', { n: selected.size })}
 			</button>
 		{/snippet}
@@ -2026,22 +2026,6 @@
 		flex-wrap: wrap;
 	}
 
-	.btn-secondary {
-		padding: 8px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.88rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-secondary:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
 	/* The last card import's refused rows (decisions §377). */
 	.card-import-errors {
 		border: 1px solid var(--border);
@@ -2101,33 +2085,6 @@
 		font-size: 0.82rem;
 	}
 
-	.bulk-action-btn {
-		padding: 6px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.bulk-action-btn:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-
-	.bulk-action-btn.secondary {
-		background: transparent;
-		color: var(--accent-strong);
-	}
-
 	.bulk-all-matching-note {
 		font-size: 0.82rem;
 		color: var(--text-muted);
@@ -2167,18 +2124,6 @@
 		color: var(--text-muted);
 		max-width: 32ch;
 	}
-	.btn-back {
-		border: none;
-		background: none;
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-		padding: 4px 0;
-	}
-	.btn-back:hover {
-		color: var(--accent);
-	}
 	.attach-hint {
 		margin: 6px 0 12px;
 		font-size: 0.8rem;
@@ -2205,12 +2150,6 @@
 		font-family: inherit;
 		font-size: 0.85rem;
 		min-width: 280px;
-	}
-
-	/* Danger variant of the secondary button (report reject). */
-	.btn-secondary.danger:hover {
-		border-color: var(--danger);
-		color: var(--danger);
 	}
 
 	/* Inline blocking-violation panel above the report detail. */

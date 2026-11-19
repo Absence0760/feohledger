@@ -2255,7 +2255,8 @@
 					</span>
 					{#if allQueueSelected && !selectedAllQueueMatching && queueSelectableTotal > selectableQueue.length}
 						<button
-							class="btn-select-all-matching"
+							type="button"
+							class="btn-secondary"
 							data-testid="queue-select-all-matching"
 							disabled={selectingAllQueue}
 							onclick={selectAllQueueMatching}
@@ -2271,7 +2272,7 @@
 					{/if}
 					{#if !showReview}
 						<button
-							class="btn-pay"
+							class="btn-primary"
 							disabled={mixedCurrencySelection}
 							title={mixedCurrencySelection ? m('payments.queue.mixedCurrencyBlocked') : ''}
 							onclick={() => (showReview = true)}
@@ -2279,7 +2280,7 @@
 							{m('payments.queue.reviewAndPay')}
 						</button>
 					{/if}
-					<button class="btn-clear" onclick={clearQueueSelection}>{m('common.clear')}</button>
+					<button type="button" class="btn-cancel btn-clear" onclick={clearQueueSelection}>{m('common.clear')}</button>
 				</div>
 			</div>
 		{/if}
@@ -2374,7 +2375,8 @@
 				<div class="review-footer">
 					<span class="review-total">{m('payments.queue.total', { amount: formatGroups(selectedGroups) })}</span>
 					<button
-						class="btn-execute"
+						type="button"
+						class="btn-primary btn-execute"
 						disabled={creatingRun || mixedCurrencySelection}
 						title={mixedCurrencySelection ? m('payments.queue.mixedCurrencyBlocked') : ''}
 						onclick={createDraftRun}
@@ -3412,7 +3414,7 @@
 					{m('common.cancel')}
 				</button>
 				{#if complianceMode === 'release'}
-					<button type="submit" class="btn-pay" disabled={complianceBusy}>
+					<button type="submit" class="btn-primary" disabled={complianceBusy}>
 						{complianceBusy
 							? m('payments.compliance.release.busy')
 							: m('payments.compliance.release.confirm')}
@@ -3583,7 +3585,7 @@
 				</button>
 				<button
 					type="button"
-					class="btn-pay"
+					class="btn-primary"
 					data-testid="erp-sync-confirm"
 					disabled={erpSyncBusy}
 					onclick={commitErpSync}
@@ -4011,29 +4013,6 @@
 		font-weight: 600;
 	}
 
-	.btn-select-all-matching {
-		padding: 4px 10px;
-		border-radius: 4px;
-		border: 1px solid var(--accent);
-		background: transparent;
-		color: var(--accent);
-		font-size: 0.8rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.btn-select-all-matching:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-
-	.btn-select-all-matching:not(:disabled):hover {
-		background: var(--accent-strong);
-		color: #fff;
-	}
-
 	.pay-bar-all-matching {
 		font-size: 0.8rem;
 		color: var(--text-muted);
@@ -4097,27 +4076,6 @@
 		font-size: 0.7rem;
 		font-weight: 400;
 		color: inherit;
-	}
-
-	.btn-pay {
-		padding: 6px 16px;
-		border-radius: 4px;
-		border: none;
-		background: var(--success-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-pay:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-pay:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	/* A queue row the backend would refuse: readable, visibly inert, never
@@ -4235,21 +4193,6 @@
 		line-height: 1.4;
 	}
 
-	.btn-clear {
-		padding: 6px 12px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.82rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-clear:hover {
-		color: var(--text);
-	}
-
 	/* --- Review panel --- */
 
 	.review-panel {
@@ -4306,27 +4249,6 @@
 		font-size: 0.9rem;
 		font-weight: 700;
 		color: var(--text);
-	}
-
-	.btn-execute {
-		padding: 8px 20px;
-		border-radius: 6px;
-		border: none;
-		background: var(--success-strong);
-		color: #fff;
-		font-size: 0.88rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-execute:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-execute:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	/* --- Record-only mode + record-outside dialog (issue #517) --- */
@@ -4398,27 +4320,6 @@
 		background: color-mix(in srgb, var(--danger) 8%, transparent);
 		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		border-radius: 4px;
-	}
-
-	.btn-danger {
-		padding: 8px 18px;
-		border-radius: 4px;
-		border: 1px solid var(--danger-strong);
-		background: var(--danger-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-danger:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-
-	.btn-danger:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	.rebate-grid {
