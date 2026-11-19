@@ -8,6 +8,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { DISCOUNT_STATUS_TONES, type DiscountStatus } from '#lib/types/discounts.ts';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -234,17 +235,14 @@
 		<p class="sub">{m('portal.discounts.subtitle')}</p>
 	</header>
 
-	<nav class="filters" aria-label={m('portal.discounts.filterAria')}>
-		{#each FILTERS as f (f.key)}
-			<button
-				type="button"
-				class="filter-chip"
-				class:active={activeFilter === f.key}
-				aria-pressed={activeFilter === f.key}
-				onclick={() => setFilter(f.key)}>{m(f.labelKey)}</button
-			>
-		{/each}
-	</nav>
+	<div class="filter-bar">
+		<FilterChips
+			ariaLabel={m('portal.discounts.filterAria')}
+			chips={FILTERS.map((f) => ({ key: f.key, label: m(f.labelKey) }))}
+			active={activeFilter}
+			onchange={setFilter}
+		/>
+	</div>
 
 	{#if error}<div class="error" role="alert">{error}</div>{/if}
 
@@ -435,28 +433,9 @@
 		color: var(--text-muted);
 		font-size: 0.85rem;
 	}
-	.filters {
-		display: flex;
-		gap: 8px;
+	/* The chips themselves are app.css's `.filter-chip`, owned by FilterChips. */
+	.filter-bar {
 		margin-bottom: 16px;
-		flex-wrap: wrap;
-	}
-	.filter-chip {
-		padding: 5px 12px;
-		border: 1px solid var(--border);
-		border-radius: 999px;
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.82rem;
-		cursor: pointer;
-	}
-	.filter-chip:hover {
-		color: var(--text);
-	}
-	.filter-chip.active {
-		background: var(--accent-strong);
-		border-color: var(--accent-strong);
-		color: #fff;
 	}
 	/* Table chrome (padding, borders, header, `.right`, `td.actions`) is
 	   app.css's `.grid-container`, owned by DataTable. Cells top-align: the

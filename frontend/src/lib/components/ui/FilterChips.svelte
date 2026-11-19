@@ -14,9 +14,15 @@
 		active: string;
 		/** Fired in addition to updating `active`. */
 		onchange?: (key: string) => void;
+		/**
+		 * Accessible name for the chip `<nav>`. Pass one wherever the page has
+		 * more than one navigation landmark, so a screen-reader user can tell
+		 * this row of filters from the site nav.
+		 */
+		ariaLabel?: string;
 	};
 
-	let { chips, active = $bindable(), onchange }: Props = $props();
+	let { chips, active = $bindable(), onchange, ariaLabel }: Props = $props();
 
 	function select(key: string) {
 		active = key;
@@ -24,7 +30,7 @@
 	}
 </script>
 
-<nav class="filters">
+<nav class="filters" aria-label={ariaLabel}>
 	{#each chips as chip (chip.key)}
 		<button
 			class="filter-chip"
