@@ -28,6 +28,10 @@ from app.models.webhook import (
 )
 
 _AMOUNT = "Invoice amount as an exact decimal string (never a float)."
+_CURRENCY = (
+    "ISO 4217 currency code of `amount`, or null when the invoice records no currency "
+    "(not yet extracted, or the document names none). Never a guessed default."
+)
 
 
 class WebhookInvoiceData(BaseModel):
@@ -38,7 +42,7 @@ class WebhookInvoiceData(BaseModel):
     invoice_number: str | None = Field(None, description="The supplier's invoice number.")
     vendor_name: str | None = Field(None, description="The vendor's name.")
     amount: str | None = Field(None, description=_AMOUNT)
-    currency: str = Field(description="ISO 4217 currency code of `amount`.")
+    currency: str | None = Field(None, description=_CURRENCY)
     status: str | None = Field(None, description="The invoice's status after the transition.")
 
 
@@ -67,7 +71,7 @@ class WebhookExceptionData(BaseModel):
     invoice_number: str | None = Field(None, description="The linked invoice's number.")
     vendor_name: str | None = Field(None, description="The linked invoice's vendor name.")
     amount: str | None = Field(None, description=_AMOUNT)
-    currency: str = Field(description="ISO 4217 currency code of `amount`.")
+    currency: str | None = Field(None, description=_CURRENCY)
     link: str = Field(description="App-relative deep link to the invoice or the exception queue.")
 
 

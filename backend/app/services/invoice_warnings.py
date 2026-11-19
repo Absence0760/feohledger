@@ -440,7 +440,12 @@ async def refresh_warnings(
             # currencies into one mean/stdev would both misfire (a normal
             # foreign-currency invoice reads as a huge outlier) and mask
             # real anomalies (a mixed-currency history inflates stdev).
-            if cfg["stat_anomaly_enabled"] and invoice.amount:
+            # An invoice that records no currency has no comparable history:
+            # reading it as USD would score it against USD invoices (§TBD-currency).
+            from app.services.payment_runs import payable_currency_code
+
+            anomaly_currency = payable_currency_code(invoice.currency)
+            if cfg["stat_anomaly_enabled"] and invoice.amount and anomaly_currency is not None:
                 hist_q = await db.execute(
                     select(Invoice.amount)
                     .where(
@@ -448,7 +453,7 @@ async def refresh_warnings(
                         Invoice.id != invoice.id,
                         Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
                         Invoice.amount.isnot(None),
-                        Invoice.currency == (invoice.currency or "USD"),
+                        func.upper(Invoice.currency) == anomaly_currency,
                     )
                     .order_by(Invoice.created_at.desc())
                     .limit(20)

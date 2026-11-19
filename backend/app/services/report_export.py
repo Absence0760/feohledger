@@ -182,7 +182,8 @@ def export_invoice_register(invoices: Iterable) -> str:
                 getattr(inv, "invoice_number", "") or "",
                 getattr(inv, "vendor_name", "") or "",
                 _fmt_money(getattr(inv, "amount", None)),
-                getattr(inv, "currency", "") or "USD",
+                # Blank when the invoice records no currency: never a guessed USD.
+                getattr(inv, "currency", "") or "",
                 status or "",
                 _fmt_date(getattr(inv, "invoice_date", None)),
                 _fmt_date(getattr(inv, "due_date", None)),

@@ -85,6 +85,13 @@ def test_spec_publishes_v1_invoice_money_as_string():
     assert amount.get("type") == "string", amount
 
 
+def test_spec_publishes_v1_invoice_currency_as_nullable():
+    """An invoice may record no currency (decisions §TBD-currency); the contract
+    says so rather than promising a code it would then break with a 500."""
+    currency = _spec()["components"]["schemas"]["V1Invoice"]["properties"]["currency"]
+    assert {"type": "null"} in currency.get("anyOf", []), currency
+
+
 def test_spec_does_not_leak_internal_only_schemas():
     spec = _spec()
     schema_names = set(spec["components"]["schemas"])

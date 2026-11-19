@@ -320,7 +320,9 @@ async def upload_invoice(
             vendor_name="",
             description="",
             amount=Decimal("0"),
-            currency="USD",
+            # Unknown until extraction reads the document, and unknown after it
+            # if the document names none: never a guessed USD (§TBD-currency).
+            currency=None,
             status=InvoiceStatus.new,
             organization_id=org_id,
             entity_id=entity_id,

@@ -57,7 +57,7 @@ async def list_pending_approvals(
             invoice_number=inv.invoice_number,
             vendor_name=inv.vendor_name,
             amount=inv.amount,
-            currency=inv.currency or "USD",
+            currency=inv.currency or None,
             assigned_to_id=str(assigned_to) if assigned_to else None,
             waiting_since=created_at.date() if created_at else None,
         )

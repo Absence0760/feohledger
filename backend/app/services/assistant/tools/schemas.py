@@ -38,7 +38,7 @@ class InvoiceSummary(BaseModel):
     invoice_number: str
     vendor_name: str
     amount: Decimal
-    currency: str
+    currency: str | None  # None = the invoice records no currency
     status: str
     invoice_date: date | None = None
     due_date: date | None = None
@@ -89,7 +89,7 @@ class PendingApprovalRow(BaseModel):
     invoice_number: str
     vendor_name: str
     amount: Decimal
-    currency: str
+    currency: str | None  # None = the invoice records no currency
     assigned_to_id: str | None = None
     waiting_since: date | None = None
 

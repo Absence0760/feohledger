@@ -184,7 +184,9 @@ class InvoiceResponse(BaseModel):
     vendor_id: str | None = None
     invoice_number: str
     amount: MoneyAmount
-    currency: str
+    # `None` = currency unknown (an upload before extraction, or a document
+    # that names none). Never defaulted: clients render it without a symbol.
+    currency: str | None
     invoice_date: str | None
     received_date: str | None
     due_date: str | None

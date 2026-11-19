@@ -573,7 +573,8 @@ async def submit_invoice(
         vendor_id=vendor.id,
         description="",
         amount=Decimal("0"),
-        currency="USD",
+        # Unknown until extraction reads the document (§TBD-currency).
+        currency=None,
         status=InvoiceStatus.new,
         organization_id=vendor.organization_id,
         # The supplier portal has no entity selector — a vendor's invoice lands

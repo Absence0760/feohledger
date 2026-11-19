@@ -141,7 +141,9 @@ class EligibleInvoiceResponse(BaseModel):
     status: str
     due_date: str | None = None
     amount: MoneyAmount
-    currency: str
+    # `None` = the invoice records no currency; the picker offers it to a memo of
+    # any currency, as `eligible_invoices_query` does.
+    currency: str | None
     # `amount` minus every credit already APPLIED to the invoice — the figure
     # the over-application guard on both application paths compares against.
     creditable_balance: MoneyAmount
