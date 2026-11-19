@@ -1,7 +1,7 @@
 """The dashboard's `total_pending` covers every in-flight payment status.
 
 `GET /api/dashboard` restated the in-flight set as `["pending", "processing"]`
-while `api/payments.PENDING_PAYMENT_STATUSES` is the canonical
+while `payment_adapters/base.PENDING_PAYMENT_STATUSES` is the canonical
 `("pending", "processing", "submitted", "pending_compliance")`. The two extra
 statuses are not edge cases: `submitted` is money already handed to the rail,
 and `pending_compliance` is money the sanctions/KYC gate is holding for a human.
@@ -21,7 +21,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.api.payments import PENDING_PAYMENT_STATUSES
+from app.services.payment_adapters.base import PENDING_PAYMENT_STATUSES
 from app.models.entity import Entity
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment

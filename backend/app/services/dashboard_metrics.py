@@ -51,6 +51,7 @@ from app.services.open_ap_due import (
     is_overdue,
     latest_schedule_subquery,
 )
+from app.services.payment_adapters.base import PENDING_PAYMENT_STATUSES
 from app.services.touchless import touchless_counts_select
 from app.tenant import apply_entity_scope
 
@@ -598,7 +599,6 @@ async def payment_totals(s: DashboardScope) -> dict:
     # gate waiting on a human — showed in NEITHER dashboard KPI (not paid, not
     # pending) and simply vanished from the landing page. `/payments/summary`
     # states exactly that reasoning where the tuple is defined.
-    from app.api.payments import PENDING_PAYMENT_STATUSES
 
     pending_q = await s.db.execute(
         s.pay(

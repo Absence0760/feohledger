@@ -114,6 +114,7 @@ from app.services.payment_adapters import (
     UnknownPaymentProviderError,
     get_payment_adapter,
 )
+from app.services.payment_adapters.base import PENDING_PAYMENT_STATUSES
 from app.services.payment_controls import (
     CFO_REASON_AMOUNT_NOT_EXPRESSIBLE,
     CFO_REASON_THRESHOLD_UNPARSEABLE,
@@ -1366,12 +1367,9 @@ async def payment_queue_ids(
     }
 
 
-#: Payment statuses whose money is committed but not yet settled — what
-#: `/summary` reports as `total_pending`. `pending_compliance` belongs here:
-#: the payment is authorized and waiting on a human, so leaving it out made
-#: held money appear in NEITHER KPI (not paid, not pending) — invisible in the
-#: one place a treasurer looks for "what is still out there".
-PENDING_PAYMENT_STATUSES = ("pending", "processing", "submitted", "pending_compliance")
+#: `PENDING_PAYMENT_STATUSES` (committed, not yet settled) lives beside the
+#: other payment-status sets in `services/payment_adapters/base`, so services
+#: such as the dashboard read it without importing this router.
 
 
 @router.get("/summary")
