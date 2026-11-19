@@ -23714,3 +23714,69 @@ a run refuses them, a refresh keeps one row and a new receipt lifts it; an
 implicated recorder's receipt does not; `po_receipt_implicated` and its
 opt-out; an approval over the unchanged warning raises no hold; the
 new-or-worse comparison).
+
+## §TBD-contractfx. A contract limit the invoice's currency cannot measure is a finding, and a not-to-exceed one stops unattended approval (round 28, 2026-11-19)
+
+**Problem.** `contract_compliance.evaluate_contract_compliance` measures
+cumulative spend against `spend_limit` only when the invoice's currency
+(`payment_runs.payable_currency_code`) is the contract's. An invoice in
+another currency, or in none (§466), skipped the check and raised nothing, so
+a not-to-exceed contract said nothing about it. A code-less invoice cannot be
+approved or paid (§466), but a foreign-currency one could be, unattended, with
+nobody told that the cap was never checked.
+
+**Decision 1: a finding, never a conversion.** When the contract has a
+`spend_limit` and a valid currency, an invoice in another currency gets
+`contract_currency_mismatch` (params `invoiceCurrency`, `contractNumber`,
+`contractCurrency`, all `text`), and one with no valid currency gets
+`contract_currency_mismatch_invoice_currency_unknown`. Both are type
+`contract_noncompliant`, built through `invoice_warning_catalog.warning`, with
+severity `error` when `not_to_exceed` and `warning` otherwise, as the
+spend-limit codes' severity follows it. Nothing is converted. A rate fetched
+or guessed here would decide whether a contractual cap is passed, which is
+§196's substitution in another place. The figure stays out of the sum, as
+before. Two codes, not a param, because a missing currency is a different
+sentence (the `po_currency_mismatch` pattern). A contract with no limit raises
+neither: there is nothing unmeasured.
+
+**Decision 2: a not-to-exceed `error` stops every unattended approval, and
+the measured breach does too.** §469 stopped the unattended doors for
+`po_overbilled` because a finding that means the invoice could over-pay must
+have a person read it before approval, even when it cannot be a hold. A
+not-to-exceed contract is the customer's statement that spend past the cap
+needs a decision. An amount the cap cannot measure is exactly that case: it may
+be within the cap or past it, and nobody can say which without a rate we
+refuse to guess. So `invoice_warnings.has_contract_cap_warning` (an `error`
+`contract_noncompliant` finding, which only a not-to-exceed contract's
+spend-limit codes carry) makes `po_match_hold_refusal` answer `contract_cap`
+(`UNATTENDED_APPROVAL_CONTRACT_CAP`). Extraction's auto-approve and
+`/complete`'s floor then land at `ready_for_review` with
+`auto_approve_suppressed: "contract_cap"`, and the exception-agent coordinator
+unwinds an apply that approved such an invoice and escalates
+(`_ContractCap`), as it does for `po_overbilled`.
+
+This also covers `contract_spend_limit_exceeded_not_to_exceed`. It was an
+`error` with no consequence on any unattended door. Wiring only the currency
+finding would have stopped an unmeasurable invoice while still auto-approving
+one that measurably breached the cap, which is backwards. The function is
+named for the PO match, but both doors and the floor already ask it, so the
+contract answer lives there rather than as a second question at each door.
+
+**Why not a hold.** §469's reasons hold here too. The spend sum crosses
+invoices, and a sibling rejected or relinked does not re-run this invoice's
+warnings, so a payment-blocking hold would go stale both ways.
+`contract_noncompliant` is not in `PAYMENT_BLOCKING_EXCEPTION_TYPES` and stays
+out. A non-not-to-exceed contract keeps its advisory meaning: the finding is a
+`warning` and stops nothing.
+
+**Left alone.** A contract whose own stored currency is invalid (the API
+validates it, so only an old or hand-edited row) raises no currency finding.
+The prior-spend query still compares the raw `contract.currency`.
+
+Tests: `backend/tests/test_contracts.py` (other currency and no currency, each
+with `not_to_exceed` on and off, with exact params and no spend query; the
+same currency unchanged, over and under the limit; no limit, no finding;
+`has_contract_cap_warning` reads only an `error`; through the real link route,
+`po_match_hold_refusal` answers `contract_cap` for a not-to-exceed contract and
+nothing otherwise); `backend/tests/test_exception_agents.py` (the agent
+unwind).
