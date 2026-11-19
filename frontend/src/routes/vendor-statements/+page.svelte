@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Reconciliation, ReconStatus } from '#lib/types/vendorStatementRecon.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import {
 		RECON_STATUSES,
 		reconStatusLabelKey,
@@ -37,7 +38,6 @@
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.isManager);
 
@@ -442,17 +442,16 @@
 		</DataTable>
 	{/if}
 
-	{#if hasMore && !loadError}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('vendorStatements.loadMore', { shown: formatCount(recons.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('vendorStatements.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={recons.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		errored={loadError}
+		onloadmore={() => load({ append: true })}
+		moreKey="vendorStatements.loadMore"
+		allKey="vendorStatements.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import type { AdminUser } from '#lib/types/admin.ts';
 	import { roleLabelKey } from '#lib/types/admin.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
@@ -17,7 +18,6 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	let showCreateModal = $state(false);
 	let editingUser = $state<AdminUser | null>(null);
@@ -499,17 +499,15 @@
 	{/snippet}
 </DataTable>
 
-{#if adminStore.hasMore}
-	<div class="load-more-row">
-		<button class="btn-load-more" onclick={loadMore} disabled={adminStore.loading}>
-			{adminStore.loading ? m('common.loading') : m('admin.users.loadMore', { shown: formatCount(adminStore.users.length), total: formatCount(adminStore.total) })}
-		</button>
-	</div>
-{:else if adminStore.total > 0}
-	<div class="load-more-row">
-		<span class="load-more-end">{m('admin.users.showingAll', { total: adminStore.total })}</span>
-	</div>
-{/if}
+<LoadMoreFooter
+	shown={adminStore.users.length}
+	total={adminStore.total}
+	hasMore={adminStore.hasMore}
+	loading={adminStore.loading}
+	onloadmore={loadMore}
+	moreKey="admin.users.loadMore"
+	allKey="admin.users.showingAll"
+/>
 
 <!-- Invite User Modal -->
 <Modal open={showCreateModal} ariaLabel={m('admin.users.modal.invite.aria')} width="sm" onclose={() => (showCreateModal = false)}>

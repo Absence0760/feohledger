@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Payment, PaymentMethod, PaymentStatus } from '#lib/types/payment.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { queueBlockedReasonKey } from '#lib/types/paymentQueue.ts';
 	import {
 		PAYMENT_STATUSES,
@@ -2593,19 +2594,15 @@
 		</DataTable>
 		</div>
 
-		{#if hasMoreQueue}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={loadMoreQueue} disabled={queueLoadingMore}>
-					{queueLoadingMore
-						? m('common.loading')
-						: m('payments.queue.loadMore', { shown: formatCount(queue.length), total: formatCount(queueTotal) })}
-				</button>
-			</div>
-		{:else if queueTotal > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('payments.queue.showingAll', { total: queueTotal })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={queue.length}
+			total={queueTotal}
+			hasMore={hasMoreQueue}
+			loading={queueLoadingMore}
+			onloadmore={loadMoreQueue}
+			moreKey="payments.queue.loadMore"
+			allKey="payments.queue.showingAll"
+		/>
 		{/if}
 
 	{:else if activeTab === 'history'}
@@ -2747,21 +2744,15 @@
 		</DataTable>
 		</div>
 
-		{#if paymentStore.hasMore}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={() => paymentStore.loadMore()} disabled={paymentStore.loading}>
-					{paymentStore.loading
-						? m('common.loading')
-						: m('payments.history.loadMore', { shown: formatCount(paymentStore.all.length), total: formatCount(paymentStore.total) })}
-				</button>
-			</div>
-		{:else if paymentStore.total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end"
-					>{m('payments.history.showingAll', { total: paymentStore.total })}</span
-				>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={paymentStore.all.length}
+			total={paymentStore.total}
+			hasMore={paymentStore.hasMore}
+			loading={paymentStore.loading}
+			onloadmore={() => paymentStore.loadMore()}
+			moreKey="payments.history.loadMore"
+			allKey="payments.history.showingAll"
+		/>
 		{/if}
 
 	{:else if activeTab === 'runs'}
@@ -2949,22 +2940,16 @@
 		{/if}
 		</div>
 
-		{#if hasMoreRebates}
-			<div class="load-more-row">
-				<button
-					class="btn-load-more"
-					onclick={loadMoreRebates}
-					disabled={loadingMoreRebates}
-					data-testid="load-more-rebates"
-				>
-					{loadingMoreRebates ? m('common.loading') : m('payments.rebates.loadMore', { shown: formatCount(rebates.length), total: formatCount(rebateCount) })}
-				</button>
-			</div>
-		{:else if rebateCount > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('payments.rebates.showingAll', { total: rebateCount })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={rebates.length}
+			total={rebateCount}
+			hasMore={hasMoreRebates}
+			loading={loadingMoreRebates}
+			onloadmore={loadMoreRebates}
+			moreKey="payments.rebates.loadMore"
+			allKey="payments.rebates.showingAll"
+			testId="load-more-rebates"
+		/>
 
 		{#if rebateCount > 0 && rebateListCurrency}
 			<!-- The WHOLE filtered set's total, off the envelope — never a sum of
@@ -3045,17 +3030,15 @@
 		{/if}
 		</div>
 
-		{#if hasMoreCards}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={loadMoreCards} disabled={loadingMoreCards}>
-					{loadingMoreCards ? m('common.loading') : m('payments.cards.loadMore', { shown: formatCount(cards.length), total: formatCount(cardsTotal) })}
-				</button>
-			</div>
-		{:else if cardsTotal > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('payments.cards.showingAll', { total: cardsTotal })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={cards.length}
+			total={cardsTotal}
+			hasMore={hasMoreCards}
+			loading={loadingMoreCards}
+			onloadmore={loadMoreCards}
+			moreKey="payments.cards.loadMore"
+			allKey="payments.cards.showingAll"
+		/>
 	{/if}
 	</div>
 </PageHeader>

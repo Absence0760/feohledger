@@ -3789,7 +3789,7 @@ export const messages = {
 	'workflows.list.newWorkflow': '+ Nuevo workflow',
 	'workflows.list.selectAll': 'Seleccionar todos los workflows',
 	'workflows.list.selectRow': 'Seleccionar {name}',
-	'workflows.list.showingAll': '{n, plural, one {Mostrando # workflow} other {Mostrando los # workflows}}',
+	'workflows.list.showingAll': '{total, plural, one {Mostrando # workflow} other {Mostrando los # workflows}}',
 	'workflows.list.step.approval': 'Aprobación',
 	'workflows.list.step.erpExport': 'Exportación a ERP',
 	'workflows.list.step.extraction': 'Extracción de datos',

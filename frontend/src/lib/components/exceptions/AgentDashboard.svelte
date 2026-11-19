@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formatRatioPercent } from '#lib/utils/percent.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	// Autonomous-exception-agent dashboard: resolution rate, escalation rate,
 	// accuracy (placeholder), plus the recent decision log. Read-only surface over
 	// GET /api/exceptions/agent-stats + /agent-decisions (admin/ap_manager-gated).
@@ -34,7 +35,6 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const PAGE_SIZE = 20;
 
@@ -462,19 +462,15 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
-					{loadingMore
-						? m('common.loading')
-						: m('exceptions.agents.loadMore', { shown: formatCount(decisions.length), total: formatCount(total) })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('exceptions.agents.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={decisions.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={loadMore}
+			moreKey="exceptions.agents.loadMore"
+			allKey="exceptions.agents.showingAll"
+		/>
 	</section>
 </div>
 

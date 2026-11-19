@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
@@ -23,7 +24,6 @@
 	import { poStatusLabel, poStatusTone } from '#lib/types/purchaseOrder.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { untrack } from 'svelte';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const COLUMNS = $derived([
 		{ label: m('purchaseOrders.col.poNumber'), class: 'col-number' },
@@ -420,17 +420,16 @@
 	</div>
 	{/if}
 
-	{#if hasMore && !errored}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('purchaseOrders.loadMore', { shown: formatCount(pos.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0 && !errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('purchaseOrders.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={pos.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		{errored}
+		onloadmore={loadMore}
+		moreKey="purchaseOrders.loadMore"
+		allKey="purchaseOrders.showingAll"
+	/>
 </PageHeader>
 
 <Modal

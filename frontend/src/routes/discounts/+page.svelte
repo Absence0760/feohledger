@@ -3,6 +3,7 @@
 	import { page as appPage } from '$app/state';
 	import { untrack } from 'svelte';
 	import { formatPercent } from '#lib/utils/percent.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { hasPartialRealisedSet, partialRealisedCount } from '#lib/utils/discountPartialSet.ts';
@@ -46,7 +47,6 @@
 		DiscountStatusFilter,
 		DiscountOptimization
 	} from '#lib/types/discounts.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	// RBAC mirrors `backend/app/api/discounts.py`, which is the layer that
 	// actually enforces:
@@ -759,17 +759,16 @@
 			</DataTable>
 		{/if}
 
-		{#if hasMore && !offersError}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={() => loadOffers({ append: true })} disabled={loadingMore}>
-					{loadingMore ? m('common.loading') : m('discounts.loadMore', { shown: formatCount(offers.length), total: formatCount(total) })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('discounts.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={offers.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			errored={offersError}
+			onloadmore={() => loadOffers({ append: true })}
+			moreKey="discounts.loadMore"
+			allKey="discounts.showingAll"
+		/>
 	{/if}
 </PageHeader>
 

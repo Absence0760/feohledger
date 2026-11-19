@@ -7,6 +7,7 @@
 		type PortalInvoiceListItem,
 	} from '#lib/portalApi.ts';
 	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { onMount, untrack } from 'svelte';
@@ -33,7 +34,6 @@
 		postPortalChatMessage,
 		uploadPortalChatAttachment,
 	} from '#lib/portalChat.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	type PortalInvoice = PortalInvoiceListItem;
 
@@ -561,24 +561,16 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button
-					type="button"
-					class="btn-load-more"
-					onclick={() => load({ append: true })}
-					disabled={loadingMore}
-				>
-					{loadingMore
-						? m('portal.common.loading')
-						: m('portal.invoices.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('portal.invoices.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={() => load({ append: true })}
+			moreKey="portal.invoices.loadMore"
+			allKey="portal.invoices.showingAll"
+			loadingKey="portal.common.loading"
+		/>
 	{/if}
 </div>
 

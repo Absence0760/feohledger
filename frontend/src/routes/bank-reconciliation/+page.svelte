@@ -32,6 +32,7 @@
 		UnmatchedDebit
 	} from '#lib/types/bankReconciliation.ts';
 	import { isTruncated } from '#lib/types/bankReconciliation.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { paymentMethodLabelKey, paymentStatusLabelKey } from '#lib/types/payment.ts';
 	import {
 		deleteBankStatement,
@@ -69,7 +70,6 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const canMutate = $derived(auth.isManager);
 
@@ -839,25 +839,15 @@
 					{/snippet}
 				</DataTable>
 
-				{#if hasMoreStatements}
-					<div class="load-more-row">
-						<button
-							class="btn-load-more"
-							onclick={() => loadStatements({ append: true })}
-							disabled={statementsLoadingMore}
-						>
-							{statementsLoadingMore
-								? m('common.loading')
-								: m('bankRecon.loadMore', { shown: formatCount(statements.length), total: formatCount(statementTotal) })}
-						</button>
-					</div>
-				{:else if statementTotal > 0}
-					<div class="load-more-row">
-						<span class="load-more-end">
-							{m('bankRecon.showingAll', { total: statementTotal })}
-						</span>
-					</div>
-				{/if}
+				<LoadMoreFooter
+					shown={statements.length}
+					total={statementTotal}
+					hasMore={hasMoreStatements}
+					loading={statementsLoadingMore}
+					onloadmore={() => loadStatements({ append: true })}
+					moreKey="bankRecon.loadMore"
+					allKey="bankRecon.showingAll"
+				/>
 			{/if}
 		</div>
 	{/if}

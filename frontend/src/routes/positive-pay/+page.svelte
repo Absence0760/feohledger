@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PositivePayFile } from '#lib/types/positivePay.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
@@ -36,7 +37,6 @@
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import { formatDate } from '#lib/utils/time.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.isManager);
 
@@ -427,17 +427,16 @@
 		</DataTable>
 	{/if}
 
-	{#if hasMore && !loadError}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('positivePay.loadMore', { shown: formatCount(files.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('positivePay.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={files.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		errored={loadError}
+		onloadmore={() => load({ append: true })}
+		moreKey="positivePay.loadMore"
+		allKey="positivePay.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

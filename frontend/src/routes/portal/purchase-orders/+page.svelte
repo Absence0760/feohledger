@@ -8,6 +8,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import UnverifiedMoney from '#lib/components/ui/UnverifiedMoney.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -18,7 +19,6 @@
 	import { poStatusLabel, poStatusTone } from '#lib/types/purchaseOrder.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import { PO_TOTAL_UNVERIFIABLE, poFlipRefusalText } from '#lib/types/portalPurchaseOrder.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	// `flip_verdict` is the server's answer to "would the flip mint an invoice
 	// from this PO?" (`api/portal.po_flip_refusal`) — read it, never restate
@@ -195,24 +195,16 @@
 			</tbody>
 		</table>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button
-					type="button"
-					class="btn-load-more"
-					onclick={() => load({ append: true })}
-					disabled={loadingMore}
-				>
-					{loadingMore
-						? m('portal.common.loading')
-						: m('portal.po.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('portal.po.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={() => load({ append: true })}
+			moreKey="portal.po.loadMore"
+			allKey="portal.po.showingAll"
+			loadingKey="portal.common.loading"
+		/>
 	{/if}
 </div>
 

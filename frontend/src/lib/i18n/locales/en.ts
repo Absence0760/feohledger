@@ -3970,7 +3970,7 @@ export const en = {
 	'workflows.list.newWorkflow': '+ New Workflow',
 	'workflows.list.selectAll': 'Select all workflows',
 	'workflows.list.selectRow': 'Select {name}',
-	'workflows.list.showingAll': '{n, plural, one {Showing all # workflow} other {Showing all # workflows}}',
+	'workflows.list.showingAll': '{total, plural, one {Showing all # workflow} other {Showing all # workflows}}',
 	'workflows.list.step.approval': 'Approval',
 	'workflows.list.step.erpExport': 'ERP Export',
 	'workflows.list.step.extraction': 'Data Extraction',

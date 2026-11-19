@@ -95,6 +95,17 @@ function formattedCountParams(file: string, source: string): FormattedParam[] {
 	return found;
 }
 
+/**
+ * `ui/LoadMoreFooter.svelte` formats `{shown}` and `{total}` for the `moreKey`
+ * its caller names, so each `moreKey="…"` is a formatted-count site the
+ * literal `m()` scan above cannot see.
+ */
+function footerParams(file: string, source: string): FormattedParam[] {
+	return [...code(source).matchAll(/\bmoreKey="([\w.-]+)"/g)].flatMap((match) =>
+		['shown', 'total'].map((param) => ({ file, key: match[1], param }))
+	);
+}
+
 /** Whether `template` uses `param` as an ICU plural or select variable. */
 function usesAsIcuSelector(template: string, param: string): boolean {
 	return new RegExp(`\\{\\s*${param}\\s*,\\s*(?:plural|select)\\s*,`).test(template);
@@ -148,6 +159,13 @@ describe('the scanner catches what it is for', () => {
 		]);
 	});
 
+	it("treats a LoadMoreFooter's moreKey as formatting shown and total", () => {
+		expect(footerParams('f.svelte', '<LoadMoreFooter moreKey="x.loadMore" allKey="x.showingAll" />')).toEqual([
+			{ file: 'f.svelte', key: 'x.loadMore', param: 'shown' },
+			{ file: 'f.svelte', key: 'x.loadMore', param: 'total' }
+		]);
+	});
+
 	it('does not confuse a variable that merely shares a prefix', () => {
 		expect(usesAsIcuSelector('{count, plural, other {#}}', 'c')).toBe(false);
 		expect(usesAsIcuSelector('{count, plural, other {#}}', 'count')).toBe(true);
@@ -157,7 +175,10 @@ describe('the scanner catches what it is for', () => {
 describe('a pre-formatted count never selects an ICU plural', () => {
 	const sites = Object.entries(RAW)
 		.filter(([path]) => !/\.test\.ts$/.test(path))
-		.flatMap(([path, source]) => formattedCountParams(path, source));
+		.flatMap(([path, source]) => [
+			...formattedCountParams(path, source),
+			...footerParams(path, source)
+		]);
 
 	it('the scan finds formatCount params at all (guards a vacuous suite)', () => {
 		expect(sites.length).toBeGreaterThan(0);

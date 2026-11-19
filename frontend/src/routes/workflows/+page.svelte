@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { WorkflowDefinition } from '#lib/types/workflow.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { STEP_TYPE_LABELS } from '#lib/types/workflow.ts';
 	import type { WorkflowStepType } from '#lib/types/workflow.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
@@ -32,7 +33,6 @@
 	import ImportExportControls, {
 		exportWorkflowToFile,
 	} from '#lib/components/workflow-mgmt/ImportExportControls.svelte';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	let showCreate = $state(false);
 	let newName = $state('');
@@ -356,19 +356,15 @@
 	</DataTable>
 	{/if}
 
-	{#if workflowStore.hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMore} disabled={workflowStore.loading}>
-				{workflowStore.loading
-					? m('common.loading')
-					: m('workflows.list.loadMore', { shown: formatCount(workflowStore.all.length), total: formatCount(workflowStore.total) })}
-			</button>
-		</div>
-	{:else if workflowStore.total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('workflows.list.showingAll', { n: workflowStore.total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={workflowStore.all.length}
+		total={workflowStore.total}
+		hasMore={workflowStore.hasMore}
+		loading={workflowStore.loading}
+		onloadmore={loadMore}
+		moreKey="workflows.list.loadMore"
+		allKey="workflows.list.showingAll"
+	/>
 </PageHeader>
 
 <Modal

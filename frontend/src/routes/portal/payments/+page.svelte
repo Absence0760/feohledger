@@ -9,6 +9,7 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import Money from '#lib/components/ui/Money.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
@@ -23,7 +24,6 @@
 	import PortalListFilters from '#lib/components/portal/PortalListFilters.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { paymentMethodLabelKey } from '#lib/types/payment.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	type PortalPayment = PortalPaymentListItem;
 
@@ -265,24 +265,16 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button
-					type="button"
-					class="btn-load-more"
-					onclick={() => load({ append: true })}
-					disabled={loadingMore}
-				>
-					{loadingMore
-						? m('portal.common.loading')
-						: m('portal.payments.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('portal.payments.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={() => load({ append: true })}
+			moreKey="portal.payments.loadMore"
+			allKey="portal.payments.showingAll"
+			loadingKey="portal.common.loading"
+		/>
 	{/if}
 </div>
 
