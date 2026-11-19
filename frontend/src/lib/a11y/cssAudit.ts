@@ -260,16 +260,22 @@ export function lightPaletteBlocks(css: string): {
 }
 
 /**
- * Every custom property *assigned* anywhere in a file — CSS rules and inline
- * `style="--x: y"` attributes alike. A token assigned per-element (the
- * exceptions page's `--type-color`) is legitimately absent from `:root`, so it
- * must not read as dead.
+ * Every custom property *assigned* anywhere in a file — CSS rules, inline
+ * `style="--x: y"` attributes, and script that sets one through
+ * `style.setProperty('--x', …)` (BulkBar's measured `--bulk-bar-reserve`).
+ * A token assigned per-element or at runtime (the exceptions page's
+ * `--type-color`) is legitimately absent from `:root`, so it must not read as
+ * dead.
  */
 export function collectAssignedTokens(source: string): string[] {
 	const found = new Set<string>();
-	const re = new RegExp(`(${TOKEN_RE})\\s*:`, 'g');
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(stripCssComments(source))) !== null) found.add(m[1]);
+	const declared = new RegExp(`(${TOKEN_RE})\\s*:`, 'g');
+	const scripted = new RegExp(`setProperty\\(\\s*['"\`](${TOKEN_RE})['"\`]`, 'g');
+	const text = stripCssComments(source);
+	for (const re of [declared, scripted]) {
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(text)) !== null) found.add(m[1]);
+	}
 	return [...found];
 }
 
