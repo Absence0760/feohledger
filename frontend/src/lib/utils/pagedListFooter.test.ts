@@ -34,7 +34,38 @@ const RAW = import.meta.glob('/src/**/*.svelte', {
 	eager: true
 }) as Record<string, string>;
 
-const SHOWING_ALL = /m\(\s*'([A-Za-z0-9.]+)\.showingAll'/g;
+/**
+ * A list's "Showing all" key, whether the file renders it itself
+ * (`m('x.showingAll')`) or hands it to the footer (`allKey="x.showingAll"`).
+ * Reading only the first form made the pairing test pass vacuously once every
+ * list moved to `<LoadMoreFooter>`: it found no keys, so nothing to pair.
+ */
+const SHOWING_ALL = /(?:m\(\s*'|allKey=")([A-Za-z0-9.]+)\.showingAll['"]/g;
+
+/** `<list>`'s Load more key, rendered directly or passed as `moreKey`. */
+function hasLoadMore(source: string, list: string): boolean {
+	return source.includes(`'${list}.loadMore'`) || source.includes(`moreKey="${list}.loadMore"`);
+}
+
+/** Every list key that claims "Showing all", file by file. */
+function showingAllKeys(files: Record<string, string>): string[] {
+	const out: string[] = [];
+	for (const [path, source] of Object.entries(files)) {
+		for (const match of source.matchAll(SHOWING_ALL)) out.push(`${path} → ${match[1]}`);
+	}
+	return out;
+}
+
+/** Lists that say "Showing all N" with no Load more for the rest. */
+function unpaired(files: Record<string, string>): string[] {
+	const out: string[] = [];
+	for (const [path, source] of Object.entries(files)) {
+		for (const match of source.matchAll(SHOWING_ALL)) {
+			if (!hasLoadMore(source, match[1])) out.push(`${path} → ${match[1]}`);
+		}
+	}
+	return out;
+}
 
 const FOOTER = '/src/lib/components/ui/LoadMoreFooter.svelte';
 
@@ -73,16 +104,10 @@ describe('paged list footers', () => {
 	});
 
 	it('every "Showing all N" footer is paired with a Load more control', () => {
-		const offenders: string[] = [];
-		for (const [path, source] of Object.entries(RAW)) {
-			SHOWING_ALL.lastIndex = 0;
-			for (const match of source.matchAll(SHOWING_ALL)) {
-				const list = match[1];
-				if (!source.includes(`'${list}.loadMore'`)) offenders.push(`${path} → ${list}`);
-			}
-		}
+		// Not vacuous: the scan must see the keys the footers are handed.
+		expect(showingAllKeys(RAW).length, 'no showingAll keys found: did the prop move?').toBeGreaterThan(30);
 		expect(
-			offenders,
+			unpaired(RAW),
 			'these lists claim to show everything but offer no way to load the rest'
 		).toEqual([]);
 	});
@@ -128,5 +153,19 @@ describe('the footer scanners catch what they are for', () => {
 		expect(found).toHaveLength(2);
 		expect(found[0]).toMatch(/^\/src\/mixed\.svelte/);
 		expect(found[1]).toMatch(/^\/src\/missing\.svelte/);
+	});
+
+	it('reads showingAll from m() and from the allKey prop, and pairs each with its loadMore', () => {
+		const files = {
+			'/src/direct.svelte': "{m('budgets.showingAll', { total })} {m('budgets.loadMore')}",
+			'/src/prop.svelte': '<LoadMoreFooter moreKey="intake.loadMore" allKey="intake.showingAll" />',
+			'/src/orphanProp.svelte': '<LoadMoreFooter allKey="catalogs.showingAll" />',
+			'/src/orphanDirect.svelte': "{m('requisitions.showingAll', { total })}"
+		};
+		expect(showingAllKeys(files)).toHaveLength(4);
+		expect(unpaired(files)).toEqual([
+			'/src/orphanProp.svelte → catalogs',
+			'/src/orphanDirect.svelte → requisitions'
+		]);
 	});
 });
