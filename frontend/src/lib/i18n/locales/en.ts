@@ -308,6 +308,7 @@ export const en = {
 	'profile.passkeys.lastUsed': 'Last used {date}',
 	'profile.passkeys.neverUsed': 'Never used',
 	'profile.passkeys.remove': 'Remove',
+	'profile.passkeys.confirmRemove': 'Confirm remove',
 	'profile.passkeys.loadFailed':
 		"Couldn't load your passkeys, so we can't say which ones are registered.",
 	'profile.passkeys.none': 'No passkeys yet',

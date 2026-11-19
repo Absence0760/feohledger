@@ -268,6 +268,7 @@ export const messages = {
 	'profile.passkeys.lastUsed': '最終使用 {date}',
 	'profile.passkeys.neverUsed': '未使用',
 	'profile.passkeys.remove': '削除',
+	'profile.passkeys.confirmRemove': '削除を確定',
 	'profile.passkeys.loadFailed':
 		'パスキーを読み込めなかったため、どのパスキーが登録されているかをお伝えできません。',
 	'profile.passkeys.none': 'パスキーはまだありません',
