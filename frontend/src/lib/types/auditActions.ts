@@ -4,13 +4,15 @@
 // `dispatch_audit` / `log_action` call sites, plus a handful built from
 // f-strings. So the vocabulary lives here as catalogue keys
 // (`audit.action.<token>`), and `auditActions.roster.test.ts` scans the
-// backend source so a new token cannot ship without a label.
+// backend source so a new token cannot ship without a label. The labels are
+// the `audit` catalogue slice (catalogues.ts), which /audit's `+layout.ts`
+// loads before the page renders, so `hasMessage` sees them on the first frame.
 //
 // The label never replaces the token. Auditors cite `invoice.approved`
 // verbatim, the CSV export carries it unchanged, and an unknown token (a
 // retired action on an old row, or one added after this build) renders raw.
 
-import { en } from '#lib/i18n/locales/en.ts';
+import { hasMessage } from '#lib/i18n/store.svelte.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
@@ -45,15 +47,16 @@ const PATTERNS: { re: RegExp; key: MessageKey; param: 'status' | 'change' | null
 	{ re: /^[a-z_]+\.viewed$/, key: 'audit.actionPattern.viewed', param: null }
 ];
 
-/** The catalogue key for an exact token, or null when it has none. */
-export function auditActionKey(action: string): MessageKey | null {
+/** The catalogue key for an exact token, or null when it has none. `has`
+ *  defaults to the runtime's view of the loaded catalogues. */
+export function auditActionKey(action: string, has: (key: string) => boolean = hasMessage): MessageKey | null {
 	const key = `audit.action.${action}`;
-	return Object.hasOwn(en, key) ? (key as MessageKey) : null;
+	return has(key) ? (key as MessageKey) : null;
 }
 
 /** A translated label for `action`, or the token itself when none applies. */
-export function auditActionLabel(action: string, t: Translate): string {
-	const exact = auditActionKey(action);
+export function auditActionLabel(action: string, t: Translate, has: (key: string) => boolean = hasMessage): string {
+	const exact = auditActionKey(action, has);
 	if (exact) return t(exact);
 	for (const { re, key, param } of PATTERNS) {
 		const match = re.exec(action);

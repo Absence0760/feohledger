@@ -66,6 +66,22 @@ export function m(key: MessageKey, params?: Record<string, string | number>): st
 	return interpolate(value ?? key, params, locale);
 }
 
+/**
+ * Whether `m(key)` has text for `key` rather than falling back to the raw key:
+ * it is in the main catalogue, or in its slice as currently loaded. For keys
+ * built from data (an audit action token), where the caller shows the data
+ * itself when no label exists. Reactive like `m()`: it re-runs when the slice
+ * lands. A slice key reads false until its slice is loaded, so a caller asks
+ * only where its route has awaited `ensureSlices()`.
+ */
+export function hasMessage(key: string): boolean {
+	if (Object.hasOwn(dict, key) || Object.hasOwn(en, key)) return true;
+	const slice = sliceOf(key);
+	if (!slice) return false;
+	const loaded = sliceDicts[slice] ?? (EN_FALLBACK[slice] as SliceDict | undefined);
+	return loaded !== undefined && Object.hasOwn(loaded, key);
+}
+
 /** A slice in `target`, else in English; null only if both fail to load. */
 async function fetchSlice(name: SliceName, target: Locale): Promise<{ dict: SliceDict; loc: Locale } | null> {
 	try {

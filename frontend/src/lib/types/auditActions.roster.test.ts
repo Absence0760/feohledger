@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
-import { DYNAMIC_ACTION_TEMPLATES, auditActionKey, auditActionLabel } from './auditActions';
+
+// The real store imports `$app/env`. Every lookup below passes its own `has`
+// (English from every catalogue), so the runtime's default is never consulted.
+vi.mock('#lib/i18n/store.svelte.ts', () => ({ hasMessage: () => false }));
+
+const { DYNAMIC_ACTION_TEMPLATES, auditActionKey, auditActionLabel } = await import('./auditActions');
 
 /**
  * Roster guard: every `AuditLog.action` token the backend writes has a label
@@ -115,6 +120,9 @@ function harvest(files: Record<string, string>) {
 
 const { tokens, templates } = harvest(RAW);
 const EN = EN_ALL as Record<string, string>;
+// The labels are a lazy catalogue slice the store has not loaded here, so the
+// lookups below read English from every catalogue at once.
+const hasEn = (key: string) => Object.hasOwn(EN, key);
 
 describe('audit action roster', () => {
 	it('reads the backend source', () => {
@@ -130,7 +138,7 @@ describe('audit action roster', () => {
 	});
 
 	it('every backend action token has a label', () => {
-		const unlabelled = tokens.filter((t) => auditActionKey(t) === null);
+		const unlabelled = tokens.filter((t) => auditActionKey(t, hasEn) === null);
 		expect(
 			unlabelled,
 			'Add `audit.action.<token>` to all six locale catalogues, or list a ' +
@@ -154,23 +162,23 @@ describe('auditActionLabel', () => {
 		Object.entries(params ?? {}).reduce((s, [k, v]) => s.replace(`{${k}}`, String(v)), EN[key] ?? key);
 
 	it('labels an exact token', () => {
-		expect(auditActionLabel('invoice.approved', t)).toBe('Invoice approved');
+		expect(auditActionLabel('invoice.approved', t, hasEn)).toBe('Invoice approved');
 	});
 
 	it('labels templated tokens with their variable tail', () => {
-		expect(auditActionLabel('payment.in_transit', t)).toBe('Payment status: in transit');
-		expect(auditActionLabel('vendor.bank_details_change_approved', t)).toBe(
+		expect(auditActionLabel('payment.in_transit', t, hasEn)).toBe('Payment status: in transit');
+		expect(auditActionLabel('vendor.bank_details_change_approved', t, hasEn)).toBe(
 			'Vendor change approved (bank details)'
 		);
-		expect(auditActionLabel('invoice.viewed', t)).toBe('Record viewed');
+		expect(auditActionLabel('invoice.viewed', t, hasEn)).toBe('Record viewed');
 	});
 
 	it('prefers an exact label over a pattern', () => {
-		expect(auditActionLabel('payment.voided', t)).toBe('Payment voided');
-		expect(auditActionLabel('vendor.bank_details_change_requested', t)).toBe('Bank details change requested');
+		expect(auditActionLabel('payment.voided', t, hasEn)).toBe('Payment voided');
+		expect(auditActionLabel('vendor.bank_details_change_requested', t, hasEn)).toBe('Bank details change requested');
 	});
 
 	it('renders an unknown token raw', () => {
-		expect(auditActionLabel('something.new_and_unlabelled', t)).toBe('something.new_and_unlabelled');
+		expect(auditActionLabel('something.new_and_unlabelled', t, hasEn)).toBe('something.new_and_unlabelled');
 	});
 });
