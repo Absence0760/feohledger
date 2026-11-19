@@ -148,14 +148,15 @@ test.describe('/admin/api-keys (admin)', () => {
 		await expect(row.getByText('Active')).toBeVisible();
 
 		// Two-click armed revoke: first click arms ("Confirm"), second commits.
-		// `exact` so the "View usage for e2e-revoke-…" row link (which contains
-		// the substring "revoke") doesn't also match.
-		await row.getByRole('button', { name: 'Revoke', exact: true }).click();
-		await row.getByRole('button', { name: 'Confirm', exact: true }).click();
+		// The action is named for its key ("Revoke for <name>"), so a screen
+		// reader can tell one row's Revoke from the next; `exact` keeps the
+		// "View usage for e2e-revoke-…" row link out of the match.
+		await row.getByRole('button', { name: `Revoke for ${name}`, exact: true }).click();
+		await row.getByRole('button', { name: `Confirm for ${name}`, exact: true }).click();
 
 		// Row flips to Revoked; the Revoke action is gone for a revoked key.
 		await expect(row.getByText('Revoked')).toBeVisible({ timeout: 10_000 });
-		await expect(row.getByRole('button', { name: 'Revoke', exact: true })).toHaveCount(0);
+		await expect(row.getByRole('button', { name: `Revoke for ${name}`, exact: true })).toHaveCount(0);
 
 		// Server-side: the key is revoked, and a repeat DELETE is idempotent (200,
 		// no error).

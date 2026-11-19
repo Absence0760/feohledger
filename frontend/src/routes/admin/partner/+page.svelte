@@ -392,7 +392,13 @@
 								armed={confirmDetachId === child.id}
 								disabled={detaching}
 								onclick={() => handleDetach(child)}
-								ariaLabel={m('admin.partner.detachAria', { name: child.name })}
+								ariaLabel={m('admin.rowActionAria', {
+									action:
+										confirmDetachId === child.id
+											? m('admin.partner.row.confirmDetach')
+											: m('admin.partner.row.detach'),
+									name: child.name
+								})}
 							>
 								{confirmDetachId === child.id ? m('admin.partner.row.confirmDetach') : m('admin.partner.row.detach')}
 							</RowAction>
