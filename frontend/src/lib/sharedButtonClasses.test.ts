@@ -59,11 +59,13 @@ const PAINT =
 
 /**
  * Class names a migrated button keeps with no CSS behind them, because an e2e
- * spec selects by them. `<file> <class>`.
+ * spec or the page's own script selects by them. `<file> <class>`.
  */
 const E2E_HOOKS = new Set([
 	'routes/payments/+page.svelte btn-clear',
-	'routes/payments/+page.svelte btn-execute'
+	'routes/payments/+page.svelte btn-execute',
+	// Read by the outside-click un-arm (`closest('.row-action, .btn-decide')`).
+	'routes/vendors/change-requests/+page.svelte btn-decide'
 ]);
 
 const RAW = import.meta.glob('/src/**/*.svelte', {
@@ -83,6 +85,9 @@ function classesIn(selector: string): string[] {
 function scopedRules(path: string) {
 	return extractStyleBlocks(path, SOURCES.get(path) ?? '').flatMap((b) => parseRules(b.css));
 }
+
+/** Every class `app.css` styles (`.btn-load-more` and the like count too). */
+const APP_CSS_CLASSES = new Set(parseRules(appCss).flatMap((r) => classesIn(r.selector)));
 
 function markup(source: string): string {
 	return source.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
@@ -131,7 +136,7 @@ describe('shared button classes', () => {
 		);
 		const undefinedHere = [...used].filter(
 			(cls) =>
-				!(SHARED as readonly string[]).includes(cls) &&
+				!APP_CSS_CLASSES.has(cls) &&
 				!scopedRules(path).some((r) => classesIn(r.selector).includes(cls))
 		);
 		// A class neither shared nor styled locally is either an e2e hook kept on

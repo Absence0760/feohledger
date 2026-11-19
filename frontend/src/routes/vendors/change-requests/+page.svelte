@@ -662,10 +662,12 @@
 				     modal makes for its block/re-screen pair. The armed two-click
 				     and its outside-click un-arm are unchanged: both share the
 				     row's `*ArmedId` slots, so arming here and arming the row
-				     behind it can never disagree. -->
+				     behind it can never disagree. The shared `.btn-danger` /
+				     `.btn-primary` paint them (`.armed` included); `.btn-decide`
+				     is only the hook the outside-click un-arm reads. -->
 				<button
 					type="button"
-					class="btn-decide reject"
+					class="btn-danger btn-decide reject"
 					class:armed={rejectArmedId === current.id}
 					disabled={busyId === current.id}
 					onclick={(e) => {
@@ -680,7 +682,7 @@
 				</button>
 				<button
 					type="button"
-					class="btn-decide approve"
+					class="btn-primary btn-decide approve"
 					class:armed={approveArmedId === current.id}
 					disabled={busyId === current.id || !isAllowed(current.approve_refusal)}
 					onclick={(e) => {
