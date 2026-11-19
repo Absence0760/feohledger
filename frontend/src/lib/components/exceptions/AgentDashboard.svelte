@@ -9,6 +9,7 @@
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import {
 		getAgentStats,
@@ -274,8 +275,11 @@
 	// The three action chips ARE the three action labels, so they read the same
 	// keys the badge does — a chip saying one thing and the rows it filters
 	// another is the drift one shared map removes.
+	// FilterChips keys are strings; the "All" chip stands for no filter
+	// (`actionFilter === null`), which no `action_taken` value can collide with.
+	const ALL_ACTIONS = '';
 	const ACTION_CHIPS = $derived([
-		{ key: null, label: m('common.all') },
+		{ key: ALL_ACTIONS, label: m('common.all') },
 		{ key: 'auto_resolved', label: m('exceptions.agents.action.autoResolved') },
 		{ key: 'escalated', label: m('exceptions.agents.action.escalated') },
 		{ key: 'no_action', label: m('exceptions.agents.action.noAction') }
@@ -352,7 +356,7 @@
 				<h2>{m('exceptions.agents.run.heading')}</h2>
 				<HelpTip term="exception-agent" />
 			</div>
-			<button class="filter-chip" onclick={loadCandidates} disabled={candidatesLoading}>
+			<button type="button" class="btn-secondary" onclick={loadCandidates} disabled={candidatesLoading}>
 				{candidatesLoading
 					? m('exceptions.agents.run.refreshing')
 					: m('exceptions.agents.run.refresh')}
@@ -422,18 +426,12 @@
 	<section class="log-section" data-testid="agent-decision-log">
 		<header class="log-head">
 			<h2>{m('exceptions.agents.log.heading')}</h2>
-			<nav class="filters" aria-label={m('exceptions.agents.log.filterAria')}>
-				{#each ACTION_CHIPS as chip (chip.key ?? 'all')}
-					<button
-						class="filter-chip"
-						class:active={actionFilter === chip.key}
-						aria-pressed={actionFilter === chip.key}
-						onclick={() => setActionFilter(chip.key)}
-					>
-						{chip.label}
-					</button>
-				{/each}
-			</nav>
+			<FilterChips
+				ariaLabel={m('exceptions.agents.log.filterAria')}
+				chips={ACTION_CHIPS}
+				active={actionFilter ?? ALL_ACTIONS}
+				onchange={(key) => setActionFilter(key === ALL_ACTIONS ? null : key)}
+			/>
 		</header>
 
 		<DataTable

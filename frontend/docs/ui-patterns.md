@@ -665,6 +665,10 @@ pill-shaped status filter above the table:
 
 - `chips = [{key, label, count?, alert?}]`. Omit `count` for label-only
   chips; `alert: true` renders the red attention badge (`.count.alert`).
+  Pass `ariaLabel` to name the chip `<nav>` landmark.
+- The chips are painted by `app.css` alone: a scoped rule may place
+  `.filter-chip` but never repaint it, in any file
+  (`src/lib/sharedButtonClasses.test.ts`).
 - The "All" chip comes first; the active chip uses `var(--accent-strong)` +
   white — **not** `var(--accent)`, which is only 3.12:1 against white. See
   *Colour tokens and contrast* below.

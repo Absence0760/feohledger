@@ -38,6 +38,7 @@ const SHARED = [
 ] as const;
 
 const COVERED = [
+	'lib/components/exceptions/AgentDashboard.svelte',
 	'lib/components/layout/AccountLoadState.svelte',
 	'lib/components/modals/AdvancedSearchModal.svelte',
 	'lib/components/modals/BulkNegotiationModal.svelte',
@@ -72,6 +73,15 @@ const COVERED = [
 	'routes/vendors/change-requests/+page.svelte',
 	'routes/vendors/screening/+page.svelte'
 ];
+
+/**
+ * Shared classes no scoped rule may paint in ANY file, covered or not. A filter
+ * pill is `<FilterChips>` (or, for a multi-select row, the bare `.filter-chip`
+ * markup) styled by `app.css` alone: `/portal/discount-offers` once repainted
+ * it locally with a different padding and no hover border, so the supplier
+ * portal's chips drifted from every other list's.
+ */
+const NO_PAINT_ANYWHERE = ['filter-chip'] as const;
 
 /** Properties that paint a button; a scoped rule on a shared class sets none. */
 const PAINT =
@@ -214,6 +224,24 @@ describe('shared button classes', () => {
 		// A class neither shared nor styled locally is either an e2e hook kept on
 		// a migrated button (allowed below) or a typo that renders unstyled.
 		expect(undefinedHere.filter((c) => !E2E_HOOKS.has(`${path} ${c}`))).toEqual([]);
+	});
+
+	it('app.css declares every class no scoped rule may paint', () => {
+		for (const cls of NO_PAINT_ANYWHERE) expect(APP_CSS_CLASSES.has(cls), cls).toBe(true);
+	});
+
+	it('no file paints .filter-chip from a scoped rule', () => {
+		const painted: string[] = [];
+		for (const path of SOURCES.keys()) {
+			for (const rule of scopedRules(path)) {
+				const classes = classesIn(rule.selector);
+				if (!NO_PAINT_ANYWHERE.some((c) => classes.includes(c))) continue;
+				for (const [prop] of rule.declarations) {
+					if (PAINT.test(prop)) painted.push(`${path} ${rule.selector} { ${prop} }`);
+				}
+			}
+		}
+		expect(painted).toEqual([]);
 	});
 
 	it('reads a whole class name, not a btn- fragment of a longer one', () => {

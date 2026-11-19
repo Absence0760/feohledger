@@ -11,9 +11,15 @@ import { describe, expect, it } from 'vitest';
  * - A `toLocale*String('en-US', …)` pins every reader to US formatting.
  * - `new Intl.NumberFormat(locale).format(n)` with no options is a hand-rolled
  *   `formatCount`; six components each carried one before the shared helper.
+ * - In a `.svelte` file, `.toFixed(` is a figure in English notation ("12.5d"
+ *   in a German page) — use `formatDays` / `formatHours` (`utils/duration.ts`),
+ *   `formatPercent` or `formatCount`. And a component-local
+ *   `new Intl.RelativeTimeFormat` duplicates `utils/time.ts` (`timeAgo`,
+ *   `formatDueIn`), which reads the active locale and memoizes the formatter.
  *
  * The `formatters` themselves (`utils/money.ts`, `percent.ts`, `time.ts`,
- * `count.ts`, `quantity.ts`) are where `Intl` belongs and are not scanned.
+ * `count.ts`, `quantity.ts`, `duration.ts`) are where `Intl` belongs and are
+ * not scanned.
  */
 const RAW = import.meta.glob('/src/**/*.{svelte,ts}', {
 	query: '?raw',
@@ -23,6 +29,7 @@ const RAW = import.meta.glob('/src/**/*.{svelte,ts}', {
 
 const FORMATTERS = new Set([
 	'/src/lib/utils/count.ts',
+	'/src/lib/utils/duration.ts',
 	'/src/lib/utils/money.ts',
 	'/src/lib/utils/percent.ts',
 	'/src/lib/utils/quantity.ts',
@@ -36,7 +43,7 @@ const FORMATTERS = new Set([
  */
 const PENDING_OTHER_LANE: Record<string, string> = {};
 
-const RULES: { name: string; pattern: RegExp }[] = [
+const RULES: { name: string; pattern: RegExp; svelteOnly?: boolean }[] = [
 	{ name: 'bare toLocaleString()', pattern: /\.toLocale(?:Date|Time)?String\(\s*\)/ },
 	{
 		name: "pinned locale in toLocale*String('xx-YY')",
@@ -45,6 +52,16 @@ const RULES: { name: string; pattern: RegExp }[] = [
 	{
 		name: 'options-less Intl.NumberFormat (use formatCount)',
 		pattern: /new Intl\.NumberFormat\(\s*[^,()]*(?:\(\s*\))?\s*\)\s*\.format\(/
+	},
+	{
+		name: '.toFixed( in a component (use formatDays / formatHours / formatPercent / formatCount)',
+		pattern: /\.toFixed\(/,
+		svelteOnly: true
+	},
+	{
+		name: 'component-local Intl.RelativeTimeFormat (use utils/time.ts)',
+		pattern: /new Intl\.RelativeTimeFormat\b/,
+		svelteOnly: true
 	}
 ];
 
@@ -57,9 +74,11 @@ function offences(): string[] {
 	const found: string[] = [];
 	for (const [path, source] of Object.entries(RAW)) {
 		if (FORMATTERS.has(path) || /\.test\.ts$/.test(path)) continue;
+		const isSvelte = path.endsWith('.svelte');
 		const lines = code(source).split('\n');
 		lines.forEach((line, i) => {
-			for (const { name, pattern } of RULES) {
+			for (const { name, pattern, svelteOnly } of RULES) {
+				if (svelteOnly && !isSvelte) continue;
 				if (pattern.test(line)) found.push(`${path}:${i + 1} ${name}`);
 			}
 		});
