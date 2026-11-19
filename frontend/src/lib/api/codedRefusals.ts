@@ -539,11 +539,14 @@ const BUILDERS: Record<string, Builder> = {
 	segregation_raiser: fixed('refusal.exceptionSegregationRaiser'),
 	segregation_implicated: fixed('refusal.exceptionSegregationImplicated'),
 	segregation_approver: fixed('refusal.exceptionSegregationApprover'),
+	// `api/billing.py` — a configured billing provider's read failed (502).
+	billing_provider_unavailable: fixed('refusal.billingProviderUnavailable'),
 	// `api/credit_memos.py`
 	credit_memo_vendor_mismatch: fixed('refusal.creditMemoVendorMismatch'),
 	credit_memo_vendor_unresolved: fixed('refusal.creditMemoVendorUnresolved'),
 	credit_memo_entity_mismatch: fixed('refusal.creditMemoEntityMismatch'),
 	credit_memo_currency_mismatch: fixed('refusal.creditMemoCurrencyMismatch'),
+	credit_memo_invoice_currency_unknown: fixed('refusal.creditMemoInvoiceCurrencyUnknown'),
 	credit_memo_invoice_settled: (p, t) => {
 		const status = str(p, 'status');
 		return status === null

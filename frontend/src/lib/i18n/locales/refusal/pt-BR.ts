@@ -55,6 +55,8 @@ export const messages = {
 	'refusal.creditMemoVendorUnresolved': "A fatura não tem fornecedor vinculado, portanto o fornecedor da nota de crédito não pode ser verificado. Resolva primeiro o fornecedor da fatura (salve-o novamente na fatura) e depois aplique o crédito.",
 	'refusal.creditMemoEntityMismatch': "A nota de crédito e a fatura pertencem a entidades diferentes; um crédito não pode reduzir o valor a pagar de outra subsidiária.",
 	'refusal.creditMemoCurrencyMismatch': "A moeda da nota de crédito não corresponde à moeda da fatura.",
+	'refusal.creditMemoInvoiceCurrencyUnknown': "A fatura não registra nenhuma moeda, então um crédito não pode ser conferido com o saldo dela. Defina primeiro a moeda da fatura e depois aplique o crédito.",
+	'refusal.billingProviderUnavailable': "O provedor de cobrança está indisponível. Tente novamente.",
 	'refusal.creditMemoInvoiceSettled': "A fatura está com status {status}: nenhum pagamento será mais feito contra ela, então um crédito aplicado não reduziria nada. Deixe a nota de crédito em aberto e aplique-a à próxima fatura do fornecedor.",
 	'refusal.creditMemoNotEditable': "Só é possível editar uma nota de crédito em aberto que nunca foi aplicada (esta está com status {status}).",
 	'refusal.creditMemoNotApplicable': "Não é possível aplicar uma nota de crédito com status {status}.",

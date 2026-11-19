@@ -447,7 +447,7 @@ Every refusal is a coded `detail = {code, message, params}`. Full rules:
 | `GET`  | `/api/credit-memos/{id}/eligible-invoices` | admin, ap_manager | The invoices `/apply` will accept for this memo — its terms read off the row; same opaque 404 as every by-id route, the apply's own 409 for a memo that is not `open` — see § Eligible invoices |
 | `POST` | `/api/credit-memos`                | admin, ap_manager | Create a credit memo. With no `invoice_id` it lands `open`; with one it is applied on the spot and runs the same guards as `/apply` |
 | `PATCH` | `/api/credit-memos/{id}`          | admin, ap_manager | Correct an `open`, never-applied memo — see § Editing a memo. 409 on anything else |
-| `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable. Every refusal (here and on a linked create) is a coded `409` `detail = {code, message, params}`: `credit_memo_invoice_settled` (`status`), `credit_memo_vendor_unresolved`, `credit_memo_vendor_mismatch`, `credit_memo_entity_mismatch`, `credit_memo_currency_mismatch`, `credit_memo_not_applicable` (`status`), `credit_memo_exceeds_balance` (`remaining` as an exact string, `currency`); an edit's refusal is `credit_memo_not_editable` (`status`) |
+| `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable. Every refusal (here and on a linked create) is a coded `409` `detail = {code, message, params}`: `credit_memo_invoice_settled` (`status`), `credit_memo_vendor_unresolved`, `credit_memo_vendor_mismatch`, `credit_memo_entity_mismatch`, `credit_memo_currency_mismatch`, `credit_memo_invoice_currency_unknown` (the invoice records no usable currency), `credit_memo_not_applicable` (`status`), `credit_memo_exceeds_balance` (`remaining` as an exact string, `currency`); an edit's refusal is `credit_memo_not_editable` (`status`) |
 | `POST` | `/api/credit-memos/{id}/void`      | admin, ap_manager | Void an `open` memo (409 once `applied` — applied memos are immutable for audit — and 409 on an already-`void` memo, so a retried void never writes a second `credit_memo.voided` row) |
 
 ### Search, sort and the chip counts
@@ -481,8 +481,9 @@ three rungs:
    upper-cased (a blank value counts as not asserted; `"US"` / `"EURO"` are a
    422, since a code no invoice carries makes a memo that can never be applied);
 2. the named invoice's own `currency`, when `invoice_id` is supplied — the memo
-   *inherits* rather than asserting;
-3. the org's reporting currency (`services/currency_conversion.resolve_reporting_currency`,
+   *inherits* rather than asserting (an invoice with no usable currency is
+   refused instead, `credit_memo_invoice_currency_unknown`);
+3. for an unlinked memo only, the org's reporting currency (`services/currency_conversion.resolve_reporting_currency`,
    which itself falls back to `FEOH_REPORTING_CURRENCY_DEFAULT`).
 
 The schema used to default to a hardcoded `"USD"`, which dead-ended every
@@ -531,7 +532,10 @@ the memo itself — see § Editing a memo) and then enforce, in order, five 409s
 3. **Currency must match** — the remaining-balance math subtracts the amounts
    directly, so a EUR memo on a USD invoice would corrupt it. This fires only
    on a currency the caller actually asserted (see above), and compares case-
-   insensitively, since the invoice schemas never normalised case.
+   insensitively, since the invoice schemas never normalised case. An invoice
+   whose currency is unknown (NULL, blank or malformed) takes no credit at all —
+   409 `credit_memo_invoice_currency_unknown`, named currency or not, until its
+   own currency is set (decisions §473).
 4. **No over-application** — the sum of `applied` memos on an invoice may never
    exceed the invoice amount (a credit past the balance would mint a negative
    payable).
@@ -565,7 +569,9 @@ up under it), a status in `CREDITABLE_INVOICE_STATUSES` (never `paid` or
 `done`), `Invoice.vendor_id` equal to the memo's vendor (through the invoice
 list's own `vendor_id` leg, so an unlinked invoice is never offered), the entity
 rule (a NULL on either side admitted), the currency rule (case- and
-space-insensitive, a blank invoice currency admitted), and the balance rule —
+space-insensitive; an invoice with no usable currency — NULL, blank or
+malformed — is never offered, since both paths refuse it with 409
+`credit_memo_invoice_currency_unknown`, decisions §473), and the balance rule —
 `amount − Σ applied credits ≥` the memo's amount, or `> 0` when the create
 dialog has no amount yet (every credit is strictly positive, so a fully credited
 invoice can take none).
