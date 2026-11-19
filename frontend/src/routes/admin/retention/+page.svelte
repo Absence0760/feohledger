@@ -8,6 +8,8 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { getRetentionPolicy, updateRetentionPolicy } from '#lib/api/retention.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import {
 		RETENTION_RECORD_CLASSES,
 		type RetentionRecordClass
@@ -23,17 +25,18 @@
 		if (userLoaded && !allowed) goto('/');
 	});
 
-	const CLASS_LABELS: Record<RetentionRecordClass, string> = {
-		invoices: 'Invoices',
-		audit_log: 'Audit log'
+	const CLASS_LABELS: Record<RetentionRecordClass, MessageKey> = {
+		invoices: 'admin.retention.class.invoices',
+		audit_log: 'admin.retention.class.audit_log'
 	};
 
-	const CLASS_HINTS: Record<RetentionRecordClass, string> = {
-		invoices:
-			'Terminal (done / paid) invoices older than this window are soft-archived — a marker is stamped on the row, nothing is deleted.',
-		audit_log:
-			'Rows older than this window are verified as WORM-shipped, never deleted — an immutable-audit-log guard rejects any delete outright.'
+	const CLASS_HINTS: Record<RetentionRecordClass, MessageKey> = {
+		invoices: 'admin.retention.classHint.invoices',
+		audit_log: 'admin.retention.classHint.audit_log'
 	};
+
+	// An env var name, not copy: it reads the same in every locale.
+	const RETENTION_FLAG = 'FEOH_RETENTION_ENABLED';
 
 	let policy = $state<Record<string, number>>({});
 	let savedPolicy = $state<Record<string, number>>({});
@@ -45,6 +48,17 @@
 
 	const dirty = $derived(
 		RETENTION_RECORD_CLASSES.some((cls) => policy[cls] !== savedPolicy[cls])
+	);
+
+	// The PUT refuses anything but a positive whole number of months
+	// (`api/retention.py`). A cleared field parses to 0, which used to enable
+	// Save and only fail as a toast after the round trip; say so at the field
+	// and keep Save off instead.
+	function isValidMonths(v: number | undefined): boolean {
+		return typeof v === 'number' && Number.isInteger(v) && v > 0;
+	}
+	const invalidClasses = $derived(
+		RETENTION_RECORD_CLASSES.filter((cls) => !isValidMonths(policy[cls]))
 	);
 	// Leaving with an edited window asks first (the app-wide dialog).
 	guardUnsavedChanges(() => dirty && !saving);
@@ -59,7 +73,7 @@
 			defaultMonths = res.default_months;
 			sweepEnabled = res.enabled;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load the retention policy.';
+			error = e instanceof Error ? e.message : m('admin.retention.loadFailed');
 		} finally {
 			loading = false;
 		}
@@ -77,7 +91,7 @@
 		for (const cls of RETENTION_RECORD_CLASSES) {
 			if (policy[cls] !== savedPolicy[cls]) changed[cls] = policy[cls];
 		}
-		if (Object.keys(changed).length === 0) return;
+		if (Object.keys(changed).length === 0 || invalidClasses.length > 0) return;
 
 		saving = true;
 		try {
@@ -86,9 +100,9 @@
 			savedPolicy = { ...res.policy };
 			defaultMonths = res.default_months;
 			sweepEnabled = res.enabled;
-			toast('Retention policy saved.', 'success');
+			toast(m('admin.retention.saved'), 'success');
 		} catch (e) {
-			toast(e instanceof Error ? e.message : 'Failed to save the retention policy.', 'error');
+			toast(e instanceof Error ? e.message : m('admin.retention.saveFailed'), 'error');
 		} finally {
 			saving = false;
 		}
@@ -99,37 +113,41 @@
 	}
 </script>
 
-<PageHeader title="Retention Policy">
+<PageHeader title={m('admin.retention.title')}>
 	<!-- Save sits in the header, as on the Report Builder: below the long hint
 	     and both rows it fell off a phone's first screen. Shown once the policy
 	     has loaded, so it never offers to save a form that is not there. -->
 	{#snippet actions()}
 		{#if !loading && !error}
 			<button type="button" class="btn-cancel" onclick={reset} disabled={!dirty || saving}>
-				Reset
+				{m('admin.retention.reset')}
 			</button>
-			<button type="button" class="btn-primary" onclick={save} disabled={!dirty || saving}>
-				{saving ? 'Saving…' : 'Save changes'}
+			<button
+				type="button"
+				class="btn-primary"
+				onclick={save}
+				disabled={!dirty || saving || invalidClasses.length > 0}
+			>
+				{saving ? m('common.saving') : m('admin.retention.save')}
 			</button>
 		{/if}
 	{/snippet}
 
 	<p class="page-hint">
-		SOX records-management windows, per record class. <HelpTip term="retention-policy" /> A background sweep
-		enforces these — it soft-archives terminal invoices past their window and
-		verifies the audit log has been WORM-shipped, and it never deletes an
-		audit row. <HelpTip term="audit-trail" /> Enforcement sweep:
+		{m('admin.retention.introPre')} <HelpTip term="retention-policy" />
+		{m('admin.retention.introPost')} <HelpTip term="audit-trail" />
+		{m('admin.retention.sweepLabel')}
 		<Badge tone={sweepEnabled ? 'success' : 'muted'}>
-			{sweepEnabled ? 'Enabled' : 'Disabled'}
+			{sweepEnabled ? m('admin.retention.sweepEnabled') : m('admin.retention.sweepDisabled')}
 		</Badge>
 		<span class="sweep-hint">
-			(the platform operator's <code>FEOH_RETENTION_ENABLED</code> switch — not
-			editable here)
+			{m('admin.retention.sweepHintPre')} <code>{RETENTION_FLAG}</code>
+			{m('admin.retention.sweepHintPost')}
 		</span>
 	</p>
 
 	{#if loading}
-		<p class="state" data-testid="retention-loading">Loading…</p>
+		<p class="state" data-testid="retention-loading">{m('common.loading')}</p>
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="retention-error" />
 	{:else}
@@ -137,8 +155,8 @@
 			{#each RETENTION_RECORD_CLASSES as cls (cls)}
 				<div class="policy-row">
 					<div class="policy-row-label">
-						<label for={`retention-${cls}`}>{CLASS_LABELS[cls]}</label>
-						<p class="policy-row-hint">{CLASS_HINTS[cls]}</p>
+						<label for={`retention-${cls}`}>{m(CLASS_LABELS[cls])}</label>
+						<p class="policy-row-hint" id={`retention-${cls}-hint`}>{m(CLASS_HINTS[cls])}</p>
 					</div>
 					<div class="policy-row-input">
 						<input
@@ -147,16 +165,29 @@
 							min="1"
 							step="1"
 							data-testid={`retention-input-${cls}`}
+							aria-invalid={invalidClasses.includes(cls) ? 'true' : undefined}
+							aria-describedby={invalidClasses.includes(cls)
+								? `retention-${cls}-hint retention-${cls}-error`
+								: `retention-${cls}-hint`}
 							value={policy[cls] ?? ''}
 							oninput={(e) => {
 								const v = parseInt((e.target as HTMLInputElement).value, 10);
 								policy = { ...policy, [cls]: Number.isFinite(v) ? v : 0 };
 							}}
 						/>
-						<span class="unit">months</span>
+						<span class="unit">{m('admin.retention.unit')}</span>
 					</div>
+					{#if invalidClasses.includes(cls)}
+						<p
+							class="field-error"
+							id={`retention-${cls}-error`}
+							data-testid={`retention-error-${cls}`}
+						>
+							{m('admin.retention.invalid')}
+						</p>
+					{/if}
 					{#if defaultMonths !== null}
-						<p class="default-hint">Platform default: {defaultMonths} months</p>
+						<p class="default-hint">{m('admin.retention.platformDefault', { n: defaultMonths })}</p>
 					{/if}
 				</div>
 			{/each}
@@ -248,6 +279,13 @@
 	.unit {
 		color: var(--text-muted);
 		font-size: 0.85rem;
+	}
+
+	.field-error {
+		grid-column: 1 / -1;
+		margin: 0;
+		color: var(--danger);
+		font-size: 0.8rem;
 	}
 
 	.default-hint {
