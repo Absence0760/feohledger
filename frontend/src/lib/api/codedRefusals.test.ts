@@ -22,7 +22,7 @@ import { messages as jaMain } from '../i18n/locales/ja';
 import { messages as jaRefusal } from '../i18n/locales/refusal/ja';
 import { interpolate } from '../i18n/interpolate';
 import { setActiveFormatLocale } from '../i18n/formatLocale';
-import type { MainMessageKey, MessageKey } from '../i18n/messages';
+import type { MessageKey } from '../i18n/messages';
 import {
 	CODED_REFUSAL_CODES,
 	INVOICE_REQUIRED_FIELDS_MISSING,
@@ -44,6 +44,8 @@ const fr = { ...frMain, ...frRefusal };
 const es = { ...esMain, ...esRefusal };
 const ptBR = { ...ptBRMain, ...ptBRRefusal };
 const ja = { ...jaMain, ...jaRefusal };
+/** A key of the main catalogue or the refusal slice: what these tests index. */
+type RefusalTestKey = keyof typeof en;
 
 const translator =
 	(messages: Record<string, string>, locale: string) =>
@@ -153,7 +155,7 @@ describe('codedRefusalText', () => {
 		['status_sync_off', 'refusal.statusSyncOff'],
 		['status_sync_unsupported', 'refusal.statusSyncUnsupported'],
 		['status_sync_needs_reconnect', 'refusal.statusSyncNeedsReconnect']
-	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
+	] as [string, RefusalTestKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
 
@@ -404,7 +406,7 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 		['payment_settlement_not_completed', 'refusal.paymentSettlementNotCompleted'],
 		['payment_settlement_covered', 'refusal.paymentSettlementCovered'],
 		['payment_settlement_not_held', 'refusal.paymentSettlementNotHeld']
-	] as [string, MainMessageKey][])('%s is the fixed sentence %s', (code, key) => {
+	] as [string, RefusalTestKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
 	});
 
@@ -413,7 +415,7 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 		['a_newer_step', 'refusal.paymentRunSegregation'],
 		['nacha_export', 'refusal.paymentRunSegregationExport'],
 		['record_outside', 'refusal.paymentRunSegregationRecord']
-	] as [string | undefined, MainMessageKey][])(
+	] as [string | undefined, RefusalTestKey][])(
 		'maker-checker on the %s step names that step (%s)',
 		(step, key) => {
 			const params = step === undefined ? {} : { step };
@@ -541,7 +543,7 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 			['nacha_amount_too_large', 'refusal.nachaAmountTooLarge'],
 			// `params.reason` is a dispatcher machine code — never shown.
 			['nacha_payment_not_payable', 'refusal.nachaPaymentNotPayable']
-		] as [string, MainMessageKey][]) {
+		] as [string, RefusalTestKey][]) {
 			expect(
 				codedRefusalText(code, { invoice_number: 'INV-9', reason: 'invoice_blocked:fraud_flag' }, deT)
 			).toBe(
@@ -634,8 +636,10 @@ describe('the plan-feature refusal', () => {
 });
 
 describe('the goods-receipt refusals', () => {
+	// Names the key and params it was asked for. Never the bare key alone, which
+	// is what `m()` returns for a key it cannot resolve (`resolvedOnly`).
 	const t = (key: string, params?: Record<string, string | number>) =>
-		params ? `${key} ${JSON.stringify(params)}` : key;
+		`${key} ${JSON.stringify(params ?? {})}`;
 
 	it('names the PO or the receipt number the refusal is about', () => {
 		expect(codedRefusalText('goods_receipt_po_cancelled', { poNumber: 'PO-1042' }, t)).toBe(
@@ -669,20 +673,21 @@ describe('the goods-receipt refusals', () => {
 });
 
 describe('the commerce refusals', () => {
-	const t = (key: string) => key;
+	// Bracketed, since a bare key is what `m()` returns for one it cannot resolve.
+	const t = (key: string) => `[${key}]`;
 
 	it('states every commerce connection and sync refusal', () => {
-		expect(codedRefusalText('commerce_not_configured', {}, t)).toBe('refusal.commerceNotConfigured');
+		expect(codedRefusalText('commerce_not_configured', {}, t)).toBe('[refusal.commerceNotConfigured]');
 		expect(codedRefusalText('commerce_oauth_not_available', { provider: 'x' }, t)).toBe(
-			'refusal.commerceOauthNotAvailable'
+			'[refusal.commerceOauthNotAvailable]'
 		);
 		expect(codedRefusalText('commerce_sync_not_retryable', { status: 'synced' }, t)).toBe(
-			'refusal.commerceSyncNotRetryable'
+			'[refusal.commerceSyncNotRetryable]'
 		);
-		expect(codedRefusalText('commerce_sync_not_found', {}, t)).toBe('refusal.commerceSyncNotFound');
-		expect(codedRefusalText('commerce_unknown_entity', {}, t)).toBe('refusal.commerceUnknownEntity');
+		expect(codedRefusalText('commerce_sync_not_found', {}, t)).toBe('[refusal.commerceSyncNotFound]');
+		expect(codedRefusalText('commerce_unknown_entity', {}, t)).toBe('[refusal.commerceUnknownEntity]');
 		expect(codedRefusalText('commerce_unknown_provider', {}, t)).toBe(
-			'refusal.commerceUnknownProvider'
+			'[refusal.commerceUnknownProvider]'
 		);
 	});
 });
@@ -832,7 +837,7 @@ describe('the ERP send refused for an open duplicate or fraud exception (§286)'
 });
 
 describe('the self-service signup refusals (issue #635 finding 18)', () => {
-	const FIXED: [string, MainMessageKey][] = [
+	const FIXED: [string, RefusalTestKey][] = [
 		['slug_required', 'refusal.slugRequired'],
 		['slug_format', 'refusal.slugFormat'],
 		['slug_hyphen_edge', 'refusal.slugHyphenEdge'],
@@ -938,7 +943,7 @@ describe('the shared rate limiter’s 429 (`rate_limited`)', () => {
 });
 
 describe('the vendor merge refusals (`services/vendor_merge.py`)', () => {
-	const MERGE: [string, MainMessageKey][] = [
+	const MERGE: [string, RefusalTestKey][] = [
 		['vendor_merge_self', 'refusal.vendorMergeSelf'],
 		['vendor_merge_no_duplicates', 'refusal.vendorMergeNoDuplicates'],
 		['vendor_merge_canonical_not_found', 'refusal.vendorMergeCanonicalNotFound'],
@@ -1048,7 +1053,7 @@ describe('the invoice state machine’s own refusals (`services/workflow_engine.
 		}
 	});
 
-	const FIXED: [string, MainMessageKey][] = [
+	const FIXED: [string, RefusalTestKey][] = [
 		['invoice_once_approved_not_reread', 'refusal.invoiceOnceApprovedNotReread'],
 		['invoice_once_approved_not_to_draft', 'refusal.invoiceOnceApprovedNotToDraft'],
 		[
@@ -1394,7 +1399,7 @@ describe('the expense report and card reconciliation refusals (decisions §348, 
 		['expense_not_creator', 'refusal.expenseNotCreator'],
 		['expense_report_foreign_line', 'refusal.expenseReportForeignLine'],
 		['card_txn_expense_already_matched', 'refusal.cardTxnExpenseAlreadyMatched']
-	] as [string, MainMessageKey][])('%s is the fixed sentence %s in every locale', (code, key) => {
+	] as [string, RefusalTestKey][])('%s is the fixed sentence %s in every locale', (code, key) => {
 		for (const [locale, messages] of LOCALES) {
 			const text = codedRefusalText(code, {}, translator(messages, locale));
 			expect(text, `${locale} ${code}`).toBe((messages as Record<string, string>)[key]);
@@ -1443,7 +1448,7 @@ describe('the expense report and card reconciliation refusals (decisions §348, 
 			{ count: 1, currency: 'eur' },
 			'refusal.expenseReportLinesUnconverted'
 		]
-	] as [string, Record<string, unknown>, MainMessageKey][])(
+	] as [string, Record<string, unknown>, RefusalTestKey][])(
 		'states submit’s list-shaped 422 %s in every locale (decisions §378)',
 		(code, params, key) => {
 			const values = { count: params.count as number, currency: 'EUR' };
@@ -1525,7 +1530,7 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 		}
 	});
 
-	const FIXED: [string, MainMessageKey][] = [
+	const FIXED: [string, RefusalTestKey][] = [
 		['invoice_bulk_not_found', 'refusal.invoiceBulkNotFound'],
 		['invoice_still_extracting', 'refusal.invoiceStillExtracting'],
 		['invoice_recall_one_at_a_time', 'refusal.invoiceRecallOneAtATime']
