@@ -236,7 +236,6 @@ async def test_dispatch_preflight_refuses(realdb, stored):
         payment = Payment(
             id=uuid.uuid4(),
             invoice_id=inv_id,
-            organization_id=invoice.organization_id,
             amount=invoice.amount,
             method="ach",
         )
@@ -330,7 +329,6 @@ async def test_payment_totals_exclude_a_payment_on_an_unknown_currency_invoice(r
             s.add(
                 Payment(
                     invoice_id=inv_id,
-                    organization_id=realdb.info(TENANT).org_id,
                     amount=Decimal(amount),
                     method="ach",
                     status="completed",
