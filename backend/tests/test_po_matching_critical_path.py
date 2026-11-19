@@ -1010,3 +1010,153 @@ async def test_realdb_another_vendors_same_numbered_po_does_not_count(realdb):
         warnings = await _overbilling_codes(s, inv)
 
     assert warnings == []
+
+
+# ===========================================================================
+# Cumulative billing against RECEIPTS (decisions §TBD-receipts): the receipt
+# leg compares ONE invoice with the received slice of the PO, so two invoices
+# for the same 400.00 that arrived each fit it. The over-billing refresh sums
+# the same siblings against `received_value` and raises
+# `po_billed_beyond_receipt`, a warning of the `po_overbilled` type.
+# ===========================================================================
+
+
+async def _receipt_po(s, org_id, ent, number, *, ordered="10", received=("4",), total="1000.00"):
+    """A 1000.00 USD PO of ten units with four received: 400.00 received."""
+    po = await _add_po(
+        s, org_id, ent, po_number=number, total=total, currency="USD", lines=[ordered]
+    )
+    await _add_gr(s, org_id, ent, po.id, received=list(received))
+    return po
+
+
+@pytest.mark.asyncio
+async def test_realdb_two_invoices_against_one_receipt_warn_beyond_receipt(realdb):
+    """400.00 received, two invoices of 400.00: each fits the receipt alone
+    (no hold), together they bill twice what arrived."""
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-RCPT-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        await _receipt_po(s, org_id, ent, number)
+        first = await _add_invoice(s, org_id, ent, po_number=number, amount="400.00")
+        second = await _add_invoice(s, org_id, ent, po_number=number, amount="400.00")
+        await s.commit()
+
+        alone = await match_invoice_to_po(s, second)
+        warnings = await _overbilling_codes(s, second)
+        first_warnings = await _overbilling_codes(s, first)
+
+    assert alone.received_value == Decimal("400.00")
+    assert alone.billed_beyond_receipt is False
+    assert [w["code"] for w in warnings] == ["po_billed_beyond_receipt"]
+    assert warnings[0]["type"] == "po_overbilled"
+    assert warnings[0]["severity"] == "warning"
+    assert warnings[0]["params"] == {
+        "billedAmount": "400.00",
+        "poNumber": number,
+        "receivedValue": "400.00",
+        "currency": "USD",
+    }
+    # The finding cannot say which bill is the excess one, so both carry it.
+    assert [w["code"] for w in first_warnings] == ["po_billed_beyond_receipt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("amount", "warns"), [("220.00", False), ("220.01", True)])
+async def test_realdb_beyond_receipt_boundary_is_the_match_tolerance(realdb, amount, warns):
+    """400.00 received at the default 5 % tolerance is a 420.00 limit: 200.00
+    already billed plus 220.00 passes, a cent more warns."""
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-RCPT-EDGE-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        await _receipt_po(s, org_id, ent, number)
+        await _add_invoice(s, org_id, ent, po_number=number, amount="200.00")
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount=amount)
+        await s.commit()
+
+        warnings = await _overbilling_codes(s, inv)
+
+    assert [w["code"] for w in warnings] == (["po_billed_beyond_receipt"] if warns else [])
+
+
+@pytest.mark.asyncio
+async def test_realdb_beyond_the_total_writes_only_the_total_finding(realdb):
+    """Past the whole PO no receipt can cure the bill, so the receipt sentence
+    is not written beside the total one."""
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-RCPT-TOTAL-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        await _receipt_po(s, org_id, ent, number)
+        await _add_invoice(s, org_id, ent, po_number=number, amount="700.00")
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="400.00")
+        await s.commit()
+
+        warnings = await _overbilling_codes(s, inv)
+
+    assert [w["code"] for w in warnings] == ["po_billed_beyond_total"]
+
+
+@pytest.mark.asyncio
+async def test_realdb_a_non_terminating_received_share_is_named_to_the_cent(realdb):
+    """One of three units received of 1000.00 is 333.33…: compared exactly,
+    named to the cent."""
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-RCPT-THIRD-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        await _receipt_po(s, org_id, ent, number, ordered="3", received=("1",))
+        await _add_invoice(s, org_id, ent, po_number=number, amount="300.00")
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="300.00")
+        await s.commit()
+
+        warnings = await _overbilling_codes(s, inv)
+
+    assert [w["code"] for w in warnings] == ["po_billed_beyond_receipt"]
+    assert warnings[0]["params"]["receivedValue"] == "333.33"
+
+
+@pytest.mark.asyncio
+async def test_realdb_a_later_receipt_clears_the_finding_and_refresh_is_idempotent(realdb):
+    """The PO-match refresh rebuilds the finding rather than appending to it,
+    and while it stands no unattended approval is given. Recording the rest of
+    the delivery covers both bills, and the next refresh drops it."""
+    from app.models.invoice import InvoiceStatus
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    number = f"PO-RCPT-LATER-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        po = await _receipt_po(s, org_id, ent, number)
+        await _add_invoice(s, org_id, ent, po_number=number, amount="400.00")
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="400.00")
+        inv.status = InvoiceStatus.ready_for_review
+        await s.commit()
+
+        await invoice_warnings.refresh_po_match_only(s, inv)
+        await invoice_warnings.refresh_po_match_only(s, inv)
+        codes_before = [w.get("code") for w in inv.warnings or []]
+        refusal = await invoice_warnings.po_match_hold_refusal(
+            s, inv, approver_id=None, org_settings=None
+        )
+
+        await _add_gr(s, org_id, ent, po.id, received=["6"])
+        await s.commit()
+        await invoice_warnings.refresh_po_match_only(s, inv)
+        codes_after = [w.get("code") for w in inv.warnings or []]
+        refusal_after = await invoice_warnings.po_match_hold_refusal(
+            s, inv, approver_id=None, org_settings=None
+        )
+
+    assert codes_before.count("po_billed_beyond_receipt") == 1
+    assert refusal == invoice_warnings.UNATTENDED_APPROVAL_PO_OVERBILLED
+    assert "po_billed_beyond_receipt" not in codes_after
+    assert "po_billed_beyond_total" not in codes_after
+    assert refusal_after is None

@@ -2245,6 +2245,20 @@
       }
     }
   },
+  "invoiceWarningPoBilledBeyondReceipt": "Other invoices already bill {billedAmount} against PO {poNumber}, of which goods worth {receivedValue} have been received — this invoice takes it past what was received",
+  "@invoiceWarningPoBilledBeyondReceipt": {
+    "placeholders": {
+      "billedAmount": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      },
+      "receivedValue": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningPoAmountVariancePoCurrencyUnknown": "Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})",
   "@invoiceWarningPoAmountVariancePoCurrencyUnknown": {
     "placeholders": {

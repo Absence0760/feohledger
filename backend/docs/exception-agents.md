@@ -207,7 +207,8 @@ the mismatch (`decision.refound`) and on no implicated receipt lifting the hold
 (`_receipts_implicated`), not on the human's word
 (`test_the_approval_an_agent_run_gives_does_not_refuse_its_own_resolve`). An
 apply that leaves the invoice `approved` with the cumulative PO over-billing
-warning (`po_billed_beyond_total`, decisions §469) unwinds and escalates too
+warning (`po_billed_beyond_total`, decisions §469, or
+`po_billed_beyond_receipt`, §TBD-receipts) unwinds and escalates too
 (`_POOverbilled`): that warning raises no hold, and an agent's approval is no
 person reading it. The
 approval's re-judge of cleared holds (decisions §422) does not undo it either:

@@ -1005,6 +1005,7 @@
   "invoiceWarningPoNotFound": "発注 {poNumber} が見つかりません",
   "invoiceWarningPoAmountVariance": "発注 {poNumber} との金額差異 {variancePct}（請求 {invoiceAmount} / 発注 {poTotal}）",
   "invoiceWarningPoBilledBeyondTotal": "他の請求書が発注 {poNumber}（合計 {poTotal}）に対してすでに {billedAmount} を請求しています — この請求書でその合計を超えます",
+  "invoiceWarningPoBilledBeyondReceipt": "他の請求書が発注 {poNumber} に対してすでに {billedAmount} を請求していますが、入荷済みの物品は {receivedValue} 分です — この請求書で入荷分を超えます",
   "invoiceWarningPoAmountVariancePoCurrencyUnknown": "通貨が記録されていない発注 {poNumber} との金額差異 {variancePct}（請求 {invoiceAmount} / 発注 {poTotal}）",
   "invoiceWarningPoCurrencyMismatch": "請求書は {invoiceCurrency}、発注 {poNumber} は {poCurrency} のため、金額を比較していません",
   "invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown": "請求書に有効な通貨が記録されておらず、{poNumber} の発注は異なる通貨 ({poCurrencies}) のため、金額を比較していません",

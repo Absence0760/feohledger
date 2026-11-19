@@ -3306,6 +3306,15 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoBilledBeyondReceipt(
+    String billedAmount,
+    String poNumber,
+    String receivedValue,
+  ) {
+    return 'Andere Rechnungen stellen bereits $billedAmount gegen Bestellung $poNumber in Rechnung, von der Waren im Wert von $receivedValue eingegangen sind — diese Rechnung überschreitet den Wareneingang';
+  }
+
+  @override
   String invoiceWarningPoAmountVariancePoCurrencyUnknown(
     String variancePct,
     String poNumber,

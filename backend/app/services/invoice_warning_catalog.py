@@ -321,6 +321,23 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
             "currency": "currency",
         },
     ),
+    # Cumulative, receipt leg: the same siblings plus this invoice bill past
+    # the received slice of the PO (`po_total × received / ordered`), though
+    # each fits it alone (decisions §TBD-receipts). Same type, so it stops
+    # every unattended approval as the total leg does.
+    WarningSpec(
+        "po_billed_beyond_receipt",
+        "po_overbilled",
+        "Other invoices already bill {billedAmount} {currency} against PO {poNumber}, "
+        "of which goods worth {receivedValue} {currency} have been received — this "
+        "invoice takes it past what was received",
+        {
+            "billedAmount": "money",
+            "poNumber": "text",
+            "receivedValue": "money",
+            "currency": "currency",
+        },
+    ),
     WarningSpec(
         "po_amount_variance_po_currency_unknown",
         "po_mismatch",

@@ -23588,3 +23588,67 @@ land at review with `po_overbilled`); `backend/tests/test_exception_agents.py`
 (the agent unwind);
 `backend/tests/test_portal_self_service.py` (a rejected flip's verdict, its
 replay, and the reopened flip's verdict, with one invoice throughout).
+
+## §TBD-receipts. Invoices billing past what was received of a PO is the same review warning (round 26, 2026-11-19)
+
+**Problem.** §469 made the amount leg cumulative and left the receipt leg
+per-invoice. The matcher measures ONE invoice against the received slice of
+the PO (`received_value`, `po_total × received / ordered`, §249), so with
+400.00 of a 1000.00 PO received, two invoices of 400.00 each fit it: neither
+raised the `billed_beyond_receipt` hold, and together they asked for twice
+what had arrived.
+
+**Decision: the same warning, not a hold.**
+`invoice_warnings._refresh_po_overbilling` measures the same siblings §469
+defined (matched PO id, split legs at their whole amount, an unmatched
+invoice by number within the PO's entity and vendor; every status but
+`rejected`; the PO's currency) against `received_value` at the match rule's
+tolerance, and adds `po_billed_beyond_receipt` (type `po_overbilled`,
+severity `warning`; params `billedAmount`, `poNumber`, `receivedValue`,
+`currency`). The comparison is exact `Decimal`; only the displayed
+`receivedValue` is rounded to the cent, since one unit of three received is
+a non-terminating share. It runs only:
+
+- on a SHORT receipt, the one case where the matcher sets `received_value`.
+  A full receipt's slice is the whole PO, which the total check measures.
+- when this invoice alone fits what arrived. If it does not, the matcher's
+  `billed_beyond_receipt` has already raised the payment-blocking
+  `po_mismatch` (§249), and a second sentence would add nothing.
+- when the total check did not fire. Past the whole PO, no receipt can cure
+  the bill, so only `po_billed_beyond_total` is written.
+
+Sharing the type gives it §469's consequences with no new wiring:
+`po_match_hold_refusal` answers `po_overbilled`, so extraction's
+auto-approve and `/complete`'s floor send the invoice to review; the
+exception-agent coordinator unwinds an approval that leaves it standing; and
+`refresh_po_match_only` rebuilds it rather than appending.
+
+**Why not a hold, against §249.** §249 holds a finding that means the
+invoice could over-pay, and this one does. It is still a warning for §469's
+reason, plus one that is sharper here. §469's reason: the sum crosses
+invoices, and a sibling rejected, reopened or credited does not re-run this
+invoice's warnings, so a hold would go stale both ways. The receipt side is
+better served than the amount side, because recording or cancelling a goods
+receipt re-matches every invoice citing the PO in the same transaction
+(`refresh_invoices_citing_pos`), so the delivery that covers the bills drops
+the finding at once. The sibling side is not. The sharper reason: the
+finding cannot say which bill is the excess one. Each invoice sees the
+others, so every bill on the PO carries it. A payment-blocking hold would
+stop the legitimate first bill along with the second, and clearing a
+`po_mismatch` is an SoD-gated sign-off (§169–§170) that the first bill's
+approver would then need for an invoice that was never wrong. A warning that
+stops every unattended approval puts a person in front of the figure on
+every bill, which is the review the finding asks for.
+
+**Left alone.** Receipts are still valued pro rata across the PO's lines, so
+receiving the cheap lines of a mixed order overstates the received value for
+both the per-invoice hold and this warning. That is the narrowed
+`docs/followups.md` entry: value receipts per line in the matcher's
+`received_value`, which both read. Credit memos are not netted, as in §469.
+
+Tests: `backend/tests/test_po_matching_critical_path.py` (two 400.00 invoices
+against 400.00 received both warn with exact params and neither is held
+alone; the 5 % boundary to the cent; past the total only the total finding;
+one of three units received named as 333.33; two PO-only refreshes keep one
+finding, unattended approval answers `po_overbilled`, and a receipt for the
+rest of the delivery clears both on the next refresh).
