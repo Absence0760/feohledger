@@ -24,6 +24,8 @@ interface Case {
 	shown: RegExp;
 	/** Extra setup after landing on the route (e.g. switching tab). */
 	before?: (page: import('@playwright/test').Page) => Promise<void>;
+	/** The page renders `ui/LoadError`, so the error carries a Retry. */
+	retry?: true;
 }
 
 const CASES: Case[] = [
@@ -36,6 +38,7 @@ const CASES: Case[] = [
 	},
 	{
 		name: 'contracts',
+		retry: true,
 		route: '/contracts',
 		apiPathname: '/api/contracts',
 		notShown: /No contracts match your filters/,
@@ -43,6 +46,7 @@ const CASES: Case[] = [
 	},
 	{
 		name: 'expenses',
+		retry: true,
 		route: '/expenses',
 		apiPathname: '/api/expenses',
 		notShown: /No expenses match your filters/,
@@ -89,6 +93,49 @@ const CASES: Case[] = [
 		apiPathname: '/api/vendors/change-requests',
 		notShown: /Nothing is waiting for approval/,
 		shown: /Could not load the change-request queue/
+	},
+	// The procure-to-pay lists. Each toasted its failure and then let the
+	// empty line stand — "No purchase orders." is what a clerk reads before
+	// keying an invoice as non-PO spend.
+	{
+		name: 'purchase orders',
+		retry: true,
+		route: '/purchase-orders',
+		apiPathname: '/api/purchase-orders',
+		notShown: /No purchase orders\./,
+		shown: /Could not load purchase orders/
+	},
+	{
+		name: 'goods receipts',
+		retry: true,
+		route: '/goods-receipts',
+		apiPathname: '/api/goods-receipts',
+		notShown: /No goods receipts\./,
+		shown: /Could not load goods receipts/
+	},
+	{
+		name: 'requisitions',
+		retry: true,
+		route: '/requisitions',
+		apiPathname: '/api/requisitions',
+		notShown: /No requisitions match your filters/,
+		shown: /Could not load requisitions/
+	},
+	{
+		name: 'intake',
+		retry: true,
+		route: '/intake',
+		apiPathname: '/api/intake',
+		notShown: /No intake requests match your filters/,
+		shown: /Could not load intake requests/
+	},
+	{
+		name: 'budgets',
+		retry: true,
+		route: '/budgets',
+		apiPathname: '/api/budgets',
+		notShown: /No budgets match your filters/,
+		shown: /Could not load budgets/
 	}
 ];
 
@@ -116,6 +163,9 @@ for (const c of CASES) {
 
 		await expect(page.getByText(c.shown)).toBeVisible();
 		await expect(page.getByText(c.notShown)).toHaveCount(0);
+		// A way back, not just a message: `ui/LoadError`'s Retry is the only
+		// route off the dead end once the toast is dismissed.
+		if (c.retry) await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
 	});
 }
 
