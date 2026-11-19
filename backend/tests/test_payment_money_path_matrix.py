@@ -204,7 +204,9 @@ async def test_run_total_and_payments_are_the_exact_decimal_sum(realdb, label):
         paid = dict(
             (
                 await s.execute(
-                    select(Payment.invoice_id, Payment.amount).where(Payment.payment_run_id == run.id)
+                    select(Payment.invoice_id, Payment.amount).where(
+                        Payment.payment_run_id == run.id
+                    )
                 )
             ).all()
         )
