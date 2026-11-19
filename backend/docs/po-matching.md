@@ -518,7 +518,9 @@ A split is matched as `_match_split` describes:
   with an unverifiable total holds the invoice, as that PO would alone. Any leg
   in another currency from the invoice — or two legs whose own codes disagree,
   even when the invoice's is absent — is a currency mismatch (`different`, held
-  as `po_currency_mismatch`), and the combined `po_total` is `null`: USD 600 +
+  as `po_currency_mismatch`, or `po_currency_mismatch_invoice_currency_unknown`
+  naming the legs' codes when the invoice's own code is malformed), and the
+  combined `po_total` is `null`: USD 600 +
   EUR 400 is not 1,000 of anything, and stored as a total it rendered as
   "€1,000.00". Each leg keeps its own `po_total` and `po_currency` in
   `details["legs"]`. A split whose legs are `{code, NULL}` (one leg in the

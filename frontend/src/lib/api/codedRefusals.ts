@@ -58,6 +58,7 @@ import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRef
 import { authRefusalText } from '#lib/api/authRefusals.ts';
 import { ownWorkspaceSignInUrl } from '#lib/api/sessionRejection.ts';
 import {
+	CURRENCY_BLOCKS_ERP_EXPORT,
 	ERP_CALL_BUDGET_EXHAUSTED,
 	EXCEPTION_BLOCKS_ERP_EXPORT,
 	PAYMENT_BLOCKS_ERP_EXPORT,
@@ -80,6 +81,13 @@ export const PLAN_FEATURE_REQUIRED = 'plan_feature_required';
 /** `PATCH /api/invoices/{id}`'s optimistic-concurrency 409
  *  (`backend/app/api/invoice_version.py::INVOICE_STALE_EDIT`). */
 export const INVOICE_STALE_EDIT = 'invoice_stale_edit';
+
+/** A save of a credential block whose stored sealed value can no longer be
+ *  opened — a 503 whose `params.block` names the block
+ *  (`backend/app/api/refusals.py::CREDENTIAL_BLOCK_UNOPENABLE`). The
+ *  organization page branches on it to offer clearing the block
+ *  (`components/organization/CredentialResetPrompt.svelte`, decisions §464). */
+export const CREDENTIAL_BLOCK_UNOPENABLE = 'credential_block_unopenable';
 
 /** Approval's version check: the invoice changed after the approver loaded it
  *  (`backend/app/api/invoice_version.py::INVOICE_STALE_APPROVAL`). The invoice
@@ -395,6 +403,17 @@ const BUILDERS: Record<string, Builder> = {
 	},
 	invoice_still_extracting: fixed('refusal.invoiceStillExtracting'),
 	invoice_recall_one_at_a_time: fixed('refusal.invoiceRecallOneAtATime'),
+	// A row a service or the engine refused without a code (decisions §465):
+	// `params.status` is the target it could not reach, named by its label; an
+	// unknown one falls back to the server's sentence.
+	invoice_bulk_refused: (params, t) => {
+		const status = str(params, 'status');
+		return status === null
+			? null
+			: t('refusal.invoiceBulkRefused', {
+					status: statusLabel(status, invoiceStatusLabelKey, t)
+				});
+	},
 	// `api/workflow.close_refusals` — `/complete` closing to `done`, and a
 	// `POST /bulk/status → done` row's skip, refused while a live payment or
 	// virtual card holds the invoice (decisions §357). `params.claim` names
@@ -415,6 +434,9 @@ const BUILDERS: Record<string, Builder> = {
 		return t('refusal.paymentRunSegregation');
 	},
 	payment_run_awaiting_cfo: fixed('refusal.paymentRunAwaitingCfo'),
+	// `api/payments.py::create_payment` — a single payment above the CFO
+	// threshold booked outside a run by someone without the CFO role.
+	payment_cfo_required: fixed('refusal.paymentCfoRequired'),
 	payment_run_nothing_to_retry: fixed('refusal.paymentRunNothingToRetry'),
 	payment_run_nothing_settled: fixed('refusal.paymentRunNothingSettled'),
 	payment_run_not_recordable: fixed('refusal.paymentRunNotRecordable'),
@@ -592,6 +614,9 @@ const BUILDERS: Record<string, Builder> = {
 	// sanctions-held, rejected), the same way.
 	[VENDOR_BLOCKS_ERP_EXPORT]: (p, t) =>
 		erpRefusalText({ code: VENDOR_BLOCKS_ERP_EXPORT, params: p }, t),
+	// ...and for an invoice with no payable currency, the same way.
+	[CURRENCY_BLOCKS_ERP_EXPORT]: (p, t) =>
+		erpRefusalText({ code: CURRENCY_BLOCKS_ERP_EXPORT, params: p }, t),
 	// `api/refusals.py::erp_pull_failure` — a chart / vendor / PO sync whose
 	// OAuth connection is gone (the ERP panel's own "not connected" sentence),
 	// or whose listing could not be read whole, so nothing synced.
@@ -612,6 +637,8 @@ const BUILDERS: Record<string, Builder> = {
 	},
 	// `api/auth.py` + `api/portal_auth.py` — a signed-in factor change
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
+	// The sign-in challenge's emailed code missed: wrong, expired or spent.
+	mfa_email_code_invalid: fixed('refusal.mfaEmailCodeInvalid'),
 	// `api/auth.py::_refuse_other_workspace` — signing in on another
 	// workspace's page. `sign_in_url` is the account's own sign-in page, query
 	// string (`?email=`) included; the sentence names only its host, which is
@@ -861,6 +888,8 @@ const BUILDERS: Record<string, Builder> = {
 	workspace_close_actor_not_admin: fixed('refusal.workspaceCloseActorNotAdmin'),
 	workspace_close_audit_unavailable: fixed('refusal.workspaceCloseAuditUnavailable'),
 	workspace_close_incomplete: fixed('refusal.workspaceCloseIncomplete'),
+	// A credential block whose stored value will not open (decisions §464).
+	credential_block_unopenable: fixed('refusal.credentialBlockUnopenable'),
 	// A CSV invoice row whose number is the same payable as another once
 	// formatting is ignored (`services/csv_import`, decisions §77) — a row error.
 	csv_invoice_number_matches_existing: (p, t) => {
@@ -966,6 +995,7 @@ const BUILDERS: Record<string, Builder> = {
 	card_skip_vendor_unscreenable: fixed('refusal.cardSkipVendorUnscreenable'),
 	card_skip_compliance_hold: fixed('refusal.cardSkipComplianceHold'),
 	card_skip_erp_bill: fixed('refusal.cardSkipErpBill'),
+	card_skip_currency_unknown: fixed('refusal.cardSkipCurrencyUnknown'),
 	card_skip_issue_failed: fixed('refusal.cardSkipIssueFailed'),
 	// The whole `/cards/generate` call, on a tenant whose programme is off.
 	cards_not_enabled: fixed('refusal.cardsNotEnabled'),

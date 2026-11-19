@@ -2,6 +2,7 @@ import {
 	API_BASE,
 	authedTenantHeaders,
 	deleteInvoicesWhere,
+	deletePaymentRunsWhere,
 	expect,
 	signInAndWait,
 	tenantPsql,
@@ -63,10 +64,10 @@ async function createRun(
 }
 
 function hardDeleteInvoice(id: string): void {
-	tenantPsql(`DELETE FROM payments WHERE invoice_id='${id}'`);
-	tenantPsql(
-		`DELETE FROM payment_runs WHERE id IN (SELECT DISTINCT payment_run_id FROM payments WHERE invoice_id='${id}')`
-	);
+	// The invoice's payments, and any run holding only them, go with it in
+	// `deleteInvoicesWhere` below. (The two statements this replaced deleted the
+	// payments first, which emptied the subquery the run delete selected by, so
+	// every such run leaked as a draft.)
 	tenantPsql(
 		`DELETE FROM workflow_steps WHERE instance_id IN (SELECT id FROM workflow_instances WHERE invoice_id='${id}')`
 	);
@@ -83,8 +84,7 @@ function hardDeleteInvoice(id: string): void {
 }
 
 function deletePaymentRun(runId: string): void {
-	tenantPsql(`DELETE FROM payments WHERE payment_run_id='${runId}'`);
-	tenantPsql(`DELETE FROM payment_runs WHERE id='${runId}'`);
+	deletePaymentRunsWhere(`id='${runId}'`);
 }
 
 /**
@@ -147,8 +147,13 @@ test.describe('/payments — CFO approval gate', () => {
 				{ headers: await authedTenantHeaders(page) }
 			);
 			expect(resp.status()).toBe(403);
-			const body = (await resp.json()) as { detail: string };
-			expect(body.detail).toContain('CFO');
+			// A coded refusal (decisions §461): the code is the contract the
+			// browser localizes on; the English sentence still names the CFO.
+			const body = (await resp.json()) as {
+				detail: { code: string; message: string };
+			};
+			expect(body.detail.code).toBe('payment_run_awaiting_cfo');
+			expect(body.detail.message).toContain('CFO');
 		} finally {
 			if (runId) deletePaymentRun(runId);
 			hardDeleteInvoice(invoiceId);

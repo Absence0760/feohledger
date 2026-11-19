@@ -11,40 +11,41 @@ import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/org_settings_screen.dart';
 import 'package:feohledger_mobile/stores/org_settings_store.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 /// Localized host (defaults to `en`) so `AppLocalizations.of(context)` resolves.
 Widget _host(Widget home) => MaterialApp(
-      localizationsDelegates: appLocalizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: home,
-    );
+  localizationsDelegates: appLocalizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  home: home,
+);
 
 http.Response _json(Object body, [int status = 200]) => http.Response(
-      jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 Map<String, dynamic> _orgJson({String name = 'Acme Corp'}) => {
-      'id': 'org1',
-      'name': name,
-      'slug': 'acme',
-      'plan': 'pro',
-      'created_at': '2026-01-01T00:00:00',
-      'settings': {
-        'company': {
-          'address': '1 Main St',
-          'phone': '555-0100',
-          'website': 'https://acme.test',
-          'tax_id': '12-3456789',
-        },
-        'invoice_defaults': {
-          'currency': 'USD',
-          'payment_terms': 'Net 30',
-          'number_prefix': 'INV-',
-        },
-      },
-    };
+  'id': 'org1',
+  'name': name,
+  'slug': 'acme',
+  'plan': 'pro',
+  'created_at': '2026-01-01T00:00:00',
+  'settings': {
+    'company': {
+      'address': '1 Main St',
+      'phone': '555-0100',
+      'website': 'https://acme.test',
+      'tax_id': '12-3456789',
+    },
+    'invoice_defaults': {
+      'currency': 'USD',
+      'payment_terms': 'Net 30',
+      'number_prefix': 'INV-',
+    },
+  },
+};
 
 Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
   for (var i = 0; i < 20 && finder.evaluate().isEmpty; i++) {
@@ -71,6 +72,33 @@ void main() {
     await tester.pumpWidget(_host(const OrgSettingsScreen()));
     await _pumpUntil(tester, find.text('Acme Corp'));
   }
+
+  testWidgets('a failed first load shows the shared error state with Retry, '
+      'never the exception', (tester) async {
+    var calls = 0;
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        calls++;
+        return calls == 1 ? http.Response('boom', 500) : _json(_orgJson());
+      }),
+    );
+
+    await tester.pumpWidget(_host(const OrgSettingsScreen()));
+    await _pumpUntil(tester, find.text('Could not load settings'));
+
+    // The shared first-load state, carrying the localized sentence and never
+    // the exception the store holds
+    // (`ApiException(500): Request failed (500)`).
+    expect(find.byType(LoadErrorState), findsOneWidget);
+    expect(OrgSettingsStore.instance.error, contains('ApiException'));
+    expect(find.textContaining('boom'), findsNothing);
+    expect(find.textContaining('ApiException'), findsNothing);
+    expect(find.textContaining('Request failed'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+    await _pumpUntil(tester, find.text('Acme Corp'));
+    expect(find.byType(LoadErrorState), findsNothing);
+  });
 
   testWidgets('seeds the form from the loaded settings', (tester) async {
     ApiClient().debugConfigure(

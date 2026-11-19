@@ -1187,13 +1187,28 @@ async def _refresh_po_match(
         # severity and exception type as an out-of-tolerance amount — it is the
         # same control failing, on the unit instead of the figure, and with no
         # figure there is no way to show the invoice is not over-billing.
-        flag = warning(
-            "po_currency_mismatch",
-            "warning",
-            invoiceCurrency=po_currency_code(invoice.currency) or "",
-            poNumber=match.po_number,
-            poCurrency=match.po_currency or "",
-        )
+        #
+        # A `different` match with no valid invoice code is a split whose legs
+        # disagree with each other (decisions §445). That sentence cannot say
+        # "Invoice is in …", so it is its own code and names the legs' codes.
+        # Otherwise both codes are known: a `different` match always records
+        # the PO code that differs (`po_matching.compare_currencies`).
+        invoice_code = po_currency_code(invoice.currency)
+        if invoice_code is None:
+            flag = warning(
+                "po_currency_mismatch_invoice_currency_unknown",
+                "warning",
+                poNumber=match.po_number,
+                poCurrencies=", ".join(match.po_currency_codes()),
+            )
+        else:
+            flag = warning(
+                "po_currency_mismatch",
+                "warning",
+                invoiceCurrency=invoice_code,
+                poNumber=match.po_number,
+                poCurrency=match.po_currency,
+            )
         warnings.append(flag)
         await _raise("po_mismatch", "warning", flag)
     elif (

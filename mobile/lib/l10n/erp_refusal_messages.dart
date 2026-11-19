@@ -33,6 +33,9 @@ const paymentBlocksErpExport = 'payment_blocks_erp_export';
 /// The invoice's vendor is one the payment path will not pay.
 const vendorBlocksErpExport = 'vendor_blocks_erp_export';
 
+/// The invoice has no payable currency (blank, whitespace-only or malformed).
+const currencyBlocksErpExport = 'currency_blocks_erp_export';
+
 /// The ERP's shared API quota stopped the call before it was made (§322).
 const erpCallBudgetExhausted = 'erp_call_budget_exhausted';
 
@@ -117,6 +120,7 @@ const _special = {
   exceptionBlocksErpExport,
   paymentBlocksErpExport,
   vendorBlocksErpExport,
+  currencyBlocksErpExport,
   'erp_retries_exhausted',
   'erp_push_interrupted',
 };
@@ -163,10 +167,15 @@ String? erpRefusalText(AppLocalizations l, Object? refusal) {
   switch (code) {
     // A push that made no attempt (decisions §428): no provider is named, and
     // a possibly-posted one adds where to look first.
-    case 'erp_retries_exhausted' || 'erp_push_interrupted':
-      final plain = code == 'erp_retries_exhausted'
-          ? l.erpRefusalRetriesExhausted
-          : l.erpRefusalPushInterrupted;
+    // So does an invoice with no payable currency, refused before any adapter.
+    case 'erp_retries_exhausted' ||
+        'erp_push_interrupted' ||
+        currencyBlocksErpExport:
+      final plain = switch (code) {
+        'erp_retries_exhausted' => l.erpRefusalRetriesExhausted,
+        'erp_push_interrupted' => l.erpRefusalPushInterrupted,
+        _ => l.erpRefusalCurrencyBlocksExport,
+      };
       return possiblyPosted
           ? '$plain ${l.erpRefusalVendorHoldPossiblyPosted}'
           : plain;

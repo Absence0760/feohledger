@@ -223,6 +223,17 @@ function createAdminStore() {
 		return res;
 	}
 
+	/**
+	 * Sign a user out everywhere without touching their account
+	 * (`POST /api/admin/users/{id}/revoke-sessions`, `user.manage`): for a lost
+	 * laptop or a credential just rotated, where deactivating would lock them out
+	 * and record a suspension that never happened. Returns how many sessions
+	 * ended; nothing on the row changes, so the list is left alone.
+	 */
+	async function revokeUserSessions(id: string): Promise<{ revoked: number }> {
+		return api.post<{ revoked: number }>(`/api/admin/users/${id}/revoke-sessions`, {});
+	}
+
 	async function deleteUser(id: string): Promise<void> {
 		await api.delete(`/api/admin/users/${id}`);
 		usersSequence.supersedeInFlight();
@@ -304,6 +315,7 @@ function createAdminStore() {
 		createUser,
 		updateUser,
 		resetUserPassword,
+		revokeUserSessions,
 		deleteUser,
 		bulkDeleteUsers,
 		createRole,

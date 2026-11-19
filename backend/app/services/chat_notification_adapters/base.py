@@ -33,7 +33,9 @@ class ChatMessage:
     vendor_name: str
     status: str  # human-readable status word, e.g. "approved"
     amount: Decimal | None = None
-    currency: str = "USD"
+    # The invoice's own code, or None when it records none: the figure is then
+    # stated bare, never as dollars (decisions §160 / §196 / §466).
+    currency: str | None = None
     link: str | None = None  # deep link into the app (no secrets)
     # Optional signed Approve/Reject action tokens for an interactive message —
     # Slack Block Kit buttons or Teams MessageCard HttpPOST actions, on the
@@ -49,6 +51,8 @@ class ChatMessage:
         """Render the amount exactly from the Decimal, or '' when absent."""
         if self.amount is None:
             return ""
+        if not self.currency:
+            return f"{self.amount:,.2f}"
         return f"{self.currency} {self.amount:,.2f}"
 
 
@@ -94,7 +98,7 @@ def render_chat_message(
     invoice_number: str,
     vendor_name: str,
     amount: Decimal | None = None,
-    currency: str = "USD",
+    currency: str | None = None,
     link: str | None = None,
     approve_token: str | None = None,
     reject_token: str | None = None,
@@ -124,7 +128,7 @@ def render_chat_message(
         vendor_name=vendor_name,
         status=status,
         amount=amount,
-        currency=currency or "USD",
+        currency=currency or None,
         link=link,
         approve_token=approve_token,
         reject_token=reject_token,

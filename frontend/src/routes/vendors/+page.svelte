@@ -701,6 +701,14 @@
 			<button class="btn-outline" disabled={syncing} onclick={syncFromErp}>
 				{syncing ? m('vendors.action.syncing') : m('vendors.action.syncErp')}
 			</button>
+		{:else if canManageVendors && erpOffer === null}
+			<!-- Unknown yet: hold the slot in the Sync button's shape so its
+			     arrival does not re-wrap the toolbar and shift the filter row
+			     and table down (layout-stability.spec.ts). Hidden from sight
+			     and from assistive tech; never interactive. -->
+			<span class="btn-outline erp-slot-reserve" aria-hidden="true" inert>
+				{m('vendors.action.syncErp')}
+			</span>
 		{:else if auth.isAdmin && erpOffer?.kind === 'connect'}
 			<!-- No ERP yet: the way to one, for the role that can set it up. -->
 			<a class="btn-outline" href="/organization?section=erp" data-testid="vendors-connect-erp">
@@ -1097,6 +1105,10 @@
 </Modal>
 
 <style>
+	.erp-slot-reserve {
+		visibility: hidden;
+	}
+
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
 	/* Shared by the Merge-duplicates <button> and the change-approvals <a>, so
 	   the two toolbar controls read as one row. */

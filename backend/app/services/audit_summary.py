@@ -152,6 +152,13 @@ Respond with a single JSON object, no surrounding prose:
 """
 
 
+def _invoice_currency(invoice) -> str | None:
+    """The invoice's own code, or None when it records none."""
+    from app.services.payment_runs import payable_currency_code
+
+    return payable_currency_code(getattr(invoice, "currency", None))
+
+
 def _invoice_payload(invoice) -> dict:
     """Non-PII invoice fields for the prompt. Amount is stringified only into
     this throwaway prompt — never stored as float-for-currency."""
@@ -159,7 +166,9 @@ def _invoice_payload(invoice) -> dict:
         "invoice_number": invoice.invoice_number or "",
         "vendor_name": invoice.vendor_name or "",
         "amount": str(invoice.amount) if invoice.amount is not None else None,
-        "currency": invoice.currency or "USD",
+        # None (JSON null) when the invoice records no currency — never a
+        # guessed "USD" the model would then repeat as fact (decisions §466).
+        "currency": _invoice_currency(invoice),
         "status": str(invoice.status.value if hasattr(invoice.status, "value") else invoice.status),
     }
 
@@ -384,11 +393,12 @@ def build_template_summary(
     inv_no = invoice.invoice_number or "this invoice"
     vendor = invoice.vendor_name or "an unknown vendor"
     amount = str(invoice.amount) if invoice.amount is not None else None
-    currency = invoice.currency or "USD"
+    currency = _invoice_currency(invoice)
 
     head = f"Invoice {inv_no} from {vendor}"
     if amount is not None:
-        head += f" for {amount} {currency}"
+        # A code-less figure is stated bare, never as dollars (decisions §466).
+        head += f" for {amount} {currency}" if currency else f" for {amount}"
 
     phrases: list[tuple[str, bool]] = []
     for e in events:

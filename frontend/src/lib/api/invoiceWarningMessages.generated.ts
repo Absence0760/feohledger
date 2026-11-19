@@ -85,6 +85,8 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'po_amount_variance_po_currency_unknown': 'invoices.warning.poAmountVariancePoCurrencyUnknown',
 	// Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared
 	'po_currency_mismatch': 'invoices.warning.poCurrencyMismatch',
+	// The invoice records no valid currency and the POs behind {poNumber} are in different currencies ({poCurrencies}) — the amounts were not compared
+	'po_currency_mismatch_invoice_currency_unknown': 'invoices.warning.poCurrencyMismatchInvoiceCurrencyUnknown',
 	// PO {poNumber} is cancelled — the invoice was not matched against it
 	'po_cancelled': 'invoices.warning.poCancelled',
 	// PO {poNumber} is not approved in the ERP yet — the invoice was not matched against it
@@ -147,6 +149,8 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'po_match.issue.po_not_found': 'invoices.poMatch.issue.poNotFound',
 	// Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared
 	'po_match.issue.currency_mismatch': 'invoices.poMatch.issue.currencyMismatch',
+	// Currency mismatch: invoice records no valid currency, POs in {poCurrencies} — amounts not compared
+	'po_match.issue.currency_mismatch_invoice_currency_unknown': 'invoices.poMatch.issue.currencyMismatchInvoiceCurrencyUnknown',
 	// PO is cancelled — amounts not compared
 	'po_match.issue.po_cancelled': 'invoices.poMatch.issue.poCancelled',
 	// PO not approved in the ERP yet — amounts not compared
@@ -360,6 +364,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'po_amount_variance': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'money', currency: 'currency' },
 	'po_amount_variance_po_currency_unknown': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'number', currency: 'currency' },
 	'po_currency_mismatch': { invoiceCurrency: 'text', poNumber: 'text', poCurrency: 'text' },
+	'po_currency_mismatch_invoice_currency_unknown': { poNumber: 'text', poCurrencies: 'text' },
 	'po_cancelled': { poNumber: 'text' },
 	'po_not_issued': { poNumber: 'text' },
 	'po_total_unverifiable': { poNumber: 'text' },
@@ -391,6 +396,7 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'gl_code_stale_prior': { code: 'text' },
 	'po_match.issue.po_not_found': { poNumber: 'text' },
 	'po_match.issue.currency_mismatch': { invoiceCurrency: 'text', poCurrency: 'text' },
+	'po_match.issue.currency_mismatch_invoice_currency_unknown': { poCurrencies: 'text' },
 	'po_match.issue.po_cancelled': {},
 	'po_match.issue.po_not_issued': {},
 	'po_match.issue.po_total_unverifiable': {},

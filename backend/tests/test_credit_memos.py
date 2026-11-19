@@ -2283,11 +2283,11 @@ async def test_invoice_edit_cannot_change_the_currency_under_an_applied_credit(r
             "This invoice carries applied credit memos in USD; its currency cannot change "
             "to EUR, or the credit would be netted across currencies"
         )
-        # Blanking it is a change too: the apply guard admits a blank invoice
-        # currency only on a legacy row that never had one.
+        # Blanking it is refused before the credit guard is reached: an edit
+        # may never clear the currency (decisions §460).
         blank = await c.patch(f"/api/invoices/{invoice_id}", json={"currency": ""})
-        assert blank.status_code == 409, blank.text
-        assert "change to no currency" in blank.json()["detail"]
+        assert blank.status_code == 422, blank.text
+        assert blank.json()["detail"]["code"] == "invoice_currency_required"
         # Same currency, different case: not a change, as on the apply guard.
         same = await c.patch(f"/api/invoices/{invoice_id}", json={"currency": "usd"})
         assert same.status_code == 200, same.text

@@ -235,6 +235,17 @@ lifecycle with no second human. The control mirrors the invoice-approval
 than an explicit `false` keeps the secure default). A legacy run with a NULL
 `initiated_by` is never blocked (nothing to compare against).
 
+**The refusal is coded on the wire.** Maker-checker (403
+`payment_run_segregation`, `params.step` on the record / bank-file steps) and
+the CFO-approval wait (403 `payment_run_awaiting_cfo`) answer every POST that
+raises them — approve, execute, resume, retry-failed, record-outside, the NACHA
+export — with `detail = {code, message, params}`, the same object the run
+dialog's `actions` verdict carries, so the web toast and the mobile Pay tab
+state it in the reader's language (`docs/decisions.md` §461). A standalone
+`POST /api/payments` above the CFO threshold, booked by someone without the CFO
+role, answers 403 `payment_cfo_required` the same way. Every client renders a
+code it does not know by its English `message`.
+
 ### A standalone payment can't be injected into a run
 
 `POST /api/payments` used to accept a `payment_run_id` in the body and write it
@@ -835,6 +846,9 @@ re-sent.
 - `vendor_not_active` — the invoice's vendor is not `active` (unverified, rejected,
   deactivated or merged away since the run was built); the run builder's refusal of
   the same name, through `services/payment_runs.inactive_vendor_statuses`.
+- `currency_unknown` — the invoice's currency was blanked since the run was built;
+  the run builder's refusal of the same name. Dispatch would refuse it anyway, so
+  booking a fresh attempt would only add noise.
 - `net_amount_changed` — a credit memo applied while the payment sat `failed`
   (`credit_memos.py` refuses only a `paid` or `done` invoice, and never looks at
   an existing payment) means the failed row's `amount` is no longer what the
@@ -1352,11 +1366,14 @@ block above is Modern Treasury's set. **The secret keys — `api_key`,
 envelope-encrypted in `provider_credentials`, written only through the audited
 `PUT /api/organization/credentials/payments` and merged back for the adapter by
 `provider_credentials.provider_config` (`backend/docs/erp-integration.md`
-§ Where the credentials live has the mechanism). **`program_type` and `sandbox` are not
-read by any payment adapter** — they belong to the card and extraction
-families. Both appeared here until 2026-09-17 and had propagated into
-`docs/founder-runbooks/payment-rails-onboarding.md` as live settings. Modern
-Treasury selects sandbox by credential set, not by flag.
+§ Where the credentials live has the mechanism). **`program_type` is not read by
+any payment adapter** — it belongs to the card and extraction families. **`sandbox`
+picks the host** for Column, Increase, Dwolla and Checkeeper (default `true`);
+Modern Treasury and Stripe select sandbox by credential set, not by flag. A save
+that changes `provider` or `sandbox` (or removes a `providers[]` entry, or
+changes its `sandbox`) drops the sealed keys it strands, audited, so a key is
+never sent to a provider or environment it was not typed for
+(`provider_credentials.rail_secrets_to_drop`, decisions §464).
 
 `tests/test_payment_adapter_doc_drift.py` pins the Methods column of the table
 above to each adapter's `supported_methods`, so a rail added or dropped in code
@@ -3009,6 +3026,7 @@ types already did.
 |---------|-------------|--------------|
 | an unresolved (`open`/`escalated`) payment-blocking exception | the exception **type** (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation` / `quality_hold` / `po_mismatch`) | `blocked: true` |
 | the invoice's vendor is not `active` — unverified, inactive or rejected (`payment_runs.inactive_vendor_statuses`; `vendor-management.md` § Vendor Lifecycle). Refused on every rail, so it outranks the card-rail pin. `POST /api/payments` 409s; dispatch fails a payment whose vendor stopped being active after booking as `vendor_not_active:<status>`, before the processor call and retry-safe; `/retry-failed` skips it | `vendor_not_active` | `blocked: true` |
+| the invoice records no currency — `invoices.currency` blank or whitespace (the invoice PATCH still keeps `""` as its legacy "no currency" value; `normalize_currency_code` → `None`). Refused on every rail, so it outranks the card-rail pin. Never read as USD (decisions §453 and the round-16 entry after it): the builder's 409 is prefixed `currency_unknown:`, a blank is left out of the mixed-currency 422 (it is no currency, not a second one), `POST /api/payments` 409s the same way, `POST /api/payments/corridor-quotes` refuses to price it, and `card_issuance.issue_card_for_invoice` refuses to mint a card for it before the provider call (`POST /api/cards/generate` refuses it first by name, `card_skip_currency_unknown`). Dispatch (`dispatch_preflight`) fails a payment whose invoice was blanked after booking as `currency_unknown`, before the processor call and retry-safe, so the order is never sent in a currency nobody recorded; `/retry-failed` skips it | `currency_unknown` | `blocked: true` |
 | an applied credit memo's vendor or currency no longer matches the invoice (a background re-extraction rewrote it after the apply) — netting it would credit the wrong supplier or subtract across currencies (`services/applied_credit_integrity`, decisions §214). Checked before `fully_credited`, whose net is computed from that same credit. `POST /api/payments` refuses it with a 409, and dispatch fails a payment booked before the change as `applied_credit_mismatch:<vendor\|currency>`, before the processor call and retry-safe. `/retry-failed` skips it. | `applied_credit_mismatch` | `blocked: true` |
 | applied credit memos cover the whole invoice — a `$0` payment a real rail rejects as `failed` | `fully_credited` | `blocked: true` |
 | a live virtual card already claims the invoice (`POST /api/cards/generate` mints one with no `Payment` row behind it) | `live_virtual_card` | `blocked: false`, `required_method: "virtual_card"` |

@@ -381,6 +381,8 @@ async def test_challenge_verify_wrong_code_rejected(mfa_on, monkeypatch):
             db=db,
         )
     assert exc.value.status_code == 401
+    # Coded like the employee sign-in challenge, still a 401 (decisions §461).
+    assert exc.value.detail == {"code": "mfa_code_invalid", "message": "Invalid code", "params": {}}
 
 
 # ---------------------------------------------------------------------------

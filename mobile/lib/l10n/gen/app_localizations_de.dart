@@ -141,9 +141,25 @@ class AppLocalizationsDe extends AppLocalizations {
       'Zwischengespeicherte Daten — Server nicht erreichbar';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'Fehler: $error';
-  }
+  String get dashboardLoadError =>
+      'Das Dashboard konnte nicht geladen werden. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“.';
+
+  @override
+  String get dashboardRefreshFailed =>
+      'Aktualisierung fehlgeschlagen – dies sind die zuletzt geladenen Zahlen. Zum erneuten Versuch nach unten ziehen.';
+
+  @override
+  String get dashboardNeedsAttention => 'Ihre Aufmerksamkeit erforderlich';
+
+  @override
+  String get dashboardOverview => 'Übersicht';
+
+  @override
+  String get dashboardEmpty =>
+      'Noch keine Rechnungen. Erfasste und hochgeladene Rechnungen erscheinen hier.';
+
+  @override
+  String get dashboardTopVendorsEmpty => 'Noch keine Lieferantenausgaben.';
 
   @override
   String dashboardInvoiceCount(int count) {
@@ -1264,6 +1280,10 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get payQueueBlockedVendorNotActive =>
       'Lieferant nicht verifiziert oder nicht aktiv — zuerst den Lieferanten verifizieren';
+
+  @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'Für diese Rechnung ist keine Währung erfasst — zuerst die Währung festlegen';
 
   @override
   String get payQueueBlockedAppliedCreditMismatch =>
@@ -2516,6 +2536,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Ein früherer Versuch hat die Rechnung möglicherweise bereits im ERP angelegt; prüfen Sie dort, bevor jemand sie bezahlt.';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'Diese Rechnung hat keine gültige Währung. Legen Sie ihre Währung fest, bevor Sie sie an das ERP senden.';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'Für diese Übertragung waren keine Versuche mehr übrig, daher wurde diesmal kein Versuch unternommen. Versuchen Sie es erneut, um sie mit neuen Versuchen zu senden.';
 
@@ -3292,6 +3316,14 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return 'Die Rechnung enthält keine gültige Währung, und die Bestellungen hinter $poNumber lauten auf unterschiedliche Währungen ($poCurrencies) — die Beträge wurden nicht verglichen';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return 'Bestellung $poNumber ist storniert — die Rechnung wurde nicht mit ihr abgeglichen';
   }
@@ -3509,6 +3541,13 @@ class AppLocalizationsDe extends AppLocalizations {
     String poCurrency,
   ) {
     return 'Währungsabweichung: Rechnung in $invoiceCurrency, Bestellung in $poCurrency — Beträge nicht verglichen';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return 'Währungsabweichung: Rechnung ohne gültige Währung, Bestellungen in $poCurrencies — Beträge nicht verglichen';
   }
 
   @override
@@ -4024,6 +4063,11 @@ class AppLocalizationsDe extends AppLocalizations {
       'Eine Genehmigung wird je Rechnung einzeln und mit Begründung zurückgenommen: Verwenden Sie „Genehmigung zurücknehmen“ an der Rechnung.';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'Diese Rechnung konnte nicht auf $status gesetzt werden.';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return 'Pflichtfelder fehlen: $fields';
   }
@@ -4286,6 +4330,14 @@ class AppLocalizationsDe extends AppLocalizations {
       'Dieser Lauf überschreitet die CFO-Freigabeschwelle der Organisation und wartet auf die Freigabe durch einen Benutzer mit der CFO-Rolle.';
 
   @override
+  String get codedRefusalMfaCodeInvalid =>
+      'Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'Dieser Code ist ungültig oder abgelaufen. Fordern Sie einen neuen Code an und versuchen Sie es erneut.';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       'Nur ein Lauf im Entwurf oder einer, dessen Bankdatei exportiert wurde, kann als bezahlt erfasst werden.';
 
@@ -4296,4 +4348,157 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get codedRefusalExternalPaymentBlockingException =>
       'Für diese Rechnung besteht eine ungelöste Ausnahme, die die Zahlung sperrt. Lösen Sie sie, bevor Sie die Rechnung als bezahlt erfassen.';
+
+  @override
+  String get grRecordTitle => 'Wareneingang erfassen';
+
+  @override
+  String get grRecordIntro =>
+      'Erfassen Sie, was zu einer Bestellung geliefert wurde. Rechnungen, die diese Bestellung angeben, werden beim Speichern sofort neu abgeglichen.';
+
+  @override
+  String get grRecordSearchPo => 'Bestellung suchen';
+
+  @override
+  String get grRecordSearchPlaceholder => 'Bestellnummer';
+
+  @override
+  String get grRecordPo => 'Bestellung';
+
+  @override
+  String get grRecordNoPos => 'Keine passenden Bestellungen';
+
+  @override
+  String get grRecordLoadPosFailed =>
+      'Bestellungen konnten nicht geladen werden';
+
+  @override
+  String get grRecordLoadPoFailed =>
+      'Die Bestellung konnte nicht geladen werden';
+
+  @override
+  String grRecordPoCancelled(String number) {
+    return 'Bestellung $number ist storniert, daher kann dazu nichts erfasst werden.';
+  }
+
+  @override
+  String get grRecordOrdered => 'Bestellt';
+
+  @override
+  String get grRecordAlreadyReceived => 'Bisher erhalten';
+
+  @override
+  String get grRecordOutstanding => 'Offen';
+
+  @override
+  String get grRecordThisDelivery => 'Diese Lieferung';
+
+  @override
+  String grRecordQuantityFor(String line) {
+    return 'Erhaltene Menge für $line';
+  }
+
+  @override
+  String get grRecordOverReceipt =>
+      'Mehr als offen ist. Der Abgleich markiert dies als Mehrlieferung.';
+
+  @override
+  String get grRecordLinesHint =>
+      'Lassen Sie eine Position leer, wenn sie nicht Teil dieser Lieferung war. Geben Sie 0 ein, wenn sie erwartet, aber nicht geliefert wurde.';
+
+  @override
+  String get grRecordNoPoLines =>
+      'Diese Bestellung hat keine Positionen. Beschreiben Sie daher, was geliefert wurde.';
+
+  @override
+  String get grRecordAddLine => 'Position hinzufügen';
+
+  @override
+  String grRecordRemoveLine(int n) {
+    return 'Position $n entfernen';
+  }
+
+  @override
+  String grRecordLineDescription(int n) {
+    return 'Beschreibung, Position $n';
+  }
+
+  @override
+  String grRecordLineQuantity(int n) {
+    return 'Erhaltene Menge, Position $n';
+  }
+
+  @override
+  String get grRecordReceivedDate => 'Erhalten am';
+
+  @override
+  String get grRecordNumber => 'Lieferscheinnummer';
+
+  @override
+  String get grRecordNumberHint =>
+      'Optional. Die Lieferschein- oder Packzettelnummer des Lieferanten.';
+
+  @override
+  String grRecordNumberPlaceholder(String po) {
+    return 'Leer: GR-$po-n';
+  }
+
+  @override
+  String get grRecordSaving => 'Wird erfasst…';
+
+  @override
+  String get grRecordSubmit => 'Wareneingang erfassen';
+
+  @override
+  String grRecordRecorded(String number) {
+    return 'Wareneingang $number erfasst';
+  }
+
+  @override
+  String get grRecordFailed => 'Wareneingang konnte nicht erfasst werden';
+
+  @override
+  String get settingsGoodsReceipt => 'Wareneingang erfassen';
+
+  @override
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber) {
+    return 'Bestellung $poNumber ist storniert; dazu kann nichts erfasst werden.';
+  }
+
+  @override
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber) {
+    return 'Ein Wareneingang mit der Nummer $grNumber existiert bereits.';
+  }
+
+  @override
+  String get codedRefusalGoodsReceiptLineNotOnPo =>
+      'Jede erhaltene Position muss eine Position dieser Bestellung sein.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineDuplicated =>
+      'Eine Bestellposition darf auf einem Wareneingang nur einmal vorkommen.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineRequired =>
+      'Beschreiben Sie für jede Position, was geliefert wurde.';
+
+  @override
+  String get codedRefusalGoodsReceiptNothingReceived =>
+      'Ein Wareneingang muss mindestens eine erhaltene Einheit erfassen.';
+
+  @override
+  String get codedRefusalGoodsReceiptIdempotencyReused =>
+      'Diese Anfrage wurde bereits für eine andere Bestellung verwendet. Öffnen Sie das Formular erneut und versuchen Sie es noch einmal.';
+
+  @override
+  String get settingsGoodsReceiptHint =>
+      'Eine Lieferung zu einer Bestellung erfassen';
+
+  @override
+  String get grRecordSegregationNote =>
+      'Funktionstrennung: Sobald Sie diesen Wareneingang erfassen, können Sie keine Rechnung zu dieser Bestellung freigeben, und ein Wareneingang, den Sie nach einer Freigabe erfassen, gibt diese Rechnung nicht frei.';
+
+  @override
+  String get grRecordReceiveLines =>
+      'Geben Sie für mindestens eine Position eine Menge ein';
 }

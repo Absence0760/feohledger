@@ -101,14 +101,24 @@ async def _run(
     return run_id
 
 
+#: The run refusals whose POST answers with the coded detail, not plain text.
+CODED_ON_THE_WIRE = frozenset({"payment_run_segregation", "payment_run_awaiting_cfo"})
+
+
 def _assert_parity(verdict, resp, label):
     if verdict is None:
         assert resp.status_code == 200, (label, resp.text)
         return
     assert resp.status_code in (403, 409), (label, verdict, resp.text)
-    # The endpoints answer in plain text; the verdict carries the SAME sentence
-    # under a code (`role_not_permitted` for the dependency's refusal).
-    assert resp.json()["detail"] == verdict["message"], (label, verdict, resp.text)
+    # Most endpoints answer in plain text and the verdict carries the SAME
+    # sentence under a code (`role_not_permitted` for the dependency's
+    # refusal). Maker-checker and the CFO wait answer with the coded detail
+    # itself (decisions §461) — the verdict, exactly.
+    detail = resp.json()["detail"]
+    if verdict["code"] in CODED_ON_THE_WIRE:
+        assert detail == verdict, (label, verdict, resp.text)
+    else:
+        assert detail == verdict["message"], (label, verdict, resp.text)
 
 
 def _run_scenarios(realdb, role):

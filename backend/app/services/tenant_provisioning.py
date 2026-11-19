@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import select, text
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import ROLE_ADMIN
 from app.config import settings
@@ -30,7 +31,7 @@ from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
 from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscription
 from app.services.schema_version import head_revision, record_head
-from app.utils.emails import normalize_email
+from app.utils.emails import email_matches, exact_email_first, normalize_email
 from app.utils.passwords import hash_password
 from app.utils.slug import ensure_slug_not_held, validate_slug_format
 
@@ -309,6 +310,80 @@ async def organization_slug_exists(slug: str) -> bool:
     async with control_session_factory() as session:
         result = await session.execute(select(Organization.id).where(Organization.slug == slug))
         return result.scalar_one_or_none() is not None
+
+
+class ResendRefused(Exception):
+    """An operator re-send of a first admin's set-password link that must not
+    go ahead. ``code`` is stable for callers; the message names no address."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class ResendTarget:
+    """What ``create_tenant.py --resend-link`` needs to mint and mail a link."""
+
+    organization_id: uuid.UUID
+    org_name: str
+    slug: str
+    org_settings: dict | None
+    user_id: uuid.UUID
+    admin_name: str
+    admin_email: str
+
+
+async def resend_link_target(slug: str, admin_email: str) -> ResendTarget:
+    """The tenant admin an operator may re-send a set-password link to, or
+    :class:`ResendRefused` (``docs/decisions.md`` §452 and its follow-up).
+
+    Refused when the tenant or the account does not exist, when the account is
+    not an active administrator of THAT tenant, and when it already has a
+    password: the re-send exists for an admin whose first link never arrived,
+    and an account with a password is recovered by its holder through Forgot
+    password, not by an operator clearing it from the server.
+    """
+    async with control_session_factory() as session:
+        org = (
+            await session.execute(select(Organization).where(Organization.slug == slug))
+        ).scalar_one_or_none()
+        if org is None:
+            raise ResendRefused("tenant_not_found", f"no tenant with slug '{slug}'.")
+        user = (
+            await session.execute(
+                select(User)
+                .where(email_matches(User.email, admin_email), User.organization_id == org.id)
+                .options(selectinload(User.roles))
+                .order_by(exact_email_first(User.email, admin_email).desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if user is None:
+            raise ResendRefused(
+                "admin_not_found", f"tenant '{slug}' has no user with that email address."
+            )
+        if not any(r.name == ROLE_ADMIN and r.organization_id is None for r in user.roles):
+            raise ResendRefused(
+                "not_an_admin", f"that user is not an administrator of tenant '{slug}'."
+            )
+        if not user.is_active:
+            raise ResendRefused("admin_inactive", "that administrator's account is deactivated.")
+        if user.hashed_password is not None:
+            raise ResendRefused(
+                "password_already_set",
+                "that administrator has already set a password; they use Forgot "
+                "password on the sign-in page, or another admin resets it in the app.",
+            )
+        return ResendTarget(
+            organization_id=org.id,
+            org_name=org.name,
+            slug=org.slug,
+            org_settings=org.settings,
+            user_id=user.id,
+            admin_name=user.full_name,
+            admin_email=user.email,
+        )
 
 
 async def _system_admin_role(session) -> Role | None:

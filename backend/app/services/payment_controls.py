@@ -30,7 +30,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
-from fastapi import HTTPException, status
+from fastapi import status
 
 from app.api.refusals import ActionRefusal
 
@@ -59,10 +59,7 @@ def check_run_segregation(
     no recorded creator — nothing to compare against).
     """
     if run_segregation_violated(initiated_by, actor_id, payment_config):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=_run_segregation_message(action),
-        )
+        raise _segregation(action).http()
 
 
 def run_segregation_violated(
@@ -94,7 +91,12 @@ def _run_segregation_message(action: str) -> str:
 # creator an "Execute" that could only 403.
 #
 # The endpoints keep their plain-string `detail` (every client, mobile
-# included, reads it); the verdict carries the same sentence under a code.
+# included, reads it); the verdict carries the same sentence under a code —
+# except maker-checker and the CFO sign-off wait, the two a user acts on by
+# handing the run to someone else: their POST answers with the coded detail
+# too, so the refusal toast is stated in the reader's language (decisions
+# §461). Both web and mobile render a coded detail by its `message` when
+# they cannot localize it.
 
 RUN_NOT_DRAFT = "payment_run_not_draft"
 RUN_CFO_NOT_REQUIRED = "payment_run_cfo_not_required"
@@ -111,7 +113,17 @@ def _not_draft(run, verb: str) -> ActionRefusal:
 
 def _segregation(action: str) -> ActionRefusal:
     return ActionRefusal(
-        RUN_SEGREGATION, _run_segregation_message(action), status.HTTP_403_FORBIDDEN
+        RUN_SEGREGATION, _run_segregation_message(action), status.HTTP_403_FORBIDDEN, coded=True
+    )
+
+
+def _awaiting_cfo() -> ActionRefusal:
+    return ActionRefusal(
+        RUN_AWAITING_CFO,
+        "This run exceeds the org's CFO-approval threshold and is awaiting "
+        "sign-off from a user with the CFO role.",
+        status.HTTP_403_FORBIDDEN,
+        coded=True,
     )
 
 
@@ -153,12 +165,7 @@ def run_execute_refusal(
     if run_segregation_violated(run.initiated_by, actor_id, payment_config):
         return _segregation("execute")
     if run.requires_cfo_approval and run.cfo_approved_at is None:
-        return ActionRefusal(
-            RUN_AWAITING_CFO,
-            "This run exceeds the org's CFO-approval threshold and is awaiting "
-            "sign-off from a user with the CFO role.",
-            status.HTTP_403_FORBIDDEN,
-        )
+        return _awaiting_cfo()
     return None
 
 
@@ -215,12 +222,7 @@ def run_retry_failed_refusal(
     if run_segregation_violated(run.initiated_by, actor_id, payment_config):
         return _segregation("execute")
     if run.requires_cfo_approval and run.cfo_approved_at is None:
-        return ActionRefusal(
-            RUN_AWAITING_CFO,
-            "This run exceeds the org's CFO-approval threshold and is awaiting "
-            "sign-off from a user with the CFO role.",
-            status.HTTP_403_FORBIDDEN,
-        )
+        return _awaiting_cfo()
     if retryable_failures <= 0:
         return ActionRefusal(
             RUN_NOTHING_TO_RETRY,
@@ -435,15 +437,6 @@ RUN_NOTHING_TO_RECORD = "payment_run_nothing_to_record"
 RECORDABLE_RUN_STATUSES = ("draft", "exported")
 
 
-def _awaiting_cfo() -> ActionRefusal:
-    return ActionRefusal(
-        RUN_AWAITING_CFO,
-        "This run exceeds the org's CFO-approval threshold and is awaiting "
-        "sign-off from a user with the CFO role.",
-        status.HTTP_403_FORBIDDEN,
-    )
-
-
 def _segregation_for(action: str, step: str) -> ActionRefusal:
     """Maker-checker for a step other than approve / execute: the same code,
     with the step named by a stable token in ``params.step``
@@ -454,6 +447,7 @@ def _segregation_for(action: str, step: str) -> ActionRefusal:
         _run_segregation_message(action),
         status.HTTP_403_FORBIDDEN,
         params={"step": step},
+        coded=True,
     )
 
 

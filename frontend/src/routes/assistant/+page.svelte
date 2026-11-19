@@ -5,6 +5,7 @@
 	import ChatMessage from '#lib/components/assistant/ChatMessage.svelte';
 	import ExamplePrompts from '#lib/components/assistant/ExamplePrompts.svelte';
 	import UsageMeter from '#lib/components/assistant/UsageMeter.svelte';
+	import ChatLayout from '#lib/components/assistant/ChatLayout.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import type {
 		ChatResponse,
@@ -269,8 +270,8 @@
 		<button type="button" class="btn-secondary" onclick={newChat} disabled={busy}>{m('assistant.newChat')}</button>
 	{/snippet}
 
-	<div class="assistant-layout">
-		<aside class="convo-rail">
+	<ChatLayout railLabel={m('assistant.rail.toggle')} railId="assistant-rail" {busy} bind:scrollEl>
+		{#snippet rail()}
 			<UsageMeter {usage} />
 			<div class="convo-head">{m('assistant.recent')}</div>
 			{#if conversations.length === 0}
@@ -294,27 +295,21 @@
 					{/each}
 				</ul>
 			{/if}
-		</aside>
+		{/snippet}
 
-		<section class="chat-pane">
-			<div
-				class="chat-scroll"
-				bind:this={scrollEl}
-				role="log"
-				aria-live="polite"
-				aria-busy={busy}
-			>
-				{#if isEmpty}
-					<ExamplePrompts onpick={pickPrompt} />
-				{:else}
-					<div class="msg-stream">
-						{#each messages as message (message.id)}
-							<ChatMessage {message} />
-						{/each}
-					</div>
-				{/if}
-			</div>
+		{#snippet log()}
+			{#if isEmpty}
+				<ExamplePrompts onpick={pickPrompt} />
+			{:else}
+				<div class="msg-stream">
+					{#each messages as message (message.id)}
+						<ChatMessage {message} />
+					{/each}
+				</div>
+			{/if}
+		{/snippet}
 
+		{#snippet footer()}
 			{#if budgetNotice}
 				<div class="budget-notice" role="alert">{budgetNotice}</div>
 			{/if}
@@ -338,30 +333,11 @@
 					{busy ? m('assistant.thinking') : m('assistant.send')}
 				</button>
 			</form>
-		</section>
-	</div>
+		{/snippet}
+	</ChatLayout>
 </PageHeader>
 
 <style>
-	.assistant-layout {
-		display: grid;
-		grid-template-columns: 240px 1fr;
-		gap: 16px;
-		flex: 1 1 auto;
-		min-height: 0;
-	}
-	.convo-rail {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		padding: 14px;
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		background: var(--surface);
-		height: fit-content;
-		max-height: calc(100vh - 140px);
-		overflow-y: auto;
-	}
 	.convo-head {
 		font-size: 0.7rem;
 		font-weight: 600;
@@ -415,23 +391,6 @@
 	.convo-count {
 		font-size: 0.72rem;
 		color: var(--text-muted);
-	}
-	.chat-pane {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		min-height: 0;
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		background: var(--bg);
-		overflow: hidden;
-	}
-	.chat-scroll {
-		flex: 1 1 auto;
-		min-height: 420px;
-		max-height: calc(100vh - 220px);
-		overflow-y: auto;
-		padding: 20px;
 	}
 	.msg-stream {
 		display: flex;
@@ -497,12 +456,4 @@
 		padding: 0 22px;
 	}
 
-	@media (max-width: 720px) {
-		.assistant-layout {
-			grid-template-columns: 1fr;
-		}
-		.convo-rail {
-			max-height: none;
-		}
-	}
 </style>

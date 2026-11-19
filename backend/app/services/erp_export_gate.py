@@ -60,6 +60,15 @@ status what may still be booked:
 It runs at the same two places, after the live-claim check, with the coded
 refusal ``vendor_blocks_erp_export`` and ``params = {hold}``.
 
+**An invoice with no payable currency refuses the push too** (round 17). The
+payload used to say ``invoice.currency or "USD"``, so a blank, whitespace-only
+or malformed code was booked in the ERP as a USD bill, payable there in a
+currency nobody chose. §457 refuses such an invoice on every payment surface
+(``currency_unknown``); :func:`erp_export_currency_unknown` judges it with the
+same predicate, ``payment_runs.payable_currency_code``, last, at the same two
+places, with the coded refusal ``currency_blocks_erp_export`` and no params
+beyond ``possibly_posted``. The fix is to correct the invoice's currency.
+
 Every string here is PII-free: an exception type, a claim and a hold are fixed
 literals, never a vendor field.
 """
@@ -101,6 +110,11 @@ ERP_BOOKABLE_VENDOR_STATUSES: frozenset[str] = frozenset({"active", "unverified"
 #: ``HOLD_SANCTIONS_REVIEW``).
 HOLD_VENDOR_REJECTED = "vendor_rejected"
 HOLD_VENDOR_STATUS_UNKNOWN = "vendor_status_unknown"
+
+#: The refusal code when the invoice has no payable currency (blank,
+#: whitespace-only or malformed, ``payment_runs.payable_currency_code``),
+#: registered in the same two places.
+CURRENCY_BLOCKS_ERP_EXPORT = "currency_blocks_erp_export"
 
 
 async def erp_export_blocking_exception(db: AsyncSession, invoice_id: uuid.UUID) -> str | None:
@@ -231,6 +245,28 @@ def vendor_hold_message(hold: str, *, possibly_posted: bool = False) -> str:
     return f"{message}; {_POSSIBLY_POSTED_NOTE}" if possibly_posted else message
 
 
+def erp_export_currency_unknown(invoice) -> bool:
+    """True when the invoice has no currency a bill may be booked in: the run
+    gate's own predicate (``payment_runs.payable_currency_code``), so the ERP
+    push and the payment path cannot read the column differently (§457)."""
+    from app.services.payment_runs import payable_currency_code
+
+    return payable_currency_code(invoice.currency) is None
+
+
+def currency_unknown_params(*, possibly_posted: bool = False) -> dict:
+    """The currency refusal's params: only ``possibly_posted``, when true. The
+    stored value is never echoed: it is free text, and the refusal is a fixed
+    reason."""
+    return {"possibly_posted": True} if possibly_posted else {}
+
+
+def currency_unknown_message(*, possibly_posted: bool = False) -> str:
+    """The English ``error`` on the ``invoice.erp_failed`` row."""
+    message = f"ERP post refused: {CURRENCY_BLOCKS_ERP_EXPORT}"
+    return f"{message}; {_POSSIBLY_POSTED_NOTE}" if possibly_posted else message
+
+
 @dataclass(frozen=True)
 class ExportRefusal:
     """Why the push is refused: the coded refusal, and its English for the
@@ -251,7 +287,8 @@ async def erp_export_refusal(
 ) -> ExportRefusal | None:
     """Every reason this invoice may not be pushed now, or None. The first wins:
     an open duplicate / fraud exception (§286), then a live payment or card
-    (§309), then a vendor the payment path will not pay. Both the HTTP doors and
+    (§309), then a vendor the payment path will not pay, then an invoice with
+    no payable currency. Both the HTTP doors and
     ``erp._call_erp`` ask this one function."""
     invoice_id = invoice.id
     exception_type = await erp_export_blocking_exception(db, invoice_id)
@@ -274,6 +311,12 @@ async def erp_export_refusal(
             VENDOR_BLOCKS_ERP_EXPORT,
             vendor_hold_params(hold, possibly_posted=possibly_posted),
             vendor_hold_message(hold, possibly_posted=possibly_posted),
+        )
+    if erp_export_currency_unknown(invoice):
+        return ExportRefusal(
+            CURRENCY_BLOCKS_ERP_EXPORT,
+            currency_unknown_params(possibly_posted=possibly_posted),
+            currency_unknown_message(possibly_posted=possibly_posted),
         )
     return None
 
@@ -341,6 +384,10 @@ async def blocked_erp_export_detail(db: AsyncSession, invoice) -> dict | None:
         )
     elif refused.code == PAYMENT_BLOCKS_ERP_EXPORT:
         message = _CLAIM_SENTENCE[refused.params["claim"]]
+    elif refused.code == CURRENCY_BLOCKS_ERP_EXPORT:
+        message = (
+            "This invoice has no valid currency. Set its currency before sending it to the ERP."
+        )
     else:
         message = _HOLD_SENTENCE[refused.params["hold"]]
     if posted:

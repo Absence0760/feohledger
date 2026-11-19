@@ -50,7 +50,7 @@ def _user(*, totp: bool = True):
         organization_id=uuid.uuid4(),
         hashed_password="$bcrypt-sha256$irrelevant",
         mfa_enabled=totp,
-        mfa_secret="JBSWY3DPEHPK3PXP" if totp else None,
+        mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP" if totp else None,
     )
 
 

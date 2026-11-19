@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/mfa_challenge.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -109,9 +110,18 @@ class _MfaScreenState extends State<MfaScreen> {
       // and strand the user here on a later forced (401) logout.
       Navigator.of(context).pop();
     } else {
-      final error = AuthStore.instance.error;
+      final error = _errorText(AppLocalizations.of(context));
       if (error != null) A11y.announce(context, error);
     }
+  }
+
+  /// The store's error, in the reader's language when the server coded it
+  /// (a wrong code: `mfa_code_invalid`, or `mfa_email_code_invalid` for the
+  /// emailed one), else the store's own sentence.
+  String? _errorText(AppLocalizations l) {
+    final auth = AuthStore.instance;
+    if (auth.error == null) return null;
+    return localizeCodedRefusal(l, auth.errorDetail) ?? auth.error;
   }
 
   @override
@@ -210,7 +220,7 @@ class _MfaScreenState extends State<MfaScreen> {
                         Semantics(
                           liveRegion: true,
                           child: Text(
-                            auth.error!,
+                            _errorText(l)!,
                             // shade700 keeps the error legible at AA contrast.
                             style: TextStyle(color: Colors.red.shade700),
                             textAlign: TextAlign.center,

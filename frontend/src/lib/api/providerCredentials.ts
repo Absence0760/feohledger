@@ -20,3 +20,12 @@ export const getProviderCredentials = () => api.get<ProviderCredentialStatus>(BA
 
 export const updateProviderCredentials = (block: CredentialBlock, body: ProviderCredentialUpdate) =>
 	api.put<ProviderCredentialStatus>(`${BASE}/${block}`, body);
+
+/**
+ * Remove every stored secret of one block WITHOUT opening it — the way out
+ * when the sealed value can no longer be opened and so every save of the block
+ * answers 503 `credential_block_unopenable` (decisions §464). The admin then
+ * types each key again.
+ */
+export const resetProviderCredentials = (block: CredentialBlock) =>
+	api.delete<ProviderCredentialStatus>(`${BASE}/${block}`);

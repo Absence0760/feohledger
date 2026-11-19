@@ -5,9 +5,10 @@ the employee and supplier-portal auth routers (`api/auth.py`,
 `api/portal_auth.py`), the approval path (`services/approval_chain.py`,
 `services/review.py`), the exception queue's segregation refusal
 (`services/exception_lifecycle.py`), credit-memo application
-(`api/credit_memos.py`), expense reports and card reconciliation
+(`api/credit_memos.py`), payment-run maker-checker and CFO sign-off
+(`services/payment_controls.py`, `api/payments.py`), expense reports and card reconciliation
 (`services/expense_controls.py`, `api/expenses.py`), the invoice stale-edit 409
-(`api/invoices.py`), self-service signup
+and currency-edit 422s (`api/invoices.py`), self-service signup
 (`api/signup.py`), vendor merge (`services/vendor_merge.py`) and the shared
 rate limiter's 429 (`services/rate_limit.py`).
 A server-side catcher that turns one back into text reads it through
@@ -104,9 +105,20 @@ def refusal_of(exc: HTTPException, *, fallback_code: str) -> dict:
 #: and both web clients read a 401 on an authenticated call as an expired
 #: session — they clear the token and bounce to the login page, so a mistyped
 #: code used to sign the user out. Exactly as specific as the "Invalid code" it
-#: replaces. The login challenge's own "Invalid code" stays a 401: there is no
-#: session yet, so a 401 is the truth and nobody is signed out by it.
+#: replaces. The login challenge's wrong TOTP code (``POST /api/auth/mfa/verify``
+#: and the portal's) carries the same detail but stays a 401: there is no
+#: session yet, so a 401 is the truth and nobody is signed out by it — neither
+#: web client bounces an anonymous 401, mobile ends a session on a 401 only when
+#: it presented a token, and the per-account MFA failure budget counts the
+#: attempt either way (decisions §461).
 MFA_CODE_INVALID_DETAIL = coded_refusal("mfa_code_invalid", "Invalid code")
+
+#: The login challenge's email one-time code missed: wrong, expired, or already
+#: spent (``POST /api/auth/mfa/verify`` with ``method=email``, and the portal's
+#: ``/mfa/challenge``). Its own code because its sentence differs from the TOTP
+#: one above — an emailed code also expires — and, like it, folds a wrong code
+#: and an expired one together. A 401 for the same reason (decisions §465).
+MFA_EMAIL_CODE_INVALID_DETAIL = coded_refusal("mfa_email_code_invalid", "Invalid or expired code")
 
 
 #: An ERP pull (chart, vendor or PO sync) refused because the org's OAuth
@@ -223,24 +235,56 @@ def statement_currency(raw: str | None) -> str:
     every currency boundary uses, so ``"usd"`` is stored ``USD`` and ``"EURO"``
     is refused rather than overflowing the ``String(3)`` column.
     """
+    return _currency_or_refusal(
+        raw,
+        required=(
+            STATEMENT_CURRENCY_REQUIRED,
+            "Choose the statement's currency (a three-letter code such as USD or EUR).",
+        ),
+        invalid_code=STATEMENT_CURRENCY_INVALID,
+    )
+
+
+#: ``PATCH /api/invoices/{id}`` setting ``currency`` to a blank (or ``null``).
+#: ``invoices.currency`` is NOT NULL, so a blank used to land as ``""``, a
+#: "no currency" every money path then had to know about (decisions §457).
+#: An edit may change the currency, never erase it.
+INVOICE_CURRENCY_REQUIRED = "invoice_currency_required"
+#: The same field holding something that is not a three-letter ISO 4217 code.
+#: Params: ``value``.
+INVOICE_CURRENCY_INVALID = "invoice_currency_invalid"
+
+
+def invoice_currency(raw: str | None) -> str:
+    """The normalized currency an invoice edit writes, or a coded 422.
+
+    Only called when the edit names ``currency``: a PATCH that leaves it out
+    never reaches here, so a legacy row already holding ``""`` stays editable.
+    """
+    return _currency_or_refusal(
+        raw,
+        required=(
+            INVOICE_CURRENCY_REQUIRED,
+            "An invoice's currency cannot be cleared. Choose a three-letter code "
+            "such as USD or EUR.",
+        ),
+        invalid_code=INVOICE_CURRENCY_INVALID,
+    )
+
+
+def _currency_or_refusal(raw: object, *, required: tuple[str, str], invalid_code: str) -> str:
     from app.utils.currency_code import normalize_iso_currency
 
-    value = (raw or "").strip()
+    value = raw.strip() if isinstance(raw, str) else ""
     if not value:
-        raise HTTPException(
-            status_code=422,
-            detail=coded_refusal(
-                STATEMENT_CURRENCY_REQUIRED,
-                "Choose the statement's currency (a three-letter code such as USD or EUR).",
-            ),
-        )
+        raise HTTPException(status_code=422, detail=coded_refusal(*required))
     try:
         return normalize_iso_currency(value)
     except ValueError:
         raise HTTPException(
             status_code=422,
             detail=coded_refusal(
-                STATEMENT_CURRENCY_INVALID,
+                invalid_code,
                 f"{value!r} is not a three-letter currency code such as USD or EUR.",
                 value=value,
             ),
@@ -361,6 +405,25 @@ WORKSPACE_CLOSE_CONFIRMATION_MISMATCH_DETAIL = coded_refusal(
     WORKSPACE_CLOSE_CONFIRMATION_MISMATCH,
     "Type this workspace's address exactly as shown to confirm that it should be closed.",
 )
+
+#: A save of a credential block (`PUT /api/organization/credentials/{block}`,
+#: or `PATCH /api/organization` dropping a rail's keys) could not open the
+#: block's stored sealed value to merge into it: its KMS key is disabled, or in
+#: dev `FEOH_SECRET_KEY` changed. A 503 whose `params.block` names the block, so
+#: the organization page can offer `DELETE /api/organization/credentials/{block}`
+#: — the only way out (decisions §464). A seal failure is a different 503, with
+#: no code: it is retried, never answered by removing keys.
+CREDENTIAL_BLOCK_UNOPENABLE = "credential_block_unopenable"
+
+
+def credential_block_unopenable_detail(block: str) -> dict:
+    return coded_refusal(
+        CREDENTIAL_BLOCK_UNOPENABLE,
+        "The stored credentials for this section can no longer be opened, so nothing was "
+        "saved. An administrator can clear them and enter each one again.",
+        block=block,
+    )
+
 
 #: The workspace holds something a self-service closure must not destroy. A
 #: 409 whose `params.blockers` lists the stable codes

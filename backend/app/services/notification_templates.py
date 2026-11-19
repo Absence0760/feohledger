@@ -39,7 +39,10 @@ class InvoiceContext:
     invoice_number: str
     vendor_name: str
     amount: Decimal | None = None
-    currency: str = "USD"
+    # The invoice's own code (``payment_runs.payable_currency_code``), or None
+    # when it records none: the figure is then stated bare, never as dollars
+    # (decisions §160 / §196 / §466).
+    currency: str | None = None
     reason: str | None = None  # e.g. rejection reason — free text, no PII expected
     # Short, PII-free chat snippet (e.g. an author label like "from supplier").
     # NEVER the raw message body — see EVENT_CHAT_MESSAGE render branch.
@@ -57,6 +60,8 @@ def _money(ctx: InvoiceContext) -> str:
     if ctx.amount is None:
         return ""
     # Render exactly from the Decimal — never coerce currency through float.
+    if not ctx.currency:
+        return f" for {ctx.amount:,.2f}"
     return f" for {ctx.currency} {ctx.amount:,.2f}"
 
 

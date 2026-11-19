@@ -832,7 +832,7 @@ async def close_workspace(
 
     # After the commit, and never a reason to report failure: the workspace is
     # gone. Stale state the deleted accounts left outside the database.
-    await _forget_runtime_state(org_id, db_name, user_ids)
+    await _forget_runtime_state(org_id, outcome.slug, db_name, user_ids)
     logger.info(
         "[workspace-close] org %s closed by user %s: %d document(s), database %s, "
         "%d control-plane row(s)",
@@ -845,12 +845,15 @@ async def close_workspace(
     return outcome
 
 
-async def _forget_runtime_state(org_id: uuid.UUID, db_name: str, user_ids: list[uuid.UUID]) -> None:
+async def _forget_runtime_state(
+    org_id: uuid.UUID, slug: str, db_name: str, user_ids: list[uuid.UUID]
+) -> None:
     """Drop what the deleted workspace left in process memory and Redis.
 
     The tokens and links are already inert — every one resolves to a user row
     that no longer exists — but session metadata (IP, device label) and live
-    reset links for deleted accounts should not linger until their TTLs.
+    reset links for deleted accounts, employee and supplier alike, should not
+    linger until their TTLs.
     Best-effort: the closure has committed, so a failure here is logged, never
     reported as one.
     """
@@ -871,6 +874,14 @@ async def _forget_runtime_state(org_id: uuid.UUID, db_name: str, user_ids: list[
             "[workspace-close] org %s: session keys of %d deleted user(s) not cleared (%s)",
             org_id,
             len(user_ids),
+            exc.__class__.__name__,
+        )
+    try:
+        await credential_cleanup.forget_portal_links(slug)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[workspace-close] org %s: supplier-portal links not cleared (%s)",
+            org_id,
             exc.__class__.__name__,
         )
 

@@ -327,16 +327,9 @@ async def test_the_sign_in_code_email_previews_without_the_code(module, monkeypa
 
 
 async def test_the_password_reset_email_previews_without_the_link(monkeypatch):
-    from types import SimpleNamespace
-
     from app.api import auth
 
-    capture = _Capture()
-    monkeypatch.setattr(auth, "get_email_adapter", lambda: capture)
-    await auth._send_password_reset_email(
-        SimpleNamespace(email="a@b.test", full_name="Jared"), RESET
-    )
-    (msg,) = capture.sent
+    msg = auth._password_reset_message(to="a@b.test", full_name="Jared", reset_url=RESET)
     html, _ = _smtp_parts(msg, monkeypatch)
     assert "token" not in _preheader(html)
     assert "http" not in _preheader(html)

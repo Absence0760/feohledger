@@ -666,8 +666,8 @@ async def renew_contract(
 
 
 def _bulk_skip_reason(exc: HTTPException, fallback: str) -> str:
-    """The human-readable cause a bulk-status skip is reported with. Mirrors
-    `api/invoices.py::_skip_reason` — `_transition` raises `HTTPException`
+    """The human-readable cause a bulk-status skip is reported with.
+    `_transition` raises `HTTPException`
     with a plain-string `detail` (404 not found / 409 illegal starting
     status), and that string IS the real cause."""
     return exc.detail if isinstance(exc.detail, str) else fallback

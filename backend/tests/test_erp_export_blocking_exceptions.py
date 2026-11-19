@@ -71,6 +71,7 @@ async def _seed(
     uploaded_by_id: uuid.UUID | None = None,
     vendor_name: str = "Northwind Supplies",
     with_instance: bool = True,
+    currency: str = "USD",
 ) -> uuid.UUID:
     """An invoice whose frozen workflow has the ERP export step ON.
 
@@ -86,7 +87,7 @@ async def _seed(
             invoice_number=number,
             vendor_name=vendor_name,
             amount=Decimal("1234.56"),
-            currency="USD",
+            currency=currency,
             status=status,
             uploaded_by_id=uploaded_by_id,
             approved_by="Approver" if status != InvoiceStatus.ready_for_review else None,
@@ -1861,6 +1862,115 @@ async def test_re_screening_the_vendor_releases_a_review_hold(realdb, dispatched
         sent = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
     assert sent.status_code == 202, sent.text
     assert dispatched == [inv_id]
+
+
+# ---------------------------------------------------------------------------
+# An invoice with no payable currency refuses the push
+# ---------------------------------------------------------------------------
+#
+# The payload used to say `invoice.currency or "USD"`, so a blank or malformed
+# code was booked in the ERP as a USD bill, payable there past the run gate's
+# `currency_unknown` refusal (§457). The push now judges the column with the
+# run gate's own predicate, `payment_runs.payable_currency_code`.
+
+CURRENCY_CODE = "currency_blocks_erp_export"
+
+
+def test_the_currency_refusal_code_is_registered_for_the_browser():
+    from app.services.erp_adapters.base import ERP_REFUSAL_CODES
+    from app.services.erp_export_gate import CURRENCY_BLOCKS_ERP_EXPORT
+
+    assert CURRENCY_BLOCKS_ERP_EXPORT == CURRENCY_CODE
+    assert CURRENCY_CODE in ERP_REFUSAL_CODES
+
+
+@pytest.mark.parametrize("door", ["send-to-erp", "complete", "retry-erp"])
+@pytest.mark.parametrize("currency", ["", "   ", "U$D"])
+async def test_an_invoice_with_no_payable_currency_refuses_every_door(
+    realdb, dispatched, currency, door
+):
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    start = InvoiceStatus.failed if door == "retry-erp" else InvoiceStatus.approved
+    inv_id = await _seed(
+        mk,
+        info.org_id,
+        number=f"CURX-{currency.strip() or 'blank'}-{len(currency)}-{door}"[:50],
+        status=start,
+        currency=currency,
+    )
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/{door}")
+
+    assert res.status_code == 409, res.text
+    detail = res.json()["detail"]
+    assert detail["code"] == CURRENCY_CODE
+    assert detail["params"] == {}
+    assert "currency" in detail["message"] and "ERP" in detail["message"]
+    assert await _status(mk, inv_id) == start
+    assert dispatched == []
+    assert await _audit(mk, inv_id, "invoice.erp_submitted") == []
+    assert await _audit(mk, inv_id, "invoice.erp_retried") == []
+
+
+async def test_a_lowercase_padded_currency_still_books(realdb, dispatched):
+    """The predicate normalises rather than refuses a code it can read."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(mk, info.org_id, number="CUROK-eur", currency="eur")
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/invoices/{inv_id}/send-to-erp")
+    assert res.status_code == 202, res.text
+    assert dispatched == [inv_id]
+
+
+async def test_a_blank_currency_stops_a_queued_push_at_call_erp(realdb):
+    """The door passed (or never ran: the workflow's own advance); `_call_erp`
+    refuses before building an adapter, at `failed`, on the first attempt,
+    rather than booking a USD bill nobody chose."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed(
+        mk, info.org_id, number="CURX-QUEUED", status=InvoiceStatus.sending_to_erp, currency=" "
+    )
+
+    spy = _SpyAdapter()
+    await _push(mk, inv_id, adapter=spy)
+
+    assert spy.posted == 0
+    assert await _status(mk, inv_id) == InvoiceStatus.failed
+    (failed,) = await _audit(mk, inv_id, "invoice.erp_failed")
+    assert failed.details["refusal"] == {"code": CURRENCY_CODE, "params": {}}
+    assert failed.details["error"] == f"ERP post refused: {CURRENCY_CODE}"
+    assert failed.details["retries"] == 1, "a refusal must not spend the backoff budget"
+
+
+def test_the_payload_carries_the_normalised_currency_and_never_guesses():
+    from types import SimpleNamespace
+
+    from app.services.erp import _build_payload
+
+    def inv(currency):
+        return SimpleNamespace(
+            correlation_id=uuid.uuid4(),
+            invoice_number="INV-1",
+            vendor_name="Acme",
+            amount=Decimal("1.00"),
+            currency=currency,
+            **dict.fromkeys(
+                (
+                    "vendor_tax_id invoice_date due_date po_number description subtotal "
+                    "tax_amount tax_rate discount_amount shipping_amount gl_account "
+                    "cost_center payment_terms payment_method bill_to_address "
+                    "remit_to_address vendor_address"
+                ).split()
+            ),
+        )
+
+    assert _build_payload(inv(" eur "), []).currency == "EUR"
+    assert _build_payload(inv(""), []).currency is None
 
 
 # -- parity: the ERP gate and the payment path read the vendor the same way --

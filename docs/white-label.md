@@ -107,6 +107,23 @@ same as the shell's mark; once loaded (change password, or a sign-in page
 reached after one) they carry the tenant's name. `reset()` clears both the cache and the inline `<html>`
 overrides (logout / tenant switch).
 
+**Accent before first paint** — the applied accent is cached per workspace so a
+branded tenant never sees the platform blue first. `brand.applyTheme()` writes
+the two values it applied to this origin's `localStorage` under
+`feoh_brand_accent:<getTenantStorageKey()>` (the slug on a platform host, the
+hostname on a vanity host; never the shared `feoh_theme` cookie, which every
+workspace sees) via `frontend/src/lib/stores/brandAccentCache.ts`, and only after
+a successful read. On a reload, `<script id="accent-boot">` in `src/app.html`
+applies that entry before first paint; on an in-app sign-in (no reload),
+`ensureLoaded()` applies it before the read is sent. The fetched branding then
+corrects a stale entry or, for an org with no accent, removes it. A failed read
+leaves the cached colour standing. Every value is re-validated as a 3- or
+6-digit hex on read, in the store and in the inline script alike, so a tampered
+entry cannot inject CSS; every storage access is wrapped, and blocked storage
+means "no cache" (the old behaviour). `reset()` clears the entry.
+`brandAccentCache.test.ts` executes the inline script against the store's own
+reads to keep the two equal (decisions §463).
+
 **The fallback mark** — `brand.mark` (`brandTheme.ts::brandMark`,
 `docs/decisions.md` §173). A configured logo always wins. Without one, the
 sidebar shows the FeohLedger mark only while the product still carries the

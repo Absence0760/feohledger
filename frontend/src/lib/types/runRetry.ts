@@ -46,6 +46,7 @@ export const RETRY_SKIP_REASON_KEYS: Record<string, MessageKey> = {
 	invoice_not_payable: 'paymentRuns.runDetail.retrySkip.invoiceNotPayable',
 	invoice_has_blocking_exception: 'paymentRuns.runDetail.retrySkip.invoiceHasBlockingException',
 	vendor_not_active: 'paymentRuns.runDetail.retrySkip.vendorNotActive',
+	currency_unknown: 'paymentRuns.runDetail.retrySkip.currencyUnknown',
 	invoice_has_live_card: 'paymentRuns.runDetail.retrySkip.invoiceHasLiveCard',
 	needs_reconciliation: 'paymentRuns.runDetail.retrySkip.needsReconciliation',
 	invoice_has_live_payment: 'paymentRuns.runDetail.retrySkip.invoiceHasLivePayment',

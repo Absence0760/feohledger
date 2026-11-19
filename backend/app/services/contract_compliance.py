@@ -106,11 +106,17 @@ async def evaluate_contract_compliance(
     # --- cumulative spend over limit --------------------------------------
     # Skip entirely when the invoice's own currency differs from the
     # contract's — it can't be validly added to a same-currency prior sum
-    # and compared against a limit denominated in yet another currency.
+    # and compared against a limit denominated in yet another currency. An
+    # invoice recording no currency matches no contract: reading its blank as
+    # USD measured a code-less figure against a USD limit (decisions §466).
+    from app.services.payment_runs import payable_currency_code
+
+    invoice_currency = payable_currency_code(invoice.currency)
     if (
         contract.spend_limit is not None
         and invoice.amount is not None
-        and (invoice.currency or "USD") == contract.currency
+        and invoice_currency is not None
+        and invoice_currency == payable_currency_code(contract.currency)
     ):
         prior = (
             await db.execute(

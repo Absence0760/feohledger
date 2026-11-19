@@ -106,6 +106,9 @@ describe('codedRefusalText', () => {
 		[INVOICE_STALE_EDIT, 'refusal.invoiceStaleEdit'],
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
 		['mfa_code_invalid', 'refusal.mfaCodeInvalid'],
+		['mfa_email_code_invalid', 'refusal.mfaEmailCodeInvalid'],
+		['payment_run_awaiting_cfo', 'refusal.paymentRunAwaitingCfo'],
+		['payment_cfo_required', 'refusal.paymentCfoRequired'],
 		['erp_not_connected', 'erpRefusal.notConnected'],
 		['invoice_due_before_date', 'refusal.invoiceDueBeforeDate'],
 		['sso_email_in_other_workspace', 'refusal.ssoEmailInOtherWorkspace'],
@@ -124,6 +127,7 @@ describe('codedRefusalText', () => {
 		['workspace_close_audit_unavailable', 'refusal.workspaceCloseAuditUnavailable'],
 		['workspace_close_incomplete', 'refusal.workspaceCloseIncomplete'],
 		['workspace_close_actor_not_admin', 'refusal.workspaceCloseActorNotAdmin'],
+		['credential_block_unopenable', 'refusal.credentialBlockUnopenable'],
 		['signup_slug_held', 'refusal.signupSlugHeld'],
 		['expense_report_not_owner', 'refusal.expenseReportNotOwner'],
 		['expense_report_self_reject', 'refusal.expenseReportSelfReject'],
@@ -757,6 +761,20 @@ describe('the ERP send refused because of the vendor', () => {
 	});
 });
 
+describe('the ERP send refused for an invoice with no payable currency', () => {
+	it('states the 409 the send doors answer with', () => {
+		expect(localizeApiDetail(detail('currency_blocks_erp_export', {}), enT)).toBe(
+			EN_ALL['erpRefusal.currencyBlocksExport']
+		);
+		expect(codedRefusalText('currency_blocks_erp_export', {}, deT)).toBe(
+			de['erpRefusal.currencyBlocksExport']
+		);
+		expect(codedRefusalText('currency_blocks_erp_export', { possibly_posted: true }, enT)).toBe(
+			`${EN_ALL['erpRefusal.currencyBlocksExport']} ${EN_ALL['erpRefusal.vendorHoldPossiblyPosted']}`
+		);
+	});
+});
+
 describe('the ERP send refused for an open duplicate or fraud exception (§286)', () => {
 	it('states the 409 the send doors answer with, in the reader’s language', () => {
 		expect(
@@ -1167,6 +1185,7 @@ describe('why /cards/generate minted nothing, and the CSV near-duplicate rows', 
 		['card_skip_vendor_unscreenable', {}],
 		['card_skip_compliance_hold', { verdict: 'hold' }],
 		['card_skip_erp_bill', { erp_reason: 'erp_bill_not_open' }],
+		['card_skip_currency_unknown', {}],
 		['card_skip_issue_failed', {}],
 		['cards_not_enabled', {}]
 	] as [string, Record<string, unknown>][])('%s is stated in every shipped locale', (code, params) => {
@@ -1464,7 +1483,7 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 		const codes = [...source.matchAll(/^INVOICE_[A-Z_]+ = "(invoice_[a-z_]+)"/gm)].map(
 			(x) => x[1]
 		);
-		expect(codes).toHaveLength(4);
+		expect(codes).toHaveLength(5);
 		for (const code of codes) {
 			expect(CODED_REFUSAL_CODES, `no sentence for "${code}"`).toContain(code);
 		}
@@ -1508,6 +1527,20 @@ describe('the invoice bulk-status endpoint’s own skips (`api/invoices.bulk_sta
 
 	it('invoice_status_immutable without a status falls back to the server English', () => {
 		expect(codedRefusalText('invoice_status_immutable', {}, enT)).toBeNull();
+	});
+
+	it('invoice_bulk_refused names the target by its label, in every shipped locale', () => {
+		// The backstop for a refusal a service raised without a code (§465).
+		for (const [locale, messages] of LOCALES) {
+			const text = codedRefusalText(
+				'invoice_bulk_refused',
+				{ status: 'new' },
+				translator(messages, locale)
+			);
+			expect(text, locale).toContain((messages as Record<string, string>)['invoices.status.new']);
+			expect(text, locale).not.toMatch(/[{}]/);
+		}
+		expect(codedRefusalText('invoice_bulk_refused', {}, enT)).toBeNull();
 	});
 
 	it('a skip row localizes through the transport entry point the bulk toast calls', () => {

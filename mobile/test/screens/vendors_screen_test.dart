@@ -13,41 +13,42 @@ import 'package:feohledger_mobile/screens/vendors_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 
 Widget _localized(Widget home) => MaterialApp(
-      localizationsDelegates: appLocalizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: home,
-    );
+  localizationsDelegates: appLocalizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  home: home,
+);
 
 http.Response _json(Object body, [int status = 200]) => http.Response(
-      jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 http.Response _list(List<Map<String, dynamic>> items) =>
     _json({'items': items, 'total': items.length, 'page': 1});
 
 Map<String, dynamic> _vendorJson(String id, {String status = 'unverified'}) => {
-      'id': id,
-      'name': 'Vendor $id',
-      'code': 'V$id',
-      'email': 'v$id@example.com',
-      'status': status,
-      'source': 'manual',
-      'invoice_count': 1,
-      'created_at': '2026-01-01T12:00:00',
-    };
+  'id': id,
+  'name': 'Vendor $id',
+  'code': 'V$id',
+  'email': 'v$id@example.com',
+  'status': status,
+  'source': 'manual',
+  'invoice_count': 1,
+  'created_at': '2026-01-01T12:00:00',
+};
 
 Map<String, dynamic> _me(List<String> roles) => {
-      'id': 'u1',
-      'email': 'demo@acme.com',
-      'full_name': 'Demo User',
-      'organization_id': 'org1',
-      'roles': roles,
-    };
+  'id': 'u1',
+  'email': 'demo@acme.com',
+  'full_name': 'Demo User',
+  'organization_id': 'org1',
+  'roles': roles,
+};
 
 Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
   for (var i = 0; i < 20 && finder.evaluate().isEmpty; i++) {
@@ -77,10 +78,7 @@ void main() {
 
   /// Set the AuthStore's user to the given roles via a one-shot login, then
   /// swap the client to [screenClient] for the screen under test.
-  Future<void> loginThen(
-    List<String> roles,
-    MockClient screenClient,
-  ) async {
+  Future<void> loginThen(List<String> roles, MockClient screenClient) async {
     ApiClient().debugConfigure(
       client: MockClient((req) async {
         if (req.url.path == '/api/auth/login') {
@@ -93,12 +91,42 @@ void main() {
     ApiClient().debugConfigure(client: screenClient);
   }
 
-  testWidgets('renders one VendorListTile per vendor once loaded',
-      (tester) async {
+  testWidgets('a failed first load shows the shared error state with Retry, '
+      'never the exception', (tester) async {
+    var calls = 0;
     await loginThen(
       ['ap_manager'],
-      MockClient((req) async => _list([_vendorJson('1'), _vendorJson('2')])),
+      MockClient((req) async {
+        calls++;
+        return calls == 1
+            ? http.Response('boom', 500)
+            : _list([_vendorJson('1')]);
+      }),
     );
+
+    await tester.pumpWidget(_localized(const VendorsScreen()));
+    await _pumpUntil(tester, find.text('Could not load vendors'));
+
+    // The shared first-load state, carrying the localized sentence and never
+    // the exception the store holds
+    // (`ApiException(500): Request failed (500)`).
+    expect(find.byType(LoadErrorState), findsOneWidget);
+    expect(VendorStore.instance.error, contains('ApiException'));
+    expect(find.textContaining('boom'), findsNothing);
+    expect(find.textContaining('ApiException'), findsNothing);
+    expect(find.textContaining('Request failed'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+    await _pumpUntil(tester, find.byType(VendorListTile));
+    expect(find.byType(VendorListTile), findsOneWidget);
+  });
+
+  testWidgets('renders one VendorListTile per vendor once loaded', (
+    tester,
+  ) async {
+    await loginThen([
+      'ap_manager',
+    ], MockClient((req) async => _list([_vendorJson('1'), _vendorJson('2')])));
 
     await tester.pumpWidget(_localized(const VendorsScreen()));
     await _pumpUntil(tester, find.byType(VendorListTile));
@@ -118,8 +146,9 @@ void main() {
     expect(find.widgetWithText(FilterChip, 'Active'), findsOneWidget);
   });
 
-  testWidgets('manager sees the ERP-sync action; the action POSTs sync-erp',
-      (tester) async {
+  testWidgets('manager sees the ERP-sync action; the action POSTs sync-erp', (
+    tester,
+  ) async {
     var syncCalls = 0;
     await loginThen(
       ['ap_manager'],
@@ -142,9 +171,12 @@ void main() {
     expect(syncCalls, 1);
   });
 
-  testWidgets('cfo (read-only) does NOT see the ERP-sync action',
-      (tester) async {
-    await loginThen(['cfo'], MockClient((req) async => _list([_vendorJson('1')])));
+  testWidgets('cfo (read-only) does NOT see the ERP-sync action', (
+    tester,
+  ) async {
+    await loginThen([
+      'cfo',
+    ], MockClient((req) async => _list([_vendorJson('1')])));
 
     await tester.pumpWidget(_localized(const VendorsScreen()));
     await _pumpUntil(tester, find.byType(VendorListTile));
@@ -152,8 +184,9 @@ void main() {
     expect(find.byTooltip('Sync from ERP'), findsNothing);
   });
 
-  testWidgets('action sheet verify POSTs /verify and refetches',
-      (tester) async {
+  testWidgets('action sheet verify POSTs /verify and refetches', (
+    tester,
+  ) async {
     String? verifiedPath;
     var listCalls = 0;
     await loginThen(
@@ -176,13 +209,13 @@ void main() {
     expect(find.text('Verify'), findsOneWidget);
 
     await tester.tap(find.text('Verify'));
-    await _pumpUntilTrue(
-      tester,
-      () => verifiedPath != null && listCalls >= 2,
-    );
+    await _pumpUntilTrue(tester, () => verifiedPath != null && listCalls >= 2);
 
     expect(verifiedPath, endsWith('/vendors/1/verify'));
-    expect(listCalls, greaterThanOrEqualTo(2),
-        reason: 'verify should refetch after the initial load');
+    expect(
+      listCalls,
+      greaterThanOrEqualTo(2),
+      reason: 'verify should refetch after the initial load',
+    );
   });
 }

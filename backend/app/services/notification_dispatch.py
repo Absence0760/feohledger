@@ -588,7 +588,7 @@ async def _send_chat_best_effort(
         invoice_number=getattr(invoice_ctx, "invoice_number", "") or "",
         vendor_name=getattr(invoice_ctx, "vendor_name", "") or "",
         amount=getattr(invoice_ctx, "amount", None),
-        currency=getattr(invoice_ctx, "currency", None) or "USD",
+        currency=getattr(invoice_ctx, "currency", None) or None,
         link=link,
         approve_token=approve_token,
         reject_token=reject_token,

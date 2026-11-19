@@ -1,6 +1,5 @@
 """Auth endpoints — login (with optional MFA challenge), MFA enroll/verify, logout, profile."""
 
-import asyncio
 import json
 import logging
 import uuid
@@ -19,9 +18,13 @@ from app.api.deps import (
     get_current_user,
 )
 from app.api.permissions import effective_permissions
-from app.api.refusals import MFA_CODE_INVALID_DETAIL, coded_refusal
+from app.api.refusals import (
+    MFA_CODE_INVALID_DETAIL,
+    MFA_EMAIL_CODE_INVALID_DETAIL,
+    coded_refusal,
+)
 from app.config import settings
-from app.database import get_control_db
+from app.database import control_session_factory, get_control_db
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.webauthn_credential import WebAuthnCredential
@@ -89,6 +92,7 @@ from app.services.session_management import (
 from app.services.sso import is_sso_only, sso_only_requested
 from app.services.sso_plan import plan_scoped_settings
 from app.tenant import resolve_tenant_slug_by_custom_domain
+from app.utils.detached_tasks import spawn_detached
 from app.utils.emails import email_matches, exact_email_first, normalize_email
 from app.utils.passwords import (
     PasswordError,
@@ -102,27 +106,6 @@ from app.utils.tenant_urls import password_reset_url, sign_in_url
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# Strong references to in-flight background tasks (the forgot-password email
-# send) — without this the only reference is the local in `_spawn_background`,
-# and the event loop's own registry is weak, so the task could be
-# garbage-collected mid-send. Mirrors `services/post_commit.py`'s `_tasks`.
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_background(coro) -> None:
-    """Fire-and-forget a coroutine, keeping a strong ref until it completes.
-
-    Used for the forgot-password email so the HTTP response returns before
-    the send completes — awaiting it inline would make a match's response
-    measurably slower than a non-match's (DB lookup + Redis write + an
-    outbound send vs. just a DB lookup), which is exactly the enumeration
-    side-channel the equalized response body is trying to close.
-    """
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -701,14 +684,14 @@ def _password_reset_url(org: Organization, token: str) -> str | None:
     return password_reset_url(org.slug, org.settings, token)
 
 
-async def _send_password_reset_email(user: User, reset_url: str) -> None:
-    """Best-effort — exceptions are swallowed here (this runs detached via
-    `_spawn_background`, so nothing is left to propagate to)."""
-    msg = EmailMessage(
-        to=user.email,
+def _password_reset_message(*, to: str, full_name: str, reset_url: str) -> EmailMessage:
+    """The forgot-password email: the link is declared, so it renders as the
+    button, and the preheader never carries it."""
+    return EmailMessage(
+        to=to,
         subject="Reset your FeohLedger password",
         body_text=(
-            f"Hi {user.full_name},\n\n"
+            f"Hi {full_name},\n\n"
             "We received a request to reset your FeohLedger password. If you "
             "made this request, click the link below to choose a new one:\n\n"
             f"  {reset_url}\n\n"
@@ -720,10 +703,51 @@ async def _send_password_reset_email(user: User, reset_url: str) -> None:
         links=(reset_url,),
         preheader="Use the link in this email to choose a new password.",
     )
+
+
+async def _issue_and_send_reset(
+    *, user_id: uuid.UUID, org_id: uuid.UUID, to: str, full_name: str, ip: str | None
+) -> None:
+    """Mint, mail and audit one account's forgot-password link — detached.
+
+    Everything only a MATCHING address does lives here, off the response path
+    (the supplier route's shape, `docs/decisions.md` §451): the org lookup, the
+    token mint (a Redis write), the send and the audit row. Awaiting any of
+    them in the route would make a known address measurably slower than an
+    unknown one. Plain values, not the ORM row, and its own control-plane
+    session: the request's session is closed by the time this runs. Failures
+    are logged by user id only — never the address or the link.
+    """
+    async with control_session_factory() as db:
+        org = await _load_user_org(db, org_id)
+    if org is None:
+        return
     try:
-        await get_email_adapter().send(msg)
+        token = await password_reset.issue_reset_token(user_id)
     except Exception:  # noqa: BLE001
-        logger.exception("Password reset email failed for user %s", user.id)
+        logger.exception("Forgot-password token not minted (user=%s)", user_id)
+        return
+    reset_url = _password_reset_url(org, token)
+    if reset_url is None:
+        logger.warning(
+            "Password reset requested but no tenant base URL is configured "
+            "(org=%s) — no email sent",
+            org.id,
+        )
+    else:
+        msg = _password_reset_message(to=to, full_name=full_name, reset_url=reset_url)
+        try:
+            await get_email_adapter().send(msg)
+        except Exception as exc:  # noqa: BLE001
+            # The class only: an SMTP refusal's message can quote the recipient.
+            logger.error("Password reset email failed (user=%s): %s", user_id, type(exc).__name__)
+    await dispatch_auth_audit(
+        organization_id=org_id,
+        actor_id=None,
+        action="auth.password_reset.requested",
+        entity_id=user_id,
+        details={"ip": ip},
+    )
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)
@@ -740,9 +764,10 @@ async def forgot_password(
     what picks the tenant subdomain the reset link points at.
 
     Always returns the same generic response regardless of whether `email`
-    matched a real account, and the outbound email (the only place a match is
-    observable) is dispatched on a detached background task rather than
-    awaited — an enumeration oracle here is exactly the class of leak
+    matched a real account, and every step only a match takes (org lookup,
+    token mint, send, audit) runs on a detached task rather than being
+    awaited, so neither the body nor the response time says whether the
+    address exists — an enumeration oracle here is exactly the class of leak
     `docs/authentication.md`'s brute-force section already guards against on
     `/auth/login` and `/auth/mfa/verify`.
     """
@@ -765,24 +790,16 @@ async def forgot_password(
     user = await _user_by_email(db, body.email)
 
     if user is not None and user.is_active:
-        org = await _load_user_org(db, user.organization_id)
-        if org is not None:
-            reset_url = _password_reset_url(org, await password_reset.issue_reset_token(user.id))
-            if reset_url is not None:
-                _spawn_background(_send_password_reset_email(user, reset_url))
-            else:
-                logger.warning(
-                    "Password reset requested but no tenant base URL is configured "
-                    "(org=%s) — no email sent",
-                    org.id,
-                )
-            await dispatch_auth_audit(
-                organization_id=user.organization_id,
-                actor_id=None,
-                action="auth.password_reset.requested",
-                entity_id=user.id,
-                details={"ip": _client_ip(request)},
-            )
+        spawn_detached(
+            _issue_and_send_reset(
+                user_id=user.id,
+                org_id=user.organization_id,
+                to=user.email,
+                full_name=user.full_name,
+                ip=_client_ip(request),
+            ),
+            name="auth.forgot_password",
+        )
 
     return ForgotPasswordResponse()
 
@@ -957,7 +974,7 @@ async def verify_mfa(
                 entity_id=user.id,
                 details={"method": "totp", "ip": ip},
             )
-            raise HTTPException(status_code=401, detail="Invalid code")
+            raise HTTPException(status_code=401, detail=MFA_CODE_INVALID_DETAIL)
     elif body.method == "email":
         if not await mfa.verify_email_otp(user.id, body.code):
             await record_auth_failure(
@@ -970,7 +987,7 @@ async def verify_mfa(
                 entity_id=user.id,
                 details={"method": "email", "ip": ip},
             )
-            raise HTTPException(status_code=401, detail="Invalid or expired code")
+            raise HTTPException(status_code=401, detail=MFA_EMAIL_CODE_INVALID_DETAIL)
 
     await clear_auth_failures("auth_mfa", mfa_identity)
 

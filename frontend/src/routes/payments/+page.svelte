@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Payment, PaymentMethod, PaymentStatus } from '#lib/types/payment.ts';
+	import { queueBlockedReasonKey } from '#lib/types/paymentQueue.ts';
 	import {
 		PAYMENT_STATUSES,
 		paymentStatusLabelKey,
@@ -103,33 +104,33 @@
 
 	let RUNS_COLUMNS = $derived([
 		{ label: m('payments.col.run') },
-		{ label: m('payments.col.status') },
-		{ label: m('payments.col.total'), class: 'right' },
-		{ label: m('payments.summary.payments') },
-		{ label: m('payments.col.executed') },
-		{ label: m('payments.col.created') },
+		{ label: m('payments.col.status'), class: 'col-status' },
+		{ label: m('payments.col.total'), class: 'right col-amount' },
+		{ label: m('payments.summary.payments'), class: 'col-count' },
+		{ label: m('payments.col.executed'), class: 'col-date' },
+		{ label: m('payments.col.created'), class: 'col-date' },
 		// Actions column: the run-level ERP sync-back retry lives here. Always
 		// rendered so the table keeps its shape for a role that can't use it.
 		{ class: 'actions-col' }
 	]);
 
 	let CARDS_COLUMNS = $derived([
-		{ label: m('payments.col.card') },
+		{ label: m('payments.col.card'), class: 'col-card' },
 		{ label: m('payments.col.vendor') },
-		{ label: m('payments.col.invoice') },
-		{ label: m('payments.col.limit'), class: 'right' },
-		{ label: m('payments.col.charged'), class: 'right' },
-		{ label: m('payments.col.status') },
-		{ label: m('payments.col.expires') },
+		{ label: m('payments.col.invoice'), class: 'col-number' },
+		{ label: m('payments.col.limit'), class: 'right col-amount' },
+		{ label: m('payments.col.charged'), class: 'right col-amount' },
+		{ label: m('payments.col.status'), class: 'col-status' },
+		{ label: m('payments.col.expires'), class: 'col-date' },
 		{ class: 'actions-col' }
 	]);
 
 	let REBATES_COLUMNS = $derived([
 		{ label: m('payments.rebates.col.period') },
-		{ label: m('payments.rebates.col.card') },
-		{ label: m('payments.rebates.col.rate'), class: 'right' },
-		{ label: m('payments.rebates.col.amount'), class: 'right' },
-		{ label: m('payments.rebates.col.status') },
+		{ label: m('payments.rebates.col.card'), class: 'col-card' },
+		{ label: m('payments.rebates.col.rate'), class: 'right col-count' },
+		{ label: m('payments.rebates.col.amount'), class: 'right col-amount' },
+		{ label: m('payments.rebates.col.status'), class: 'col-status' },
 		// Actions column: the one available lifecycle step. Always rendered so
 		// the table keeps its shape for a terminal (`paid_out`) row.
 		{ class: 'actions-col' }
@@ -423,41 +424,11 @@
 
 	/** Localised sentence for why a run would refuse — or constrain — a row.
 	 *
-	 *  Maps the backend's fixed reason vocabulary; an unrecognised or missing
-	 *  code falls back to the generic reason rather than rendering a raw
-	 *  identifier at the operator. */
+	 *  Maps the backend's fixed reason vocabulary (`QUEUE_BLOCKED_REASON_KEYS`);
+	 *  an unrecognised or missing code falls back to the generic reason rather
+	 *  than rendering a raw identifier at the operator. */
 	function blockedReason(item: QueueItem): string {
-		switch (item.blocked_reason) {
-			case 'duplicate':
-				return m('payments.queue.blocked.duplicate');
-			case 'fraud_flag':
-				return m('payments.queue.blocked.fraudFlag');
-			case 'line_total_mismatch':
-				return m('payments.queue.blocked.lineTotalMismatch');
-			case 'payment_reconciliation':
-				// The fourth member of PAYMENT_BLOCKING_EXCEPTION_TYPES, and the
-				// one this switch was missing — so a row held because an earlier
-				// payment's fate at the rail is unknown fell through to the
-				// generic string and told the operator nothing actionable. The
-				// default arm stays for codes this build genuinely doesn't know.
-				return m('payments.queue.blocked.paymentReconciliation');
-			case 'quality_hold':
-				return m('payments.queue.blocked.qualityHold');
-			case 'po_mismatch':
-				return m('payments.queue.blocked.poMismatch');
-			case 'vendor_not_active':
-				return m('payments.queue.blocked.vendorNotActive');
-			case 'applied_credit_mismatch':
-				return m('payments.queue.blocked.appliedCreditMismatch');
-			case 'fully_credited':
-				return m('payments.queue.blocked.fullyCredited');
-			case 'live_virtual_card':
-				// Not a block — the row is pinned to the card rail. Its own
-				// sentence says so, rather than the "can't be paid" generic.
-				return m('payments.queue.blocked.liveVirtualCard');
-			default:
-				return m('payments.queue.blocked.generic');
-		}
+		return m(queueBlockedReasonKey(item.blocked_reason));
 	}
 
 	// The rows a payment run could actually be built from. Everything that
@@ -2352,7 +2323,9 @@
 			</div>
 		{/if}
 
+		<div class="pay-table pay-queue">
 		<DataTable
+			fixed
 			isEmpty={queue.length === 0}
 			empty={queueLoading
 				? m('common.loading')
@@ -2364,15 +2337,15 @@
 			{#snippet header()}
 				<tr>
 					<th class="checkbox-col"><input type="checkbox" aria-label={m('payments.selectAllPayableAria')} checked={allQueueSelected} disabled={selectableQueue.length === 0} onchange={toggleQueueSelectAll} /></th>
-					<th>{m('payments.col.invoiceNumber')}</th>
+					<th class="col-number">{m('payments.col.invoiceNumber')}</th>
 					<th>{m('payments.col.vendor')}</th>
-					<th class="right">{m('payments.col.amount')}</th>
-					<th>{m('payments.col.dueDate')}</th>
-					<th>{m('payments.col.discount')} <HelpTip term="dynamic-discounting" /></th>
-					<th>{m('payments.col.terms')}</th>
-					<th>{m('payments.col.status')}</th>
+					<th class="right col-amount">{m('payments.col.amount')}</th>
+					<th class="col-date">{m('payments.col.dueDate')}</th>
+					<th class="col-discount">{m('payments.col.discount')} <HelpTip term="dynamic-discounting" /></th>
+					<th class="col-terms">{m('payments.col.terms')}</th>
+					<th class="col-queue-status">{m('payments.col.status')}</th>
 					{#if canCompareRoutes()}
-						<th class="right">{m('payments.col.routes')}</th>
+						<th class="right col-routes">{m('payments.col.routes')}</th>
 					{/if}
 					{#if canRecordOutside()}
 						<!-- Row action: record a payment made outside FeohLedger. -->
@@ -2526,6 +2499,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		</div>
 
 		{#if hasMoreQueue}
 			<div class="load-more-row">
@@ -2542,20 +2516,22 @@
 		{/if}
 
 	{:else if activeTab === 'history'}
+		<div class="pay-table pay-history">
 		<DataTable
+			fixed
 			isEmpty={paymentStore.all.length === 0}
 			empty={historyEmptyMessage}
 			colspan={8}
 		>
 			{#snippet header()}
 				<tr>
-					<th scope="col">{m('payments.col.invoiceNumber')}</th>
+					<th scope="col" class="col-number">{m('payments.col.invoiceNumber')}</th>
 					<th scope="col">{m('payments.col.vendor')}</th>
-					<SortableHeader field="method" label={m('payments.col.method')} active={sortField === 'method'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
-					<SortableHeader field="amount" label={m('payments.col.amount')} class="right" active={sortField === 'amount'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
-					<SortableHeader field="status" label={m('payments.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
+					<SortableHeader field="method" label={m('payments.col.method')} class="col-method" active={sortField === 'method'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
+					<SortableHeader field="amount" label={m('payments.col.amount')} class="right col-amount" active={sortField === 'amount'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
+					<SortableHeader field="status" label={m('payments.col.status')} class="col-status" active={sortField === 'status'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
 					<th scope="col">{m('payments.col.reference')}</th>
-					<SortableHeader field="created_at" label={m('payments.col.date')} active={sortField === 'created_at'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
+					<SortableHeader field="created_at" label={m('payments.col.date')} class="col-date" active={sortField === 'created_at'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
 					<th class="actions-col"></th>
 				</tr>
 			{/snippet}
@@ -2646,6 +2622,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		</div>
 
 		{#if paymentStore.hasMore}
 			<div class="load-more-row">
@@ -2673,7 +2650,9 @@
 				testId="runs-error"
 			/>
 		{:else}
+		<div class="pay-table pay-runs">
 		<DataTable
+			fixed
 			columns={RUNS_COLUMNS}
 			isEmpty={runs.length === 0}
 			empty={runsLoading ? m('common.loading') : m('payments.runs.empty')}
@@ -2716,6 +2695,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		</div>
 		{/if}
 	{:else if activeTab === 'cards'}
 		{#if cardDashboard}
@@ -2781,8 +2761,9 @@
 			</p>
 		{/if}
 
-		<div data-testid="rebates-table">
+		<div class="pay-table pay-rebates" data-testid="rebates-table">
 		<DataTable
+			fixed
 			columns={REBATES_COLUMNS}
 			isEmpty={rebates.length === 0}
 			empty={loadingRebates
@@ -2888,8 +2869,9 @@
 		     scope the cards-pagination spec measures its page size against —
 		     a real API, not scaffolding: without it the assertion silently
 		     starts counting a sibling table's rows. -->
-		<div data-testid="cards-table">
+		<div class="pay-table pay-cards" data-testid="cards-table">
 		<DataTable
+			fixed
 			columns={CARDS_COLUMNS}
 			isEmpty={cards.length === 0}
 			empty={loadingCards
@@ -3782,6 +3764,54 @@
 	.sync-nothing {
 		color: var(--text-muted);
 	}
+
+	/* --- Column widths ---
+	   Every table here is `table-layout: fixed` (DataTable's `fixed`). Under
+	   `auto` the header cells were sized against the one "Loading…" row and
+	   then re-sized against the real rows, so every column slid sideways as
+	   the data landed. Fixed widths come from the header alone, so they hold
+	   from first paint. The predictable columns (checkbox, numbers, money,
+	   dates, badges, actions) get widths sized to their widest content; the
+	   free-text columns (vendor, reference, run, period) carry none and share
+	   what is left. The `min-width` keeps those readable: past it the table
+	   scrolls inside its region (frontend/docs/ui-patterns.md § Data tables),
+	   which is what a phone gets. The `<th>` render from this page's snippets,
+	   DataTable's `columns`, and SortableHeader alike, so the selectors go
+	   through `:global` under a page-owned wrapper (the /vendors pattern). */
+	.pay-table {
+		min-width: 0;
+	}
+	.pay-table :global(th.checkbox-col) { width: 40px; }
+	.pay-table :global(th.col-number) { width: 140px; }
+	.pay-table :global(th.col-amount) { width: 140px; }
+	.pay-table :global(th.col-date) { width: 120px; }
+	.pay-table :global(th.col-status) { width: 140px; }
+	.pay-table :global(th.col-count) { width: 100px; }
+	.pay-table :global(th.col-card) { width: 150px; }
+	.pay-table :global(th.col-method) { width: 150px; }
+	.pay-table :global(th.col-discount) { width: 120px; }
+	.pay-table :global(th.col-terms) { width: 100px; }
+	/* Holds the status pill plus, on a blocked row, a wrapping reason chip and
+	   the link to its exception. */
+	.pay-table :global(th.col-queue-status) { width: 190px; }
+	/* "Compare routes" and "Record as paid" are sized for their longest
+	   locale (fr: "Comparer les routes", "Enregistrer comme payée"): the
+	   RowAction never wraps, so a narrower column spills the button out of
+	   its cell. Label + 26px button chrome + 28px cell padding. */
+	.pay-table :global(th.col-routes) { width: 180px; }
+	.pay-queue :global(th.actions-col) { width: 215px; }
+	.pay-history :global(th.actions-col) { width: 260px; }
+	.pay-runs :global(th.actions-col) { width: 190px; }
+	.pay-rebates :global(th.actions-col) { width: 150px; }
+	.pay-cards :global(th.actions-col) { width: 130px; }
+	/* The fixed queue columns sum to 1245px; 1385 leaves the vendor 140px and
+	   still fits the 1388px region the 1666px layout gives the table
+	   (tests-e2e/a11y/wide-layout.spec.ts: at 1666px a table fits outright). */
+	.pay-queue :global(table) { min-width: 1385px; }
+	.pay-history :global(table) { min-width: 1250px; }
+	.pay-runs :global(table) { min-width: 960px; }
+	.pay-rebates :global(table) { min-width: 820px; }
+	.pay-cards :global(table) { min-width: 1100px; }
 
 	/* --- Queue selection & payment --- */
 

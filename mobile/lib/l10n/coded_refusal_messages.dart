@@ -12,7 +12,9 @@
 /// skipped row of a bulk status change (the invoices list), and resolving /
 /// dismissing an exception (the detail screen and the queue swipe), and
 /// recording a payment made outside FeohLedger (the Pay tab's queue row and
-/// run, backend decisions §251). Only those
+/// run, backend decisions §251), approving or executing a run (the Pay tab's
+/// run actions), a wrong code at the sign-in MFA step, and recording a goods
+/// receipt (the procurement receipt form). Only those
 /// codes are mapped here; the web registry
 /// covers the surfaces mobile does not ship (credit memos, expense reports,
 /// the invoice stale-edit prompt).
@@ -242,6 +244,7 @@ const codedRefusalCodes = <String>{
   'invoice_bulk_not_found',
   'invoice_status_immutable',
   'invoice_recall_one_at_a_time',
+  'invoice_bulk_refused',
   'invoice_required_fields_missing',
   'invoice_transition_invalid',
   'invoice_transition_recall_only',
@@ -266,6 +269,20 @@ const codedRefusalCodes = <String>{
   'payment_run_awaiting_cfo',
   'payment_run_not_recordable',
   'payment_run_nothing_to_record',
+  // The sign-in challenge's wrong code (`api/auth.py::verify_mfa`).
+  'mfa_code_invalid',
+  // ...and its emailed one-time code's miss (wrong, expired or spent).
+  'mfa_email_code_invalid',
+  // Recording a delivery (`services/goods_receipts.py`) — the mobile receipt
+  // form. The receiver's segregation refusal arrives later, at approval, as
+  // `approval_segregation_receiver` (backend decisions §267, §389).
+  'goods_receipt_po_cancelled',
+  'goods_receipt_number_taken',
+  'goods_receipt_line_not_on_po',
+  'goods_receipt_line_duplicated',
+  'goods_receipt_line_required',
+  'goods_receipt_nothing_received',
+  'goods_receipt_idempotency_reused',
 };
 
 /// The localized refusal for [detail] (a decoded error `detail`), or `null`
@@ -335,6 +352,11 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
           : l.codedRefusalInvoiceStatusImmutable(status);
     case 'invoice_recall_one_at_a_time':
       return l.codedRefusalInvoiceRecallOneAtATime;
+    // A row refused without a code of its own (backend decisions §465):
+    // `params.status` is the target it could not reach.
+    case 'invoice_bulk_refused':
+      final target = _status(l, params, 'status');
+      return target == null ? null : l.codedRefusalInvoiceBulkRefused(target);
     case 'invoice_required_fields_missing':
       return _requiredFields(l, params);
     case 'invoice_transition_invalid':
@@ -365,6 +387,29 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
       return l.codedRefusalPaymentRunNotRecordable;
     case 'payment_run_nothing_to_record':
       return l.codedRefusalPaymentRunNothingToRecord;
+    // `api/auth.py::verify_mfa` — a wrong authenticator code at sign-in (the
+    // MFA screen; backend decisions §461).
+    case 'mfa_code_invalid':
+      return l.codedRefusalMfaCodeInvalid;
+    case 'mfa_email_code_invalid':
+      return l.codedRefusalMfaEmailCodeInvalid;
+    // `services/goods_receipts.py` — the receipt form's refusals.
+    case 'goods_receipt_po_cancelled':
+      final po = _str(params, 'poNumber');
+      return po == null ? null : l.codedRefusalGoodsReceiptPoCancelled(po);
+    case 'goods_receipt_number_taken':
+      final gr = _str(params, 'grNumber');
+      return gr == null ? null : l.codedRefusalGoodsReceiptNumberTaken(gr);
+    case 'goods_receipt_line_not_on_po':
+      return l.codedRefusalGoodsReceiptLineNotOnPo;
+    case 'goods_receipt_line_duplicated':
+      return l.codedRefusalGoodsReceiptLineDuplicated;
+    case 'goods_receipt_line_required':
+      return l.codedRefusalGoodsReceiptLineRequired;
+    case 'goods_receipt_nothing_received':
+      return l.codedRefusalGoodsReceiptNothingReceived;
+    case 'goods_receipt_idempotency_reused':
+      return l.codedRefusalGoodsReceiptIdempotencyReused;
   }
   if (code.startsWith('external_payment_')) {
     return _forInvoice(l, params, _externalPayment(l, code, params));

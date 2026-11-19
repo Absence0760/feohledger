@@ -140,9 +140,25 @@ class AppLocalizationsEs extends AppLocalizations {
       'Datos en caché — no se pudo conectar al servidor';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'Error: $error';
-  }
+  String get dashboardLoadError =>
+      'No se pudo cargar el panel. Revise su conexión y toque Reintentar.';
+
+  @override
+  String get dashboardRefreshFailed =>
+      'No se pudo actualizar: estas son las últimas cifras cargadas. Deslice hacia abajo para reintentar.';
+
+  @override
+  String get dashboardNeedsAttention => 'Requiere su atención';
+
+  @override
+  String get dashboardOverview => 'Resumen';
+
+  @override
+  String get dashboardEmpty =>
+      'Aún no hay facturas. Las facturas capturadas y subidas aparecerán aquí.';
+
+  @override
+  String get dashboardTopVendorsEmpty => 'Aún no hay gasto por proveedor.';
 
   @override
   String dashboardInvoiceCount(int count) {
@@ -1268,6 +1284,10 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get payQueueBlockedVendorNotActive =>
       'Proveedor no verificado o inactivo: verifique primero el proveedor';
+
+  @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'Esta factura no tiene moneda registrada: indique primero su moneda';
 
   @override
   String get payQueueBlockedAppliedCreditMismatch =>
@@ -2528,6 +2548,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Es posible que un intento anterior ya haya creado la factura en el ERP; compruébelo allí antes de que alguien la pague.';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'Esta factura no tiene una moneda válida. Indique su moneda antes de enviarla al ERP.';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'A este envío no le quedaban intentos, así que esta vez no se intentó. Vuelva a intentarlo para enviarlo con intentos nuevos.';
 
@@ -3297,6 +3321,14 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return 'La factura no registra una moneda válida y los pedidos de $poNumber están en monedas distintas ($poCurrencies); los importes no se compararon';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return 'El pedido $poNumber está cancelado — la factura no se cotejó con él';
   }
@@ -3514,6 +3546,13 @@ class AppLocalizationsEs extends AppLocalizations {
     String poCurrency,
   ) {
     return 'Discrepancia de moneda: factura en $invoiceCurrency, pedido en $poCurrency; importes no comparados';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return 'Discrepancia de moneda: factura sin moneda válida, pedidos en $poCurrencies; importes no comparados';
   }
 
   @override
@@ -4029,6 +4068,11 @@ class AppLocalizationsEs extends AppLocalizations {
       'Una aprobación se retira de factura en factura, con un motivo: use Retirar aprobación en la factura.';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'Esta factura no se pudo cambiar a $status.';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return 'Faltan campos obligatorios: $fields';
   }
@@ -4287,6 +4331,14 @@ class AppLocalizationsEs extends AppLocalizations {
       'Esta remesa supera el umbral de aprobación del CFO de la organización y espera la aprobación de un usuario con el rol de CFO.';
 
   @override
+  String get codedRefusalMfaCodeInvalid =>
+      'Ese código no es válido. Compruebe su aplicación de autenticación e inténtelo de nuevo.';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'Ese código no es válido o ha caducado. Solicite un código nuevo e inténtelo de nuevo.';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       'Solo una remesa en borrador, o una cuyo archivo bancario se exportó, puede registrarse como pagada.';
 
@@ -4297,4 +4349,155 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get codedRefusalExternalPaymentBlockingException =>
       'Esta factura tiene una excepción sin resolver que bloquea el pago. Resuélvala antes de registrar la factura como pagada.';
+
+  @override
+  String get grRecordTitle => 'Registrar recepción de mercancías';
+
+  @override
+  String get grRecordIntro =>
+      'Registre lo que llegó de una orden de compra. Las facturas que citan la OC se vuelven a conciliar en cuanto guarda.';
+
+  @override
+  String get grRecordSearchPo => 'Buscar OC';
+
+  @override
+  String get grRecordSearchPlaceholder => 'Número de OC';
+
+  @override
+  String get grRecordPo => 'Orden de compra';
+
+  @override
+  String get grRecordNoPos => 'No hay órdenes de compra que coincidan';
+
+  @override
+  String get grRecordLoadPosFailed => 'Error al cargar las órdenes de compra';
+
+  @override
+  String get grRecordLoadPoFailed => 'Error al cargar la orden de compra';
+
+  @override
+  String grRecordPoCancelled(String number) {
+    return 'La orden de compra $number está cancelada, así que no se puede recibir nada contra ella.';
+  }
+
+  @override
+  String get grRecordOrdered => 'Pedido';
+
+  @override
+  String get grRecordAlreadyReceived => 'Recibido hasta ahora';
+
+  @override
+  String get grRecordOutstanding => 'Pendiente';
+
+  @override
+  String get grRecordThisDelivery => 'Esta entrega';
+
+  @override
+  String grRecordQuantityFor(String line) {
+    return 'Cantidad recibida para $line';
+  }
+
+  @override
+  String get grRecordOverReceipt =>
+      'Más de lo pendiente. La conciliación lo marcará como exceso de recepción.';
+
+  @override
+  String get grRecordLinesHint =>
+      'Deje una línea en blanco si no formaba parte de esta entrega. Introduzca 0 si se esperaba pero no llegó.';
+
+  @override
+  String get grRecordNoPoLines =>
+      'Esta orden de compra no tiene líneas, así que describa lo que llegó.';
+
+  @override
+  String get grRecordAddLine => 'Añadir línea';
+
+  @override
+  String grRecordRemoveLine(int n) {
+    return 'Quitar la línea $n';
+  }
+
+  @override
+  String grRecordLineDescription(int n) {
+    return 'Descripción, línea $n';
+  }
+
+  @override
+  String grRecordLineQuantity(int n) {
+    return 'Cantidad recibida, línea $n';
+  }
+
+  @override
+  String get grRecordReceivedDate => 'Recibido el';
+
+  @override
+  String get grRecordNumber => 'Número de albarán';
+
+  @override
+  String get grRecordNumberHint =>
+      'Opcional. El número de albarán o de lista de empaque del proveedor.';
+
+  @override
+  String grRecordNumberPlaceholder(String po) {
+    return 'En blanco: GR-$po-n';
+  }
+
+  @override
+  String get grRecordSaving => 'Registrando…';
+
+  @override
+  String get grRecordSubmit => 'Registrar recepción';
+
+  @override
+  String grRecordRecorded(String number) {
+    return 'Recepción $number registrada';
+  }
+
+  @override
+  String get grRecordFailed => 'Error al registrar la recepción';
+
+  @override
+  String get settingsGoodsReceipt => 'Registrar recepción';
+
+  @override
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber) {
+    return 'La orden de compra $poNumber está cancelada; no se puede recibir nada contra ella.';
+  }
+
+  @override
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber) {
+    return 'Ya existe una recepción con el número $grNumber.';
+  }
+
+  @override
+  String get codedRefusalGoodsReceiptLineNotOnPo =>
+      'Cada línea recibida debe ser una de las líneas de esta orden de compra.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineDuplicated =>
+      'Una línea de la orden de compra solo puede aparecer una vez en una recepción.';
+
+  @override
+  String get codedRefusalGoodsReceiptLineRequired =>
+      'Describa lo que se recibió en cada línea.';
+
+  @override
+  String get codedRefusalGoodsReceiptNothingReceived =>
+      'Una recepción debe registrar al menos una unidad recibida.';
+
+  @override
+  String get codedRefusalGoodsReceiptIdempotencyReused =>
+      'Esta solicitud ya se usó para otra orden de compra. Vuelva a abrir el formulario e inténtelo de nuevo.';
+
+  @override
+  String get settingsGoodsReceiptHint =>
+      'Registrar una entrega contra una orden de compra';
+
+  @override
+  String get grRecordSegregationNote =>
+      'Segregación de funciones: una vez que registre esta recepción, no podrá aprobar una factura emitida contra esta orden de compra, y una recepción que registre después de aprobar una no la libera.';
+
+  @override
+  String get grRecordReceiveLines =>
+      'Introduzca una cantidad en al menos una línea';
 }

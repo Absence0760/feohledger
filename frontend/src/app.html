@@ -57,6 +57,41 @@
 			})();
 		</script>
 		<!--
+			Tenant accent before first paint (docs/white-label.md, decisions
+			§463). Repeats the read in src/lib/stores/brandAccentCache.ts,
+			which brandAccentCache.test.ts executes this script against: the entry
+			is this origin's localStorage under feoh_brand_accent:<tenant key>,
+			where the key is the whole hostname on a vanity host or its first
+			label (the slug) on a platform host. Only the store writes it, and
+			only the origin's own key, so trying both finds at most that one.
+			Each value must be a 3- or 6-digit hex literal or it is ignored: the
+			entry is writable by anything on the origin and lands in CSS. The
+			fetched branding then corrects or clears it. Any throw = no accent.
+		-->
+		<script id="accent-boot">
+			(function () {
+				try {
+					var host = String(window.location.hostname || '').toLowerCase().replace(/\.+$/, '');
+					if (!host) return;
+					var keys = [host, host.split('.')[0]];
+					var raw = null;
+					for (var i = 0; i < keys.length && !raw; i++) {
+						if (keys[i]) raw = window.localStorage.getItem('feoh_brand_accent:' + keys[i]);
+					}
+					if (!raw) return;
+					var cached = JSON.parse(raw);
+					if (!cached || typeof cached !== 'object') return;
+					var props = ['--accent', '--accent-strong'];
+					for (var j = 0; j < props.length; j++) {
+						var value = cached[props[j]];
+						if (typeof value === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value.trim())) {
+							document.documentElement.style.setProperty(props[j], value.trim());
+						}
+					}
+				} catch (e) {}
+			})();
+		</script>
+		<!--
 			Link-preview card. It lives here, not in svelte:head, because unfurl
 			crawlers run no JavaScript. Platform-branded on every host, like the
 			favicon. The image URL must be absolute, so PUBLIC_SITE_URL prefixes it

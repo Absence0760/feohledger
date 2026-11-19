@@ -105,7 +105,7 @@ async def _create_user(realdb, *, hashed: str, mfa_enabled: bool = False) -> tup
                 organization_id=realdb.info(TENANT).org_id,
                 must_change_password=False,
                 mfa_enabled=mfa_enabled,
-                mfa_secret="JBSWY3DPEHPK3PXP" if mfa_enabled else None,
+                mfa_secret="JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP" if mfa_enabled else None,
             )
         )
         await s.commit()

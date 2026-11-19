@@ -20,7 +20,7 @@ mobile/
 │   ├── models/
 │   │   ├── user.dart            # User model with role helpers
 │   │   ├── adaptive.dart        # ApproverPattern / VendorPattern / ApprovalPatterns, AnomalyFlag / InvoiceAnomaly / AnomalyBatch, WorkflowSuggestion + SuggestionStatus (every statistic a string — the backend stringifies its Decimals)
-│   │   ├── goods_receipt.dart   # GoodsReceipt (read only to populate the record-inspection picker; `label` = "GR-1 → PO-9")
+│   │   ├── goods_receipt.dart   # GoodsReceipt (record-inspection picker; `label` = "GR-1 → PO-9") + ReceivablePO / ReceivablePODetail / ReceivablePOLine (quantities in ten-thousandths, `outstandingScaled`) + GoodsReceiptDraft (quantities sent as strings) + `quantityString`
 │   │   ├── inspection.dart      # Inspection + InspectionResult enum (pass/fail/partial + unknown for a free-form/QMS value) + InspectionDraft (quantities sent as raw strings) + quantityToDisplay
 │   │   ├── audit_entry.dart     # AuditEntry + AuditFieldChange (invoice activity timeline; details.changes diff)
 │   │   ├── contract.dart        # Contract + ContractStatus enum (draft/active/expired/terminated/cancelled; isActionable gate on the lifecycle buttons)
@@ -41,6 +41,7 @@ mobile/
 │   │   └── push_service.dart       # Firebase Cloud Messaging + local notifications; registers the device token with the backend (POST /api/notifications/device-token) on acquisition + refresh; deep-links a notification tap to InvoiceDetailScreen via PushService.navigatorKey (wired into MaterialApp in main.dart)
 │   ├── stores/
 │   │   ├── adaptive_store.dart  # Adaptive read models — three independent section states + request sequences; dismiss patches the row from the response; NOT offline-cached (privileged analytics read)
+│   │   ├── goods_receipt_store.dart # Record-a-goods-receipt form — PO search + pick (two request sequences), submit with one Idempotency-Key per opened form; NOT offline-cached
 │   │   ├── inspection_store.dart # Quality inspections — list + server-side result filter, record (refetches), getById, goods-receipt options; NOT offline-cached (a stale pass/fail is a wrong answer about payability)
 │   │   ├── auth_store.dart      # Auth state — login, logout, role checks (incl. canBulkEditInvoices + isOrgAdmin gates); binds the session scope on login/restore
 │   │   ├── admin_user_store.dart # Admin user management — users + roles, set-roles / activate-deactivate (admin-only, not offline-cached)
@@ -83,10 +84,11 @@ mobile/
 │   │   ├── payment_queue_screen.dart # Pay — Queue tab (select approved invoices + per-row method → Create Run) + Runs tab (execute/cancel drafts, record a run as paid), KPI summary bar, record-only banner
 │   │   ├── workflows_screen.dart # Admin — read-only workflow list (name, active/default status, step count) → tap-through; reached from Settings → Administration
 │   │   ├── workflow_detail_screen.dart # Read-only workflow detail — steps (number, type, name, enabled) + per-step config summary; fetches GET /api/workflows/{id} on open
+│   │   ├── goods_receipt_record_screen.dart # Record a goods receipt — PO search/picker, per-line ordered / received / outstanding with outstanding pre-filled, free-text lines for a line-less PO, coded refusals, segregation note; pops with the GR number
 │   │   ├── inspections_screen.dart # Quality inspections — list + server-side outcome chips, pull-to-refresh, record-inspection FAB (admin/ap_manager); tap a row → detail
 │   │   ├── inspection_detail_screen.dart # Read-only inspection detail — fields + what the outcome does to the 4-way match + an unlinked-row warning; loading / not-found / error states
 │   │   ├── adaptive_screen.dart  # Adaptive AI workflows — Suggestions (+ dismiss) / Approval patterns / Anomalies tabs, per-tab states; read-first (no apply paths)
-│   │   └── settings_screen.dart  # User profile, biometric toggle, logout; Procurement section (all roles): Quality Inspections; Administration section (gated PER ENTRY — User Management / Organization Settings / Workflows for admins, Adaptive Workflows for admin/ap_manager/cfo)
+│   │   └── settings_screen.dart  # User profile, biometric toggle, logout; Procurement section: Quality Inspections (all roles), Record receipt (admin/ap_manager/ap_clerk); Administration section (gated PER ENTRY — User Management / Organization Settings / Workflows for admins, Adaptive Workflows for admin/ap_manager/cfo)
 │   └── widgets/
 │       ├── brand_mark.dart      # The FeohLedger mark (login, splash); decorative, rendered by assets/gen-icons.sh
 │       ├── activity_timeline.dart # Invoice audit-log timeline (action label, actor, time, per-field before→after diff); empty state; one merged Semantics label per entry
@@ -110,6 +112,7 @@ mobile/
 │       ├── notification_list_tile.dart # Notification row — unread dot, title, body, event label + relative time; one merged Semantics label
 │       ├── notification_bell.dart      # App-bar bell action with a live unread Badge → opens NotificationsScreen (in the Dashboard app bar; visible to all roles)
 │       ├── kpi_card.dart        # Dashboard metric card
+│       ├── load_error_state.dart # Full-screen first-load failure: localized message + Retry (never a raw exception string); dashboard today, the per-screen `_ErrorState` copies are candidates to migrate
 │       ├── partial_conversion_note.dart # Amber-reading disclosure that a rendered rollup counts unconvertible rows at face value (dashboard + cash flow); caller passes the localized sentence and renders it only for a non-zero count
 │       ├── cash_flow_button.dart # Dashboard app-bar action → CashFlowScreen; gated to CFO/admin (renders nothing otherwise; mirrors backend _CFO_ROLES)
 │       ├── invoice_list_tile.dart # Invoice row with vendor, amount, status

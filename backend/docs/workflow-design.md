@@ -167,9 +167,15 @@ an `ap_manager` with no CFO signature, and routed to the manager tier of a chain
 whose senior level starts at 10,000. `require_cfo_above` is the control that
 decides whether a CFO has to sign at all, which makes it the sharpest instance.
 
-`GateAmount.expressible=False` (no locked rate, or a lock that provably
-describes a different currency pair) means there is **no comparison to make**,
-and every consumer fails CLOSED:
+`GateAmount.expressible=False` (no locked rate, a lock that provably
+describes a different currency pair, or an invoice that records **no currency**
+— NULL, blank, whitespace-only or malformed, judged by
+`payment_runs.payable_currency_code`) means there is **no comparison to make**,
+and every consumer fails CLOSED. A code-less invoice is never read as the
+reporting currency: a USD 100 invoice clears a USD 50,000 cap, the same figure
+with no code does not, and the refusal says the invoice "records no currency"
+(`params.currency` null). It also gets no structuring aggregate, since there is
+no currency to scope the vendor's other spend to (decisions §466):
 
 | Site | Fail-closed behaviour |
 |---|---|

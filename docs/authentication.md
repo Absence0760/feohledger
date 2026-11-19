@@ -930,8 +930,17 @@ web clients read a 401 on a call that carried a token as an expired session —
 they clear it and bounce to the login page — so a mistyped code signed the user
 out. They now answer `400` with `detail = coded_refusal("mfa_code_invalid",
 "Invalid code")` (`api/refusals.MFA_CODE_INVALID_DETAIL`), exactly as specific as
-the sentence it replaced. The login challenge's own `/mfa/verify` "Invalid code"
-stays a `401`: there is no session yet, so nobody is signed out by it.
+the sentence it replaced. The login challenge's own wrong TOTP code on
+`POST /api/auth/mfa/verify` (and the portal's `POST /api/portal/auth/mfa/challenge`)
+carries the same coded detail but stays a `401`: there is no session yet, so
+nobody is signed out by it — neither web client bounces a 401 on a call that
+carried no token, mobile ends a session on a 401 only when it presented one, and
+the per-account MFA failure budget counts the miss whatever the status
+(`docs/decisions.md` §461). The emailed one-time code's miss is coded too, as
+`mfa_email_code_invalid` ("Invalid or expired code",
+`api/refusals.MFA_EMAIL_CODE_INVALID_DETAIL`) — its own code because its
+sentence also covers an expired code — and is a `401` for the same reason
+(§465).
 
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
@@ -1086,7 +1095,8 @@ other account nobody chose a password for: an admin-invited user
 (`POST /api/partner/children/provision`), an operator-provisioned first admin
 (`deploy/add-tenant.sh` → `scripts/create_tenant.py`, which prints only the
 address and has no option to print the link, since its output is often retained
-by SSM),
+by SSM; its `--resend-link` re-sends to a first admin who has no password yet,
+superseding every earlier link),
 and an admin-reset user, whose
 password the reset clears (`POST /api/admin/users/{id}/reset-password`) — each
 emailed the same link, with its own lifetime `FEOH_SET_PASSWORD_LINK_TTL_HOURS`
@@ -2791,8 +2801,8 @@ parked here.
 | `GET /auth/sso/authorize`, `GET /auth/saml/login` | Entry legs of the OIDC / SAML dance — they 302 the browser to the IdP. There is no session yet, by definition. |
 | `GET /auth/saml/metadata` | SP `EntityDescriptor` XML an IdP admin registers. No secrets — only the public SP cert when AuthnRequest signing is on. |
 | `GET /signup/slug-check`, `POST /signup/start` | Self-service tenant signup: there is no account to authenticate yet. Abuse is bounded by the per-IP / per-email rate limits and the captcha, not by a credential. |
-| `POST /auth/forgot-password` | **Self-service password recovery.** It has to be reachable by a user who — by definition — cannot log in; requiring a credential to ask for a password reset would be circular. It is not an unguarded surface: it answers *identically* for a known and an unknown address (the email is dispatched on a detached task, so response time can't enumerate accounts either), and it is throttled on two axes — per IP (5/hour) and per submitted address (3/hour), so an attacker rotating IPs still can't email-bomb one victim's inbox with reset links. The state-changing half of the flow is **not** public: `POST /auth/reset-password` is gated by the single-use emailed token (see below). |
-| `POST /portal/auth/forgot-password` | **The supplier-portal twin**, tenant-scoped by `X-Tenant-Slug` / Host. The same identical answer and detached send; budgets per IP (5/hour) and per (tenant, address) (3/hour, tenant-scoped like the portal login's failure budget so one tenant's traffic never throttles another's supplier). It changes nothing on the account; the reset itself is gated by the single-use portal token (below). |
+| `POST /auth/forgot-password` | **Self-service password recovery.** It has to be reachable by a user who — by definition — cannot log in; requiring a credential to ask for a password reset would be circular. It is not an unguarded surface: it answers *identically* for a known and an unknown address, and everything only a known address does (the org lookup, the token mint, the send and the `auth.password_reset.requested` audit row) runs on a detached task (`app/utils/detached_tasks.py`, shared with the portal twin), so response time can't enumerate accounts either, and it is throttled on two axes — per IP (5/hour) and per submitted address (3/hour), so an attacker rotating IPs still can't email-bomb one victim's inbox with reset links. The state-changing half of the flow is **not** public: `POST /auth/reset-password` is gated by the single-use emailed token (see below). |
+| `POST /portal/auth/forgot-password` | **The supplier-portal twin**, tenant-scoped by `X-Tenant-Slug` / Host. The same identical answer, with the mint, send and audit detached the same way; budgets per IP (5/hour) and per (tenant, address) (3/hour, tenant-scoped like the portal login's failure budget so one tenant's traffic never throttles another's supplier). It changes nothing on the account; the reset itself is gated by the single-use portal token (below). |
 | `GET /portal/branding` | White-label brand read for the **unauthenticated** supplier-portal login page. Tenant resolved by the `get_tenant` chokepoint; returns only the whitelisted `BrandConfig` fields. See `white-label.md`. |
 
 #### `ALTERNATE_AUTH` — gated by something other than the JWT

@@ -39,7 +39,7 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-11-18 (round PR #731, round 15): the backfill's matching-only re-check (§446), mobile ERP prefill and split one-click (§448), supplier forgot-password (§451) and the tenant tooling's set-password link (§452) closed four (c) entries; the round opened seven (a blank currency read as USD by the run builder, the employee forgot-password timing, supplier links left at closure, no `--resend-link`, the recurring skip badge, the pyotp test secret, the blank currency in the split warning), taking the file from 112 → 115. Before that, 2026-11-17 (round PR #731, round 14): the latest payment schedule (§435), the PO currency backfill (§436), the split matched against its legs (§437), the browser OAuth connect (§438), mobile record-only (§439), overdue AP in the forecast (§440), the requisition budget picker (§441), the recurring GL re-check (§442), set-password links (§443) and sealed BYOK keys and OIDC secret (§444) closed eleven (c) entries; they opened four (a supplier forgot-password, mobile record-only's remaining gaps, the backfill's full warning refresh, the tenant tooling's temporary password), taking the file from 119 → 112. Before that, 2026-11-15 (round PR #717, round 13): the queue record booking a kept split only through its row (§426), invoice webhooks sent after commit (§427), the stranded and spent ERP push plus the `configured_at` fence (§428), mobile approve on the server verdict and bulk skip reasons (§429), the mobile ERP refusal, portable deploy scripts, the balanced NACHA offset (§432), the split PO links (§433) and the expense creator (§434) closed twelve (c) entries; the split links opened one (a warning refresh re-raising a split's `no_po` hold), taking the file from 130 → 119. Before that, 2026-11-15 (round PR #716, round 12) — the ERP push re-checking `sending_to_erp` (§410), the auto-send recovery sweep (§411), Intacct's location in the link realm (§412), the exception dialog's ERP amount and split (§413), the recall webhook event (§414, amended by §421), Xero's scope gap and contact search (§415), a new vendor opening its detail (§416), the ERP webhook matching by document id (§417), bulk approve held to review (§418), the outbound-host guard resolving imports (§419) and the approver refused on the queue (§420) closed thirteen (c) entries; they opened five (c) entries (invoice webhooks emitted before commit, "Record as paid" dropping a kept split, a push stuck with its retries spent, mobile bulk skips without a reason, the auto-send sweep unable to fence a directly configured ERP) and one (b) step (turn the auto-send sweep on), taking the file from 136 → 129; the round gate's code review then opened one (c) entry (an invoice stuck at `sending_to_erp` when its process dies before dispatch), taking it to 130. Before that, 2026-11-15 (round PR #715, round 11) — the inspector at the approval door (§404), Merge.dev's delete-account and `/sync-status` wait (§405), NetSuite's pinned client and TBA revoke (§406) and Business Central and SYSPRO's named steps (§407) closed three (c) entries (an inspector approving afterwards, a lost-response Merge push re-created, the stored-credential ERPs silent at deletion), and the per-tenant ERP webhook order (§408) opened one (a genuine delivery acknowledged and lost while the credential store is down), taking the file from 138 → 136. Before that, 2026-11-15 (round 10) — re-matching a hand-entered inspection in its own request (§401), making the pasted vendor statement's currency required (§402) and refusing a Business Central bill that pays another vendor (§403) closed their (c) entries; §401 opened one (an inspector approving afterwards with no door refusing them) and the OAuth revoke work (§400: Sage's revoke checked against Sage's own guide, Intacct's tokens revoked at tenant deletion) opened one (the four stored-credential ERPs still silent at deletion), taking the file from 138 → 137, and the Merge.dev audit fixes (§399: the `Idempotency-Key` header and pre-create lookup, line `total_amount`, coded refusals, region, the per-tenant webhook) opened one (a lost-response Merge push re-created before Merge lists it), taking it to 138. Before that, 2026-11-15 (round PR #713, round 9) — the PO status gate (§394), Sage Intacct (§395), the two-rail split (§396), BC's own lost-read draft (§397) and NetSuite (§398) closed their entries (unissued POs, BC orphan draft, two-rail split, NetSuite PO lines) and opened the next ones (Intacct's link realm ignoring `location_id`, a found BC draft posted without its `payToVendorId` checked, the exception dialog's rail picker beside a split), taking the file from 139 → 138. Before that, 2026-11-14 (round PR #712, round 8) — Sage UK (§390), Business Central (§391), the Xero webhook and check-now button (§392, amended for the QuickBooks webhook), QuickBooks' stated cash (§393) and the bulk toasts closed their entries; they opened a (b) step (register the Xero webhook) and two (c) entries (a BC orphan draft after a lost create response, a bill paid on two rails), taking the file from 143 → 139. Before that, 2026-11-13 (round PR #709, round 7) — the currency inputs, bulk-status skip codes (§387), Sage SA port (§385), receipt SoD (§389) and Xero status sync (§386) closed their entries and opened the next ones (the expense bulk toast's English count, an approver clearing their own held row in the queue, QuickBooks recording the owed amount, no Xero webhook or on-demand button, the exception dialog without the ERP amount, old Xero connections without the payments scope, a customer who becomes a supplier), taking the file from 138 → 143. Before that, 2026-11-13 (round PR #707, payee fingerprint key) — the dedicated `FEOH_PAYEE_FINGERPRINT_KEY` (§383, amended) opened one (b) entry, adding that key to production before the first deploy of this PR, taking the file from 137 → 138. Before that, 2026-11-13 (round PR #707, round 6, payee stamp) — the payee stamp (§383, migration 0128) closed the merged-then-voided re-payment entry and opened its residual, keeping the file at 137. Before that, 2026-11-13 (round PR #707, round 6) — the bank-file panel (§382) and the coded engine refusals (§380) closed their entries; the money-path gate fixes (§379) opened two (a merged-then-voided payee re-pay, the uncoded merge and engine refusals, the latter since closed) and §380 opened one (the bulk endpoint's own skip sentences), taking the file from 136 → 137. Before that, 2026-11-13 (round PR #707, gate fixes) — the round-wide gate's fix lanes opened one (c) entry, the bank-file panel hiding Verify after a switch to processor mode, taking the file from 135 → 136. Before that, 2026-11-13 (round PR #707, rounds 4–5) — the cleared-finding fingerprint (§366), DSAR complete bundle (§369), failed-push financial lock (§370), ERP grant revoke (§371), CSV import scope and currency (§372), approval recall (§374), vendor ERP unlink (§375), GL kept links (§376), card and statement currency (§377) and coded expense submit lists (§378) closed their entries and opened the next ones (a hand-entered inspection never re-matches, the pasted vendor-statement USD default, the recall's webhook / PEPPOL / mirror / redelivery edges), taking the file from 139 → 135. Before that, 2026-11-13 (round PR #707, rounds 2–4) — the deep link (§354), company picker (§355), per-ERP vendor links (§356), bulk-done gate (§357), keyed exception descriptions (§358), SAML bridge (§359), hardcoded pages (§360), expense refusals (§361), NACHA void and verify (§362, its review moved to (b)), document lock (§363), SPA off the VM (§364), zizmor lows (§365), the uploader backfill (§367), the legacy intake claim (§368) and the vendor-merge links (§373) closed their entries and opened five (GL single-slot link, the vendor-merge residual then its unlink action, expense submit's list 422s, the failed-push financial lock), taking the file from 152 → 139. Before that, 2026-11-12 (ERP names) — storing an over-long ERP name shortened and marked, and matching vendor names case and spacing aside (decisions §353), closed two (c) entries, taking the file from 154 → 152. Before that, 2026-11-11 (python-jose → joserfc) — moving the backend's own tokens to joserfc (decisions §351) closed the (c) entry for python-jose's unpatched advisory, taking the file from 155 → 154. Before that, 2026-11-11 (supply-chain scan baseline) — fixing the zizmor and osv-scanner baseline (decisions §350) opened two (c) entries, python-jose's unpatched advisory and the `$/` local-action syntax, and one (b) entry, making the scans blocking after sign-off, taking the file from 152 → 155. Before that, 2026-10-31 (round 4, test harness) — guarding mock-DB tests against the real engine (known-issues, struck) opened two (c) entries, the deploy-script tests failing on macOS and the rename script hanging across local slots, taking the file from 149 → 151. Before that, 2026-10-31 (round 4) — the follow-ups batch closed four (c) entries (the per-org host sweep, decisions §345; the missing Generate card action, §346; `/adaptive`'s Retry; two stale payment texts), narrowed the restated-predicates entry by the invoice (§347) and expense (§348) controls, and opened four (bulk `done` with no live-claim check, mobile approve, English expense refusals, two guard gaps), keeping the file at 149. Before that, 2026-10-31 (round 3) — the follow-ups batch closed six (c) entries (the resume in-doubt retry, decisions §343; the PEPPOL / Ollama hosts, §339; localhost CORS, §338; zero-total POs, §340; the CSV near-duplicate, §341; card-generate skips, §342), narrowed the restated-predicates entry by six payments controls (§344), and opened four (the exported-run void, no Generate card action, the per-org host sweep, two stale payment-path texts), taking the file from 151 → 149. Before that, 2026-10-31 (round 2) — the follow-ups batch closed six (c) entries (the last three PO listings and the write-back sentences, decisions §332; the ERP push ignoring vendor status, §333; the SSRF re-resolution, §334; the OAuth login-CSRF, §336; the unconfirmed QuickBooks realm, §337) and opened six (zero-total POs on three adapters, sanctions false-positive adjudication, two unguarded configurable hosts, localhost CORS in production, the mobile ERP refusal, `/adaptive`'s missing Retry), keeping the file at 151; the resume/retry in-doubt entry's trigger fired (§335). Before that, 2026-10-31 — the follow-ups batch closed six (c) entries (four PO listings reading a failed read as complete, decisions §329; the unlocked run builder, §330; the hand-rolled load-error blocks; the three copied buttons; the assistant stream's 429; the English ERP reconciliation sentences, §331) and opened two (c) entries (three adapters still reading a failed PO listing as empty, and the uncatalogued QuickBooks write-back sentences), taking the file from 155 → 151. Before that, 2026-10-26 — re-keying old Merge.dev PO rows in the sync (decisions §328, later in PR #670) replaced its (c) entry with a (b) one, running that sync per Merge.dev tenant after deploy, keeping the file at 155. Before that, 2026-10-26 — refreshing a synced PO's lines (decisions §327, later in PR #670) closed its (c) entry, taking the file from 156 → 155. Before that, 2026-10-26 — refusing a cancelled PO in the matcher (decisions §326, later in PR #670) closed its (c) entry, taking the file from 157 → 156. Before that, 2026-10-26 — scoping the PO sync's re-match to the synced entity and skipping paid / done invoices (later in PR #670) closed its (c) entry, taking the file from 158 → 157. Before that, 2026-10-26 — the PR #670 branch-wide money-path review opened five (c) entries (old Merge.dev PO rows, the re-match's scope, no exit for a never-priceable PO, PO lines never refreshed, the matcher ignoring PO status), taking the file from 153 → 158. Before that, 2026-10-26 — the branch review's skipped-PO wiring for NetSuite, Business Central, Sage (ZA) and Intacct (decisions §325, later in PR #670) opened one (c) entry, their PO listings still reading a failed or capped read as complete, taking the file from 152 → 153. Before that, 2026-10-26 — showing the "re-check now matches" note on `/exceptions` and the mobile exception detail (later in PR #670) closed its (c) entry, taking the file from 153 → 152. Before that, 2026-10-26 — letting a failed received-goods read fail `/api/analytics/cfo` instead of reporting a zero GR/IR leg (later in PR #670) closed its (c) entry, taking the file from 154 → 153. Before that, 2026-10-26 — withholding a marked PO's stale total on every surface and leaving it out of budgets and accruals (decisions §323, later in PR #670) closed the (c) entry for it and its review opened one, the received-goods accrual swallowing every error into zeros, keeping the file at 153. Before that, 2026-10-26 — wiring Blackbaud FE NXT into the skipped-PO report (decisions §324) closed its (c) entry, taking the file from 155 → 154. Before that, 2026-10-26 — making the ERP PO sync's re-match hold-only (decisions §323, amended) opened two (c) entries, rendering its "re-check now matches" note and the CISO question on the next-edit auto-close, taking the file from 153 → 155. Before that, 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
+**Last reconciled:** 2026-11-18 (round 21, mobile dashboard): moving `admin_users`, `inspections`, `workflows`, `vendors`, `org_settings` and `adaptive` onto the shared `LoadErrorState` closed one (c) entry, taking the file from 103 → 102. Before that, 2026-11-18 (round PR #732, round 20, UI/UX): fixed column widths on /payments, /purchase-orders and /gl-accounts closed one (c) entry and the table-driven layout-shift budget narrowed another to the unmeasured pages; the dashboard greeting and the above-the-fold spec closed two; the mobile dashboard pass opened two (the six hand-rolled mobile error blocks, the missing overdue count), taking the file from 104 → 103. Before that, 2026-11-18 (round PR #732, round 19): coded bulk-status skips and the email-OTP miss (§465), the in-app reset for an unopenable credential block and the mobile goods-receipt screen closed three (c) entries; the approval-currency fix (§466) opened one (a contract cap that raises no warning on a currency-less or other-currency invoice), taking the file from 106 → 104. Before that, 2026-11-18 (round PR #732, round 18): dropping a payment or card key on a provider switch (§464) closed one (c) entry and narrowed the unopenable-credentials entry to its missing button; the pre-paint white-label accent (§463) closed one; the admin "sign out everywhere" action narrowed the settings-without-a-screen entry, taking the file from 108 → 106. Before that, 2026-11-18 (round PR #732, round 17): the e2e teardown of payment runs and vendors closed one (c) entry; the coded payment-run and MFA refusals (§461) narrowed the English-refusals entry to the bulk-status skips, and the PATCH currency refusal (§460) narrowed the blank-currency entry to rows already blank; the ERP currency gate (§462) and the dedicated card skip closed findings of the round-16 review, taking the file from 109 → 108. Before that, 2026-11-18 (round PR #732, round 16): the run builder's `currency_unknown` refusal (§457), the detached employee forgot-password and the closure's supplier links and the TOTP test secrets (§456), `--resend-link` (§454), the recurring skip badge (§455) and the split warning's unknown invoice currency (§458) closed seven (c) entries; the run refusal opened one (the invoice PATCH still writing `""` for no currency), taking the file from 115 → 109. Before that, 2026-11-18 (round PR #731, round 15): the backfill's matching-only re-check (§446), mobile ERP prefill and split one-click (§448), supplier forgot-password (§451) and the tenant tooling's set-password link (§452) closed four (c) entries; the round opened seven (a blank currency read as USD by the run builder, the employee forgot-password timing, supplier links left at closure, no `--resend-link`, the recurring skip badge, the pyotp test secret, the blank currency in the split warning), taking the file from 112 → 115. Before that, 2026-11-17 (round PR #731, round 14): the latest payment schedule (§435), the PO currency backfill (§436), the split matched against its legs (§437), the browser OAuth connect (§438), mobile record-only (§439), overdue AP in the forecast (§440), the requisition budget picker (§441), the recurring GL re-check (§442), set-password links (§443) and sealed BYOK keys and OIDC secret (§444) closed eleven (c) entries; they opened four (a supplier forgot-password, mobile record-only's remaining gaps, the backfill's full warning refresh, the tenant tooling's temporary password), taking the file from 119 → 112. Before that, 2026-11-15 (round PR #717, round 13): the queue record booking a kept split only through its row (§426), invoice webhooks sent after commit (§427), the stranded and spent ERP push plus the `configured_at` fence (§428), mobile approve on the server verdict and bulk skip reasons (§429), the mobile ERP refusal, portable deploy scripts, the balanced NACHA offset (§432), the split PO links (§433) and the expense creator (§434) closed twelve (c) entries; the split links opened one (a warning refresh re-raising a split's `no_po` hold), taking the file from 130 → 119. Before that, 2026-11-15 (round PR #716, round 12) — the ERP push re-checking `sending_to_erp` (§410), the auto-send recovery sweep (§411), Intacct's location in the link realm (§412), the exception dialog's ERP amount and split (§413), the recall webhook event (§414, amended by §421), Xero's scope gap and contact search (§415), a new vendor opening its detail (§416), the ERP webhook matching by document id (§417), bulk approve held to review (§418), the outbound-host guard resolving imports (§419) and the approver refused on the queue (§420) closed thirteen (c) entries; they opened five (c) entries (invoice webhooks emitted before commit, "Record as paid" dropping a kept split, a push stuck with its retries spent, mobile bulk skips without a reason, the auto-send sweep unable to fence a directly configured ERP) and one (b) step (turn the auto-send sweep on), taking the file from 136 → 129; the round gate's code review then opened one (c) entry (an invoice stuck at `sending_to_erp` when its process dies before dispatch), taking it to 130. Before that, 2026-11-15 (round PR #715, round 11) — the inspector at the approval door (§404), Merge.dev's delete-account and `/sync-status` wait (§405), NetSuite's pinned client and TBA revoke (§406) and Business Central and SYSPRO's named steps (§407) closed three (c) entries (an inspector approving afterwards, a lost-response Merge push re-created, the stored-credential ERPs silent at deletion), and the per-tenant ERP webhook order (§408) opened one (a genuine delivery acknowledged and lost while the credential store is down), taking the file from 138 → 136. Before that, 2026-11-15 (round 10) — re-matching a hand-entered inspection in its own request (§401), making the pasted vendor statement's currency required (§402) and refusing a Business Central bill that pays another vendor (§403) closed their (c) entries; §401 opened one (an inspector approving afterwards with no door refusing them) and the OAuth revoke work (§400: Sage's revoke checked against Sage's own guide, Intacct's tokens revoked at tenant deletion) opened one (the four stored-credential ERPs still silent at deletion), taking the file from 138 → 137, and the Merge.dev audit fixes (§399: the `Idempotency-Key` header and pre-create lookup, line `total_amount`, coded refusals, region, the per-tenant webhook) opened one (a lost-response Merge push re-created before Merge lists it), taking it to 138. Before that, 2026-11-15 (round PR #713, round 9) — the PO status gate (§394), Sage Intacct (§395), the two-rail split (§396), BC's own lost-read draft (§397) and NetSuite (§398) closed their entries (unissued POs, BC orphan draft, two-rail split, NetSuite PO lines) and opened the next ones (Intacct's link realm ignoring `location_id`, a found BC draft posted without its `payToVendorId` checked, the exception dialog's rail picker beside a split), taking the file from 139 → 138. Before that, 2026-11-14 (round PR #712, round 8) — Sage UK (§390), Business Central (§391), the Xero webhook and check-now button (§392, amended for the QuickBooks webhook), QuickBooks' stated cash (§393) and the bulk toasts closed their entries; they opened a (b) step (register the Xero webhook) and two (c) entries (a BC orphan draft after a lost create response, a bill paid on two rails), taking the file from 143 → 139. Before that, 2026-11-13 (round PR #709, round 7) — the currency inputs, bulk-status skip codes (§387), Sage SA port (§385), receipt SoD (§389) and Xero status sync (§386) closed their entries and opened the next ones (the expense bulk toast's English count, an approver clearing their own held row in the queue, QuickBooks recording the owed amount, no Xero webhook or on-demand button, the exception dialog without the ERP amount, old Xero connections without the payments scope, a customer who becomes a supplier), taking the file from 138 → 143. Before that, 2026-11-13 (round PR #707, payee fingerprint key) — the dedicated `FEOH_PAYEE_FINGERPRINT_KEY` (§383, amended) opened one (b) entry, adding that key to production before the first deploy of this PR, taking the file from 137 → 138. Before that, 2026-11-13 (round PR #707, round 6, payee stamp) — the payee stamp (§383, migration 0128) closed the merged-then-voided re-payment entry and opened its residual, keeping the file at 137. Before that, 2026-11-13 (round PR #707, round 6) — the bank-file panel (§382) and the coded engine refusals (§380) closed their entries; the money-path gate fixes (§379) opened two (a merged-then-voided payee re-pay, the uncoded merge and engine refusals, the latter since closed) and §380 opened one (the bulk endpoint's own skip sentences), taking the file from 136 → 137. Before that, 2026-11-13 (round PR #707, gate fixes) — the round-wide gate's fix lanes opened one (c) entry, the bank-file panel hiding Verify after a switch to processor mode, taking the file from 135 → 136. Before that, 2026-11-13 (round PR #707, rounds 4–5) — the cleared-finding fingerprint (§366), DSAR complete bundle (§369), failed-push financial lock (§370), ERP grant revoke (§371), CSV import scope and currency (§372), approval recall (§374), vendor ERP unlink (§375), GL kept links (§376), card and statement currency (§377) and coded expense submit lists (§378) closed their entries and opened the next ones (a hand-entered inspection never re-matches, the pasted vendor-statement USD default, the recall's webhook / PEPPOL / mirror / redelivery edges), taking the file from 139 → 135. Before that, 2026-11-13 (round PR #707, rounds 2–4) — the deep link (§354), company picker (§355), per-ERP vendor links (§356), bulk-done gate (§357), keyed exception descriptions (§358), SAML bridge (§359), hardcoded pages (§360), expense refusals (§361), NACHA void and verify (§362, its review moved to (b)), document lock (§363), SPA off the VM (§364), zizmor lows (§365), the uploader backfill (§367), the legacy intake claim (§368) and the vendor-merge links (§373) closed their entries and opened five (GL single-slot link, the vendor-merge residual then its unlink action, expense submit's list 422s, the failed-push financial lock), taking the file from 152 → 139. Before that, 2026-11-12 (ERP names) — storing an over-long ERP name shortened and marked, and matching vendor names case and spacing aside (decisions §353), closed two (c) entries, taking the file from 154 → 152. Before that, 2026-11-11 (python-jose → joserfc) — moving the backend's own tokens to joserfc (decisions §351) closed the (c) entry for python-jose's unpatched advisory, taking the file from 155 → 154. Before that, 2026-11-11 (supply-chain scan baseline) — fixing the zizmor and osv-scanner baseline (decisions §350) opened two (c) entries, python-jose's unpatched advisory and the `$/` local-action syntax, and one (b) entry, making the scans blocking after sign-off, taking the file from 152 → 155. Before that, 2026-10-31 (round 4, test harness) — guarding mock-DB tests against the real engine (known-issues, struck) opened two (c) entries, the deploy-script tests failing on macOS and the rename script hanging across local slots, taking the file from 149 → 151. Before that, 2026-10-31 (round 4) — the follow-ups batch closed four (c) entries (the per-org host sweep, decisions §345; the missing Generate card action, §346; `/adaptive`'s Retry; two stale payment texts), narrowed the restated-predicates entry by the invoice (§347) and expense (§348) controls, and opened four (bulk `done` with no live-claim check, mobile approve, English expense refusals, two guard gaps), keeping the file at 149. Before that, 2026-10-31 (round 3) — the follow-ups batch closed six (c) entries (the resume in-doubt retry, decisions §343; the PEPPOL / Ollama hosts, §339; localhost CORS, §338; zero-total POs, §340; the CSV near-duplicate, §341; card-generate skips, §342), narrowed the restated-predicates entry by six payments controls (§344), and opened four (the exported-run void, no Generate card action, the per-org host sweep, two stale payment-path texts), taking the file from 151 → 149. Before that, 2026-10-31 (round 2) — the follow-ups batch closed six (c) entries (the last three PO listings and the write-back sentences, decisions §332; the ERP push ignoring vendor status, §333; the SSRF re-resolution, §334; the OAuth login-CSRF, §336; the unconfirmed QuickBooks realm, §337) and opened six (zero-total POs on three adapters, sanctions false-positive adjudication, two unguarded configurable hosts, localhost CORS in production, the mobile ERP refusal, `/adaptive`'s missing Retry), keeping the file at 151; the resume/retry in-doubt entry's trigger fired (§335). Before that, 2026-10-31 — the follow-ups batch closed six (c) entries (four PO listings reading a failed read as complete, decisions §329; the unlocked run builder, §330; the hand-rolled load-error blocks; the three copied buttons; the assistant stream's 429; the English ERP reconciliation sentences, §331) and opened two (c) entries (three adapters still reading a failed PO listing as empty, and the uncatalogued QuickBooks write-back sentences), taking the file from 155 → 151. Before that, 2026-10-26 — re-keying old Merge.dev PO rows in the sync (decisions §328, later in PR #670) replaced its (c) entry with a (b) one, running that sync per Merge.dev tenant after deploy, keeping the file at 155. Before that, 2026-10-26 — refreshing a synced PO's lines (decisions §327, later in PR #670) closed its (c) entry, taking the file from 156 → 155. Before that, 2026-10-26 — refusing a cancelled PO in the matcher (decisions §326, later in PR #670) closed its (c) entry, taking the file from 157 → 156. Before that, 2026-10-26 — scoping the PO sync's re-match to the synced entity and skipping paid / done invoices (later in PR #670) closed its (c) entry, taking the file from 158 → 157. Before that, 2026-10-26 — the PR #670 branch-wide money-path review opened five (c) entries (old Merge.dev PO rows, the re-match's scope, no exit for a never-priceable PO, PO lines never refreshed, the matcher ignoring PO status), taking the file from 153 → 158. Before that, 2026-10-26 — the branch review's skipped-PO wiring for NetSuite, Business Central, Sage (ZA) and Intacct (decisions §325, later in PR #670) opened one (c) entry, their PO listings still reading a failed or capped read as complete, taking the file from 152 → 153. Before that, 2026-10-26 — showing the "re-check now matches" note on `/exceptions` and the mobile exception detail (later in PR #670) closed its (c) entry, taking the file from 153 → 152. Before that, 2026-10-26 — letting a failed received-goods read fail `/api/analytics/cfo` instead of reporting a zero GR/IR leg (later in PR #670) closed its (c) entry, taking the file from 154 → 153. Before that, 2026-10-26 — withholding a marked PO's stale total on every surface and leaving it out of budgets and accruals (decisions §323, later in PR #670) closed the (c) entry for it and its review opened one, the received-goods accrual swallowing every error into zeros, keeping the file at 153. Before that, 2026-10-26 — wiring Blackbaud FE NXT into the skipped-PO report (decisions §324) closed its (c) entry, taking the file from 155 → 154. Before that, 2026-10-26 — making the ERP PO sync's re-match hold-only (decisions §323, amended) opened two (c) entries, rendering its "re-check now matches" note and the CISO question on the next-edit auto-close, taking the file from 153 → 155. Before that, 2026-10-26 — reporting the POs an ERP adapter skips (decisions §323) opened two (c) entries, wiring Blackbaud FE NXT into that report and the stale total still shown and summed outside the match, taking the file from 151 → 153. Before that, 2026-10-26 — review of the sub-processor change notice opened one (c) entry, a notice that reaches nobody (no active administrator, or administrators the provider refused) with no procedure behind the counters, taking the file from 149 → 150. Before that, 2026-10-26 — the sub-processor change notice (decisions §321, #427) replaced its (c) entry with a narrower one, the missing privacy/DPO contact, and opened one (b) entry, turning the sweep on in production, taking the file from 148 → 149. Before that, 2026-10-22 — keeping the ERP's reported payment (decisions §319) opened one (c) entry, the ERP reconciliation sentences still English-only, taking the file from 147 → 148. Before that, 2026-10-22 — recording real QuickBooks payment shapes (decisions §318) opened three (c) entries for the walkthrough's user-visible testing gaps (fields in view, the layout-shift budget, a scripted first-customer rehearsal) and one (b) entry, the first recording, taking the file from 143 → 147. Before that, 2026-10-22 — fixing the page-change layout shifts on /invoices, /payments and /exceptions opened two (c) entries, the brand-accent flash on a cold load and the auto-layout tables re-flowing their columns, and fixing the QuickBooks bill-payment reader (decisions §317) opened one (b) entry, clearing up what the wrong reader left in production — together taking the file from 140 → 143. Before that, 2026-10-22 — closing #575, which narrowed its day-one entry to the one gap left (no public-DNS API smoke check in `vm-deploy.yml`) and kept the file at 140. Before that, 2026-10-21 — merging main (#634, #636, #638, #640) into the live-claim ERP refusal branch (§309); both sides kept, taking the file to 140. Before that, 2026-10-21 — merging main (the uptime checks, #634: one (b) and one (c) entry) into the first-client UX branch; both sides kept, taking the file to 139. Before that, 2026-10-21 — merging main (the bundle-metric change, #640, which closed the bundle-total (c) entry) into the first-client UX branch, taking the file to 137. Before that, 2026-10-21 — merging main (the `feoh_app` cutover prune, #638) into the first-client UX branch (issue #635); both sides kept, taking the file to 138. Before that, 2026-10-21 — fixing the payments-spec data leak (issue #635) opened one
 (c) entry, leaked draft payment runs and a leaked vendor, taking the file from 138 → 139. Before
 that, 2026-10-21 — removing `transition: all` (issue #635) opened one (c)
 entry, three pages hand-rolling a shared button, taking the file from 137 → 138. Before that,
@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**115 open: 85 (c) · 12 (a) · 18 (b)** — re-derived from the file, never carried
+**102 open: 72 (c) · 12 (a) · 18 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -771,32 +771,6 @@ or is a sibling of a fix that needs its own pass.
       next change to `invoices.currency`.
 
 
-### Surfaced by retiring the stale archive PRs (2026-09-18, PRs #453/#454)
-
-- [ ] **(c) The dashboard has no greeting, and the only draft of one never
-      compiled.** A session crashed on 2026-09-16 mid-edit on
-      `frontend/src/routes/+page.svelte`; PR #454 preserved the 31-line stash so it
-      existed somewhere other than one machine's `.git`. That draft is not
-      salvageable and was closed rather than merged: it annotated
-      `greetingKey` as `MessageKey` against
-      `dashboard.greeting.{morning,afternoon,evening}`, and **those keys are defined
-      in no locale file** — `MessageKey` is `keyof typeof en`, so the annotation is a
-      type error and `pnpm check` fails on it. Below `</script>` none of
-      `greetingKey`, `todayLabel`, `userName` or the seven imported
-      `~icons/material-symbols/*` glyphs are referenced, so even with the keys added
-      it renders nothing and leaves seven unused imports. The idea is recorded here
-      because the draft is gone, not because the draft was close.
-      **Durable fix:** implement it as a normal change rather than recovering the
-      stash — the three `dashboard.greeting.*` keys across **all six** locale
-      catalogues (`en`, `de`, `es`, `fr`, `ja`, `pt-BR`; a missing key in one is a
-      compile error, which is the point), an actual render site in the
-      `<PageHeader>` slot, `$derived.by` re-reading `currentLocale()` so the date
-      re-renders on a locale switch, and the glyphs `aria-hidden` with each card's
-      `<h2>` still naming it. Greeting text keyed on the reader's own clock is
-      presentation only and must not gate or reorder any figure below it.
-      **Trigger:** the next `/polish-ui` pass on the dashboard, or any change that
-      already touches `frontend/src/routes/+page.svelte`'s header.
-
 ### Surfaced by panelising the settings pages (2026-09-22, decisions §205)
 
 - [ ] **(c) `/organization` is still one file, and it is growing — 4,186
@@ -821,6 +795,21 @@ or is a sibling of a fix that needs its own pass.
       the refactor has a guard already waiting for it.
       **Trigger:** the next change that touches more than one panel of
       `frontend/src/routes/organization/+page.svelte`.
+
+### Surfaced by the currency-residue pass (round 19, 2026-11-18, decisions §466)
+
+- [ ] **(c) A contract's spend limit says nothing about an invoice in another
+      currency, or in none.** `contract_compliance.evaluate_contract_compliance`
+      skips the cumulative-spend check when the invoice's currency
+      (`payment_runs.payable_currency_code`) is missing or differs from the
+      contract's, so a not-to-exceed contract raises no finding for that
+      invoice. A code-less invoice still cannot be approved or paid, because the
+      approval gate and every rail refuse it. A foreign-currency one can. **Durable
+      fix:** a `contract_currency_mismatch` warning (severity follows
+      `not_to_exceed`, as the spend-limit codes do) in
+      `invoice_warning_catalog`, its six web locales and the mobile ARB, then
+      `pnpm gen:warning-messages`. **Trigger:** the next change to contract
+      compliance, or the first multi-currency customer with contracts.
 
 ### Surfaced by the approval recall (2026-11-13, decisions §374)
 
@@ -946,28 +935,6 @@ or is a sibling of a fix that needs its own pass.
 
 ### Surfaced by the round-2 issues batch (2026-10-06, PR #514, decisions §237–§243)
 
-- [ ] **(c) Three refusals a user acts on are still English-only.** §238 coded the
-      approval, CFO / max-amount, credit-memo, expense and stale-edit refusals. Not
-      done: the per-row skip reasons `POST /api/invoices/bulk-status` returns
-      where the refusal behind them is not coded (since §387 a coded refusal
-      becomes a coded skip, and §418's `invoice_not_in_review` is one; the
-      English fallback is `api/invoices._skip_reason`, plus the two §263 added — a row
-      changed since the approver loaded it, which the single approve already
-      codes as `invoice_stale_approval`, and "Required fields missing", which
-      `/complete` codes as `invoice_required_fields_missing`), the payment-run SoD and CFO sign-off
-      refusals in `api/payments.py`, and the sign-in MFA challenge's
-      `401 "Invalid code"` (`POST /api/auth/mfa/verify`) — the same sentence §238
-      coded on enroll-verify, still bare on the step every MFA user meets.
-      **Durable fix:** `api/refusals.coded_refusal` on each, registered in
-      `frontend/src/lib/api/codedRefusals.ts` and the mobile
-      `coded_refusal_messages.dart`; the bulk skip reasons as per-row codes like
-      `/exceptions/bulk/resolve` already returns. The sign-in MFA refusal carries
-      the `mfa_code_invalid` code; whether its status moves to 400 is decided
-      against the login throttle and the client's 401 handling there, which
-      §238's enroll-verify change did not have to consider.
-      **Trigger:** the next change to any of those messages, or the first
-      non-English tenant running payment runs.
-
 ### Surfaced by writing the help centre (2026-10-06, decisions §244)
 
 Writing the in-app guides against the code turned these up. The guides
@@ -989,12 +956,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       locale's tenants passing a share of active users worth the review cost.
 - [ ] **(c) Settings with a backend and no screen.** Approval delegation,
       per-vendor / per-GL match tolerance, exception-agent autonomy level, the
-      SCIM bearer token, an admin revoking another user's sessions, and the
-      line-total-mismatch on/off switch (`settings.fraud_rules`) all
-      exist in the API with no UI, so help can describe their effect but can't
-      tell anyone where to change them. **Durable fix:** a panel each in
-      `/organization` (or the user row's actions for sessions), each with its
-      own help guide step. **Trigger:** the first customer asking to change
+      SCIM bearer token, and the line-total-mismatch on/off switch
+      (`settings.fraud_rules`) all exist in the API with no UI, so help can
+      describe their effect but can't tell anyone where to change them.
+      **Durable fix:** a panel each in `/organization`, each with its own help
+      guide step. **Trigger:** the first customer asking to change
       one, or SCIM onboarding for an enterprise tenant.
 - [ ] **(c) Help for the mobile app and the supplier portal.** The help centre
       covers the employee web app. Mobile users and suppliers get none.
@@ -1109,14 +1075,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 Three separate PRs, in this order. Inventory tracking and selling are out of
 scope (§260) — do not fold them into any of these.
 
-- [ ] **(c) Mobile has no goods-receipt entry.** `/goods-receipts` → Record
-      receipt is web-only; mobile reads receipts only for the inspection
-      picker. A warehouse or shop-floor user would naturally record a delivery
-      on a phone. **Durable fix:** a receipts screen with the same PO picker,
-      per-line outstanding quantities and the endpoints the web form uses (no
-      backend change), quantities sent as strings, widget tests and ARB strings
-      in every locale. **Trigger:** the first tenant receiving goods without a
-      desk, or the next mobile procurement change.
 - [ ] **(c) No adapter pulls goods receipts, and the enterprise ERPs still
       ride Merge.dev.** The US + South Africa set is now direct (QuickBooks
       Online, Xero, Sage Accounting and its SA API, Sage Intacct, SYSPRO,
@@ -1231,31 +1189,6 @@ scope (§260) — do not fold them into any of these.
       voided there, or the recall stays refused. **Trigger:** the first
       customer who needs to recall a pushed bill, or the live void test now
       pending.
-### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
-
-- [ ] **(c) Switching payment or card provider keeps the old provider's sealed
-      secret.** Changing `payments.provider` (or `cards.provider`) leaves the
-      previous provider's stored key in place, and the next call sends it to
-      the new provider's host. The change is audited
-      (`organization.provider_config_updated`) but nothing clears it. The ERP
-      block no longer has this gap: a new ERP or a new destination drops its
-      sealed secrets in the same transaction (decisions §271,
-      `erp_adapters/catalog.secrets_to_drop`). **Durable fix:** the same shape
-      for `payments` / `cards` — a pure "what does this save drop" rule keyed on
-      the provider identity (and any base-URL / environment key), applied by
-      `PATCH /api/organization` through `provider_credentials.update_secrets`
-      with an audited `credentials_updated` row, plus a test. **Trigger:** the
-      next change to the payments or cards settings writers, or before the
-      first tenant with live payment-rail or card-issuer credentials. The extraction block no longer has the gap
-      either: a provider switch drops its sealed key with an audited
-      `extraction_provider_changed` row (decisions §444).
-- [ ] **(c) A sealed value that can no longer be opened has no in-app
-      recovery.** If the KMS key is disabled or (in dev) `FEOH_SECRET_KEY`
-      changes, every save for that block returns 503, because the writer opens
-      the existing value to merge into it. **Durable fix:** an admin "clear
-      unreadable credentials" action on `/api/organization/credentials/{block}`,
-      audited, that replaces the row without opening it. **Trigger:** the first
-      key rotation or environment where it happens.
 
 ### Surfaced by evaluating Baidu's Unlimited OCR (2026-10-11)
 
@@ -1578,24 +1511,6 @@ scope (§260) — do not fold them into any of these.
       the nav row gated on the capability. **Trigger:** the product decision on
       who may act as a partner, or the next partner/reseller onboarding.
 
-### Surfaced by fixing the payments-spec data leak (2026-10-21, issue #635, PR #636)
-
-- [ ] **(c) Some e2e spec leaks draft payment runs, and `queue.spec` leaks a vendor.**
-      After `delete-gate.spec` stopped leaking blocked invoices (16d74798), a
-      check of the local e2e tenants found 20 draft payment runs on e2e2 dated
-      2026-09-05..07 that no spec removes. A draft run holding live payments
-      keeps those invoices out of the payment queue, which is the same
-      cross-spec interference that broke `execute.spec`.
-      `payments/queue.spec.ts`'s `createApprovedInvoice` also leaves its
-      auto-created `E2E Pluralization Vendor` behind. It has no invoices, so it
-      is inert today. **Durable fix:** find the spec that creates draft runs
-      (grep `payment-runs` POSTs without a matching `deletePaymentRun` in an
-      `afterEach`) and give it prefix-scoped cleanup. Remove the pluralization
-      vendor in `queue.spec`'s teardown, and extend `meta/teardown-guard` to
-      catch a spec that creates a payment run or vendor without removing it.
-      **Trigger:** the next payments e2e flake, or the next pass over
-      `meta/teardown-guard`.
-
 ### Surfaced by adding external uptime checks (2026-10-21, decisions §311)
 
 - [ ] **(c) Nothing watches the Let's Encrypt certificates Caddy holds on the
@@ -1617,37 +1532,6 @@ scope (§260) — do not fold them into any of these.
       customer #1, with the status-page work, or at once if Caddy's logs show
       a renewal failure.
 
-### Surfaced by measuring the page-change glitch (2026-10-22, `tests-e2e/reactivity/layout-stability.spec.ts`)
-
-- [ ] **(c) A white-labelled tenant's accent flashes the platform default on
-      every cold load.** `stores/brand.svelte.ts` reads
-      `GET /api/organization/branding` only after `/auth/me` resolves, and
-      applies `--accent` / `--accent-strong` when it lands — so after a sign-in
-      or a reload the active sidebar row, the primary buttons and the pressed
-      chips paint in the default blue for a round trip and then turn the
-      tenant's colour (measured: blue → the acme seed's dark red on the first
-      page after login). Not per navigation — the store loads once a session —
-      but it is the first thing a branded tenant sees. **Durable fix:** cache
-      the two applied accent values per workspace (keyed by
-      `getTenantStorageKey()`, never the shared theme cookie) and apply them in `app.html`'s pre-paint script beside the theme, letting the
-      fetched branding correct a stale cache; clear the entry in
-      `brand.reset()`. **Trigger:** the first tenant that sets a brand accent,
-      or any white-label sale (the same trigger as the per-theme accent entry
-      above).
-- [ ] **(c) Tables without `fixed` re-flow their columns when their rows
-      land.** `DataTable` uses `table-layout: auto` unless the page passes
-      `fixed`, so the header cells are sized against the one "Loading…" row
-      and then re-sized against the real rows: every column slides sideways as
-      the data arrives (measured on /payments, /purchase-orders,
-      /gl-accounts — small layout-shift scores, but visible). /invoices passes
-      `fixed` with per-column widths and does not move. **Durable fix:** give
-      each list page's `DataTable` `fixed` plus `<th>` widths, as /invoices
-      does, page by page as each is next touched; extend
-      `tests-e2e/reactivity/layout-stability.spec.ts` with a header-cell
-      x-position check per converted page. **Trigger:** the next polish pass on
-      any of those pages, or a second report of pages "jumping" once the
-      vertical shifts fixed here have shipped.
-
 ### Surfaced by the 2026-10-22 production walkthrough (decisions §317–§318)
 
 The walkthrough found defects the suite could not see because each check
@@ -1655,35 +1539,19 @@ covered the one page or shape it was written for. #646 / §318 closed the
 QuickBooks half with recorded shapes and a live check; these are the
 user-visible halves still open.
 
-- [ ] **(c) Key fields and primary actions are checked to be on screen only on
-      /login.** #642 added the check there (`tests-e2e/auth/login.spec.ts`:
-      the email and password fields in the viewport of a short window, no
-      scrolling) after a global class pushed them below the fold on every
-      screen. Every other spec fills fields and clicks buttons by locator,
-      and Playwright scrolls to them first, so a page whose search box,
-      filters or primary action ends up below the fold still passes.
-      **Durable fix:** one table-driven spec over every sidebar page and the
-      signup / set-password / supplier-portal entry pages, at 1280×720,
-      1366×768 and 390×844, asserting with `toBeInViewport()` (no scroll) the
-      page's heading, its primary action and its first input or filter;
-      each page's row names those three locators, and a new sidebar page
-      without a row fails the spec (the `lib/help/pages.ts` pattern).
-      **Trigger:** the next page added to the sidebar, or the next "I could
-      not find the button" report.
-- [ ] **(c) The layout-shift budget covers three list pages.** #644's
-      `tests-e2e/reactivity/layout-stability.spec.ts` holds /invoices,
-      /payments and /exceptions' late responses behind a gate and asserts the
-      table does not move; /vendors, /purchase-orders, /gl-accounts,
-      /credit-memos, /expenses, /contracts, /bank-reconciliation and the
-      dashboard have no such check, and the measurement
-      showed small shifts on some of them. **Durable fix:** make the spec
-      table-driven over every main list page, with each page's late
-      responses delayed by a realistic latency (the 2026-10-22 production
-      timings, not zero), a cumulative layout-shift budget per page
-      (`PerformanceObserver` `layout-shift`, under 0.1, the Core Web Vitals
-      "good" line), and a new list page without a row failing the spec.
-      **Trigger:** the next list page added, or the next polish pass on any of
-      those pages.
+- [ ] **(c) The layout-shift budget covers eleven pages.**
+      `tests-e2e/reactivity/layout-stability.spec.ts` is table-driven
+      (`LIST_PAGES`): the dashboard and ten list pages are opened with every
+      API response delayed, held to a cumulative layout shift under 0.1, and
+      the six `fixed` tables also have their header columns' x positions
+      checked. The other list pages in the sidebar (screening, bank changes,
+      goods receipts, requisitions, intake, catalogs, budgets, discounts,
+      recurring, statements, Positive Pay, audit, workflows, experiments,
+      adaptive, 1099, and the admin lists) sit in `NOT_LIST_PAGES` as
+      "Unmeasured", unmeasured and not yet given `fixed` widths. **Durable
+      fix:** move each into `LIST_PAGES`, giving its `DataTable` `fixed` plus
+      `<th>` widths where its columns slide. **Trigger:** the next polish pass
+      on any of those pages.
 - [ ] **(c) No scripted "first customer" release rehearsal.** The 2026-10-22
       walkthrough — sign up, connect QuickBooks, sync the chart and vendors,
       enter an invoice, approve it, push it, pay the bill in QuickBooks, watch
@@ -1775,62 +1643,32 @@ user-visible halves still open.
 
 ### Surfaced by round 15 (2026-11-18, round PR #731, decisions §445–§453)
 
-- [ ] **(c) A blank invoice currency still reads as USD in the run builder and
-      at execution.** `services/payment_runs.create_payment_run_for_invoices`
-      computes `invoices[iid].currency or "USD"` and `api/payments.py` builds
-      the payment with `(invoice.currency or "USD")`, so a manual `POST
-      /api/payments/runs` (or an invoice blanked by a concurrent PATCH between
-      `/draft-run`'s read and the builder's lock) still stages and pays a
-      currency-less invoice as USD — the substitution §453 removed from
-      `/draft-run`. **Durable fix:** a `currency_unknown` reason in
-      `run_refusal_reasons`, reaching the builder's 409 and the queue's
-      `blocked_reason` together, labelled on web `/payments` and mobile
-      `payment_queue_screen.dart` (six locales + ARB), and drop both `or
-      "USD"`s; longer term, stop the invoice PATCH writing `""` at all.
-      **Trigger:** the next change to the payment-run builder or queue
-      refusals.
-- [ ] **(c) The employee forgot-password reveals whether an account exists by
-      response time.** `POST /api/auth/forgot-password` (`api/auth.py`) awaits
-      the reset-token mint and `dispatch_auth_audit` only on the known-address
-      branch. The supplier route now runs that work on a detached task (§451).
-      **Durable fix:** the same shape for the employee route, with a test that
-      the response does not await the mint. **Trigger:** the next change to
-      `api/auth.py`'s forgot-password, or a security review of the login
-      surface.
-- [ ] **(c) Closing a workspace leaves its suppliers' set-password links in
-      Redis.** `credential_cleanup.forget_users` now clears employee reset
-      links and their generation counters (round 15), but not the
-      `portal:pwreset:` family. The links are unusable once the tenant's
-      portal accounts are gone, so this is hygiene, not exposure. **Durable
-      fix:** clear the tenant's `portal:pwreset:` keys and counters in the
-      same sweep. **Trigger:** the next change to workspace closure or portal
-      tokens.
-- [ ] **(c) `create_tenant.py` cannot re-send the first admin's link.** If the
-      set-password email fails on a tenant with no working mail, a re-run
-      skips the existing slug (`--skip-existing`), so the only recovery is
-      Forgot password once mail works (§452). **Durable fix:** an operator
-      `--resend-link` for an existing tenant's first admin, sharing one email
-      builder with `api/partner.py`'s child-admin email. **Trigger:** the
-      first operator who hits it.
-- [ ] **(c) `/recurring`'s "Not generating" badge explains itself only in a
-      tooltip.** The skip badge (`recurring.skip.title`) carries the skipped-
-      period count, period and reason in a `title`, which a keyboard, a touch
-      screen or a screen reader cannot reach. The GL off-chart badge beside it
-      was fixed in round 15. **Durable fix:** the same shape: visible or
-      visually-hidden text. **Trigger:** the next change to `/recurring`.
-- [ ] **(c) The two SSO step-up tests fail in any fresh local venv.**
-      `pyproject.toml` allows `pyotp>=2.10,<3`; pyotp 2.12 refuses secrets
-      under 112 bits, so `test_sso_only.py`'s step-up tests fail locally while
-      CI (pinned 2.10 by the lock) passes. **Durable fix:** a `TOTP_SECRET` of
-      at least 16 base32 characters in that test. **Trigger:** the next pyotp
-      bump.
-- [ ] **(c) A malformed invoice currency prints a blank in the split currency
-      warning.** When an invoice's own code is malformed and a split's legs
-      disagree (§445), `po_currency_mismatch` reads "Invoice is in  but PO …
-      is in EUR". It needs a stored malformed code, which the NOT NULL column
-      with a USD default makes rare. **Durable fix:** a variant sentence for
-      an unknown invoice currency. **Trigger:** the next change to the warning
-      catalogue.
+- [ ] **(c) Invoices already holding `""` as "no currency" stay blank.**
+      `invoices.currency` is NOT NULL, so a currency blanked before round 17
+      landed as `""` rather than NULL. The PATCH no longer writes it: a blank,
+      `null` or malformed `currency` is a coded 422 (decisions §460), and
+      create, CSV import and approve-with-corrections never could. What is
+      left is the rows already blank: every money path refuses them (`/draft-run`
+      skips them, §453; the run builder, the payment queue, `POST
+      /api/payments` and dispatch refuse them as `currency_unknown`, §457), but
+      each reader still has to know that `""` means unknown, and the PATCH lets
+      a blank row be edited without naming a currency. **Durable fix:** the
+      nullable column of the "currency unknown" entry above, with a tenant
+      migration turning `""` into NULL so the one explicit unknown replaces the
+      sentinel. **Trigger:** that entry's migration, or the next change to the
+      `invoices.currency` column.
+
+### Surfaced by round 20 (2026-11-18, round PR #732)
+
+- [ ] **(c) The mobile dashboard cannot say how much is overdue.** Its
+      "Upcoming" card reads the dashboard's upcoming list, which the server
+      caps at ten rows, so an overdue count derived from it undercounts, and
+      the label "Upcoming" covers both due-within-seven-days and overdue.
+      **Durable fix:** an `overdue_count` / `overdue_total` (per currency) on
+      `GET /api/dashboard`, computed in SQL like the web's overdue KPI (§449),
+      then an "Overdue" figure and a tap-through to the payment queue on
+      mobile. **Trigger:** the next change to the dashboard endpoint or the
+      mobile dashboard.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

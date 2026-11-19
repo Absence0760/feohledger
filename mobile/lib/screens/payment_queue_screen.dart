@@ -72,6 +72,8 @@ String _blockedReasonLabel(AppLocalizations l, String? code) => switch (code) {
       'quality_hold' => l.payQueueBlockedQualityHold,
       'po_mismatch' => l.payQueueBlockedPoMismatch,
       'vendor_not_active' => l.payQueueBlockedVendorNotActive,
+      // The invoice records no currency: no rail can pay it until one is set.
+      'currency_unknown' => l.payQueueBlockedCurrencyUnknown,
       'applied_credit_mismatch' => l.payQueueBlockedAppliedCreditMismatch,
       'fully_credited' => l.payQueueBlockedFullyCredited,
       // Not a block — the row is pinned to the card rail. Its own sentence
@@ -778,8 +780,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       if (confirmed != true) return;
       final message = await PaymentQueueStore.instance.approveRun(run.id);
       if (!mounted) return;
-      final text = message ??
-          l.payRunApproveFailed('${PaymentQueueStore.instance.error}');
+      final text = message ?? l.payRunApproveFailed(_runRefusal(l));
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
       A11y.announce(context, text);
     } else if (action == 'record') {
@@ -804,8 +805,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       if (confirmed != true) return;
       final message = await PaymentQueueStore.instance.executeRun(run.id);
       if (!mounted) return;
-      final text = message ??
-          l.payRunExecuteFailed('${PaymentQueueStore.instance.error}');
+      final text = message ?? l.payRunExecuteFailed(_runRefusal(l));
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
       A11y.announce(context, text);
     } else {
@@ -816,6 +816,14 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
       A11y.announce(context, text);
     }
+  }
+
+  /// The last refused approve / execute in the reader's language when the
+  /// server coded it (maker-checker, the CFO wait), else its own sentence.
+  String _runRefusal(AppLocalizations l) {
+    final store = PaymentQueueStore.instance;
+    return localizeCodedRefusal(l, store.runActionErrorDetail) ??
+        '${store.error}';
   }
 
   Future<bool?> _confirm(String title, String body, {String? confirmLabel}) {

@@ -22969,3 +22969,443 @@ plan-driven run should cap how overdue an invoice may be is an open product
 question for the operator. A cap would be a `settings.cash_flow` integer
 applied before staging, folded into the plan's derivation so the plan and the
 run agree, with the forecast's overdue slice left uncapped.
+
+## 454. The operator re-sends a first admin's set-password link, never to an account with a password (extends §452, round 16, 2026-11-18)
+
+`scripts/create_tenant.py --resend-link --slug <slug> --admin-email <addr>`
+(`deploy/add-tenant.sh <slug> --admin-email <addr> --resend-link`) provisions
+nothing. It finds the tenant's admin (`tenant_provisioning.resend_link_target`),
+bumps the account's link generation as an admin reset does, so every earlier
+link stops working, then mints and emails a fresh one. It prints only a masked
+address (`a***@acme.test`) and writes `user.set_password_link_resent` (actor
+NULL, no address) to the tenant's audit trail. It exits 2 without touching the
+token store when the tenant or account does not exist, the account is not an
+active system admin of that tenant, or no tenant URL is configured, and 3 when
+the generation bump, mint or send fails. The workspace-ready email has one
+builder, `set_password_links.workspace_admin_email`, which partner child
+provisioning uses too. The re-sent copy adds that the link replaces any earlier
+one.
+
+An admin who already has a password is refused, and there is no `--force`. The
+re-send exists for an account whose first link never arrived, which by
+definition has no password. An account with a password is recovered by its
+holder through Forgot password, which now works because mail does, or by
+another admin's reset in the app, which is audited against a named actor. A
+`--force` would have the server operator clear a customer's working password
+from a shell, with no named actor and no step-up. That is a takeover
+primitive the product deliberately keeps behind RBAC and the out-rank guard
+(§276, §443).
+
+**Rejected.** Picking the admin without `--admin-email` (for example, the
+tenant's oldest admin). The operator typed that address when provisioning, and
+naming it means a tenant with several admins cannot be sent the wrong one.
+Printing the link, for the reasons §452 gives.
+
+## 455. A badge whose tooltip carries information says it in text too, through one component (round 16, 2026-11-18)
+
+`/recurring`'s "Not generating" badge put the skipped-period count, the period
+and the reason only in a `title`, which a keyboard, a touch screen and a screen
+reader never reach. §442's GL off-chart badge beside it had been fixed in round
+15 by hand: the code in the pill, the reason in a visually-hidden span, the
+tooltip kept for the pointer user. Two badges with the same three-part markup
+is the point at which guard rail 9 asks for a component, so both now render
+`ui/ExplainedBadge` (`label` visible, `explanation` visually hidden and as the
+`title`).
+
+Extracting it found a defect in the round-15 markup. The hidden span opened
+with a literal space (`> {reason}</span>`), and Svelte 5 trims whitespace at
+the edge of an element's children, so the text a screen reader read was "GL
+6800 needs re-codingGL 6800 is not…", one run-on word. The component writes the
+space as an expression (``{` ${explanation}`}``), and both its vitest and the
+e2e spec assert the badge's whole text, so a regression to the literal form
+fails.
+
+Considered and rejected: showing the skip reason as visible text in the row.
+The status column is narrow and already holds up to three pills; the reason is
+a sentence, and the visible pill already names the problem. The visually-hidden
+text gives assistive technology the same information the tooltip gives a
+mouse, which is what WCAG 1.3.1 and 4.1.2 ask for. The i18n key keeps its name
+`recurring.skip.title`; renaming it in six locales would be churn with no
+reader-facing change.
+
+## 456. Forgot-password work only a known address does runs detached, on both routes (round 16, 2026-11-18)
+
+`POST /api/auth/forgot-password` sent its email on a detached task but awaited
+the org lookup, the reset-token mint and the `auth.password_reset.requested`
+audit row first, and only a known, active address took those steps. The
+response time therefore still said whether the account existed. The route now
+does the user lookup and nothing else; the rest runs on a detached task with
+its own control-plane session, the shape §451 gave the supplier route. A token
+store failure is logged by user id and answered with the same 200, as on the
+portal.
+
+Both routes now spawn through one registry, `app/utils/detached_tasks.py`.
+Each had its own copy, and tests drained a module's private set or yielded in
+a loop until mail appeared. Tests await `drain_detached()`, the real
+completion signal. The lifespan shutdown drains it too, bounded at five
+seconds before the auth-audit drain, because a stopping process could
+otherwise drop a reset link mid-send. Any work still running at the deadline
+is cancelled and logged with a count.
+
+Rejected: loading the org with the user in one join. That keeps the query
+count equal, but the mint and the audit write would still be awaited only for
+a match. Padding the unknown branch with dummy work was also rejected: it
+tracks Redis and tenant-DB latency only roughly, so it masks the leak rather
+than removing it.
+
+A workspace closure also forgets its suppliers' set-password links now.
+`credential_cleanup.forget_portal_links(slug)` deletes every `portal:pwreset:`
+token whose stored value is bound to the slug, plus the generation counter of
+each supplier those tokens name. The closure already requires every portal
+account to be deleted, so these are links that outlived their rows. A counter
+is keyed by the supplier id alone, so only a link ties it to a tenant. A
+counter with no remaining link is left to its own TTL: it is a number under a
+random id whose row is gone. Re-keying the counters by slug was rejected. A
+counter that reads as `0` under a new key would revive any link superseded at
+generation 0.
+
+The test TOTP secrets were 16 base32 characters, which is 80 bits. pyotp 2.12
+refuses anything under 112 bits, and the lock pins 2.10, so the tests passed
+in CI and failed in any fresh venv. `verify_totp` swallows the error, so on
+2.12 a refusal test could also pass for the wrong reason. Every such literal is now
+32 characters (160 bits, pyotp's `random_base32` default). The followup
+suggested 16 characters, which would not have been enough.
+
+## 457. A payment run refuses an invoice that records no currency, on every surface (extends §453, round 16, 2026-11-18)
+
+§453 stopped `/draft-run` staging an invoice whose currency is blank, but the
+run builder (`invoices[iid].currency or "USD"`) and dispatch
+(`normalize_currency_code(...) or "USD"`) still read the blank as USD. A manual
+`POST /api/payments/runs`, or an invoice blanked by a PATCH while a draft run
+waited for sign-off, was staged and paid in a currency nobody recorded.
+
+A blank currency is now a per-invoice refusal, `currency_unknown`, in
+`payment_runs.run_refusal_reasons`, so the builder's 409 (prefixed
+`currency_unknown:`) and the queue's `blocked_reason` come from one predicate,
+and the queue's SQL selectable set has its twin (`_queue_currency_unknown`).
+It is refused on every rail, so it ranks with `vendor_not_active`, above the
+card-rail pin. The mixed-currency 422 leaves a blank out rather than counting
+it as a second currency. `dispatch_preflight` refuses it before the processor
+call (retry-safe), which covers rail dispatch, the NACHA export and
+paid-outside close-out; `/retry-failed` skips it; `POST /api/payments` 409s;
+`/corridor-quotes` refuses to price it; and the card mint refuses it before the
+provider call. Both `or "USD"`s are gone, the adapter payload carries the
+normalised code, and `prepare_international_payment` raises rather than
+defaulting a blank to the home currency.
+
+Rejected: reading the blank as the org's home or reporting currency, which is
+the same substitution with a different default; and fixing only the builder,
+which leaves the window between booking and dispatch open. Stopping the
+invoice PATCH writing `""` at all is the longer-term fix and stays in
+`docs/followups.md`. The builder's refusals are still plain strings rather
+than `{code, params}` bodies; the code travels as the detail's prefix and as
+the queue's `blocked_reason`, which is what the web and mobile queues label.
+
+## 458. A split's currency mismatch with a malformed invoice code names every leg's code (amends §445, round 16, 2026-11-18)
+
+A split whose legs' codes disagree is `different` even when the invoice's own
+code is malformed (§445), and `po_currency_mismatch` then read "Invoice is in
+ but PO … is in EUR": a blank, and one leg's code standing for the whole PO.
+That is its own code, `po_currency_mismatch_invoice_currency_unknown` (with a
+PO-match issue twin), not a fallback word in a param: a word in a sentence
+selects the code (`backend/docs/invoice-warnings.md`). It names every code the
+legs record, in one `text` param (`poCurrencies`, "USD, EUR"), because no
+single code is honest about a split that spans several. The hold is unchanged.
+
+## 459. A plan-driven run stages every approved overdue invoice; no age cap (closes §453's open question, round 16, 2026-11-18)
+
+§453 left open whether `/draft-run` should cap how overdue an approved invoice
+may be before a cash plan stages it. It does not. An approved invoice that is
+long past due is the one a payables team most needs to pay, and a cap would
+drop it from the plan silently, with no row saying why. A sum that should not be
+paid is a question for the controls that already state it: a payment-blocking
+exception, a vendor block, a compliance hold or a recall (§374), each audited
+and each shown on the queue. An age threshold is none of those.
+
+Rejected: a `settings.cash_flow` cap left off by default, which adds a setting
+with no case that the existing holds do not cover better; and a 90-day default,
+which would change behaviour for every tenant to hide its oldest debts. The
+operator delegated the call to the round coordinator.
+
+## 460. An invoice edit may change the currency, never clear it (extends §457, round 17, 2026-11-18)
+
+`PATCH /api/invoices/{id}` took `currency` as `BlankableCurrencyCode`, which
+kept a blank as `""` and wrote it to the NOT NULL column as "no currency". §457
+made every money path refuse that value, but each new reader still had to know
+the sentinel, and an explicit `null` reached the `setattr` and failed the
+NOT NULL constraint as a 500.
+
+The PATCH now refuses both in the handler, through `api/refusals.invoice_currency`:
+a blank or `null` is 422 `invoice_currency_required`, and a code that is not
+three ASCII letters is 422 `invoice_currency_invalid` with `params.value`. The
+schema field is a raw `str | None` so the refusal is coded rather than
+Pydantic's validation list, and `BlankableCurrencyCode`, whose only user was
+this field, is gone. `statement_currency` and `invoice_currency` share one
+helper. The other writers already refused a blank: create takes `CurrencyCode`,
+the CSV importer `_parse_currency`, and approve-with-corrections does not take a
+currency. No web or mobile screen edits an invoice's currency, so the codes are
+not in the clients' registries; a client that adds one registers them then.
+
+A PATCH that leaves `currency` out is not checked, so a row already holding
+`""` stays editable. Refusing every edit until the currency is fixed would
+block the notes, coding and vendor clean-up AP does on exactly those rows, and
+the money paths already refuse to pay them (§457). The user can fix the
+currency in the same PATCH whenever they know it.
+
+Rejected: making the column nullable here. That is the larger "currency
+unknown" follow-up (a tenant migration, the upload creating rows with NULL, and
+every reader failing closed on NULL), and it stays in `docs/followups.md` along
+with the rows already blank.
+
+## 461. Payment-run SoD / CFO sign-off and the sign-in MFA wrong code are coded refusals (round 17, 2026-11-18)
+
+**Context.** §238 coded the refusals a user acts on, but three stayed English
+(`docs/followups.md`). Two are closed here. The payment run's maker-checker
+(`payment_run_segregation`) and CFO wait (`payment_run_awaiting_cfo`) already
+had codes, because the run dialog's `actions` verdicts carry them. But the POSTs
+behind those verdicts (approve, execute, resume, retry-failed, record-outside,
+the NACHA export) still answered with the plain sentence. That was deliberate
+then: "every client, mobile included, reads it as text". The standalone
+`POST /api/payments` CFO refusal had no code at all. The sign-in challenge's
+wrong TOTP code was a bare `401 "Invalid code"`, the same sentence §238 had
+already coded on enroll-verify.
+
+**Decision.** `payment_controls._segregation`, `_segregation_for` and
+`_awaiting_cfo` are `ActionRefusal(coded=True)`, so each endpoint raises the
+same `{code, message, params}` its verdict ships, and `check_run_segregation`
+(the `/resume` gate) raises through `_segregation(...).http()`. The standalone
+payment's CFO refusal is `payment_cfo_required`. The plain-text concern no
+longer holds: web's `formatApiDetail` and mobile's `ApiClient.errorMessage`
+both render an object `detail` by its `message`, so a client that cannot
+localize a code still shows the server's sentence. Both web and mobile now
+localize these codes. On mobile, `PaymentQueueStore` keeps the refused body for
+the Pay tab.
+
+The sign-in MFA wrong code (`POST /api/auth/mfa/verify`, and the portal's
+`/mfa/challenge` twin, which had the same bare sentence) carries
+`MFA_CODE_INVALID_DETAIL` and **stays a 401**. The followup asked for this to
+be checked against the login throttle and each client's 401 handling. Neither
+gives a reason to move it:
+
+- The per-account `auth_mfa` failure budget records the miss before the raise,
+  whatever the status.
+- Web's `request()` only ends a session on a 401 when a token was sent, and
+  none exists at this step.
+- Mobile ends a session only when it presented a token, and on this 401 it
+  shows the localized sentence (`AuthStore.errorDetail`).
+
+A 401 is also the truthful status: no session exists yet. §238's enroll-verify
+move to 400 was about a signed-in session being torn down, which cannot happen
+here.
+
+**Not done.** The bulk status change's per-row skip reasons
+(`api/invoices._skip_reason`) and the email-OTP miss ("Invalid or expired
+code") stay in `docs/followups.md`.
+
+## 462. The ERP push refuses an invoice with no payable currency (round 17, 2026-11-18)
+
+**Problem.** `services/erp._build_payload` sent `currency=invoice.currency or
+"USD"`. An invoice whose currency was blank, whitespace-only or malformed was
+booked in the ERP as a USD bill, where a bookkeeper can pay it directly. §457
+removed that substitution from every payment surface (`currency_unknown`), but
+the ERP export gate (§286, §309, and the vendor hold) did not judge the
+currency, so the ERP was a way round it.
+
+**Decision.** The export gate refuses such an invoice with the coded refusal
+`currency_blocks_erp_export`, judged by `payment_runs.payable_currency_code`,
+the same predicate the run gate uses, so the two cannot disagree about what a
+payable currency is. It runs where the other export refusals run: in
+`erp._call_erp` before any adapter is built (so a push queued by the workflow's
+own advance is stopped too) and at `/complete`, `/send-to-erp` and
+`/retry-erp` with a 409 before their transition. It is checked last, so the
+earlier refusals keep their precedence. The payload carries the predicate's
+normalised code and never substitutes one. Params carry only
+`possibly_posted`; the stored value is free text and is never echoed.
+
+**Rejected.** Defaulting to the org's base currency instead of USD: still a
+guess about which currency the debt is in, and it books a liability in it.
+Letting the adapter refuse (QuickBooks already answers an unknown code with
+`currency_unknown`): not every adapter checks, and the bill is then refused
+only after an ERP round trip.
+
+## 463. A white-label accent is cached per workspace and painted before first paint (round 18, 2026-11-18)
+
+**Problem.** `brand.svelte.ts` reads `GET /api/organization/branding` only after
+`/auth/me`, so after a sign-in or reload a branded tenant's primary buttons,
+active sidebar row and pressed chips painted the platform blue for a round trip.
+
+**Decision.** Cache the two applied values (`--accent`, `--accent-strong`) in
+the origin's `localStorage` under `feoh_brand_accent:<getTenantStorageKey()>`
+(`stores/brandAccentCache.ts`), apply them from `app.html`'s
+`<script id="accent-boot">` beside the theme script, and again in
+`ensureLoaded()` for the in-app sign-in that runs no pre-paint script. The
+fetched branding is authoritative: it overwrites or removes the entry.
+`reset()` clears it.
+
+- **Not the shared theme cookie.** That cookie is scoped to the platform apex so
+  every workspace sees it; one tenant's colour would paint another's.
+- **How the inline script finds the key without `PUBLIC_PLATFORM_DOMAINS`.**
+  `getTenantStorageKey()` is the slug, which `classifyHost` always takes from
+  the hostname's first label, or the whole hostname on a vanity host. The script
+  tries both. Storage is per origin and only the store writes it, with the
+  origin's own key, so at most one of the two can exist; there is no need to
+  repeat `classifyHost` in the inline script or template the domains into it.
+- **Validated on read, twice.** Storage is writable by anything on the origin
+  and the value lands in a CSS custom property, so the store and the script
+  each accept only the two props and only 3- or 6-digit hex literals.
+  `brandAccentCache.test.ts` runs the script against the store's reads.
+- **Written only after a successful read; a failed read keeps it.** Writing
+  before the first read would cache the empty default and erase a good entry on
+  a transient failure, and wiping the painted colour on a failed read would
+  bring back the flash this removes.
+- **No CSP hash to update:** the frontend ships no CSP (`infra/frontend.tf`,
+  SvelteKit hydration uses inline scripts).
+
+## 464. A payment or card key goes with its provider, and an unopenable block can be cleared (round 18, 2026-11-18)
+
+**The drop.** Changing `settings.payments.provider` or `settings.cards.provider`
+left the old provider's sealed `api_key` / `client_secret` / webhook key in
+`provider_credentials`, and the next call sent it to the new provider's host.
+The ERP block (§271) and the extraction block (§444) already drop their secrets
+when a save points them somewhere new; the rail blocks now do the same.
+`provider_credentials.rail_secrets_to_drop(block, before, after)` is the pure
+rule. A key belongs to a provider in one environment, so the block's own secrets
+go when the save changes:
+
+- the provider (stripped, blank = none);
+- the `sandbox` flag, read with the default the adapters apply when it is absent
+  (`true` for payments, `false` for cards). Column, Increase, Dwolla, Checkeeper,
+  Lithic and Nium pick their host from it, and a sandbox key on a production
+  host, or the reverse, is the same mistake on a smaller scale;
+- for a card block with no provider, the `region`, because
+  `card_adapters/dispatcher` then picks the issuer from it.
+
+A `payments.providers[]` entry's secrets are stored as
+`providers.<provider>.<field>`, which is already keyed by provider. They go when
+that entry is removed or its own `sandbox` changes. `PATCH /api/organization`
+clears only the paths that are actually stored, through `update_secrets`, in the
+save's transaction, audited first as `organization.credentials_updated` with
+reason `payments_provider_changed` / `cards_provider_changed`.
+
+The rule over-drops on purpose in two cases. A card block that resolved its
+issuer by region and is then saved naming that same issuer explicitly loses its
+key. So does a Modern Treasury or Stripe block whose `sandbox` flag is flipped,
+even though those two pick the environment by key rather than by host. In both
+cases the admin types the key again, in the same save. Working out "the same
+issuer" would mean copying the dispatcher's credential-dependent fallback into
+a pure rule. A rule that wrongly keeps a key sends it to the wrong host.
+Rejected: comparing the whole configuration, as the generic connection test
+does. That would drop keys on every threshold or NACHA edit in the payments
+block, which holds both rail configuration and AP policy.
+
+**The reset.** `update_secrets` opens the stored row so it can merge into it. A
+row that can no longer be opened (KMS key disabled, or a changed dev
+`FEOH_SECRET_KEY`) therefore made every save of that block a 503, and that
+includes a `clear` and the PATCH drop above. `DELETE
+/api/organization/credentials/{block}` (`provider_credentials.reset_block`)
+deletes the row without opening it, naming what it held from its
+`secret_fields`. It is admin-only, holds the org row lock, and is audited first
+(`organization.credentials_updated`, reason `reset_without_opening`); if that
+audit row cannot be written, nothing is removed. It is deliberately not limited
+to rows that fail to open. Checking that would mean calling KMS on a path meant
+for when KMS is the problem, and removing all of a block's keys is an action an
+admin may take anyway. For `erp` it also removes the OAuth tokens sealed in the
+same row. They cannot be revoked at the provider without being opened, so the
+connection reads as "reconnect" (`erp_oauth` treats a missing refresh token as
+not connected). The organization page has no per-block "remove all" control to
+attach this to, since each secret field has its own "remove the stored value",
+so the action is API-only for now; the button is tracked in `docs/followups.md`.
+
+## 465. Every bulk-status skip is coded, and the email-OTP miss too (round 19, 2026-11-18)
+
+**Context.** The last English-only refusals entry in `docs/followups.md` (§238,
+narrowed by §387 and §461) named the bulk status change's per-row skips and the
+sign-in challenge's email-OTP miss. Two of its three skips were already closed:
+§387 had coded the stale-version skip (`invoice_stale_approval`) and the blank
+submit (`invoice_required_fields_missing`). What was left was the fallback,
+`api/invoices._skip_reason`: a refusal reaching `_refused_skip` without
+`{code, message, params}` became a row with only an English `reason`. Every
+refusal `approve_invoice`, `reject_invoice`, `resubmit_invoice` and
+`transition_invoice` raise for a bulk row is coded today, so the fallback was
+unreachable in practice. But that held only by the services' discipline, and
+the next uncoded refusal added to any of them would surface English-only in a
+translated list.
+
+**Decision.**
+- `_refused_skip` no longer has an uncoded exit. An uncoded refusal (a plain
+  string, or a structured detail that is not `{code, message, params}`, such
+  as the GL-chart refusal's shape) becomes `invoice_bulk_refused` with
+  `params.status` set to the target the row could not reach. The refusal's
+  own sentence (`utils/http.detail_text`), or the branch's fallback label,
+  stays as the English `reason`. `_skip_reason` is gone.
+- Web (`codedRefusals.ts`) and mobile (`coded_refusal_messages.dart`) state it
+  as "This invoice could not be changed to {status}", with the status named by
+  its label. An unknown status falls back to the server's sentence.
+- The trade-off: a code-aware client shows that generic sentence even in
+  English, and the server's more specific one stays in `reason`. That is
+  deliberate. A row is either stated in the reader's language or it isn't,
+  and a refusal specific enough to need its own sentence should get its own
+  code at the service that raises it.
+- The email-OTP miss (`POST /api/auth/mfa/verify` with `method=email`, and the
+  portal's `/mfa/challenge`) is `mfa_email_code_invalid`
+  (`api/refusals.MFA_EMAIL_CODE_INVALID_DETAIL`), "Invalid or expired code".
+  It is not `mfa_code_invalid`, because its sentence also covers an expired
+  code. It folds a wrong code and an expired one together, as before. It stays
+  a 401 for §461's reasons.
+
+**Guards.** `tests/test_bulk_status_controls.py::test_an_uncoded_refusal_is_still_a_coded_skip`
+(plain, structured and unreadable details) and the endpoint-codes pin;
+`tests/test_mfa.py::test_verify_mfa_email_code_miss_is_coded`;
+`codedRefusals.test.ts` (the reverse pin now counts five endpoint codes, plus
+the label test) and the mobile `coded_refusal_messages_test.dart`.
+
+## 466. An invoice with no currency clears no approval limit and matches no contract (round 19, 2026-11-18)
+
+Rounds 16 and 17 (§453, §457, §460, §462) stopped the payment rails, the ERP
+push and the invoice PATCH from reading a blank currency as USD. The approval
+gates still did it in two places. `currency_conversion.reporting_amount_at_locked_rate`
+read `currency or reporting_currency`, so a NULL code was treated as already in
+the reporting currency and compared against `max_invoice_amount` and
+`require_cfo_above` at face value. `review._enforce_approval_thresholds` also
+substituted `"USD"` for its structuring aggregate, summing the vendor's USD
+spend against a figure in an unknown currency. That is §196's substitution
+inside an approval gate.
+
+**Decision.** The locked-rate helper judges the code with the shared predicate,
+`payment_runs.payable_currency_code`, so NULL, blank, whitespace-only and
+malformed codes all mean "no currency". Such an amount is `unconverted`. Every
+consumer already reads that as fail-closed (§160's `GateAmount`): both approval
+gates fire, auto-approve does not, chain bands apply every level, and the
+payment-run and standalone-payment CFO gates demand a CFO. Fixing the one helper
+covers all of them, rather than adding a check at each of ten call sites. The
+refusal reuses the existing coded shape (`approval_max_amount_exceeded` /
+`approval_cfo_required`, `params.expressible: false`, `params.currency: null`).
+Its English note now says the invoice "records no currency", because "could not
+be expressed in USD" invites the reader to look for a missing FX rate. The
+structuring aggregate and the extraction auto-approve aggregate are skipped for
+a code-less invoice. There is no currency to scope them to, and the gate fails
+closed regardless.
+
+**Contract compliance.** A code-less invoice matches no contract currency, so
+it is not summed into a USD contract's spend or measured against its limit.
+That leaves no finding to warn on, which already happens to an invoice whose
+currency differs from the contract's. A dedicated finding for both cases needs
+a new warning code across six web locales and the mobile catalogue, so it is
+tracked in `docs/followups.md`. The approval gate and the payment rails both
+refuse a code-less invoice, so it cannot be paid in the meantime.
+
+**Displays.** Assignment and escalation notifications, chat messages, vendor
+notices, the audit summary (template and LLM prompt) and the LLM fraud adapters
+state the figure bare and pass `null` to a model, never `USD`. That matches
+`formatMoney`, which renders a missing code as a bare number. `InvoiceContext`
+and `ChatMessage` now default `currency` to `None`. The old `"USD"` default
+silently dollarised any caller that omitted it.
+
+**NACHA.** The file preflight's USD check now uses the same predicate, so
+` usd ` is USD there as it is in the run builder.
+
+**Left alone.** Reporting-currency defaults (`cashflow`, `budget_service`,
+`adaptive_workflows`, `tax_1099`) read the org's reporting currency, not an
+invoice's. `adaptive_workflows` does call the locked-rate helper, and its
+code-less rows now come back `unconverted`. That keeps them out of the
+threshold statistics, which is the direction its docstring asks for.

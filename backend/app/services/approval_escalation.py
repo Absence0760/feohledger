@@ -90,6 +90,9 @@ async def _notify_escalated_approvers(
     from app.models.notification import EVENT_INVOICE_ASSIGNED
     from app.services.notification_dispatch import notify_event
     from app.services.notification_templates import InvoiceContext
+    from app.services.payment_runs import (
+        payable_currency_code as _payable_currency_code,
+    )
     from app.services.review import approval_message_facts
 
     try:
@@ -113,7 +116,7 @@ async def _notify_escalated_approvers(
                 invoice_number=invoice.invoice_number,
                 vendor_name=invoice.vendor_name,
                 amount=invoice.amount,
-                currency=invoice.currency or "USD",
+                currency=_payable_currency_code(getattr(invoice, "currency", None)),
             ),
             action_facts=await approval_message_facts(db, invoice),
             actor_id=None,  # system-initiated sweep

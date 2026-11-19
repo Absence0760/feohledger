@@ -255,13 +255,17 @@ def _build_payload(
     ``refs`` carries the ERP ids :func:`_resolve_erp_refs` looked up; without
     it every ERP reference is None (unlinked), which a direct adapter refuses.
     """
+    from app.services.payment_runs import payable_currency_code
+
     refs = refs or ErpRefs()
     return InvoicePayload(
         correlation_id=str(invoice.correlation_id),
         invoice_number=invoice.invoice_number,
         vendor_name=invoice.vendor_name,
         amount=invoice.amount,
-        currency=invoice.currency or "USD",
+        # The export gate refused a blank or malformed code before this
+        # (`erp_export_gate.CURRENCY_BLOCKS_ERP_EXPORT`); never substitute one.
+        currency=payable_currency_code(invoice.currency),
         vendor_tax_id=invoice.vendor_tax_id,
         invoice_date=invoice.invoice_date,
         due_date=invoice.due_date,
@@ -935,7 +939,8 @@ async def _call_erp(
     # payable from the ERP as well. Asked here as well as at the HTTP doors, so
     # a push queued before the run was staged is stopped at the last moment.
     # Last, a vendor the payment path will not pay (blocked, sanctions-held,
-    # rejected) is not booked where it could be paid past our screening.
+    # rejected) is not booked where it could be paid past our screening, and an
+    # invoice with no payable currency is not booked as a bill in a guessed one.
     refused = await erp_export_refusal(db, invoice, possibly_posted=possibly_posted(state))
     if refused is not None:
         raise ErpPostRefusedError(refused.error, refusal=refused.refusal)

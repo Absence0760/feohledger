@@ -51,6 +51,12 @@ export const PAYMENT_BLOCKS_ERP_EXPORT = 'payment_blocks_erp_export';
  *  appears as on the other two. Also a 409 the send doors answer with. */
 export const VENDOR_BLOCKS_ERP_EXPORT = 'vendor_blocks_erp_export';
 
+/** The invoice has no payable currency — blank, whitespace-only or malformed —
+ *  so the push was refused before any adapter ran rather than booked as a bill
+ *  in a guessed one (same module). No params beyond `possibly_posted: true`.
+ *  Also a 409 the send doors answer with. */
+export const CURRENCY_BLOCKS_ERP_EXPORT = 'currency_blocks_erp_export';
+
 /** The sentence per vendor `hold`. A possibly-posted refusal appends one more. */
 const HOLD_KEYS: Record<string, MessageKey> = {
 	payments_blocked: 'erpRefusal.vendorBlocked',
@@ -95,7 +101,11 @@ const PROVIDERLESS = new Set([
 /** Pushes `services/erp` failed without an attempt (decisions §428). They name
  *  no provider, and carry `possibly_posted: true` when an EARLIER attempt may
  *  have created the bill, so the sentence says to look there before retrying. */
-const UNATTEMPTED = new Set(['erp_retries_exhausted', 'erp_push_interrupted']);
+const UNATTEMPTED = new Set([
+	'erp_retries_exhausted',
+	'erp_push_interrupted',
+	CURRENCY_BLOCKS_ERP_EXPORT
+]);
 
 /** Every code's sentence, each naming `{provider}` unless in `PROVIDERLESS`. */
 const KEYS: Record<string, MessageKey> = {
@@ -159,6 +169,7 @@ const KEYS: Record<string, MessageKey> = {
 	[EXCEPTION_BLOCKS_ERP_EXPORT]: 'erpRefusal.exceptionBlocksExport',
 	[PAYMENT_BLOCKS_ERP_EXPORT]: 'erpRefusal.paymentBlocksExport',
 	[VENDOR_BLOCKS_ERP_EXPORT]: 'erpRefusal.vendorBlocked',
+	[CURRENCY_BLOCKS_ERP_EXPORT]: 'erpRefusal.currencyBlocksExport',
 	// A FeohLedger payment written back to the ERP (decisions §295)
 	payment_account_not_mapped: 'erpRefusal.paymentAccountNotMapped',
 	bill_not_in_erp: 'erpRefusal.billNotInErp',

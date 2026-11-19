@@ -207,7 +207,7 @@ fast, at the start of the run, naming the exact tenant and field — see
 Skip it (e.g. exercising one non-tenant spec by hand against an unseeded DB)
 with `FEOH_E2E_SKIP_WORKFLOW_SHAPE_CHECK=true`.
 
-## Row teardown (`deleteInvoicesWhere` / `deleteVendorsWhere` / `deleteWorkflowsWhere`)
+## Row teardown (`deleteInvoicesWhere` / `deleteVendorsWhere` / `deleteWorkflowsWhere` / `deletePaymentRunsWhere`)
 
 `invoices` is referenced by **16 foreign keys and none of them cascade**, so a
 bare `DELETE FROM invoices WHERE …` only succeeds while that invoice happens to
@@ -228,9 +228,9 @@ import { deleteInvoicesWhere } from '../fixtures/helpers';
 test.afterEach(() => deleteInvoicesWhere(`invoice_number LIKE '${MARKER}%'`));
 ```
 
-### Three owners, three signatures
+### Four owners, two signatures
 
-`invoices` was the first table to earn an owner; two more followed for the same
+`invoices` was the first table to earn an owner; three more followed for the same
 reason, and **their signatures differ** — read the one you need rather than
 assuming.
 
@@ -239,6 +239,7 @@ assuming.
 | `deleteInvoicesWhere(predicate, slug?)` | a WHERE body | none — the predicate is the whole scope |
 | `deleteVendorsWhere(predicate, slug?)` | a WHERE body | none |
 | `deleteWorkflowsWhere(namePrefix, slug?)` | a **name prefix** | `is_default = false`, baked in |
+| `deletePaymentRunsWhere(predicate, slug?)` | a WHERE body on `payment_runs` | none |
 
 `deleteWorkflowsWhere` takes a prefix rather than a predicate on purpose. A
 tenant's seeded default workflow must survive every teardown, and the fallback
@@ -252,12 +253,27 @@ contains invoices, so it delegates to `deleteInvoicesWhere` rather than
 restating it. Rows that exist only because of the vendor are deleted; independent
 records that merely point at one of its rows have the link cleared.
 
+`deletePaymentRunsWhere` removes the runs, their payments and the payments'
+children, and leaves the invoices: deleting a draft run's payments is what puts
+its invoices back in the payment queue, so it is the teardown for a run staged
+over seeded invoices (`cash-flow/copilot`). `deleteInvoicesWhere` calls it for
+every run holding only the doomed invoices' payments, so a spec that removes its
+own invoices removes their runs too.
+
 ### The source guard
 
 `meta/teardown-guard.spec.ts` scans every `.ts` file under `tests-e2e/`
 (comments stripped, so prose about the pattern is fine) and fails if any file
 other than the helper itself issues `DELETE FROM invoices`, `DELETE FROM
-vendors` or `DELETE FROM workflow_definitions`. Without it the twentieth spec
+vendors`, `DELETE FROM workflow_definitions` or `DELETE FROM payment_runs`.
+It also fails a file that **creates** a payment run (`.post(` to
+`/api/payments/runs` or the copilot's `/draft-run`, or `INSERT INTO
+payment_runs`) or a vendor (`.post(` to `/api/vendors`, or `INSERT INTO
+vendors`) and never calls an owner that removes it — `deletePaymentRunsWhere` /
+`deleteInvoicesWhere` / `deleteVendorsWhere` for a run, `deleteVendorsWhere` for
+a vendor. A file whose only such request is one the server must refuse is listed
+in the guard's `CREATES_NOTHING` with the request named. UI-driven creates and
+URLs held in variables are out of reach of the scan. Without it the twentieth spec
 re-introduces the pattern, and the failure lands weeks later as a foreign-key
 error in someone else's file. Its message quotes the real signature per table,
 because a guard that tells you to pass a predicate to the one helper that takes

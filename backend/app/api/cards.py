@@ -785,6 +785,7 @@ async def _mint_one_locked(
         inactive_vendor_statuses,
         live_payment_invoices,
         net_payable_amounts,
+        payable_currency_code,
     )
 
     # Idempotency: an invoice with a LIVE (non-cancelled) card is skipped, so a
@@ -814,6 +815,13 @@ async def _mint_one_locked(
     # a live payment the same way (`uq_payments_one_live_per_invoice`).
     if inv.id in await live_payment_invoices(db, [inv.id]):
         return card_skip(inv.id, ci.CARD_SKIP_LIVE_PAYMENT)
+    # A card is denominated in the invoice's currency, and one that records none
+    # (blank: the invoice PATCH's legacy value) is never read as USD. Refused
+    # here by name, before the credit netting and the compliance screen would
+    # misread a missing code, rather than left to `issue_card_for_invoice`'s
+    # backstop, where it could only read as `card_skip_issue_failed`.
+    if payable_currency_code(inv.currency) is None:
+        return card_skip(inv.id, ci.CARD_SKIP_CURRENCY_UNKNOWN)
     # The card is minted for the invoice net of applied credit memos: a card is
     # spendable up to its limit, so one minted at the gross overpays the credit.
     # It deliberately does NOT take an accepted early-payment discount: a card

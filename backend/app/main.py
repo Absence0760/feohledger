@@ -419,7 +419,11 @@ async def lifespan(app: FastAPI):
             AUTH_AUDIT_DRAIN_TIMEOUT_SECONDS,
             drain_auth_audits,
         )
+        from app.utils.detached_tasks import DETACHED_DRAIN_TIMEOUT_SECONDS, drain_detached
 
+        # The forgot-password routes' detached mint / send / audit first: they
+        # can still queue work that needs the engines below.
+        await drain_detached(timeout=DETACHED_DRAIN_TIMEOUT_SECONDS)
         await drain_auth_audits(timeout=AUTH_AUDIT_DRAIN_TIMEOUT_SECONDS)
 
         from app.database import dispose_all_engines

@@ -138,9 +138,23 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dashboardCachedBanner => 'キャッシュデータを表示中 — サーバーに接続できませんでした';
 
   @override
-  String dashboardErrorPrefix(String error) {
-    return 'エラー: $error';
-  }
+  String get dashboardLoadError => 'ダッシュボードを読み込めませんでした。接続を確認して再試行をタップしてください。';
+
+  @override
+  String get dashboardRefreshFailed =>
+      '更新できませんでした。最後に読み込んだ数値を表示しています。下に引いて再試行してください。';
+
+  @override
+  String get dashboardNeedsAttention => '対応が必要';
+
+  @override
+  String get dashboardOverview => '概要';
+
+  @override
+  String get dashboardEmpty => '請求書はまだありません。取り込んだ請求書やアップロードした請求書がここに表示されます。';
+
+  @override
+  String get dashboardTopVendorsEmpty => '取引先別の支出はまだありません。';
 
   @override
   String dashboardInvoiceCount(int count) {
@@ -1157,6 +1171,10 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get payQueueBlockedVendorNotActive =>
       '取引先が未確認または無効です — 先に取引先を確認してください';
+
+  @override
+  String get payQueueBlockedCurrencyUnknown =>
+      'この請求書には通貨が記録されていません — 先に通貨を設定してください';
 
   @override
   String get payQueueBlockedAppliedCreditMismatch =>
@@ -2380,6 +2398,10 @@ class AppLocalizationsJa extends AppLocalizations {
       '以前の送信で ERP に請求書が既に作成されている可能性があります。誰かが支払う前に ERP を確認してください。';
 
   @override
+  String get erpRefusalCurrencyBlocksExport =>
+      'この請求書には有効な通貨がありません。ERP に送信する前に通貨を設定してください。';
+
+  @override
   String get erpRefusalRetriesExhausted =>
       'この送信には残りの試行回数がなかったため、今回は試行されませんでした。再試行すると、新しい試行回数で送信します。';
 
@@ -3111,6 +3133,14 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown(
+    String poNumber,
+    String poCurrencies,
+  ) {
+    return '請求書に有効な通貨が記録されておらず、$poNumber の発注は異なる通貨 ($poCurrencies) のため、金額を比較していません';
+  }
+
+  @override
   String invoiceWarningPoCancelled(String poNumber) {
     return '発注 $poNumber は取り消されています — 請求書はこの発注と照合されていません';
   }
@@ -3328,6 +3358,13 @@ class AppLocalizationsJa extends AppLocalizations {
     String poCurrency,
   ) {
     return '通貨の不一致: 請求は $invoiceCurrency、発注は $poCurrency — 金額は比較されていません';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatchInvoiceCurrencyUnknown(
+    String poCurrencies,
+  ) {
+    return '通貨の不一致: 請求に有効な通貨がなく、発注は $poCurrencies — 金額は比較されていません';
   }
 
   @override
@@ -3835,6 +3872,11 @@ class AppLocalizationsJa extends AppLocalizations {
       '承認の取り消しは理由を添えて1件ずつ行います。請求書の「承認を取り消す」を使用してください。';
 
   @override
+  String codedRefusalInvoiceBulkRefused(String status) {
+    return 'この請求書を$statusに変更できませんでした。';
+  }
+
+  @override
   String codedRefusalInvoiceRequiredFieldsMissing(String fields) {
     return '必須項目が入力されていません：$fields';
   }
@@ -4088,6 +4130,13 @@ class AppLocalizationsJa extends AppLocalizations {
       'このランは組織のCFO承認しきい値を超えているため、CFOロールを持つユーザーの承認を待っています。';
 
   @override
+  String get codedRefusalMfaCodeInvalid => 'このコードは無効です。認証アプリを確認して、もう一度お試しください。';
+
+  @override
+  String get codedRefusalMfaEmailCodeInvalid =>
+      'このコードは無効か、有効期限が切れています。新しいコードをリクエストして、もう一度お試しください。';
+
+  @override
   String get codedRefusalPaymentRunNotRecordable =>
       '支払済みとして記録できるのは、下書きのランか、銀行ファイルをエクスポートしたランだけです。';
 
@@ -4097,4 +4146,149 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get codedRefusalExternalPaymentBlockingException =>
       'この請求書には、支払いをブロックする未解決の例外があります。支払済みとして記録する前に解決してください。';
+
+  @override
+  String get grRecordTitle => '入荷を登録';
+
+  @override
+  String get grRecordIntro =>
+      '発注書に対して届いたものを登録します。保存するとすぐに、この発注書を参照する請求書が再照合されます。';
+
+  @override
+  String get grRecordSearchPo => '発注書を検索';
+
+  @override
+  String get grRecordSearchPlaceholder => '発注書番号';
+
+  @override
+  String get grRecordPo => '発注書';
+
+  @override
+  String get grRecordNoPos => '該当する発注書がありません';
+
+  @override
+  String get grRecordLoadPosFailed => '発注書を読み込めませんでした';
+
+  @override
+  String get grRecordLoadPoFailed => '発注書を読み込めませんでした';
+
+  @override
+  String grRecordPoCancelled(String number) {
+    return '発注書 $number は取り消されているため、入荷を登録できません。';
+  }
+
+  @override
+  String get grRecordOrdered => '発注数';
+
+  @override
+  String get grRecordAlreadyReceived => '入荷済み';
+
+  @override
+  String get grRecordOutstanding => '未入荷';
+
+  @override
+  String get grRecordThisDelivery => '今回の入荷';
+
+  @override
+  String grRecordQuantityFor(String line) {
+    return '$line の入荷数量';
+  }
+
+  @override
+  String get grRecordOverReceipt => '未入荷数を超えています。照合で過剰入荷として示されます。';
+
+  @override
+  String get grRecordLinesHint =>
+      '今回の入荷に含まれない明細は空欄のままにしてください。予定していたが届かなかった場合は 0 を入力します。';
+
+  @override
+  String get grRecordNoPoLines => 'この発注書には明細がないため、届いたものを記入してください。';
+
+  @override
+  String get grRecordAddLine => '明細を追加';
+
+  @override
+  String grRecordRemoveLine(int n) {
+    return '明細 $n を削除';
+  }
+
+  @override
+  String grRecordLineDescription(int n) {
+    return '明細 $n の内容';
+  }
+
+  @override
+  String grRecordLineQuantity(int n) {
+    return '明細 $n の入荷数量';
+  }
+
+  @override
+  String get grRecordReceivedDate => '入荷日';
+
+  @override
+  String get grRecordNumber => '納品書番号';
+
+  @override
+  String get grRecordNumberHint => '任意。仕入先の納品書または梱包明細の番号です。';
+
+  @override
+  String grRecordNumberPlaceholder(String po) {
+    return '空欄の場合: GR-$po-n';
+  }
+
+  @override
+  String get grRecordSaving => '登録中…';
+
+  @override
+  String get grRecordSubmit => '入荷を登録';
+
+  @override
+  String grRecordRecorded(String number) {
+    return '入荷 $number を登録しました';
+  }
+
+  @override
+  String get grRecordFailed => '入荷を登録できませんでした';
+
+  @override
+  String get settingsGoodsReceipt => '入荷を登録';
+
+  @override
+  String codedRefusalGoodsReceiptPoCancelled(String poNumber) {
+    return '発注書 $poNumber は取り消されているため、入荷を登録できません。';
+  }
+
+  @override
+  String codedRefusalGoodsReceiptNumberTaken(String grNumber) {
+    return '番号 $grNumber の入荷はすでに存在します。';
+  }
+
+  @override
+  String get codedRefusalGoodsReceiptLineNotOnPo =>
+      '入荷の各明細は、この発注書の明細である必要があります。';
+
+  @override
+  String get codedRefusalGoodsReceiptLineDuplicated =>
+      '1 つの発注明細は、1 件の入荷に 1 回しか含められません。';
+
+  @override
+  String get codedRefusalGoodsReceiptLineRequired => '各明細で何が届いたかを記入してください。';
+
+  @override
+  String get codedRefusalGoodsReceiptNothingReceived =>
+      '入荷には少なくとも 1 単位の入荷数量が必要です。';
+
+  @override
+  String get codedRefusalGoodsReceiptIdempotencyReused =>
+      'このリクエストはすでに別の発注書に使われています。フォームを開き直して、もう一度お試しください。';
+
+  @override
+  String get settingsGoodsReceiptHint => '発注書に対する入荷を登録';
+
+  @override
+  String get grRecordSegregationNote =>
+      '職務分掌：この入荷を登録すると、この発注書に対する請求書を承認できなくなります。また、承認後に登録した入荷では、その請求書の保留は解除されません。';
+
+  @override
+  String get grRecordReceiveLines => '少なくとも 1 つの明細に数量を入力してください';
 }

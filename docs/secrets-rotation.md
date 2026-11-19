@@ -162,7 +162,9 @@ block and the changed path NAMES — written first, and a `503` with nothing
 saved if it cannot be. The value is re-sealed under a fresh data key on every
 write. No endpoint returns it. **No grace period**: revoke the old key at the
 provider after the new one is confirmed (a "Test Connection" with the form
-unchanged uses the stored key).
+unchanged uses the stored key). Saving the block with a different provider or
+environment drops the stored keys (audited), so switching provider means typing
+the new provider's key in the same save.
 
 **The KMS key itself** rotates automatically every year (`enable_key_rotation`
 in `infra/kms.tf`); AWS keeps prior key material for `Decrypt`, so stored rows
@@ -171,6 +173,24 @@ keep opening and nothing needs re-sealing. Moving to a *different* key (a new
 records the key that wrapped it and opens under that one, and is re-sealed under
 the new key on its next write. Never schedule the old key for deletion while a
 row still names it (`SELECT DISTINCT key_id FROM provider_credentials`).
+
+**A row that can no longer be opened** (its KMS key disabled or deleted, or in
+dev a changed `FEOH_SECRET_KEY`) makes every save of that block a `503`, because
+a save merges into the stored value. That `503` is coded
+`credential_block_unopenable` with `params.block` naming the block, from both
+`PUT /api/organization/credentials/{block}` and a `PATCH /api/organization` that
+drops a rail's keys. A seal failure (KMS unreachable) stays an uncoded `503`: it
+is retried, never answered by removing keys.
+
+On the coded refusal, the block's panel on `/organization` (Payments, Virtual
+cards, AI extraction, ERP, Commerce) shows the admin a **Clear stored
+credentials** prompt (`components/organization/CredentialResetPrompt.svelte`).
+Its confirm says that every stored secret of the block is removed and must be
+entered again, and it then calls `DELETE
+/api/organization/credentials/{block}`, which removes the row without opening it
+(audited, reason `reset_without_opening`). The admin then types each key again.
+For `erp` that also removes the OAuth tokens sealed in the same row, so the
+connection reads as "reconnect". The DELETE can also be called directly.
 
 ### Per-subscription outbound-webhook signing secret
 

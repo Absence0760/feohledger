@@ -1,6 +1,7 @@
 import {
 	API_BASE,
 	authedTenantHeaders,
+	deletePaymentRunsWhere,
 	expect,
 	firstPayableQueueInvoice,
 	signInAndWait,
@@ -75,8 +76,7 @@ function deletePaymentRun(runId: string): void {
 	if (!UUID_RE.test(runId)) {
 		throw new Error(`deletePaymentRun: not a run id: ${String(runId)}`);
 	}
-	tenantPsql(`DELETE FROM payments WHERE payment_run_id='${runId}'`);
-	tenantPsql(`DELETE FROM payment_runs WHERE id='${runId}'`);
+	deletePaymentRunsWhere(`id='${runId}'`);
 }
 
 /** Revert an invoice's status (payment_scheduled is immutable to PATCH). */

@@ -1170,3 +1170,84 @@ async def test_create_po_from_cancelled_contract_409(realdb):
         await c.post(f"/api/contracts/{contract_id}/cancel")
         resp = await c.post(f"/api/contracts/{contract_id}/create-po", json={})
     assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# An invoice recording no currency matches no contract (decisions §466).
+# ---------------------------------------------------------------------------
+
+
+class _ComplianceDb:
+    """Answers `evaluate_contract_compliance`'s two queries in order: the
+    contract load, then the prior-spend sum. Records how many ran."""
+
+    def __init__(self, contract, prior):
+        self._answers = [contract, prior]
+        self.calls = 0
+
+    async def execute(self, *_a, **_k):
+        from types import SimpleNamespace
+
+        value = self._answers[self.calls]
+        self.calls += 1
+        return SimpleNamespace(scalar_one_or_none=lambda: value, scalar=lambda: value)
+
+
+def _usd_contract(**overrides):
+    from types import SimpleNamespace
+
+    from app.models.contract import ContractStatus
+
+    fields = dict(
+        id=uuid.uuid4(),
+        contract_number="MSA-NTE",
+        vendor_id=None,
+        status=ContractStatus.active,
+        start_date=None,
+        end_date=None,
+        currency="USD",
+        spend_limit=Decimal("1000.00"),
+        not_to_exceed=True,
+        terms={},
+    )
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def _contract_invoice(currency):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        contract_id=uuid.uuid4(),
+        invoice_date=None,
+        vendor_id=None,
+        amount=Decimal("1500.00"),
+        currency=currency,
+        gl_account=None,
+    )
+
+
+@pytest.mark.parametrize("currency", [None, "", "   ", "US", "12$"])
+async def test_a_code_less_invoice_does_not_match_a_usd_contract(currency):
+    """Its blank used to read as USD, so a code-less figure was summed with the
+    contract's USD spend and measured against its USD limit. It now matches
+    nothing: the spend query never runs and no USD finding is reported."""
+    from app.services.contract_compliance import evaluate_contract_compliance
+
+    db = _ComplianceDb(_usd_contract(), Decimal("0"))
+    findings = await evaluate_contract_compliance(db, _contract_invoice(currency))
+
+    assert db.calls == 1  # the contract load only; no USD spend sum
+    assert not [f for f in findings if f["code"].startswith("contract_spend_limit")]
+
+
+@pytest.mark.parametrize("currency", ["USD", " usd ", "usd"])
+async def test_a_usd_invoice_still_matches_a_usd_contract(currency):
+    from app.services.contract_compliance import evaluate_contract_compliance
+
+    db = _ComplianceDb(_usd_contract(), Decimal("0"))
+    findings = await evaluate_contract_compliance(db, _contract_invoice(currency))
+
+    assert db.calls == 2
+    assert [f["code"] for f in findings] == ["contract_spend_limit_exceeded_not_to_exceed"]

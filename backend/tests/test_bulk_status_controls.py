@@ -879,8 +879,58 @@ def test_every_skip_the_bulk_endpoint_writes_itself_is_coded():
         invoices.INVOICE_STATUS_IMMUTABLE,
         invoices.INVOICE_STILL_EXTRACTING,
         invoices.INVOICE_RECALL_ONE_AT_A_TIME,
+        invoices.INVOICE_BULK_REFUSED,
     ):
         assert code.startswith("invoice_")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("detail", "reason"),
+    [
+        # A plain-string refusal keeps its own sentence as the English.
+        ("Some new uncoded refusal", "Some new uncoded refusal"),
+        # A structured detail that is not `{code, message, params}` (the
+        # GL-chart refusal's shape) contributes its sentence, never a dict.
+        ({"code": "gl_codes_outside_chart", "message": "GL 9999 is unknown"}, "GL 9999 is unknown"),
+        # Nothing readable at all: the branch's own fallback.
+        ({"unexpected": True}, "transition was refused"),
+    ],
+)
+async def test_an_uncoded_refusal_is_still_a_coded_skip(realdb, monkeypatch, detail, reason):
+    """A refusal a service raises without `{code, message, params}` is reported
+    as `invoice_bulk_refused` naming the target, with the refusal's English as
+    `reason` — never an English-only row in a translated list (decisions §465).
+    Every refusal those services raise today is coded, so the fake stands in for
+    the next one that is not."""
+    from fastapi import HTTPException
+
+    from app.api import invoices
+
+    async def _refuse(*args, **kwargs):
+        raise HTTPException(status_code=409, detail=detail)
+
+    monkeypatch.setattr(invoices, "transition_invoice", _refuse)
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed(mk, info.org_id, number="BULK-UNCODED", status=InvoiceStatus.approved)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status", json={"ids": [str(inv_id)], "status": "new"}
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated"] == 0
+    assert body["skipped"] == [
+        {
+            "id": str(inv_id),
+            "reason": reason,
+            "code": "invoice_bulk_refused",
+            "params": {"status": "new"},
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------

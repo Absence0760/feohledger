@@ -11,7 +11,10 @@ operator never sees, chooses or relays a credential, and the CLI prints only
 the address the link went to. There is deliberately no way to print the link:
 this CLI runs on the server (``deploy/add-tenant.sh``, often through SSM, whose
 output is retained), so a printed credential would land in logs. If the email
-fails, the CLI exits 3 and the admin uses Forgot password once mail works.
+fails, the CLI exits 3; once mail works, ``--resend-link`` sends that admin a
+fresh link (and supersedes any earlier one), or the admin uses Forgot password.
+``--resend-link`` refuses a tenant or admin that does not exist and an admin who
+already has a password (``docs/decisions.md`` §452 and its follow-up).
 ``--admin-password`` sets a password directly and is local-dev only: a
 deployed environment (``FEOH_ENVIRONMENT``) refuses it.
 """
@@ -39,15 +42,23 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
 from fastapi import HTTPException
 
 from app.api.set_password_links import (
-    expiry_sentence,
     link_expires_at,
+    link_unavailable,
     mint_employee_link,
     send_set_password_email,
+    workspace_admin_email,
 )
 from app.config import settings
-from app.database import control_engine
-from app.services.email_adapters import EmailMessage
-from app.services.tenant_provisioning import organization_slug_exists, provision_tenant
+from app.database import control_engine, dispose_all_engines
+from app.services import password_reset
+from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.tenant_provisioning import (
+    ResendRefused,
+    organization_slug_exists,
+    provision_tenant,
+    resend_link_target,
+)
+from app.utils.emails import mask_address
 from app.utils.slug import SlugError
 from app.utils.tenant_urls import tenant_base_url
 
@@ -66,29 +77,97 @@ async def _deliver_set_password_link(
     not be minted or sent — never with the link in it."""
     link = await mint_employee_link(slug, None, user_id, set_password=True)
     await send_set_password_email(
-        EmailMessage(
-            to=admin_email,
-            subject=f"Your {name} FeohLedger workspace is ready",
-            body_text=(
-                f"Hi {admin_name},\n\n"
-                f"A FeohLedger workspace has been set up for {name}, with you as "
-                "its administrator. Choose your password with this link:\n\n"
-                f"  {link}\n\n"
-                + expiry_sentence()
-                + " If it has expired, use Forgot password on the sign-in page.\n"
-            ),
-            links=(link,),
-            # Fixed copy: the derived preview would reach the link.
-            preheader="Use the link in this email to set your password.",
+        workspace_admin_email(
+            org_name=name, admin_name=admin_name, admin_email=admin_email, link=link
         ),
         log_ref=f"tenant={slug}",
     )
-    print(f"  Set-password link emailed to {admin_email}.")
+    print(f"  Set-password link sent to {mask_address(admin_email)}.")
+
+
+async def _resend_set_password_link(slug: str, admin_email: str) -> None:
+    """``--resend-link``: a fresh link for an existing tenant's admin who has
+    no password yet, superseding every earlier one, as an admin reset does.
+
+    Exits 2 when there is nothing to send to (no such tenant or admin, not an
+    active admin, a password already set, no tenant URL) and 3 when the link
+    could not be minted or sent. Prints only the masked address."""
+    try:
+        target = await resend_link_target(slug, admin_email)
+    except ResendRefused as exc:
+        print(f"error: not re-sending the set-password link ({exc.code}): {exc}", file=sys.stderr)
+        raise SystemExit(EXIT_BAD_ARGS) from None
+    if not tenant_base_url(target.slug, target.org_settings):
+        print(
+            "error: FEOH_TENANT_URL_TEMPLATE is not set, so there is no tenant URL "
+            "to build the admin's set-password link on.",
+            file=sys.stderr,
+        )
+        raise SystemExit(EXIT_BAD_ARGS)
+
+    revoked = False
+    try:
+        # Every earlier link dies first, as `POST /admin/users/{id}/reset-password`
+        # does: the one this sends is the only one that works.
+        try:
+            await password_reset.revoke_outstanding(target.user_id)
+        except Exception as exc:  # noqa: BLE001
+            raise link_unavailable() from exc
+        revoked = True
+        link = await mint_employee_link(
+            target.slug, target.org_settings, target.user_id, set_password=True
+        )
+        await send_set_password_email(
+            workspace_admin_email(
+                org_name=target.org_name,
+                admin_name=target.admin_name,
+                admin_email=target.admin_email,
+                link=link,
+                resent=True,
+            ),
+            log_ref=f"tenant={target.slug} user={target.user_id}",
+        )
+    except HTTPException as exc:
+        if revoked:
+            # The earlier links are dead even though no new one arrived: that
+            # revocation belongs on the tenant's trail too.
+            await dispatch_auth_audit(
+                organization_id=target.organization_id,
+                actor_id=None,
+                action="user.set_password_link_resent",
+                entity_type="user",
+                entity_id=target.user_id,
+                details={"via": "operator_cli", "delivered": False},
+            )
+        code = exc.detail.get("code") if isinstance(exc.detail, dict) else exc.status_code
+        print(
+            f"error: the set-password link for tenant '{slug}' was not delivered ({code}). "
+            "Any earlier link no longer works; re-run --resend-link once mail works.",
+            file=sys.stderr,
+        )
+        raise SystemExit(EXIT_LINK_NOT_DELIVERED) from None
+
+    # No address and no link: the tenant's own trail records that the
+    # operator issued one (actor NULL: no control-plane user ran this).
+    await dispatch_auth_audit(
+        organization_id=target.organization_id,
+        actor_id=None,
+        action="user.set_password_link_resent",
+        entity_type="user",
+        entity_id=target.user_id,
+        details={"via": "operator_cli", "delivered": True},
+    )
+    print(
+        f"Set-password link for tenant '{target.slug}' sent to {mask_address(target.admin_email)}."
+    )
+    print(f"  Link expires: {link_expires_at():%Y-%m-%d %H:%M} UTC (it works once)")
 
 
 async def main():
     parser = argparse.ArgumentParser(description="Provision a new tenant")
-    parser.add_argument("--name", required=True, help="Organization name")
+    parser.add_argument(
+        "--name", default=None, help="Organization name (required unless --resend-link)"
+    )
     parser.add_argument("--slug", required=True, help="URL slug (e.g., 'acme')")
     parser.add_argument(
         "--plan",
@@ -119,7 +198,29 @@ async def main():
         "(makes wrappers like deploy/add-tenant.sh re-runnable; provisioning "
         "itself deliberately errors on a duplicate slug)",
     )
+    parser.add_argument(
+        "--resend-link",
+        action="store_true",
+        help="Do not provision: email the existing tenant's admin (--slug, "
+        "--admin-email) a fresh set-password link, superseding any earlier one. "
+        "Refused if the admin has already set a password.",
+    )
     args = parser.parse_args()
+
+    if args.resend_link:
+        if args.admin_password is not None or args.force_password_change or args.skip_existing:
+            parser.error(
+                "--resend-link takes only --slug and --admin-email; it never sets a password."
+            )
+        try:
+            await _resend_set_password_link(args.slug, args.admin_email)
+        finally:
+            # Every engine, not just the control plane's: the audit row is
+            # written through a cached tenant engine (local audit mode).
+            await dispose_all_engines()
+        return
+    if args.name is None:
+        parser.error("--name is required to provision a tenant.")
 
     if args.admin_password is not None:
         if settings.is_deployed:

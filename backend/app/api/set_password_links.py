@@ -112,6 +112,33 @@ async def mint_portal_link(
     return url
 
 
+def workspace_admin_email(
+    *, org_name: str, admin_name: str, admin_email: str, link: str, resent: bool = False
+) -> EmailMessage:
+    """The email that gives a new workspace's first administrator their
+    set-password link — one copy for partner child provisioning
+    (``api/partner.py``) and the operator CLI (``scripts/create_tenant.py``,
+    first send and ``--resend-link``). ``resent`` says the link replaces any
+    earlier one, which the re-send has just made unusable."""
+    replaces = " It replaces any earlier link we sent you." if resent else ""
+    return EmailMessage(
+        to=admin_email,
+        subject=f"Your {org_name} FeohLedger workspace is ready",
+        body_text=(
+            f"Hi {admin_name},\n\n"
+            f"A FeohLedger workspace has been set up for {org_name}, with you as "
+            "its administrator. Choose your password with this link:\n\n"
+            f"  {link}\n\n"
+            + expiry_sentence()
+            + replaces
+            + " If it has expired, use Forgot password on the sign-in page.\n"
+        ),
+        links=(link,),
+        # Fixed copy: the derived preview would reach the link.
+        preheader="Use the link in this email to set your password.",
+    )
+
+
 async def send_set_password_email(message: EmailMessage, *, log_ref: str) -> None:
     """Send the email carrying a set-password link, or raise 502.
 

@@ -449,3 +449,15 @@ def test_chat_message_amount_str_absent():
         status="approved",
     )
     assert msg.amount_str() == ""
+
+
+def test_chat_message_states_a_code_less_amount_bare():
+    """No currency: the figure is stated bare, never as dollars (decisions §466)."""
+    from app.services.chat_notification_adapters.base import render_chat_message
+
+    msg = render_chat_message(
+        "invoice_approved", invoice_number="I", vendor_name="V", amount=Decimal("12.50")
+    )
+    assert msg is not None
+    assert msg.currency is None
+    assert msg.amount_str() == "12.50"

@@ -110,6 +110,18 @@ void main() {
       localizeCodedRefusal(de, refusal('invoice_stale_approval')),
       de.codedRefusalInvoiceStaleApproval,
     );
+    expect(
+      localizeCodedRefusal(de, refusal('mfa_code_invalid')),
+      de.codedRefusalMfaCodeInvalid,
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('mfa_email_code_invalid')),
+      de.codedRefusalMfaEmailCodeInvalid,
+    );
+    expect(
+      localizeCodedRefusal(de, refusal('payment_run_awaiting_cfo')),
+      de.codedRefusalPaymentRunAwaitingCfo,
+    );
   });
 
   test('the CFO gate names both figures and what was measured', () {
@@ -268,6 +280,13 @@ void main() {
     );
     expect(localizeCodedRefusal(en, refusal('invoice_status_immutable')),
         isNull);
+    // A row refused without a code of its own names its target (§465).
+    expect(
+      localizeCodedRefusal(
+          en, refusal('invoice_bulk_refused', {'status': 'new'})),
+      'This invoice could not be changed to New.',
+    );
+    expect(localizeCodedRefusal(en, refusal('invoice_bulk_refused')), isNull);
     expect(
       localizeCodedRefusal(
           en, refusal('invoice_transition_invalid', {'status': 'new'})),
@@ -393,5 +412,32 @@ void main() {
         de.codedRefusalPaymentRunNotRecordable);
     expect(localizeCodedRefusal(de, refusal('payment_run_nothing_to_record')),
         de.codedRefusalPaymentRunNothingToRecord);
+  });
+
+  // `services/goods_receipts.py` — the mobile receipt form.
+  test('the goods-receipt refusals are stated, and a missing param is null',
+      () {
+    expect(
+      localizeCodedRefusal(
+        de,
+        refusal('goods_receipt_po_cancelled', {'poNumber': 'PO-9'}),
+      ),
+      de.codedRefusalGoodsReceiptPoCancelled('PO-9'),
+    );
+    expect(
+      localizeCodedRefusal(
+        en,
+        refusal('goods_receipt_number_taken', {'grNumber': 'DN-7'}),
+      ),
+      en.codedRefusalGoodsReceiptNumberTaken('DN-7'),
+    );
+    expect(
+      localizeCodedRefusal(en, refusal('goods_receipt_nothing_received')),
+      en.codedRefusalGoodsReceiptNothingReceived,
+    );
+    expect(
+      localizeCodedRefusal(en, refusal('goods_receipt_po_cancelled')),
+      isNull,
+    );
   });
 }

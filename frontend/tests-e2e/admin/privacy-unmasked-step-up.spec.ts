@@ -1,6 +1,13 @@
 import type { Page, Route } from '@playwright/test';
 
-import { API_BASE, currentTenantSlug, expect, signInAndWait, test } from '../fixtures/helpers';
+import {
+	API_BASE,
+	currentTenantSlug,
+	deleteVendorsWhere,
+	expect,
+	signInAndWait,
+	test
+} from '../fixtures/helpers';
 
 /**
  * /admin/privacy — an UNMASKED-banking DSAR export collects a second factor.
@@ -34,8 +41,20 @@ async function createVendor(page: Page): Promise<string> {
 		data: { name, email: `unmasked.${Date.now()}@example.test` }
 	});
 	expect(resp.ok()).toBe(true);
-	return ((await resp.json()) as { id: string }).id;
+	const id = ((await resp.json()) as { id: string }).id;
+	createdVendorIds.push(id);
+	return id;
 }
+
+/** Every vendor this file created, by id: erasure redacts the name, so a
+ *  name-based sweep would miss exactly the rows the erasure tests touch. */
+const createdVendorIds: string[] = [];
+
+test.afterEach(() => {
+	if (createdVendorIds.length === 0) return;
+	deleteVendorsWhere(`id IN (${createdVendorIds.map((id) => `'${id}'`).join(', ')})`);
+	createdVendorIds.length = 0;
+});
 
 async function fillUnmaskedExport(page: Page, vendorId: string): Promise<void> {
 	await page.goto('/admin/privacy');

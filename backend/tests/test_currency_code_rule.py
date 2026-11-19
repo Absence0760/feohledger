@@ -15,14 +15,19 @@ import pytest
 from fastapi import HTTPException
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from app.api.refusals import STATEMENT_CURRENCY_INVALID, statement_currency
+from app.api.refusals import (
+    INVOICE_CURRENCY_INVALID,
+    INVOICE_CURRENCY_REQUIRED,
+    STATEMENT_CURRENCY_INVALID,
+    invoice_currency,
+    statement_currency,
+)
 from app.models.procurement import po_currency_code
 from app.schemas.budget import BudgetCreate, BudgetUpdate
 from app.schemas.catalog import CatalogItemCreate, CatalogItemUpdate
 from app.schemas.contract import ContractCreate, ContractUpdate
 from app.schemas.credit_memo import CreditMemoCreate, CreditMemoUpdate
 from app.schemas.currency import (
-    BlankableCurrencyCode,
     CurrencyCode,
     CurrencyCodeOrUnset,
     OptionalCurrencyCode,
@@ -115,18 +120,6 @@ def test_currency_code_or_unset_reads_blank_as_none():
             ta.validate_python(raw)
 
 
-def test_blankable_currency_code_keeps_blank_as_blank():
-    """Only the invoice PATCH: `""` is the legacy "no currency" value the
-    credit-memo currency guard reasons about, so it must reach the handler."""
-    ta = TypeAdapter(BlankableCurrencyCode)
-    assert ta.validate_python(None) is None
-    assert ta.validate_python("") == ""
-    assert ta.validate_python("pln") == "PLN"
-    for raw in [r for r in MALFORMED if r.strip()]:
-        with pytest.raises(ValidationError):
-            ta.validate_python(raw)
-
-
 # ---------------------------------------------------------------------------
 # Every request schema's currency field is on the shared rule
 # ---------------------------------------------------------------------------
@@ -137,7 +130,6 @@ def test_blankable_currency_code_keeps_blank_as_blank():
 #: the whole request body.
 REQUEST_CURRENCY_FIELDS: list[tuple[type[BaseModel], str]] = [
     (InvoiceCreate, "currency"),
-    (InvoiceUpdate, "currency"),
     (CreditMemoCreate, "currency"),
     (CreditMemoUpdate, "currency"),
     (ContractCreate, "currency"),
@@ -194,6 +186,33 @@ def test_statement_currency_refuses_non_ascii(raw):
 
 def test_statement_currency_uppercases():
     assert statement_currency(" pln ") == "PLN"
+
+
+def test_invoice_update_currency_reaches_the_handler_raw():
+    """The PATCH's `currency` is checked by `invoice_currency` in the handler,
+    so a malformed code is a coded 422 rather than Pydantic's list."""
+    assert InvoiceUpdate(currency="EURO").currency == "EURO"
+
+
+@pytest.mark.parametrize("raw", [None, "", "   "])
+def test_invoice_currency_refuses_a_blank(raw):
+    with pytest.raises(HTTPException) as exc:
+        invoice_currency(raw)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == INVOICE_CURRENCY_REQUIRED
+
+
+@pytest.mark.parametrize("raw", ["ÄÖÜ", "uß", "EURO", "US", "U$D"])
+def test_invoice_currency_refuses_a_malformed_code(raw):
+    with pytest.raises(HTTPException) as exc:
+        invoice_currency(raw)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == INVOICE_CURRENCY_INVALID
+    assert exc.value.detail["params"] == {"value": raw.strip()}
+
+
+def test_invoice_currency_uppercases():
+    assert invoice_currency(" eur ") == "EUR"
 
 
 @pytest.mark.parametrize("raw", ["ÄÖÜ", "uß", "EURO"])

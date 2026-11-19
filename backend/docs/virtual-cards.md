@@ -895,6 +895,7 @@ order the gates run; the catalogue is `card_issuance.CARD_SKIP_MESSAGES`:
 | `card_skip_blocked` | unresolved payment-blocking exception | `exception_type` |
 | `card_skip_vendor_not_payable` | vendor not `active` | `vendor_status` |
 | `card_skip_live_payment` | a live payment on another rail | — |
+| `card_skip_currency_unknown` | the invoice records no currency (blank / whitespace); never read as USD, refused before credit netting, the compliance screen and the provider | — |
 | `card_skip_credit_conflict` | an applied credit no longer pairs (§214) | — |
 | `card_skip_nothing_owed` | applied credits cover the invoice | — |
 | `card_skip_vendor_unscreenable` | no vendor record to screen | — |
@@ -1031,7 +1032,11 @@ raw body against the owning tenant's `cards.webhook_signing_secret` — sealed
 in `provider_credentials` with the BYOK `api_key` / `client_secret`, set through
 `PUT /api/organization/credentials/cards` and read through
 `provider_credentials.provider_config` (a secret that cannot be opened is a
-bodyless 503, our failure rather than a verdict on the event). The handler:
+bodyless 503, our failure rather than a verdict on the event; an admin clears an
+unopenable block with `DELETE /api/organization/credentials/cards`). A
+`PATCH /api/organization` that changes `cards.provider` or `cards.sandbox` (or,
+with no provider, `cards.region`) drops the sealed card secrets, audited
+(`provider_credentials.rail_secrets_to_drop`, decisions §464). The handler:
 
 0. bounds the body against `card_webhook_max_bytes` (default 4 MiB) BEFORE
    buffering it — a declared `Content-Length` over the cap rejects without

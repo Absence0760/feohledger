@@ -275,6 +275,55 @@ test.describe('/admin user lifecycle', () => {
 		}
 	});
 
+	test('Sign out everywhere asks to confirm, calls revoke-sessions and toasts', async ({
+		page
+	}) => {
+		const headers = await authedTenantHeaders(page);
+		const email = `e2e-revoke-${Date.now()}@test.local`;
+		const createResp = await page.request.post(`${API_BASE}/api/admin/users`, {
+			headers,
+			data: { full_name: 'Revoke Me', email, role_names: ['ap_clerk'] }
+		});
+		const created = (await createResp.json()) as { id: string };
+
+		try {
+			await page.reload();
+			const row = page.locator('table tbody tr', { hasText: email });
+			await expect(row).toBeVisible();
+
+			let revokeCalls = 0;
+			page.on('request', (r) => {
+				if (r.url().includes(`/api/admin/users/${created.id}/revoke-sessions`)) revokeCalls++;
+			});
+
+			// First click only arms the action — no request yet.
+			await row.getByRole('button', { name: 'Sign out everywhere', exact: true }).click();
+			const armed = row.locator('button.row-action.variant-danger.armed');
+			await expect(armed).toHaveText('Confirm');
+			expect(revokeCalls).toBe(0);
+
+			const revoked = page.waitForResponse(
+				(r) =>
+					r.url().includes(`/api/admin/users/${created.id}/revoke-sessions`) &&
+					r.request().method() === 'POST'
+			);
+			await armed.click();
+			const resp = await revoked;
+			expect(resp.status()).toBe(200);
+			// The invited user has never signed in, so nothing was live to end.
+			expect(await resp.json()).toEqual({ revoked: 0 });
+
+			await expect(
+				page.locator('.toast .toast-text', { hasText: 'Revoke Me was not signed in anywhere' })
+			).toBeVisible();
+			// The account itself is untouched.
+			await expect(row.locator('.status-dot')).toContainText('Active');
+			await expect(row.getByRole('button', { name: 'Sign out everywhere', exact: true })).toBeVisible();
+		} finally {
+			await deleteUser(page, created.id);
+		}
+	});
+
 	test('Delete requires a confirm click (two-step armed pattern)', async ({ page }) => {
 		const headers = await authedTenantHeaders(page);
 		const email = `e2e-delete-${Date.now()}@test.local`;
@@ -290,9 +339,10 @@ test.describe('/admin user lifecycle', () => {
 			const row = page.locator('table tbody tr', { hasText: email });
 			await expect(row).toBeVisible();
 
-			// First click arms (no DELETE issued yet).
-			await row.locator('button.row-action.variant-danger').click();
-			await expect(row.locator('button.row-action.variant-danger.armed')).toBeVisible();
+			// First click arms (no DELETE issued yet). By name: an active row
+			// carries a second danger action, "Sign out everywhere".
+			await row.getByRole('button', { name: 'Delete', exact: true }).click();
+			await expect(row.locator('button.row-action.variant-danger.armed')).toHaveText('Confirm');
 
 			// Second click commits.
 			const deleted = page.waitForResponse(
@@ -300,7 +350,7 @@ test.describe('/admin user lifecycle', () => {
 					r.url().includes(`/api/admin/users/${created.id}`) &&
 					r.request().method() === 'DELETE'
 			);
-			await row.locator('button.row-action.variant-danger').click();
+			await row.getByRole('button', { name: 'Confirm', exact: true }).click();
 			const resp = await deleted;
 			expect(resp.status()).toBe(204);
 			didDelete = true;

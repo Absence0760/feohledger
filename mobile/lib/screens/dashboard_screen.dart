@@ -2,10 +2,12 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/stores/dashboard_store.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/cash_flow_button.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 import 'package:feohledger_mobile/widgets/notification_bell.dart';
 import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 
@@ -38,227 +40,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (context, _) {
           final store = DashboardStore.instance;
 
+          // First load only: a refresh keeps the figures on screen.
           if (store.loading && store.data == null) {
-            return const Center(child: CircularProgressIndicator());
+            return Center(
+              child: CircularProgressIndicator(semanticsLabel: l.commonLoading),
+            );
           }
 
+          // First load failed and there is no cached copy to fall back on.
+          // The sentence is localized and says what to do next — never the
+          // exception's `toString()`.
           if (store.error != null && store.data == null) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(l.dashboardErrorPrefix('${store.error}')),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: store.fetch,
-                    child: Text(l.commonRetry),
-                  ),
-                ],
-              ),
+            return LoadErrorState(
+              message: l.dashboardLoadError,
+              onRetry: store.fetch,
             );
           }
 
           final data = store.data;
           if (data == null) return const SizedBox.shrink();
 
-          // What the part-conversion disclosures name as the currency the
-          // unconverted rows could not reach. The payload's own code whenever
-          // it names one; the counts ride the same `reporting` era of the
-          // payload, so the fallback is a guard, not a path anyone expects.
-          final disclosedCurrency =
-              data.reportingCurrency ?? l.partialConversionCurrencyFallback;
-          // The rows ACTUALLY rendered below — the disclosure has to describe
-          // the ranking the reader sees, not vendors the list never shows.
-          final vendors = data.topVendors.take(5).toList();
-          // A sum of row COUNTS, not money.
-          final vendorsUnconverted =
-              vendors.fold<int>(0, (n, v) => n + v.unconvertedCount);
-
           return RefreshIndicator(
             onRefresh: store.fetch,
             child: ListView(
+              // Pull-to-refresh must work even when the content is shorter
+              // than the viewport (an empty book, a large screen).
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
-              children: [
-                // Offline indicator — data is being served from the local
-                // cache because the last refresh couldn't reach the server.
-                if (store.fromCache) ...[
-                  _cacheBanner(l),
-                  const SizedBox(height: 12),
-                ],
-
-                // KPI row
-                Row(
-                  children: [
-                    Expanded(
-                      child: KpiCard(
-                        title: l.dashboardTotalInvoices,
-                        value: data.totalInvoices.toString(),
-                        subtitle: formatMoneyCompact(
-                          data.totalAmount,
-                          currency: data.reportingCurrency,
-                        ),
-                        icon: Icons.receipt_long,
-                        color: Colors.blue,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: KpiCard(
-                        title: l.dashboardUpcoming,
-                        value: data.upcoming.count.toString(),
-                        subtitle: formatMoneyCompact(
-                          data.upcoming.totalAmount,
-                          currency: data.reportingCurrency,
-                        ),
-                        icon: Icons.schedule,
-                        color: Colors.orange,
-                      ),
-                    ),
-                  ],
-                ),
-                // The two money KPIs above are reporting-currency rollups that
-                // keep an unconvertible row in at FACE value rather than drop
-                // it (dropping would understate the book and what is due), so
-                // each says so beside itself when it happened. Two lines, not
-                // one: they count different populations — the whole book, and
-                // the invoices due within the week.
-                if (data.unconvertedCount > 0)
-                  PartialConversionNote(
-                    l.dashboardKpiUnconverted(
-                      l.dashboardTotalInvoices,
-                      data.unconvertedCount,
-                      disclosedCurrency,
-                    ),
-                  ),
-                if (data.upcoming.unconvertedCount > 0)
-                  PartialConversionNote(
-                    l.dashboardKpiUnconverted(
-                      l.dashboardUpcoming,
-                      data.upcoming.unconvertedCount,
-                      disclosedCurrency,
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: KpiCard(
-                        title: l.dashboardForReview,
-                        value: (data.pipeline['ready_for_review'] ?? 0)
-                            .toString(),
-                        icon: Icons.rate_review,
-                        color: Colors.amber.shade700,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: KpiCard(
-                        title: l.dashboardApproved,
-                        value: (data.pipeline['approved'] ?? 0).toString(),
-                        icon: Icons.check_circle,
-                        color: Colors.green,
-                      ),
-                    ),
-                  ],
-                ),
-
-                // Aging
-                const SizedBox(height: 24),
-                Text(
-                  l.dashboardAging,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                // ONE note for the band set, matching the single
-                // `aging_reporting.unconverted_count` the API serves: which
-                // band an unconverted invoice fell into does not change what
-                // the reader should do about it.
-                if (data.aging.unconvertedCount > 0) ...[
-                  PartialConversionNote(
-                    l.dashboardAgingUnconverted(
-                      data.aging.unconvertedCount,
-                      disclosedCurrency,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                ],
-                Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Colors.grey.shade200),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        _agingBucket(
-                          l.dashboardAgingCurrent,
-                          data.aging.current,
-                          Colors.green,
-                          currency: data.reportingCurrency,
-                        ),
-                        _agingBucket(
-                          l.dashboardAgingDays30,
-                          data.aging.thirtyDays,
-                          Colors.amber,
-                          currency: data.reportingCurrency,
-                        ),
-                        _agingBucket(
-                          l.dashboardAgingDays60,
-                          data.aging.sixtyDays,
-                          Colors.orange,
-                          currency: data.reportingCurrency,
-                        ),
-                        _agingBucket(
-                          l.dashboardAgingDays90plus,
-                          data.aging.ninetyPlus,
-                          Colors.red,
-                          currency: data.reportingCurrency,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Top vendors
-                const SizedBox(height: 24),
-                Text(
-                  l.dashboardTopVendors,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                // A vendor with an unconverted invoice is ranked on a total
-                // that is not in the same currency as the rows around it. The
-                // section note says what that means; the row's own subtitle
-                // says WHICH vendors, so the reader need not guess.
-                if (vendorsUnconverted > 0)
-                  PartialConversionNote(
-                    l.dashboardTopVendorsUnconverted(
-                      vendorsUnconverted,
-                      disclosedCurrency,
-                    ),
-                  ),
-                ...vendors.map(
-                  (v) => ListTile(
-                    dense: true,
-                    title: Text(v.vendorName),
-                    trailing: Text(
-                      formatMoneyCompact(
-                        v.totalAmount,
-                        currency: data.reportingCurrency,
-                      ),
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      v.unconvertedCount > 0
-                          ? '${l.dashboardInvoiceCount(v.invoiceCount)} · '
-                              '${l.dashboardVendorFaceValueCount(v.unconvertedCount)}'
-                          : l.dashboardInvoiceCount(v.invoiceCount),
-                    ),
-                  ),
-                ),
-              ],
+              children: _sections(l, store, data),
             ),
           );
         },
@@ -266,61 +75,353 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _cacheBanner(AppLocalizations l) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.amber.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.amber.shade200),
-      ),
-      child: Row(
+  List<Widget> _sections(
+    AppLocalizations l,
+    DashboardStore store,
+    DashboardData data,
+  ) {
+    // What the part-conversion disclosures name as the currency the
+    // unconverted rows could not reach. The payload's own code whenever it
+    // names one; the counts ride the same `reporting` era of the payload, so
+    // the fallback is a guard, not a path anyone expects.
+    final disclosedCurrency =
+        data.reportingCurrency ?? l.partialConversionCurrencyFallback;
+    // The rows ACTUALLY rendered below — the disclosure has to describe the
+    // ranking the reader sees, not vendors the list never shows.
+    final vendors = data.topVendors.take(5).toList();
+    // A sum of row COUNTS, not money.
+    final vendorsUnconverted = vendors.fold<int>(
+      0,
+      (n, v) => n + v.unconvertedCount,
+    );
+
+    return [
+      // Status first: is the user looking at live figures?
+      if (store.fromCache) ...[
+        _Banner(icon: Icons.cloud_off, message: l.dashboardCachedBanner),
+        const SizedBox(height: 12),
+      ] else if (store.error != null) ...[
+        // A refresh failed with no cached copy behind it: the figures below
+        // are the last ones loaded, and the user should know.
+        _Banner(icon: Icons.sync_problem, message: l.dashboardRefreshFailed),
+        const SizedBox(height: 12),
+      ],
+
+      // An empty book is not an error and not a row of zeros to decode.
+      if (data.totalInvoices == 0) ...[
+        _EmptyNotice(message: l.dashboardEmpty),
+        const SizedBox(height: 16),
+      ],
+
+      // 1. What is waiting on the user, and what is coming due. These lead
+      // because they are the two figures an approver acts on today.
+      _SectionHeader(l.dashboardNeedsAttention),
+      const SizedBox(height: 8),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.cloud_off, size: 18, color: Colors.amber.shade800),
-          const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              l.dashboardCachedBanner,
-              style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+            child: KpiCard(
+              title: l.dashboardForReview,
+              value: (data.pipeline['ready_for_review'] ?? 0).toString(),
+              icon: Icons.rate_review,
+              color: Colors.amber.shade700,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: KpiCard(
+              title: l.dashboardUpcoming,
+              value: data.upcoming.count.toString(),
+              subtitle: formatMoneyCompact(
+                data.upcoming.totalAmount,
+                currency: data.reportingCurrency,
+              ),
+              icon: Icons.schedule,
+              color: Colors.orange,
             ),
           ),
         ],
       ),
-    );
+      // Each money KPI is a reporting-currency rollup that keeps an
+      // unconvertible row in at FACE value rather than drop it (dropping would
+      // understate what is due), so it says so beside itself when it happened.
+      if (data.upcoming.unconvertedCount > 0)
+        PartialConversionNote(
+          l.dashboardKpiUnconverted(
+            l.dashboardUpcoming,
+            data.upcoming.unconvertedCount,
+            disclosedCurrency,
+          ),
+        ),
+
+      // 2. What is overdue, by how long.
+      const SizedBox(height: 24),
+      _SectionHeader(l.dashboardAging),
+      const SizedBox(height: 8),
+      // ONE note for the band set, matching the single
+      // `aging_reporting.unconverted_count` the API serves: which band an
+      // unconverted invoice fell into does not change what the reader should
+      // do about it.
+      if (data.aging.unconvertedCount > 0) ...[
+        PartialConversionNote(
+          l.dashboardAgingUnconverted(
+            data.aging.unconvertedCount,
+            disclosedCurrency,
+          ),
+        ),
+        const SizedBox(height: 4),
+      ],
+      _AgingCard(
+        currency: data.reportingCurrency,
+        buckets: [
+          (l.dashboardAgingCurrent, data.aging.current, Colors.green),
+          (l.dashboardAgingDays30, data.aging.thirtyDays, Colors.amber),
+          (l.dashboardAgingDays60, data.aging.sixtyDays, Colors.orange),
+          (l.dashboardAgingDays90plus, data.aging.ninetyPlus, Colors.red),
+        ],
+      ),
+
+      // 3. The book as a whole — context, not a to-do.
+      const SizedBox(height: 24),
+      _SectionHeader(l.dashboardOverview),
+      const SizedBox(height: 8),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: KpiCard(
+              title: l.dashboardTotalInvoices,
+              value: data.totalInvoices.toString(),
+              subtitle: formatMoneyCompact(
+                data.totalAmount,
+                currency: data.reportingCurrency,
+              ),
+              icon: Icons.receipt_long,
+              color: Colors.blue,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: KpiCard(
+              title: l.dashboardApproved,
+              value: (data.pipeline['approved'] ?? 0).toString(),
+              icon: Icons.check_circle,
+              color: Colors.green,
+            ),
+          ),
+        ],
+      ),
+      if (data.unconvertedCount > 0)
+        PartialConversionNote(
+          l.dashboardKpiUnconverted(
+            l.dashboardTotalInvoices,
+            data.unconvertedCount,
+            disclosedCurrency,
+          ),
+        ),
+
+      // 4. Top vendors.
+      const SizedBox(height: 24),
+      _SectionHeader(l.dashboardTopVendors),
+      const SizedBox(height: 8),
+      // A vendor with an unconverted invoice is ranked on a total that is not
+      // in the same currency as the rows around it. The section note says what
+      // that means; the row's own subtitle says WHICH vendors.
+      if (vendorsUnconverted > 0)
+        PartialConversionNote(
+          l.dashboardTopVendorsUnconverted(
+            vendorsUnconverted,
+            disclosedCurrency,
+          ),
+        ),
+      if (vendors.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            l.dashboardTopVendorsEmpty,
+            style: TextStyle(color: Colors.grey.shade700),
+          ),
+        ),
+      ...vendors.map((v) => _vendorRow(l, v, data.reportingCurrency)),
+    ];
   }
 
-  Widget _agingBucket(
-    String label,
-    double amount,
-    Color color, {
-    required String? currency,
-  }) {
-    final figure = formatMoneyCompact(amount, currency: currency);
-    // One announcement per bucket ("Current: $1,234") rather than the dot +
-    // amount + label read as three fragments (WCAG 1.3.1).
-    return Expanded(
-      child: Semantics(
-        label: '$label: $figure',
-        excludeSemantics: true,
-        child: Column(
+  Widget _vendorRow(AppLocalizations l, VendorSpend v, String? currency) {
+    final figure = formatMoneyCompact(v.totalAmount, currency: currency);
+    final detail = v.unconvertedCount > 0
+        ? '${l.dashboardInvoiceCount(v.invoiceCount)} · '
+              '${l.dashboardVendorFaceValueCount(v.unconvertedCount)}'
+        : l.dashboardInvoiceCount(v.invoiceCount);
+    // One announcement per row ("Acme Corp, $20K, 4 invoices") instead of
+    // three fragments in tile order.
+    return Semantics(
+      label: '${v.vendorName}, $figure, $detail',
+      excludeSemantics: true,
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(v.vendorName),
+        subtitle: Text(detail, style: TextStyle(color: Colors.grey.shade700)),
+        trailing: Text(
+          figure,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+}
+
+/// A section title a screen-reader user can jump between (headings rotor /
+/// TalkBack heading navigation).
+class _SectionHeader extends StatelessWidget {
+  final String text;
+
+  const _SectionHeader(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      header: true,
+      child: Text(text, style: Theme.of(context).textTheme.titleMedium),
+    );
+  }
+}
+
+/// The amber "these figures aren't live" strip — the cached-copy notice and
+/// the failed-refresh notice share it. A live region, so the change is spoken
+/// when it appears over figures the user is already reading.
+class _Banner extends StatelessWidget {
+  final IconData icon;
+  final String message;
+
+  const _Banner({required this.icon, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      label: message,
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.amber.shade200),
+        ),
+        child: Row(
           children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              figure,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
-            Text(
-              label,
-              // shade700 keeps the small (11px) label at AA contrast.
-              style: TextStyle(color: Colors.grey.shade700, fontSize: 11),
+            Icon(icon, size: 18, color: Colors.amber.shade900),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _EmptyNotice extends StatelessWidget {
+  final String message;
+
+  const _EmptyNotice({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            ExcludeSemantics(
+              child: Icon(Icons.inbox_outlined, color: Colors.grey.shade700),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The four aging bands. Four across at a normal text size; two across once
+/// the user's text scale would squeeze a compact figure ("R45.3K") into a
+/// quarter of a 390dp screen and wrap it mid-number.
+class _AgingCard extends StatelessWidget {
+  final List<(String, double, Color)> buckets;
+  final String? currency;
+
+  const _AgingCard({required this.buckets, required this.currency});
+
+  @override
+  Widget build(BuildContext context) {
+    final scaled = MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3;
+    final perRow = scaled ? 2 : 4;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            for (var i = 0; i < buckets.length; i += perRow) ...[
+              if (i > 0) const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final b in buckets.skip(i).take(perRow))
+                    Expanded(child: _bucket(b.$1, b.$2, b.$3)),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bucket(String label, double amount, Color color) {
+    final figure = formatMoneyCompact(amount, currency: currency);
+    // One announcement per bucket ("Current: $1,234") rather than the dot +
+    // amount + label read as three fragments (WCAG 1.3.1). The dot is a
+    // decorative cue; the label carries the meaning.
+    return Semantics(
+      label: '$label: $figure',
+      excludeSemantics: true,
+      child: Column(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            figure,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+          ),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            // shade700 keeps the small (11px) label at AA contrast.
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 11),
+          ),
+        ],
       ),
     );
   }

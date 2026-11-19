@@ -56,10 +56,11 @@ def get_payment_adapter(payment_config: dict | None) -> PaymentAdapter:
 
     For Modern Treasury that is `org_id`, `api_key`, `originating_account_id`
     and `webhook_secret` (`modern_treasury.py`); `backend/docs/payments.md`
-    carries the per-provider tables. Note `program_type` and `sandbox` are
-    NOT read anywhere on the payments path — they are card/extraction keys,
-    and this docstring listed them until 2026-09-17, which is how they
-    reached the founder runbook as though they did something here.
+    carries the per-provider tables. Note `program_type` is NOT read anywhere
+    on the payments path — it is a card/extraction key. `sandbox` is read by
+    the Column, Increase, Dwolla and Checkeeper adapters to pick their host
+    (default `true`), which is why a change to it drops the sealed keys
+    (`provider_credentials.rail_secrets_to_drop`).
 
     **No config → `mock`** (unchanged): that is the local-first default, and
     an org that has never configured a processor is a normal state.

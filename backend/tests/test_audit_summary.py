@@ -556,3 +556,18 @@ def test_every_invoice_audit_action_is_summarized_or_deliberately_skipped():
         f"audit actions with no summary phrase: {unknown} — add each to "
         "_ACTION_PHRASES or, if it is not an outcome, to _UNSUMMARIZED_ACTIONS"
     )
+
+
+@pytest.mark.parametrize("currency", [None, "", "  ", "US"])
+def test_a_code_less_invoice_is_never_summarised_in_dollars(currency):
+    """The template states the figure bare and the prompt tells the model the
+    currency is unknown (null), never a guessed USD (decisions §466)."""
+    import json as _json
+
+    from app.services.audit_summary import _invoice_payload
+
+    summary = build_template_summary(_invoice(currency=currency), [], None)
+    assert "for 4200.00" in summary.text
+    assert "USD" not in summary.text
+    assert _invoice_payload(_invoice(currency=currency))["currency"] is None
+    assert '"currency": null' in _json.dumps(_invoice_payload(_invoice(currency=currency)))

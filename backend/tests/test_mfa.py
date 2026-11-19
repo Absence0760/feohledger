@@ -31,17 +31,19 @@ def test_generate_totp_secret_is_base32_and_unique():
 def test_provisioning_uri_includes_issuer_and_account():
     from app.services import mfa
 
-    uri = mfa.provisioning_uri("JBSWY3DPEHPK3PXP", "user@acme.com", issuer="Acme AP")
+    uri = mfa.provisioning_uri(
+        "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", "user@acme.com", issuer="Acme AP"
+    )
     assert uri.startswith("otpauth://totp/")
     assert "Acme%20AP" in uri
     assert "user%40acme.com" in uri
-    assert "secret=JBSWY3DPEHPK3PXP" in uri
+    assert "secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP" in uri
 
 
 def test_qr_code_data_url_is_png_data_uri():
     from app.services import mfa
 
-    uri = mfa.provisioning_uri("JBSWY3DPEHPK3PXP", "user@acme.com")
+    uri = mfa.provisioning_uri("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", "user@acme.com")
     data_url = mfa.qr_code_data_url(uri)
     assert data_url.startswith("data:image/png;base64,")
     # PNG bodies aren't tiny; sanity-check minimum size
@@ -335,16 +337,64 @@ async def test_verify_mfa_failure_writes_audit_action():
         _patch.object(auth_mod, "dispatch_auth_audit", _fake_audit),
         _patch.object(auth_mod.settings, "mfa_enabled", True),
     ):
-        with pytest.raises(HTTPException):
+        with pytest.raises(HTTPException) as exc:
             await auth_mod.verify_mfa(
                 MFAVerifyRequest(challenge_token=challenge, code="000000", method="totp"),
                 _mfa_request(),
                 db,
             )
 
+    # The sign-in challenge's wrong code is coded so the login page states it
+    # in the reader's language, and stays a 401: no session exists to end
+    # (decisions §461).
+    assert exc.value.status_code == 401
+    assert exc.value.detail == {"code": "mfa_code_invalid", "message": "Invalid code", "params": {}}
     assert "auth.mfa.verify.failure" in audit_calls
     assert "auth.mfa.verify.success" not in audit_calls
     assert "auth.login.success" not in audit_calls
+
+
+@pytest.mark.asyncio
+async def test_verify_mfa_email_code_miss_is_coded():
+    """The emailed code's miss carries its own code (its sentence also covers an
+    expired code, unlike the TOTP one) and stays a 401 (decisions §465)."""
+    from unittest.mock import patch as _patch
+
+    from fastapi import HTTPException
+
+    from app.api import auth as auth_mod
+    from app.schemas.auth import MFAVerifyRequest
+    from app.services import mfa as mfa_svc
+
+    user = _mfa_user(enrolled=True)
+    db = _single_user_db(user)
+
+    async def _fake_audit(**kwargs):
+        pass
+
+    async def _miss(user_id, code):
+        return False
+
+    challenge = mfa_svc.create_challenge_token(user.id)
+
+    with (
+        _patch.object(auth_mod, "dispatch_auth_audit", _fake_audit),
+        _patch.object(auth_mod.mfa, "verify_email_otp", _miss),
+        _patch.object(auth_mod.settings, "mfa_enabled", True),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await auth_mod.verify_mfa(
+                MFAVerifyRequest(challenge_token=challenge, code="000000", method="email"),
+                _mfa_request(),
+                db,
+            )
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == {
+        "code": "mfa_email_code_invalid",
+        "message": "Invalid or expired code",
+        "params": {},
+    }
 
 
 @pytest.mark.asyncio

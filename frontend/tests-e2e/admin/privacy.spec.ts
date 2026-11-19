@@ -1,4 +1,12 @@
-import { API_BASE, currentTenantSlug, expect, signInAndWait, TENANT_ROOT_URL, test } from '../fixtures/helpers';
+import {
+	API_BASE,
+	currentTenantSlug,
+	deleteVendorsWhere,
+	expect,
+	signInAndWait,
+	TENANT_ROOT_URL,
+	test
+} from '../fixtures/helpers';
 
 /**
  * /admin/privacy — GDPR/CCPA DSAR export + right-to-erasure (admin only).
@@ -43,8 +51,19 @@ async function createVendor(page: import('@playwright/test').Page, name: string)
 	});
 	expect(resp.ok()).toBe(true);
 	const vendor = (await resp.json()) as VendorSummary;
+	createdVendorIds.push(vendor.id);
 	return vendor.id;
 }
+
+/** Every vendor this file created, by id: erasure redacts the name, so a
+ *  name-based sweep would miss exactly the rows the erasure tests touch. */
+const createdVendorIds: string[] = [];
+
+test.afterEach(() => {
+	if (createdVendorIds.length === 0) return;
+	deleteVendorsWhere(`id IN (${createdVendorIds.map((id) => `'${id}'`).join(', ')})`);
+	createdVendorIds.length = 0;
+});
 
 test.describe('/admin/privacy (admin)', () => {
 	test.use({ storageState: { cookies: [], origins: [] } });

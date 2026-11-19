@@ -140,6 +140,31 @@ def is_generation_key(key: bytes | str) -> bool:
     return key_str.startswith(f"{PASSWORD_RESET_PREFIX}gen:")
 
 
+def portal_stored_owner(raw: bytes | str | None) -> tuple[str, str] | None:
+    """``(slug, vendor_user_id)`` a portal token's stored value names, whatever
+    its generation — for :mod:`services.credential_cleanup`, which deletes a
+    closed tenant's links outright. ``None`` for a value it cannot read."""
+    parts = _split_gen(raw)
+    if parts is None:
+        return None
+    slug, sep, vendor_user_id = parts[0].rpartition(":")
+    if not sep or not slug:
+        return None
+    return slug, vendor_user_id
+
+
+def portal_generation_key(vendor_user_id: uuid.UUID | str) -> str:
+    """The portal generation counter of ``vendor_user_id``. Keyed by the id
+    alone, not the slug, so it can only be found through a link that names it."""
+    return _gen_key(PORTAL_PASSWORD_RESET_PREFIX, str(vendor_user_id))
+
+
+def is_portal_generation_key(key: bytes | str) -> bool:
+    """Whether a key under the portal prefix is a generation counter."""
+    key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+    return key_str.startswith(f"{PORTAL_PASSWORD_RESET_PREFIX}gen:")
+
+
 async def _live_subject(r, prefix: str, raw: bytes | str | None) -> str | None:
     """The subject of a stored value, or ``None`` when it was superseded."""
     parts = _split_gen(raw)

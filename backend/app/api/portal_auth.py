@@ -5,7 +5,6 @@ the tenant DB; the tenant is resolved from the `X-Tenant-Slug` header, same
 as every other tenant-scoped route.
 """
 
-import asyncio
 import logging
 import time
 import uuid
@@ -17,7 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import create_vendor_access_token, decode_token
 from app.api.portal_deps import get_current_vendor_user
-from app.api.refusals import MFA_CODE_INVALID_DETAIL, coded_refusal
+from app.api.refusals import (
+    MFA_CODE_INVALID_DETAIL,
+    MFA_EMAIL_CODE_INVALID_DETAIL,
+    coded_refusal,
+)
 from app.config import settings
 from app.models.organization import Organization
 from app.models.vendor import Vendor
@@ -69,6 +72,7 @@ from app.services.session_management import (
     revoke_user_sessions,
 )
 from app.tenant import get_tenant, get_tenant_db, get_tenant_slug
+from app.utils.detached_tasks import spawn_detached
 from app.utils.emails import email_matches, exact_email_first
 from app.utils.passwords import (
     PasswordError,
@@ -611,16 +615,6 @@ async def portal_reset_password(
 # `VendorUser.provisioned_by_user_id` is NOT re-stamped — no AP actor chose
 # this address, and the stamp is the bank-change SoD record (decisions §283).
 
-# Strong references to the detached sends — the event loop only holds tasks
-# weakly. Mirrors `api/auth._background_tasks`.
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_background(coro) -> None:
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-
 
 async def _issue_and_send_portal_reset(
     *,
@@ -733,7 +727,7 @@ async def portal_forgot_password(
     ).scalar_one_or_none()
 
     if vu is not None and vu.is_active:
-        _spawn_background(
+        spawn_detached(
             _issue_and_send_portal_reset(
                 slug=slug,
                 org_id=org.id,
@@ -743,7 +737,8 @@ async def portal_forgot_password(
                 to=vu.email,
                 full_name=vu.full_name,
                 ip=resolve_client_ip(request) or "unknown",
-            )
+            ),
+            name="portal_auth.forgot_password",
         )
 
     return ForgotPasswordResponse()
@@ -878,11 +873,11 @@ async def portal_mfa_challenge(
     if factor == "email":
         if not await mfa.verify_vendor_email_otp(vu.id, body.code):
             await _audit_verify_failure()
-            raise HTTPException(status_code=401, detail="Invalid or expired code")
+            raise HTTPException(status_code=401, detail=MFA_EMAIL_CODE_INVALID_DETAIL)
     else:
         if not await mfa.verify_totp(vu.mfa_secret, body.code):
             await _audit_verify_failure()
-            raise HTTPException(status_code=401, detail="Invalid code")
+            raise HTTPException(status_code=401, detail=MFA_CODE_INVALID_DETAIL)
 
     await clear_auth_failures("portal_mfa", mfa_identity)
 

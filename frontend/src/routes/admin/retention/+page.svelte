@@ -100,6 +100,20 @@
 </script>
 
 <PageHeader title="Retention Policy">
+	<!-- Save sits in the header, as on the Report Builder: below the long hint
+	     and both rows it fell off a phone's first screen. Shown once the policy
+	     has loaded, so it never offers to save a form that is not there. -->
+	{#snippet actions()}
+		{#if !loading && !error}
+			<button type="button" class="btn-cancel" onclick={reset} disabled={!dirty || saving}>
+				Reset
+			</button>
+			<button type="button" class="btn-primary" onclick={save} disabled={!dirty || saving}>
+				{saving ? 'Saving…' : 'Save changes'}
+			</button>
+		{/if}
+	{/snippet}
+
 	<p class="page-hint">
 		SOX records-management windows, per record class. <HelpTip term="retention-policy" /> A background sweep
 		enforces these — it soft-archives terminal invoices past their window and
@@ -148,14 +162,6 @@
 			{/each}
 		</div>
 
-		<div class="policy-actions">
-			<button type="button" class="btn-cancel" onclick={reset} disabled={!dirty || saving}>
-				Reset
-			</button>
-			<button type="button" class="btn-primary" onclick={save} disabled={!dirty || saving}>
-				{saving ? 'Saving…' : 'Save changes'}
-			</button>
-		</div>
 	{/if}
 </PageHeader>
 
@@ -249,12 +255,6 @@
 		margin: 0;
 		color: var(--text-muted);
 		font-size: 0.75rem;
-	}
-
-	.policy-actions {
-		display: flex;
-		gap: 0.5rem;
-		max-width: 640px;
 	}
 
 	/* Plain page-body inputs (not inside `.modal`, which app.css styles

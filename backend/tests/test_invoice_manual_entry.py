@@ -11,7 +11,7 @@ stays exactly as keyed in.
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.workflow import AuditLog
@@ -360,3 +360,56 @@ async def test_an_invoice_due_before_it_is_dated_is_refused_at_entry(realdb):
         assert both.status_code == 200, both.text
         other = await c.patch(f"/api/invoices/{inv_id}", json={"description": "fine"})
         assert other.status_code == 200, other.text
+
+
+async def test_an_edit_cannot_clear_or_garble_the_currency(realdb):
+    """`invoices.currency` is NOT NULL, so a blanked currency used to land as
+    `""`, a "no currency" every money path then had to recognise (decisions
+    §457). An edit may change the currency, never erase it; and a row already
+    blank stays editable for everything else (decisions §460)."""
+    body = {
+        "vendor": "Currency Edit Co",
+        "invoice_number": "CUR-EDIT-001",
+        "amount": "10.00",
+        "currency": "USD",
+    }
+    async with realdb.client(key="a", role="ap_manager") as c:
+        created = await c.post("/api/invoices", json=body)
+        assert created.status_code == 201, created.text
+        inv_id = created.json()["id"]
+
+        for blank in ("", "   ", None):
+            resp = await c.patch(f"/api/invoices/{inv_id}", json={"currency": blank})
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["detail"]["code"] == "invoice_currency_required"
+        for bad in ("EURO", "US", "ÄÖÜ"):
+            resp = await c.patch(f"/api/invoices/{inv_id}", json={"currency": bad})
+            assert resp.status_code == 422, resp.text
+            detail = resp.json()["detail"]
+            assert detail["code"] == "invoice_currency_invalid"
+            assert detail["params"] == {"value": bad}
+
+        async with realdb.sessionmaker("a")() as s:
+            row = (
+                await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(inv_id)))
+            ).scalar_one()
+            assert row.currency == "USD"
+
+        changed = await c.patch(f"/api/invoices/{inv_id}", json={"currency": " eur "})
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["currency"] == "EUR"
+
+        # A legacy row already holding "" (written before this refusal) is not
+        # held hostage: an edit that leaves the currency out still saves.
+        async with realdb.sessionmaker("a")() as s:
+            await s.execute(
+                update(Invoice).where(Invoice.id == uuid.UUID(inv_id)).values(currency="")
+            )
+            await s.commit()
+        other = await c.patch(f"/api/invoices/{inv_id}", json={"description": "still editable"})
+        assert other.status_code == 200, other.text
+        assert other.json()["currency"] == ""
+        # ...and naming a real code is how it gets one.
+        fixed = await c.patch(f"/api/invoices/{inv_id}", json={"currency": "GBP"})
+        assert fixed.status_code == 200, fixed.text
+        assert fixed.json()["currency"] == "GBP"

@@ -19,11 +19,15 @@ from fastapi import HTTPException
 # ---------------------------------------------------------------------------
 
 
-def _make_invoice(amount: float):
+def _make_invoice(amount: float, currency: str | None = "USD"):
+    # Every real Invoice carries a currency. A stub without one used to be read
+    # as USD by the gate; it now fails closed (decisions §466), so the code-
+    # less case is opted into explicitly with `currency=None`.
     return SimpleNamespace(
         id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
         amount=Decimal(str(amount)),
+        currency=currency,
     )
 
 
@@ -303,6 +307,7 @@ def _make_invoice_with_vendor(amount: float, vendor_id=None):
         organization_id=uuid.uuid4(),
         vendor_id=vendor_id or uuid.uuid4(),
         amount=Decimal(str(amount)),
+        currency="USD",
     )
 
 
@@ -601,7 +606,7 @@ async def test_a_code_less_invoice_is_never_stated_in_dollars():
     never the `USD` stand-in the gate compares with (decisions §160 / §196)."""
     from app.services.review import _enforce_approval_thresholds
 
-    invoice = _make_invoice(amount=50000)
+    invoice = _make_invoice(amount=50000, currency=None)
     instance = _make_instance({"require_cfo_above": 10000})
     with patch("app.services.review.get_workflow_instance", new=AsyncMock(return_value=instance)):
         with pytest.raises(HTTPException) as exc_info:
@@ -610,3 +615,4 @@ async def test_a_code_less_invoice_is_never_stated_in_dollars():
     detail = exc_info.value.detail
     assert detail["params"]["currency"] is None
     assert detail["message"].startswith("Invoice amount 50,000.00 exceeds ")
+    assert "records no currency" in detail["message"]

@@ -870,6 +870,20 @@ async def test_a_split_across_two_currencies_is_held_with_no_combined_total(real
         assert result.po_total is None
         assert result.amount_variance is None
         assert result.received_value is None
+        # With no invoice code to print, neither sentence leaves a blank or
+        # lets one leg's code stand for both: each names the legs' codes.
+        assert result.issues == [
+            {
+                "code": "po_match.issue.currency_mismatch_invoice_currency_unknown",
+                "params": {"poCurrencies": "USD, EUR"},
+                "message": "Currency mismatch: invoice records no valid currency, "
+                "POs in USD, EUR — amounts not compared",
+            }
+        ]
+        await _refresh(s, inv)
+        flag = next(w for w in inv.warnings if w["type"] == "po_mismatch")
+        assert flag["code"] == "po_currency_mismatch_invoice_currency_unknown"
+        assert flag["params"] == {"poNumber": inv.po_number, "poCurrencies": "USD, EUR"}
         await s.rollback()
 
 
