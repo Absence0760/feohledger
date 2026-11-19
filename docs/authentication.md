@@ -647,6 +647,13 @@ alone is **not** trusted to decide which tenant's data is read.
 
 For employee tokens (`typ` is anything other than `"vendor"`), the
 guard requires `payload["org"] == organization.id`. Mismatch → 403.
+A token with **no** `org` claim → the same 403 (`token_tenant_mismatch`):
+`get_current_user` resolves the account by `sub` alone and never
+compares its organization with the tenant, so a claim-less token would
+otherwise open whichever tenant the header named. Every access token
+the app mints carries `org`; the MFA challenge types
+(`mfa_challenge`, `vendor_mfa_challenge`) are not access tokens and
+stay exempt.
 Vendor-portal tokens (`typ="vendor"`) are exempt because `VendorUser`
 rows live in the per-tenant DB and a cross-tenant attempt fails
 naturally on the user-lookup query in
@@ -656,8 +663,13 @@ requests pass through to the downstream auth dep (which 401s).
 Without this guard, an authenticated user from tenant A could read
 or mutate tenant B's data simply by sending
 `X-Tenant-Slug: <other-tenant>` on the request. The guard is pinned
-by `backend/tests/test_tenant_isolation.py` (unit) and
-`frontend/tests-e2e/auth/tenant-isolation.spec.ts` (e2e).
+by `backend/tests/test_tenant_isolation.py` (unit),
+`backend/tests/test_tenant_auth_sweep.py` (every employee route that
+resolves a tenant, with a foreign token and a claim-less one, on the
+production dependency chain; plus the `/api/v1` key-only tenant rule)
+and `frontend/tests-e2e/auth/tenant-isolation.spec.ts` (e2e). The
+supplier portal's per-vendor scoping is swept over every by-id route in
+`backend/tests/test_portal_cross_vendor.py`.
 
 ## SAML SSO
 

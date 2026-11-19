@@ -63,7 +63,7 @@ X-Tenant-Slug header + Authorization Bearer <JWT>
   → get_tenant_db()          # yield a session on the tenant's DB
 ```
 
-The cross-check in `get_tenant` is the load-bearing security control. Without it, an authenticated user from tenant A could read or mutate tenant B's data by sending `X-Tenant-Slug: <other-tenant>`. Vendor-portal tokens (`typ="vendor"`) are exempt — they're scoped naturally because `VendorUser` rows live in the per-tenant DB. See `docs/authentication.md § Cross-tenant guard`.
+The cross-check in `get_tenant` is the load-bearing security control. Without it, an authenticated user from tenant A could read or mutate tenant B's data by sending `X-Tenant-Slug: <other-tenant>`. Vendor-portal tokens (`typ="vendor"`) are exempt — they're scoped naturally because `VendorUser` rows live in the per-tenant DB. An employee access token with **no** `org` claim is refused the same way (403 `token_tenant_mismatch`), not waved through: `get_current_user` resolves the account by `sub` alone and never compares its organization with the tenant, and every access token the app mints carries `org`. Only the MFA challenge types (not access tokens) stay exempt. `backend/tests/test_tenant_auth_sweep.py` drives every employee route that resolves a tenant with a foreign token and with a claim-less one, through the production dependency chain, and fails on any route that resolves the other tenant. See `docs/authentication.md § Cross-tenant guard`.
 
 ### Engine construction is the other half of the guard
 
