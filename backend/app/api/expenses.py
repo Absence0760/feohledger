@@ -622,20 +622,21 @@ async def _refresh_policy_violations(db: AsyncSession, expense: Expense, org: Or
     thresholds are read in when the policy itself names none — without it the
     engine would compare a foreign-currency expense to a bare threshold number.
 
-    Best-effort: any failure leaves the stored value untouched and never breaks
-    the surrounding write (the violations are advisory)."""
-    try:
-        policies = await _active_policies(db, expense.entity_id)
-        covered = await _approved_preapproval_amount(db, expense)
-        violations = evaluate_expense(
-            expense,
-            policies,
-            approved_preapproval_amount=covered,
-            default_threshold_currency=resolve_reporting_currency(org.settings),
-        )
-        expense.policy_violations = violations or None
-    except Exception:  # pragma: no cover — advisory, never break the write
-        pass
+    A failure propagates and fails the surrounding write. It used to be
+    swallowed, leaving the stored flags describing the expense as it was before
+    the edit: an approver reading those badges then saw no violation on a line
+    that now breaks policy. Report submission re-runs the same engine with no
+    catch, so a write that "succeeded" here would only fail later, further from
+    its cause (and a database error has already poisoned the transaction)."""
+    policies = await _active_policies(db, expense.entity_id)
+    covered = await _approved_preapproval_amount(db, expense)
+    violations = evaluate_expense(
+        expense,
+        policies,
+        approved_preapproval_amount=covered,
+        default_threshold_currency=resolve_reporting_currency(org.settings),
+    )
+    expense.policy_violations = violations or None
 
 
 # ---------------------------------------------------------------------------
