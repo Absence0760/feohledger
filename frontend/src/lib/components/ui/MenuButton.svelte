@@ -6,7 +6,7 @@
 		triggerKeyAction,
 		typeaheadTarget,
 		type MenuPlacement
-	} from '#lib/utils/menuButton';
+	} from '#lib/utils/menuButton.ts';
 
 	/**
 	 * A button that opens a menu of actions — the WAI-ARIA APG menu button
