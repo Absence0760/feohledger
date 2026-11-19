@@ -3286,11 +3286,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String invoiceWarningPoBilledBeyondReceipt(
-    String billedAmount,
+    String totalBilled,
     String poNumber,
     String receivedValue,
   ) {
-    return 'Other invoices already bill $billedAmount against PO $poNumber, of which goods worth $receivedValue have been received — this invoice takes it past what was received';
+    return 'Invoices on PO $poNumber bill $totalBilled, this one included; goods worth $receivedValue have been received';
   }
 
   @override

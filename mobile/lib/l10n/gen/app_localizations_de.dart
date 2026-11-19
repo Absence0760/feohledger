@@ -3307,11 +3307,11 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String invoiceWarningPoBilledBeyondReceipt(
-    String billedAmount,
+    String totalBilled,
     String poNumber,
     String receivedValue,
   ) {
-    return 'Andere Rechnungen stellen bereits $billedAmount gegen Bestellung $poNumber in Rechnung, von der Waren im Wert von $receivedValue eingegangen sind — diese Rechnung überschreitet den Wareneingang';
+    return 'Rechnungen zu Bestellung $poNumber belaufen sich einschließlich dieser auf $totalBilled; eingegangen sind Waren im Wert von $receivedValue';
   }
 
   @override

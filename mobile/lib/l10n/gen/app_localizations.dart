@@ -5028,9 +5028,9 @@ abstract class AppLocalizations {
   /// No description provided for @invoiceWarningPoBilledBeyondReceipt.
   ///
   /// In en, this message translates to:
-  /// **'Other invoices already bill {billedAmount} against PO {poNumber}, of which goods worth {receivedValue} have been received — this invoice takes it past what was received'**
+  /// **'Invoices on PO {poNumber} bill {totalBilled}, this one included; goods worth {receivedValue} have been received'**
   String invoiceWarningPoBilledBeyondReceipt(
-    String billedAmount,
+    String totalBilled,
     String poNumber,
     String receivedValue,
   );
