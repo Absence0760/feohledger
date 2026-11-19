@@ -1,6 +1,7 @@
 <script lang="ts">
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
 	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
+	import Spinner from '#lib/components/ui/Spinner.svelte';
 	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
 	import IconMail from '~icons/material-symbols/mark-email-unread-outline';
 	import IconCheck from '~icons/material-symbols/check-circle';
@@ -605,7 +606,7 @@
 					<span class="slug-suffix" id="slug-suffix">{tenantUrlSuffix}</span>
 					<span class="slug-state" aria-hidden="true">
 						{#if slugStatus === 'checking'}
-							<span class="spinner"></span>
+							<Spinner size={18} />
 						{:else if slugStatus === 'ok'}
 							<IconCheck />
 						{:else if slugStatus === 'bad'}
@@ -810,18 +811,6 @@
 	.slug-row.bad .slug-state {
 		color: var(--danger);
 	}
-	.spinner {
-		width: 14px;
-		height: 14px;
-		border-radius: 50%;
-		border: 2px solid var(--border);
-		border-top-color: var(--accent);
-		animation: spin 0.7s linear infinite;
-	}
-	@keyframes spin {
-		to { transform: rotate(360deg); }
-	}
-
 	.hint {
 		display: block;
 		margin-top: 2px;

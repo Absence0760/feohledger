@@ -30,8 +30,8 @@ const RAW = import.meta.glob('/src/lib/components/marketing/*.svelte', {
 
 /**
  * The pre-auth employee pages: the shell and its siblings, and every route
- * that renders inside it. Same budget, one documented exemption — a busy
- * spinner (`ui-patterns.md` § Motion, rule 4a; see {@link spinnerExempt}).
+ * that renders inside it. Same budget, no exemption of their own — a busy
+ * ring is `ui/Spinner.svelte` (see {@link SPINNER}).
  */
 const AUTH_RAW = import.meta.glob(
 	[
@@ -40,6 +40,26 @@ const AUTH_RAW = import.meta.glob(
 	],
 	{ query: '?raw', import: 'default', eager: true }
 ) as Record<string, string>;
+
+/**
+ * The one loop the budget allows anywhere (`ui-patterns.md` § Motion, rule
+ * 4a): the busy ring, owned by one component so the exemption has one home.
+ */
+const SPINNER = '/src/lib/components/ui/Spinner.svelte';
+const SPINNER_RAW = (
+	import.meta.glob('/src/lib/components/ui/Spinner.svelte', {
+		query: '?raw',
+		import: 'default',
+		eager: true
+	}) as Record<string, string>
+)[SPINNER];
+
+/** Every Svelte file, for the call-site half of the exemption. */
+const ALL_RAW = import.meta.glob('/src/**/*.svelte', {
+	query: '?raw',
+	import: 'default',
+	eager: true
+}) as Record<string, string>;
 
 const BUDGET_S = 5;
 
@@ -96,31 +116,38 @@ function selectorAt(css: string, index: number): string {
 }
 
 /**
- * A busy spinner may loop (rule 4a): it is the `.spinner` rule, and every
- * element carrying that class in the markup is mounted inside an `{#if}`, so
- * it exists only while the request it stands for is in flight and goes when
- * the answer lands. That is WCAG 2.2.2's own carve-out — the Understanding
- * text calls a progress animation during a phase the user is waiting on
- * essential, and it is user-started or the page's sole content, never
- * presented beside content it competes with. A spinner rendered
- * unconditionally would loop forever on a settled page, so it does not
- * qualify. Reduced motion stops it outright (app.css collapses every
- * iteration count to 1); the text beside it carries the meaning.
+ * A busy spinner may loop (rule 4a) — but only as `ui/Spinner.svelte`'s
+ * `.spinner` rule, and only where every `<Spinner` in the markup is mounted
+ * inside an `{#if}`, so it exists only while the request it stands for is in
+ * flight and goes when the answer lands. That is WCAG 2.2.2's own carve-out —
+ * the Understanding text calls a progress animation during a phase the user
+ * is waiting on essential. A spinner rendered unconditionally would loop
+ * forever on a settled page, so it does not qualify. Reduced motion stills it
+ * (the component's own media query, and app.css besides); the text beside it
+ * carries the meaning.
  */
-function spinnerExempt(source: string, selector: string): boolean {
-	if (selector !== '.spinner') return false;
-	const markup = source.replace(/<style[^>]*>[\s\S]*?<\/style>/g, '').replace(/<script[^>]*>[\s\S]*?<\/script>/g, '');
-	const uses = [...markup.matchAll(/class="spinner"/g)];
-	if (uses.length === 0) return false;
-	return uses.every((u) => {
-		const before = markup.slice(0, u.index);
-		const opened = (before.match(/\{#if\b/g) ?? []).length;
-		const closed = (before.match(/\{\/if\}/g) ?? []).length;
-		return opened > closed;
-	});
+function spinnerExempt(file: string, selector: string): boolean {
+	return file === SPINNER && selector === '.spinner';
 }
 
-function audit(file: string, source: string, allowSpinner = false): Finding[] {
+/** Markup only: no `<style>`, no `<script>`. */
+const markupOf = (source: string) =>
+	source.replace(/<style[^>]*>[\s\S]*?<\/style>/g, '').replace(/<script[^>]*>[\s\S]*?<\/script>/g, '');
+
+/** Each `<Spinner` a file renders outside any `{#if}` (by line). */
+function unconditionalSpinners(source: string): number[] {
+	const markup = markupOf(source);
+	return [...markup.matchAll(/<Spinner\b/g)]
+		.filter((u) => {
+			const before = markup.slice(0, u.index);
+			const opened = (before.match(/\{#if\b/g) ?? []).length;
+			const closed = (before.match(/\{\/if\}/g) ?? []).length;
+			return opened <= closed;
+		})
+		.map((u) => markup.slice(0, u.index).split('\n').length);
+}
+
+function audit(file: string, source: string): Finding[] {
 	const css = styleOf(source);
 	const props = customProps(css);
 	const findings: Finding[] = [];
@@ -130,7 +157,7 @@ function audit(file: string, source: string, allowSpinner = false): Finding[] {
 		const longhand = m[1];
 		const value = m[2].trim();
 		if (/\binfinite\b/.test(value)) {
-			if (allowSpinner && spinnerExempt(source, selectorAt(css, m.index!))) continue;
+			if (spinnerExempt(file, selectorAt(css, m.index!))) continue;
 			findings.push({ file, decl, problem: 'loops forever' });
 			continue;
 		}
@@ -190,7 +217,7 @@ describe('marketing motion budget (WCAG 2.2.2 without a pause control)', () => {
 	});
 });
 
-describe('auth-shell motion budget (same rule, busy-spinner exemption)', () => {
+describe('auth-shell motion budget (same rule, no exemption of its own)', () => {
 	const files = Object.entries(AUTH_RAW).sort(([a], [b]) => a.localeCompare(b));
 
 	it('scans the shell and the pages that render in it', () => {
@@ -207,28 +234,60 @@ describe('auth-shell motion budget (same rule, busy-spinner exemption)', () => {
 		}
 	});
 
-	it('every animation is finite and ends within five seconds, bar a conditional spinner', () => {
-		const findings = files.flatMap(([path, source]) => audit(path, source, true));
+	it('every animation is finite and ends within five seconds', () => {
+		const findings = files.flatMap(([path, source]) => audit(path, source));
 		expect(findings).toEqual([]);
 	});
+});
 
-	it('the exemption covers only a `.spinner` mounted inside an {#if}', () => {
-		const style = `<style>.spinner { animation: spin 0.8s linear infinite; }</style>`;
-		const conditional = `{#if loading}<span class="spinner" aria-hidden="true"></span>{/if}${style}`;
-		const always = `<span class="spinner" aria-hidden="true"></span>${style}`;
-		const otherSelector = `{#if loading}<span class="spinner"></span>{/if}<style>.glow { animation: pulse 1s infinite; }</style>`;
-		expect(audit('ok.svelte', conditional, true)).toEqual([]);
-		expect(audit('always.svelte', always, true).map((f) => f.problem)).toEqual(['loops forever']);
-		expect(audit('glow.svelte', otherSelector, true).map((f) => f.problem)).toEqual(['loops forever']);
-		// The marketing surfaces get no exemption at all.
-		expect(audit('marketing.svelte', conditional).map((f) => f.problem)).toEqual(['loops forever']);
+describe('the busy spinner (rule 4a: the one loop, in one component)', () => {
+	it('loops only on its `.spinner` ring', () => {
+		expect(SPINNER_RAW).toBeDefined();
+		expect(styleOf(SPINNER_RAW)).toMatch(/\.spinner\s*\{[^}]*animation:[^;]*\binfinite\b/);
+		expect(audit(SPINNER, SPINNER_RAW)).toEqual([]);
 	});
 
-	it('reduced motion still stops the spinner (app.css)', () => {
-		const appCss = Object.values(
-			import.meta.glob('/src/app.css', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
-		)[0];
-		const block = appCss.match(/@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
-		expect(block).toMatch(/animation-iteration-count:\s*1\s*!important/);
+	it('stills itself under reduced motion', () => {
+		expect(styleOf(SPINNER_RAW)).toMatch(
+			/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.spinner\s*\{\s*animation:\s*none;/
+		);
+	});
+
+	it('no other file hand-rolls a looping `.spinner`', () => {
+		// The exemption is keyed on the file, so a copy elsewhere is audited
+		// like any other loop; this names it for what it is.
+		const copies = Object.entries(ALL_RAW)
+			.filter(([path]) => path !== SPINNER)
+			.filter(([, source]) => /\.spinner\s*\{[^}]*\binfinite\b/.test(styleOf(source)))
+			.map(([path]) => path);
+		expect(copies).toEqual([]);
+	});
+
+	it('every caller mounts it inside an {#if}, so it goes when the answer lands', () => {
+		const callers = Object.entries(ALL_RAW).filter(([, source]) => /<Spinner\b/.test(markupOf(source)));
+		// The four it was extracted from; a glob that matched nothing would
+		// pass by checking nothing.
+		expect(callers.map(([path]) => path)).toEqual(
+			expect.arrayContaining([
+				'/src/lib/components/auth/AuthCallback.svelte',
+				'/src/routes/login/+page.svelte',
+				'/src/routes/signup/+page.svelte',
+				'/src/routes/verify/+page.svelte'
+			])
+		);
+		const unconditional = callers
+			.map(([path, source]) => ({ path, lines: unconditionalSpinners(source) }))
+			.filter((c) => c.lines.length > 0);
+		expect(unconditional).toEqual([]);
+	});
+
+	it('the checks themselves: a loop elsewhere fails, an unconditional caller is caught', () => {
+		const style = `<style>.spinner { animation: spin 0.8s linear infinite; }</style>`;
+		expect(audit('Copy.svelte', style).map((f) => f.problem)).toEqual(['loops forever']);
+		expect(audit(SPINNER, `<style>.glow { animation: pulse 1s infinite; }</style>`).map((f) => f.problem)).toEqual([
+			'loops forever'
+		]);
+		expect(unconditionalSpinners(`{#if busy}<Spinner />{/if}`)).toEqual([]);
+		expect(unconditionalSpinners(`{#if busy}x{/if}\n<Spinner />`)).toEqual([2]);
 	});
 });

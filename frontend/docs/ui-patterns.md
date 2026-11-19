@@ -1174,19 +1174,20 @@ inherit it for free. Reuse these; don't re-solve them per page.
      `/signup`, `/change-password` and `/find-workspace` routes) and
      `tests-e2e/marketing/landing.spec.ts` (every running animation's
      `getComputedTiming().endTime` ≤ 5000 ms).
-  4a. **One exemption, auth shell only: a busy spinner.** A `.spinner` may
-     loop while the request it stands for is in flight — mounted inside an
-     `{#if}` on that request's state, so it unmounts when the answer lands,
-     and paired with text that says what is happening (`role="status"` or the
-     field's own hint). That is 2.2.2's own carve-out: an indicator of a phase
-     the user is waiting on is essential, and these are either user-started
-     (a submit, a typed slug) or the page's sole content (`/verify`, the SSO
-     callback). A finite spin would be worse — a ring that freezes at 5 s on a
-     slow request reads as a hang. Reduced motion stops it (the app.css rule
-     collapses every iteration count to 1) and the text carries the meaning.
-     A spinner rendered unconditionally, or a loop on any other selector, is
-     not covered; the marketing pages get no exemption. Enforced by the same
-     guard (`spinnerExempt`).
+  4a. **One exemption: a busy spinner, and it is `ui/Spinner.svelte`.** The
+     ring may loop while the request it stands for is in flight — mounted
+     inside an `{#if}` on that request's state, so it unmounts when the answer
+     lands, and paired with text that says what is happening (its own `label`,
+     a `role="status"` region, or the caller's live region / field hint). That
+     is 2.2.2's own carve-out: an indicator of a phase the user is waiting on
+     is essential, and these are either user-started (a submit, a typed slug)
+     or the page's sole content (`/verify`, the SSO callback). A finite spin
+     would be worse — a ring that freezes at 5 s on a slow request reads as a
+     hang. Reduced motion stills it (the component's own media query; app.css
+     collapses iteration counts besides) and the text carries the meaning.
+     The exemption lives in that one component: a hand-rolled `.spinner` loop
+     anywhere else, a loop on any other selector, or a `<Spinner>` rendered
+     outside an `{#if}` fails the same guard; the marketing pages get none.
   5. **Fade with colour, not `opacity`, at rest.** A decorative watermark takes
      an `rgba()` colour; `opacity` composites a whole subtree
      (`opacityAudit.test.ts`). `opacity: 0` / `1` in a reveal or keyframe is fine.
