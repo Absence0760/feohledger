@@ -77,3 +77,81 @@ describe('WCAG 2.5.3 Label in Name: every <key>Aria contains <key>', () => {
 		});
 	}
 });
+
+// The catalogue check above pairs `<key>Aria` with `<key>`, so it only sees a
+// state the catalogue has an Aria key for. A control whose visible text
+// switches with its state ("Remove" → "Confirm remove", "Copy" → "Copied")
+// under ONE fixed aria-label slips past it: the armed name still says
+// "Remove". This scans the markup for that shape — a `<button>` /
+// `<RowAction>` with a static `aria-label={m('k')}` (no ternary in it) whose
+// body shows two or more message keys behind a condition — so the label is
+// switched with the state (or dropped while busy) as the visible text is.
+
+const SVELTE = import.meta.glob('/src/**/*.svelte', {
+	query: '?raw',
+	import: 'default',
+	eager: true
+}) as Record<string, string>;
+
+/** The `{…}` expression starting at `open` (an index of `{`), braces balanced. */
+function braced(src: string, open: number): string {
+	let depth = 0;
+	for (let i = open; i < src.length; i++) {
+		if (src[i] === '{') depth++;
+		else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1);
+	}
+	return src.slice(open);
+}
+
+function fixedLabelOverSwitchedText(source: string): string[] {
+	const found: string[] = [];
+	const control = /<(button|RowAction)\b/g;
+	let match: RegExpExecArray | null;
+	while ((match = control.exec(source)) !== null) {
+		const tag = match[1];
+		const close = source.indexOf(`</${tag}>`, match.index);
+		if (close < 0) continue;
+		const element = source.slice(match.index, close);
+		const attr = /(?:aria-label|ariaLabel)=\{/.exec(element);
+		if (!attr) continue;
+		const expr = braced(element, attr.index + attr[0].length - 1);
+		if (expr.includes('?')) continue; // already switched with the state
+		const key = /^\{m\('([^']+)'/.exec(expr)?.[1];
+		if (!key) continue;
+		// The body: after the opening tag's own expressions, whose `>` may sit
+		// inside a `{…}` (an arrow function), so skip over those.
+		let i = match.index + tag.length + 1;
+		while (i < element.length && element[i] !== '>') {
+			i = element[i] === '{' ? i + braced(element, i).length : i + 1;
+		}
+		const body = element.slice(i + 1);
+		const keys = new Set([...body.matchAll(/m\('([^']+)'/g)].map((k) => k[1]));
+		if (keys.size >= 2 && (body.includes('?') || body.includes('{#if'))) {
+			found.push(`${key} over ${[...keys].sort().join(' / ')}`);
+		}
+	}
+	return found;
+}
+
+describe('WCAG 2.5.3: a fixed aria-label never sits over state-switched text', () => {
+	test('the scan catches the shape and passes a switched label', () => {
+		expect(
+			fixedLabelOverSwitchedText(
+				`<button aria-label={m('a.removeAria')} onclick={() => (x = 1 > 0)}>{armed ? m('a.confirmRemove') : m('a.remove')}</button>`
+			)
+		).toEqual(['a.removeAria over a.confirmRemove / a.remove']);
+		expect(
+			fixedLabelOverSwitchedText(
+				`<button aria-label={armed ? m('a.confirmRemoveAria') : m('a.removeAria')}>{armed ? m('a.confirmRemove') : m('a.remove')}</button>`
+			)
+		).toEqual([]);
+	});
+
+	test('no component does it', () => {
+		const failures: string[] = [];
+		for (const [path, source] of Object.entries(SVELTE)) {
+			for (const hit of fixedLabelOverSwitchedText(source)) failures.push(`${path}: ${hit}`);
+		}
+		expect(failures).toEqual([]);
+	});
+});

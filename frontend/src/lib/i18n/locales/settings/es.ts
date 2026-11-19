@@ -154,6 +154,7 @@ export const messages = {
 	'org.chat.webhook.remove': 'Eliminar webhook',
 	'org.chat.webhook.confirmRemove': 'Confirmar eliminación',
 	'org.chat.webhook.removeAria': 'Eliminar webhook: la URL del webhook entrante de chat',
+	'org.chat.webhook.confirmRemoveAria': 'Confirmar eliminación: la URL del webhook entrante de chat',
 	'org.chat.webhook.rotateHint':
 		'El reemplazo surte efecto de inmediato y sin periodo de solapamiento: publicamos en una sola URL, así que mantener activa la anterior seguiría publicando allí. Elimina también el webhook antiguo en tu proveedor de chat: solo ellos pueden revocarlo.',
 	'org.chat.webhook.toast.saved': 'Webhook de chat guardado',
@@ -187,6 +188,7 @@ export const messages = {
 	'org.emailIntake.rotateConfirm': 'Confirmar rotación',
 	'org.emailIntake.rotating': 'Rotando…',
 	'org.emailIntake.rotateAria': 'Rotar dirección de recepción por correo',
+	'org.emailIntake.rotateConfirmAria': 'Confirmar rotación de la dirección de recepción por correo',
 	'org.emailIntake.rotateWarning':
 		'Rotar reemplaza esta dirección de inmediato. La dirección actual deja de aceptar correo en el momento en que confirme — todo lo que un proveedor envíe después se descarta, sin rebote y sin factura. Dé la nueva dirección a todos los proveedores antes de que le facturen de nuevo.',
 	'org.emailIntake.rotated.aria': 'Nueva dirección de recepción por correo',

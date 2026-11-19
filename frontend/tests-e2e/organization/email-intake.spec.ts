@@ -128,13 +128,22 @@ test.describe('/organization email intake', () => {
 		await expect(card.getByTestId('email-intake-rotate-warning')).toContainText(
 			'stops accepting email the moment you confirm'
 		);
-		await expect(rotate).toHaveText('Confirm rotate');
+		// Armed, the accessible name switches with the visible text (WCAG
+		// 2.5.3): a speech user says "Confirm rotate", and a screen reader
+		// hears the armed state. The unarmed name is gone.
+		const confirmRotate = card.getByRole('button', {
+			name: 'Confirm rotate address for email intake',
+			exact: true
+		});
+		await expect(confirmRotate).toHaveText('Confirm rotate');
+		await expect(confirmRotate).toHaveClass(/\barmed\b/);
+		await expect(rotate).toHaveCount(0);
 		await expect(card.getByTestId('email-intake-address')).toHaveText(CONFIGURED);
 		expect(rotatePosts).toBe(0);
 
 		// Second click commits, and the replacement is revealed with a copy
 		// affordance through the shared SecretReveal.
-		await rotate.click();
+		await confirmRotate.click();
 		const revealed = page.getByTestId('email-intake-address-rotated');
 		await expect(revealed).toBeVisible();
 		await expect(revealed).toHaveText(ROTATED);
