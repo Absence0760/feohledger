@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * `invoiceStore`'s failure flags.
  *
  * - `errored` describes the latest list load, so it clears the moment a fresh
- *   load starts — a Retry shows the loading line, not the old failure (or the
- *   stale rows the failure was hiding).
+ *   load starts — a Retry shows the loading line, not the old failure. A
+ *   failed fresh load empties the list, so there are no stale rows for that
+ *   Retry to redraw (unless a local edit since owns them).
  * - `loadMore` never rejects: a failed page records `loadMoreErrored` and
  *   keeps the rows already shown, so no caller has to remember a `.catch`.
  */
@@ -55,6 +56,41 @@ describe('invoiceStore.errored', () => {
 		retry.resolve(page(['a'], 1));
 		await pending;
 		expect(store.errored).toBe(false);
+		expect(store.all.map((i) => i.id)).toEqual(['a']);
+	});
+
+	it('a failed fresh load drops the previous rows, so a Retry cannot redraw them', async () => {
+		const store = await freshStore();
+		get.mockResolvedValueOnce(page(['old'], 1));
+		await store.fetch(); // noqa: raw-fetch-in-component — store method, routes through api client
+
+		get.mockRejectedValueOnce(new Error('offline'));
+		await expect(store.fetch({ status: 'paid' })).rejects.toThrow('offline'); // noqa: raw-fetch-in-component — store method, routes through api client
+		expect(store.all).toEqual([]);
+		expect(store.total).toBe(0);
+
+		const retry = deferred<ReturnType<typeof page>>();
+		get.mockReturnValueOnce(retry.promise);
+		const pending = store.fetch({ status: 'paid' }); // noqa: raw-fetch-in-component — store method, routes through api client
+		expect(store.errored).toBe(false);
+		expect(store.all).toEqual([]);
+		retry.resolve(page(['new'], 1));
+		await pending;
+		expect(store.all.map((i) => i.id)).toEqual(['new']);
+	});
+
+	it('a failure superseded by a local edit keeps the edited rows', async () => {
+		const store = await freshStore();
+		get.mockResolvedValueOnce(page(['a'], 1));
+		await store.fetch(); // noqa: raw-fetch-in-component — store method, routes through api client
+
+		const slow = deferred<ReturnType<typeof page>>();
+		get.mockReturnValueOnce(slow.promise);
+		const pending = store.fetch(); // noqa: raw-fetch-in-component — store method, routes through api client
+		store.patchLocal('a', { id: 'a' });
+		slow.reject(new Error('offline'));
+		await expect(pending).rejects.toThrow('offline');
+		expect(store.errored).toBe(true);
 		expect(store.all.map((i) => i.id)).toEqual(['a']);
 	});
 });
