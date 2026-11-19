@@ -631,6 +631,8 @@ export const messages = {
 	'invoices.warning.contractVendorMismatch': 'Der Lieferant der Rechnung stimmt nicht mit dem Lieferanten des Vertrags {contractNumber} überein',
 	'invoices.warning.contractSpendLimitExceeded': 'Die kumulierte Ausgabe {cumulativeSpend} übersteigt das Limit {spendLimit} des Vertrags {contractNumber}',
 	'invoices.warning.contractSpendLimitExceededNotToExceed': 'Die kumulierte Ausgabe {cumulativeSpend} übersteigt das Limit {spendLimit} des Vertrags {contractNumber} (nicht überschreitbar)',
+	'invoices.warning.contractCurrencyMismatch': 'Die Rechnung lautet auf {invoiceCurrency}, Vertrag {contractNumber} jedoch auf {contractCurrency} — sein Ausgabenlimit wurde nicht geprüft',
+	'invoices.warning.contractCurrencyMismatchInvoiceCurrencyUnknown': 'Die Rechnung enthält keine gültige Währung, daher wurde das Ausgabenlimit von Vertrag {contractNumber} in {contractCurrency} nicht geprüft',
 	'invoices.warning.contractGlNotAllowed': 'Das Sachkonto {glAccount} liegt außerhalb der im Vertrag {contractNumber} zugelassenen Konten',
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Die Beträge stimmen nicht: Zwischensumme ({subtotal}) + Steuer ({tax}) + Versand ({shipping}) − Rabatt ({discount}) = {expected}, die Gesamtsumme lautet jedoch {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'Das Fälligkeitsdatum ({dueDate}) liegt vor dem Rechnungsdatum ({invoiceDate}).',

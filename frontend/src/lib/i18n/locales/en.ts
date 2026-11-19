@@ -712,6 +712,8 @@ export const en = {
 	'invoices.warning.contractVendorMismatch': 'Invoice vendor does not match contract {contractNumber} vendor',
 	'invoices.warning.contractSpendLimitExceeded': 'Cumulative spend {cumulativeSpend} exceeds contract {contractNumber} limit {spendLimit}',
 	'invoices.warning.contractSpendLimitExceededNotToExceed': 'Cumulative spend {cumulativeSpend} exceeds contract {contractNumber} limit {spendLimit} (not-to-exceed)',
+	'invoices.warning.contractCurrencyMismatch': 'Invoice is in {invoiceCurrency} but contract {contractNumber} is in {contractCurrency} — its spend limit was not checked',
+	'invoices.warning.contractCurrencyMismatchInvoiceCurrencyUnknown': 'The invoice records no valid currency, so the spend limit in {contractCurrency} of contract {contractNumber} was not checked',
 	'invoices.warning.contractGlNotAllowed': 'GL account {glAccount} is outside contract {contractNumber} allowed accounts',
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Amounts don\'t add up: subtotal ({subtotal}) + tax ({tax}) + shipping ({shipping}) − discount ({discount}) = {expected}, but total is {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'Due date ({dueDate}) is before invoice date ({invoiceDate}).',

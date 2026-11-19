@@ -2523,6 +2523,31 @@
       }
     }
   },
+  "invoiceWarningContractCurrencyMismatch": "Invoice is in {invoiceCurrency} but contract {contractNumber} is in {contractCurrency} — its spend limit was not checked",
+  "@invoiceWarningContractCurrencyMismatch": {
+    "placeholders": {
+      "invoiceCurrency": {
+        "type": "String"
+      },
+      "contractNumber": {
+        "type": "String"
+      },
+      "contractCurrency": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown": "The invoice records no valid currency, so the spend limit in {contractCurrency} of contract {contractNumber} was not checked",
+  "@invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown": {
+    "placeholders": {
+      "contractNumber": {
+        "type": "String"
+      },
+      "contractCurrency": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningContractGlNotAllowed": "GL account {glAccount} is outside contract {contractNumber} allowed accounts",
   "@invoiceWarningContractGlNotAllowed": {
     "placeholders": {

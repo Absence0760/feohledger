@@ -626,6 +626,8 @@ export const messages = {
 	'invoices.warning.contractVendorMismatch': '請求書の仕入先が契約 {contractNumber} の仕入先と一致しません',
 	'invoices.warning.contractSpendLimitExceeded': '累計支出 {cumulativeSpend} が契約 {contractNumber} の上限 {spendLimit} を超えています',
 	'invoices.warning.contractSpendLimitExceededNotToExceed': '累計支出 {cumulativeSpend} が契約 {contractNumber} の上限 {spendLimit} を超えています（超過不可）',
+	'invoices.warning.contractCurrencyMismatch': '請求書は {invoiceCurrency}、契約 {contractNumber} は {contractCurrency} のため、支出上限を確認していません',
+	'invoices.warning.contractCurrencyMismatchInvoiceCurrencyUnknown': '請求書に有効な通貨が記録されていないため、契約 {contractNumber} の {contractCurrency} 建て支出上限を確認していません',
 	'invoices.warning.contractGlNotAllowed': '勘定科目 {glAccount} は契約 {contractNumber} で許可された科目の範囲外です',
 	'invoices.warning.selfCorrectionTotalReconciliation': '金額が一致しません: 小計（{subtotal}）+ 税（{tax}）+ 送料（{shipping}）− 割引（{discount}）= {expected} ですが、合計は {amount} です。',
 	'invoices.warning.selfCorrectionDateOrdering': '支払期限（{dueDate}）が請求日（{invoiceDate}）より前です。',

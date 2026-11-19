@@ -635,6 +635,8 @@ export const messages = {
 	'invoices.warning.contractVendorMismatch': 'O fornecedor da nota não corresponde ao do contrato {contractNumber}',
 	'invoices.warning.contractSpendLimitExceeded': 'O gasto acumulado {cumulativeSpend} excede o limite {spendLimit} do contrato {contractNumber}',
 	'invoices.warning.contractSpendLimitExceededNotToExceed': 'O gasto acumulado {cumulativeSpend} excede o limite {spendLimit} do contrato {contractNumber} (não excedível)',
+	'invoices.warning.contractCurrencyMismatch': 'A nota está em {invoiceCurrency}, mas o contrato {contractNumber} está em {contractCurrency} — o limite de gasto não foi verificado',
+	'invoices.warning.contractCurrencyMismatchInvoiceCurrencyUnknown': 'A nota não registra uma moeda válida, então o limite de gasto em {contractCurrency} do contrato {contractNumber} não foi verificado',
 	'invoices.warning.contractGlNotAllowed': 'A conta contábil {glAccount} está fora das contas permitidas do contrato {contractNumber}',
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Os valores não fecham: subtotal ({subtotal}) + imposto ({tax}) + frete ({shipping}) − desconto ({discount}) = {expected}, mas o total é {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'A data de vencimento ({dueDate}) é anterior à data da nota ({invoiceDate}).',

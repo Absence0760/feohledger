@@ -2666,6 +2666,11 @@ UNATTENDED_APPROVAL_PO_OVERBILLED = "po_overbilled"
 #: amended): the receipt evidence every receipt finding is measured against
 #: may be the typist's own, so no unattended door approves on it.
 UNATTENDED_APPROVAL_PO_RECEIPT_IMPLICATED = "po_receipt_implicated"
+#: The invoice carries an ``error`` contract finding: a not-to-exceed contract's
+#: limit is passed, or cannot be measured because the invoice is in another
+#: currency or none (decisions §TBD-contractfx). Like §469's warning it raises
+#: no hold, so no unattended door approves past it.
+UNATTENDED_APPROVAL_CONTRACT_CAP = "contract_cap"
 
 
 def _matched_po_ids(po_match: dict | None) -> list[str]:
@@ -2688,6 +2693,21 @@ def has_po_overbilling_warning(invoice: Invoice) -> bool:
     match, as :func:`po_match_hold_refusal` is."""
     return any(
         isinstance(w, dict) and w.get("type") == PO_OVERBILLED_TYPE
+        for w in (invoice.warnings or [])
+    )
+
+
+def has_contract_cap_warning(invoice: Invoice) -> bool:
+    """Whether the last refresh left an ``error`` contract-compliance finding
+    on ``invoice``. Only a ``not_to_exceed`` contract's spend-limit findings
+    carry that severity (``contract_spend_limit_exceeded_not_to_exceed``,
+    ``contract_currency_mismatch`` and its unknown-currency twin), so this is
+    "a hard cap is passed or could not be measured" (decisions §TBD-contractfx).
+    Read from ``invoice.warnings``, so asked after the refresh."""
+    return any(
+        isinstance(w, dict)
+        and w.get("type") == "contract_noncompliant"
+        and w.get("severity") == "error"
         for w in (invoice.warnings or [])
     )
 
@@ -2718,6 +2738,12 @@ async def po_match_hold_refusal(
       invoice and the others billing its PO pass the PO's total, or what has
       been received of it. It raises no hold, so only a person reading it may
       approve.
+    * an ``error`` contract finding (:func:`has_contract_cap_warning`,
+      decisions §TBD-contractfx): a not-to-exceed contract's limit is passed,
+      or the invoice's currency is not the contract's (or is missing) so the
+      limit was not measured. Not a PO-match finding, but every unattended
+      door already asks this function, so it answers here rather than adding a
+      second question at each.
     * a live hand-entered receipt on the matched PO whose recorder is
       implicated in the invoice or unknown (``receipts_clear_hold``, decisions
       §262, §470 amended). The receipt findings, per-invoice and cumulative,
@@ -2736,6 +2762,8 @@ async def po_match_hold_refusal(
         return UNATTENDED_APPROVAL_PO_HOLD_OPEN
     if has_po_overbilling_warning(invoice):
         return UNATTENDED_APPROVAL_PO_OVERBILLED
+    if has_contract_cap_warning(invoice):
+        return UNATTENDED_APPROVAL_CONTRACT_CAP
     if exception_segregation_enabled(org_settings) and not await receipts_clear_hold(
         db, invoice, _matched_po_ids(invoice.po_match)
     ):

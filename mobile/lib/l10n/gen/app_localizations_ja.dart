@@ -3299,6 +3299,23 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningContractCurrencyMismatch(
+    String invoiceCurrency,
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return '請求書は $invoiceCurrency、契約 $contractNumber は $contractCurrency のため、支出上限を確認していません';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return '請求書に有効な通貨が記録されていないため、契約 $contractNumber の $contractCurrency 建て支出上限を確認していません';
+  }
+
+  @override
   String invoiceWarningContractGlNotAllowed(
     String glAccount,
     String contractNumber,

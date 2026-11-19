@@ -178,6 +178,15 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'spendLimit': 'money',
     'currency': 'currency',
   },
+  'contract_currency_mismatch': {
+    'invoiceCurrency': 'text',
+    'contractNumber': 'text',
+    'contractCurrency': 'text',
+  },
+  'contract_currency_mismatch_invoice_currency_unknown': {
+    'contractNumber': 'text',
+    'contractCurrency': 'text',
+  },
   'contract_gl_not_allowed': {'glAccount': 'text', 'contractNumber': 'text'},
   'self_correction_total_reconciliation': {
     'subtotal': 'number',
@@ -800,6 +809,29 @@ String? _localizeWarningCode(
         cumulativeSpend,
         contractNumber,
         spendLimit,
+      );
+    // Invoice is in {invoiceCurrency} but contract {contractNumber} is in {contractCurrency} — its spend limit was not checked
+    case 'contract_currency_mismatch':
+      final invoiceCurrency = _text(p['invoiceCurrency'], currency);
+      if (invoiceCurrency == null) return null;
+      final contractNumber = _text(p['contractNumber'], currency);
+      if (contractNumber == null) return null;
+      final contractCurrency = _text(p['contractCurrency'], currency);
+      if (contractCurrency == null) return null;
+      return l.invoiceWarningContractCurrencyMismatch(
+        invoiceCurrency,
+        contractNumber,
+        contractCurrency,
+      );
+    // The invoice records no valid currency, so the spend limit in {contractCurrency} of contract {contractNumber} was not checked
+    case 'contract_currency_mismatch_invoice_currency_unknown':
+      final contractNumber = _text(p['contractNumber'], currency);
+      if (contractNumber == null) return null;
+      final contractCurrency = _text(p['contractCurrency'], currency);
+      if (contractCurrency == null) return null;
+      return l.invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+        contractNumber,
+        contractCurrency,
       );
     // GL account {glAccount} is outside contract {contractNumber} allowed accounts
     case 'contract_gl_not_allowed':

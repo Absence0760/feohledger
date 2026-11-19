@@ -633,6 +633,8 @@ export const messages = {
 	'invoices.warning.contractVendorMismatch': 'El proveedor de la factura no coincide con el del contrato {contractNumber}',
 	'invoices.warning.contractSpendLimitExceeded': 'El gasto acumulado {cumulativeSpend} supera el límite {spendLimit} del contrato {contractNumber}',
 	'invoices.warning.contractSpendLimitExceededNotToExceed': 'El gasto acumulado {cumulativeSpend} supera el límite {spendLimit} del contrato {contractNumber} (no superable)',
+	'invoices.warning.contractCurrencyMismatch': 'La factura está en {invoiceCurrency}, pero el contrato {contractNumber} está en {contractCurrency}; no se comprobó su límite de gasto',
+	'invoices.warning.contractCurrencyMismatchInvoiceCurrencyUnknown': 'La factura no registra una moneda válida, así que no se comprobó el límite de gasto en {contractCurrency} del contrato {contractNumber}',
 	'invoices.warning.contractGlNotAllowed': 'La cuenta contable {glAccount} está fuera de las cuentas permitidas del contrato {contractNumber}',
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Los importes no cuadran: subtotal ({subtotal}) + impuestos ({tax}) + envío ({shipping}) − descuento ({discount}) = {expected}, pero el total es {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'La fecha de vencimiento ({dueDate}) es anterior a la fecha de la factura ({invoiceDate}).',

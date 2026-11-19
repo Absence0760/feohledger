@@ -131,6 +131,10 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'contract_spend_limit_exceeded': 'invoices.warning.contractSpendLimitExceeded',
 	// Cumulative spend {cumulativeSpend} {currency} exceeds contract {contractNumber} limit {spendLimit} {currency} (not-to-exceed)
 	'contract_spend_limit_exceeded_not_to_exceed': 'invoices.warning.contractSpendLimitExceededNotToExceed',
+	// Invoice is in {invoiceCurrency} but contract {contractNumber} is in {contractCurrency} — its spend limit was not checked
+	'contract_currency_mismatch': 'invoices.warning.contractCurrencyMismatch',
+	// The invoice records no valid currency, so the spend limit in {contractCurrency} of contract {contractNumber} was not checked
+	'contract_currency_mismatch_invoice_currency_unknown': 'invoices.warning.contractCurrencyMismatchInvoiceCurrencyUnknown',
 	// GL account {glAccount} is outside contract {contractNumber} allowed accounts
 	'contract_gl_not_allowed': 'invoices.warning.contractGlNotAllowed',
 	// Amounts don't add up: subtotal ({subtotal}) + tax ({tax}) + shipping ({shipping}) − discount ({discount}) = {expected}, but total is {amount}.
@@ -391,6 +395,8 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'contract_vendor_mismatch': { contractNumber: 'text' },
 	'contract_spend_limit_exceeded': { cumulativeSpend: 'money', contractNumber: 'text', spendLimit: 'money', currency: 'currency' },
 	'contract_spend_limit_exceeded_not_to_exceed': { cumulativeSpend: 'money', contractNumber: 'text', spendLimit: 'money', currency: 'currency' },
+	'contract_currency_mismatch': { invoiceCurrency: 'text', contractNumber: 'text', contractCurrency: 'text' },
+	'contract_currency_mismatch_invoice_currency_unknown': { contractNumber: 'text', contractCurrency: 'text' },
 	'contract_gl_not_allowed': { glAccount: 'text', contractNumber: 'text' },
 	'self_correction_total_reconciliation': { subtotal: 'number', tax: 'number', shipping: 'number', discount: 'number', expected: 'number', amount: 'number' },
 	'self_correction_date_ordering': { dueDate: 'date', invoiceDate: 'date' },
