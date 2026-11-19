@@ -8,6 +8,7 @@
 	} from '#lib/types/supplierChat.ts';
 	import type { ChatMentionCandidate } from '#lib/api/supplierChat.ts';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 
@@ -30,6 +31,13 @@
 		onresolve?: () => Promise<void>;
 		onreopen?: () => Promise<void>;
 		loading?: boolean;
+		/** The thread could not be read: a localized message, rendered in
+		 *  place of the conversation. Without it a failed read has to pose as
+		 *  an empty thread ("No messages yet"), which tells the reader nobody
+		 *  has written — a claim the failed read never established. */
+		error?: string;
+		/** Re-read the thread. Pair with `error`: the failure offers Retry. */
+		onretry?: () => void;
 		/** Caller-supplied attachment download. Receives the on-wire file_url. */
 		ondownload?: (fileUrl: string, filename: string) => Promise<void> | void;
 	};
@@ -44,6 +52,8 @@
 		onresolve,
 		onreopen,
 		loading = false,
+		error,
+		onretry,
 		ondownload,
 	}: Props = $props();
 
@@ -245,7 +255,13 @@
 	</div>
 
 	<div class="chat-list" data-testid="chat-messages">
-		{#if loading && messages.length === 0}
+		{#if error && !loading}
+			{#if onretry}
+				<LoadError message={error} {onretry} testId="chat-load-error" />
+			{:else}
+				<p class="chat-empty" role="alert" data-testid="chat-load-error">{error}</p>
+			{/if}
+		{:else if loading && messages.length === 0}
 			<p class="chat-empty">Loading…</p>
 		{:else if messages.length === 0}
 			<p class="chat-empty">No messages yet. Start the conversation below.</p>
@@ -287,7 +303,11 @@
 		{/if}
 	</div>
 
-	{#if isAp && status === 'resolved'}
+	{#if error && !loading}
+		<!-- No composer over a thread that failed to load: replying blind to a
+		     conversation the reader cannot see is not a flow to offer. Retry
+		     first. -->
+	{:else if isAp && status === 'resolved'}
 		<p class="chat-resolved-note">This thread is resolved. Reopen it to post a new message.</p>
 	{:else}
 		<div class="chat-composer">

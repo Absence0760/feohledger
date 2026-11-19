@@ -23,6 +23,7 @@
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import SupplierChatThread from '#lib/components/chat/SupplierChatThread.svelte';
 	import type { PortalChatThread } from '#lib/types/supplierChat.ts';
 	import {
@@ -243,6 +244,10 @@
 	let expandedId = $state<string | null>(null);
 	let chatThreads = $state<Record<string, PortalChatThread | null>>({});
 	let chatLoading = $state<Record<string, boolean>>({});
+	// A failed thread read, per invoice. Kept apart from `chatThreads` so a
+	// failure is never dressed up as an empty conversation ("No messages yet")
+	// — which would tell the supplier nobody has written when the read failed.
+	let chatErrors = $state<Record<string, string>>({});
 
 	async function toggleChat(invoiceId: string) {
 		if (expandedId === invoiceId) {
@@ -257,13 +262,13 @@
 
 	async function loadChat(invoiceId: string) {
 		chatLoading = { ...chatLoading, [invoiceId]: true };
+		chatErrors = { ...chatErrors, [invoiceId]: '' };
 		try {
 			chatThreads = { ...chatThreads, [invoiceId]: await getPortalChatThread(invoiceId) };
 		} catch {
-			chatThreads = {
-				...chatThreads,
-				[invoiceId]: { invoice_id: invoiceId, status: 'open', messages: [] },
-			};
+			// Leave `chatThreads[invoiceId]` unset so re-expanding the row reads
+			// again, and say the read failed with a way to retry it.
+			chatErrors = { ...chatErrors, [invoiceId]: m('portal.invoices.chatLoadFailed') };
 		} finally {
 			chatLoading = { ...chatLoading, [invoiceId]: false };
 		}
@@ -420,19 +425,22 @@
 			/>
 		{/if}
 	{:else}
-		<table>
-			<thead>
-				<tr>
-					<th>{m('portal.invoices.col.invoiceNumber')}</th>
-					<th>{m('portal.invoices.col.submitted')}</th>
-					<th>{m('portal.invoices.col.invoiceDate')}</th>
-					<th>{m('portal.invoices.col.due')}</th>
-					<th class="num">{m('portal.invoices.col.amount')}</th>
-					<th>{m('portal.invoices.col.status')}</th>
-					<th class="actions-col"></th>
-				</tr>
-			</thead>
-			<tbody>
+		<!-- DataTable, not a bare <table>: seven columns cannot reflow at 320px,
+		     so the table scrolls inside its own named, keyboard-focusable region
+		     (WCAG 1.4.10 / 2.1.1) instead of pushing the whole page sideways. -->
+		<DataTable
+			ariaLabel={m('portal.invoices.tableAria')}
+			columns={[
+				{ label: m('portal.invoices.col.invoiceNumber') },
+				{ label: m('portal.invoices.col.submitted') },
+				{ label: m('portal.invoices.col.invoiceDate') },
+				{ label: m('portal.invoices.col.due') },
+				{ label: m('portal.invoices.col.amount'), class: 'right' },
+				{ label: m('portal.invoices.col.status') },
+				{ class: 'actions-col' }
+			]}
+		>
+			{#snippet body()}
 				{#each items as inv (inv.id)}
 					<tr
 						class="clickable"
@@ -465,7 +473,7 @@
 						<td>{formatDate(inv.submitted_at, m('portal.common.dash'))}</td>
 						<td>{formatDate(inv.invoice_date, m('portal.common.dash'))}</td>
 						<td>{formatDate(inv.due_date, m('portal.common.dash'))}</td>
-						<td class="num"><Money amount={inv.amount} currency={inv.currency} mono /></td>
+						<td class="right"><Money amount={inv.amount} currency={inv.currency} mono /></td>
 						<td>
 							<span class="status s-{inv.status}">{m(portalInvoiceStatusLabelKey(inv.status))}</span>
 							{#if inv.waiting_on}
@@ -536,6 +544,8 @@
 									members={[]}
 									templates={[]}
 									loading={chatLoading[inv.id] ?? false}
+									error={chatErrors[inv.id] || undefined}
+									onretry={() => loadChat(inv.id)}
 									onsend={chatSender(inv.id)}
 									ondownload={chatDownload}
 								/>
@@ -543,8 +553,8 @@
 						</tr>
 					{/if}
 				{/each}
-			</tbody>
-		</table>
+			{/snippet}
+		</DataTable>
 
 		{#if hasMore}
 			<div class="load-more-row">
@@ -608,38 +618,8 @@
 		cursor: pointer;
 		text-decoration: underline;
 	}
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		overflow: hidden;
-	}
-	th,
-	td {
-		text-align: left;
-		padding: 10px 12px;
-		font-size: 0.88rem;
-		border-bottom: 1px solid var(--border);
-	}
-	th {
-		background: var(--bg);
-		color: var(--text-muted);
-		font-weight: 500;
-		text-transform: uppercase;
-		font-size: 0.72rem;
-		letter-spacing: 0.04em;
-	}
-	tbody tr:last-child td {
-		border-bottom: none;
-	}
-	tr.clickable {
-		cursor: pointer;
-	}
-	tr.clickable:hover td {
-		background: var(--bg);
-	}
+	/* Table chrome (padding, borders, header, hover, `.clickable`, `.right`,
+	   `td.actions`) is app.css's `.grid-container`, owned by DataTable. */
 	tr.expanded td {
 		background: var(--bg);
 	}
@@ -666,10 +646,6 @@
 		background: var(--bg);
 		cursor: default;
 		padding: 14px 16px;
-	}
-	.num {
-		text-align: right;
-		font-variant-numeric: tabular-nums;
 	}
 	.status {
 		padding: 2px 8px;
@@ -728,17 +704,7 @@
 		opacity: 0.6;
 		cursor: default;
 	}
-	.actions-col {
-		width: 1%;
-	}
-	.actions {
-		white-space: nowrap;
-	}
-	/* Two per-row downloads (source file + generated e-invoice) sit side by
-	   side; without a gap they read as one control. */
-	.actions .file-btn + .file-btn {
-		margin-left: 6px;
-	}
+	/* The two per-row downloads are spaced by app.css's `td.actions > * + *`. */
 	.file-btn {
 		padding: 4px 12px;
 		border: 1px solid var(--border);

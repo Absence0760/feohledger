@@ -109,10 +109,13 @@ export const messages = {
 	'portal.invoices.einvoiceDownloadFailed': '電子請求書をダウンロードできませんでした。',
 	'portal.invoices.preparing': '準備しています…',
 	'portal.invoices.fileDownloadFailed': 'ダウンロードに失敗しました',
+	'portal.invoices.tableAria': '請求書一覧',
+	'portal.invoices.chatLoadFailed': '会話を読み込めませんでした。',
 
 	// ポータルの支払い (routes/portal/payments/+page.svelte)
 	'portal.payments.title': '支払い',
 	'portal.payments.loadFailed': '読み込みに失敗しました',
+	'portal.payments.tableAria': '支払い一覧',
 	'portal.payments.downloadFailed': 'ダウンロードに失敗しました',
 	'portal.payments.empty': 'まだ支払いはありません。',
 	'portal.payments.emptyHint': 'お客様が支払いを発行すると、ここに表示されます。',
@@ -172,6 +175,7 @@ export const messages = {
 	'portal.discounts.filter.captured': '取得済み',
 	'portal.discounts.filter.closed': '終了',
 	'portal.discounts.loadFailed': '読み込みに失敗しました',
+	'portal.discounts.tableAria': '割引オファー一覧',
 	'portal.discounts.acceptFailed': '承諾に失敗しました',
 	'portal.discounts.declineFailed': '辞退に失敗しました',
 	'portal.discounts.loadMore': 'さらに読み込む（{total}件中{shown}件）',
