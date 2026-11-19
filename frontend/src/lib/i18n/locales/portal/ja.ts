@@ -190,6 +190,9 @@ export const messages = {
 	'portal.discounts.tier': '{days}日 → {percent}',
 	'portal.discounts.accept': '承諾',
 	'portal.discounts.decline': '辞退',
+	'portal.discounts.declineConfirm': '辞退を確定',
+	'portal.discounts.emptyFiltered': 'このフィルターに一致する割引オファーはありません。',
+	'portal.discounts.clearFilter': 'すべてのオファーを表示',
 	'portal.discounts.dialog.title': '早期支払割引を承諾',
 	'portal.discounts.dialog.subtitle':
 		'承諾すると、早期の支払いと引き換えに割引を受けることを確認します。これにより資金が移動することはありません。支払いはお客様が引き続き処理します。',
