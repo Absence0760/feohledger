@@ -42,12 +42,6 @@ export function poStatusLabel(status: string, t: Translate): string {
 export const PO_NOT_INVOICEABLE = 'po_not_invoiceable';
 export const PO_TOTAL_UNVERIFIABLE = 'po_total_unverifiable';
 
-/** The portal PO list / detail row's verdict on "Create invoice" (issue #575).
- *  `undefined` (an older backend, or not loaded) is a refusal: fail closed. */
-export interface PortalPOFlipVerdict {
-	flip_verdict?: ActionRefusal;
-}
-
 /**
  * The sentence for a flip refusal, in the reader's language when this build
  * knows the code, else the server's English (`refusalText`). The unvouched

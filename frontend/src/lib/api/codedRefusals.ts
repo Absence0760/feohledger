@@ -338,6 +338,9 @@ const slugNamed =
 	};
 
 const BUILDERS: Record<string, Builder> = {
+	// `api/portal.py::po_flip_refusal` — a supplier's "Create invoice" on a PO
+	// that is cancelled / closed / voided / unissued (`DEAD_PO_STATUSES`).
+	po_not_invoiceable: fixed('portal.po.refusal.notInvoiceable'),
 	// `services/approval_chain.py`
 	approval_segregation: fixed('refusal.approvalSegregation'),
 	approval_segregation_receiver: fixed('refusal.approvalSegregationReceiver'),

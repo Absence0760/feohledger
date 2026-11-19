@@ -18,15 +18,14 @@
 	import {
 		PO_TOTAL_UNVERIFIABLE,
 		poFlipRefusalText,
-		poStatusLabel,
-		type PortalPOFlipVerdict,
+		poStatusLabel
 	} from '#lib/types/purchaseOrder.ts';
 
 	// `flip_verdict` is the server's answer to "would the flip mint an invoice
 	// from this PO?" (`api/portal.po_flip_refusal`) — read it, never restate
 	// the status rule here (frontend/docs/ui-patterns.md § read the server's
 	// verdict).
-	type PortalPO = PortalPOListItem & PortalPOFlipVerdict;
+	type PortalPO = PortalPOListItem;
 
 	let items = $state<PortalPO[]>([]);
 	// Server-side count of every PO the vendor owns, not the loaded page —
