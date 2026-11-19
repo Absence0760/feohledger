@@ -48,6 +48,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.models.invoice_status import OPEN_AP_STATUSES as _OPEN_AP_STATUS_MEMBERS
+from app.models.invoice_status import SETTLED_STATUSES as _SETTLED_STATUS_MEMBERS
 from app.utils.dates import utc_today
 
 # Canonical "open accounts-payable" invoice-status set — an approved liability
@@ -572,7 +573,13 @@ TOUCHLESS_CLEARED_STATUSES: tuple[str, ...] = OPEN_AP_STATUSES
 #              `sending_to_erp` (approved, then the ERP export blew up).
 # The durable `Invoice.approval_date` stamp (written on every approval path,
 # never cleared) is the evidence; an unstamped row is out of the population.
-TOUCHLESS_REVIEW_EVIDENCE_STATUSES: tuple[str, ...] = ("done", "paid", "failed")
+# That is the settled set (`models/invoice_status.SETTLED_STATUSES`) plus
+# `failed`: everything approval reaches beyond open AP, and the one status
+# reachable from both sides of review.
+TOUCHLESS_REVIEW_EVIDENCE_STATUSES: tuple[str, ...] = (
+    *(s.value for s in _SETTLED_STATUS_MEMBERS),
+    "failed",
+)
 
 # Review finished and the invoice did NOT clear — denominator only. A rejection
 # is a person's decision by construction, so it can never be touchless.
