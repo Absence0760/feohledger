@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 import { formatUtilization, overBudgetCount } from './budgetRollupSummary';
 import type { BudgetCurrencyRollup, BudgetRollup } from '#lib/types/budget.ts';
@@ -49,8 +50,18 @@ describe('overBudgetCount', () => {
 });
 
 describe('formatUtilization', () => {
+	beforeEach(() => setActiveFormatLocale('en-US'));
+	afterEach(() => setActiveFormatLocale(undefined));
+
 	it('renders a percentage', () => {
 		expect(formatUtilization('12.00')).toBe('12.00%');
+		expect(formatUtilization('104.50')).toBe('104.50%');
+	});
+
+	it('follows the active locale rather than pinning English punctuation', () => {
+		setActiveFormatLocale('fr-FR');
+		// Intl spaces the French sign with a narrow no-break space.
+		expect(formatUtilization('12.50')?.replace(/[\u00a0\u202f]/g, ' ')).toBe('12,50 %');
 	});
 
 	it('returns null for null — never "0%"', () => {
