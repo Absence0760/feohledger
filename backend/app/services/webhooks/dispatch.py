@@ -333,7 +333,9 @@ def _invoice_fields(invoice) -> dict:
         "invoice_number": getattr(invoice, "invoice_number", None),
         "vendor_name": getattr(invoice, "vendor_name", None),
         "amount": _money_str(getattr(invoice, "amount", None)),
-        "currency": getattr(invoice, "currency", None) or "USD",
+        # NULL = the invoice records no currency: sent as null, never a guessed
+        # USD (decisions §160 / §196 / §TBD-currency).
+        "currency": getattr(invoice, "currency", None) or None,
         "status": getattr(getattr(invoice, "status", None), "value", None),
     }
 
@@ -437,7 +439,7 @@ async def emit_exception_raised(
             invoice_number=getattr(invoice, "invoice_number", None),
             vendor_name=getattr(invoice, "vendor_name", None),
             amount=_money_str(getattr(invoice, "amount", None)),
-            currency=getattr(invoice, "currency", None) or "USD",
+            currency=getattr(invoice, "currency", None) or None,
             link=f"/invoices/{inv_id}" if inv_id else "/exceptions",
         ).model_dump(),
     )

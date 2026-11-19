@@ -102,7 +102,7 @@ async def list_invoices(
             invoice_number=inv.invoice_number,
             vendor_name=inv.vendor_name,
             amount=inv.amount,
-            currency=inv.currency or "USD",
+            currency=inv.currency or None,
             status=inv.status.value if hasattr(inv.status, "value") else str(inv.status),
             invoice_date=inv.invoice_date,
             due_date=inv.due_date,
