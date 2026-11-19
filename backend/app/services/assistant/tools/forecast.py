@@ -1,7 +1,7 @@
 """``get_payment_forecast`` tool — projected AP outflow buckets.
 
 Reads the SAME commitment rows as the CFO cash-flow forecast and the copilot's
-planning tools (``app/api/analytics.py::_commitment_rows``) and buckets them
+planning tools (``services/ap_commitments.commitment_rows``) and buckets them
 with ``services.analytics.bucket_outflows``. It used to run its own query on
 the raw ``Invoice.due_date`` with a ``>= today`` bound and summed the raw
 ``Invoice.amount``, so it dropped every past-due invoice (the forecast
@@ -18,8 +18,8 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import _commitment_rows
 from app.services.analytics import bucket_outflows
+from app.services.ap_commitments import commitment_rows
 from app.services.assistant.tools._currency import resolve_org_currency
 from app.services.assistant.tools.schemas import (
     ForecastBucket,
@@ -51,7 +51,7 @@ async def get_payment_forecast(
     # The org's reporting currency: every row's amount is expressed in it, and
     # it is the currency the result is labelled with.
     currency = await resolve_org_currency(org_id, control_db)
-    commitment_rows = await _commitment_rows(
+    outflow_rows = await commitment_rows(
         db,
         today=today,
         horizon_days=_HORIZON_DAYS[params.horizon],
@@ -60,7 +60,7 @@ async def get_payment_forecast(
         reporting_currency=currency,
     )
 
-    buckets = bucket_outflows(commitment_rows, granularity=params.granularity, today=today)
+    buckets = bucket_outflows(outflow_rows, granularity=params.granularity, today=today)
 
     out_buckets: list[ForecastBucket] = []
     total = overdue = Decimal("0")

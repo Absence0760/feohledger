@@ -29,12 +29,12 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from app.api.analytics import _commitment_rows
 from app.api.pagination import PaginationParams
 from app.models.discount import DiscountOffer
 from app.models.entity import Entity
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentSchedule
+from app.services.ap_commitments import commitment_rows
 from app.services.discount_auto_trigger import _resolve_due_date
 from app.services.payment_schedules import latest_schedule, latest_schedules
 from app.utils.dates import utc_today
@@ -100,7 +100,7 @@ async def test_every_reader_picks_the_same_schedule_on_a_created_at_tie(realdb):
         offer = DiscountOffer(invoice_id=invoice_id)
         assert await _resolve_due_date(s, offer) == expected_due
 
-        rows = await _commitment_rows(s, today=utc_today(), horizon_days=90, include_pending=False)
+        rows = await commitment_rows(s, today=utc_today(), horizon_days=90, include_pending=False)
         (row,) = [r for r in rows if r["invoice_id"] == str(invoice_id)]
         assert row["due_date"] == expected_due
 

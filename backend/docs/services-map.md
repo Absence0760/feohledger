@@ -8,6 +8,15 @@ Adapter subdirectories (`*_adapters/`) are documented separately in
 `backend/CLAUDE.md` § Adapter patterns. Background sweeps are in
 `backend/docs/background-sweeps.md`.
 
+**A service never imports a router.** Dependencies point from `app/api/` into
+`app/services/`, not back: a helper or constant a service needs lives in a
+service, and the router imports it from there. The only `app.api` modules a
+service or util may import are `refusals`, `deps` and `permissions`, the
+request-layer vocabulary that defines no route. `tests/test_services_do_not_import_routers.py`
+scans every module under `app/services/` and `app/utils/` (nested imports
+included) and keeps a per-file list of the router imports still to clear; that
+list may only shrink.
+
 | Service | What it does |
 |---------|-------------|
 | `workflow_engine.py` | Invoice state machine with valid transitions, step orchestration |
@@ -65,7 +74,8 @@ Adapter subdirectories (`*_adapters/`) are documented separately in
 | `workflow_experiments.py` | A/B testing of workflow rules — **pure** deterministic A/B assignment (`assign_variant`: stable hash of invoice id + experiment id, ratio-honouring, no clock/randomness) + per-variant metrics + winner call (`compute_experiment_results`: time-to-approval / touchless / exception / rejection, "not enough data yet" state, no LLM). The DB-touching assignment hook is `workflow_experiments_runtime.py` (`maybe_assign_experiment_variant`, called by `workflow_engine.create_workflow_instance`, best-effort, freezes the variant config onto the snapshot + records the assignment + audit row). See `backend/docs/adaptive-workflows.md` § A/B testing. |
 | `supplier_chat.py` | Embedded per-invoice supplier chat — lazy thread create, static `CHAT_TEMPLATES`, the org `supplier_chat.enabled` flag read, and the notification (AP managers / @mentions) + direct supplier portal-link email helpers shared by the AP (`api/invoices.py`) and portal (`api/portal.py`) routes. See `backend/docs/supplier-chat.md`. |
 | `payment_schedules.py` | Which `PaymentSchedule` row is an invoice's schedule: the newest, `created_at` then `id` descending (`LATEST_SCHEDULE_ORDER`, `latest_schedule`). Read by the cash forecast, the discount auto-capture sweep and the per-invoice ROI so they cannot pick different rows of a same-transaction tie (issue #575, `tests/test_payment_schedule_latest.py`). `latest_schedules()` is the same rule as a `DISTINCT ON` alias for joining: the payment queue page, its early-pay savings rollup and the dashboard discount-capture tile join it, never the table, so an invoice with two schedule rows is one queue row and one discount; that test file also fails any `.join(PaymentSchedule, …)` under `app/` |
-| `open_ap_due.py` | When the open AP falls due, stated once: the outflow population (`COMMITTED_STATUSES` = open AP, `PENDING_STATUSES` = in review), `latest_schedule_subquery()` + `effective_due_date()` (latest schedule's due date, else the invoice's) and `is_overdue()` (strictly before today). Read by the cash-flow forecast (`api/analytics._commitment_rows`, so the /cfo overdue card) and by `GET /api/dashboard`'s `overdue_*` / `due_soon_*`, so the two cannot count different invoices |
+| `open_ap_due.py` | When the open AP falls due, stated once: the outflow population (`COMMITTED_STATUSES` = open AP, `PENDING_STATUSES` = in review), `latest_schedule_subquery()` + `effective_due_date()` (latest schedule's due date, else the invoice's) and `is_overdue()` (strictly before today). Read by the cash-flow forecast (`ap_commitments.commitment_rows`, so the /cfo overdue card) and by `GET /api/dashboard`'s `overdue_*` / `due_soon_*`, so the two cannot count different invoices |
+| `ap_commitments.py` | **The open-AP commitment rows and the aging snapshot.** `commitment_rows` shapes open invoices into the reporting-currency, overdue-flagged rows `services.analytics.bucket_outflows` consumes: the CFO forecast / what-if / cash position, the copilot routes and planning tools, `get_payment_forecast`, the shortfall sweep and the scheduled `cashflow_forecast` report all read it. `aging_snapshot_buckets` is the one five-band builder behind the `aging_snapshot` export and the emailed report. Moved out of `api/analytics` so no service imports a router |
 | `discount_roi.py` | Pure annualized-return ROI primitive for early-pay discounts (cost-of-forgoing-discount APR; days accelerated = net due − discount deadline). Shared by the optimizer, the auto-capture sweep, and the per-invoice ROI endpoint. See `backend/docs/dynamic-discounting.md`. |
 | `discount_offers.py` | `DiscountOffer` tier selection + savings math + lifecycle mutators (accept/decline/capture/expire) + bulk-vendor offer builder. Pure; never commits. |
 | `discount_optimizer.py` | Ranks open offers by APR and greedily selects the highest-yield worthwhile ones within a cash budget (capture vs. cash preservation). Pure. |

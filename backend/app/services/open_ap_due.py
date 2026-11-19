@@ -3,7 +3,7 @@ what "overdue" means.
 
 Two surfaces count overdue AP, and they must count the same rows:
 
-* the cash-flow forecast (`api/analytics._commitment_rows`), and with it the
+* the cash-flow forecast (`ap_commitments.commitment_rows`), and with it the
   /cfo "Overdue (owed now)" card (decisions §440, §449), the cash-position
   curve, the what-if, the copilot tools and the shortfall sweep;
 * `GET /api/dashboard`'s `overdue_count` / `overdue_total` and

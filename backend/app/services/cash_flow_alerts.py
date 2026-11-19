@@ -14,7 +14,7 @@ Every tick:
   2. Skip any org with no persisted ``settings.cashflow.min_balance_threshold``
      — the threshold IS the opt-in. Without one there is no line to breach and
      nothing to say.
-  3. Build the org-wide commitment rows (the SAME ``_commitment_rows`` the CFO
+  3. Build the org-wide commitment rows (the SAME ``ap_commitments.commitment_rows`` the CFO
      dashboard and the copilot use), bucket them weekly over the configured
      horizon, resolve the opening balance through the shared
      ``services.cashflow.resolve_opening_balance`` (so an alert can never start
@@ -69,7 +69,6 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api.analytics import _commitment_rows
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
 from app.db_engine import create_async_engine
@@ -80,6 +79,7 @@ from app.services.analytics import (
     compute_cash_position,
     detect_threshold_breaches,
 )
+from app.services.ap_commitments import commitment_rows
 from app.services.cashflow import (
     resolve_cash_thresholds,
     resolve_opening_balance,
@@ -199,7 +199,7 @@ async def _project_tenant(
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with factory() as db:
-            rows = await _commitment_rows(
+            rows = await commitment_rows(
                 db,
                 today=ref_today,
                 horizon_days=settings.cashflow_shortfall_alerts_horizon_days,

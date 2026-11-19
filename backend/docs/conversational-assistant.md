@@ -117,9 +117,9 @@ float). Params clamp limits so an odd model arg can't request an unbounded scan.
 | Tool | Wraps | Returns |
 |------|-------|---------|
 | `list_invoices` | filtered `select(Invoice)` (entity-scoped) | invoice summaries + total + applied filters |
-| `get_vendor_spend` | `services.analytics.compute_supplier_concentration` (statuses from `app/api/analytics._COMMITTED_STATUSES`) | top-N vendors + share %, reporting currency |
+| `get_vendor_spend` | `services.analytics.compute_supplier_concentration` (statuses from `services/open_ap_due.COMMITTED_STATUSES`) | top-N vendors + share %, reporting currency |
 | `list_pending_approvals` | `ready_for_review` invoices ⋈ active approval `WorkflowStep` | approval-queue rows (`assignee=me\|anyone`) |
-| `get_payment_forecast` | `api/analytics._commitment_rows` → `services.analytics.bucket_outflows` (the CFO forecast's own rows: reporting currency, latest payment schedule, past-due AP carried into the first bucket) | due-dated outflow buckets + total, with the `overdue` slice named |
+| `get_payment_forecast` | `ap_commitments.commitment_rows` → `services.analytics.bucket_outflows` (the CFO forecast's own rows: reporting currency, latest payment schedule, past-due AP carried into the first bucket) | due-dated outflow buckets + total, with the `overdue` slice named |
 | `find_invoices_by_text` | `services.rag.retrieve_similar` (pgvector; mock embeddings by default) | similar invoices + non-PII snippet |
 | `get_cashflow_forecast` | cash-flow copilot (`tools/cashflow.py`) | projected outflow by period: committed / pending / discount-eligible |
 | `get_cash_position` | cash-flow copilot (`tools/cashflow.py`) | running balance per period + first shortfall |

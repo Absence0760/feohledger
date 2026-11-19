@@ -191,7 +191,6 @@ def test_financially_locked_reads_the_wire_string_too():
 
 
 def test_consumers_read_the_owner():
-    from app.api import analytics as api_analytics
     from app.api import invoice_entry
     from app.api import invoices as api_invoices
     from app.api import payments as api_payments
@@ -199,6 +198,7 @@ def test_consumers_read_the_owner():
     from app.api import vendors as api_vendors
     from app.services import analytics as svc_analytics
     from app.services import (
+        ap_commitments,
         budget_service,
         csv_import,
         erp_status_sync,
@@ -217,7 +217,7 @@ def test_consumers_read_the_owner():
     assert gl_recode._IMMUTABLE_STATUSES is POST_APPROVAL_LOCKED_STATUSES
     assert invoice_warnings._PRE_APPROVAL_STATUSES is PRE_APPROVAL_STATUSES
     assert svc_analytics.OPEN_AP_STATUSES == tuple(s.value for s in OPEN_AP_STATUSES)
-    assert api_analytics._COMMITTED_STATUSES == svc_analytics.OPEN_AP_STATUSES
+    assert ap_commitments.COMMITTED_STATUSES == svc_analytics.OPEN_AP_STATUSES
     assert set(budget_service.REALISED_INVOICE_STATUSES) == set(APPROVED_OR_BEYOND_STATUSES)
     assert api_statement_recon._LEDGER_EXCLUDED_STATUSES is SETTLED_STATUSES
     assert retention_sweep._ARCHIVABLE_INVOICE_STATES is SETTLED_STATUSES

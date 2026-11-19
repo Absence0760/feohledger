@@ -629,7 +629,7 @@ _COLLAPSING_REDUCERS = {
 }
 
 #: The row-at-a-time CONVERTER. Unlike the reducers above it has legitimate
-#: uses — projecting one output row per input row (`_commitment_rows`' cash
+#: uses — projecting one output row per input row (`commitment_rows`' cash
 #: commitments, the dashboard's ten upcoming payments). What is never
 #: legitimate is using it to build a per-KEY TOTAL, because that is an
 #: aggregate a `GROUP BY` should have produced.

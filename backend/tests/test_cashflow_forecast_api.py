@@ -226,7 +226,7 @@ async def test_forecast_include_pending_false_drops_pipeline(realdb):
 async def _seed_overdue_probe(realdb) -> date:
     """The followups probe: an approved USD 1,000 invoice due YESTERDAY and an
     approved USD 200 invoice due in five days. Returns the server's `today`
-    (UTC — the clock `_commitment_rows` runs on), so the dates cannot straddle
+    (UTC — the clock `commitment_rows` runs on), so the dates cannot straddle
     a local midnight."""
     from app.utils.dates import utc_today
 
@@ -879,7 +879,7 @@ async def test_forecast_outflows_are_in_the_reporting_currency(realdb):
     """A foreign-currency invoice must contribute its REPORTING amount, not
     its raw face value.
 
-    `_commitment_rows` used to select `Invoice.amount` — the invoice's own
+    `commitment_rows` used to select `Invoice.amount` — the invoice's own
     currency — with no conversion, while every consumer subtracts those rows
     from an opening balance that `cashflow.resolve_opening_balance` guarantees
     is in the reporting currency (it REFUSES a provider balance in any other,
@@ -940,7 +940,7 @@ async def test_forecast_outflows_are_in_the_reporting_currency(realdb):
 
 
 async def test_two_payment_schedules_do_not_double_count_the_invoice(realdb):
-    """`_commitment_rows` fanned an invoice out to one row per `PaymentSchedule`.
+    """`commitment_rows` fanned an invoice out to one row per `PaymentSchedule`.
 
     The bare `outerjoin(PaymentSchedule)` returned a row per schedule and the
     loop appended a commitment row for each, so a two-schedule invoice was

@@ -2,7 +2,7 @@
 
 Nothing stops an invoice carrying more than one schedule row, and three
 readers each answered "which one?" themselves: the cash-flow forecast
-(`api/analytics._commitment_rows`, newest by `created_at` then `id`), the
+(`ap_commitments.commitment_rows`, newest by `created_at` then `id`), the
 discount auto-capture sweep (`discount_auto_trigger._resolve_due_date`) and the
 per-invoice early-pay ROI (`api/discounts.invoice_roi`) — the last two by
 `created_at` alone. Two rows written in one transaction share `created_at`
