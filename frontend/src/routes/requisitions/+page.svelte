@@ -29,6 +29,7 @@
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -69,6 +70,12 @@
 	let loading = $state(false);
 	let pageNum = $state(1);
 	let loadingMore = $state(false);
+	// Set by a failed page-1 load, cleared by a successful one. A failed load
+	// renders `ui/LoadError` (with a Retry) in the table's place: on its own the
+	// toast faded and left the empty-state line claiming nothing matched — or,
+	// on a re-load, the previous filter's rows standing as this one's answer.
+	// A failed load-more keeps the rows already shown and only toasts.
+	let errored = $state(false);
 
 	// The list is paged: `total` is the whole filtered set, so a footer that
 	// says "Showing all {total}" is only true once every row is loaded.
@@ -249,10 +256,12 @@
 			requisitions = opts.append ? appendUnique(requisitions, res.items) : res.items;
 			total = res.total;
 			pageNum = nextPage;
+			errored = false;
 		} catch (err) {
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// edit still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
+			if (!opts.append) errored = true;
 			toast(err instanceof Error ? err.message : m('requisitions.toast.loadFailed'), 'error');
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
@@ -458,6 +467,9 @@
 		<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
 	</div>
 
+	{#if errored}
+		<LoadError message={m('requisitions.empty.errored')} onretry={() => load()} testId="requisitions-error" />
+	{:else}
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={requisitions.length === 0}
@@ -527,8 +539,9 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	{/if}
 
-	{#if hasMore}
+	{#if hasMore && !errored}
 		<div class="load-more-row">
 			<button
 				class="btn-load-more"
@@ -540,7 +553,7 @@
 					: m('requisitions.loadMore', { shown: requisitions.length, total })}
 			</button>
 		</div>
-	{:else if total > 0}
+	{:else if total > 0 && !errored}
 		<div class="load-more-row">
 			<span class="load-more-end">{m('requisitions.showingAll', { total })}</span>
 		</div>

@@ -30,6 +30,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import LineDescription from '#lib/components/ui/LineDescription.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
@@ -144,6 +145,12 @@
 	let page = $state(1);
 	let loading = $state(true);
 	let loadingMore = $state(false);
+	// Set by a failed page-1 load, cleared by a successful one. A failed load
+	// renders `ui/LoadError` (with a Retry) in the table's place: on its own the
+	// toast faded and left the empty-state line claiming nothing matched — or,
+	// on a re-load, the previous filter's rows standing as this one's answer.
+	// A failed load-more keeps the rows already shown and only toasts.
+	let errored = $state(false);
 
 	let detailId = $state<string | null>(null);
 	let detail = $state<GRDetail | null>(null);
@@ -251,9 +258,11 @@
 			grs = opts.append ? appendUnique(grs, data.items) : data.items;
 			total = data.total;
 			page = nextPage;
+			errored = false;
 		} catch (err) {
 			// `isCurrentRequest`, not `canCommit`: only the newest request reports.
 			if (!listSequence.isCurrentRequest(token)) return;
+			if (!opts.append) errored = true;
 			toast(err instanceof Error ? err.message : m('goodsReceipts.toast.loadListFailed'), 'error');
 		} finally {
 			// Both flags belong to the newest request: an append used to clear
@@ -580,6 +589,13 @@
 			role="tabpanel"
 			aria-labelledby="goods-receipts-tab-receipts"
 		>
+			{#if errored}
+				<LoadError
+					message={m('goodsReceipts.empty.errored')}
+					onretry={() => loadGRs()}
+					testId="goods-receipts-error"
+				/>
+			{:else}
 			<DataTable
 				columns={COLUMNS}
 				isEmpty={grs.length === 0}
@@ -611,8 +627,9 @@
 					{/each}
 				{/snippet}
 			</DataTable>
+			{/if}
 
-			{#if hasMore}
+			{#if hasMore && !errored}
 				<div class="load-more-row">
 					<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
 						{loadingMore
@@ -620,7 +637,7 @@
 							: m('goodsReceipts.loadMore', { shown: grs.length, total })}
 					</button>
 				</div>
-			{:else if total > 0}
+			{:else if total > 0 && !errored}
 				<div class="load-more-row">
 					<span class="load-more-end">{m('goodsReceipts.showingAll', { total })}</span>
 				</div>

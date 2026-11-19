@@ -432,7 +432,7 @@
 					: m('contracts.loadMore', { shown: contractStore.all.length, total: contractStore.total })}
 			</button>
 		</div>
-	{:else if contractStore.total > 0}
+	{:else if contractStore.total > 0 && !contractStore.errored}
 		<div class="load-more-row">
 			<span class="load-more-end">{m('contracts.showingAll', { total: contractStore.total })}</span>
 		</div>
