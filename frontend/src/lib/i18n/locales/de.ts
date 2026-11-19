@@ -1936,7 +1936,6 @@ export const messages = {
 		'Für die gesamte Gruppe antworten statt nur für die in der Seitenleiste gewählte Einheit.',
 	'cashFlow.saved.heading': 'Gespeicherte Pläne',
 	'cashFlow.saved.refresh': 'Aktualisieren',
-	'cashFlow.saved.loading': 'Wird geladen…',
 	'cashFlow.saved.empty': 'Noch keine gespeicherten Pläne. Speichern Sie einen Planvorschlag, um ihn mit den tatsächlichen Zahlungen zu vergleichen.',
 	'cashFlow.saved.loadError': 'Gespeicherte Pläne konnten nicht geladen werden.',
 	'cashFlow.saved.deleteError': 'Der Plan konnte nicht gelöscht werden.',
@@ -1961,7 +1960,6 @@ export const messages = {
 	'cfo.exportCsv': 'CSV exportieren',
 	'cfo.error.loadFailed': 'Liquiditätsdaten konnten nicht geladen werden',
 	'cfo.error.exportFailed': 'CSV konnte nicht exportiert werden',
-	'cfo.loading': 'Wird geladen…',
 	'cfo.control.granularity': 'Granularität',
 	'cfo.control.horizon': 'Zeithorizont',
 	'cfo.control.horizonDays': '{days}T',
@@ -2065,7 +2063,6 @@ export const messages = {
 	'cfo.position.empty': 'Keine prognostizierten Abflüsse in diesem Zeitraum.',
 
 	'cfoMetrics.heading': 'CFO-Kennzahlen',
-	'cfoMetrics.loading': 'Wird geladen…',
 	'cfoMetrics.loadFailed': 'CFO-Kennzahlen konnten nicht geladen werden',
 	'cfoMetrics.kpi.dpo': 'Tage Verbindlichkeiten (DPO)',
 	'cfoMetrics.kpi.ccc': 'Cash-Conversion-Zyklus',
@@ -3302,7 +3299,6 @@ export const messages = {
 	'byEntity.col.openPos': 'Offene Bestellungen',
 	'byEntity.tag.default': 'Standard',
 	'byEntity.consolidated': 'Konsolidiert',
-	'byEntity.loading': 'Wird geladen…',
 	'byEntity.loadFailed': 'Aufschlüsselung nach Einheit konnte nicht geladen werden',
 	'byEntity.unconverted':
 		'Ausstehend enthält {n, plural, one {# offene Rechnung} other {# offene Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',

@@ -25,6 +25,7 @@
 	} from '#lib/api/vendors.ts';
 	import { vendorStatusLabelKey, type VendorCluster } from '#lib/types/vendor.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { consolidationReasonLabel } from '#lib/utils/vendorConsolidation.ts';
 	import { formatCount } from '#lib/utils/count.ts';
@@ -137,7 +138,7 @@
 	<p class="hint muted">{m('vendors.consolidation.hint')}</p>
 
 	{#if loading}
-		<p class="muted state">{m('vendors.consolidation.loading')}</p>
+		<LoadingState label={m('vendors.consolidation.loading')} />
 	{:else if loadError}
 		<p class="muted state" role="alert">{m('vendors.consolidation.loadFailed')}</p>
 	{:else if clusters.length === 0}

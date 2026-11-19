@@ -988,7 +988,6 @@ export const enSettings = {
 	'admin.partner.join.generate': 'Generate link code',
 	'admin.partner.join.copy': 'Copy',
 	'admin.partner.join.expiresIn': 'Expires in {minutes} min',
-	'admin.partner.loading': 'Loading…',
 	'admin.partner.loadFailed': 'Failed to load partner overview.',
 	'admin.partner.notPartner':
 		'This workspace does not administer any child tenants yet. When a tenant is linked to this workspace as a partner, its children appear here.',

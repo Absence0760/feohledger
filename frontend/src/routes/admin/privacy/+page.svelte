@@ -20,6 +20,7 @@
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
 	import type { StepUpProof } from '#lib/stores/auth.svelte.ts';
 	import { ApiError } from '#lib/api.ts';
@@ -357,7 +358,7 @@
 
 	<h2 class="section-heading">{m('admin.privacy.history.title')}</h2>
 	{#if loading}
-		<p class="state" data-testid="privacy-loading">{m('common.loading')}</p>
+		<LoadingState testId="privacy-loading" />
 	{:else if error}
 		<LoadError message={error} onretry={loadRequests} testId="privacy-error" />
 	{:else}
@@ -577,11 +578,6 @@
 		color: var(--text-muted);
 		font-size: 0.85rem;
 		max-width: 760px;
-	}
-
-	.state {
-		color: var(--text-muted);
-		padding: 0.75rem 0;
 	}
 
 	.request-card {

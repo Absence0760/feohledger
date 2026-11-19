@@ -1936,7 +1936,6 @@ export const messages = {
 		'Répondre pour l’ensemble du groupe plutôt que pour l’entité sélectionnée dans la barre latérale.',
 	'cashFlow.saved.heading': 'Plans enregistrés',
 	'cashFlow.saved.refresh': 'Actualiser',
-	'cashFlow.saved.loading': 'Chargement…',
 	'cashFlow.saved.empty': 'Aucun plan enregistré. Enregistrez un plan proposé pour le comparer aux paiements réels.',
 	'cashFlow.saved.loadError': 'Impossible de charger les plans enregistrés.',
 	'cashFlow.saved.deleteError': 'Impossible de supprimer ce plan.',
@@ -1961,7 +1960,6 @@ export const messages = {
 	'cfo.exportCsv': 'Exporter en CSV',
 	'cfo.error.loadFailed': 'Échec du chargement des données de trésorerie',
 	'cfo.error.exportFailed': 'Impossible d\'exporter le CSV',
-	'cfo.loading': 'Chargement…',
 	'cfo.control.granularity': 'Granularité',
 	'cfo.control.horizon': 'Horizon',
 	'cfo.control.horizonDays': '{days}j',
@@ -2065,7 +2063,6 @@ export const messages = {
 	'cfo.position.empty': 'Aucune sortie projetée dans cette fenêtre.',
 
 	'cfoMetrics.heading': 'Indicateurs financiers',
-	'cfoMetrics.loading': 'Chargement…',
 	'cfoMetrics.loadFailed': 'Échec du chargement des indicateurs financiers',
 	'cfoMetrics.kpi.dpo': 'Délai de paiement fournisseurs (DPO)',
 	'cfoMetrics.kpi.ccc': 'Cycle de conversion de trésorerie',
@@ -3301,7 +3298,6 @@ export const messages = {
 	'byEntity.col.openPos': 'Commandes ouvertes',
 	'byEntity.tag.default': 'par défaut',
 	'byEntity.consolidated': 'Consolidé',
-	'byEntity.loading': 'Chargement…',
 	'byEntity.loadFailed': 'Échec du chargement de la ventilation par entité',
 	'byEntity.unconverted':
 		'En cours inclut au nominal {n, plural, one {# facture ouverte} other {# factures ouvertes}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',

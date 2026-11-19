@@ -11,6 +11,7 @@
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 
 	// RBAC parity with the backend: `GET /api/health/sweeps` is
 	// `require_roles(ROLE_ADMIN)`. Wait for `auth.user` to resolve before
@@ -186,7 +187,7 @@
 	</div>
 
 	{#if loading && report === null}
-		<p class="state" data-testid="sweep-health-loading">{m('common.loading')}</p>
+		<LoadingState testId="sweep-health-loading" />
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="sweep-health-error" />
 	{:else if report}
@@ -246,11 +247,6 @@
 		color: var(--text-muted);
 		font-size: 0.85rem;
 		max-width: 900px;
-	}
-
-	.state {
-		color: var(--text-muted);
-		padding: 0.75rem 0;
 	}
 
 	.kpi-row {

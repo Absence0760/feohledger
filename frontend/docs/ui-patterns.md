@@ -1135,6 +1135,7 @@ the `ui/` primitive in the Source column.
 | Field-level advisory | `.field-warning` (`role="status"`) | `ui/FieldWarning.svelte` |
 | Zero-data onboarding block | `.empty-state` (+ `data-testid`) | `ui/EmptyState.svelte` |
 | Setup steps with done states | `.setup-checklist` (`li[data-done]`) | `ui/SetupChecklist.svelte` |
+| Standalone loading block (page, panel, modal, card) | `<LoadingState label? testId?>` (`role="status"`, polite) | `ui/LoadingState.svelte` |
 | Failed load + Retry (page, or whole screen) | `.load-error` (`role="alert"` in a page) | `ui/LoadError.svelte` |
 | Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |

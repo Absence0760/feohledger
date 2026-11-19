@@ -96,6 +96,7 @@
 	} from '#lib/types/cardRebate.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
@@ -3642,7 +3643,7 @@
 		</div>
 
 		{#if quoteBusy}
-			<p class="state" data-testid="quotes-loading">{m('common.loading')}</p>
+			<LoadingState testId="quotes-loading" />
 		{:else if quoteError}
 			<!-- Persistent, not a toast. The 409 body names each provider's own
 			     machine reason, which is what tells an operator whether the corridor

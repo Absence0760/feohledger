@@ -48,6 +48,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	const PAGE_SIZE = 20;
@@ -607,7 +608,7 @@
 
 		<h3>{m('vendors.changeRequests.modal.proposed')}</h3>
 		{#if revealLoading}
-			<p class="muted">{m('common.loading')}</p>
+			<LoadingState />
 		{:else if revealError || !revealed}
 			<p class="muted">{m('vendors.changeRequests.modal.revealFailed')}</p>
 		{:else}

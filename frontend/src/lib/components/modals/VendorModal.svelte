@@ -37,6 +37,7 @@
 		type EnrichmentFieldSuggestion
 	} from '#lib/types/vendor.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { getVendorScore, type VendorScoreResponse } from '#lib/api/enrichment.ts';
@@ -489,7 +490,7 @@
 		<p class="hint muted">{m('vendors.modal.erp.hint')}</p>
 
 		{#if loadingErpLinks}
-			<p class="muted">{m('common.loading')}</p>
+			<LoadingState />
 		{:else if erpLinksError}
 			<!-- Its own state: a failed read is not a vendor with no links. -->
 			<p class="muted" data-testid="vendor-erp-links-error">{m('vendors.modal.erp.loadFailed')}</p>
@@ -585,7 +586,7 @@
 			<p class="hint muted">{m('vendors.modal.score.hint')}</p>
 
 			{#if loadingScore}
-				<p class="muted">{m('common.loading')}</p>
+				<LoadingState />
 			{:else if scoreError}
 				<!-- A failed read is its own state. Falling through to the
 				     "no history yet" copy below would report a vendor with a
@@ -703,7 +704,7 @@
 	<section class="panel">
 		<h3>{m('vendors.modal.screeningHistory')}</h3>
 		{#if loadingHistory}
-			<p class="muted">{m('common.loading')}</p>
+			<LoadingState />
 		{:else if history.length === 0}
 			<p class="muted">{m('vendors.modal.noChecks')}</p>
 		{:else}

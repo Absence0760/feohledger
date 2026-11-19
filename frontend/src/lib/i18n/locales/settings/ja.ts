@@ -961,7 +961,6 @@ export const messages = {
 	'admin.partner.join.generate': 'リンクコードを生成',
 	'admin.partner.join.copy': 'コピー',
 	'admin.partner.join.expiresIn': '{minutes} 分後に期限切れ',
-	'admin.partner.loading': '読み込み中…',
 	'admin.partner.loadFailed': 'パートナー概要を読み込めませんでした。',
 	'admin.partner.notPartner':
 		'このワークスペースはまだ子テナントを管理していません。テナントがパートナーとしてこのワークスペースにリンクされると、その子がここに表示されます。',

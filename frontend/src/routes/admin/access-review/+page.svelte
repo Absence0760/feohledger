@@ -13,6 +13,7 @@
 	import type { AccessReviewResponse } from '#lib/types/accessReview.ts';
 	import { roleLabelKey } from '#lib/types/admin.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 
 	// RBAC: the backend gates both /api/access-reviews routes to admin | cfo
 	// (`require_roles(ROLE_ADMIN, ROLE_CFO)`) — the reviewer privilege. Wait for
@@ -145,7 +146,7 @@
 	</div>
 
 	{#if loading}
-		<p class="state" data-testid="access-review-loading">{m('common.loading')}</p>
+		<LoadingState testId="access-review-loading" />
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="access-review-error" />
 	{:else if review}
@@ -196,11 +197,6 @@
 		margin: 0;
 		color: var(--success);
 		font-size: 0.85rem;
-	}
-
-	.state {
-		color: var(--text-muted);
-		padding: 0.75rem 0;
 	}
 
 	.kpi-row {

@@ -23,6 +23,7 @@
 	import { formatCount } from '#lib/utils/count.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	// The published-address registry, not a literal typed here. All three
 	// `mailto:`s below read `billing@example.com` — the IANA-reserved TLD, which
 	// can never deliver — so every "contact us" on this page was a dead button.
@@ -371,7 +372,7 @@
 				<!-- The plan card's slot, held from first paint so the sections
 				     below (which load on their own) do not jump when it lands. -->
 				<section class="panel plan-card plan-pending" aria-busy="true" data-testid="billing-loading">
-					<p class="state">{m('billing.loading')}</p>
+					<LoadingState label={m('billing.loading')} />
 				</section>
 			{:else if !hasSubscription}
 				<!-- The org has no live subscription yet. Not `<EmptyState>`: its
@@ -597,7 +598,7 @@
 			{/if}
 
 			{#if pmLoading}
-				<p class="state" data-testid="billing-payment-methods-loading">{m('billing.pm.loading')}</p>
+				<LoadingState label={m('billing.pm.loading')} testId="billing-payment-methods-loading" />
 			{:else if pmError}
 				<LoadError
 					message={pmError}
@@ -632,7 +633,7 @@
 		<section class="list-section" aria-label={m('billing.invoices.aria')} data-testid="billing-invoices">
 			<h2 class="section-title">{m('billing.invoices.heading')}</h2>
 			{#if invoicesLoading}
-				<p class="state" data-testid="billing-invoices-loading">{m('billing.invoices.loading')}</p>
+				<LoadingState label={m('billing.invoices.loading')} testId="billing-invoices-loading" />
 			{:else if invoicesError}
 				<LoadError
 					message={invoicesError}
@@ -733,7 +734,7 @@
 			}}
 		>
 			{#if plansLoading}
-				<p class="state">{m('billing.plan.changeModal.loading')}</p>
+				<LoadingState label={m('billing.plan.changeModal.loading')} />
 			{:else if plansError}
 				<LoadError
 					message={plansError}

@@ -35,6 +35,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 
 	const PAGE_SIZE = 20;
 
@@ -347,7 +348,7 @@
 			{/if}
 		</div>
 	{:else if loading}
-		<p class="dash-loading">{m('exceptions.agents.loading')}</p>
+		<LoadingState label={m('exceptions.agents.loading')} />
 	{/if}
 
 	<section class="log-section" data-testid="agent-run-panel">
@@ -586,11 +587,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
-	}
-
-	.dash-loading {
-		color: var(--text-muted);
-		font-size: 0.9rem;
 	}
 
 	.accuracy-card {

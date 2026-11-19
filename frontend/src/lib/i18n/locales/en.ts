@@ -2081,7 +2081,6 @@ export const en = {
 		'Answer for the whole group rather than the entity selected in the sidebar.',
 	'cashFlow.saved.heading': 'Saved plans',
 	'cashFlow.saved.refresh': 'Refresh',
-	'cashFlow.saved.loading': 'Loading…',
 	'cashFlow.saved.empty': 'No saved plans yet. Save a proposed plan to compare it against what you actually pay.',
 	'cashFlow.saved.loadError': "Couldn't load saved plans.",
 	'cashFlow.saved.deleteError': "Couldn't delete that plan.",
@@ -2106,7 +2105,6 @@ export const en = {
 	'cfo.exportCsv': 'Export CSV',
 	'cfo.error.loadFailed': 'Failed to load cash-flow data',
 	'cfo.error.exportFailed': 'Could not export CSV',
-	'cfo.loading': 'Loading…',
 	'cfo.control.granularity': 'Granularity',
 	'cfo.control.horizon': 'Horizon',
 	'cfo.control.horizonDays': '{days}d',
@@ -2214,7 +2212,6 @@ export const en = {
 
 	// CFO metrics (lib/components/analytics/CfoMetrics.svelte, embedded in /cfo)
 	'cfoMetrics.heading': 'CFO metrics',
-	'cfoMetrics.loading': 'Loading…',
 	'cfoMetrics.loadFailed': 'Failed to load CFO metrics',
 	'cfoMetrics.kpi.dpo': 'Days payable outstanding',
 	'cfoMetrics.kpi.ccc': 'Cash conversion cycle',
@@ -3475,7 +3472,6 @@ export const en = {
 	'byEntity.col.openPos': 'Open POs',
 	'byEntity.tag.default': 'default',
 	'byEntity.consolidated': 'Consolidated',
-	'byEntity.loading': 'Loading…',
 	'byEntity.loadFailed': 'Failed to load per-entity breakdown',
 	'byEntity.unconverted':
 		'Outstanding includes {n, plural, one {# open invoice} other {# open invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',

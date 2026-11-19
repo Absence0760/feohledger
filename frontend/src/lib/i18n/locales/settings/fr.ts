@@ -971,7 +971,6 @@ export const messages = {
 	'admin.partner.join.generate': 'Générer un code de liaison',
 	'admin.partner.join.copy': 'Copier',
 	'admin.partner.join.expiresIn': 'Expire dans {minutes} min',
-	'admin.partner.loading': 'Chargement…',
 	'admin.partner.loadFailed': 'Échec du chargement de l\'aperçu partenaire.',
 	'admin.partner.notPartner':
 		'Cet espace de travail n\'administre encore aucun locataire enfant. Lorsqu\'un locataire est lié à cet espace de travail en tant que partenaire, ses enfants apparaissent ici.',

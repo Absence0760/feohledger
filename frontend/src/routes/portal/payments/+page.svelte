@@ -15,6 +15,7 @@
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import {
 		portalPaymentStatusLabelKey,
 		portalPaymentStatusTone,
@@ -205,7 +206,7 @@
 	/>
 
 	{#if loading && !items.length}
-		<div class="loading">{m('portal.common.loading')}</div>
+		<LoadingState label={m('portal.common.loading')} />
 	{:else if loadError}
 		<LoadError message={loadError} onretry={refresh} testId="portal-payments-load-error" />
 	{:else if !items.length}
@@ -310,14 +311,6 @@
 		cursor: default;
 	}
 	.empty,
-	.loading {
-		padding: 40px;
-		text-align: center;
-		background: var(--surface);
-		border: 1px dashed var(--border);
-		border-radius: 4px;
-		color: var(--text-muted);
-	}
 	.empty .hint {
 		font-size: 0.82rem;
 	}

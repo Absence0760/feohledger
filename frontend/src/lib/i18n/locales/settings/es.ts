@@ -971,7 +971,6 @@ export const messages = {
 	'admin.partner.join.generate': 'Generar código de vinculación',
 	'admin.partner.join.copy': 'Copiar',
 	'admin.partner.join.expiresIn': 'Caduca en {minutes} min',
-	'admin.partner.loading': 'Cargando…',
 	'admin.partner.loadFailed': 'No se pudo cargar el resumen de socios.',
 	'admin.partner.notPartner':
 		'Este espacio de trabajo aún no administra inquilinos secundarios. Cuando un inquilino se vincule a este espacio de trabajo como socio, sus secundarios aparecerán aquí.',

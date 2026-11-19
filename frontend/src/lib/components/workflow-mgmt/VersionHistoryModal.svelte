@@ -2,6 +2,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import type { WorkflowVersion, WorkflowDiff } from '#lib/types/workflow.ts';
@@ -110,7 +111,7 @@
 <Modal {open} ariaLabel={m('workflows.mgmt.ver.aria')} title={m('workflows.mgmt.ver.title', { name: workflowName })} width="lg" {onclose}>
 	<div class="vh-body">
 		{#if loading}
-			<p class="vh-status">{m('workflows.mgmt.ver.loading')}</p>
+			<LoadingState label={m('workflows.mgmt.ver.loading')} />
 		{:else if error}
 			<p class="vh-status vh-error">{error}</p>
 		{:else if versions.length === 0}

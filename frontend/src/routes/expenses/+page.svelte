@@ -98,6 +98,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
@@ -1974,7 +1975,7 @@
 	<Modal open ariaLabel={m('expenses.match.aria')} title={m('expenses.match.title')} width="sm" onclose={closeMatchPicker}>
 		<div class="match-picker">
 			{#if matchLoading}
-				<p class="muted">{m('expenses.match.loading')}</p>
+				<LoadingState label={m('expenses.match.loading')} />
 			{:else if matchSuggestions.length === 0}
 				<p class="muted">{m('expenses.match.empty')}</p>
 			{:else}

@@ -19,6 +19,7 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
@@ -424,7 +425,7 @@
 	{/snippet}
 
 	{#if !userLoaded}
-		<p class="loading">{m('common.loading')}</p>
+		<LoadingState />
 	{:else if !canRead}
 		<p class="loading">{m('discounts.redirecting')}</p>
 	{:else}

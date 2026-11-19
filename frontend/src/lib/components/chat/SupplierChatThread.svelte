@@ -14,6 +14,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 
@@ -291,7 +292,7 @@
 				<p class="chat-empty" role="alert" data-testid="chat-load-error">{error}</p>
 			{/if}
 		{:else if loading && messages.length === 0}
-			<p class="chat-empty">{m('common.loading')}</p>
+			<LoadingState />
 		{:else if messages.length === 0}
 			<p class="chat-empty">{m('supplierChat.empty')}</p>
 		{:else}

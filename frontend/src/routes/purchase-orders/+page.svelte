@@ -19,6 +19,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { invoiceStatusLabelKey } from '#lib/types/invoice.ts';
 	import { poStatusLabel, poStatusTone } from '#lib/types/purchaseOrder.ts';
@@ -454,7 +455,7 @@
 
 	<div class="modal-body">
 		{#if detailLoading}
-			<div class="loading">{m('common.loading')}</div>
+			<LoadingState />
 		{:else if detail}
 			<dl class="meta">
 				<dt>{m('purchaseOrders.modal.vendor')}</dt><dd>{detail.vendor_name ?? '—'}</dd>
@@ -697,12 +698,6 @@
 	.line-table .empty {
 		text-align: center;
 		padding: 40px;
-		color: var(--text-muted);
-	}
-
-	.loading {
-		padding: 40px;
-		text-align: center;
 		color: var(--text-muted);
 	}
 

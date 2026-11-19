@@ -22,6 +22,7 @@
 	import QuantityInput from '#lib/components/ui/QuantityInput.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatQuantityInput, isPositiveQuantity, parseQuantity } from '#lib/utils/quantity.ts';
 	import {
@@ -269,7 +270,7 @@
 		{/if}
 
 		{#if poLoading}
-			<p class="muted">{m('common.loading')}</p>
+			<LoadingState />
 		{:else if poError}
 			<p class="submit-error" role="alert">{poError}</p>
 		{:else if po}

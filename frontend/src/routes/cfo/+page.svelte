@@ -15,6 +15,7 @@
 	import { formatPeriod } from '#lib/utils/time.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { untrack } from 'svelte';
 	import { openingBalanceSkipKey } from './openingBalanceNotice';
@@ -350,7 +351,7 @@
 	{#if error}
 		<LoadError message={error} onretry={load} testId="cfo-load-error" />
 	{:else if loading}
-		<p class="loading">{m('cfo.loading')}</p>
+		<LoadingState testId="cfo-loading" />
 	{:else if forecast}
 
 		<!-- Forecast bar chart -->

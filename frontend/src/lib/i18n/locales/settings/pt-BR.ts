@@ -971,7 +971,6 @@ export const messages = {
 	'admin.partner.join.generate': 'Gerar código de vínculo',
 	'admin.partner.join.copy': 'Copiar',
 	'admin.partner.join.expiresIn': 'Expira em {minutes} min',
-	'admin.partner.loading': 'Carregando…',
 	'admin.partner.loadFailed': 'Falha ao carregar a visão geral de parceiros.',
 	'admin.partner.notPartner':
 		'Este espaço de trabalho ainda não administra inquilinos filhos. Quando um inquilino for vinculado a este espaço de trabalho como parceiro, seus filhos aparecerão aqui.',

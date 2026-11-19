@@ -12,6 +12,7 @@
 	import { formatDays } from '#lib/utils/duration.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import type { CfoAccrualsByCurrency, CfoAnalytics } from '#lib/types/analytics.ts';
 
@@ -166,7 +167,7 @@
 	{#if error}
 		<p class="cfm-error" role="alert">{error}</p>
 	{:else if loading && !data}
-		<p class="empty">{m('cfoMetrics.loading')}</p>
+		<LoadingState />
 	{:else if data}
 		{#if data.reporting_accounts_payable_balance.unconverted_count > 0}
 			<p class="cfm-skipped" data-testid="unconverted-ap-balance">
@@ -387,7 +388,7 @@
 
 <style>
 	/* This component is mounted standalone (not as a layout's routed children), so it needs its
-	   own copy of the .chart-card / .cf-bar* / .empty recipe rather than
+	   own copy of the .chart-card / .cf-bar* recipe rather than
 	   relying on the parent route's scoped <style> — Svelte scoped CSS never
 	   reaches into a child component's own template. Kept in sync with
 	   routes/cfo/+page.svelte's identical block by inspection. */
@@ -444,12 +445,6 @@
 		font-size: 0.82rem;
 		text-align: right;
 		font-variant-numeric: tabular-nums;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		text-align: center;
-		padding: 20px;
 	}
 
 	.cfm-error {

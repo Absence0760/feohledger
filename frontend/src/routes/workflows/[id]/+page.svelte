@@ -10,6 +10,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import type { MoneyAmount } from '#lib/utils/money.ts';
 	import { isMoneyInput } from '#lib/utils/moneyInput.ts';
@@ -157,7 +158,6 @@
 	}
 
 	let selectedStep = $derived(steps[selectedIndex] ?? null);
-
 
 	function makeStep(type: WorkflowStepType): WorkflowStep {
 		return {
@@ -313,7 +313,7 @@
 			{/snippet}
 		</LoadError>
 	{:else if !workflow}
-		<div class="loading">{m('common.loading')}</div>
+		<LoadingState />
 	{:else}
 		<header class="toolbar">
 			<div class="toolbar-left">
@@ -835,12 +835,6 @@
 	/* `.btn-cancel` is a button recipe; on a link it must not underline. */
 	.back-to-list {
 		text-decoration: none;
-	}
-
-	.loading {
-		padding: 60px 20px;
-		text-align: center;
-		color: var(--text-muted);
 	}
 
 	/* Toolbar */

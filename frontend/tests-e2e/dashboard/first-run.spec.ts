@@ -255,7 +255,7 @@ test.describe('dashboard — an empty entity on an established workspace', () =>
 		});
 		await page.reload();
 		await expect(page.locator('.kpi-row .kpi[data-kpi-state="value"]').first()).toBeVisible();
-		await expect(page.locator('p.loading')).toBeVisible();
+		await expect(page.getByTestId('dashboard-loading')).toBeVisible();
 		await expect(empty).toHaveCount(0);
 		await expect(page.getByText('No invoices for this entity yet')).toHaveCount(0);
 		release();

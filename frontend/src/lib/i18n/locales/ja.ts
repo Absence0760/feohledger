@@ -1896,7 +1896,6 @@ export const messages = {
 	'cashFlow.consolidated.hint': 'サイドバーで選択したエンティティではなく、グループ全体について回答します。',
 	'cashFlow.saved.heading': '保存済みプラン',
 	'cashFlow.saved.refresh': '再読み込み',
-	'cashFlow.saved.loading': '読み込み中…',
 	'cashFlow.saved.empty': '保存済みプランはまだありません。提案されたプランを保存すると、実際の支払いと比較できます。',
 	'cashFlow.saved.loadError': '保存済みプランを読み込めませんでした。',
 	'cashFlow.saved.deleteError': 'そのプランを削除できませんでした。',
@@ -1920,7 +1919,6 @@ export const messages = {
 	'cfo.exportCsv': 'CSVをエクスポート',
 	'cfo.error.loadFailed': 'キャッシュフローデータを読み込めませんでした',
 	'cfo.error.exportFailed': 'CSVをエクスポートできませんでした',
-	'cfo.loading': '読み込み中…',
 	'cfo.control.granularity': '粒度',
 	'cfo.control.horizon': '期間',
 	'cfo.control.horizonDays': '{days}日',
@@ -2023,7 +2021,6 @@ export const messages = {
 	'cfo.position.empty': 'この期間に予測される支出はありません。',
 
 	'cfoMetrics.heading': 'CFO指標',
-	'cfoMetrics.loading': '読み込み中…',
 	'cfoMetrics.loadFailed': 'CFO指標の読み込みに失敗しました',
 	'cfoMetrics.kpi.dpo': '買掛金支払日数 (DPO)',
 	'cfoMetrics.kpi.ccc': 'キャッシュ・コンバージョン・サイクル',
@@ -3242,7 +3239,6 @@ export const messages = {
 	'byEntity.col.openPos': '未処理の発注',
 	'byEntity.tag.default': '既定',
 	'byEntity.consolidated': '連結',
-	'byEntity.loading': '読み込み中…',
 	'byEntity.loadFailed': 'エンティティ別内訳の読み込みに失敗しました',
 	'byEntity.unconverted':
 		'未払いには、{currency} への為替レートが未確定の未決済請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',

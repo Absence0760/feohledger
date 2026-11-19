@@ -16,6 +16,7 @@
 	import { getPortalSummary, type PortalSummary } from '#lib/portalApi.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
@@ -69,7 +70,7 @@
 	</header>
 
 	{#if loading}
-		<p class="state">{m('portal.common.loading')}</p>
+		<LoadingState label={m('portal.common.loading')} />
 	{:else if error}
 		<!-- Distinct from the empty state: something failed, so offer a retry
 		     rather than a first-run call to action. -->
@@ -185,11 +186,6 @@
 
 	.subtitle {
 		margin: 4px 0 0;
-		color: var(--text-muted);
-		font-size: 0.9rem;
-	}
-
-	.state {
 		color: var(--text-muted);
 		font-size: 0.9rem;
 	}

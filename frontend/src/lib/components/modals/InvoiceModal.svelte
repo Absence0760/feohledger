@@ -28,6 +28,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { erpRefusalText } from '#lib/api/erpRefusals.ts';
 	import { invoiceWarningText, poMatchIssueText } from '#lib/api/invoiceWarnings.ts';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -1936,7 +1937,7 @@
 				{#if fileLoadError}
 					<div class="no-pdf">{m('invoices.modal.fileLoadError')}</div>
 				{:else if !fileBlobUrl}
-					<div class="no-pdf">{m('common.loading')}</div>
+					<div class="no-pdf"><LoadingState /></div>
 				{:else if isImage}
 					<img src={fileBlobUrl} alt={m('invoices.modal.imageAlt', { number: invoice.invoice_number })} class="invoice-image" />
 				{:else}

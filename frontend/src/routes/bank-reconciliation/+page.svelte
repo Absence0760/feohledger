@@ -63,6 +63,7 @@
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -555,7 +556,7 @@
 			</div>
 
 			{#if outstandingLoading}
-				<p class="state-note muted" data-testid="outstanding-loading">{m('common.loading')}</p>
+				<LoadingState testId="outstanding-loading" />
 			{:else if outstandingError}
 				<LoadError
 					message={m('bankRecon.error.load')}
@@ -899,11 +900,6 @@
 		margin: 2px 0 10px;
 		font-size: 0.8rem;
 		line-height: 1.45;
-	}
-
-	.state-note {
-		margin: 20px 0;
-		font-size: 0.9rem;
 	}
 
 	.truncated {

@@ -33,6 +33,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatPercent } from '#lib/utils/percent.ts';
 	import { formatCount } from '#lib/utils/count.ts';
@@ -541,7 +542,7 @@
 	onclose={() => (resultsFor = null)}
 >
 	{#if resultsLoading}
-		<p>{m('experiments.results.loading')}</p>
+		<LoadingState label={m('experiments.results.loading')} />
 	{:else if resultsError}
 		<p class="error-banner">{resultsError}</p>
 	{:else if results}
