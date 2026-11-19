@@ -14,8 +14,19 @@
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
+	import {
+		PO_TOTAL_UNVERIFIABLE,
+		poFlipRefusalText,
+		poStatusLabel,
+		type PortalPOFlipVerdict,
+	} from '#lib/types/purchaseOrder.ts';
 
-	type PortalPO = PortalPOListItem;
+	// `flip_verdict` is the server's answer to "would the flip mint an invoice
+	// from this PO?" (`api/portal.po_flip_refusal`) — read it, never restate
+	// the status rule here (frontend/docs/ui-patterns.md § read the server's
+	// verdict).
+	type PortalPO = PortalPOListItem & PortalPOFlipVerdict;
 
 	let items = $state<PortalPO[]>([]);
 	// Server-side count of every PO the vendor owns, not the loaded page —
@@ -148,19 +159,36 @@
 								label={m('portal.po.totalUnverifiable')}
 							/>
 						</td>
-						<td><span class="status s-{po.status}">{po.status}</span></td>
+						<td><span class="status">{poStatusLabel(po.status, m)}</span></td>
 						<td class="actions">
-							<!-- The server refuses to bill a total it cannot confirm
-							     (409); the note above the table says why. -->
-							<button
-								type="button"
-								class="flip-btn"
-								disabled={flipping === po.id || po.total_unverifiable}
-								aria-describedby={po.total_unverifiable ? 'po-unverifiable-note' : undefined}
-								onclick={() => flip(po)}
-							>
-								{flipping === po.id ? m('portal.po.creating') : m('portal.po.createInvoice')}
-							</button>
+							{#if isAllowed(po.flip_verdict)}
+								<button
+									type="button"
+									class="flip-btn"
+									disabled={flipping === po.id}
+									onclick={() => flip(po)}
+								>
+									{flipping === po.id ? m('portal.po.creating') : m('portal.po.createInvoice')}
+								</button>
+							{:else if po.flip_verdict?.code === PO_TOTAL_UNVERIFIABLE}
+								<!-- The supplier can act on this one (submit their own
+								     invoice), so the control stays, disabled, and the
+								     note above the table says why. -->
+								<button
+									type="button"
+									class="flip-btn"
+									disabled
+									aria-describedby="po-unverifiable-note"
+								>
+									{m('portal.po.createInvoice')}
+								</button>
+							{:else if po.flip_verdict}
+								<!-- A dead order: nothing to create, so no control —
+								     only the reason. -->
+								<span class="flip-refusal" data-testid="po-flip-refusal">
+									{poFlipRefusalText(po.flip_verdict, m)}
+								</span>
+							{/if}
 						</td>
 					</tr>
 				{/each}
@@ -252,6 +280,11 @@
 	.flip-btn:disabled {
 		opacity: 0.6;
 		cursor: default;
+	}
+	.flip-refusal {
+		color: var(--text-muted);
+		font-size: 0.82rem;
+		white-space: normal;
 	}
 	.status {
 		padding: 2px 8px;

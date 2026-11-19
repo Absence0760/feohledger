@@ -23409,3 +23409,32 @@ silently dollarised any caller that omitted it.
 invoice's. `adaptive_workflows` does call the locked-rate helper, and its
 code-less rows now come back `unconverted`. That keeps them out of the
 threshold statistics, which is the direction its docstring asks for.
+
+## §NEW-M1. A supplier cannot flip a dead purchase order, and closed counts as dead (round 23, 2026-11-18)
+
+**Problem.** The supplier portal offered "Create invoice" on every PO it
+listed, and `POST /api/portal/purchase-orders/{id}/flip` minted an invoice for
+`po.total` from a cancelled, voided or closed order — a payable against spend
+nobody committed.
+
+**Decision.** The flip refuses a PO in `models/procurement.DEAD_PO_STATUSES`
+with a coded 409 `po_not_invoiceable`, from one gate
+(`api/portal.po_flip_refusal`) that also ships per row as `flip_verdict`, and
+the page reads that verdict instead of a status list (issue #575).
+
+**Why the dead set, not the matcher's.** `UNMATCHABLE_PO_STATUSES` (§394)
+leaves `closed` matchable because the invoice being matched can itself be what
+closed the order. A flip is different: it creates a NEW invoice for the PO's
+WHOLE total, so on a closed (fully billed) order it is a second bill.
+`DEAD_PO_STATUSES` is the existing single definition of "no longer a live
+commitment" (budget commitments and the open-PO accrual read it), and is
+exactly what a flip bills against. No new list was added.
+
+**Replay first.** The gate runs after the per-PO idempotency short-circuit, so
+a retry of a flip that succeeded (and closed the PO) gets its invoice back, not
+a refusal.
+
+Tests: `backend/tests/test_portal_self_service.py` (each dead status refused
+with the coded detail and verdict, the replay after closing, the unvouched
+total's verdict); `frontend/src/lib/types/purchaseOrder.test.ts`;
+`frontend/tests-e2e/portal/portal.spec.ts` (a closed PO offers no control).
