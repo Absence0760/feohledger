@@ -852,11 +852,11 @@ abstract class AppLocalizations {
   /// **'No payments'**
   String get paymentsEmpty;
 
-  /// No description provided for @paymentsErrorPrefix.
+  /// Payments history first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Error: {error}'**
-  String paymentsErrorPrefix(String error);
+  /// **'Couldn\'t load payments: {error}'**
+  String paymentsLoadErrorPrefix(String error);
 
   /// No description provided for @paymentStatusPending.
   ///
@@ -1992,17 +1992,17 @@ abstract class AppLocalizations {
   /// **'No invoices awaiting payment'**
   String get payQueueEmpty;
 
-  /// No description provided for @payQueueError.
+  /// Pay screen, Queue tab: first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Could not load the payment queue'**
-  String get payQueueError;
+  /// **'Couldn\'t load the payment queue: {error}'**
+  String payQueueLoadErrorPrefix(String error);
 
-  /// No description provided for @payQueueRetry.
+  /// Pay screen, Runs tab: first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Retry'**
-  String get payQueueRetry;
+  /// **'Couldn\'t load payment runs: {error}'**
+  String payRunsLoadErrorPrefix(String error);
 
   /// No description provided for @payQueueDue.
   ///

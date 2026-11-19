@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -132,7 +133,7 @@ void main() {
       expect(store.queue, hasLength(2));
       expect(store.summary, isNotNull);
       expect(store.summary!.queueCount, 2);
-      expect(store.error, isNull);
+      expect(store.queueLoadError, isNull);
       expect(store.fromCache, isFalse);
     });
 
@@ -458,7 +459,7 @@ void main() {
       final message = await store.createRunFromSelection();
 
       expect(message, isNull);
-      expect(store.error, isNotNull);
+      expect(store.actionError, isNotNull);
       // Selection is preserved so the user can retry.
       expect(store.hasSelection, isTrue);
     });
@@ -527,7 +528,7 @@ void main() {
       );
 
       expect(await store.approveRun('run1'), isNull);
-      expect(store.error, 'Run is already CFO-approved');
+      expect(store.actionError, 'Run is already CFO-approved');
     });
 
     test('cancelRun posts to /cancel and returns the message', () async {
@@ -592,7 +593,7 @@ void main() {
       expect(store.isRecordOnly, isFalse,
           reason: 'unknown is not evidence of record-only');
       expect(store.queue, hasLength(1));
-      expect(store.error, isNull);
+      expect(store.queueLoadError, isNull);
     });
 
     test('a mode this build does not know fails closed too', () async {
@@ -737,7 +738,7 @@ void main() {
             })),
       );
       final detail = await store.loadRunRecordDetail('run1');
-      expect(detail.run.status, 'exported');
+      expect(detail.run.status, PaymentRunStatus.exported);
       expect(detail.recordOutside.allowed, isTrue);
     });
 
@@ -782,6 +783,183 @@ void main() {
       expect(posted!.url.path, '/api/payments/runs/run1/record-outside');
       expect(jsonDecode(posted!.body),
           {'reference': 'BATCH-9', 'paid_on': '2026-11-16'});
+    });
+  });
+
+  // Each tab has its own load error and a refused action has its own slot, so
+  // one failure can't put the wrong surface into an error state; each list is
+  // ordered by its own request sequence.
+  group('separate errors + request ordering', () {
+    MockClient runsFailClient() => MockClient((req) async {
+          final path = req.url.path;
+          if (path.contains('/payments/runs')) {
+            return _json({'detail': 'Runs unavailable'}, 500);
+          }
+          if (path.endsWith('/payments/queue')) {
+            return _json({
+              'items': [_queueItem('1')],
+              'total': 1,
+              'total_amount': 100.0,
+              'total_savings': 0.0,
+            });
+          }
+          if (path.endsWith('/payments/summary')) return _json(_summary);
+          return _json({});
+        });
+
+    test('a failed runs read is the Runs tab\'s error only', () async {
+      ApiClient().debugConfigure(client: runsFailClient());
+      await store.fetch();
+      await store.fetchRuns();
+
+      expect(store.runsLoadError, isA<ApiException>());
+      expect(store.queueLoadError, isNull);
+      expect(store.actionError, isNull);
+      expect(store.queue, hasLength(1));
+      expect(store.runsLoading, isFalse);
+    });
+
+    test('a failed queue read with no cache is the Queue tab\'s error only',
+        () async {
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (req.url.path.contains('/payments/runs')) {
+            return _json({'items': [], 'total': 0, 'page': 1});
+          }
+          throw Exception('offline');
+        }),
+      );
+      await store.fetch();
+      await store.fetchRuns();
+
+      expect(store.queueLoadError, isNotNull);
+      expect(store.runsLoadError, isNull);
+      expect(store.actionError, isNull);
+    });
+
+    test('a refused action is an actionError, never a load error', () async {
+      ApiClient().debugConfigure(
+        client: makeClient(
+          onPost: (req) => _json({'detail': 'Run is not a draft'}, 409),
+        ),
+      );
+      await store.fetch();
+      await store.fetchRuns();
+
+      expect(await store.cancelRun('run1'), isNull);
+
+      expect(store.actionError, 'Run is not a draft');
+      expect(store.queueLoadError, isNull);
+      expect(store.runsLoadError, isNull);
+    });
+
+    test('a slow, older runs read cannot overwrite a newer one', () async {
+      final slow = Completer<http.Response>();
+      var runsCalls = 0;
+      Map<String, dynamic> run(String id) => {
+            'id': id,
+            'status': 'draft',
+            'total_amount': 10.0,
+            'currency': 'USD',
+            'payment_count': 1,
+            'requires_cfo_approval': false,
+            'cfo_approved_at': null,
+            'created_at': '2026-01-10T12:00:00',
+          };
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          runsCalls++;
+          return runsCalls == 1
+              ? slow.future
+              : _json({'items': [run('new')], 'total': 1, 'page': 1});
+        }),
+      );
+
+      final first = store.fetchRuns();
+      await store.fetchRuns();
+      expect(store.runs.single.id, 'new');
+
+      slow.complete(_json({'items': [run('old')], 'total': 1, 'page': 1}));
+      await first;
+
+      expect(store.runs.single.id, 'new');
+      expect(store.runsLoading, isFalse);
+    });
+
+    test('a slow, older queue read cannot overwrite a newer one', () async {
+      final slowQueue = Completer<http.Response>();
+      var queueCalls = 0;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          final path = req.url.path;
+          if (path.endsWith('/payments/queue')) {
+            queueCalls++;
+            final items = [_queueItem(queueCalls == 1 ? 'old' : 'new')];
+            final body = _json({
+              'items': items,
+              'total': 1,
+              'total_amount': 100.0,
+              'total_savings': 0.0,
+            });
+            if (queueCalls == 1) {
+              return slowQueue.future.then((_) => body);
+            }
+            return body;
+          }
+          if (path.endsWith('/payments/summary')) return _json(_summary);
+          return _json({});
+        }),
+      );
+
+      final first = store.fetch();
+      await store.fetch();
+      expect(store.queue.single.id, 'new');
+
+      slowQueue.complete(http.Response('', 200));
+      await first;
+
+      expect(store.queue.single.id, 'new');
+      expect(store.loading, isFalse);
+    });
+
+    test('a queue refresh does not discard an in-flight runs read', () async {
+      final slowRuns = Completer<http.Response>();
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          final path = req.url.path;
+          if (path.contains('/payments/runs')) return slowRuns.future;
+          if (path.endsWith('/payments/queue')) {
+            return _json({
+              'items': [_queueItem('1')],
+              'total': 1,
+              'total_amount': 100.0,
+              'total_savings': 0.0,
+            });
+          }
+          if (path.endsWith('/payments/summary')) return _json(_summary);
+          return _json({});
+        }),
+      );
+
+      final runs = store.fetchRuns();
+      await store.fetch();
+      slowRuns.complete(_json({
+        'items': [
+          {
+            'id': 'r1',
+            'status': 'exported',
+            'total_amount': 10.0,
+            'currency': 'USD',
+            'payment_count': 1,
+            'created_at': '2026-01-10T12:00:00',
+          },
+        ],
+        'total': 1,
+        'page': 1,
+      }));
+      await runs;
+
+      expect(store.runs.single.id, 'r1');
     });
   });
 }

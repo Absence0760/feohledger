@@ -1,11 +1,16 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/scheduler.dart';
 
-import 'package:feohledger_mobile/api/api_client.dart';
-import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/payment.dart';
+import 'package:feohledger_mobile/stores/payment_store.dart';
 import 'package:feohledger_mobile/utils/money.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 
+/// Payment history. The list, its offline copy and its request ordering live
+/// in [PaymentStore]; the body is [AsyncListBody], so a failed first load
+/// offers Retry and a failed refresh over a loaded list says so.
 class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({super.key});
 
@@ -14,35 +19,14 @@ class PaymentsScreen extends StatefulWidget {
 }
 
 class _PaymentsScreenState extends State<PaymentsScreen> {
-  List<Payment> _payments = [];
-  bool _loading = true;
-  String? _error;
-
   @override
   void initState() {
     super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
+    // After the first frame: fetch() notifies, which must not happen while
+    // the tree is still building.
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      PaymentStore.instance.fetch();
     });
-    try {
-      final payments = await PaymentApi.list();
-      if (!mounted) return;
-      setState(() {
-        _payments = payments;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = describeApiError(e);
-        _loading = false;
-      });
-    }
   }
 
   @override
@@ -50,55 +34,51 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     final l = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(title: Text(l.paymentsTitle)),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Text(l.paymentsErrorPrefix(_error!)))
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: _payments.isEmpty
-                      ? Center(child: Text(l.paymentsEmpty))
-                      : ListView.separated(
-                          itemCount: _payments.length,
-                          separatorBuilder: (_, _) =>
-                              const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final p = _payments[index];
-                            final reference =
-                                p.reference ?? p.id.substring(0, 8);
-                            // The AUTHORIZED figure, in the currency the
-                            // joined invoice carries. `payments` has no
-                            // currency column of its own, and a null code
-                            // renders the bare figure — the org's reporting
-                            // currency is not what this payment moved.
-                            final amount = formatMoney(
-                              p.amount,
-                              currency: p.currency,
-                            );
-                            // One merged announcement for the whole payment row.
-                            return Semantics(
-                              label:
-                                  '$amount, '
-                                  '${p.method.label}, $reference, '
-                                  '${_statusLabel(l, p.status)}',
-                              excludeSemantics: true,
-                              child: ListTile(
-                                leading: _methodIcon(p.method),
-                                title: Text(
-                                  amount,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  '${p.method.label} • $reference',
-                                ),
-                                trailing: _statusChip(l, p.status),
-                              ),
-                            );
-                          },
-                        ),
-                ),
+      body: ListenableBuilder(
+        listenable: PaymentStore.instance,
+        builder: (context, _) {
+          final store = PaymentStore.instance;
+          final loadError = store.loadError;
+          return AsyncListBody<Payment>(
+            items: store.payments,
+            loading: store.loading,
+            hasError: loadError != null,
+            fromCache: store.fromCache,
+            errorMessage: loadError == null
+                ? ''
+                : describeLoadError(l, loadError, l.paymentsLoadErrorPrefix),
+            onRefresh: store.fetch,
+            empty: Text(l.paymentsEmpty, textAlign: TextAlign.center),
+            itemBuilder: (context, p) => _row(l, p),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _row(AppLocalizations l, Payment p) {
+    final reference = p.reference ?? p.id.substring(0, 8);
+    // The AUTHORIZED figure, in the currency the joined invoice carries.
+    // `payments` has no currency column of its own, and a null code renders
+    // the bare figure — the org's reporting currency is not what this
+    // payment moved. Formatted from the served string: never a double.
+    final amount = formatMoneyString(p.amountDisplay, currency: p.currency);
+    // One merged announcement for the whole payment row.
+    return Semantics(
+      label:
+          '$amount, '
+          '${p.method.label}, $reference, '
+          '${_statusLabel(l, p.status)}',
+      excludeSemantics: true,
+      child: ListTile(
+        leading: _methodIcon(p.method),
+        title: Text(
+          amount,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text('${p.method.label} • $reference'),
+        trailing: _statusChip(l, p.status),
+      ),
     );
   }
 

@@ -359,6 +359,34 @@ class PaymentSummary {
   }
 }
 
+/// A payment run's stored status, as `GET /api/payments/runs/` reports it.
+///
+/// The rules a screen used to apply to raw strings (`run.status == 'draft'`)
+/// live on [PaymentRun] as predicates over this, so a typo in a comparison
+/// cannot silently hide a control. [other] is any code this build does not
+/// name (`executing`, or one added later): it gets no action and the screen
+/// labels it from [PaymentRun.statusCode].
+enum PaymentRunStatus {
+  draft('draft'),
+  exported('exported'),
+  submitted('submitted'),
+  completed('completed'),
+  partial('partial'),
+  failed('failed'),
+  cancelled('cancelled'),
+  other('');
+
+  const PaymentRunStatus(this.value);
+  final String value;
+
+  static PaymentRunStatus fromString(String s) {
+    for (final e in PaymentRunStatus.values) {
+      if (e != other && e.value == s) return e;
+    }
+    return other;
+  }
+}
+
 /// A batch from `GET /api/payments/runs/`.
 ///
 /// **[totalAmountDisplay] is denominated in [currency], and the server is what
@@ -376,7 +404,12 @@ class PaymentSummary {
 /// genuine figure (`docs/decisions.md` §79/§82, §160).
 class PaymentRun {
   final String id;
-  final String status;
+
+  /// The parsed status. Read the predicates below rather than comparing it.
+  final PaymentRunStatus status;
+
+  /// The raw status code as served — only for labelling an [PaymentRunStatus.other].
+  final String statusCode;
   final String totalAmountDisplay;
 
   /// The ISO code [totalAmountDisplay] is in, or `null` when the server could
@@ -390,7 +423,7 @@ class PaymentRun {
 
   PaymentRun({
     required this.id,
-    required this.status,
+    required this.statusCode,
     required this.totalAmountDisplay,
     this.currency,
     required this.paymentCount,
@@ -398,7 +431,7 @@ class PaymentRun {
     required this.cfoApproved,
     required this.createdAt,
     this.executedAt,
-  });
+  }) : status = PaymentRunStatus.fromString(statusCode);
 
   factory PaymentRun.fromJson(Map<String, dynamic> json) {
     DateTime parseRequired(Object? v) =>
@@ -408,7 +441,7 @@ class PaymentRun {
 
     return PaymentRun(
       id: json['id'] as String,
-      status: json['status'] as String? ?? 'draft',
+      statusCode: json['status'] as String? ?? 'draft',
       totalAmountDisplay: moneyToDisplay(json['total_amount']),
       currency: json['currency'] as String?,
       paymentCount: (json['payment_count'] as int?) ??
@@ -421,8 +454,31 @@ class PaymentRun {
     );
   }
 
+  bool get isDraft => status == PaymentRunStatus.draft;
+
   /// Only `draft` runs can be executed (or cancelled) from the app.
-  bool get isExecutable => status == 'draft';
+  bool get isExecutable => isDraft;
+
+  /// Cancel is the draft's other exit (`POST /runs/{id}/cancel` refuses
+  /// anything else).
+  bool get isCancellable => isDraft;
+
+  /// The run is over the org's CFO threshold and nobody has signed it off —
+  /// execute will be refused until someone does.
+  bool get awaitsCfoApproval => requiresCfoApproval && !cfoApproved;
+
+  /// Whether a sign-off is something this run can take now: a draft still
+  /// waiting on one. Mirrors the state guards on
+  /// `POST /api/payments/runs/{id}/approve` (draft, requires it, not yet
+  /// given); WHO may sign is the caller's role, checked beside this.
+  bool get canTakeCfoApproval => isDraft && awaitsCfoApproval;
+
+  /// The two stored statuses a run can hold an open record-as-paid decision
+  /// in: a draft, or one whose bank file was exported on the web. Whether
+  /// THIS reader may record it is the run detail's `actions.record_outside`
+  /// verdict, which the dialog reads before it offers a form.
+  bool get mayRecordOutside =>
+      status == PaymentRunStatus.draft || status == PaymentRunStatus.exported;
 }
 
 /// `GET /api/payments/execution-mode`'s `mode`: whether FeohLedger SENDS this

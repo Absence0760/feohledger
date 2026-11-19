@@ -452,8 +452,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get paymentsEmpty => 'No payments';
 
   @override
-  String paymentsErrorPrefix(String error) {
-    return 'Error: $error';
+  String paymentsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load payments: $error';
   }
 
   @override
@@ -1234,10 +1234,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get payQueueEmpty => 'No invoices awaiting payment';
 
   @override
-  String get payQueueError => 'Could not load the payment queue';
+  String payQueueLoadErrorPrefix(String error) {
+    return 'Couldn\'t load the payment queue: $error';
+  }
 
   @override
-  String get payQueueRetry => 'Retry';
+  String payRunsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load payment runs: $error';
+  }
 
   @override
   String payQueueDue(String date) {

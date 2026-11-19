@@ -291,6 +291,72 @@ void main() {
     expect(find.text('No invoices awaiting payment'), findsOneWidget);
   });
 
+  // Both tabs are AsyncListBody, each with its own load error: one shared
+  // `error` used to put the Queue tab into its error state when only the runs
+  // read failed, and the queue's error was a hand-built column.
+  testWidgets('a failed queue load says why and offers Retry, which reloads',
+      (tester) async {
+    var fail = true;
+    final ok = _screenClient(queue: [_queueItem('1')]);
+    await loginThen(
+      ['ap_manager'],
+      MockClient((req) async {
+        if (fail && req.url.path.endsWith('/payments/queue')) {
+          return _json({'detail': 'Queue unavailable'}, 503);
+        }
+        return ok.send(req).then(http.Response.fromStream);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+    await _pumpUntil(tester, find.text('Retry'));
+
+    expect(
+      find.text("Couldn't load the payment queue: Queue unavailable"),
+      findsOneWidget,
+    );
+    // Never the empty state over a failed read.
+    expect(find.text('No invoices awaiting payment'), findsNothing);
+
+    fail = false;
+    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+    await _pumpUntil(tester, find.text('Vendor 1'));
+
+    expect(find.text('Vendor 1'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
+  });
+
+  testWidgets('a failed runs load is the Runs tab\'s error, not the queue\'s',
+      (tester) async {
+    final ok = _screenClient(queue: [_queueItem('1')]);
+    await loginThen(
+      ['ap_manager'],
+      MockClient((req) async {
+        if (req.url.path.contains('/payments/runs')) {
+          return _json({'detail': 'Runs unavailable'}, 503);
+        }
+        return ok.send(req).then(http.Response.fromStream);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+    await _pumpUntil(tester, find.text('Vendor 1'));
+
+    // The queue is live: no error state, no "couldn't refresh" banner.
+    expect(find.text('Vendor 1'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
+
+    await tester.tap(find.text('Runs'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text("Couldn't load payment runs: Runs unavailable"),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(FilledButton, 'Retry'), findsOneWidget);
+    expect(find.text('No payment runs'), findsNothing);
+  });
+
   // The CFO-approval gate. `GET /api/payments/runs/` must declare
   // `requires_cfo_approval` / `cfo_approved_at` on `PaymentRunResponse` for
   // this to be reachable at all — without them FastAPI strips the keys, both
@@ -911,11 +977,13 @@ void main() {
 
       final banner = find.byKey(const Key('record-only-banner'));
       expect(banner, findsOneWidget);
-      // It leads the tab's own list, so it scrolls away with the rows rather
-      // than holding height above both tabs at a large text size, and it
-      // sends the reader to the web for a run's bank file.
-      expect(find.ancestor(of: banner, matching: find.byType(ListView)),
-          findsOneWidget);
+      // It is the header of the tab's own scroll view, so it scrolls away
+      // with the rows rather than holding height above them at a large text
+      // size, and it sends the reader to the web for a run's bank file.
+      expect(
+        find.ancestor(of: banner, matching: find.byType(NestedScrollView)),
+        findsOneWidget,
+      );
       expect(
         find.text('FeohLedger records payments but never sends them: pay '
             "from your bank or ERP, then record each one here (a run's bank "
@@ -927,8 +995,10 @@ void main() {
       await openRunMenu(tester);
       // The Runs tab leads with it too.
       expect(banner, findsOneWidget);
-      expect(find.ancestor(of: banner, matching: find.byType(ListView)),
-          findsOneWidget);
+      expect(
+        find.ancestor(of: banner, matching: find.byType(NestedScrollView)),
+        findsOneWidget,
+      );
       expect(find.text('Execute'), findsNothing);
       expect(find.text('Record run as paid…'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);

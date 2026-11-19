@@ -28,7 +28,6 @@ const _rawErrorRule = 'raw caught error';
 /// `path` → the rules it is still exempt from.
 const Map<String, Set<String>> _allowlist = {
   'lib/screens/approvals_screen.dart': {_iconRule},
-  'lib/screens/payment_queue_screen.dart': {_iconRule},
   'lib/screens/capture_screen.dart': {_rawErrorRule},
   'lib/screens/cash_flow_screen.dart': {_rawErrorRule},
   'lib/screens/invoices_screen.dart': {_rawErrorRule},
