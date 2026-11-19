@@ -40,10 +40,7 @@ ALLOWED_API_MODULES = frozenset({"app.api.refusals", "app.api.deps", "app.api.pe
 
 #: file (relative to `app/`) -> the `app.api.*` modules it still imports.
 KNOWN_OFFENDERS: dict[str, frozenset[str]] = {
-    "services/assistant/tools/cashflow.py": frozenset({"app.api.discounts"}),
-    "services/assistant/tools/optimizer.py": frozenset({"app.api.discounts"}),
     "services/audit_summary.py": frozenset({"app.api.exceptions"}),
-    "services/discount_offers.py": frozenset({"app.api.payments"}),
     "services/erp_export_gate.py": frozenset({"app.api.payments"}),
     "services/exception_lifecycle.py": frozenset({"app.api.payments"}),
     "services/external_payment.py": frozenset({"app.api.payments"}),

@@ -17,7 +17,6 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.discounts import _name_maps
 from app.config import settings
 from app.models.organization import Organization
 from app.services.analytics import (
@@ -51,6 +50,7 @@ from app.services.cashflow import (
     resolve_cash_thresholds,
     resolve_opening_balance,
 )
+from app.services.discount_opportunities import name_maps
 from app.utils.dates import utc_today
 
 _ZERO = Decimal("0")
@@ -336,7 +336,7 @@ async def propose_payment_plan(
         cost_of_capital_pct=params.cost_of_capital_pct,
         today=today,
     )
-    vmap, imap = await _name_maps(db, offers)
+    vmap, imap = await name_maps(db, offers)
     recommendations = build_discount_recommendations(optimizer_result, offers, vmap, imap)
 
     plan = assemble_plan(

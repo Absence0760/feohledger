@@ -77,11 +77,6 @@ from app.tenant import (
 from app.utils.currency_code import iso_currency_or_none
 from app.utils.dates import utc_today
 
-# Re-exports kept ONLY until services/assistant/tools/cashflow.py imports from
-# app.services.discount_opportunities directly; delete them then.
-_name_maps = name_maps
-_build_opportunity = build_opportunity
-
 #: An invoice-scoped offer on an invoice that records no currency, with none
 #: named in the body (decisions §473).
 DISCOUNT_OFFER_CURRENCY_REQUIRED = "discount_offer_currency_required"
