@@ -7,9 +7,9 @@ import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 const _savedCopy =
-    "Showing a saved copy — couldn't reach the server. Pull down to try again.";
+    "Showing a saved copy — couldn't reach the server. Tap Retry to try again.";
 const _refreshFailed =
-    "Couldn't refresh — showing the last list loaded. Pull down to try again.";
+    "Couldn't refresh — showing the last list loaded. Tap Retry to try again.";
 
 Widget _host({
   List<String> items = const [],
@@ -17,6 +17,7 @@ Widget _host({
   bool hasError = false,
   bool fromCache = false,
   Future<void> Function()? onRefresh,
+  Widget? filteredEmpty,
 }) => MaterialApp(
   localizationsDelegates: appLocalizationsDelegates,
   supportedLocales: AppLocalizations.supportedLocales,
@@ -29,6 +30,7 @@ Widget _host({
       errorMessage: 'Load failed sentence',
       onRefresh: onRefresh ?? () async {},
       empty: const Text('Nothing here'),
+      filteredEmpty: filteredEmpty,
       itemBuilder: (context, item) => ListTile(title: Text(item)),
     ),
   ),
@@ -135,8 +137,85 @@ void main() {
     await tester.pumpWidget(_host(items: ['a'], fromCache: true));
 
     expect(
-      tester.getSemantics(find.byType(StaleDataBanner)),
+      tester.getSemantics(find.bySemanticsLabel(_savedCopy)),
       isSemantics(label: _savedCopy, isLiveRegion: true),
+    );
+    handle.dispose();
+  });
+
+  testWidgets('the banner carries a 48dp Retry wired to the refresh, so a '
+      'retry never depends on the pull gesture', (tester) async {
+    var refreshes = 0;
+    await tester.pumpWidget(
+      _host(items: ['a'], hasError: true, onRefresh: () async => refreshes++),
+    );
+
+    final retry = find.descendant(
+      of: find.byType(StaleDataBanner),
+      matching: find.widgetWithText(TextButton, 'Retry'),
+    );
+    expect(retry, findsOneWidget);
+    final size = tester.getSize(retry);
+    expect(size.height, greaterThanOrEqualTo(48));
+    expect(size.width, greaterThanOrEqualTo(48));
+
+    await tester.tap(retry);
+    await tester.pump();
+    expect(refreshes, 1);
+  });
+
+  testWidgets('the banner text meets the AA contrast guideline',
+      (tester) async {
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(_host(items: ['a'], fromCache: true));
+
+    // amber.shade900 on amber.shade50 measured 2.6:1; the banner's text and
+    // its Retry must clear 4.5:1 (WCAG 1.4.3).
+    await expectLater(tester, meetsGuideline(textContrastGuideline));
+    await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+    handle.dispose();
+  });
+
+  testWidgets('a filtered list with no rows shows the filtered-empty widget, '
+      'not the whole-list empty copy', (tester) async {
+    var cleared = 0;
+    await tester.pumpWidget(
+      _host(
+        filteredEmpty: FilteredEmptyState(
+          message: 'No escalated exceptions',
+          onShowAll: () => cleared++,
+        ),
+      ),
+    );
+
+    expect(find.text('No escalated exceptions'), findsOneWidget);
+    expect(find.text('Nothing here'), findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Show all'));
+    expect(cleared, 1);
+  });
+
+  testWidgets('filteredEmpty is ignored while rows are on screen',
+      (tester) async {
+    await tester.pumpWidget(
+      _host(
+        items: ['a'],
+        filteredEmpty: const Text('No escalated exceptions'),
+      ),
+    );
+
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('No escalated exceptions'), findsNothing);
+  });
+
+  testWidgets('the first-load error sentence is a live region',
+      (tester) async {
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(_host(hasError: true));
+
+    expect(
+      tester.getSemantics(find.text('Load failed sentence')),
+      isSemantics(label: 'Load failed sentence', isLiveRegion: true),
     );
     handle.dispose();
   });

@@ -34,10 +34,10 @@ class ExceptionDetailScreen extends StatefulWidget {
 class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
   ApException? _exception;
   bool _loading = true;
-  // The caught load error, worded at render time by [describeLoadError] —
-  // `AppLocalizations.of(context)` isn't safe to call from initState/_load.
-  // Caught here rather than read back from `ExceptionStore.error`, which holds
-  // the exception's `toString()` (and whatever the store's last failure was).
+  // The error [ExceptionStore.getById] threw, worded at render time by
+  // [describeLoadError] — `AppLocalizations.of(context)` isn't safe to call
+  // from initState/_load. The store hands it back rather than recording it,
+  // so a failed detail read never shows up as the list's error.
   Object? _error;
   // True while an action / assign network call is in flight — disables the
   // controls and guards against a double-tap firing twice.
@@ -55,7 +55,7 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
       _error = null;
     });
     try {
-      final exc = await ExceptionApi.getById(widget.exceptionId);
+      final exc = await ExceptionStore.instance.getById(widget.exceptionId);
       if (!mounted) return;
       setState(() {
         _exception = exc;

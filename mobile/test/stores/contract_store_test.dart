@@ -58,7 +58,7 @@ void main() {
       expect(store.contracts, hasLength(1));
       expect(store.contracts.first.id, '1');
       expect(store.fromCache, isFalse);
-      expect(store.error, isNull);
+      expect(store.loadError, isNull);
       expect(store.loading, isFalse);
     });
 
@@ -89,7 +89,7 @@ void main() {
 
       await store.fetch();
 
-      expect(store.error, isNotNull);
+      expect(store.loadError, isNotNull);
       expect(store.fromCache, isFalse);
     });
   });
@@ -164,7 +164,33 @@ void main() {
       final ok = await store.activate('1');
 
       expect(ok, isFalse);
-      expect(store.error, isNotNull);
+      expect(store.actionError, isNotNull);
+      // A refused action is not a failed load: the list stays live, so the
+      // screen raises no "couldn't refresh" banner over it.
+      expect(store.loadError, isNull);
+    });
+
+    test('clearFilters drops the chip and the query and refetches unfiltered',
+        () async {
+      final queries = <Map<String, String>>[];
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          queries.add(req.url.queryParameters);
+          return _list([]);
+        }),
+      );
+      store.setStatusFilter('expired');
+      store.setSearch('acme');
+      await store.fetch();
+      expect(store.isFiltered, isTrue);
+
+      store.clearFilters();
+      await store.fetch();
+
+      expect(store.isFiltered, isFalse);
+      expect(store.statusFilter, isNull);
+      expect(queries.last.containsKey('status'), isFalse);
+      expect(queries.last.containsKey('search'), isFalse);
     });
 
     test('terminate posts to the terminate endpoint and refetches', () async {

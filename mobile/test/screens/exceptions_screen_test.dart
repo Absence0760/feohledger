@@ -13,6 +13,7 @@ import 'package:feohledger_mobile/screens/exceptions_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/exception_store.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/bulk_action_bar.dart';
 import 'package:feohledger_mobile/widgets/exception_list_tile.dart';
 
@@ -157,7 +158,12 @@ void main() {
     await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Retry'));
 
     expect(
-      find.text("Couldn't load exceptions. Check your connection and tap Retry."),
+      // A server that answered with a 500 is not a connection problem: the
+      // sentence carries its reason, not "check your connection".
+      find.text(
+        "Couldn't load exceptions: "
+        "The server couldn't complete the request (HTTP 500).",
+      ),
       findsOneWidget,
     );
     expect(find.text('No exceptions'), findsNothing);
@@ -415,5 +421,72 @@ void main() {
       other: await runFlow(const Locale('ja')),
       surface: 'ExceptionsScreen bulk flow',
     );
+  });
+
+  testWidgets('a load that never reached a server says check your connection',
+      (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient((req) async => throw http.ClientException('offline')),
+    );
+
+    await tester.pumpWidget(_localized(const ExceptionsScreen()));
+    await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Retry'));
+
+    expect(
+      find.text(
+        "Couldn't reach FeohLedger. Check your connection and tap Retry.",
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a failed resolve over a loaded list raises no stale banner',
+      (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient((req) async => req.method == 'POST'
+          ? http.Response(jsonEncode({'detail': 'Not permitted'}), 403,
+              headers: {'content-type': 'application/json'})
+          : _list([_exceptionJson('1')])),
+    );
+
+    await tester.pumpWidget(_localized(const ExceptionsScreen()));
+    await _pumpUntil(tester, find.byType(ExceptionListTile));
+
+    bool? ok;
+    ExceptionStore.instance.resolve('1').then((v) => ok = v);
+    await _pumpUntilTrue(tester, () => ok != null);
+
+    expect(ok, isFalse);
+    expect(ExceptionStore.instance.actionError, 'Not permitted');
+    expect(ExceptionStore.instance.loadError, isNull);
+    // The rows are live: the refusal is the action's, not the list's.
+    expect(find.byType(StaleDataBanner), findsNothing);
+    expect(find.byType(ExceptionListTile), findsOneWidget);
+  });
+
+  testWidgets('a status chip that filters every row out says so, and Show all '
+      'clears it', (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient((req) async =>
+          req.url.queryParameters['status'] == 'escalated'
+              ? _list([])
+              : _list([_exceptionJson('1')])),
+    );
+
+    await tester.pumpWidget(_localized(const ExceptionsScreen()));
+    await _pumpUntil(tester, find.byType(ExceptionListTile));
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Escalated'));
+    await _pumpUntil(tester, find.text('No escalated exceptions'));
+
+    expect(find.text('No escalated exceptions'), findsOneWidget);
+    // Not the whole-queue "clear" copy: other statuses may hold rows.
+    expect(find.text('No exceptions'), findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Show all'));
+    await _pumpUntil(tester, find.byType(ExceptionListTile));
+
+    expect(ExceptionStore.instance.statusFilter, isNull);
+    expect(find.byType(ExceptionListTile), findsOneWidget);
   });
 }

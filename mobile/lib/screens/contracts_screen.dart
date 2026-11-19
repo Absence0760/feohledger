@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/contract.dart';
 import 'package:feohledger_mobile/screens/contract_detail_screen.dart';
 import 'package:feohledger_mobile/stores/contract_store.dart';
@@ -90,15 +91,32 @@ class _ContractsScreenState extends State<ContractsScreen> {
               listenable: ContractStore.instance,
               builder: (context, _) {
                 final store = ContractStore.instance;
+                final loadError = store.loadError;
 
                 return AsyncListBody<Contract>(
                   items: store.contracts,
                   loading: store.loading,
-                  hasError: store.error != null,
+                  // The fetch's failure only — a refused lifecycle action
+                  // leaves the list live (actionError), so it raises no banner.
+                  hasError: loadError != null,
                   fromCache: store.fromCache,
-                  errorMessage: l.contractsLoadError,
+                  // Worded from the cause: the server's reason on a 403 / 500,
+                  // the connection sentence only when no server answered.
+                  errorMessage: loadError == null
+                      ? ''
+                      : describeLoadError(
+                          l,
+                          loadError,
+                          l.contractsLoadErrorPrefix,
+                        ),
                   onRefresh: store.fetch,
                   empty: Text(l.contractsEmpty, textAlign: TextAlign.center),
+                  filteredEmpty: store.isFiltered
+                      ? FilteredEmptyState(
+                          message: l.contractsFilteredEmpty,
+                          onShowAll: _showAll,
+                        )
+                      : null,
                   itemBuilder: (context, contract) => ContractListTile(
                     contract: contract,
                     onTap: () => _openDetail(contract),
@@ -122,6 +140,15 @@ class _ContractsScreenState extends State<ContractsScreen> {
         onSelected: (_) => ContractStore.instance.setStatusFilter(value),
       ),
     );
+  }
+
+  /// The filtered-empty state's "Show all": clear the search box (and its
+  /// pending debounce, which would otherwise re-apply the query) and the
+  /// status chip.
+  void _showAll() {
+    _searchDebouncer.cancel();
+    _searchController.clear();
+    ContractStore.instance.clearFilters();
   }
 
   void _openDetail(Contract contract) {

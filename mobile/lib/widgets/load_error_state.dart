@@ -40,7 +40,13 @@ class LoadErrorState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center),
+            // A live region, so a screen-reader user hears why the screen
+            // went empty instead of landing on silence (WCAG 4.1.3).
+            Semantics(
+              container: true,
+              liveRegion: true,
+              child: Text(message, textAlign: TextAlign.center),
+            ),
             const SizedBox(height: 16),
             FilledButton(onPressed: onRetry, child: Text(l.commonRetry)),
           ],

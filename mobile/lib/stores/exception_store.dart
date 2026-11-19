@@ -12,7 +12,17 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
 
   List<ApException> _exceptions = [];
   bool _loading = false;
-  String? _error;
+
+  /// The last **fetch** failure, as caught — the list screen words it with
+  /// `describeLoadError` (the server's reason vs the connection sentence) and
+  /// it is the only thing that drives the list's error state and
+  /// "couldn't refresh" banner. Actions never write it.
+  Object? _loadError;
+
+  /// The last failed **action** (resolve / escalate / dismiss / assign / bulk),
+  /// as a sentence ([describeApiError]). Kept apart from [loadError] so a
+  /// refused resolve over a loaded list is not reported as a failed refresh.
+  String? _actionError;
 
   /// The raw `detail` of the last refused resolve / escalate / dismiss — the
   /// queue's segregation-of-duties refusal is coded (`segregation_raiser` /
@@ -31,7 +41,8 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
 
   List<ApException> get exceptions => _exceptions;
   bool get loading => _loading;
-  String? get error => _error;
+  Object? get loadError => _loadError;
+  String? get actionError => _actionError;
   Object? get actionErrorDetail => _actionErrorDetail;
   String? get statusFilter => _statusFilter;
   bool get fromCache => _fromCache;
@@ -48,7 +59,8 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
   void reset() {
     _exceptions = [];
     _loading = false;
-    _error = null;
+    _loadError = null;
+    _actionError = null;
     _actionErrorDetail = null;
     _statusFilter = null;
     _fromCache = false;
@@ -89,7 +101,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
     // (e.g. rapid status-filter chip taps racing each other).
     final token = nextRequestToken();
     _loading = true;
-    _error = null;
+    _loadError = null;
     notifyListeners();
 
     final cacheKey = 'exceptions_${_statusFilter ?? 'all'}';
@@ -129,7 +141,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
       // (now absent) data came from cache.
       _fromCache = false;
       _loading = false;
-      _error = describeApiError(e);
+      _loadError = e;
       notifyListeners();
     }
   }
@@ -152,30 +164,29 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
     required String action,
     required String resolution,
   }) async {
+    _actionError = null;
     _actionErrorDetail = null;
     try {
       await ExceptionApi.act(id, action: action, resolution: resolution);
       await fetch();
       return true;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       _actionErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return false;
     }
   }
 
-  /// Load one exception's full detail (used by the detail screen). Returns null
-  /// + records the error on failure (e.g. 404 / network).
-  Future<ApException?> getById(String id) async {
-    try {
-      return await ExceptionApi.getById(id);
-    } catch (e) {
-      _error = describeApiError(e);
-      notifyListeners();
-      return null;
-    }
-  }
+  /// Load one exception's full detail (used by the detail screen).
+  ///
+  /// Throws the caught error as-is (a 404 / 403 [ApiException], or a network
+  /// failure) for the detail screen to word with `describeLoadError` — the
+  /// server's reason or the connection sentence. It deliberately writes no
+  /// store state: a failed detail read is not a failed list load, and
+  /// recording it in [loadError] would put "couldn't refresh" over a live
+  /// list.
+  Future<ApException> getById(String id) => ExceptionApi.getById(id);
 
   /// Assign (or unassign with [userId] == null) an exception. Returns the
   /// updated exception on success (so the caller can reflect the new assignee),
@@ -191,7 +202,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
       }
       return updated;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -217,7 +228,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return result;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return null;
     }

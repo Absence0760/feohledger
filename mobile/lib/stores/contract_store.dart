@@ -12,14 +12,28 @@ class ContractStore extends ChangeNotifier with SequencedFetch {
 
   List<Contract> _contracts = [];
   bool _loading = false;
-  String? _error;
+
+  /// The last **fetch** failure, as caught — the list screen words it with
+  /// `describeLoadError` and it alone drives the list's error state and
+  /// "couldn't refresh" banner. Lifecycle actions never write it.
+  Object? _loadError;
+
+  /// The last failed lifecycle action (activate / terminate / cancel), as a
+  /// sentence ([describeApiError]). Kept apart from [loadError] so a refused
+  /// action is not reported as a failed refresh of the list.
+  String? _actionError;
   String? _statusFilter;
   String? _searchQuery;
   bool _fromCache = false;
 
   List<Contract> get contracts => _contracts;
   bool get loading => _loading;
-  String? get error => _error;
+  Object? get loadError => _loadError;
+  String? get actionError => _actionError;
+
+  /// Whether a status chip or search query is narrowing the list — the
+  /// screen shows the filtered-empty state, not "No contracts", when it is.
+  bool get isFiltered => _statusFilter != null || _searchQuery != null;
   String? get statusFilter => _statusFilter;
   bool get fromCache => _fromCache;
 
@@ -30,7 +44,8 @@ class ContractStore extends ChangeNotifier with SequencedFetch {
   void reset() {
     _contracts = [];
     _loading = false;
-    _error = null;
+    _loadError = null;
+    _actionError = null;
     _statusFilter = null;
     _searchQuery = null;
     _fromCache = false;
@@ -47,11 +62,19 @@ class ContractStore extends ChangeNotifier with SequencedFetch {
     fetch();
   }
 
+  /// Drop the status chip and the search query together and refetch — the
+  /// filtered-empty state's "Show all".
+  void clearFilters() {
+    _statusFilter = null;
+    _searchQuery = null;
+    fetch();
+  }
+
   Future<void> fetch() async {
     // See SequencedFetch — discards a response superseded by a newer fetch().
     final token = nextRequestToken();
     _loading = true;
-    _error = null;
+    _loadError = null;
     notifyListeners();
 
     final cacheKey =
@@ -95,42 +118,45 @@ class ContractStore extends ChangeNotifier with SequencedFetch {
       // (now absent) data came from cache.
       _fromCache = false;
       _loading = false;
-      _error = describeApiError(e);
+      _loadError = e;
       notifyListeners();
     }
   }
 
   Future<bool> activate(String id) async {
+    _actionError = null;
     try {
       await ContractApi.activate(id);
       await fetch();
       return true;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return false;
     }
   }
 
   Future<bool> terminate(String id) async {
+    _actionError = null;
     try {
       await ContractApi.terminate(id);
       await fetch();
       return true;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return false;
     }
   }
 
   Future<bool> cancel(String id) async {
+    _actionError = null;
     try {
       await ContractApi.cancel(id);
       await fetch();
       return true;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return false;
     }
