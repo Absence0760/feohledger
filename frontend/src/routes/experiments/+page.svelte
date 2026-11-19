@@ -33,6 +33,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
@@ -216,56 +217,67 @@
 			toast(m('experiments.toast.created'), 'success');
 			await load();
 		} catch (e) {
-			createError = e instanceof Error ? e.message : m('experiments.toast.createFailed');
+			createError = errorMessage(e, m('experiments.toast.createFailed'));
 		} finally {
 			saving = false;
 		}
 	}
 
-	async function doStart(exp: Experiment) {
+	// One lifecycle call per row at a time: the row's actions disable while it
+	// is in flight, so a double-click cannot start, stop or conclude twice.
+	let busyId = $state<string | null>(null);
+
+	async function runAction(
+		exp: Experiment,
+		call: (id: string) => Promise<unknown>,
+		done: string,
+		failed: string
+	) {
+		busyId = exp.id;
 		try {
-			await startExperiment(exp.id);
-			toast(m('experiments.toast.started'), 'success');
+			await call(exp.id);
+			toast(done, 'success');
 			await load();
-		} catch {
-			toast(m('experiments.toast.startFailed'), 'error');
+		} catch (e) {
+			// The server's reason (a 409 "already running", a refusal) is the
+			// useful part; the fixed sentence is only the fallback.
+			toast(errorMessage(e, failed), 'error');
+		} finally {
+			busyId = null;
 		}
 	}
 
-	async function doStop(exp: Experiment) {
-		try {
-			await stopExperiment(exp.id);
-			toast(m('experiments.toast.stopped'), 'success');
-			await load();
-		} catch {
-			toast(m('experiments.toast.stopFailed'), 'error');
-		}
+	function doStart(exp: Experiment) {
+		return runAction(exp, startExperiment, m('experiments.toast.started'), m('experiments.toast.startFailed'));
 	}
 
-	async function doConclude(exp: Experiment) {
-		try {
-			await concludeExperiment(exp.id);
-			toast(m('experiments.toast.concluded'), 'success');
-			await load();
-		} catch {
-			toast(m('experiments.toast.concludeFailed'), 'error');
-		}
+	function doStop(exp: Experiment) {
+		return runAction(exp, stopExperiment, m('experiments.toast.stopped'), m('experiments.toast.stopFailed'));
 	}
 
+	// Two destructive actions, each armed two-click (ui-patterns § RowAction):
+	// Delete (a draft) and Conclude, which is TERMINAL — a concluded experiment
+	// takes no new assignments and cannot be restarted — and used to fire on a
+	// single click beside the reversible Stop.
 	let confirmDeleteId = $state<string | null>(null);
-	async function doDelete(exp: Experiment) {
+	let confirmConcludeId = $state<string | null>(null);
+
+	function doConclude(exp: Experiment) {
+		if (confirmConcludeId !== exp.id) {
+			confirmConcludeId = exp.id;
+			return;
+		}
+		confirmConcludeId = null;
+		return runAction(exp, concludeExperiment, m('experiments.toast.concluded'), m('experiments.toast.concludeFailed'));
+	}
+
+	function doDelete(exp: Experiment) {
 		if (confirmDeleteId !== exp.id) {
 			confirmDeleteId = exp.id;
 			return;
 		}
 		confirmDeleteId = null;
-		try {
-			await deleteExperiment(exp.id);
-			toast(m('experiments.toast.deleted'), 'success');
-			await load();
-		} catch {
-			toast(m('experiments.toast.deleteFailed'), 'error');
-		}
+		return runAction(exp, deleteExperiment, m('experiments.toast.deleted'), m('experiments.toast.deleteFailed'));
 	}
 
 	async function openResults(exp: Experiment) {
@@ -293,7 +305,10 @@
 </script>
 
 <svelte:window onclick={(e) => {
-	if (confirmDeleteId && !(e.target as HTMLElement)?.closest('.row-action')) confirmDeleteId = null;
+	if ((confirmDeleteId || confirmConcludeId) && !(e.target as HTMLElement)?.closest('.row-action')) {
+		confirmDeleteId = null;
+		confirmConcludeId = null;
+	}
 }} />
 
 <PageHeader title={m('experiments.title')}>
@@ -338,17 +353,25 @@
 					</td>
 					<td class="actions">
 						{#if canMutate && exp.status === 'draft'}
-							<RowAction variant="success" onclick={() => doStart(exp)}>{m('experiments.row.start')}</RowAction>
+							<RowAction variant="success" disabled={busyId === exp.id} onclick={() => doStart(exp)}>{m('experiments.row.start')}</RowAction>
 							<RowAction
 								variant="danger"
 								armed={confirmDeleteId === exp.id}
+								disabled={busyId === exp.id}
 								onclick={() => doDelete(exp)}
 							>
 								{confirmDeleteId === exp.id ? m('experiments.row.confirm') : m('experiments.row.delete')}
 							</RowAction>
 						{:else if canMutate && exp.status === 'running'}
-							<RowAction onclick={() => doStop(exp)}>{m('experiments.row.stop')}</RowAction>
-							<RowAction variant="danger" onclick={() => doConclude(exp)}>{m('experiments.row.conclude')}</RowAction>
+							<RowAction disabled={busyId === exp.id} onclick={() => doStop(exp)}>{m('experiments.row.stop')}</RowAction>
+							<RowAction
+								variant="danger"
+								armed={confirmConcludeId === exp.id}
+								disabled={busyId === exp.id}
+								onclick={() => doConclude(exp)}
+							>
+								{confirmConcludeId === exp.id ? m('experiments.row.confirm') : m('experiments.row.conclude')}
+							</RowAction>
 						{/if}
 					</td>
 				</tr>
