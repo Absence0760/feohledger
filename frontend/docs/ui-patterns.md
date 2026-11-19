@@ -380,7 +380,12 @@ appears when one or more rows are selected:
   as three buttons they wrapped the bar to three rows at 375px. A page with a
   single format (`/vendors`, `/contracts`: CSV only) keeps its one button —
   a menu of one is a slower button. The menu flips above the bar, since the
-  bar is pinned to the bottom of the viewport. Specs open it first:
+  bar is pinned to the bottom of the viewport. Placement measures against
+  what is visible of the menu — the viewport cut down to its nearest
+  ancestor whose `overflow` is not `visible` (`utils/menuButton.clipBounds`)
+  — so inside a scrolling pane (InvoiceModal's `.form-scroll`, which holds
+  the e-invoice download menu) it flips and shifts against the pane, not the
+  window. Specs open it first:
   `getByRole('button', { name: 'Export' })`, then
   `getByRole('menuitem', { name: 'CSV' })`.
 - Bulk endpoints return a partial-success shape — `{deleted: [],
@@ -739,7 +744,9 @@ centred dialog with backdrop-click + Esc to close:
 - `class="<name>"` puts a class on the dialog element beside `modal`, for a
   dialog with its own size or layout (style it as `:global(.modal.<name>)`);
   `fullscreen` drops the backdrop's gutter and fills the viewport (the
-  invoice dialog's toggle). Both are no-ops when omitted. `InvoiceModal`
+  invoice dialog's toggle) — the dynamic viewport, `100dvh` / `100dvw` after
+  a `100vh` / `100vw` fallback, so on a phone a footer pinned to the dialog's
+  foot is not under the browser toolbar. Both are no-ops when omitted. `InvoiceModal`
   (`invoice-dialog`) and `RunDetailModal` (`run-detail-dialog`) use them; a
   `<svelte:window>` listener a dialog needs stays in the caller.
 - Cancel sits left of the primary action. Required-field markers use
@@ -1546,6 +1553,14 @@ inherit it for free. Reuse these; don't re-solve them per page.
 - **Icon-only controls** — every icon-only `<button>` needs an
   `aria-label` (NotificationBell reflects the unread count; the sidebar
   collapse toggle + profile button carry `aria-label` + `aria-expanded`).
+- **The sidebar's profile disclosure closes when focus leaves it** (WCAG
+  2.4.11). It is drawn above its trigger, over the Help link (and over the
+  icon column in the 60px rail), so a `focusout` whose `relatedTarget` is
+  outside `.profile-wrapper` closes it without moving focus — Shift+Tab to
+  Help or Tab past Log out never lands on a control hidden under it. Its
+  trigger's name is "Profile and account" (a disclosure, not a menu). Guard:
+  `tests-e2e/smoke/sidebar.spec.ts` (both directions, axe in the collapsed
+  rail in both themes).
 - **De-emphasised rows** (`.row-muted`, app.css; WCAG 1.4.3) — a paused
   subscription, a revoked API key, a deactivated user. Put
   `class:row-muted` on the `<tr>`; the shared rule colours its non-actions
