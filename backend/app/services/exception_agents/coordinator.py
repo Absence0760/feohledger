@@ -303,6 +303,8 @@ async def run_agent(
                         raise _ReceiptsImplicated(invoice.status)
                     if _approved_past_po_overbilling(invoice):
                         raise _POOverbilled(invoice.status)
+                    if _approved_past_contract_cap(invoice):
+                        raise _ContractCap(invoice.status)
         except (NotApprovable, HTTPException) as exc:
             # Two families of refusal, one outcome — an escalation with a
             # recorded decision.
@@ -360,6 +362,16 @@ async def run_agent(
                 )
                 logger.info(
                     "Agent approval would pass a PO's total on invoice %s; escalating",
+                    invoice.id,
+                )
+            elif isinstance(exc, _ContractCap):
+                reason = (
+                    "This invoice is linked to a not-to-exceed contract whose limit it "
+                    "passes, or cannot be measured against because the currencies "
+                    "differ, so it needs a person's approval. Escalated to a human."
+                )
+                logger.info(
+                    "Agent approval would pass a contract cap on invoice %s; escalating",
                     invoice.id,
                 )
             elif isinstance(exc, PayeeFixedByApproval):
@@ -500,6 +512,23 @@ def _approved_past_po_overbilling(invoice) -> bool:
 
     status = getattr(invoice.status, "value", invoice.status)
     return status == InvoiceStatus.approved.value and has_po_overbilling_warning(invoice)
+
+
+class _ContractCap(NotApprovable):
+    """The apply approved an invoice whose refresh reports an ``error``
+    contract finding: a not-to-exceed limit passed, or not measurable because
+    the invoice is in another currency or none (decisions §TBD-contractfx).
+    The unattended doors send it to a person
+    (``invoice_warnings.UNATTENDED_APPROVAL_CONTRACT_CAP``); an agent approval
+    is no person reading it either, so the apply unwinds and the row
+    escalates."""
+
+
+def _approved_past_contract_cap(invoice) -> bool:
+    from app.services.invoice_warnings import has_contract_cap_warning
+
+    status = getattr(invoice.status, "value", invoice.status)
+    return status == InvoiceStatus.approved.value and has_contract_cap_warning(invoice)
 
 
 async def _receipts_implicated(db, exception, invoice, org_settings) -> bool:

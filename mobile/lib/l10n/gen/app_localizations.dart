@@ -5222,6 +5222,25 @@ abstract class AppLocalizations {
     String spendLimit,
   );
 
+  /// No description provided for @invoiceWarningContractCurrencyMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice is in {invoiceCurrency} but contract {contractNumber} is in {contractCurrency} — its spend limit was not checked'**
+  String invoiceWarningContractCurrencyMismatch(
+    String invoiceCurrency,
+    String contractNumber,
+    String contractCurrency,
+  );
+
+  /// No description provided for @invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'The invoice records no valid currency, so the spend limit in {contractCurrency} of contract {contractNumber} was not checked'**
+  String invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+    String contractNumber,
+    String contractCurrency,
+  );
+
   /// No description provided for @invoiceWarningContractGlNotAllowed.
   ///
   /// In en, this message translates to:

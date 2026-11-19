@@ -863,6 +863,8 @@
   "invoiceWarningContractVendorMismatch": "El proveedor de la factura no coincide con el del contrato {contractNumber}",
   "invoiceWarningContractSpendLimitExceeded": "El gasto acumulado {cumulativeSpend} supera el límite {spendLimit} del contrato {contractNumber}",
   "invoiceWarningContractSpendLimitExceededNotToExceed": "El gasto acumulado {cumulativeSpend} supera el límite {spendLimit} del contrato {contractNumber} (no superable)",
+  "invoiceWarningContractCurrencyMismatch": "La factura está en {invoiceCurrency}, pero el contrato {contractNumber} está en {contractCurrency}; no se comprobó su límite de gasto",
+  "invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown": "La factura no registra una moneda válida, así que no se comprobó el límite de gasto en {contractCurrency} del contrato {contractNumber}",
   "invoiceWarningContractGlNotAllowed": "La cuenta contable {glAccount} está fuera de las cuentas permitidas del contrato {contractNumber}",
   "invoiceWarningSelfCorrectionTotalReconciliation": "Los importes no cuadran: subtotal ({subtotal}) + impuestos ({tax}) + envío ({shipping}) − descuento ({discount}) = {expected}, pero el total es {amount}.",
   "invoiceWarningSelfCorrectionDateOrdering": "La fecha de vencimiento ({dueDate}) es anterior a la fecha de la factura ({invoiceDate}).",

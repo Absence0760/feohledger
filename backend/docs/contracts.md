@@ -197,11 +197,31 @@ checked:
 | Invoice dated before the contract's `start_date` | `warning` |
 | Spend recorded against a `terminated` / `cancelled` contract | `warning` |
 | Invoice vendor differs from the contract vendor | `warning` |
-| Cumulative linked spend (excl. rejected, exact `Decimal`) over `spend_limit` | `error` if `not_to_exceed`, else `warning` |
+| Cumulative linked spend (excl. rejected, exact `Decimal`, in the contract's currency) over `spend_limit` | `error` if `not_to_exceed`, else `warning` |
+| Invoice in another currency than a contract with a `spend_limit` (`contract_currency_mismatch`), or recording none (`contract_currency_mismatch_invoice_currency_unknown`): the limit was not checked | `error` if `not_to_exceed`, else `warning` |
 | Invoice `gl_account` outside `terms.allowed_gl_accounts` | `warning` |
 
 All findings carry the exception type **`contract_noncompliant`** and surface as
 an `Exception` row via the normal warnings/exception pipeline.
+
+**The limit is measured only in the contract's own currency.** An invoice in
+another currency is never summed with the contract's spend, and never converted:
+a guessed rate must not decide whether a contractual cap is passed. An invoice
+recording no valid currency matches no contract (`docs/decisions.md` §466).
+Either one says so with a currency finding instead of passing in silence. A
+contract with no `spend_limit` has nothing to measure, so it raises none.
+
+**A not-to-exceed `error` stops every unattended approval.** The spend-limit
+breach and the currency finding on a `not_to_exceed` contract are the only
+`error` contract findings (`invoice_warnings.has_contract_cap_warning`). Neither
+is a payment hold: like the PO over-billing warning (§469), the sum crosses
+invoices and would go stale. But no unattended door approves past one.
+`po_match_hold_refusal` answers `contract_cap`, so extraction's auto-approve and
+`/complete`'s `auto_approve_below` floor land at `ready_for_review` with
+`auto_approve_suppressed: "contract_cap"`, and the exception-agent coordinator
+unwinds an apply that approved such an invoice and escalates
+(`docs/decisions.md` §TBD-contractfx). A person approving with the finding in
+front of them is the review it asks for.
 
 ### 5. Contract-based PO creation
 

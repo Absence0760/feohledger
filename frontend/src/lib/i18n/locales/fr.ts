@@ -634,6 +634,8 @@ export const messages = {
 	'invoices.warning.contractVendorMismatch': 'Le fournisseur de la facture ne correspond pas à celui du contrat {contractNumber}',
 	'invoices.warning.contractSpendLimitExceeded': 'La dépense cumulée {cumulativeSpend} dépasse la limite {spendLimit} du contrat {contractNumber}',
 	'invoices.warning.contractSpendLimitExceededNotToExceed': 'La dépense cumulée {cumulativeSpend} dépasse la limite {spendLimit} du contrat {contractNumber} (non dépassable)',
+	'invoices.warning.contractCurrencyMismatch': 'La facture est en {invoiceCurrency} mais le contrat {contractNumber} est en {contractCurrency} — sa limite de dépense n’a pas été vérifiée',
+	'invoices.warning.contractCurrencyMismatchInvoiceCurrencyUnknown': 'La facture n’indique aucune devise valide : la limite de dépense en {contractCurrency} du contrat {contractNumber} n’a pas été vérifiée',
 	'invoices.warning.contractGlNotAllowed': 'Le compte général {glAccount} est en dehors des comptes autorisés du contrat {contractNumber}',
 	'invoices.warning.selfCorrectionTotalReconciliation': 'Les montants ne concordent pas : sous-total ({subtotal}) + taxe ({tax}) + livraison ({shipping}) − remise ({discount}) = {expected}, mais le total est {amount}.',
 	'invoices.warning.selfCorrectionDateOrdering': 'La date d’échéance ({dueDate}) est antérieure à la date de facture ({invoiceDate}).',

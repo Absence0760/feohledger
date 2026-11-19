@@ -3479,6 +3479,23 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningContractCurrencyMismatch(
+    String invoiceCurrency,
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return 'Die Rechnung lautet auf $invoiceCurrency, Vertrag $contractNumber jedoch auf $contractCurrency — sein Ausgabenlimit wurde nicht geprüft';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return 'Die Rechnung enthält keine gültige Währung, daher wurde das Ausgabenlimit von Vertrag $contractNumber in $contractCurrency nicht geprüft';
+  }
+
+  @override
   String invoiceWarningContractGlNotAllowed(
     String glAccount,
     String contractNumber,

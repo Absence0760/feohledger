@@ -757,3 +757,36 @@ def test_an_agent_approval_past_a_po_over_billing_warning_unwinds(status, warned
     )
     invoice = SimpleNamespace(status=status, warnings=warnings)
     assert _approved_past_po_overbilling(invoice) is refused
+
+
+@pytest.mark.parametrize(
+    ("status", "severity", "refused"),
+    [
+        (InvoiceStatus.approved, "error", True),
+        (InvoiceStatus.approved, "warning", False),
+        (InvoiceStatus.ready_for_review, "error", False),
+    ],
+)
+def test_an_agent_approval_past_a_not_to_exceed_contract_cap_unwinds(status, severity, refused):
+    """A not-to-exceed contract whose limit the invoice cannot be measured
+    against (another currency) is an `error` finding that no unattended door
+    approves past (decisions §TBD-contractfx); an agent's approval is no person
+    reading it either. A plain contract's `warning` does not unwind."""
+    from types import SimpleNamespace
+
+    from app.services.exception_agents.coordinator import _approved_past_contract_cap
+    from app.services.invoice_warning_catalog import warning
+
+    invoice = SimpleNamespace(
+        status=status,
+        warnings=[
+            warning(
+                "contract_currency_mismatch",
+                severity,
+                invoiceCurrency="EUR",
+                contractNumber="MSA-1",
+                contractCurrency="USD",
+            )
+        ],
+    )
+    assert _approved_past_contract_cap(invoice) is refused

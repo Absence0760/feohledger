@@ -3484,6 +3484,23 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningContractCurrencyMismatch(
+    String invoiceCurrency,
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return 'A nota está em $invoiceCurrency, mas o contrato $contractNumber está em $contractCurrency — o limite de gasto não foi verificado';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return 'A nota não registra uma moeda válida, então o limite de gasto em $contractCurrency do contrato $contractNumber não foi verificado';
+  }
+
+  @override
   String invoiceWarningContractGlNotAllowed(
     String glAccount,
     String contractNumber,
@@ -7996,6 +8013,23 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
     String spendLimit,
   ) {
     return 'O gasto acumulado $cumulativeSpend excede o limite $spendLimit do contrato $contractNumber (não excedível)';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatch(
+    String invoiceCurrency,
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return 'A nota está em $invoiceCurrency, mas o contrato $contractNumber está em $contractCurrency — o limite de gasto não foi verificado';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return 'A nota não registra uma moeda válida, então o limite de gasto em $contractCurrency do contrato $contractNumber não foi verificado';
   }
 
   @override

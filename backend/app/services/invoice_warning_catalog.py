@@ -542,6 +542,26 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
             "currency": "currency",
         },
     ),
+    # The invoice and the contract are in different currencies, or the invoice
+    # records none, so the cumulative spend was not measured against the limit
+    # (decisions §TBD-contractfx): no rate is guessed to make the figures
+    # comparable. The codes are the finding, so both are `text`, as in
+    # `po_currency_mismatch`. Severity follows `not_to_exceed`, as the
+    # spend-limit codes' does.
+    WarningSpec(
+        "contract_currency_mismatch",
+        "contract_noncompliant",
+        "Invoice is in {invoiceCurrency} but contract {contractNumber} is in "
+        "{contractCurrency} — its spend limit was not checked",
+        {"invoiceCurrency": "text", "contractNumber": "text", "contractCurrency": "text"},
+    ),
+    WarningSpec(
+        "contract_currency_mismatch_invoice_currency_unknown",
+        "contract_noncompliant",
+        "The invoice records no valid currency, so the spend limit in "
+        "{contractCurrency} of contract {contractNumber} was not checked",
+        {"contractNumber": "text", "contractCurrency": "text"},
+    ),
     WarningSpec(
         "contract_gl_not_allowed",
         "contract_noncompliant",

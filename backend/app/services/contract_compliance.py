@@ -14,9 +14,12 @@ Checks (all advisory unless the contract is ``not_to_exceed``):
   * cumulative linked spend over the contract's ``spend_limit`` — ``error``
     severity when ``not_to_exceed``, else ``warning``. The cumulative sum is
     scoped to the contract's own ``currency`` (never add unlike face values —
-    same rule as ``contract_spend`` / ``budget_service``); an invoice in a
-    different currency than the contract cannot itself be summed against the
-    limit, so it skips this specific check rather than comparing unlike money.
+    same rule as ``contract_spend`` / ``budget_service``).
+  * an invoice in a different currency than a limited contract, or in none,
+    cannot be summed against the limit and no rate is guessed to make it so:
+    it says so instead (``contract_currency_mismatch`` /
+    ``…_invoice_currency_unknown``), at the same severity the spend-limit
+    finding would carry (decisions §TBD-contractfx).
   * invoice vendor differs from the contract vendor
   * invoice GL account outside the contract's ``terms.allowed_gl_accounts``
 """
@@ -104,20 +107,40 @@ async def evaluate_contract_compliance(
         )
 
     # --- cumulative spend over limit --------------------------------------
-    # Skip entirely when the invoice's own currency differs from the
-    # contract's — it can't be validly added to a same-currency prior sum
-    # and compared against a limit denominated in yet another currency. An
-    # invoice recording no currency matches no contract: reading its blank as
-    # USD measured a code-less figure against a USD limit (decisions §466).
+    # Measured only when the invoice's own currency is the contract's: an
+    # other-currency figure can't be added to a same-currency prior sum and
+    # compared against the limit. An invoice recording no currency matches no
+    # contract: reading its blank as USD measured a code-less figure against a
+    # USD limit (decisions §466). Either case is reported below rather than
+    # skipped in silence.
     from app.services.payment_runs import payable_currency_code
 
     invoice_currency = payable_currency_code(invoice.currency)
-    if (
-        contract.spend_limit is not None
-        and invoice.amount is not None
-        and invoice_currency is not None
-        and invoice_currency == payable_currency_code(contract.currency)
-    ):
+    contract_currency = payable_currency_code(contract.currency)
+    limited = contract.spend_limit is not None and invoice.amount is not None
+    # A not-to-exceed cap is an `error`, as its breach is, and stops every
+    # unattended approval (`invoice_warnings.has_contract_cap_warning`): an amount
+    # the cap cannot measure is one a person must read (decisions §TBD-contractfx).
+    cap_severity = "error" if contract.not_to_exceed else "warning"
+    if limited and contract_currency is not None and invoice_currency != contract_currency:
+        # Never converted: a guessed rate would decide a contractual cap.
+        findings.append(
+            warning(
+                "contract_currency_mismatch",
+                cap_severity,
+                invoiceCurrency=invoice_currency,
+                contractNumber=contract.contract_number,
+                contractCurrency=contract_currency,
+            )
+            if invoice_currency is not None
+            else warning(
+                "contract_currency_mismatch_invoice_currency_unknown",
+                cap_severity,
+                contractNumber=contract.contract_number,
+                contractCurrency=contract_currency,
+            )
+        )
+    elif limited and invoice_currency is not None and invoice_currency == contract_currency:
         prior = (
             await db.execute(
                 select(func.coalesce(func.sum(Invoice.amount), 0)).where(
@@ -135,7 +158,7 @@ async def evaluate_contract_compliance(
                     "contract_spend_limit_exceeded_not_to_exceed"
                     if contract.not_to_exceed
                     else "contract_spend_limit_exceeded",
-                    "error" if contract.not_to_exceed else "warning",
+                    cap_severity,
                     cumulativeSpend=cumulative,
                     contractNumber=contract.contract_number,
                     spendLimit=contract.spend_limit,
