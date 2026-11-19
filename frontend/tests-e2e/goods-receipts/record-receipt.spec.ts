@@ -102,7 +102,7 @@ test.describe('record a goods receipt', () => {
 		await cancel.click();
 		await expect(cancel).toHaveText('Confirm cancel');
 		await cancel.click();
-		await expect(modal.locator('.title-block')).toContainText('cancelled');
+		await expect(modal.locator('.title-block')).toContainText('Cancelled');
 		await expect(modal.getByTestId('cancel-receipt')).toHaveCount(0);
 	});
 

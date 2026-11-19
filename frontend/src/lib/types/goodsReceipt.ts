@@ -11,6 +11,8 @@
  * a successful delivery — the same row the matcher was deliberately ignoring.
  */
 
+import type { MessageKey } from '#lib/i18n/messages.ts';
+
 /** Mirrors `backend/app/services/po_matching.py::CANCELLED_GR_STATUSES`.
  *
  *  Both spellings of "cancelled" are listed because the column is free-form and
@@ -36,6 +38,28 @@ export function isCancelledGoodsReceipt(status: string | null | undefined): bool
  *  draws between `cancelled` and a status nobody told us about. */
 export function goodsReceiptTone(status: string | null | undefined): 'success' | 'muted' {
 	return isCancelledGoodsReceipt(status) ? 'muted' : 'success';
+}
+
+/** Message key for each status spelling the backend writes or treats as
+ *  cancelled (`services/goods_receipts.py` writes `received` / `cancelled`;
+ *  the rest are the `CANCELLED_GR_STATUSES` spellings an ERP import can carry).
+ *  Synonyms share one label, so a reader sees "Cancelled" whichever spelling
+ *  the row holds. */
+const GR_STATUS_LABEL_KEYS: Record<string, MessageKey> = {
+	received: 'goodsReceipts.status.received',
+	cancelled: 'goodsReceipts.status.cancelled',
+	canceled: 'goodsReceipts.status.cancelled',
+	void: 'goodsReceipts.status.void',
+	voided: 'goodsReceipts.status.void',
+	reversed: 'goodsReceipts.status.reversed'
+};
+
+/** The label key for a goods-receipt status, or `null` for a value this build
+ *  does not know — the caller then renders the raw value rather than hiding
+ *  it (the column is free-form, so an unknown spelling is still evidence).
+ *  Matched the way `isCancelledGoodsReceipt` matches: trimmed, case-folded. */
+export function goodsReceiptStatusLabelKey(status: string | null | undefined): MessageKey | null {
+	return GR_STATUS_LABEL_KEYS[(status ?? '').trim().toLowerCase()] ?? null;
 }
 
 /** Mirrors `backend/app/api/goods_receipts.py::RECEIPT_ENTRY_ROLES`. Receiving

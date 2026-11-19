@@ -162,6 +162,40 @@ const CASES: Case[] = [
 		apiPathname: '/api/discounts/offers',
 		notShown: /No discount offers match this filter/,
 		shown: /Failed to load discount offers/
+	},
+	// The four /expenses sub-tabs only toasted a failed load and left their
+	// "No … yet." empty line standing; each now renders `ui/LoadError`.
+	{
+		retry: true,
+		name: 'expense reports (reports tab)',
+		route: '/expenses?tab=reports',
+		apiPathname: '/api/expense-reports',
+		notShown: /No expense reports yet/,
+		shown: /Failed to load expense reports/
+	},
+	{
+		retry: true,
+		name: 'expense policies (policies tab)',
+		route: '/expenses?tab=policies',
+		apiPathname: '/api/expense-policies',
+		notShown: /No expense policies yet/,
+		shown: /Failed to load policies/
+	},
+	{
+		retry: true,
+		name: 'expense pre-approvals (pre-approvals tab)',
+		route: '/expenses?tab=preapprovals',
+		apiPathname: '/api/expense-preapprovals',
+		notShown: /No pre-approval requests/,
+		shown: /Failed to load pre-approvals/
+	},
+	{
+		retry: true,
+		name: 'card transactions (cards tab)',
+		route: '/expenses?tab=cards',
+		apiPathname: '/api/corporate-card-transactions',
+		notShown: /No card transactions/,
+		shown: /Failed to load card transactions/
 	}
 ];
 

@@ -20,7 +20,9 @@
 	import CatalogModal from '#lib/components/modals/CatalogModal.svelte';
 	import PunchoutModal from '#lib/components/modals/PunchoutModal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
+	import { untrack } from 'svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
@@ -63,8 +65,33 @@
 	// The list is paged: `total` is the whole filtered set, so a footer that
 	// says "Showing all {total}" is only true once every row is loaded.
 	let hasMore = $derived(catalogs.length < total);
-	let search = $state('');
-	let typeFilter = $state<string>('all'); // all | internal | punchout | preferred
+	// Search and type filter round-trip through the URL (`?search=`, `?type=`)
+	// like every sibling list, so back / reload / a shared link restore the
+	// view. Read ONCE here; `syncUrl()` is the only writer.
+	const TYPE_KEYS = ['all', 'internal', 'punchout', 'preferred'] as const;
+	function initialType(): string {
+		const t = page.url.searchParams.get('type');
+		return t && (TYPE_KEYS as readonly string[]).includes(t) ? t : 'all';
+	}
+	let search = $state(page.url.searchParams.get('search') ?? '');
+	let typeFilter = $state<string>(initialType());
+
+	// A WRITER, never a dependency: everything is read untracked, `page.url`
+	// included, or the replaceState would re-trigger the effect that called it.
+	// Merges into the current URL rather than rebuilding it, so params this
+	// page does not own survive, and skips the write when nothing changed.
+	function syncUrl() {
+		untrack(() => {
+			const url = new URL(page.url.href);
+			const q = search.trim();
+			if (q) url.searchParams.set('search', q);
+			else url.searchParams.delete('search');
+			if (typeFilter !== 'all') url.searchParams.set('type', typeFilter);
+			else url.searchParams.delete('type');
+			if (url.search === new URL(page.url.href).search) return;
+			replaceState(`${url.pathname}${url.search}`, {});
+		});
+	}
 
 	// --- Modal + selection state ---
 	let showCreate = $state(false);
@@ -114,7 +141,12 @@
 		const nextPage = opts.append ? pageNum + 1 : 1;
 		const token = fetchSequence.start();
 		if (opts.append) loadingMore = true;
-		else loading = true;
+		else {
+			loading = true;
+			// Cleared when a fresh load STARTS, so Retry unmounts LoadError while
+			// the request is out and a second failure re-announces.
+			errored = false;
+		}
 		try {
 			const params: {
 				search?: string;
@@ -137,8 +169,16 @@
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// delete still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			errored = true;
-			toast(err instanceof Error ? err.message : m('catalogs.toast.loadFailed'), 'error');
+			// A failed load-more, or a load a local delete already superseded,
+			// leaves trustworthy rows on screen: keep them and toast. Only a
+			// failed first page has nothing to show, so LoadError replaces the
+			// table (it used to do so for load-more too, throwing away every
+			// row already loaded).
+			if (opts.append || fetchSequence.wasSupersededByEdit(token)) {
+				toast(err instanceof Error ? err.message : m('catalogs.toast.loadFailed'), 'error');
+			} else {
+				errored = true;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -149,10 +189,18 @@
 
 	// Debounce text search: re-fetch 280ms after the last keystroke. Reading
 	// `search` registers the dependency so edits re-run this effect.
+	// The first run (mount, including a bookmarked `?search=`) loads at once;
+	// only a typed change waits for the debounce.
+	let searchEffectRan = false;
 	$effect(() => {
 		const q = search;
 		clearTimeout(searchTimer);
-		searchTimer = setTimeout(() => load(), q === '' ? 0 : 280);
+		const delay = q === '' || !searchEffectRan ? 0 : 280;
+		searchEffectRan = true;
+		searchTimer = setTimeout(() => {
+			syncUrl();
+			load();
+		}, delay);
 		return () => clearTimeout(searchTimer);
 	});
 
@@ -306,7 +354,10 @@
 		<SearchBox bind:value={search} placeholder={m('catalogs.search.placeholder')} ariaLabel={m('catalogs.search.aria')} />
 	</div>
 
-	<FilterChips chips={TYPE_CHIPS} bind:active={typeFilter} onchange={() => load()} />
+	<FilterChips chips={TYPE_CHIPS} bind:active={typeFilter} onchange={() => {
+		syncUrl();
+		load();
+	}} />
 
 	{#if errored}
 		<!-- A failed load is a dead end without a way back: the toast that
@@ -348,8 +399,9 @@
 			{/each}
 		{/snippet}
 	</DataTable>
-	{/if}
 
+	<!-- Inside the success branch: under LoadError the stale rows' counts
+	     ("Load more (100 of 240)") describe a list that is not on screen. -->
 	{#if hasMore}
 		<div class="load-more-row">
 			<button
@@ -366,6 +418,7 @@
 		<div class="load-more-row">
 			<span class="load-more-end">{m('catalogs.showingAll', { total })}</span>
 		</div>
+	{/if}
 	{/if}
 </PageHeader>
 

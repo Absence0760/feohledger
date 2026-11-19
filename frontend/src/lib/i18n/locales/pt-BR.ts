@@ -2178,6 +2178,7 @@ export const messages = {
 
 	'expenses.reports.openAria': 'Abrir relatório {number}',
 	'expenses.reports.empty': 'Ainda não há relatórios de despesas.',
+	'expenses.reports.toast.loadFailed': 'Falha ao carregar relatórios de despesas',
 	'expenses.reports.loadMore': 'Carregar mais ({shown} de {total})',
 	'expenses.reports.showingAll': '{total, plural, one {Mostrando # relatório} other {Mostrando todos os # relatórios}}',
 	'expenses.reports.toast.created': 'Relatório criado',
@@ -2900,6 +2901,10 @@ export const messages = {
 	'goodsReceipts.col.po': 'Pedido',
 	'goodsReceipts.col.received': 'Recebido em',
 	'goodsReceipts.col.status': 'Status',
+	'goodsReceipts.status.received': 'Recebido',
+	'goodsReceipts.status.cancelled': 'Cancelado',
+	'goodsReceipts.status.void': 'Anulado',
+	'goodsReceipts.status.reversed': 'Estornado',
 	'goodsReceipts.col.lines': 'Linhas',
 	'goodsReceipts.col.created': 'Criado em',
 	'goodsReceipts.empty': 'Nenhum recebimento de mercadorias.',
