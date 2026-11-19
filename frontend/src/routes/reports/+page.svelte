@@ -414,15 +414,15 @@
 						{running ? m('reports.action.running') : m('reports.action.run')}
 					</button>
 					{#if canMutate && loadedId}
-						<button class="btn-secondary" onclick={updateLoaded} disabled={running}
+						<button class="btn-cancel" onclick={updateLoaded} disabled={running}
 							>{m('reports.action.saveChanges')}</button
 						>
 					{/if}
 					{#if loadedId}
-						<button class="btn-secondary" onclick={() => exportSaved(loadedId!, 'csv')}
+						<button class="btn-cancel" onclick={() => exportSaved(loadedId!, 'csv')}
 							>{m('reports.action.exportCsv')}</button
 						>
-						<button class="btn-secondary" onclick={() => exportSaved(loadedId!, 'pdf')}
+						<button class="btn-cancel" onclick={() => exportSaved(loadedId!, 'pdf')}
 							>{m('reports.action.exportPdf')}</button
 						>
 					{/if}
@@ -563,27 +563,6 @@
 		align-items: center;
 		gap: 10px;
 		flex-wrap: wrap;
-	}
-	.btn-secondary {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-	.btn-secondary:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-secondary:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 	select {
 		padding: 7px 10px;

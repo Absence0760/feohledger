@@ -337,7 +337,7 @@
 		</label>
 		{#if canManage}
 			<button
-				class="btn-secondary"
+				class="btn-cancel"
 				disabled={!report || report.vendor_count_eligible_over_threshold === 0}
 				onclick={openFileModal}
 			>
@@ -869,27 +869,8 @@
 		font-family: var(--font-mono);
 	}
 
-	.btn-secondary {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
 
-	.btn-secondary:hover:not(:disabled) {
-		background: var(--bg);
-	}
 
-	.btn-secondary:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
-	}
 
 	/* --- File-1099s confirm modal --- */
 

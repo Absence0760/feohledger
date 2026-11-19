@@ -380,7 +380,7 @@
 			</button>
 			<!-- `POST /api/gl-accounts/sync-erp` is require_roles(ADMIN, AP_MANAGER),
 			     matching the buttons on /purchase-orders and /vendors. -->
-			<button class="btn-outline" disabled={syncing} onclick={syncFromErp}>
+			<button class="btn-cancel" disabled={syncing} onclick={syncFromErp}>
 				{syncing ? m('glAccounts.action.syncing') : m('glAccounts.action.syncErp')}
 			</button>
 		{/if}
@@ -613,23 +613,5 @@
 	.count-line {
 		font-size: 0.8rem;
 		color: var(--text-muted);
-	}
-	.btn-outline {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-outline:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-outline:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 </style>
