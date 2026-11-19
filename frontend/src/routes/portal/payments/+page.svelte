@@ -15,6 +15,8 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { portalPaymentStatusLabelKey, PORTAL_PAYMENT_PHASES } from '#lib/types/portalStatus.ts';
 	import PortalListFilters from '#lib/components/portal/PortalListFilters.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import { paymentMethodLabelKey } from '#lib/types/payment.ts';
 
 	type PortalPayment = PortalPaymentListItem;
 
@@ -26,6 +28,9 @@
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let error = $state('');
+	// A failed first-page read — kept apart from `error` so it is never
+	// rendered as "no payments yet" (see the invoice list).
+	let loadError = $state('');
 	let downloading = $state<string | null>(null);
 
 	const hasMore = $derived(items.length < total);
@@ -103,6 +108,7 @@
 		if (opts.append) loadingMore = true;
 		else loading = true;
 		error = '';
+		if (!opts.append) loadError = '';
 		try {
 			const res = await listPortalPayments({
 				page: nextPage,
@@ -119,7 +125,14 @@
 		} catch (err) {
 			// `isCurrentRequest`, not `canCommit` — a superseded load still failed.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			error = err instanceof Error ? err.message : m('portal.payments.loadFailed');
+			const msg = err instanceof Error ? err.message : m('portal.payments.loadFailed');
+			if (opts.append) {
+				error = msg;
+			} else {
+				items = [];
+				total = 0;
+				loadError = msg;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -153,6 +166,14 @@
 		}
 	}
 
+	// The rail is a backend enum (`virtual_card`, `faster_payments`); render its
+	// label, and the raw value only for a rail this build does not know.
+	function methodLabel(method: string | null): string {
+		if (!method) return m('portal.common.dash');
+		const key = paymentMethodLabelKey(method);
+		return key ? m(key) : method;
+	}
+
 	onMount(refresh);
 </script>
 
@@ -178,6 +199,8 @@
 
 	{#if loading && !items.length}
 		<div class="loading">{m('portal.common.loading')}</div>
+	{:else if loadError}
+		<LoadError message={loadError} onretry={refresh} testId="portal-payments-load-error" />
 	{:else if !items.length}
 		<div class="empty">
 			{#if filtered}
@@ -210,8 +233,8 @@
 						<td>{p.invoice_number}</td>
 						<td>{formatDate(p.submitted_at, m('portal.common.dash'))}</td>
 						<td>{formatDate(p.completed_at, m('portal.common.dash'))}</td>
-						<td>{p.method || m('portal.common.dash')}</td>
-						<td class="num"><Money amount={p.amount} currency={p.currency} /></td>
+						<td>{methodLabel(p.method)}</td>
+						<td class="num"><Money amount={p.amount} currency={p.currency} mono /></td>
 						<td><span class="status s-{p.status}">{m(portalPaymentStatusLabelKey(p.status))}</span></td>
 						<td>{p.reference || m('portal.common.dash')}</td>
 						<td class="actions">
