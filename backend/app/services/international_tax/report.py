@@ -29,6 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.international_tax import IntlTaxRecord, TaxKind
+from app.utils.currency_code import iso_currency_or_none
 
 _ZERO = Decimal("0.00")
 
@@ -108,7 +109,7 @@ async def generate_tax_report(
     by_currency: dict[str, CurrencyTaxTotals] = {}
 
     for r in rows:
-        currency = (r.currency or "").strip().upper()
+        currency = iso_currency_or_none(r.currency) or ""
         line = by_country.get((r.country_code, currency))
         if line is None:
             line = CountryTaxLine(country_code=r.country_code, currency=currency)

@@ -50,6 +50,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from app.services.currency_conversion import convert_amount
 from app.services.fx_adapters import FXAdapter
+from app.utils.currency_code import iso_currency_or_none
 
 _MONEY_QUANT = Decimal("0.01")
 _RATE_QUANT = Decimal("0.00000001")
@@ -73,11 +74,25 @@ def _quantize_money(value: Decimal) -> Decimal:
     return value.quantize(_MONEY_QUANT, rounding=ROUND_HALF_UP)
 
 
-def normalize_currency(code: str | None, *, default: str = "USD") -> str:
-    """Uppercase ISO code, degrading to ``default`` for empty/blank input."""
-    if isinstance(code, str) and code.strip():
-        return code.strip().upper()
-    return default.upper()
+def normalize_currency(code: object) -> str | None:
+    """``code`` as an uppercase ISO 4217 code, or ``None`` when it is not one.
+
+    Delegates to the one shape rule (``utils/currency_code``, decisions §381).
+    It used to degrade a blank code to a ``default`` — ``"USD"``, or the
+    conversion's own target currency — so a line or report that recorded no
+    usable currency compared EQUAL to the currency it was being converted into
+    and was locked at rate 1, counted at face value against the CFO gate, and
+    read as already in a policy's threshold currency: the silent
+    assume-the-default that locked FX exists to eliminate
+    (``docs/expense-management.md``; decisions §160, §196, §200). Nothing
+    decided that default — the request schemas refuse a blank or malformed
+    code on write (``schemas.currency.CurrencyCode``) — so a value that still
+    fails the rule is a legacy row, and every caller now fails closed on
+    ``None``: the lock refuses (``ExpenseConversionError``), the line counts as
+    unconverted (which blocks submission), the gate figure is unknown (which
+    requires CFO sign-off), and a policy comparison counts as a breach.
+    """
+    return iso_currency_or_none(code)
 
 
 def conversion_requires_rate_source(
@@ -107,7 +122,10 @@ def conversion_requires_rate_source(
     tenant that never needed a rate.
     """
     tgt = normalize_currency(target_currency)
-    return fx_adapter is None and normalize_currency(source_currency, default=tgt) != tgt
+    src = normalize_currency(source_currency)
+    # An unusable code on either side is never "the same currency": it needs a
+    # rate like any other cross-currency pair, so it is refused without one.
+    return fx_adapter is None and (src is None or tgt is None or src != tgt)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +157,15 @@ async def lock_expense_conversion(
     caller turns that into a 422 rather than attaching an unconvertible line.
     """
     tgt = normalize_currency(target_currency)
-    src = normalize_currency(expense.currency, default=tgt)
+    src = normalize_currency(expense.currency)
+    if src is None or tgt is None:
+        # No usable code on one side: there is no pair to price, and reading
+        # the blank as the other side's currency would lock it at rate 1.
+        raise ExpenseConversionError(
+            "The expense or its report records no valid currency code.",
+            source_currency=src or "",
+            target_currency=tgt or "",
+        )
     try:
         converted = await convert_amount(
             amount=Decimal(str(expense.amount or 0)),
@@ -175,7 +201,7 @@ def line_amount_in_report_currency(
     currency: str | None,
     converted_amount: Decimal | None,
     converted_currency: str | None,
-    report_currency: str,
+    report_currency: str | None,
 ) -> Decimal | None:
     """The line's contribution to its report's total, or ``None`` if unknown.
 
@@ -187,9 +213,11 @@ def line_amount_in_report_currency(
        treat that as *unconverted*, never as face value.
     """
     tgt = normalize_currency(report_currency)
-    if converted_amount is not None and normalize_currency(converted_currency, default="") == tgt:
+    if tgt is None:
+        return None
+    if converted_amount is not None and normalize_currency(converted_currency) == tgt:
         return _quantize_money(Decimal(str(converted_amount)))
-    if normalize_currency(currency, default=tgt) == tgt:
+    if normalize_currency(currency) == tgt:
         return _quantize_money(Decimal(str(amount or 0)))
     return None
 
@@ -260,7 +288,9 @@ def rollup_report_lines(rows: list[dict], *, report_currency: str) -> ReportRoll
 
     for row in rows:
         amount = Decimal(str(row.get("amount") or 0))
-        cur = normalize_currency(row.get("currency"), default=tgt)
+        # A line with no usable code buckets under "" and, never equal to the
+        # report currency, counts as unconverted — which blocks submission.
+        cur = normalize_currency(row.get("currency")) or ""
         contribution = line_amount_in_report_currency(
             amount=amount,
             currency=cur,
@@ -302,7 +332,7 @@ def rollup_report_lines(rows: list[dict], *, report_currency: str) -> ReportRoll
         for cur, b in sorted(buckets.items(), key=lambda kv: kv[1]["report_amount"], reverse=True)
     )
     return ReportRollup(
-        currency=tgt,
+        currency=tgt or "",
         total=_quantize_money(total),
         count=sum(b.count for b in by_currency),
         # The COUNT, not `len(unconverted_ids)`. `unconverted_ids` only collects
@@ -348,7 +378,10 @@ async def lock_report_reporting_amount(
     ``None`` here still fails closed through the ``except`` below.
     """
     tgt = normalize_currency(reporting_currency)
-    src = normalize_currency(report.currency, default=tgt)
+    src = normalize_currency(report.currency)
+    if src is None or tgt is None:
+        clear_report_reporting_amount(report)
+        return False
     try:
         converted = await convert_amount(
             amount=Decimal(str(report.total_amount or 0)),
@@ -386,9 +419,11 @@ def report_amount_for_gate(report, *, reporting_currency: str) -> Decimal | None
     """
     tgt = normalize_currency(reporting_currency)
     locked = getattr(report, "reporting_amount", None)
-    locked_cur = normalize_currency(getattr(report, "reporting_currency", None), default="")
+    if tgt is None:
+        return None
+    locked_cur = normalize_currency(getattr(report, "reporting_currency", None))
     if locked is not None and locked_cur == tgt:
         return _quantize_money(Decimal(str(locked)))
-    if normalize_currency(report.currency, default=tgt) == tgt:
+    if normalize_currency(report.currency) == tgt:
         return _quantize_money(Decimal(str(report.total_amount or 0)))
     return None

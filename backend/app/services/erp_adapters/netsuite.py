@@ -59,6 +59,7 @@ from app.services.erp_adapters.base import (
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.json_money import dumps_exact_json, loads_exact_json
 from app.utils.url_safety import UnsafeUrlError, pinned_async_client, resolve_public_addresses
 
@@ -1521,7 +1522,7 @@ def _netsuite_po_to_payload(raw: dict) -> PoPayload | None:
             expected = date.fromisoformat(str(raw["duedate"])[:10])
         except ValueError:
             expected = None
-    currency = str(raw.get("currency") or "").strip().upper()
+    currency = iso_currency_or_none(raw.get("currency"))
     vendor_id = raw.get("vendorid")
     return PoPayload(
         po_number=str(number),

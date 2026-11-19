@@ -53,6 +53,7 @@ from app.services.exception_lifecycle import (
     workflow_instances_for,
 )
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.search import ilike_contains
 
 router = APIRouter(prefix="/exceptions", tags=["exceptions"])
@@ -895,7 +896,7 @@ async def record_erp_payment(
             stated_amount = Decimal(str(stated))
         except ArithmeticError:
             stated_amount = None
-        stated_currency = str(stated_currency_raw or "").strip().upper()
+        stated_currency = iso_currency_or_none(stated_currency_raw)
         if (
             stated_amount is None
             or (amount is not None and amount != stated_amount)
@@ -904,7 +905,7 @@ async def record_erp_payment(
             # invoice owes, the rule the sweep applies to the same facts
             # (§386); never compared as a bare number (§160, §196).
             or not stated_currency
-            or stated_currency != (invoice.currency or "").strip().upper()
+            or stated_currency != iso_currency_or_none(invoice.currency)
         ):
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,

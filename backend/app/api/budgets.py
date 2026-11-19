@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +49,7 @@ from app.tenant import (
     get_tenant_db,
     get_write_entity_id,
 )
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.search import ilike_contains
 
 router = APIRouter(prefix="/budgets", tags=["budgets"])
@@ -163,7 +164,9 @@ def _budget_list_filters(
     case-insensitively, as the summary groups.
     """
     if currency and currency.strip():
-        query = query.where(func.upper(Budget.currency) == currency.strip().upper())
+        code = iso_currency_or_none(currency)
+        # A filter that is not a currency code matches no budget.
+        query = query.where(func.upper(Budget.currency) == code if code else false())
     if dimension:
         query = query.where(Budget.dimension == dimension)
     if period:

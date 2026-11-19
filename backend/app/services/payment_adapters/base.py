@@ -25,6 +25,8 @@ import enum
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.utils.currency_code import iso_currency_or_none
+
 
 class PaymentStatus(enum.StrEnum):
     pending = "pending"
@@ -277,7 +279,9 @@ def exponent_for(currency: str | None) -> int:
     """
     if not currency:
         return DEFAULT_MINOR_UNIT_EXPONENT
-    return _MINOR_UNIT_EXPONENTS.get(currency.strip().upper(), DEFAULT_MINOR_UNIT_EXPONENT)
+    return _MINOR_UNIT_EXPONENTS.get(
+        iso_currency_or_none(currency) or "", DEFAULT_MINOR_UNIT_EXPONENT
+    )
 
 
 def _scale(exponent: int) -> Decimal:

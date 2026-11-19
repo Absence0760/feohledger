@@ -601,8 +601,10 @@ async def _approved_preapproval_amount(db: AsyncSession, expense: Expense) -> De
                 ).where(
                     ExpensePreapproval.status == PreapprovalStatus.approved,
                     ExpensePreapproval.requester_user_id == owner,
+                    # "" (no usable code on the expense) matches no
+                    # pre-approval, so nothing covers it.
                     func.upper(func.coalesce(ExpensePreapproval.currency, "USD"))
-                    == normalize_currency(expense.currency),
+                    == (normalize_currency(expense.currency) or ""),
                     or_(*conditions),
                 )
             )

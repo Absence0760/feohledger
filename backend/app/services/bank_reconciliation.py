@@ -82,6 +82,7 @@ from app.models.invoice import Invoice
 from app.models.payment import Payment
 from app.services.numeric_bounds import STATEMENT_NUMERIC, fits_numeric
 from app.services.vendor_matching import _normalize, _similarity
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.dates import parse_ambiguous_date
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,21 @@ EXPECTED_TO_CLEAR_STATUSES = ("completed", "submitted", "processing")
 AMOUNT_MATCH_TOLERANCE = Decimal("0.01")
 
 
+def reconciliation_currency(value: object) -> str:
+    """The currency label a reconciliation compares on.
+
+    ``""`` only when no currency was stated: that is *unknown*, and the
+    comparisons here skip the currency check rather than manufacture a
+    mismatch out of missing data. A stated value goes through the one ISO 4217
+    rule (``utils/currency_code``). One that fails it is NOT unknown: it keeps
+    its own trimmed text, which equals no real code, so it reads as a currency
+    mismatch (fail closed) instead of silently waiving the check.
+    """
+    if value is None or not str(value).strip():
+        return ""
+    return iso_currency_or_none(value) or str(value).strip()
+
+
 def settlement_amount_and_currency(payment, invoice_currency: str | None) -> tuple[Decimal, str]:
     """What the bank account was actually debited for this payment.
 
@@ -178,8 +194,8 @@ def settlement_amount_and_currency(payment, invoice_currency: str | None) -> tup
     source_amount = getattr(payment, "source_amount", None)
     source_currency = getattr(payment, "source_currency", None)
     if source_amount is not None and source_currency not in (None, ""):
-        return Decimal(source_amount), str(source_currency).upper()
-    return Decimal(payment.amount), (invoice_currency or "").strip().upper()
+        return Decimal(source_amount), reconciliation_currency(source_currency)
+    return Decimal(payment.amount), reconciliation_currency(invoice_currency)
 
 
 def settlement_amount_sql():
@@ -225,8 +241,8 @@ def classify_discrepancy(
     signal of the remaining two. An unknown currency on either side skips the
     currency check only — missing data must not manufacture a discrepancy.
     """
-    bank_ccy = (bank_currency or "").strip().upper()
-    pay_ccy = (payment_currency or "").strip().upper()
+    bank_ccy = reconciliation_currency(bank_currency)
+    pay_ccy = reconciliation_currency(payment_currency)
     if bank_ccy and pay_ccy and bank_ccy != pay_ccy:
         return MATCH_METHOD_CURRENCY_MISMATCH
     if is_amount_mismatch(bank_amount, payment_amount):
@@ -608,7 +624,7 @@ async def _load_invoice_facts(
     rows = (await db.execute(select(Invoice).where(Invoice.id.in_(missing)))).scalars().all()
     found = {
         inv.id: _InvoiceFacts(
-            currency=(inv.currency or "").strip().upper(),
+            currency=reconciliation_currency(inv.currency),
             vendor_name=inv.vendor_name,
         )
         for inv in rows
@@ -634,7 +650,7 @@ def _settles_as(
     settled_amount, settled_currency = settlement_amount_and_currency(payment, facts.currency)
     if settled_amount != amount:
         return False
-    bank_currency = (currency or "").strip().upper()
+    bank_currency = reconciliation_currency(currency)
     return not settled_currency or not bank_currency or settled_currency == bank_currency
 
 

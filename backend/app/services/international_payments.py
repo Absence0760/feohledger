@@ -39,6 +39,7 @@ from app.utils.banking import (
     validate_iban,
     validate_swift_bic,
 )
+from app.utils.currency_code import iso_currency_or_none
 
 
 class InternationalPaymentError(ValueError):
@@ -68,20 +69,23 @@ DEFAULT_HOME_CURRENCY = "USD"
 def normalize_currency_code(value: str | None) -> str | None:
     """A currency code as the rest of the system compares it, or ``None``.
 
-    Trimmed and upper-cased; blank / non-string input yields ``None`` so the
-    caller can fall back deliberately rather than propagate a whitespace-only
-    "code" that equals nothing.
+    Delegates to the one ISO 4217 shape rule (``utils/currency_code``,
+    decisions §381): blank, non-string, and anything that is not exactly three
+    ASCII letters (``"ÄÖÜ"``, ``"US DOLLARS"``) yield ``None``. It used to only
+    trim and upper-case, so a malformed code passed through as a "currency".
+    Every caller already treats ``None`` as unknown and fails closed: the
+    payment and card legs refuse (``currency_unknown``), the KYC gate requires
+    KYC, the velocity check excludes the leg, and an unusable home-currency
+    SETTING reads as unset (``configured_home_currency``).
     """
-    if not isinstance(value, str):
-        return None
-    trimmed = value.strip().upper()
-    return trimmed or None
+    return iso_currency_or_none(value)
 
 
 def configured_home_currency(org_settings: dict | None) -> str | None:
     """The home-currency SETTING as written, normalised — or ``None``.
 
-    ``None`` means the tenant has not usably set one (absent, blank, or the
+    ``None`` means the tenant has not usably set one (absent, blank, not a
+    three-ASCII-letter code, or the
     surrounding JSON is not the shape it should be), which is a *different*
     answer from "their home currency is USD". `resolve_home_currency` collapses
     the two because the payment path has to pick something; the
@@ -343,17 +347,17 @@ def realized_fx_gain_loss_for_settlement(
         return None
     if reporting_fx_rate <= 0:
         return None
-    if invoice_currency and paid_source_currency:
-        if invoice_currency.upper() == paid_source_currency.upper():
-            return None
+    paid_ccy = iso_currency_or_none(paid_source_currency)
+    invoice_ccy = iso_currency_or_none(invoice_currency)
+    if invoice_ccy and paid_ccy and invoice_ccy == paid_ccy:
+        return None
     # The accrual is denominated in the invoice's reporting currency; the
     # outflow in the payment's source currency. Comparing them requires that
     # they be the same currency — we will not bridge them with a rate here,
     # because inventing one is exactly the kind of silent wrongness this
     # function exists to avoid.
-    if not reporting_currency or not paid_source_currency:
-        return None
-    if reporting_currency.strip().upper() != paid_source_currency.strip().upper():
+    reporting_ccy = iso_currency_or_none(reporting_currency)
+    if reporting_ccy is None or paid_ccy is None or reporting_ccy != paid_ccy:
         return None
     accrued = _quantize_money(invoice_amount * reporting_fx_rate)
     return _gain_loss(accrued=accrued, paid_home_amount=paid_source_amount)

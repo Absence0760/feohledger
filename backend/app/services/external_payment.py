@@ -97,6 +97,7 @@ from app.services.payment_runs import (
     payable_amounts,
 )
 from app.services.workflow_engine import VALID_TRANSITIONS, transition_invoice
+from app.utils.currency_code import iso_currency_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -486,8 +487,8 @@ def _check_amount(
         stated is not None
         and currency_stated
         and (
-            not (stated_currency or "").strip()
-            or stated_currency.strip().upper() != (currency or "").strip().upper()
+            iso_currency_or_none(stated_currency) is None
+            or iso_currency_or_none(stated_currency) != iso_currency_or_none(currency)
         )
     ):
         raise ExternalPaymentRefused(

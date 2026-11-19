@@ -47,13 +47,19 @@ def test_pair_is_checked_before_the_provider():
     assert not conversion_requires_rate_source(
         source_currency="USD", target_currency="USD", fx_adapter=None
     )
-    # Case / blank normalisation rides the same helper the locks use.
+    # Case normalisation rides the same helper the locks use.
     assert not conversion_requires_rate_source(
         source_currency="usd", target_currency="USD", fx_adapter=None
     )
-    assert not conversion_requires_rate_source(
-        source_currency=None, target_currency="EUR", fx_adapter=None
-    )
+    # A missing or malformed code is never "the same currency" as the target:
+    # it used to read as the target and lock at rate 1 (fail closed now).
+    for unusable in (None, "", "ÄÖÜ", "US DOLLARS"):
+        assert conversion_requires_rate_source(
+            source_currency=unusable, target_currency="EUR", fx_adapter=None
+        )
+        assert conversion_requires_rate_source(
+            source_currency="EUR", target_currency=unusable, fx_adapter=None
+        )
     # No adapter + a genuinely different pair → fail closed.
     assert conversion_requires_rate_source(
         source_currency="EUR", target_currency="USD", fx_adapter=None

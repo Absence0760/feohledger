@@ -348,7 +348,7 @@ def report_cfo_gate(report: ExpenseReport, role_names, org_settings: dict | None
     if threshold_dec is not None and not threshold_dec.is_finite():
         threshold_dec = None
     limit = f"{threshold_dec}" if threshold_dec is not None else "the configured limit"
-    report_currency = normalize_currency(report.currency)
+    report_currency = normalize_currency(report.currency) or ""
     if gate_total is None:
         message = (
             f"Report total cannot be expressed in {reporting_currency} "

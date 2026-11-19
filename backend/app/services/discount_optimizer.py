@@ -41,6 +41,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.services.discount_roi import DiscountROI, compute_roi, days_between
+from app.utils.currency_code import iso_currency_or_none
 
 _ZERO = Decimal("0.00")
 
@@ -181,11 +182,16 @@ def optimize(
     Returns a deterministic :class:`OptimizationResult`.
     """
     cost_of_capital_pct = Decimal(cost_of_capital_pct)
-    target_currency = reporting_currency.strip().upper() if reporting_currency else None
+    # A reporting currency that is set but not a code becomes "", which no
+    # offer matches: every offer is then unconvertible (fail closed), never
+    # read as "no reporting currency" (which converts nothing).
+    target_currency = (
+        (iso_currency_or_none(reporting_currency) or "") if reporting_currency else None
+    )
 
     def _unconvertible(opp: OfferOpportunity) -> bool:
         return target_currency is not None and (
-            (opp.currency or "").strip().upper() != target_currency
+            iso_currency_or_none(opp.currency) != target_currency
         )
 
     # Score every opportunity with the shared ROI primitive.

@@ -132,6 +132,7 @@ from app.services.erp_adapters.posted_total import (
 )
 from app.services.erp_oauth import register_oauth_provider
 from app.services.payment_methods import RailPart
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.json_money import dumps_exact_json
 
 logger = logging.getLogger(__name__)
@@ -1068,8 +1069,8 @@ class XeroAdapter(OAuthErpAdapter):
                     return erp_refusal(PROVIDER, BILL_PAYMENT_VOIDED)
                 # Fail closed: a bill or a payment that states no currency is
                 # not known to be in the same one, so the figure is not posted.
-                bill_currency = str(bill.get("CurrencyCode") or "").strip().upper()
-                if not bill_currency or bill_currency != (payload.currency or "").strip().upper():
+                bill_currency = iso_currency_or_none(bill.get("CurrencyCode"))
+                if bill_currency is None or bill_currency != iso_currency_or_none(payload.currency):
                     return _nothing_posted(erp_refusal(PROVIDER, CURRENCY_MISMATCH))
                 due = _decimal(bill.get("AmountDue"))
                 if due is None or payload.amount <= 0 or payload.amount > due:
