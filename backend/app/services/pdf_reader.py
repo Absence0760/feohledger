@@ -78,7 +78,7 @@ def text_layer_sync(pdf_bytes: bytes, *, min_chars: int = TEXT_LAYER_MIN_CHARS) 
     """
     try:
         text = document_text_sync(pdf_bytes)
-    except Exception:
+    except Exception:  # noqa: BLE001 — unreadable bytes mean "no text layer"; the caller falls back to vision
         return None
     return text if len(text) > min_chars else None
 
@@ -101,7 +101,7 @@ def rasterize_pages_sync(
                 if i >= max_pages:
                     break
                 images.append(page.get_pixmap(dpi=dpi).tobytes("png"))
-    except Exception:
+    except Exception:  # noqa: BLE001 — unreadable bytes rasterize to no pages; the caller reports none
         return []
 
     from app.config import settings
