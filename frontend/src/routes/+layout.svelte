@@ -41,8 +41,19 @@
 		if (browser) theme.init();
 	});
 
-	// Routes that render without a tenant context (signup flow).
-	const PUBLIC_PATHS = ['/signup', '/verify'];
+	// The apex has no sign-in form: each company signs in at its own workspace
+	// host. `/find-workspace` asks which one (#635 finding 4), and an apex
+	// `/login` — a bookmark, a typed URL, a legal page's "Sign in" — goes
+	// there instead of quietly showing the marketing page.
+	const FIND_WORKSPACE = '/find-workspace';
+
+	// Standalone pages that render in their own `AuthShell` whatever the host
+	// and whoever is signed in: the signup flow, and "find your workspace".
+	// Each brings its own `<main>`, so none may fall through to the app shell's
+	// branch below — on a workspace host with a signed-in user /find-workspace
+	// did, for the beat before its own redirect to `/`, and the page briefly
+	// carried two `<main>` landmarks.
+	const PUBLIC_PATHS = ['/signup', '/verify', FIND_WORKSPACE];
 
 	// The published legal documents (/legal, /legal/privacy, …). Public by
 	// design and by necessity: a data subject exercising a GDPR right, a
@@ -65,11 +76,6 @@
 		}
 	});
 
-	// The apex has no sign-in form: each company signs in at its own workspace
-	// host. `/find-workspace` asks which one (#635 finding 4), and an apex
-	// `/login` — a bookmark, a typed URL, a legal page's "Sign in" — goes
-	// there instead of quietly showing the marketing page.
-	const FIND_WORKSPACE = '/find-workspace';
 	const isLoginPath = (path: string) => path === '/login' || path.startsWith('/login/');
 
 	$effect(() => {
@@ -202,8 +208,6 @@
 {:else if page.url.pathname.startsWith(PORTAL_PREFIX)}
 	<slot />
 {:else if PUBLIC_PATHS.includes(page.url.pathname)}
-	<slot />
-{:else if hasTenant === false && page.url.pathname === FIND_WORKSPACE}
 	<slot />
 {:else if hasTenant === false && isLoginPath(page.url.pathname)}
 	<!-- Apex /login: on its way to /find-workspace (above); nothing to flash. -->

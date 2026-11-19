@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import AuthCard from '#lib/components/auth/AuthCard.svelte';
+	import Spinner from '#lib/components/ui/Spinner.svelte';
 	import { setToken } from '#lib/api.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -97,10 +98,7 @@
 	{#if phase === 'working'}
 		<!-- The heading is not announced when it is the only thing on screen
 		     that says what is happening; this is. -->
-		<div class="working" role="status">
-			<span class="spinner" aria-hidden="true"></span>
-			<span class="visually-hidden">{m('auth.callback.signingIn')}</span>
-		</div>
+		<Spinner size={32} label={m('auth.callback.signingIn')} hideLabel />
 	{:else}
 		{#if idpCode}
 			<p class="hint">{m('auth.callback.idpCode', { code: idpCode })}</p>
@@ -109,19 +107,3 @@
 	{/if}
 </AuthCard>
 
-<style>
-	.spinner {
-		display: block;
-		width: 26px;
-		height: 26px;
-		border: 3px solid var(--border);
-		border-top-color: var(--accent);
-		border-radius: 50%;
-		animation: spin 0.8s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-</style>

@@ -10,6 +10,9 @@
 	import { onMount, untrack } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { brand } from '#lib/stores/brand.svelte.ts';
+	import Spinner from '#lib/components/ui/Spinner.svelte';
+	// Aliased: the page's own `errorMessage` state already has the name.
+	import { errorMessage as apiErrorText } from '#lib/utils/apiError.ts';
 
 	interface CompleteResponse {
 		status: string;
@@ -115,7 +118,7 @@
 				phase = 'expired';
 			} else {
 				phase = 'error';
-				errorMessage = err instanceof Error ? err.message : m('auth.verify.failed');
+				errorMessage = apiErrorText(err, m('auth.verify.failed'));
 				existingWorkspaceUrl =
 					err instanceof ApiError && err.code === SIGNUP_EMAIL_HAS_WORKSPACE
 						? ownWorkspaceSignInUrl(err.params)
@@ -174,7 +177,8 @@
 		</div>
 
 		{#if phase === 'pending'}
-			<div class="spinner" aria-hidden="true"></div>
+			<!-- The pending heading and sub, inside the live region, say what this is. -->
+			<Spinner size={32} />
 		{:else if phase === 'success' && result?.already_verified}
 			<!-- A re-opened link: the workspace exists and nothing was re-issued,
 			     so the way on is its sign-in page. -->
@@ -299,16 +303,5 @@
 		color: var(--accent-on-tint);
 		text-decoration: underline;
 		text-underline-offset: 2px;
-	}
-	.spinner {
-		width: 26px;
-		height: 26px;
-		border: 3px solid var(--border);
-		border-top-color: var(--accent);
-		border-radius: 50%;
-		animation: spin 0.8s linear infinite;
-	}
-	@keyframes spin {
-		to { transform: rotate(360deg); }
 	}
 </style>
