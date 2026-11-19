@@ -1172,6 +1172,10 @@ the change that migrates it:
   `class="… armed"` on a button whose `disabled` reads anything but busy
   (`CloseWorkspacePanel`: `class:armed={canSubmit || submitting}`;
   `InvoiceModal` Confirm reject: `class:armed={!!rejectReason.trim()}`).
+  A two-click arm is the precondition, so hold it through the request and
+  release it after (`/vendors/screening` Confirm unblock), and drop it when
+  something else disables the commit (a re-screen in flight there).
+  `tests-e2e/a11y/armed-buttons.spec.ts` walks each commit through all three.
 - **A confirmation dialog's destructive commit is `.btn-danger.armed`.** The
   outlined `.btn-danger` trigger opened the dialog (or the inline confirm it
   reveals), so that step is the first click and its commit is the second: Void payment, Dismiss compliance
