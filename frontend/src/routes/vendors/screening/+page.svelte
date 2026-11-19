@@ -686,8 +686,7 @@
 						/>
 					{/if}
 					<button
-						class="btn-block"
-						class:unblock={selected.payments_blocked}
+						class={selected.payments_blocked && !unblockArmed ? 'btn-secondary' : 'btn-danger'}
 						class:armed={unblockArmed}
 						onclick={toggleBlock}
 						disabled={selectedBusy !== null}
@@ -822,42 +821,6 @@
 		outline: none;
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
-	}
-	/* Tinted buttons take the `-tint` fill and its `-on-tint` text partner — the
-	   base token on its own tint is the pairing the colour rules forbid (it
-	   drops under 4.5:1 in the light theme). Hover thickens the border rather
-	   than deepening the fill, so the text pairing never changes. */
-	.btn-block {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--danger-on-tint);
-		background: var(--danger-tint);
-		color: var(--danger-on-tint);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-	.btn-block:hover:not(:disabled) {
-		box-shadow: inset 0 0 0 1px var(--danger-on-tint);
-	}
-	.btn-block.unblock {
-		border-color: var(--success-on-tint);
-		background: var(--success-tint);
-		color: var(--success-on-tint);
-	}
-	.btn-block.unblock:hover:not(:disabled) {
-		box-shadow: inset 0 0 0 1px var(--success-on-tint);
-	}
-	/* Armed (one click from releasing payments): a heavier ring, not a new
-	   colour, so the text/fill pairing stays the audited one. */
-	.btn-block.unblock.armed {
-		box-shadow: inset 0 0 0 2px var(--success-on-tint);
-	}
-	.btn-block:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 	.no-perm-note {
 		font-size: 0.82rem;

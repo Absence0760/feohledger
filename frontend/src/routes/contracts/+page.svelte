@@ -442,7 +442,7 @@
 		<BulkBar count={selected.size} onclear={clearSelection}>
 			{#snippet actions()}
 				{#if allSelected && !selectedAllMatching && contractStore.total > contractStore.all.length}
-					<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
+					<button class="btn-secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
 						{selectingAllMatching
 							? m('common.loading')
 							: m('common.selectAllMatching', { total: contractStore.total })}
@@ -455,9 +455,9 @@
 					<option value="terminate">{m('contracts.modal.lifecycle.terminate')}</option>
 					<option value="cancel">{m('contracts.modal.lifecycle.cancel')}</option>
 				</select>
-				<button class="bulk-action-btn" disabled={bulkBusy} onclick={bulkStatusChange}>{m('contracts.bulk.changeStatus')}</button>
+				<button class="btn-primary" disabled={bulkBusy} onclick={bulkStatusChange}>{m('contracts.bulk.changeStatus')}</button>
 				<div class="bulk-divider"></div>
-				<button class="bulk-action-btn" disabled={bulkBusy} onclick={bulkExport}>{m('contracts.bulk.exportCsv')}</button>
+				<button class="btn-secondary" disabled={bulkBusy} onclick={bulkExport}>{m('contracts.bulk.exportCsv')}</button>
 			{/snippet}
 		</BulkBar>
 	{/if}
@@ -509,29 +509,6 @@
 		border-radius: 6px;
 		background-color: var(--surface);
 		font-size: 0.82rem;
-	}
-	.bulk-action-btn {
-		padding: 6px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-	.bulk-action-btn:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-	.bulk-action-btn.secondary {
-		background: transparent;
-		color: var(--accent-strong);
 	}
 	.bulk-all-matching-note {
 		font-size: 0.82rem;

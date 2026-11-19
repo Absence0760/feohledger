@@ -31,26 +31,53 @@ import { extractStyleBlocks, parseRules } from './a11y/cssAudit';
 const SHARED = ['btn-primary', 'btn-cancel', 'btn-secondary', 'btn-danger', 'btn-ghost'] as const;
 
 const COVERED = [
+	'lib/components/layout/AccountLoadState.svelte',
+	'lib/components/modals/AdvancedSearchModal.svelte',
+	'lib/components/modals/BulkNegotiationModal.svelte',
+	'lib/components/modals/BulkRecodeGLModal.svelte',
+	'lib/components/modals/ContractModal.svelte',
+	'lib/components/modals/InvoiceModal.svelte',
 	'lib/components/modals/RunDetailModal.svelte',
+	'lib/components/organization/CloseWorkspacePanel.svelte',
+	'lib/components/reports/ResultTable.svelte',
+	'lib/components/workflow-mgmt/ImportExportControls.svelte',
+	'lib/components/workflow-mgmt/SimulationModal.svelte',
+	'lib/components/workflow-mgmt/TemplateLibraryModal.svelte',
+	'lib/components/workflow-mgmt/VersionHistoryModal.svelte',
 	'routes/admin/privacy/+page.svelte',
 	'routes/assistant/+page.svelte',
 	'routes/cash-flow/+page.svelte',
+	'routes/contracts/+page.svelte',
 	'routes/exceptions/+page.svelte',
 	'routes/expenses/+page.svelte',
 	'routes/gl-accounts/+page.svelte',
+	'routes/invoices/+page.svelte',
 	'routes/payments/+page.svelte',
 	'routes/portal/company/+page.svelte',
+	'routes/portal/notifications/+page.svelte',
 	'routes/recurring/+page.svelte',
 	'routes/reports/+page.svelte',
 	'routes/tax/+page.svelte',
-	'routes/vendors/change-requests/+page.svelte'
+	'routes/vendors/+page.svelte',
+	'routes/vendors/change-requests/+page.svelte',
+	'routes/vendors/screening/+page.svelte'
 ];
 
 /** `<file> .<class>` → why it is not one of the shared variants. */
+const ICON_DISMISS =
+	'The header ✕ glyph with its own aria-label: an icon dismiss, not a boxed ' +
+	'action, so none of the shared variants fits it.';
+
 const LOCAL_ALLOWED: Record<string, string> = {
-	'lib/components/modals/RunDetailModal.svelte .close-btn':
-		'The header ✕ glyph with its own aria-label: an icon dismiss, not a boxed ' +
-		'action, so none of the shared variants fits it.'
+	'lib/components/modals/RunDetailModal.svelte .close-btn': ICON_DISMISS,
+	'lib/components/modals/BulkRecodeGLModal.svelte .close-btn': ICON_DISMISS,
+	'lib/components/modals/InvoiceModal.svelte .close-btn': ICON_DISMISS,
+	'lib/components/modals/InvoiceModal.svelte .icon-btn':
+		'The header glyph buttons (fullscreen, ✕), each with its own aria-label: ' +
+		'icon controls, not boxed actions.',
+	'routes/invoices/+page.svelte .advanced-btn':
+		'The round filter-glyph toggle beside the search box, with a dot when ' +
+		'advanced filters are set: an icon toggle, not a boxed action.'
 };
 
 /** Properties that paint a button; a scoped rule on a shared class sets none. */
@@ -62,6 +89,10 @@ const PAINT =
  * spec or the page's own script selects by them. `<file> <class>`.
  */
 const E2E_HOOKS = new Set([
+	'lib/components/modals/AdvancedSearchModal.svelte btn-apply',
+	'lib/components/modals/InvoiceModal.svelte btn-save',
+	'lib/components/modals/InvoiceModal.svelte btn-submit',
+	'routes/invoices/+page.svelte btn-upload',
 	'routes/payments/+page.svelte btn-clear',
 	'routes/payments/+page.svelte btn-execute',
 	// Read by the outside-click un-arm (`closest('.row-action, .btn-decide')`).
@@ -88,6 +119,9 @@ function scopedRules(path: string) {
 
 /** Every class `app.css` styles (`.btn-load-more` and the like count too). */
 const APP_CSS_CLASSES = new Set(parseRules(appCss).flatMap((r) => classesIn(r.selector)));
+
+/** A `btn-*` class name in markup — whole, so `bulk-btn-wrap` is not `btn-wrap`. */
+const BTN_CLASS = /(?<![\w-])btn-[a-z]+(?:-[a-z]+)*(?![\w-])/g;
 
 function markup(source: string): string {
 	return source.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
@@ -142,7 +176,7 @@ describe('shared button classes', () => {
 
 	it.each(COVERED)('%s uses no button class app.css does not define', (path) => {
 		const used = new Set(
-			[...markup(SOURCES.get(path) ?? '').matchAll(/\bbtn-[a-z]+(?:-[a-z]+)*\b/g)].map((m) => m[0])
+			[...markup(SOURCES.get(path) ?? '').matchAll(BTN_CLASS)].map((m) => m[0])
 		);
 		const undefinedHere = [...used].filter(
 			(cls) =>
@@ -152,6 +186,11 @@ describe('shared button classes', () => {
 		// A class neither shared nor styled locally is either an e2e hook kept on
 		// a migrated button (allowed below) or a typo that renders unstyled.
 		expect(undefinedHere.filter((c) => !E2E_HOOKS.has(`${path} ${c}`))).toEqual([]);
+	});
+
+	it('reads a whole class name, not a btn- fragment of a longer one', () => {
+		const found = [...markup('<span class="bulk-btn-wrap"><b class="btn-x">').matchAll(BTN_CLASS)].map((m) => m[0]);
+		expect(found).toEqual(['btn-x']);
 	});
 
 	it('the guard catches a copy and a paint override', () => {

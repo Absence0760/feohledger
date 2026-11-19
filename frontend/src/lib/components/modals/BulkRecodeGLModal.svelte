@@ -336,32 +336,6 @@
 		margin-top: 8px;
 	}
 
-	.btn-cancel,
-	.btn-primary {
-		padding: 8px 16px;
-		border-radius: 6px;
-		font-family: inherit;
-		font-size: 0.85rem;
-		cursor: pointer;
-		border: 1px solid var(--border);
-	}
-
-	.btn-cancel {
-		background: var(--surface);
-		color: var(--text);
-	}
-
-	.btn-primary {
-		background: var(--accent-strong);
-		color: white;
-		border-color: var(--accent-strong);
-	}
-
-	.btn-primary:disabled,
-	.btn-cancel:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
 	.summary {
 		display: grid;
 		grid-template-columns: max-content 1fr;

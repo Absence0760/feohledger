@@ -944,7 +944,7 @@
 		     create an invoice, and `POST /api/invoices/upload` takes the same
 		     entry roles as `POST /api/invoices` (`api/invoice_entry.py`). -->
 		{#if canEnterInvoices}
-			<button class="btn-primary btn-upload" disabled={uploading} onclick={() => fileInput.click()}>
+			<button class="btn-primary btn-upload upload-action" disabled={uploading} onclick={() => fileInput.click()}>
 				{uploading ? uploadProgress || m('invoices.action.uploading') : m('invoices.action.upload')}
 			</button>
 		{/if}
@@ -1072,7 +1072,7 @@
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<span class="bulk-btn-wrap" title={validBulkTransitions.length === 0 ? m('invoices.bulk.noTransitions') : ''}>
 						<button
-							class="bulk-action-btn"
+							class="btn-secondary"
 							disabled={bulkBusy || validBulkTransitions.length === 0}
 							onclick={(e) => { e.stopPropagation(); showBulkStatusSelect = !showBulkStatusSelect; }}
 						>
@@ -1098,7 +1098,7 @@
 								/>
 							{/if}
 							<button
-								class="btn-primary bulk-apply-btn"
+								class="btn-primary bulk-apply"
 								disabled={bulkBusy || (bulkNeedsReason && !bulkRejectReason.trim())}
 								onclick={bulkStatusChange}
 							>{m('common.apply')}</button>
@@ -1109,9 +1109,9 @@
 
 			<div class="bulk-divider"></div>
 
-			<button class="bulk-action-btn" disabled={bulkBusy} onclick={() => bulkExport('csv')}>CSV</button>
-			<button class="bulk-action-btn" disabled={bulkBusy} onclick={() => bulkExport('json')}>JSON</button>
-			<button class="bulk-action-btn" disabled={bulkBusy} onclick={() => bulkExport('xml')}>XML</button>
+			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('csv')}>CSV</button>
+			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('json')}>JSON</button>
+			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('xml')}>XML</button>
 		</div>
 	{/if}
 
@@ -1478,8 +1478,9 @@
 	}
 
 	/* Colour, hover and disabled come from the shared `.btn-primary`; this
-	   only keeps the label on one line in the header's action row. */
-	.btn-upload {
+	   only keeps the label on one line in the header's action row.
+	   (`.btn-upload` stays on the button as the e2e hook, with no CSS.) */
+	.upload-action {
 		white-space: nowrap;
 		flex-shrink: 0;
 	}
@@ -1583,30 +1584,6 @@
 		background: var(--border);
 	}
 
-	.bulk-action-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 5px 12px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.bulk-action-btn:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
 
 	/* --- Bulk status dropdown --- */
 
@@ -1642,10 +1619,9 @@
 		min-width: 220px;
 	}
 
-	/* Fill, text colour, hover and disabled are the shared `.btn-primary`'s;
-	   only the metrics shrink to sit beside the dropdown's compact select. */
-	.bulk-apply-btn {
+	/* Everything but the padding is the shared `.btn-primary`'s; the
+	   padding shrinks so it sits beside the dropdown's compact select. */
+	.bulk-apply {
 		padding: 5px 12px;
-		font-size: 0.8rem;
 	}
 </style>

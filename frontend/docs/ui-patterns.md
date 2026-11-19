@@ -345,7 +345,7 @@ appears when one or more rows are selected:
             label={m('things.bulk.delete', { n: selected.size })}
             confirmLabel={m('things.bulk.confirmDelete')}
         />
-        <!-- additional .bulk-action-btn buttons go here -->
+        <!-- additional .btn-secondary buttons go here -->
     {/snippet}
 </BulkBar>
 ```
@@ -1069,7 +1069,7 @@ the `ui/` primitive in the Source column.
 | Search input | `.search-box` | `ui/SearchBox.svelte` |
 | Bulk bar | `.bulk-bar` | `ui/BulkBar.svelte` |
 | Bulk delete | `.bulk-delete-btn` (+ `.armed`) | `ui/BulkDeleteButton.svelte` |
-| Bulk action | `.bulk-action-btn` | per-route, but always inside a BulkBar |
+| Bulk action | `.btn-secondary` (`.btn-primary` for the bar's lead action) | `src/app.css`, always inside a BulkBar |
 | Per-row action | `<RowAction>` (variant + armed) | `ui/RowAction.svelte` |
 | Clickable-row open control | `<RowLink>` + `.clickable` row + `isRowOpenClick` | `ui/RowLink.svelte` / `utils/rowNav.ts` |
 | Filter pill | `.filter-chip` (+ `.active`, `.count`) | `ui/FilterChips.svelte` |
@@ -1093,9 +1093,12 @@ share one box size so a toolbar mixing them is one height. Never re-declare
 one per route, and never paint one from a scoped rule (placing it — margin,
 `align-self`, padding to fill a slot — is fine). The `/vendors` `.btn-outline`,
 `/invoices` `.btn-secondary`, `/payments` `.btn-pay` / `.btn-execute`,
-`RunDetailModal`'s `.btn-execute` / `.btn-discard` / `.btn-approve` and the
-`/exceptions` and `/expenses` bulk-bar `.bulk-action-btn` copies were folded
-into these. Guard:
+`RunDetailModal`'s `.btn-execute` / `.btn-discard` / `.btn-approve`, every
+bulk-bar `.bulk-action-btn`, `/vendors/screening`'s `.btn-block`, and the
+per-modal copies in `InvoiceModal`, `ContractModal`, the workflow-management
+modals and the rest were folded into these. An icon-only control (a header ✕,
+the `/invoices` filter toggle) is not one of the variants and is listed, with
+its reason, in the guard's `LOCAL_ALLOWED`. Guard:
 `src/lib/sharedButtonClasses.test.ts` — a file joins its `COVERED` list in
 the change that migrates it:
 - `.btn-primary` — the page's one lead action (white on `--accent-strong`).
@@ -1113,7 +1116,8 @@ the change that migrates it:
   `--accent` so colour is not the only cue (WCAG 1.4.1). `inline-flex` with a
   24px `min-height`, so standing alone it meets WCAG 2.5.8.
 - `.armed` on `.btn-primary` / `.btn-danger` — the second, committing click
-  of a footer two-click confirm (execute a run, file 1099s, cancel a run):
+  of a two-click confirm (execute a run, file 1099s, cancel a run, propose
+  bulk discounts, unblock a vendor's payments on `/vendors/screening`):
   a `--danger-strong` fill, whatever the button looked like unarmed. Pair it
   with a distinct armed label (`Confirm execute · …`), since a colour change
   announces nothing to a screen reader. Busy (disabled) it stays red without
@@ -1126,10 +1130,9 @@ the change that migrates it:
   (`CredentialResetPrompt`). Never a hand-rolled `--danger-strong` fill. The
   one exception is the bank-file Reject submit in `RunDetailModal`, a plain
   `.btn-danger`: its panel sits above the run footer, where a permanent red
-  fill would read as a second armed commit beside Execute's. Still hand-rolled, to fold in when
-  next touched: `CloseWorkspacePanel`'s `.btn-close-workspace` and
-  `InvoiceModal`'s `.btn-reject` (both a filled red commit, `opacity` when
-  disabled).
+  fill would read as a second armed commit beside Execute's.
+  `CloseWorkspacePanel`'s typed-confirmation Close workspace and
+  `InvoiceModal`'s Confirm reject are `.btn-danger.armed` too.
 `.btn-secondary` / `.btn-danger` show disabled with `--text-muted` and a
 neutral border, not `opacity` (contrast measured per theme in the
 `app.css` comment).
