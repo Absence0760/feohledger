@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Contract, ContractStatus, ContractType } from '#lib/types/contract.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		CONTRACT_STATUSES,
@@ -425,19 +426,16 @@
 	</DataTable>
 	{/if}
 
-	{#if contractStore.hasMore && !contractStore.errored}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => contractStore.loadMore()} disabled={contractStore.loading}>
-				{contractStore.loading
-					? m('common.loading')
-					: m('contracts.loadMore', { shown: formatCount(contractStore.all.length), total: formatCount(contractStore.total) })}
-			</button>
-		</div>
-	{:else if contractStore.total > 0 && !contractStore.errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('contracts.showingAll', { total: contractStore.total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={contractStore.all.length}
+		total={contractStore.total}
+		hasMore={contractStore.hasMore}
+		loading={contractStore.loading}
+		errored={contractStore.errored}
+		onloadmore={() => contractStore.loadMore()}
+		moreKey="contracts.loadMore"
+		allKey="contracts.showingAll"
+	/>
 
 	{#if canManage}
 		<BulkBar count={selected.size} onclear={clearSelection}>

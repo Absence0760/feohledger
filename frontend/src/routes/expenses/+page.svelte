@@ -1,5 +1,6 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import type {
 		Expense,
 		ExpenseStatus,
@@ -1401,17 +1402,17 @@
 		</DataTable>
 		{/if}
 
-		{#if expenseStore.hasMore && !expenseStore.errored}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={() => expenseStore.loadMore()} disabled={expenseStore.loading}>
-					{expenseStore.loading ? m('expenses.loading') : m('expenses.loadMore', { shown: formatCount(expenseStore.all.length), total: formatCount(expenseStore.total) })}
-				</button>
-			</div>
-		{:else if expenseStore.total > 0 && !expenseStore.errored}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('expenses.showingAll', { total: expenseStore.total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={expenseStore.all.length}
+			total={expenseStore.total}
+			hasMore={expenseStore.hasMore}
+			loading={expenseStore.loading}
+			errored={expenseStore.errored}
+			onloadmore={() => expenseStore.loadMore()}
+			moreKey="expenses.loadMore"
+			allKey="expenses.showingAll"
+			loadingKey="expenses.loading"
+		/>
 	{:else if tab === 'reports'}
 		<!-- ===================== Reports tab ===================== -->
 		{#if activeReport}
@@ -1609,23 +1610,15 @@
 					{/each}
 				{/snippet}
 			</DataTable>
-			{#if reportsHasMore}
-				<div class="load-more-row">
-					<button
-						class="btn-load-more"
-						onclick={() => loadReports({ append: true })}
-						disabled={reportsLoadingMore}
-					>
-						{reportsLoadingMore
-							? m('common.loading')
-							: m('expenses.reports.loadMore', { shown: formatCount(reports.length), total: formatCount(reportsTotal) })}
-					</button>
-				</div>
-			{:else if reportsTotal > 0}
-				<div class="load-more-row">
-					<span class="load-more-end">{m('expenses.reports.showingAll', { total: reportsTotal })}</span>
-				</div>
-			{/if}
+			<LoadMoreFooter
+				shown={reports.length}
+				total={reportsTotal}
+				hasMore={reportsHasMore}
+				loading={reportsLoadingMore}
+				onloadmore={() => loadReports({ append: true })}
+				moreKey="expenses.reports.loadMore"
+				allKey="expenses.reports.showingAll"
+			/>
 		{/if}
 	{:else if tab === 'policies'}
 		<!-- ===================== Policies tab ===================== -->
@@ -1855,23 +1848,15 @@
 				{/each}
 			{/snippet}
 		</DataTable>
-		{#if cardsHasMore}
-			<div class="load-more-row">
-				<button
-					class="btn-load-more"
-					onclick={() => loadCardTxns({ append: true })}
-					disabled={cardsLoadingMore}
-				>
-					{cardsLoadingMore
-						? m('common.loading')
-						: m('expenses.cards.loadMore', { shown: formatCount(cardTxns.length), total: formatCount(cardsTotal) })}
-				</button>
-			</div>
-		{:else if cardsTotal > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('expenses.cards.showingAll', { total: cardsTotal })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={cardTxns.length}
+			total={cardsTotal}
+			hasMore={cardsHasMore}
+			loading={cardsLoadingMore}
+			onloadmore={() => loadCardTxns({ append: true })}
+			moreKey="expenses.cards.loadMore"
+			allKey="expenses.cards.showingAll"
+		/>
 		{/if}
 	{/if}
 	</div>

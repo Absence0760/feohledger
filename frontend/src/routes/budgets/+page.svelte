@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Budget } from '#lib/types/budget.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import {
 		BUDGET_DIMENSIONS,
 		BUDGET_DIMENSION_LABEL_KEYS,
@@ -33,7 +34,6 @@
 	import { untrack } from 'svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const PAGE_SIZE = 50;
 
@@ -367,23 +367,16 @@
 	</DataTable>
 	{/if}
 
-	{#if hasMore && !errored}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('budgets.loadMore', { shown: formatCount(budgets.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0 && !errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('budgets.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={budgets.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		{errored}
+		onloadmore={() => load({ append: true })}
+		moreKey="budgets.loadMore"
+		allKey="budgets.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import type {
 		Invoice,
 		InvoiceStatus,
@@ -1285,17 +1286,16 @@
 	</DataTable>
 	{/if}
 
-	{#if invoiceStore.hasMore && !invoiceStore.errored}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMoreInvoices} disabled={invoiceStore.loading}>
-				{invoiceStore.loading ? m('common.loading') : m('invoices.loadMore', { shown: formatCount(invoiceStore.all.length), total: formatCount(invoiceStore.total) })}
-			</button>
-		</div>
-	{:else if invoiceStore.total > 0 && !invoiceStore.errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('invoices.showingAll', { total: invoiceStore.total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={invoiceStore.all.length}
+		total={invoiceStore.total}
+		hasMore={invoiceStore.hasMore}
+		loading={invoiceStore.loading}
+		errored={invoiceStore.errored}
+		onloadmore={loadMoreInvoices}
+		moreKey="invoices.loadMore"
+		allKey="invoices.showingAll"
+	/>
 </PageHeader>
 
 {#if editing}

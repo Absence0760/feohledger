@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { untrack } from 'svelte';
@@ -36,7 +37,6 @@
 	import type { SearchPickerLoad } from '#lib/utils/searchPicker.ts';
 	import { creditAmountParam } from '#lib/utils/invoicePicker.ts';
 	import { isAllowed, type ActionRefusal } from '#lib/api/actionVerdicts.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	// Create / edit / apply / void are all `require_roles(ADMIN, AP_MANAGER)` on
 	// the backend, while the LIST (and its chip summary) is open to all four
@@ -761,19 +761,16 @@
 		</DataTable>
 	{/if}
 
-	{#if errored}
-		<!-- No footer under a failed load: its counts describe rows not shown. -->
-	{:else if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMoreMemos} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('creditMemos.loadMore', { shown: formatCount(memos.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('creditMemos.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={memos.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		{errored}
+		onloadmore={loadMoreMemos}
+		moreKey="creditMemos.loadMore"
+		allKey="creditMemos.showingAll"
+	/>
 </PageHeader>
 
 <Modal

@@ -3728,7 +3728,7 @@ export const messages = {
 	'workflows.list.newWorkflow': '+ 新規ワークフロー',
 	'workflows.list.selectAll': 'すべてのワークフローを選択',
 	'workflows.list.selectRow': '{name}を選択',
-	'workflows.list.showingAll': '{n, plural, other {全 # 件のワークフローを表示中}}',
+	'workflows.list.showingAll': '{total, plural, other {全 # 件のワークフローを表示中}}',
 	'workflows.list.step.approval': '承認',
 	'workflows.list.step.erpExport': 'ERPエクスポート',
 	'workflows.list.step.extraction': 'データ抽出',

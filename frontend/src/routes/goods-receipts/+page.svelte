@@ -25,6 +25,7 @@
 	 * regardless of what the page shows.
 	 */
 	import { api } from '#lib/api.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { MAX_PAGE_SIZE, appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -61,7 +62,6 @@
 	import { page as pageStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	// The status column is free-form, so an unknown spelling renders raw rather
 	// than disappearing; every value the backend writes has a label.
@@ -645,19 +645,16 @@
 			</DataTable>
 			{/if}
 
-			{#if hasMore && !errored}
-				<div class="load-more-row">
-					<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
-						{loadingMore
-							? m('common.loading')
-							: m('goodsReceipts.loadMore', { shown: formatCount(grs.length), total: formatCount(total) })}
-					</button>
-				</div>
-			{:else if total > 0 && !errored}
-				<div class="load-more-row">
-					<span class="load-more-end">{m('goodsReceipts.showingAll', { total })}</span>
-				</div>
-			{/if}
+			<LoadMoreFooter
+				shown={grs.length}
+				{total}
+				{hasMore}
+				loading={loadingMore}
+				{errored}
+				onloadmore={loadMore}
+				moreKey="goodsReceipts.loadMore"
+				allKey="goodsReceipts.showingAll"
+			/>
 		</div>
 	{:else}
 		<div
@@ -719,26 +716,16 @@
 				{/snippet}
 			</DataTable>
 
-			{#if hasMoreInspections}
-				<div class="load-more-row">
-					<button
-						class="btn-load-more"
-						onclick={loadMoreInspections}
-						disabled={loadingMoreInspections}
-						data-testid="load-more-inspections"
-					>
-						{loadingMoreInspections
-							? m('common.loading')
-							: m('goodsReceipts.inspections.loadMore', { shown: formatCount(inspections.length), total: formatCount(inspectionsTotal) })}
-					</button>
-				</div>
-			{:else if inspectionsTotal > 0}
-				<div class="load-more-row">
-					<span class="load-more-end">
-						{m('goodsReceipts.inspections.showingAll', { total: inspectionsTotal })}
-					</span>
-				</div>
-			{/if}
+			<LoadMoreFooter
+				shown={inspections.length}
+				total={inspectionsTotal}
+				hasMore={hasMoreInspections}
+				loading={loadingMoreInspections}
+				onloadmore={loadMoreInspections}
+				moreKey="goodsReceipts.inspections.loadMore"
+				allKey="goodsReceipts.inspections.showingAll"
+				testId="load-more-inspections"
+			/>
 		</div>
 	{/if}
 </PageHeader>

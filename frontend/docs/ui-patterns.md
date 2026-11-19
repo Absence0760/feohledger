@@ -413,22 +413,33 @@ rather than only the currently-loaded page.
 
 Default page size is **20** across all list endpoints. Backend
 returns `{items, total, page, page_size}`; the front-end renders the
-items, then a centred Load More button below the table:
+items, then **`ui/LoadMoreFooter.svelte`** below the table: a centred
+"Load more (20 of 87)" button while rows remain, "Showing all 87 <thing>s"
+once they are all loaded, and nothing for an empty list or a failed load.
 
 ```svelte
-{#if store.hasMore}
-    <div class="load-more-row">
-        <button class="btn-load-more" onclick={loadMore} disabled={store.loading}>
-            {store.loading ? 'Loading…' : `Load more (${store.items.length} of ${store.total})`}
-        </button>
-    </div>
-{:else if store.total > 0}
-    <div class="load-more-row">
-        <span class="load-more-end">Showing all {store.total} <thing>s</span>
-    </div>
-{/if}
+<LoadMoreFooter
+    shown={items.length}
+    {total}
+    {hasMore}
+    loading={loadingMore}
+    errored={loadFailed}
+    onloadmore={() => load({ append: true })}
+    moreKey="<list>.loadMore"
+    allKey="<list>.showingAll"
+/>
 ```
 
+- Never copy its markup into a page. `moreKey` gets `{shown}` and `{total}`
+  through `formatCount`; `allKey` gets the raw `{total}` its plural selects
+  on (`formattedCountPlural.test.ts`). `loadingKey` (default
+  `common.loading`; the portal passes `portal.common.loading`), `disabled`
+  (another load is in flight) and `testId` (on the button) are optional.
+  Its `.load-more-row` / `.btn-load-more` / `.load-more-end` classes are
+  styled in `app.css` and are what Playwright specs select on.
+  `src/lib/utils/pagedListFooter.test.ts` fails on a `.svelte` file other
+  than the component that renders those classes, and on a use whose two
+  keys name different lists.
 - Append, don't replace. `loadMore` issues `page=N+1` and appends the new
   items **via `appendUnique` (`#lib/utils/pagination.ts`)** — never a raw
   `[...existing, ...res.items]` spread. Offset pagination can re-surface a
@@ -446,9 +457,10 @@ items, then a centred Load More button below the table:
   rows it never fetched do not exist. Six lists (budgets, intake,
   catalogs, requisitions, and the `/expenses` Reports + Cards sub-lists)
   shipped that way — 50 rows under a footer reading "Showing all 87",
-  with no control to reach the other 37. `src/lib/utils/pagedListFooter.test.ts`
-  is the guard: any file referencing a `<list>.showingAll` message must
-  also reference the matching `<list>.loadMore`.
+  with no control to reach the other 37. The component makes the pairing
+  structural; `src/lib/utils/pagedListFooter.test.ts` also still fails a
+  file that renders a `<list>.showingAll` message without the matching
+  `<list>.loadMore`.
 - Stores expose `total`, `page`, `hasMore`, and any mutating actions
   (create / delete / bulk-delete) keep `total` in sync without a
   refetch.

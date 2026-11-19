@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
@@ -23,7 +24,6 @@
 		PORTAL_PAGE_SIZE,
 		type PortalDiscountOffer,
 	} from '#lib/portalApi.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const FILTERS = [
 		{ key: '', labelKey: 'portal.discounts.filter.all' },
@@ -346,24 +346,16 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button
-					type="button"
-					class="btn-load-more"
-					onclick={() => load({ append: true })}
-					disabled={loadingMore}
-				>
-					{loadingMore
-						? m('portal.common.loading')
-						: m('portal.discounts.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('portal.discounts.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={() => load({ append: true })}
+			moreKey="portal.discounts.loadMore"
+			allKey="portal.discounts.showingAll"
+			loadingKey="portal.common.loading"
+		/>
 	{/if}
 </div>
 

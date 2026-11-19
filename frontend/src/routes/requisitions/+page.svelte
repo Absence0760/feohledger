@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Requisition, RequisitionStatus } from '#lib/types/requisition.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import {
 		REQUISITION_FILTER_STATUSES,
 		REQUISITION_STATUS_LABEL_KEYS,
@@ -45,7 +46,6 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { formatDate } from '#lib/utils/time.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
 	// approve / reject = admin | ap_manager | CFO. One predicate used to cover
@@ -549,23 +549,16 @@
 	</DataTable>
 	{/if}
 
-	{#if hasMore && !errored}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('requisitions.loadMore', { shown: formatCount(requisitions.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0 && !errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('requisitions.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={requisitions.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		{errored}
+		onloadmore={() => load({ append: true })}
+		moreKey="requisitions.loadMore"
+		allKey="requisitions.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

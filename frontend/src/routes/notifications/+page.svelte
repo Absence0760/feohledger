@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { notificationStore } from '#lib/stores/notifications.svelte.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
@@ -16,7 +17,6 @@
 	import { EVENT_LABEL_KEYS } from '#lib/types/notification.ts';
 	import { notificationHref } from '#lib/utils/notificationHref.ts';
 	import type { Notification } from '#lib/types/notification.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	// The relative "When" cell carries the exact instant in its title, in the
 	// active locale — never the raw ISO string.
@@ -224,19 +224,15 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={loadMore} disabled={loading}>
-					{loading
-						? m('common.loading')
-						: m('notifications.loadMore', { shown: formatCount(items.length), total: formatCount(filteredTotal) })}
-				</button>
-			</div>
-		{:else if filteredTotal > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('notifications.showingAll', { total: filteredTotal })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			total={filteredTotal}
+			{hasMore}
+			{loading}
+			onloadmore={loadMore}
+			moreKey="notifications.loadMore"
+			allKey="notifications.showingAll"
+		/>
 	{/if}
 </PageHeader>
 

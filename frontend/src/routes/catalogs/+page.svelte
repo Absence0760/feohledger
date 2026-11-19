@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Catalog, GuidedBuyingSuggestion } from '#lib/types/catalog.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { catalogTypeLabelKey, guidedBuyingReasonLabelKey } from '#lib/types/catalog.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -29,7 +30,6 @@
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.isManager); // admin | ap_manager
 	// Buyers (admin / ap_manager / ap_clerk) may start a punch-out session.
@@ -429,23 +429,15 @@
 
 	<!-- Inside the success branch: under LoadError the stale rows' counts
 	     ("Load more (100 of 240)") describe a list that is not on screen. -->
-	{#if hasMore}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('catalogs.loadMore', { shown: formatCount(catalogs.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('catalogs.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={catalogs.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={() => load({ append: true })}
+		moreKey="catalogs.loadMore"
+		allKey="catalogs.showingAll"
+	/>
 	{/if}
 </PageHeader>
 

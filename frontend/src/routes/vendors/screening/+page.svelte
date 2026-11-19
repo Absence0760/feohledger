@@ -1,5 +1,6 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	// Sanctions-screening review queue — the vendors flagged `match` / `review`
 	// by the screening engine, awaiting a human decision. A separate sub-route
 	// from the vendors LIST page (/vendors) so the two don't collide.
@@ -46,7 +47,6 @@
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BLOCK } from '#lib/types/admin.ts';
@@ -602,19 +602,16 @@
 	<!-- `showingAll` is rendered ONLY behind `total > 0`: `total` is the server's
 	     whole-set count, so stating it while a later page is unfetched would be
 	     the same claim the KPIs used to make wrongly. -->
-	{#if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMore} disabled={loadingMore || loading}>
-				{loadingMore
-					? m('common.loading')
-					: m('vendors.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('vendors.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={items.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		disabled={loading}
+		onloadmore={loadMore}
+		moreKey="vendors.loadMore"
+		allKey="vendors.showingAll"
+	/>
 	{/if}
 </PageHeader>
 

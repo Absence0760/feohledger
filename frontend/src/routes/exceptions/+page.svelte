@@ -3,6 +3,7 @@
 	import { page as pageStore } from '$app/state';
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { api } from '#lib/api.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -1314,17 +1315,15 @@
 	</div>
 	{/if}
 
-	{#if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMoreExceptions} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('exceptions.loadMore', { shown: formatCount(exceptions.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('exceptions.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={exceptions.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={loadMoreExceptions}
+		moreKey="exceptions.loadMore"
+		allKey="exceptions.showingAll"
+	/>
 	</div>
 	{/if}
 </PageHeader>

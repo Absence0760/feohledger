@@ -22,6 +22,7 @@
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { api, ApiError } from '#lib/api.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
@@ -48,7 +49,6 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
-	import { formatCount } from '#lib/utils/count.ts';
 
 	const PAGE_SIZE = 20;
 
@@ -553,23 +553,15 @@
 		{/snippet}
 	</DataTable>
 
-	{#if hasMore}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('vendors.changeRequests.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('vendors.changeRequests.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={items.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={() => load({ append: true })}
+		moreKey="vendors.changeRequests.loadMore"
+		allKey="vendors.changeRequests.showingAll"
+	/>
 	{/if}
 </PageHeader>
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
@@ -900,17 +901,15 @@
 	</DataTable>
 	</div>
 
-	{#if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMoreVendors} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('vendors.loadMore', { shown: formatCount(vendors.length), total: formatCount(total) })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('vendors.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={vendors.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={loadMoreVendors}
+		moreKey="vendors.loadMore"
+		allKey="vendors.showingAll"
+	/>
 	{/if}
 
 	{#if canManageVendors}
