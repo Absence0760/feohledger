@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
@@ -111,7 +112,7 @@ class DashboardStore extends ChangeNotifier {
       // No cache to fall back on — don't keep claiming the data is cached.
       _fromCache = false;
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }

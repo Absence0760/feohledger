@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/config.dart';
+import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/models/mfa_challenge.dart';
 import 'package:feohledger_mobile/models/user.dart';
@@ -235,8 +236,8 @@ class AuthStore extends ChangeNotifier {
     } catch (e) {
       _loading = false;
       _error = e is ApiException
-          ? 'Invalid credentials'
-          : 'Connection failed: $e';
+          ? ambientLocalizations().authInvalidCredentials
+          : describeApiError(e);
       notifyListeners();
       return const LoginResult(LoginOutcome.failure);
     }
@@ -273,9 +274,9 @@ class AuthStore extends ChangeNotifier {
       // transport problem. Neither leaks why (no enumeration).
       _error = e is ApiException
           ? (e.statusCode == 401
-              ? 'Invalid or expired code. Please try again.'
-              : 'Could not verify the code. Please try again.')
-          : 'Connection failed: $e';
+              ? ambientLocalizations().authInvalidCode
+              : ambientLocalizations().authVerifyCodeFailed)
+          : describeApiError(e);
       _errorDetail = e is ApiException && e.statusCode == 401 ? e.detail : null;
       notifyListeners();
       return const LoginResult(LoginOutcome.failure);
@@ -293,8 +294,8 @@ class AuthStore extends ChangeNotifier {
       return true;
     } catch (e) {
       _error = e is ApiException
-          ? 'Could not send the email code. Please try again.'
-          : 'Connection failed: $e';
+          ? ambientLocalizations().authEmailCodeFailed
+          : describeApiError(e);
       notifyListeners();
       return false;
     }

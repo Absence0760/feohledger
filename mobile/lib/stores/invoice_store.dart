@@ -263,7 +263,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
       // (now absent) data came from cache.
       _fromCache = false;
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }
@@ -392,7 +392,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
       await _refreshAfterMutation();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return false;
     }
@@ -443,7 +443,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
       await _refreshAfterMutation();
       return result;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -479,7 +479,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
       await _refreshAfterMutation();
       return result;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -498,7 +498,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
     try {
       return await InvoiceApi.bulkExport(ids, format);
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }

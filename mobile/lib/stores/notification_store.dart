@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/notification.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
@@ -101,7 +102,7 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
       if (!isCurrentRequest(token)) return;
       _fromCache = false;
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }
@@ -132,7 +133,7 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
       // Reconcile real state — undo the optimistic flip via a refetch. fetch()
       // clears _error on entry, so re-stamp it afterwards (the mark-read is the
       // failure the caller cares about, not the reconciling read).
-      final message = e.toString();
+      final message = describeApiError(e);
       await fetch();
       _error = message;
       notifyListeners();
@@ -147,7 +148,7 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return false;
     }

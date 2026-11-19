@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
+import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
 import 'package:feohledger_mobile/models/vendor.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/utils/sequenced_fetch.dart';
@@ -94,7 +96,7 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
       if (!isCurrentRequest(token)) return;
       _fromCache = false;
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }
@@ -117,22 +119,22 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return false;
     }
   }
 
   /// Pull vendors from the connected ERP, then refetch the list. Returns the
-  /// server's human-readable summary message on success, or null on failure
+  /// sync's counts as a localized summary on success, or null on failure
   /// (with [error] set). A 400 (no ERP configured) is a failure here.
   Future<String?> syncErp() async {
     try {
       final result = await VendorApi.syncErp();
       await fetch();
-      return result['message'] as String? ?? 'ERP sync complete';
+      return _syncMessage(result);
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -151,4 +153,34 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
     'erp_vendor_id': v.erpVendorId,
     'invoice_count': v.invoiceCount,
   };
+}
+
+/// The ERP sync toast in the reader's language, built from the counts beside
+/// the server's English `message` (`backend/app/api/vendors.py`). A count may
+/// arrive as a number or as the list of the rows it counts.
+String _syncMessage(Map<String, dynamic> result) {
+  final l = ambientLocalizations();
+  int? count(String key) {
+    final v = result[key];
+    if (v is int) return v;
+    if (v is List) return v.length;
+    return null;
+  }
+
+  final created = count('created');
+  final updated = count('updated');
+  final unchanged = count('unchanged');
+  if (created == null && updated == null && unchanged == null) {
+    return l.vendorSyncComplete;
+  }
+  final parts = [
+    l.vendorSyncSummary(created ?? 0, updated ?? 0, unchanged ?? 0),
+  ];
+  final conflicts = count('conflicts') ?? 0;
+  final unlinked = count('unlinked') ?? 0;
+  final restored = count('restored') ?? 0;
+  if (conflicts > 0) parts.add(l.vendorSyncNotLinked(conflicts));
+  if (unlinked > 0) parts.add(l.vendorSyncUnlinked(unlinked));
+  if (restored > 0) parts.add(l.vendorSyncRelinked(restored));
+  return parts.join(' ');
 }

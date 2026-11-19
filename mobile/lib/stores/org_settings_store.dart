@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/organization.dart';
 
@@ -43,7 +44,7 @@ class OrgSettingsStore extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }
@@ -61,7 +62,7 @@ class OrgSettingsStore extends ChangeNotifier {
       return true;
     } catch (e) {
       _saving = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return false;
     }

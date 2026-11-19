@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/workflow.dart';
 
@@ -39,7 +40,7 @@ class WorkflowStore extends ChangeNotifier {
       _workflows = await WorkflowApi.list();
       _error = null;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
     } finally {
       _loading = false;
       notifyListeners();

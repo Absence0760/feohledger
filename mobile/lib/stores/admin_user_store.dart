@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/admin_user.dart';
 import 'package:feohledger_mobile/utils/sequenced_fetch.dart';
@@ -73,7 +74,7 @@ class AdminUserStore extends ChangeNotifier with SequencedFetch {
       if (!isCurrentRequest(token)) return;
       _users = [];
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }
@@ -105,7 +106,7 @@ class AdminUserStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return result;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -120,7 +121,7 @@ class AdminUserStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return false;
     }
@@ -132,7 +133,7 @@ class AdminUserStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return false;
     }

@@ -129,7 +129,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
       // (now absent) data came from cache.
       _fromCache = false;
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }
@@ -158,7 +158,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       _actionErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return false;
@@ -171,7 +171,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
     try {
       return await ExceptionApi.getById(id);
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -191,7 +191,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
       }
       return updated;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -217,7 +217,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return result;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }

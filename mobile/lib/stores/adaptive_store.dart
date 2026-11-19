@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/adaptive.dart';
 import 'package:feohledger_mobile/utils/sequenced_fetch.dart';
@@ -86,7 +87,7 @@ class AdaptiveStore extends ChangeNotifier with SequencedFetch {
       _patternsError = null;
     } catch (e) {
       if (!isCurrentRequest(token)) return;
-      _patternsError = e.toString();
+      _patternsError = describeApiError(e);
     }
     _patternsLoading = false;
     notifyListeners();
@@ -104,7 +105,7 @@ class AdaptiveStore extends ChangeNotifier with SequencedFetch {
       _anomaliesError = null;
     } catch (e) {
       if (!_anomalySeq.isCurrent(token)) return;
-      _anomaliesError = e.toString();
+      _anomaliesError = describeApiError(e);
     }
     _anomaliesLoading = false;
     notifyListeners();
@@ -128,7 +129,7 @@ class AdaptiveStore extends ChangeNotifier with SequencedFetch {
       _suggestionsError = null;
     } catch (e) {
       if (!_suggestionSeq.isCurrent(token)) return;
-      _suggestionsError = e.toString();
+      _suggestionsError = describeApiError(e);
     }
     _suggestionsLoading = false;
     notifyListeners();
@@ -156,7 +157,7 @@ class AdaptiveStore extends ChangeNotifier with SequencedFetch {
       notifyListeners();
       return true;
     } catch (e) {
-      _suggestionsError = e.toString();
+      _suggestionsError = describeApiError(e);
       notifyListeners();
       return false;
     }
