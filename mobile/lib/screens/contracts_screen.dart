@@ -6,6 +6,7 @@ import 'package:feohledger_mobile/models/contract.dart';
 import 'package:feohledger_mobile/screens/contract_detail_screen.dart';
 import 'package:feohledger_mobile/stores/contract_store.dart';
 import 'package:feohledger_mobile/utils/debouncer.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/contract_list_tile.dart';
 
 class ContractsScreen extends StatefulWidget {
@@ -90,26 +91,17 @@ class _ContractsScreenState extends State<ContractsScreen> {
               builder: (context, _) {
                 final store = ContractStore.instance;
 
-                if (store.loading && store.contracts.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (store.contracts.isEmpty) {
-                  return Center(child: Text(l.contractsEmpty));
-                }
-
-                return RefreshIndicator(
+                return AsyncListBody<Contract>(
+                  items: store.contracts,
+                  loading: store.loading,
+                  hasError: store.error != null,
+                  fromCache: store.fromCache,
+                  errorMessage: l.contractsLoadError,
                   onRefresh: store.fetch,
-                  child: ListView.separated(
-                    itemCount: store.contracts.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final contract = store.contracts[index];
-                      return ContractListTile(
-                        contract: contract,
-                        onTap: () => _openDetail(contract),
-                      );
-                    },
+                  empty: Text(l.contractsEmpty, textAlign: TextAlign.center),
+                  itemBuilder: (context, contract) => ContractListTile(
+                    contract: contract,
+                    onTap: () => _openDetail(contract),
                   ),
                 );
               },

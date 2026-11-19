@@ -9,9 +9,7 @@
   "navPay": "Bezahlen",
   "navPayments": "Zahlungen",
   "navSettings": "Einstellungen",
-
   "shellAppName": "FeohLedger",
-
   "commonSave": "Speichern",
   "commonSaving": "Wird gespeichert …",
   "commonCancel": "Abbrechen",
@@ -23,7 +21,6 @@
   "commonClear": "Löschen",
   "commonApply": "Anwenden",
   "commonClose": "Schließen",
-
   "settingsTitle": "Einstellungen",
   "settingsTenant": "Mandant",
   "settingsTenantNotSet": "Nicht festgelegt",
@@ -34,7 +31,6 @@
   "settingsLanguage": "Sprache",
   "settingsLanguageHint": "Wählen Sie die in der App verwendete Sprache. Ihre Auswahl wird auf diesem Gerät gespeichert.",
   "settingsLanguageSystem": "Systemstandard",
-
   "dashboardTitle": "Übersicht",
   "dashboardTotalInvoices": "Rechnungen gesamt",
   "dashboardUpcoming": "Anstehend",
@@ -60,7 +56,6 @@
   "dashboardAgingUnconverted": "Teilweise: {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – in diesem Umfang mischen die Bänder unten Währungen.",
   "dashboardTopVendorsUnconverted": "Teilweise: {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – diese Lieferanten sind daher nicht alle in derselben Währung gereiht. Erfassen Sie den fehlenden Kurs, bevor Sie sich auf die Reihenfolge stützen.",
   "dashboardVendorFaceValueCount": "{count, plural, one {{count} zum Nennwert} other {{count} zum Nennwert}}",
-
   "invoicesTitle": "Rechnungen",
   "invoicesSearchHint": "Rechnungen suchen …",
   "invoicesSearchAria": "Rechnungen suchen",
@@ -81,7 +76,6 @@
   "invoicesColAmount": "Betrag",
   "invoicesColDueDate": "Fälligkeitsdatum",
   "invoicesColStatus": "Status",
-
   "notificationsTitle": "Benachrichtigungen",
   "notificationsMarkAllRead": "Alle als gelesen markieren",
   "notificationsMarkAllReadLabel": "Alle Benachrichtigungen als gelesen markieren",
@@ -93,7 +87,6 @@
   "notificationsCaughtUp": "Sie sind auf dem neuesten Stand",
   "notificationsNothingYet": "Hier ist noch nichts",
   "notificationsLoadError": "Benachrichtigungen konnten nicht geladen werden",
-
   "vendorsTitle": "Lieferanten",
   "vendorsSyncErp": "Aus ERP synchronisieren",
   "vendorsSyncErpLabel": "Lieferanten aus ERP synchronisieren",
@@ -115,7 +108,6 @@
   "vendorCardsRequireVoid": "{count, plural, one {{count} virtuelle Karte deckt eine geplante Zahlung und ist weiterhin aktiv – stornieren Sie diese Zahlung, um die Karte zu sperren.} other {{count} virtuelle Karten decken geplante Zahlungen und sind weiterhin aktiv – stornieren Sie diese Zahlungen, um die Karten zu sperren.}}",
   "vendorActionFailed": "Aktion fehlgeschlagen",
   "vendorSyncFailed": "ERP-Synchronisierung fehlgeschlagen: {error}",
-
   "exceptionsTitle": "Ausnahmen",
   "exceptionsFilterOpen": "Offen",
   "exceptionsFilterEscalated": "Eskaliert",
@@ -130,7 +122,6 @@
   "exceptionEscalated": "Ausnahme eskaliert",
   "exceptionDismissed": "Ausnahme verworfen",
   "exceptionActionFailed": "Aktion fehlgeschlagen",
-
   "paymentsTitle": "Zahlungen",
   "paymentsEmpty": "Keine Zahlungen",
   "paymentsErrorPrefix": "Fehler: {error}",
@@ -139,7 +130,6 @@
   "paymentStatusCompleted": "Abgeschlossen",
   "paymentStatusFailed": "Fehlgeschlagen",
   "paymentStatusCancelled": "Storniert",
-
   "approvalsTitle": "Ausstehende Freigaben",
   "approvalsAllCaughtUp": "Alles erledigt!",
   "approvalsNoneWaiting": "Keine Rechnungen warten auf Freigabe",
@@ -148,7 +138,6 @@
   "approvalActionApprove": "Freigeben",
   "approvalActionReject": "Ablehnen",
   "approvalApproved": "Rechnung freigegeben",
-
   "captureTitle": "Rechnung erfassen",
   "captureChange": "Ändern",
   "captureUpload": "Hochladen",
@@ -163,7 +152,6 @@
   "captureUploadFailed": "Hochladen fehlgeschlagen: {error}",
   "captureSelectedDocument": "Ausgewähltes Dokument: {name}",
   "capturePdfReady": "PDF-Dokument bereit zum Hochladen",
-
   "advSearchTitle": "Erweiterte Suche",
   "advSearchClose": "Erweiterte Suche schließen",
   "advSearchVendor": "Lieferant",
@@ -177,7 +165,6 @@
   "advSearchMinMaxError": "Minimum darf das Maximum nicht überschreiten",
   "advSearchClearField": "{label} löschen",
   "advSearchDateFieldHint": "{label}, aktuell {value}. Zum Ändern doppeltippen.",
-
   "invoiceDetailTitle": "Rechnungsdetails",
   "invoiceDetailEdit": "Bearbeiten",
   "invoiceDetailEditLabel": "Rechnung bearbeiten",
@@ -279,7 +266,6 @@
   "invoiceDetailFileLabel": "Rechnungsdatei. Zum Anzeigen im Vollbild doppeltippen.",
   "invoiceDetailTapToViewPdf": "Zum Anzeigen des PDFs tippen",
   "invoiceDetailTapToViewFile": "Zum Anzeigen der Datei tippen",
-
   "invoiceEditTitle": "Rechnung bearbeiten",
   "invoiceEditClose": "Bearbeitungsformular schließen",
   "invoiceEditVendor": "Lieferant",
@@ -296,7 +282,6 @@
   "invoiceEditLockedNoticeRecall": "Genehmigt — Zahlungsempfänger und Betrag sind gesperrt. Zum Ändern die Genehmigung zurücknehmen, die Rechnung korrigieren und erneut genehmigen lassen.",
   "invoiceEditLockedHelper": "Nach der Genehmigung gesperrt",
   "invoiceEditDueDateHint": "Fälligkeitsdatum, aktuell {value}. Zum Ändern doppeltippen.",
-
   "warningsSectionTitle": "Warnungen & Betrugshinweise",
   "warningsPoMatchTitle": "Bestellabgleich",
   "warningsSeverityError": "Fehler",
@@ -305,7 +290,6 @@
   "warningsPoLabel": "Bestellung",
   "warningsMatchLabel": "{type}-Abgleich",
   "warningsVarianceLabel": "{value} % Abweichung",
-
   "erpStatusTitle": "ERP-Status",
   "erpStatusReference": "ERP-Referenz",
   "erpStatusDocumentId": "Dokument-ID",
@@ -315,15 +299,12 @@
   "erpStatusStatus": "Status",
   "erpStatusOpensInErp": "öffnet die Rechnung im ERP",
   "externalLinkOpenFailed": "Der Link konnte nicht geöffnet werden",
-
   "fileViewerPdfTitle": "Rechnungs-PDF",
   "fileViewerImageTitle": "Rechnungsbild",
   "fileViewerPdfError": "PDF konnte nicht geladen werden",
   "fileViewerImageError": "Bild konnte nicht geladen werden",
   "fileViewerRetry": "Erneut versuchen",
-
   "timelineNoActivity": "Noch keine Aktivität",
-
   "payTitle": "Bezahlen",
   "payTabQueue": "Warteschlange",
   "payTabRuns": "Läufe",
@@ -388,7 +369,6 @@
   "payRunStatusCancelled": "Storniert",
   "payConfirmCancel": "Abbrechen",
   "payConfirmExecute": "Ausführen",
-
   "loginAppName": "FeohLedger",
   "loginTagline": "Kreditorenbuchhaltung, ganz einfach",
   "loginTenant": "Mandant",
@@ -398,7 +378,6 @@
   "loginHidePassword": "Passwort verbergen",
   "loginRequired": "Erforderlich",
   "loginSignIn": "Anmelden",
-
   "mfaTitle": "Zwei-Faktor-Authentifizierung",
   "mfaHeading": "Bestätigen Sie Ihre Identität",
   "mfaPromptEmail": "Geben Sie den 6-stelligen Code ein, den wir Ihnen per E-Mail gesendet haben.",
@@ -414,7 +393,6 @@
   "mfaUseEmailInstead": "Stattdessen einen E-Mail-Code verwenden",
   "mfaUseAuthenticatorInstead": "Stattdessen die Authenticator-App verwenden",
   "mfaEmailedAnnounce": "Ein Anmeldecode wurde Ihnen per E-Mail gesendet.",
-
   "adminUsersTitle": "Benutzerverwaltung",
   "adminUsersSearchHint": "Nach Name oder E-Mail suchen",
   "adminUsersEmpty": "Keine Benutzer gefunden",
@@ -453,7 +431,6 @@
   "adminUsersDeleteConfirmBody": "Dadurch wird {name} ({email}) dauerhaft entfernt. Dies kann nicht rückgängig gemacht werden.",
   "adminUsersDeleted": "{name} gelöscht",
   "adminUsersDeleteFailed": "{name} konnte nicht gelöscht werden: {error}",
-
   "orgSettingsTitle": "Organisationseinstellungen",
   "orgSettingsNoSettings": "Keine Einstellungen",
   "orgSettingsLoadError": "Einstellungen konnten nicht geladen werden",
@@ -474,7 +451,6 @@
   "orgSettingsFieldRequired": "{label} ist erforderlich",
   "orgSettingsSaved": "Organisationseinstellungen gespeichert",
   "orgSettingsSaveFailed": "Speichern fehlgeschlagen: {error}",
-
   "workflowsTitle": "Workflows",
   "workflowsEmpty": "Keine Workflows gefunden",
   "workflowsLoadError": "Workflows konnten nicht geladen werden",
@@ -492,7 +468,6 @@
   "workflowDetailApproverCount": "{count, plural, one {{count} Genehmiger} other {{count} Genehmiger}}",
   "workflowDetailDelaySummary": "Verzögerung {hours} Std.",
   "workflowDetailConditionSummary": "Bei {field}",
-
   "cashFlowTitle": "Cashflow-Prognose",
   "cashFlowErrorPrefix": "Fehler: {error}",
   "cashFlowHorizonDays": "{days} Tage",
@@ -528,7 +503,6 @@
   "cashFlowLowBalanceAlertLabel": "Warnung: niedriger Kontostand. {message}",
   "cashFlowForecastUnconverted": "Teilweise: {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – in diesem Umfang mischen diese Abflüsse und die fest zugesagten und ausstehenden Summen oben Währungen.",
   "cashFlowPositionUnconverted": "Nicht umgerechnet: {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert gezählt — der laufende Saldo unten und das prognostizierte Ende oben vermischen dadurch Währungen. Erfassen Sie den fehlenden Kurs, bevor Sie auf Basis dieser Zahlen handeln.",
-
   "contractsTitle": "Verträge",
   "contractsSearchHint": "Verträge suchen …",
   "contractsEmpty": "Keine Verträge gefunden",
@@ -537,7 +511,6 @@
   "contractsFilterExpired": "Abgelaufen",
   "contractsFilterTerminated": "Gekündigt",
   "contractsFilterCancelled": "Storniert",
-
   "contractDetailTitle": "Vertragsdetails",
   "contractDetailErrorPrefix": "Fehler: {error}",
   "contractDetailUntitled": "Unbenannter Vertrag",
@@ -585,7 +558,6 @@
   "contractCancelBody": "Damit wird der Vertrag zurückgezogen – es können keine weiteren Rechnungen mehr zugeordnet werden. Dies kann nicht rückgängig gemacht werden. Fortfahren?",
   "contractCancelled": "Vertrag storniert",
   "contractCancelFailed": "Vertrag konnte nicht storniert werden – bitte erneut versuchen",
-
   "exceptionDetailTitle": "Ausnahme",
   "exceptionDetailErrorPrefix": "Ausnahme konnte nicht geladen werden: {error}",
   "exceptionDetailOverdue": "Überfällig",
@@ -710,7 +682,6 @@
   "exceptionDetailAssigneeUpdateFailed": "Zuständigkeit konnte nicht aktualisiert werden",
   "exceptionDetailUnassigned2": "Zuweisung der Ausnahme aufgehoben",
   "exceptionDetailAssignedTo": "Zugewiesen an {name}",
-
   "settingsProcurement": "Beschaffung",
   "settingsInspections": "Qualitätsprüfungen",
   "settingsInspectionsHint": "Prüfungen für den 4-Wege-Abgleich erfassen und ansehen",
@@ -984,7 +955,6 @@
   "invoicesBulkSkipNoNumber": "Rechnung (ohne Nummer)",
   "reviewVerdictsUnavailable": "Es konnte nicht geprüft werden, was Sie hier tun dürfen – zum Wiederholen nach unten ziehen",
   "reviewVerdictsChecking": "Es wird geprüft, was Sie hier tun dürfen …",
-
   "payRecordOnlyBanner": "FeohLedger erfasst Zahlungen, versendet sie aber nie: Zahlen Sie über Ihre Bank oder Ihr ERP und erfassen Sie jede Zahlung hier (die Bankdatei eines Laufs finden Sie in der Web-App).",
   "payRecordPrefilledFromErp": "Aus der von {erp} gemeldeten Zahlung übernommen. Prüfen Sie die Angaben, bevor Sie sie erfassen.",
   "payRecordErpAmount": "Laut {erp} gezahlter Betrag",
@@ -1085,5 +1055,9 @@
   "codedRefusalGoodsReceiptIdempotencyReused": "Diese Anfrage wurde bereits für eine andere Bestellung verwendet. Öffnen Sie das Formular erneut und versuchen Sie es noch einmal.",
   "settingsGoodsReceiptHint": "Eine Lieferung zu einer Bestellung erfassen",
   "grRecordSegregationNote": "Funktionstrennung: Sobald Sie diesen Wareneingang erfassen, können Sie keine Rechnung zu dieser Bestellung freigeben, und ein Wareneingang, den Sie nach einer Freigabe erfassen, gibt diese Rechnung nicht frei.",
-  "grRecordReceiveLines": "Geben Sie für mindestens eine Position eine Menge ein"
+  "grRecordReceiveLines": "Geben Sie für mindestens eine Position eine Menge ein",
+  "listShowingSavedCopy": "Gespeicherte Kopie wird angezeigt — Server nicht erreichbar. Zum Aktualisieren nach unten ziehen.",
+  "listRefreshFailed": "Aktualisierung fehlgeschlagen — die zuletzt geladene Liste wird angezeigt. Zum erneuten Versuch nach unten ziehen.",
+  "exceptionsLoadError": "Ausnahmen konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“.",
+  "contractsLoadError": "Verträge konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“."
 }

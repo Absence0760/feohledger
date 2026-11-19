@@ -876,7 +876,6 @@
       }
     }
   },
-
   "settingsProcurement": "Compras",
   "settingsInspections": "Inspeções de qualidade",
   "settingsInspectionsHint": "Registrar e consultar inspeções da conciliação de 4 vias",
@@ -1150,7 +1149,6 @@
   "invoicesBulkSkipNoNumber": "Fatura (sem número)",
   "reviewVerdictsUnavailable": "Não foi possível verificar o que você pode fazer aqui — puxe para tentar novamente",
   "reviewVerdictsChecking": "Verificando o que você pode fazer aqui…",
-
   "payRecordOnlyBanner": "O FeohLedger registra os pagamentos, mas nunca os envia: pague pelo seu banco ou ERP e registre cada pagamento aqui (o arquivo bancário de um lote está no aplicativo web).",
   "payRecordPrefilledFromErp": "Preenchido com o pagamento informado por {erp}. Confira os dados antes de registrá-lo.",
   "payRecordErpAmount": "Valor pago segundo {erp}",
@@ -1251,5 +1249,9 @@
   "codedRefusalGoodsReceiptIdempotencyReused": "Esta solicitação já foi usada para outro pedido de compra. Abra o formulário de novo e tente outra vez.",
   "settingsGoodsReceiptHint": "Registrar uma entrega de um pedido de compra",
   "grRecordSegregationNote": "Segregação de funções: depois de registrar este recebimento, você não poderá aprovar uma fatura emitida contra este pedido de compra, e um recebimento registrado depois de aprovar uma fatura não a libera.",
-  "grRecordReceiveLines": "Informe uma quantidade em pelo menos uma linha"
+  "grRecordReceiveLines": "Informe uma quantidade em pelo menos uma linha",
+  "listShowingSavedCopy": "Mostrando uma cópia salva — não foi possível conectar ao servidor. Puxe para baixo para tentar novamente.",
+  "listRefreshFailed": "Não foi possível atualizar — mostrando a última lista carregada. Puxe para baixo para tentar novamente.",
+  "exceptionsLoadError": "Não foi possível carregar as exceções. Verifique sua conexão e toque em Tentar novamente.",
+  "contractsLoadError": "Não foi possível carregar os contratos. Verifique sua conexão e toque em Tentar novamente."
 }

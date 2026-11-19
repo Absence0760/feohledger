@@ -8,6 +8,7 @@ import 'package:feohledger_mobile/screens/exception_detail_screen.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/exception_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/bulk_action_bar.dart';
 import 'package:feohledger_mobile/widgets/exception_list_tile.dart';
 
@@ -135,45 +136,37 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
               builder: (context, _) {
                 final store = ExceptionStore.instance;
 
-                if (store.loading && store.exceptions.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (store.exceptions.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
+                return AsyncListBody<ApException>(
+                  items: store.exceptions,
+                  loading: store.loading,
+                  hasError: store.error != null,
+                  fromCache: store.fromCache,
+                  errorMessage: l.exceptionsLoadError,
+                  onRefresh: store.fetch,
+                  empty: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const ExcludeSemantics(
+                        child: Icon(
                           Icons.check_circle,
                           size: 64,
                           color: Colors.green,
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          l.exceptionsEmpty,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        l.exceptionsEmpty,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(height: 4),
-                        Text(l.exceptionsQueueClear),
-                      ],
-                    ),
-                  );
-                }
-
-                return RefreshIndicator(
-                  onRefresh: store.fetch,
-                  child: ListView.separated(
-                    itemCount: store.exceptions.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final exc = store.exceptions[index];
-                      return _buildRow(exc);
-                    },
+                      ),
+                      const SizedBox(height: 4),
+                      Text(l.exceptionsQueueClear, textAlign: TextAlign.center),
+                    ],
                   ),
+                  itemBuilder: (context, exc) => _buildRow(exc),
                 );
               },
             ),

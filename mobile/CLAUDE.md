@@ -71,6 +71,10 @@ The shape: `screens/` (one per route) · `stores/` (ChangeNotifier state) ·
 `widgets/` (the shared widget library) · `models/` · `services/` (API client).
 Guard rail 10 — put code in the directory its siblings already establish, and
 build screens from the widget library rather than duplicating markup.
+A list screen backed by a store builds its body with `AsyncListBody`
+(`lib/widgets/async_list_body.dart`), never a hand-rolled spinner → error →
+empty → `RefreshIndicator` chain; `test/screens/async_list_body_adoption_test.dart`
+enforces it outside an allowlist of not-yet-converted screens.
 ## Architecture patterns
 
 - **ChangeNotifier singletons** for stores — `AuthStore.instance`, `InvoiceStore.instance`, etc.

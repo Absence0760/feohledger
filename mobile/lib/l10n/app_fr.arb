@@ -9,9 +9,7 @@
   "navPay": "Payer",
   "navPayments": "Paiements",
   "navSettings": "Paramètres",
-
   "shellAppName": "FeohLedger",
-
   "commonSave": "Enregistrer",
   "commonSaving": "Enregistrement…",
   "commonCancel": "Annuler",
@@ -23,7 +21,6 @@
   "commonClear": "Effacer",
   "commonApply": "Appliquer",
   "commonClose": "Fermer",
-
   "settingsTitle": "Paramètres",
   "settingsTenant": "Locataire",
   "settingsTenantNotSet": "Non défini",
@@ -34,7 +31,6 @@
   "settingsLanguage": "Langue",
   "settingsLanguageHint": "Choisissez la langue utilisée dans toute l’application. Votre choix est enregistré sur cet appareil.",
   "settingsLanguageSystem": "Paramètre du système",
-
   "dashboardTitle": "Tableau de bord",
   "dashboardTotalInvoices": "Total des factures",
   "dashboardUpcoming": "À venir",
@@ -60,7 +56,6 @@
   "dashboardAgingUnconverted": "Partiel : {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — les tranches ci-dessous mélangent les devises d’autant.",
   "dashboardTopVendorsUnconverted": "Partiel : {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — ces fournisseurs ne sont donc pas tous classés dans la même devise. Enregistrez le taux manquant avant de vous fier au classement.",
   "dashboardVendorFaceValueCount": "{count, plural, one {{count} à valeur faciale} other {{count} à valeur faciale}}",
-
   "invoicesTitle": "Factures",
   "invoicesSearchHint": "Rechercher des factures…",
   "invoicesSearchAria": "Rechercher des factures",
@@ -81,7 +76,6 @@
   "invoicesColAmount": "Montant",
   "invoicesColDueDate": "Échéance",
   "invoicesColStatus": "Statut",
-
   "notificationsTitle": "Notifications",
   "notificationsMarkAllRead": "Tout marquer comme lu",
   "notificationsMarkAllReadLabel": "Marquer toutes les notifications comme lues",
@@ -93,7 +87,6 @@
   "notificationsCaughtUp": "Vous êtes à jour",
   "notificationsNothingYet": "Rien pour le moment",
   "notificationsLoadError": "Impossible de charger les notifications",
-
   "vendorsTitle": "Fournisseurs",
   "vendorsSyncErp": "Synchroniser depuis l'ERP",
   "vendorsSyncErpLabel": "Synchroniser les fournisseurs depuis l'ERP",
@@ -115,7 +108,6 @@
   "vendorCardsRequireVoid": "{count, plural, one {{count} carte virtuelle couvre un paiement programmé et reste active — annulez ce paiement pour la clôturer.} other {{count} cartes virtuelles couvrent des paiements programmés et restent actives — annulez ces paiements pour les clôturer.}}",
   "vendorActionFailed": "Échec de l'action",
   "vendorSyncFailed": "Échec de la synchronisation ERP : {error}",
-
   "exceptionsTitle": "Exceptions",
   "exceptionsFilterOpen": "Ouvertes",
   "exceptionsFilterEscalated": "Escaladées",
@@ -130,7 +122,6 @@
   "exceptionEscalated": "Exception escaladée",
   "exceptionDismissed": "Exception ignorée",
   "exceptionActionFailed": "Échec de l'action",
-
   "paymentsTitle": "Paiements",
   "paymentsEmpty": "Aucun paiement",
   "paymentsErrorPrefix": "Erreur : {error}",
@@ -139,7 +130,6 @@
   "paymentStatusCompleted": "Terminé",
   "paymentStatusFailed": "Échoué",
   "paymentStatusCancelled": "Annulé",
-
   "approvalsTitle": "Approbations en attente",
   "approvalsAllCaughtUp": "Tout est à jour !",
   "approvalsNoneWaiting": "Aucune facture en attente d'approbation",
@@ -148,7 +138,6 @@
   "approvalActionApprove": "Approuver",
   "approvalActionReject": "Rejeter",
   "approvalApproved": "Facture approuvée",
-
   "captureTitle": "Capturer une facture",
   "captureChange": "Modifier",
   "captureUpload": "Téléverser",
@@ -163,7 +152,6 @@
   "captureUploadFailed": "Échec du téléversement : {error}",
   "captureSelectedDocument": "Document sélectionné : {name}",
   "capturePdfReady": "Document PDF prêt à être téléversé",
-
   "advSearchTitle": "Recherche avancée",
   "advSearchClose": "Fermer la recherche avancée",
   "advSearchVendor": "Fournisseur",
@@ -177,7 +165,6 @@
   "advSearchMinMaxError": "Le minimum ne doit pas dépasser le maximum",
   "advSearchClearField": "Effacer {label}",
   "advSearchDateFieldHint": "{label}, actuellement {value}. Appuyez deux fois pour modifier.",
-
   "invoiceDetailTitle": "Détail de la facture",
   "invoiceDetailEdit": "Modifier",
   "invoiceDetailEditLabel": "Modifier la facture",
@@ -279,7 +266,6 @@
   "invoiceDetailFileLabel": "Fichier de la facture. Appuyez deux fois pour afficher en plein écran.",
   "invoiceDetailTapToViewPdf": "Appuyez pour afficher le PDF",
   "invoiceDetailTapToViewFile": "Appuyez pour afficher le fichier",
-
   "invoiceEditTitle": "Modifier la facture",
   "invoiceEditClose": "Fermer le formulaire de modification",
   "invoiceEditVendor": "Fournisseur",
@@ -296,7 +282,6 @@
   "invoiceEditLockedNoticeRecall": "Approuvée — le bénéficiaire et le montant sont figés. Pour les modifier, retirez l'approbation, corrigez la facture puis faites-la approuver de nouveau.",
   "invoiceEditLockedHelper": "Figé après approbation",
   "invoiceEditDueDateHint": "Date d'échéance, actuellement {value}. Appuyez deux fois pour modifier.",
-
   "warningsSectionTitle": "Avertissements et alertes de fraude",
   "warningsPoMatchTitle": "Rapprochement de commande",
   "warningsSeverityError": "Erreur",
@@ -305,7 +290,6 @@
   "warningsPoLabel": "Commande",
   "warningsMatchLabel": "Rapprochement {type}",
   "warningsVarianceLabel": "{value} % d'écart",
-
   "erpStatusTitle": "Statut ERP",
   "erpStatusReference": "Référence ERP",
   "erpStatusDocumentId": "ID du document",
@@ -315,15 +299,12 @@
   "erpStatusStatus": "Statut",
   "erpStatusOpensInErp": "ouvre la facture dans l'ERP",
   "externalLinkOpenFailed": "Impossible d'ouvrir le lien",
-
   "fileViewerPdfTitle": "PDF de la facture",
   "fileViewerImageTitle": "Image de la facture",
   "fileViewerPdfError": "Impossible de charger le PDF",
   "fileViewerImageError": "Impossible de charger l'image",
   "fileViewerRetry": "Réessayer",
-
   "timelineNoActivity": "Aucune activité pour l'instant",
-
   "payTitle": "Payer",
   "payTabQueue": "File d'attente",
   "payTabRuns": "Lots",
@@ -388,7 +369,6 @@
   "payRunStatusCancelled": "Annulé",
   "payConfirmCancel": "Annuler",
   "payConfirmExecute": "Exécuter",
-
   "loginAppName": "FeohLedger",
   "loginTagline": "La comptabilité fournisseurs, simplifiée",
   "loginTenant": "Locataire",
@@ -398,7 +378,6 @@
   "loginHidePassword": "Masquer le mot de passe",
   "loginRequired": "Obligatoire",
   "loginSignIn": "Se connecter",
-
   "mfaTitle": "Authentification à deux facteurs",
   "mfaHeading": "Vérifiez votre identité",
   "mfaPromptEmail": "Saisissez le code à 6 chiffres que nous vous avons envoyé par e-mail.",
@@ -414,7 +393,6 @@
   "mfaUseEmailInstead": "Utiliser plutôt un code par e-mail",
   "mfaUseAuthenticatorInstead": "Utiliser plutôt l'application d'authentification",
   "mfaEmailedAnnounce": "Un code de connexion vous a été envoyé par e-mail.",
-
   "adminUsersTitle": "Gestion des utilisateurs",
   "adminUsersSearchHint": "Rechercher par nom ou e-mail",
   "adminUsersEmpty": "Aucun utilisateur trouvé",
@@ -453,7 +431,6 @@
   "adminUsersDeleteConfirmBody": "Cette action supprime définitivement {name} ({email}). Elle est irréversible.",
   "adminUsersDeleted": "{name} supprimé",
   "adminUsersDeleteFailed": "Échec de la suppression de {name} : {error}",
-
   "orgSettingsTitle": "Paramètres de l'organisation",
   "orgSettingsNoSettings": "Aucun paramètre",
   "orgSettingsLoadError": "Impossible de charger les paramètres",
@@ -474,7 +451,6 @@
   "orgSettingsFieldRequired": "{label} est obligatoire",
   "orgSettingsSaved": "Paramètres de l'organisation enregistrés",
   "orgSettingsSaveFailed": "Échec de l'enregistrement : {error}",
-
   "workflowsTitle": "Flux de travail",
   "workflowsEmpty": "Aucun flux de travail trouvé",
   "workflowsLoadError": "Impossible de charger les flux de travail",
@@ -492,7 +468,6 @@
   "workflowDetailApproverCount": "{count, plural, one {{count} approbateur} other {{count} approbateurs}}",
   "workflowDetailDelaySummary": "Délai {hours} h",
   "workflowDetailConditionSummary": "Sur {field}",
-
   "cashFlowTitle": "Prévision de trésorerie",
   "cashFlowErrorPrefix": "Erreur : {error}",
   "cashFlowHorizonDays": "{days} jours",
@@ -528,7 +503,6 @@
   "cashFlowLowBalanceAlertLabel": "Alerte de solde faible. {message}",
   "cashFlowForecastUnconverted": "Partiel : {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — ces sorties, ainsi que les totaux engagés et en attente ci-dessus, mélangent les devises d’autant.",
   "cashFlowPositionUnconverted": "Non converti : {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — le solde courant ci-dessous et la fin prévue ci-dessus mélangent donc des devises. Enregistrez le taux manquant avant d’agir sur ces chiffres.",
-
   "contractsTitle": "Contrats",
   "contractsSearchHint": "Rechercher des contrats…",
   "contractsEmpty": "Aucun contrat trouvé",
@@ -537,7 +511,6 @@
   "contractsFilterExpired": "Expiré",
   "contractsFilterTerminated": "Résilié",
   "contractsFilterCancelled": "Annulé",
-
   "contractDetailTitle": "Détail du contrat",
   "contractDetailErrorPrefix": "Erreur : {error}",
   "contractDetailUntitled": "Contrat sans titre",
@@ -585,7 +558,6 @@
   "contractCancelBody": "Cela retire le contrat — aucune autre facture ne pourra y être rapprochée. Cette action est irréversible. Continuer ?",
   "contractCancelled": "Contrat annulé",
   "contractCancelFailed": "Impossible d’annuler le contrat — veuillez réessayer",
-
   "exceptionDetailTitle": "Exception",
   "exceptionDetailErrorPrefix": "Impossible de charger l’exception : {error}",
   "exceptionDetailOverdue": "En retard",
@@ -710,7 +682,6 @@
   "exceptionDetailAssigneeUpdateFailed": "Impossible de mettre à jour l’affectation",
   "exceptionDetailUnassigned2": "Affectation de l’exception retirée",
   "exceptionDetailAssignedTo": "Affectée à {name}",
-
   "settingsProcurement": "Approvisionnement",
   "settingsInspections": "Inspections qualité",
   "settingsInspectionsHint": "Enregistrer et consulter les inspections du rapprochement à 4 volets",
@@ -984,7 +955,6 @@
   "invoicesBulkSkipNoNumber": "Facture (sans numéro)",
   "reviewVerdictsUnavailable": "Impossible de vérifier ce que vous pouvez faire ici — tirez pour réessayer",
   "reviewVerdictsChecking": "Vérification de ce que vous pouvez faire ici…",
-
   "payRecordOnlyBanner": "FeohLedger enregistre les paiements mais ne les envoie jamais : payez depuis votre banque ou votre ERP, puis enregistrez chaque paiement ici (le fichier bancaire d'un lot est dans l'application web).",
   "payRecordPrefilledFromErp": "Renseigné à partir du paiement signalé par {erp}. Vérifiez les informations avant de l'enregistrer.",
   "payRecordErpAmount": "Montant payé selon {erp}",
@@ -1085,5 +1055,9 @@
   "codedRefusalGoodsReceiptIdempotencyReused": "Cette demande a déjà servi pour un autre bon de commande. Rouvrez le formulaire et réessayez.",
   "settingsGoodsReceiptHint": "Réceptionner une livraison au titre d'un bon de commande",
   "grRecordSegregationNote": "Séparation des tâches : une fois cette réception enregistrée, vous ne pouvez pas approuver une facture émise au titre de ce bon de commande, et une réception enregistrée après avoir approuvé une facture ne la libère pas.",
-  "grRecordReceiveLines": "Saisissez une quantité sur au moins une ligne"
+  "grRecordReceiveLines": "Saisissez une quantité sur au moins une ligne",
+  "listShowingSavedCopy": "Copie enregistrée affichée — serveur injoignable. Tirez vers le bas pour réessayer.",
+  "listRefreshFailed": "Actualisation impossible — la dernière liste chargée est affichée. Tirez vers le bas pour réessayer.",
+  "exceptionsLoadError": "Impossible de charger les exceptions. Vérifiez votre connexion et appuyez sur Réessayer.",
+  "contractsLoadError": "Impossible de charger les contrats. Vérifiez votre connexion et appuyez sur Réessayer."
 }

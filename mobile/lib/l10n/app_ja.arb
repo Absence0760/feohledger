@@ -876,7 +876,6 @@
       }
     }
   },
-
   "settingsProcurement": "調達",
   "settingsInspections": "品質検査",
   "settingsInspectionsHint": "4 ウェイ照合の検査を登録・確認",
@@ -1150,7 +1149,6 @@
   "invoicesBulkSkipNoNumber": "請求書（番号なし）",
   "reviewVerdictsUnavailable": "ここで実行できる操作を確認できませんでした。下に引いて再試行してください",
   "reviewVerdictsChecking": "ここで実行できる操作を確認しています…",
-
   "payRecordOnlyBanner": "FeohLedger は支払いを記録するだけで送金は行わないため、銀行または ERP から支払い、ここで各支払いを記録してください（バッチの銀行ファイルは Web アプリにあります）。",
   "payRecordPrefilledFromErp": "{erp} が報告した支払いの内容を入力済みです。記録する前に内容を確認してください。",
   "payRecordErpAmount": "{erp} が報告した支払額",
@@ -1251,5 +1249,9 @@
   "codedRefusalGoodsReceiptIdempotencyReused": "このリクエストはすでに別の発注書に使われています。フォームを開き直して、もう一度お試しください。",
   "settingsGoodsReceiptHint": "発注書に対する入荷を登録",
   "grRecordSegregationNote": "職務分掌：この入荷を登録すると、この発注書に対する請求書を承認できなくなります。また、承認後に登録した入荷では、その請求書の保留は解除されません。",
-  "grRecordReceiveLines": "少なくとも 1 つの明細に数量を入力してください"
+  "grRecordReceiveLines": "少なくとも 1 つの明細に数量を入力してください",
+  "listShowingSavedCopy": "保存済みのコピーを表示中 — サーバーに接続できませんでした。下に引いて再試行してください。",
+  "listRefreshFailed": "更新できませんでした — 最後に読み込んだ一覧を表示しています。下に引いて再試行してください。",
+  "exceptionsLoadError": "例外を読み込めませんでした。接続を確認して「再試行」をタップしてください。",
+  "contractsLoadError": "契約を読み込めませんでした。接続を確認して「再試行」をタップしてください。"
 }
