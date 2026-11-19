@@ -144,7 +144,20 @@ CloudFront), built in CI. Before that the VM built it and served published
 releases from `deploy/www/` (§277), after v0.1.0's Caddy mounted the rebuilt
 `frontend/build` and served every page as an empty 404 (#579).
 
-**The first deploy of this layout needs nothing by hand.** `deploy.sh` drops
+**Coming from v0.2.1 or older, move the VM's checkout first.** A release
+deploy runs `deploy.sh --ref` from the checkout already on the VM, and before
+§364 that script's guard only accepted a commit whose
+`deploy/compose.prod.yml` still mounts `./www:/srv`. §364 removed that mount,
+so the old guard refuses every later commit with "predates the deploy/www/ SPA
+layout" before it changes anything (v0.3.0's first deploy, #733). No later
+commit can fix the script already on the VM. As `ec2-user`, run
+`git -C ~/feohledger fetch origin main` and
+`git -C ~/feohledger checkout -B main <release sha>` (the containers keep
+running), then re-run the failed deploy job. From then on the guard refuses
+only the known-bad `frontend/build` mount, so a later layout change can't
+refuse a deploy the same way.
+
+**After that, the first deploy of this layout needs nothing by hand.** `deploy.sh` drops
 every apex and `<slug>.<APP_DOMAIN>` block an older `add-tenant.sh` wrote to
 `tenants.caddy` (it lists them), moves any vanity block still on `import spa`
 to `import vanity`, and `up -d --wait` recreates Caddy because its volumes
