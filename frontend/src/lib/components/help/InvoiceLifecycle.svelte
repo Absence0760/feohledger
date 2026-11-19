@@ -14,6 +14,7 @@
 	import { guideFor } from '#lib/help/content.ts';
 	import StatusBadge from '#lib/components/ui/StatusBadge.svelte';
 	import RichText from './RichText.svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let selected = $state(0);
 	const tabs: HTMLButtonElement[] = $state([]);
@@ -63,7 +64,7 @@
 	</div>
 
 	<div class="panel" role="tabpanel" id="{uid}-panel" aria-labelledby="{uid}-tab-{selected}">
-		<p class="step">{m('help.lifecycle.stage', { n: selected + 1, total: LIFECYCLE.length })}</p>
+		<p class="step">{m('help.lifecycle.stage', { n: formatCount(selected + 1), total: formatCount(LIFECYCLE.length) })}</p>
 		<div class="badges">
 			{#each stage.statuses as status (status)}<StatusBadge {status} />{/each}
 			{#if stage.branches}

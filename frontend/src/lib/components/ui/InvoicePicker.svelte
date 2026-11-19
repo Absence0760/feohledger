@@ -33,6 +33,7 @@
 		remainingToCredit,
 		type InvoicePickerOption
 	} from '#lib/utils/invoicePicker.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let {
 		value = $bindable(''),
@@ -88,7 +89,7 @@
 		empty: emptyText,
 		noMatches: (query) => m('invoices.picker.noMatches', { query }),
 		showingAll: (total) => m('invoices.picker.showingAll', { total }),
-		showingPartial: (shown, total) => m('invoices.picker.showingPartial', { shown, total }),
+		showingPartial: (shown, total) => m('invoices.picker.showingPartial', { shown: formatCount(shown), total: formatCount(total) }),
 		refineHint: m('invoices.picker.refineHint'),
 		loadMore: m('invoices.picker.loadMore'),
 		loadMoreFailed: m('invoices.picker.loadMoreFailed'),

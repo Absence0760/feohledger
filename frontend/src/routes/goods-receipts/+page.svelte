@@ -61,6 +61,7 @@
 	import { page as pageStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// The status column is free-form, so an unknown spelling renders raw rather
 	// than disappearing; every value the backend writes has a label.
@@ -649,7 +650,7 @@
 					<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
 						{loadingMore
 							? m('common.loading')
-							: m('goodsReceipts.loadMore', { shown: grs.length, total })}
+							: m('goodsReceipts.loadMore', { shown: formatCount(grs.length), total: formatCount(total) })}
 					</button>
 				</div>
 			{:else if total > 0 && !errored}
@@ -728,10 +729,7 @@
 					>
 						{loadingMoreInspections
 							? m('common.loading')
-							: m('goodsReceipts.inspections.loadMore', {
-									shown: inspections.length,
-									total: inspectionsTotal
-								})}
+							: m('goodsReceipts.inspections.loadMore', { shown: formatCount(inspections.length), total: formatCount(inspectionsTotal) })}
 					</button>
 				</div>
 			{:else if inspectionsTotal > 0}

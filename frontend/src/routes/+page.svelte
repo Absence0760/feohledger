@@ -276,7 +276,7 @@
 			<div class="setup-head">
 				<h2 id="dashboard-setup-heading">{m('dashboard.setup.heading')}</h2>
 				<p class="setup-progress" data-testid="dashboard-setup-progress">
-					{m('dashboard.setup.progress', { done: setupCount.done, total: setupCount.total })}
+					{m('dashboard.setup.progress', { done: formatCount(setupCount.done), total: formatCount(setupCount.total) })}
 				</p>
 			</div>
 			<p class="setup-intro">{m('dashboard.setup.intro')}</p>

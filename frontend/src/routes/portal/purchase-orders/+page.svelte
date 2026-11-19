@@ -18,6 +18,7 @@
 	import { poStatusLabel, poStatusTone } from '#lib/types/purchaseOrder.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import { PO_TOTAL_UNVERIFIABLE, poFlipRefusalText } from '#lib/types/portalPurchaseOrder.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// `flip_verdict` is the server's answer to "would the flip mint an invoice
 	// from this PO?" (`api/portal.po_flip_refusal`) — read it, never restate
@@ -204,7 +205,7 @@
 				>
 					{loadingMore
 						? m('portal.common.loading')
-						: m('portal.po.loadMore', { shown: items.length, total })}
+						: m('portal.po.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
 				</button>
 			</div>
 		{:else if total > 0}

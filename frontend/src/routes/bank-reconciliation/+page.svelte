@@ -69,6 +69,7 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canMutate = $derived(auth.isManager);
 
@@ -847,7 +848,7 @@
 						>
 							{statementsLoadingMore
 								? m('common.loading')
-								: m('bankRecon.loadMore', { shown: statements.length, total: statementTotal })}
+								: m('bankRecon.loadMore', { shown: formatCount(statements.length), total: formatCount(statementTotal) })}
 						</button>
 					</div>
 				{:else if statementTotal > 0}

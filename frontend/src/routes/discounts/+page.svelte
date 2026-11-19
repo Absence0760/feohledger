@@ -46,6 +46,7 @@
 		DiscountStatusFilter,
 		DiscountOptimization
 	} from '#lib/types/discounts.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// RBAC mirrors `backend/app/api/discounts.py`, which is the layer that
 	// actually enforces:
@@ -761,7 +762,7 @@
 		{#if hasMore && !offersError}
 			<div class="load-more-row">
 				<button class="btn-load-more" onclick={() => loadOffers({ append: true })} disabled={loadingMore}>
-					{loadingMore ? m('common.loading') : m('discounts.loadMore', { shown: offers.length, total })}
+					{loadingMore ? m('common.loading') : m('discounts.loadMore', { shown: formatCount(offers.length), total: formatCount(total) })}
 				</button>
 			</div>
 		{:else if total > 0}

@@ -23,6 +23,7 @@
 	import { searchVendorOptions, type VendorOption } from '#lib/api/vendors.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { vendorOptionLabel } from '#lib/utils/vendorPicker.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let {
 		value = $bindable(''),
@@ -74,7 +75,7 @@
 		empty: m('vendors.picker.noVendors'),
 		noMatches: (query) => m('vendors.picker.noMatches', { query }),
 		showingAll: (total) => m('vendors.picker.showingAll', { total }),
-		showingPartial: (shown, total) => m('vendors.picker.showingPartial', { shown, total }),
+		showingPartial: (shown, total) => m('vendors.picker.showingPartial', { shown: formatCount(shown), total: formatCount(total) }),
 		refineHint: m('vendors.picker.refineHint'),
 		loadMore: m('vendors.picker.loadMore'),
 		loadMoreFailed: m('vendors.picker.loadMoreFailed'),

@@ -669,7 +669,7 @@
 	{#if hasMore}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('recurring.loadMore', { shown: templates.length, total })}
+				{loadingMore ? m('common.loading') : m('recurring.loadMore', { shown: formatCount(templates.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}

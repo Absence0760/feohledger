@@ -29,6 +29,7 @@
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.isManager); // admin | ap_manager
 	// Buyers (admin / ap_manager / ap_clerk) may start a punch-out session.
@@ -437,7 +438,7 @@
 			>
 				{loadingMore
 					? m('common.loading')
-					: m('catalogs.loadMore', { shown: catalogs.length, total })}
+					: m('catalogs.loadMore', { shown: formatCount(catalogs.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}

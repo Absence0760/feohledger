@@ -36,6 +36,7 @@
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.isManager);
 
@@ -429,7 +430,7 @@
 	{#if hasMore && !loadError}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('positivePay.loadMore', { shown: files.length, total })}
+				{loadingMore ? m('common.loading') : m('positivePay.loadMore', { shown: formatCount(files.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}

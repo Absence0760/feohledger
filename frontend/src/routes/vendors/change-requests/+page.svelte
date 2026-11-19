@@ -48,6 +48,7 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const PAGE_SIZE = 20;
 
@@ -561,7 +562,7 @@
 			>
 				{loadingMore
 					? m('common.loading')
-					: m('vendors.changeRequests.loadMore', { shown: items.length, total })}
+					: m('vendors.changeRequests.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}
