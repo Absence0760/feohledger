@@ -2799,7 +2799,7 @@ export const messages = {
 	'glAccounts.count': '{n, plural, one {# Konto} other {# Konten}}',
 	'glAccounts.empty': 'Keine Konten in diesem Kontenplan.',
 	'glAccounts.empty.filtered': 'Keine Konten entsprechen Ihren Filtern.',
-	'glAccounts.empty.errored': 'Der Kontenplan konnte nicht geladen werden. Aktualisieren Sie die Seite, um es erneut zu versuchen.',
+	'glAccounts.empty.errored': 'Der Kontenplan konnte nicht geladen werden.',
 	'glAccounts.onboarding.heading': 'Noch kein Kontenplan',
 	'glAccounts.onboarding.description': 'Auf Sachkonten werden Rechnungspositionen, Ausgaben und Bestellanforderungen kontiert. Synchronisieren Sie sie aus einem verbundenen ERP oder legen Sie sie hier einzeln an.',
 	'glAccounts.toast.loadFailed': 'Kontenplan konnte nicht geladen werden',

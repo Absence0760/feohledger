@@ -2749,7 +2749,7 @@ export const messages = {
 	'glAccounts.count': '{n, plural, other {# 件の勘定科目}}',
 	'glAccounts.empty': 'この勘定科目表に科目がありません。',
 	'glAccounts.empty.filtered': 'フィルターに一致する勘定科目がありません。',
-	'glAccounts.empty.errored': '勘定科目表を読み込めませんでした。ページを再読み込みしてお試しください。',
+	'glAccounts.empty.errored': '勘定科目表を読み込めませんでした。',
 	'glAccounts.onboarding.heading': '勘定科目表がまだありません',
 	'glAccounts.onboarding.description': '請求書明細、経費、購買依頼はGL勘定コードに仕訳されます。接続済みのERPから同期するか、ここで1件ずつ追加してください。',
 	'glAccounts.toast.loadFailed': '勘定科目表を読み込めませんでした',

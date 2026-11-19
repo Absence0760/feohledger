@@ -184,3 +184,22 @@ test('a failed rollup fetch does not take the cash-flow panels down with it', as
 	);
 	await expect(page.getByTestId('forecast-kpi-row')).toBeVisible();
 });
+
+test('a failed rollup fetch offers a Retry that reloads the card', async ({ page }) => {
+	let fail = true;
+	await page.route('**/api/budgets/rollup*', (route) =>
+		fail ? route.fulfill({ status: 500, body: '{}' }) : route.fallback()
+	);
+
+	await page.goto('/cfo');
+
+	const failed = page.getByTestId('budget-rollup-error');
+	await expect(failed).toContainText('Failed to load budget vs actual.', { timeout: 15_000 });
+
+	fail = false;
+	const reloaded = page.waitForResponse((r) => r.url().includes('/api/budgets/rollup'));
+	await failed.getByRole('button', { name: 'Retry' }).click();
+	expect((await reloaded).status()).toBe(200);
+	await expect(page.getByTestId('budget-rollup-error')).toHaveCount(0);
+	await expect(page.getByTestId('budget-rollup')).toBeVisible();
+});

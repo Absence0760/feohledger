@@ -84,7 +84,8 @@ test.describe('/reports (admin, real backend)', () => {
 
 		// Clean up so the list doesn't grow unbounded across runs.
 		await savedSection.getByRole('button', { name: `Delete report ${name}` }).click();
-		await savedSection.getByRole('button', { name: `Delete report ${name}` }).click();
+		// Armed: the accessible name now says what the second click does.
+		await savedSection.getByRole('button', { name: `Confirm for ${name}` }).click();
 		await expect(savedSection.getByText(name)).toHaveCount(0);
 	});
 });

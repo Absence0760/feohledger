@@ -39,6 +39,7 @@
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import GlAccountModal from '#lib/components/modals/GlAccountModal.svelte';
@@ -121,17 +122,16 @@
 
 	const filtersActive = $derived(search.trim() !== '' || typeFilter !== 'all');
 
-	// Four distinct empty states (frontend/docs/ui-patterns.md § Data tables):
-	// loading, errored, a filter that matched nothing, and a genuinely empty
-	// chart. The last one gets the EmptyState block below instead of a cell.
+	// Four distinct states (frontend/docs/ui-patterns.md § Data tables):
+	// loading, a filter that matched nothing, a genuinely empty chart (the
+	// EmptyState block below), and a failed load — which replaces the table
+	// with `LoadError` and its Retry rather than sitting in an empty cell.
 	const emptyMessage = $derived(
 		loading
 			? m('common.loading')
-			: errored
-				? m('glAccounts.empty.errored')
-				: filtersActive
-					? m('glAccounts.empty.filtered')
-					: m('glAccounts.empty')
+			: filtersActive
+				? m('glAccounts.empty.filtered')
+				: m('glAccounts.empty')
 	);
 
 	const showOnboarding = $derived(
@@ -201,11 +201,13 @@
 	async function load() {
 		const token = fetchSequence.start();
 		loading = true;
+		// Cleared as the request starts, so a Retry (or a new filter) swaps the
+		// error block for the table's loading row instead of leaving it up.
+		errored = false;
 		try {
 			const rows = await listGlAccounts(buildParams());
 			if (!fetchSequence.canCommit(token)) return;
 			accounts = rows;
-			errored = false;
 		} catch (err) {
 			// `isCurrentRequest`, not `canCommit`: a superseded request's failure
 			// is not this table's news — the newer one owns the error state, and
@@ -380,7 +382,7 @@
 			</button>
 			<!-- `POST /api/gl-accounts/sync-erp` is require_roles(ADMIN, AP_MANAGER),
 			     matching the buttons on /purchase-orders and /vendors. -->
-			<button class="btn-outline" disabled={syncing} onclick={syncFromErp}>
+			<button class="btn-cancel" disabled={syncing} onclick={syncFromErp}>
 				{syncing ? m('glAccounts.action.syncing') : m('glAccounts.action.syncErp')}
 			</button>
 		{/if}
@@ -415,6 +417,8 @@
 			actionLabel={canManage ? m('glAccounts.action.new') : undefined}
 			onaction={canManage ? () => (showCreate = true) : undefined}
 		/>
+	{:else if errored}
+		<LoadError message={m('glAccounts.empty.errored')} onretry={load} testId="gl-accounts-error" />
 	{:else}
 		<div class="gl-table">
 		<DataTable fixed columns={COLUMNS} isEmpty={accounts.length === 0} empty={emptyMessage}>
@@ -480,7 +484,10 @@
 											variant="danger"
 											armed={confirmRetireId === acct.id}
 											ariaLabel={confirmRetireId === acct.id
-												? undefined
+												? m('common.rowActionAria', {
+														action: m('glAccounts.row.confirm'),
+														name: acct.code
+													})
 												: m('glAccounts.row.retireAria', { code: acct.code })}
 											disabled={busyId === acct.id}
 											onclick={(e) => {
@@ -613,23 +620,5 @@
 	.count-line {
 		font-size: 0.8rem;
 		color: var(--text-muted);
-	}
-	.btn-outline {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-outline:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-outline:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 </style>

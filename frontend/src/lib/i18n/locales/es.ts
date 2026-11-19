@@ -2796,7 +2796,7 @@ export const messages = {
 	'glAccounts.count': '{n, plural, one {# cuenta} other {# cuentas}}',
 	'glAccounts.empty': 'No hay cuentas en este plan.',
 	'glAccounts.empty.filtered': 'Ninguna cuenta coincide con sus filtros.',
-	'glAccounts.empty.errored': 'No se pudo cargar el plan de cuentas. Actualice la página para volver a intentarlo.',
+	'glAccounts.empty.errored': 'No se pudo cargar el plan de cuentas.',
 	'glAccounts.onboarding.heading': 'Aún no hay plan de cuentas',
 	'glAccounts.onboarding.description': 'Las cuentas contables son aquellas a las que se codifican las líneas de factura, los gastos y las solicitudes de compra. Sincronícelas desde un ERP conectado o añádalas aquí una a una.',
 	'glAccounts.toast.loadFailed': 'No se pudo cargar el plan de cuentas',

@@ -2799,7 +2799,7 @@ export const messages = {
 	'glAccounts.count': '{n, plural, one {# conta} other {# contas}}',
 	'glAccounts.empty': 'Nenhuma conta neste plano.',
 	'glAccounts.empty.filtered': 'Nenhuma conta corresponde aos seus filtros.',
-	'glAccounts.empty.errored': 'Não foi possível carregar o plano de contas. Atualize a página para tentar novamente.',
+	'glAccounts.empty.errored': 'Não foi possível carregar o plano de contas.',
 	'glAccounts.onboarding.heading': 'Ainda não há plano de contas',
 	'glAccounts.onboarding.description': 'As contas contábeis são aquelas em que linhas de fatura, despesas e requisições são classificadas. Sincronize-as de um ERP conectado ou adicione-as aqui uma por uma.',
 	'glAccounts.toast.loadFailed': 'Não foi possível carregar o plano de contas',

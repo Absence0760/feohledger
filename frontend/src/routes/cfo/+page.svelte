@@ -2,6 +2,8 @@
 	import { api } from '#lib/api.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import ByEntityBreakdown from '#lib/components/analytics/ByEntityBreakdown.svelte';
@@ -155,17 +157,22 @@
 		load();
 	});
 
-	// One-shot: the rollup takes none of this page's controls, so it neither
-	// re-fires nor needs the request sequencer.
-	$effect(() => {
+	// The rollup takes none of this page's controls, so it neither re-fires nor
+	// needs the request sequencer; its only re-issue is the Retry on its own
+	// failure. The flag clears as the retry starts, so the card leaves the
+	// error state rather than sitting on it until the answer lands.
+	function loadBudgetRollup() {
+		budgetRollupError = false;
 		getBudgetRollup()
 			.then((r) => {
 				budgetRollup = r;
-				budgetRollupError = false;
 			})
 			.catch(() => {
 				budgetRollupError = true;
 			});
+	}
+	$effect(() => {
+		untrack(loadBudgetRollup);
 	});
 
 	// The two free-text money inputs are debounced — one request per pause, not
@@ -203,7 +210,10 @@
 			a.remove();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			error = e instanceof Error ? e.message : m('cfo.error.exportFailed');
+			// An action's outcome, not a failed load: a toast. Writing it into
+			// `error` replaced the whole forecast with the export's failure, and
+			// that block's Retry would re-run the forecast, not the export.
+			toast(e instanceof Error ? e.message : m('cfo.error.exportFailed'), 'error');
 		}
 	}
 
@@ -338,7 +348,7 @@
 	</div>
 
 	{#if error}
-		<p class="cf-error" role="alert">{error}</p>
+		<LoadError message={error} onretry={load} testId="cfo-load-error" />
 	{:else if loading}
 		<p class="loading">{m('cfo.loading')}</p>
 	{:else if forecast}
@@ -561,7 +571,11 @@
 				<h2>{m('cfo.budgets.title')}</h2>
 				<HelpTip term="budget" />
 			</div>
-			<p class="cf-error" role="alert">{m('cfo.budgets.loadFailed')}</p>
+			<LoadError
+				message={m('cfo.budgets.loadFailed')}
+				onretry={loadBudgetRollup}
+				testId="budget-rollup-error"
+			/>
 		</div>
 	{:else if budgetRollup}
 		<div class="chart-card" data-testid="budget-rollup">
@@ -716,11 +730,6 @@
 		font-family: inherit;
 		font-size: 0.9rem;
 		width: 180px;
-	}
-
-	.cf-error {
-		color: var(--danger);
-		font-weight: 500;
 	}
 
 	.chart-card {

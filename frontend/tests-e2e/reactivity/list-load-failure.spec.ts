@@ -80,6 +80,7 @@ const CASES: Case[] = [
 		// it: "No accounts in this chart." is a claim a clerk acts on by asking
 		// someone to sync the ERP, and it must not be what an outage looks like.
 		name: 'gl accounts',
+		retry: true,
 		route: '/gl-accounts',
 		apiPathname: '/api/gl-accounts',
 		notShown: /No accounts in this chart/,

@@ -44,9 +44,30 @@ test.describe('audit console (admin)', () => {
 
 	test('by-invoice mode requires an id before querying', async ({ page }) => {
 		await page.goto('/audit');
-		await page.getByRole('tab', { name: 'By invoice' }).click();
+		await page.getByRole('button', { name: 'By invoice' }).click();
 		await page.getByRole('button', { name: 'Run query' }).click();
 		await expect(page.getByRole('alert')).toContainText('invoice ID');
+	});
+
+	test('a failed query says so with a Retry, not an empty trail', async ({ page }) => {
+		let fail = true;
+		await page.route('**/api/audit/export*', (route) =>
+			fail ? route.fulfill({ status: 500, body: '{}' }) : route.fallback()
+		);
+		await page.goto('/audit');
+
+		await page.getByRole('button', { name: 'Run query' }).click();
+		const failed = page.getByTestId('audit-query-error');
+		await expect(failed).toBeVisible();
+		// A failure is not "no entries": the empty-state line must not sit under it.
+		await expect(page.locator('.grid-container tbody tr')).toHaveCount(0);
+
+		fail = false;
+		const exported = page.waitForResponse((r) => r.url().includes('/api/audit/export'));
+		await failed.getByRole('button', { name: 'Retry' }).click();
+		expect((await exported).status()).toBe(200);
+		await expect(page.getByTestId('audit-query-error')).toHaveCount(0);
+		await expect(page.locator('.grid-container tbody tr').first()).toBeVisible();
 	});
 });
 
