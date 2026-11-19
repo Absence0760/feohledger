@@ -38,9 +38,12 @@
 
 <svelte:window onclick={handleWindowClick} />
 
+<!-- `.bulk-delete-btn` is the e2e / outside-click hook; the shared
+     `.btn-danger` (+ `.armed`) paints it, the same box as every other bar
+     button. -->
 <button
 	type="button"
-	class="bulk-delete-btn"
+	class="btn-danger bulk-delete-btn"
 	class:armed
 	{disabled}
 	{title}
@@ -60,36 +63,3 @@
 	{/if}
 </button>
 
-<style>
-	.bulk-delete-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 5px 12px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		transition: border-color 0.15s;
-	}
-
-	.bulk-delete-btn:hover {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-
-	.bulk-delete-btn.armed {
-		border-color: var(--danger);
-		background: color-mix(in srgb, var(--danger) 10%, transparent);
-		color: var(--danger);
-	}
-
-	.bulk-delete-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-</style>
