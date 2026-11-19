@@ -72,7 +72,7 @@
 	// URL-backed (`?status=`), like every other list's chips: Back / reload /
 	// a shared link restore the view. An unknown value falls back to All rather
 	// than an empty table no chip is lit for.
-	function statusFromUrl(params: URLSearchParams): string {
+	function statusFromUrl(params: Pick<URLSearchParams, 'get'>): string {
 		const s = params.get('status');
 		return s && (EXPERIMENT_STATUSES as string[]).includes(s) ? s : 'all';
 	}
@@ -83,7 +83,7 @@
 	// Forward between two entries), so the mount-time seed above never sees it
 	// (`docs/ui-patterns.md` § "Reading the URL once at mount is only half of
 	// the round trip"). The filter is client-side, so no refetch is needed.
-	function readUrlState(params: URLSearchParams) {
+	function readUrlState(params: Pick<URLSearchParams, 'get'>) {
 		const next = statusFromUrl(params);
 		if (next !== statusFilter) statusFilter = next;
 	}
