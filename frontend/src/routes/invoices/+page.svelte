@@ -25,6 +25,7 @@
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 	import { formatList } from '#lib/utils/list.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
 	import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
@@ -1220,7 +1221,7 @@
 					<td class="description" title={invoice.description}>{invoice.description}</td>
 					<td class="mono">{invoice.po_number}</td>
 					<td class="right mono"><Money amount={invoice.amount} currency={invoice.currency} /></td>
-					<td>{invoice.due_date}</td>
+					<td>{formatDate(invoice.due_date)}</td>
 					<td><StatusBadge status={invoice.status} /></td>
 					<td class="assignee">{invoice.assigned_to || '—'}</td>
 					<td class="actions">
