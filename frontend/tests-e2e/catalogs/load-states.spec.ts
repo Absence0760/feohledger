@@ -122,7 +122,9 @@ test.describe('/catalogs load states', () => {
 
 		await page.getByRole('button', { name: /Load more/ }).click();
 
-		await expect(page.getByText('Could not load catalogs').first()).toBeVisible();
+		// The failure toasts with the server's own detail (`errorMessage` prefers
+		// it over the `catalogs.toast.loadFailed` fallback), and LoadError stays away.
+		await expect(page.getByTestId('toast').filter({ hasText: 'boom' })).toBeVisible();
 		await expect(page.getByTestId('catalogs-error')).toHaveCount(0);
 		await expect(page.getByText('Paged Catalog 1')).toBeVisible();
 		await expect(page.getByText('Paged Catalog 2')).toBeVisible();
