@@ -21,7 +21,13 @@ class KpiCard extends StatelessWidget {
     // One merged announcement ("title: value, subtitle") so the metric reads as
     // a single labelled value, not three disjoint fragments (WCAG 1.3.1). The
     // accent icon is decorative and excluded.
+    //
+    // `container: true` makes the card its own semantics node. A label-only
+    // `Semantics` is not a boundary, so two cards side by side in a Row (the
+    // dashboard's layout) merged into their list item's node, and a screen
+    // reader read both as one item: "For Review: 3 / Upcoming: 2, $2K".
     return Semantics(
+      container: true,
       label: subtitle != null
           ? '$title: $value, $subtitle'
           : '$title: $value',

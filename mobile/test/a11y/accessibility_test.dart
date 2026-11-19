@@ -275,6 +275,46 @@ void main() {
       expect(find.bySemanticsLabel('For Review: 7, 3 overdue'), findsOneWidget);
       handle.dispose();
     });
+
+    testWidgets('two cards side by side are two announcements, not one',
+        (tester) async {
+      // The dashboard lays KPI cards out in Rows inside a ListView. A
+      // label-only `Semantics` is not a node boundary, so the two siblings
+      // merged into the list item's node, labelled with both cards joined by
+      // a newline: a screen reader read "For Review: 7 / Upcoming: 2, $2K" as
+      // one item. Outside a list item the bug does not show, hence the
+      // ListView.
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_host(
+        ListView(
+          children: const [
+            Row(
+          children: [
+            Expanded(
+              child: KpiCard(
+                title: 'For Review',
+                value: '7',
+                icon: Icons.rate_review,
+              ),
+            ),
+            Expanded(
+              child: KpiCard(
+                title: 'Upcoming',
+                value: '2',
+                subtitle: r'$2K',
+                icon: Icons.schedule,
+              ),
+            ),
+          ],
+            ),
+          ],
+        ),
+      ));
+
+      expect(find.bySemanticsLabel('For Review: 7'), findsOneWidget);
+      expect(find.bySemanticsLabel(r'Upcoming: 2, $2K'), findsOneWidget);
+      handle.dispose();
+    });
   });
 
   group('PartialConversionNote', () {

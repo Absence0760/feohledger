@@ -309,7 +309,9 @@ await expectLater(tester, meetsGuideline(textContrastGuideline));
 ```
 
 plus `find.bySemanticsLabel(...)` to confirm icon buttons expose labels. Covers
-the invoice list tile, KPI card, status badge, login screen, the capture action,
+the invoice list tile, KPI card (alone, and two side by side in a list `Row`,
+which must stay two announcements: a label-only `Semantics` is not a node
+boundary, so `KpiCard` is `container: true`), status badge, login screen, the capture action,
 the approvals approve/reject affordances (an allowed row beside a refused
 one, plus the could-not-check notice), the invoice detail's Approve / Reject
 bar (allowed and refused verdicts; Approve is `green.shade800` under its white

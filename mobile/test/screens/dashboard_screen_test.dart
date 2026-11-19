@@ -743,11 +743,14 @@ void main() {
 
       // Upcoming: the two due this week, in their own currency — not the ten
       // capped rows, and not the reporting rollup of them.
-      final upcoming = tester.widget<KpiCard>(
-        find.widgetWithText(KpiCard, 'Upcoming'),
+      // Each card in the row is its own announcement (KpiCard is a semantics
+      // container; the two used to merge into one node).
+      final soonMoney = formatMoneyCompact(2000, currency: 'USD');
+      expect(
+        find.bySemanticsLabel('Upcoming: 2, $soonMoney'),
+        findsOneWidget,
       );
-      expect(upcoming.value, '2');
-      expect(upcoming.subtitle, formatMoneyCompact(2000, currency: 'USD'));
+      expect(find.bySemanticsLabel('For Review: 3'), findsOneWidget);
       expect(find.text('10'), findsNothing);
       semantics.dispose();
     });
