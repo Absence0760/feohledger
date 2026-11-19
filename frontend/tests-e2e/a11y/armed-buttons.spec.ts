@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 import {
 	API_BASE,
 	authedTenantHeaders,
+	deleteInvoicesWhere,
 	deletePaymentRunsWhere,
 	expect,
 	firstPayableQueueInvoice,
@@ -124,4 +125,118 @@ test.describe('expense-report header — axe (WCAG 2.2 AA)', () => {
 			}
 		});
 	}
+});
+
+/**
+ * Arming follows the precondition (ui-patterns § Buttons, `.armed`): a commit
+ * shows three looks — muted while it cannot be pressed (no `.armed`), the red
+ * fill once it can, and the busy tint (still `.armed`, disabled) while the
+ * request is in flight. The accessible name changes with it, so the armed
+ * state is announced, not only painted.
+ */
+test.describe('armed commits follow their precondition', () => {
+	const PREFIX = 'E2E-ARMED-REJECT';
+	test.afterEach(() => deleteInvoicesWhere(`invoice_number LIKE '${PREFIX}-%'`));
+
+	async function openInReview(page: Page, number: string): Promise<string> {
+		const res = await page.request.post(`${API_BASE}/api/invoices`, {
+			headers: await authedTenantHeaders(page),
+			data: { vendor: 'E2E Armed Vendor', invoice_number: number, amount: '42.00', currency: 'USD' }
+		});
+		expect(res.status(), await res.text()).toBe(201);
+		const id = ((await res.json()) as { id: string }).id;
+		return id;
+	}
+
+	test('InvoiceModal: one lead per footer, and Confirm reject arms on a reason', async ({ page }) => {
+		const number = `${PREFIX}-${Date.now()}`;
+		const id = await openInReview(page, number);
+		const modal = page.locator('div.modal[role="dialog"]');
+		const footer = modal.getByTestId('invoice-modal-actions');
+
+		// `new`: Submit leads, Save is secondary.
+		await page.goto(`/invoices?id=${id}`);
+		await expect(modal.locator('header h2')).toContainText(number);
+		await expect(footer.locator('.btn-primary')).toHaveCount(1);
+		await expect(footer.locator('.btn-primary')).toHaveClass(/\bbtn-submit\b/);
+
+		// `ready_for_review`, approvable: Approve leads, Save steps back.
+		tenantPsql(`UPDATE invoices SET status='ready_for_review', uploaded_by_id=NULL WHERE id='${id}'`);
+		const verdict = page.waitForResponse(
+			(r) => r.url().endsWith(`/api/invoices/${id}/review-actions`) && r.status() === 200
+		);
+		await page.goto(`/invoices?id=${id}`);
+		await verdict;
+		const approve = footer.getByRole('button', { name: 'Approve', exact: true });
+		await expect(approve).toBeEnabled();
+		await expect(footer.locator('.btn-primary')).toHaveCount(1);
+		await expect(footer.getByRole('button', { name: 'Save', exact: true })).toHaveClass(
+			/\bbtn-secondary\b/
+		);
+
+		await footer.getByRole('button', { name: 'Reject', exact: true }).click();
+		const confirm = footer.getByRole('button', { name: 'Confirm Reject' });
+		// No reason yet: disabled and NOT armed (muted, not red).
+		await expect(confirm).toBeDisabled();
+		await expect(confirm).not.toHaveClass(/\barmed\b/);
+
+		await footer.getByRole('textbox', { name: 'Reason for rejection' }).fill('Wrong vendor');
+		await expect(confirm).toBeEnabled();
+		await expect(confirm).toHaveClass(/\barmed\b/);
+		await expectNoA11yViolations(page);
+
+		// Busy: held in flight, it stays armed and disabled under its busy name.
+		let release!: () => void;
+		const held = new Promise<void>((r) => (release = r));
+		await page.route(`**/api/invoices/${id}/reject`, async (route) => {
+			await held;
+			await route.fallback();
+		});
+		await confirm.click();
+		const busy = footer.getByRole('button', { name: 'Rejecting...' });
+		await expect(busy).toBeDisabled();
+		await expect(busy).toHaveClass(/\barmed\b/);
+		release();
+	});
+
+	test('Close workspace: muted until the slug is typed, red once it is, busy stays armed', async ({
+		page
+	}) => {
+		const SLUG = 'armed-ws';
+		let release!: () => void;
+		const held = new Promise<void>((r) => (release = r));
+		await page.route(
+			(url) => url.pathname === '/api/organization/close',
+			async (route) => {
+				if (route.request().method() === 'GET') {
+					return route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({ closable: true, blockers: [], slug: SLUG, will_delete: {} })
+					});
+				}
+				await held;
+				return route.fulfill({
+					status: 409,
+					contentType: 'application/json',
+					body: JSON.stringify({ detail: { code: 'workspace_not_closable', message: 'x', params: {} } })
+				});
+			}
+		);
+		await page.goto('/organization?section=close');
+		const submit = page.getByTestId('close-workspace-submit');
+		await expect(submit).toBeDisabled();
+		await expect(submit).not.toHaveClass(/\barmed\b/);
+
+		await page.getByLabel(`Type ${SLUG} to confirm`).fill(SLUG);
+		await expect(submit).toBeEnabled();
+		await expect(submit).toHaveClass(/\barmed\b/);
+		await expect(submit).toHaveAccessibleName('Close workspace permanently');
+
+		await submit.click();
+		await expect(submit).toBeDisabled();
+		await expect(submit).toHaveAccessibleName('Closing…');
+		await expect(submit).toHaveClass(/\barmed\b/);
+		release();
+	});
 });
