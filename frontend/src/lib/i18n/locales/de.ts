@@ -6101,7 +6101,7 @@ export const messages = {
 	'supplierChat.status.resolved': "Gelöst",
 	'supplierChat.resolve': "Lösen",
 	'supplierChat.resolving': "Wird gelöst…",
-	'supplierChat.resolveAria': "Chat-Thread als gelöst markieren",
+	'supplierChat.resolveAria': "Chat-Thread lösen",
 	'supplierChat.reopen': "Wieder öffnen",
 	'supplierChat.reopening': "Wird geöffnet…",
 	'supplierChat.reopenAria': "Chat-Thread wieder öffnen",

@@ -184,7 +184,11 @@ const CONVERTED = [
 	// shared PO map (`types/purchaseOrder.ts`).
 	'routes/portal/invoices/+page.svelte',
 	'routes/portal/payments/+page.svelte',
-	'routes/portal/purchase-orders/+page.svelte'
+	'routes/portal/purchase-orders/+page.svelte',
+	// The supplier-chat thread state (round 25). Its e2e hooks
+	// (`data-testid="chat-status"`, `data-status`) moved to a wrapper span,
+	// since the primitive takes no arbitrary attributes.
+	'lib/components/chat/SupplierChatThread.svelte'
 ];
 
 const counts = countByFile(findHandRolledBadgeRules(sources));

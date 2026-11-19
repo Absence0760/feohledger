@@ -6093,7 +6093,7 @@ export const messages = {
 	'supplierChat.status.resolved': "Resuelto",
 	'supplierChat.resolve': "Resolver",
 	'supplierChat.resolving': "Resolviendo…",
-	'supplierChat.resolveAria': "Marcar la conversación como resuelta",
+	'supplierChat.resolveAria': "Resolver la conversación",
 	'supplierChat.reopen': "Reabrir",
 	'supplierChat.reopening': "Reabriendo…",
 	'supplierChat.reopenAria': "Reabrir la conversación",
