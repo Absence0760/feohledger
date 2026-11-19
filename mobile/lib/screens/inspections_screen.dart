@@ -2,13 +2,14 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
 import 'package:feohledger_mobile/screens/inspection_detail_screen.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/inspection_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/inspection_list_tile.dart';
-import 'package:feohledger_mobile/widgets/load_error_state.dart';
 import 'package:feohledger_mobile/widgets/record_inspection_sheet.dart';
 
 /// Quality inspections — the 4th leg of 4-way matching.
@@ -101,51 +102,40 @@ class _InspectionsScreenState extends State<InspectionsScreen> {
               listenable: InspectionStore.instance,
               builder: (context, _) {
                 final store = InspectionStore.instance;
+                final loadError = store.loadError;
 
-                if (store.loading && store.inspections.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (store.error != null && store.inspections.isEmpty) {
-                  return LoadErrorState(
-                    message: AppLocalizations.of(context).inspectionsLoadError,
-                    onRetry: store.fetch,
-                  );
-                }
-                if (store.inspections.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        store.resultFilter == null
-                            ? l.inspectionsEmpty
-                            : l.inspectionsEmptyFiltered,
-                        textAlign: TextAlign.center,
+                return AsyncListBody<Inspection>(
+                  items: store.inspections,
+                  loading: store.loading,
+                  // The fetch's failure only — a refused record leaves the
+                  // list live (actionError), so it raises no banner.
+                  hasError: loadError != null,
+                  // Never offline-cached (see InspectionStore): a stale
+                  // pass/fail is a wrong answer about payability.
+                  fromCache: false,
+                  errorMessage: loadError == null
+                      ? ''
+                      : describeLoadError(
+                          l,
+                          loadError,
+                          l.inspectionsLoadErrorPrefix,
+                        ),
+                  onRefresh: store.fetch,
+                  empty: Text(l.inspectionsEmpty, textAlign: TextAlign.center),
+                  filteredEmpty: store.resultFilter == null
+                      ? null
+                      : FilteredEmptyState(
+                          message: l.inspectionsEmptyFiltered,
+                          onShowAll: () => store.setResultFilter(null),
+                        ),
+                  itemBuilder: (context, inspection) => InspectionListTile(
+                    inspection: inspection,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            InspectionDetailScreen(inspectionId: inspection.id),
                       ),
                     ),
-                  );
-                }
-
-                return RefreshIndicator(
-                  onRefresh: store.fetch,
-                  child: ListView.separated(
-                    // See the note in adaptive_screen: a one-row list cannot be
-                    // overscrolled, so pull-to-refresh would do nothing.
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: store.inspections.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final inspection = store.inspections[index];
-                      return InspectionListTile(
-                        inspection: inspection,
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => InspectionDetailScreen(
-                              inspectionId: inspection.id,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
                   ),
                 );
               },
@@ -189,7 +179,7 @@ class _InspectionsScreenState extends State<InspectionsScreen> {
     setState(() => _opening = false);
 
     if (receipts == null) {
-      final message = l.inspectionsReceiptsLoadFailed(store.error ?? '');
+      final message = l.inspectionsReceiptsLoadFailed(store.actionError ?? '');
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
       A11y.announce(context, message);
@@ -210,7 +200,7 @@ class _InspectionsScreenState extends State<InspectionsScreen> {
     if (!mounted) return;
     final message = created != null
         ? l.inspectionsRecorded(created.inspectionNumber)
-        : l.inspectionsRecordFailed(store.error ?? '');
+        : l.inspectionsRecordFailed(store.actionError ?? '');
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
     A11y.announce(context, message);

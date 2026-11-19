@@ -17,14 +17,24 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
   List<AppNotification> _notifications = [];
   int _unread = 0;
   bool _loading = false;
-  String? _error;
+
+  /// The last **fetch** failure, as caught — the list screen words it with
+  /// `describeLoadError` and it alone drives the list's error state and
+  /// "couldn't refresh" banner. Mark-read actions never write it.
+  Object? _loadError;
+
+  /// The last failed **action** (mark read / mark all read), as a sentence
+  /// ([describeApiError]). Kept apart from [loadError] so a refused mark-read
+  /// over a loaded list is not reported as a failed refresh.
+  String? _actionError;
   bool _unreadOnly = false;
   bool _fromCache = false;
 
   List<AppNotification> get notifications => _notifications;
   int get unread => _unread;
   bool get loading => _loading;
-  String? get error => _error;
+  Object? get loadError => _loadError;
+  String? get actionError => _actionError;
   bool get unreadOnly => _unreadOnly;
   bool get fromCache => _fromCache;
 
@@ -36,7 +46,8 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
     _notifications = [];
     _unread = 0;
     _loading = false;
-    _error = null;
+    _loadError = null;
+    _actionError = null;
     _unreadOnly = false;
     _fromCache = false;
     debugResetSequence();
@@ -63,7 +74,7 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
     // (e.g. a rapid All/Unread filter toggle racing itself).
     final token = nextRequestToken();
     _loading = true;
-    _error = null;
+    _loadError = null;
     notifyListeners();
 
     final cacheKey = 'notifications_${_unreadOnly ? 'unread' : 'all'}';
@@ -102,7 +113,7 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
       if (!isCurrentRequest(token)) return;
       _fromCache = false;
       _loading = false;
-      _error = describeApiError(e);
+      _loadError = e;
       notifyListeners();
     }
   }
@@ -117,6 +128,7 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
     final existing = _notifications[idx];
     if (existing.isRead) return true; // already read — nothing to do
 
+    _actionError = null;
     _notifications[idx] = existing.copyMarkedRead(DateTime.now());
     if (_unread > 0) _unread--;
     notifyListeners();
@@ -130,25 +142,24 @@ class NotificationStore extends ChangeNotifier with SequencedFetch {
       }
       return true;
     } catch (e) {
-      // Reconcile real state — undo the optimistic flip via a refetch. fetch()
-      // clears _error on entry, so re-stamp it afterwards (the mark-read is the
-      // failure the caller cares about, not the reconciling read).
-      final message = describeApiError(e);
+      // Reconcile real state — undo the optimistic flip via a refetch. The
+      // refetch's own outcome lands in loadError; the mark-read failure is the
+      // action's, so it never reads as a failed refresh of the list.
+      _actionError = describeApiError(e);
       await fetch();
-      _error = message;
-      notifyListeners();
       return false;
     }
   }
 
   /// Mark every unread notification read.
   Future<bool> markAllRead() async {
+    _actionError = null;
     try {
       await NotificationApi.markAllRead();
       await fetch();
       return true;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return false;
     }

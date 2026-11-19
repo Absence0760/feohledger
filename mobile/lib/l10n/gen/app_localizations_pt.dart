@@ -315,14 +315,12 @@ class AppLocalizationsPt extends AppLocalizations {
   String get notificationsEmpty => 'Nenhuma notificação';
 
   @override
-  String get notificationsCaughtUp => 'Você está em dia';
-
-  @override
   String get notificationsNothingYet => 'Nada por aqui ainda';
 
   @override
-  String get notificationsLoadError =>
-      'Não foi possível carregar as notificações';
+  String notificationsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar as notificações: $error';
+  }
 
   @override
   String get vendorsTitle => 'Fornecedores';
@@ -352,7 +350,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get vendorsEmpty => 'Nenhum fornecedor encontrado';
 
   @override
-  String get vendorsLoadError => 'Não foi possível carregar os fornecedores';
+  String vendorsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar os fornecedores: $error';
+  }
 
   @override
   String get vendorActionVerify => 'Verificar';
@@ -2778,7 +2778,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get inspectionsEmptyFiltered => 'Nenhuma inspeção com este resultado.';
 
   @override
-  String get inspectionsLoadError => 'Falha ao carregar as inspeções';
+  String inspectionsLoadErrorPrefix(String error) {
+    return 'Falha ao carregar as inspeções: $error';
+  }
 
   @override
   String get inspectionsResultPass => 'Aprovada';
@@ -4763,6 +4765,10 @@ class AppLocalizationsPt extends AppLocalizations {
       'Nenhum contrato corresponde à sua pesquisa ou filtro.';
 
   @override
+  String get vendorsFilteredEmpty =>
+      'Nenhum fornecedor corresponde à sua pesquisa ou filtro.';
+
+  @override
   String get commonShowAll => 'Mostrar tudo';
 }
 
@@ -5074,14 +5080,12 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get notificationsEmpty => 'Nenhuma notificação';
 
   @override
-  String get notificationsCaughtUp => 'Você está em dia';
-
-  @override
   String get notificationsNothingYet => 'Nada por aqui ainda';
 
   @override
-  String get notificationsLoadError =>
-      'Não foi possível carregar as notificações';
+  String notificationsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar as notificações: $error';
+  }
 
   @override
   String get vendorsTitle => 'Fornecedores';
@@ -5111,7 +5115,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get vendorsEmpty => 'Nenhum fornecedor encontrado';
 
   @override
-  String get vendorsLoadError => 'Não foi possível carregar os fornecedores';
+  String vendorsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar os fornecedores: $error';
+  }
 
   @override
   String get vendorActionVerify => 'Verificar';
@@ -7537,7 +7543,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get inspectionsEmptyFiltered => 'Nenhuma inspeção com este resultado.';
 
   @override
-  String get inspectionsLoadError => 'Falha ao carregar as inspeções';
+  String inspectionsLoadErrorPrefix(String error) {
+    return 'Falha ao carregar as inspeções: $error';
+  }
 
   @override
   String get inspectionsResultPass => 'Aprovada';
@@ -9520,6 +9528,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get contractsFilteredEmpty =>
       'Nenhum contrato corresponde à sua pesquisa ou filtro.';
+
+  @override
+  String get vendorsFilteredEmpty =>
+      'Nenhum fornecedor corresponde à sua pesquisa ou filtro.';
 
   @override
   String get commonShowAll => 'Mostrar tudo';

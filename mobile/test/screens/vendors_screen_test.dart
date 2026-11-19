@@ -13,6 +13,7 @@ import 'package:feohledger_mobile/screens/vendors_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/load_error_state.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 
@@ -105,12 +106,21 @@ void main() {
     );
 
     await tester.pumpWidget(_localized(const VendorsScreen()));
-    await _pumpUntil(tester, find.text('Could not load vendors'));
+    await _pumpUntil(tester, find.byType(LoadErrorState));
 
-    // The shared first-load state, carrying the localized sentence and never
-    // the description the store holds (a bare 500 has no server sentence).
+    // The shared first-load state, worded from the cause: a server answered
+    // (a bare 500 carries no sentence of its own), so not "check your
+    // connection" — and never the exception, nor "No vendors found".
     expect(find.byType(LoadErrorState), findsOneWidget);
-    expect(VendorStore.instance.error, contains('HTTP 500'));
+    expect(
+      find.text(
+        "Couldn't load vendors: "
+        "The server couldn't complete the request (HTTP 500).",
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('No vendors found'), findsNothing);
+    expect(VendorStore.instance.loadError, isA<ApiException>());
     expect(find.textContaining('boom'), findsNothing);
     expect(find.textContaining('ApiException'), findsNothing);
     expect(find.textContaining('Request failed'), findsNothing);
@@ -216,5 +226,122 @@ void main() {
       greaterThanOrEqualTo(2),
       reason: 'verify should refetch after the initial load',
     );
+  });
+
+  testWidgets('the empty state can be pulled to refresh', (tester) async {
+    var calls = 0;
+    await loginThen(
+      ['ap_manager'],
+      MockClient((req) async {
+        calls++;
+        return _list([]);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const VendorsScreen()));
+    await _pumpUntil(tester, find.text('No vendors found'));
+    expect(calls, 1);
+
+    await tester.fling(
+      find.text('No vendors found'),
+      const Offset(0, 300),
+      1000,
+    );
+    await tester.pumpAndSettle();
+    await _pumpUntilTrue(tester, () => calls >= 2);
+
+    expect(calls, 2);
+  });
+
+  testWidgets('a failed verify over a loaded list raises no stale banner', (
+    tester,
+  ) async {
+    await loginThen(
+      ['ap_manager'],
+      MockClient((req) async {
+        if (req.method == 'POST') {
+          return _json({'detail': 'Not permitted'}, 403);
+        }
+        return _list([_vendorJson('1')]);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const VendorsScreen()));
+    await _pumpUntil(tester, find.byType(VendorListTile));
+
+    bool? ok;
+    VendorStore.instance.verify('1').then((v) => ok = v);
+    await _pumpUntilTrue(tester, () => ok != null);
+
+    expect(ok, isFalse);
+    expect(VendorStore.instance.actionError, 'Not permitted');
+    expect(VendorStore.instance.loadError, isNull);
+    // The rows are live: the refusal is the action's, not the list's.
+    expect(find.byType(StaleDataBanner), findsNothing);
+    expect(find.byType(VendorListTile), findsOneWidget);
+  });
+
+  testWidgets('a status chip that filters every row out says so, and Show all '
+      'clears it', (tester) async {
+    await loginThen(
+      ['ap_manager'],
+      MockClient(
+        (req) async => req.url.queryParameters['status'] == 'rejected'
+            ? _list([])
+            : _list([_vendorJson('1')]),
+      ),
+    );
+
+    await tester.pumpWidget(_localized(const VendorsScreen()));
+    await _pumpUntil(tester, find.byType(VendorListTile));
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Rejected'));
+    await _pumpUntil(
+      tester,
+      find.text('No vendors match your search or filter.'),
+    );
+    // Not the whole-directory copy: other statuses hold vendors.
+    expect(find.text('No vendors found'), findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Show all'));
+    await _pumpUntil(tester, find.byType(VendorListTile));
+
+    expect(VendorStore.instance.statusFilter, isNull);
+    expect(VendorStore.instance.isFiltered, isFalse);
+    expect(find.byType(VendorListTile), findsOneWidget);
+  });
+
+  testWidgets('a search that matches nothing says so, and Show all clears the '
+      'search box too', (tester) async {
+    await loginThen(
+      ['ap_manager'],
+      MockClient(
+        (req) async => req.url.queryParameters['search'] == 'zzz'
+            ? _list([])
+            : _list([_vendorJson('1')]),
+      ),
+    );
+
+    await tester.pumpWidget(_localized(const VendorsScreen()));
+    await _pumpUntil(tester, find.byType(VendorListTile));
+
+    await tester.enterText(find.byType(SearchBar), 'zzz');
+    // Past the search debounce.
+    await tester.pump(const Duration(milliseconds: 350));
+    await _pumpUntil(
+      tester,
+      find.text('No vendors match your search or filter.'),
+    );
+    expect(VendorStore.instance.searchQuery, 'zzz');
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Show all'));
+    await _pumpUntil(tester, find.byType(VendorListTile));
+
+    expect(VendorStore.instance.searchQuery, isNull);
+    expect(
+      tester.widget<SearchBar>(find.byType(SearchBar)).controller!.text,
+      isEmpty,
+    );
+    expect(find.byType(VendorListTile), findsOneWidget);
   });
 }

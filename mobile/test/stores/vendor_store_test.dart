@@ -56,7 +56,7 @@ void main() {
         expect(store.vendors, hasLength(1));
         expect(store.vendors.first.id, '1');
         expect(store.fromCache, isFalse);
-        expect(store.error, isNull);
+        expect(store.loadError, isNull);
         expect(store.loading, isFalse);
       },
     );
@@ -86,7 +86,7 @@ void main() {
 
         await store.fetch();
 
-        expect(store.error, isNotNull);
+        expect(store.loadError, isNotNull);
         expect(store.fromCache, isFalse);
       },
     );
@@ -261,7 +261,9 @@ void main() {
       final ok = await store.verify('1');
 
       expect(ok, isFalse);
-      expect(store.error, isNotNull);
+      expect(store.actionError, isNotNull);
+      // A refused action is not a failed load: no "couldn't refresh" banner.
+      expect(store.loadError, isNull);
     });
 
     test('syncErp posts to /sync-erp and returns the server message', () async {
@@ -302,7 +304,7 @@ void main() {
         final message = await store.syncErp();
 
         expect(message, isNull);
-        expect(store.error, isNotNull);
+        expect(store.actionError, isNotNull);
       },
     );
   });

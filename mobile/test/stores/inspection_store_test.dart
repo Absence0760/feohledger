@@ -80,7 +80,7 @@ void main() {
 
     expect(store.inspections, hasLength(2));
     expect(store.loading, isFalse);
-    expect(store.error, isNull);
+    expect(store.loadError, isNull);
     expect(store.inspections.first.inspectionNumber, 'QI-A');
     expect(store.inspections.first.result, InspectionResult.fail);
     expect(store.inspections.first.grNumber, 'GR-1');
@@ -94,7 +94,7 @@ void main() {
 
     await store.fetch();
 
-    expect(store.error, isNotNull);
+    expect(store.loadError, isNotNull);
     expect(store.inspections, isEmpty);
     expect(store.loading, isFalse);
   });
@@ -204,7 +204,9 @@ void main() {
     );
 
     expect(created, isNull);
-    expect(store.error, contains('Your role does not permit this.'));
+    expect(store.actionError, contains('Your role does not permit this.'));
+    // A refused action is not a failed load: no "couldn't refresh" banner.
+    expect(store.loadError, isNull);
   });
 
   test('getById returns the row, or throws without touching list state',
@@ -221,7 +223,8 @@ void main() {
     );
     await expectLater(store.getById('nope'), throwsA(isA<ApiException>()));
     // The detail screen words it; the list's error state never sees it.
-    expect(store.error, isNull);
+    expect(store.loadError, isNull);
+    expect(store.actionError, isNull);
   });
 
   test('loadReceiptOptions returns one page plus the whole-set total', () async {
@@ -246,7 +249,9 @@ void main() {
     );
 
     expect(await store.loadReceiptOptions(), isNull);
-    expect(store.error, isNotNull);
+    expect(store.actionError, isNotNull);
+    // A refused action is not a failed load: no "couldn't refresh" banner.
+    expect(store.loadError, isNull);
   });
 
   test('reset clears the list, the error and the filter', () async {
@@ -261,6 +266,7 @@ void main() {
 
     expect(store.inspections, isEmpty);
     expect(store.resultFilter, isNull);
-    expect(store.error, isNull);
+    expect(store.loadError, isNull);
+    expect(store.actionError, isNull);
   });
 }
