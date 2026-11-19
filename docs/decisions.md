@@ -23509,33 +23509,60 @@ the rejected invoice.
 
 **Decision 1: an over-billing warning, not a hold.**
 `invoice_warnings._refresh_po_overbilling`, run inside the PO match, sums the
-other invoices citing the matched PO and adds `po_billed_beyond_total`
+other invoices billing the matched PO and adds `po_billed_beyond_total`
 (type `po_overbilled`, severity `warning`) when they and this invoice exceed
-the PO total by more than the match rule's tolerance. "Cites" and "live" reuse
-the flip refusal's rule (`api/portal._pos_already_invoiced`): the PO's number
-within its entity, every status but `rejected`. It differs in two ways. It is
-not vendor-scoped, because AP reads it and any bill against the order counts.
-And it sums only the PO's currency, in exact `Decimal`. It runs only on a
-single-PO match whose total is trustworthy and in the invoice's own currency.
-A split's amount cannot be attributed to one leg, and a cancelled, unissued,
-unvouched or other-currency PO already raises its own finding.
+the PO total by more than the match rule's tolerance. Its `currency` param is
+the normalised ISO code, not the invoice's raw field. A sibling is any other
+invoice in every status but `rejected`, in the PO's currency, that:
+
+- last matched this PO (`po_match->>'po_id'` is its id);
+- or was linked to it by a multi-PO split (`split_po_ids` holds its id). The
+  split counts at its whole amount, because its amount cannot be attributed to
+  one leg and overcounting is the safe direction;
+- or is not matched to any PO yet (a `new` invoice, or one reopened to `new`)
+  and cites the PO's number within the PO's entity, naming the PO's vendor or
+  no vendor.
+
+So another vendor's invoice citing the same number does not count: it bills
+that vendor's order. The flip refusal (`api/portal._pos_already_invoiced`) is
+vendor-scoped and reads the number and the split legs only; this rule is wider
+because AP reads it and any bill matched to the order counts. The sum is exact
+`Decimal`. It runs only on a single-PO match whose total is trustworthy and in
+the invoice's own currency. A cancelled, unissued, unvouched or other-currency
+PO already raises its own finding.
 
 Why not a payment-blocking `po_mismatch`: the sum crosses invoices, and their
 changes (a credit memo, a corrective re-bill, a sibling rejected or reopened
 after this refresh) do not re-run this invoice's warnings. A hold would go
 stale both ways: it would hold a legitimate bill after its sibling was rejected,
 or miss a sibling reopened later. A hold would also need a re-match of every
-sibling on each status change, which no transition does today. The reviewer
-reads the warning at approval beside the amount and duplicate findings. That
-is the same review-side check §468 called for. Why its own type: the invoice
-modal shows `po_mismatch` warnings only through the PO-match panel's `issues`,
-and this finding is not one of them. `refresh_po_match_only` rebuilds the new
-type together with the match, so a PO-only refresh neither duplicates it nor
-keeps a stale copy.
+sibling on each status change, which no transition does today. Why its own
+type: the invoice modal shows `po_mismatch` warnings only through the PO-match
+panel's `issues`, and this finding is not one of them. `refresh_po_match_only`
+rebuilds the new type together with the match, so a PO-only refresh neither
+duplicates it nor keeps a stale copy.
+
+**It departs from §249, and closes the gap that leaves.** §249's principle is
+that a finding which means the invoice could over-pay is a hold, not a note.
+This one means exactly that, and is still a warning, for the staleness reason
+above: a hold that cannot be kept true would refuse legitimate bills and give
+false comfort on the rest. A warning alone, though, would let an invoice be
+approved and paid with no person reading it. So the warning stops every
+unattended approval instead: `invoice_warnings.po_match_hold_refusal` answers
+`po_overbilled` (`UNATTENDED_APPROVAL_PO_OVERBILLED`) when the freshly
+refreshed invoice carries it, which sends extraction's auto-approve and
+`/complete`'s `auto_approve_below` floor to `ready_for_review` with
+`auto_approve_suppressed: "po_overbilled"` on the audit row, as §425 does for
+a hold. An exception agent's approval is no person reading it either: the
+coordinator unwinds an apply that approved an invoice carrying the warning and
+escalates. A person approving is the review §468 called for, at the moment the
+figure is current.
 
 **Decision 2: a rejected flip still counts as "already invoiced".**
 `_pos_already_invoiced` counts a rejected invoice when its `reference_number`
-is that PO's own flip marker. A rejected flip is reopened, not replaced: the
+is that PO's own flip marker, and counts it for that PO only, so a flip
+edited to cite another PO cannot mark that one invoiced. A rejected flip is
+reopened, not replaced: the
 supplier's `/resubmit`, or AP moving it `rejected → new`. A second flip beside
 it is impossible (the unique marker) and would also be wrong: reopening the
 first would double-bill the order. So `flip_verdict` and the endpoint now
@@ -23552,6 +23579,12 @@ not a hold.
 
 Tests: `backend/tests/test_po_matching_critical_path.py` (flip then a second
 bill warns with exact params; rejecting the flip clears it, reopening brings
-it back; two halves and an other-currency invoice do not warn);
+it back; two halves and an other-currency invoice do not warn; the tolerance
+boundary to the cent; one warning after two PO-only refreshes; a split leg
+counts; another vendor's same-numbered PO does not);
+`backend/tests/test_invoice_complete_auto_approve.py` and
+`backend/tests/test_extraction_reextract_options.py` (both unattended doors
+land at review with `po_overbilled`); `backend/tests/test_exception_agents.py`
+(the agent unwind);
 `backend/tests/test_portal_self_service.py` (a rejected flip's verdict, its
 replay, and the reopened flip's verdict, with one invoice throughout).

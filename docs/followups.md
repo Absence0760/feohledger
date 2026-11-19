@@ -977,11 +977,14 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 - [ ] **(c) The PO-match receipt leg is pro rata and not cumulative.** The
       "billed beyond received" check values receipts as `po_total × received /
       ordered`, so receiving nine cheap cables of a 900 server order reads as
-      most of the value received; and nothing subtracts what other invoices
-      already billed against the same PO, so two 400 invoices both pass
-      against 400 received (decisions §249). **Durable fix:** value receipts
-      per PO line (cheapest-first as a lower bound) and subtract other live or
-      paid invoices on the same PO in both the amount and receipt legs.
+      most of the value received; and the receipt leg subtracts nothing other
+      invoices already billed against the same PO, so two 400 invoices both
+      pass against 400 received (decisions §249). The amount leg is now
+      cumulative: invoices billing a PO past its total raise
+      `po_billed_beyond_total`, a review warning that stops every unattended
+      approval (§469). **Durable fix:** value receipts per PO line
+      (cheapest-first as a lower bound) and subtract other live or paid
+      invoices on the same PO in the receipt leg.
       **Trigger:** the next PO-matching change, or the first customer relying
       on split or blanket POs.
 - [ ] **(c) Nothing links a credit memo to a discount offer.** An applied memo
