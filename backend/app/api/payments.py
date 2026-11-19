@@ -80,6 +80,9 @@ from app.services.currency_conversion import (
     reporting_amount_at_locked_rate,
     resolve_reporting_currency,
 )
+from app.services.discount_opportunities import (
+    capture_discount_offers as _capture_discount_offers,
+)
 from app.services.exception_lifecycle import record_decision
 from app.services.external_payment import (
     ExternalPaymentRefused,
@@ -4166,96 +4169,6 @@ async def _open_compliance_hold_exception(
         # holds they did not cause.
         raised_by_user_id=None,
     )
-
-
-async def _capture_discount_offers(
-    db: AsyncSession,
-    *,
-    org: Organization,
-    payment: Payment,
-    actor_id: uuid.UUID | None,
-    now: datetime,
-    invoice: Invoice | None = None,
-) -> None:
-    """Recognize `payment` settling its invoice at a discounted payoff and
-    capture any matching `accepted` `DiscountOffer` — the wiring
-    `discount_offers.mark_captured` was missing (issue #280): without a
-    caller, `captured_amount`/`captured_at` never got set and the
-    captured-savings KPI always read 0 even when discounts were genuinely
-    accepted and paid at the discounted amount.
-
-    Called from every path a `Payment` reaches `completed` — the synchronous
-    adapter/card leg (`_execute_single_payment`) and the async webhook-driven
-    completion (`payment_webhook`) — so a discount is recognized whether the
-    rail confirms instantly or days later. Both callers already hold the
-    `Invoice` and pass it in; `invoice=None` falls back to resolving it from
-    `payment.invoice_id` for any future caller that doesn't. No invoice found
-    is a no-op (nothing to match against). A payment BOOKED with a discount
-    (`Payment.discount_offer_id`, migration 0104) captures exactly that offer
-    for exactly `Payment.discount_amount`; one booked without falls back to the
-    exact-payoff match, which is how a discount taken the old way — through a
-    credit memo — is still recognized (see
-    `discount_capture.capture_offer_for_settled_payment`).
-
-    NOT called when the settlement verifier flagged a discrepancy — the
-    payoff match runs against OUR authorized amount, which a divergent
-    settlement has just contradicted. See the call site in `payment_webhook`.
-
-    Best-effort, like the vendor card-notify email below: this labels a
-    payment that already, definitely settled with a bookkeeping fact
-    (realized discount savings) — it must never be the reason a payment
-    that DID move money fails to record that it moved (or, on the webhook
-    path, the reason a webhook delivery 5xxs and gets needlessly retried).
-    The invoice lookup lives INSIDE the try for exactly that reason. A
-    failure here is logged (class only — no invoice/vendor PII) and
-    swallowed rather than propagated, mirroring `notify_vendor_of_card`'s
-    own safety net.
-    """
-    try:
-        if invoice is None:
-            inv_result = await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
-            invoice = inv_result.scalar_one_or_none()
-        if invoice is None:
-            return
-
-        from app.services.discount_capture import capture_offer_for_settled_payment
-
-        captured = await capture_offer_for_settled_payment(
-            db,
-            payment=payment,
-            invoice_currency=invoice.currency,
-            now=now,
-        )
-        if not captured:
-            return
-
-        from app.services.audit_dispatch import dispatch_audit
-
-        for offer in captured:
-            await dispatch_audit(
-                db,
-                correlation_id=payment.correlation_id or invoice.id,
-                organization_id=org.id,
-                actor_id=actor_id,
-                action="discount_offer.captured",
-                entity_type="discount_offer",
-                entity_id=offer.id,
-                details={
-                    "invoice_id": str(invoice.id),
-                    "payment_id": str(payment.id),
-                    "captured_amount": str(offer.captured_amount),
-                    "payment_amount": str(payment.amount),
-                },
-            )
-    except Exception as exc:  # noqa: BLE001
-        # Log the exception CLASS only, never the message (PII-out-of-logs
-        # invariant — mirrors payment_erp_sync.py's own discipline). Never
-        # `payment.invoice_id` either — best-effort but still no PII risk.
-        logger.warning(
-            "discount-offer capture failed for payment=%s: %s; payment settlement unaffected",
-            payment.id,
-            exc.__class__.__name__,
-        )
 
 
 async def _execute_single_payment(

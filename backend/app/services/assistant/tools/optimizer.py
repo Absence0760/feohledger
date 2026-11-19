@@ -15,7 +15,6 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.discounts import _build_opportunity, _name_maps
 from app.config import settings
 from app.models.discount import OFFER_STATUS_OFFERED, DiscountOffer
 from app.models.organization import Organization
@@ -25,6 +24,7 @@ from app.services.assistant.tools.schemas import (
     OptimizeDiscountsParams,
     OptimizeDiscountsResult,
 )
+from app.services.discount_opportunities import build_opportunity, name_maps
 from app.services.discount_optimizer import optimize
 from app.tenant import apply_entity_scope
 from app.utils.dates import utc_today
@@ -83,7 +83,7 @@ async def run_discount_optimization(
     )
     opportunities = []
     for offer in offers:
-        opp = await _build_opportunity(db, offer, today=today)
+        opp = await build_opportunity(db, offer, today=today)
         if opp is not None:
             opportunities.append(opp)
 
@@ -104,7 +104,7 @@ async def run_discount_optimization(
 def build_discount_recommendations(result, offers, vmap, imap) -> list[DiscountRecommendation]:
     """Map an ``OptimizationResult`` + its source ``DiscountOffer`` rows onto
     the shared ``DiscountRecommendation`` schema (vendor/invoice names
-    resolved via the ``_name_maps`` maps). Shared by ``optimize_discount_capture``
+    resolved via the ``name_maps`` maps). Shared by ``optimize_discount_capture``
     and the ``propose_payment_plan`` tool so the two never format the same
     selection differently."""
     offer_by_id = {str(o.id): o for o in offers}
@@ -156,7 +156,7 @@ async def optimize_discount_capture(
         cost_of_capital_pct=params.cost_of_capital_pct,
         today=today,
     )
-    vmap, imap = await _name_maps(db, offers)
+    vmap, imap = await name_maps(db, offers)
     recommendations = build_discount_recommendations(result, offers, vmap, imap)
 
     return OptimizeDiscountsResult(

@@ -78,6 +78,7 @@ from app.models.organization import Organization
 from app.models.payment import Payment, PaymentRun
 from app.services.applied_credit_integrity import applied_credit_conflicts
 from app.services.approval_chain import violates_segregation
+from app.services.discount_opportunities import capture_discount_offers
 from app.services.payment_controls import run_segregation_enabled
 from app.services.payment_methods import (
     RAIL_SPLIT_APPLIED,
@@ -536,7 +537,6 @@ async def _complete(
     rail_parts: Sequence[RailPart] = (),
 ) -> None:
     """Book ``payment`` as completed outside FeohLedger and walk the invoice to ``paid``."""
-    from app.api.payments import _capture_discount_offers
     from app.services.audit_dispatch import dispatch_audit
 
     at = paid_on_timestamp(paid_on)
@@ -625,7 +625,7 @@ async def _complete(
         },
     )
 
-    await _capture_discount_offers(
+    await capture_discount_offers(
         db, org=org, payment=payment, actor_id=actor_id, now=at, invoice=invoice
     )
 

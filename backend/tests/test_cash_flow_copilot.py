@@ -1807,7 +1807,7 @@ async def test_capture_discounts_skips_an_offer_whose_invoice_was_paid(realdb):
     async def _optimizer_blind(_db, _offer):
         return None
 
-    with patch("app.api.discounts.settled_invoice_status", _optimizer_blind):
+    with patch("app.services.discount_opportunities.settled_invoice_status", _optimizer_blind):
         async with realdb.client(key="a", role="admin") as c:
             r1 = await c.post(f"/api/cash-flow/plans/{plan.plan_id}/capture-discounts", json=body)
     assert r1.status_code == 200, r1.text
