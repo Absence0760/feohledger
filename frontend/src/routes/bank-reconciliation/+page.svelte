@@ -32,6 +32,7 @@
 		UnmatchedDebit
 	} from '#lib/types/bankReconciliation.ts';
 	import { isTruncated } from '#lib/types/bankReconciliation.ts';
+	import { paymentMethodLabelKey, paymentStatusLabelKey } from '#lib/types/payment.ts';
 	import {
 		deleteBankStatement,
 		getBankStatement,
@@ -354,6 +355,20 @@
 		{ class: 'actions-col' }
 	]);
 
+	// A payment's rail and status are enums on the wire (`payment_scheduled`,
+	// `virtual_card`); `/payments` labels the same unions through these keys,
+	// so this worksheet does too. An unrecognised value still renders raw
+	// rather than as a blank cell.
+	function paymentStatusLabel(status: string): string {
+		const key = paymentStatusLabelKey(status);
+		return key ? m(key) : status;
+	}
+	function paymentMethodLabel(method: string | null): string {
+		if (!method) return '—';
+		const key = paymentMethodLabelKey(method);
+		return key ? m(key) : method;
+	}
+
 	function statementLabel(s: BankStatement): string {
 		return `${s.account_identifier} · ${formatDate(s.period_end)}`;
 	}
@@ -579,8 +594,8 @@
 										     `null` renders bare, never the org's code (decisions §196). -->
 										<Money amount={p.amount} currency={p.currency} mono />
 									</td>
-									<td class="muted">{p.method ?? '—'}</td>
-									<td class="muted">{p.status}</td>
+									<td class="muted">{paymentMethodLabel(p.method)}</td>
+									<td class="muted">{paymentStatusLabel(p.status)}</td>
 									<td class="muted">{formatDate(p.sent_on)}</td>
 									<td class="right mono muted">{p.days_outstanding ?? '—'}</td>
 								</tr>
@@ -690,7 +705,7 @@
 											{DISCREPANCY_LABELS[d.classification] ?? d.classification}
 										</Badge>
 										{#if d.payment_status}
-											<span class="pay-status muted">{d.payment_status}</span>
+											<span class="pay-status muted">{paymentStatusLabel(d.payment_status)}</span>
 										{/if}
 									</td>
 									<td class="right"><Money amount={d.bank_amount} currency={d.bank_currency} mono /></td>
