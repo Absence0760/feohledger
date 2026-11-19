@@ -137,3 +137,17 @@ export function formatPeriod(p: string): string {
 		year: '2-digit'
 	});
 }
+
+/**
+ * A `YYYY-MM` month key as a reader says it, with the full year: "Nov 2026"
+ * (`short`) or "November 2026" (`long`). Use it wherever a month stands alone
+ * as a label, e.g. a billing period. {@link formatPeriod}'s two-digit year is
+ * for dense chart axes; on its own "Nov 26" reads as the 26th of November.
+ * Returns the raw key unchanged if it isn't a parseable month.
+ */
+export function formatMonth(key: string, style: 'short' | 'long' = 'short'): string {
+	if (!/^\d{4}-\d{2}$/.test(key)) return key;
+	const d = parseLocalDate(key);
+	if (!d) return key;
+	return d.toLocaleDateString(getActiveFormatLocale(), { month: style, year: 'numeric' });
+}

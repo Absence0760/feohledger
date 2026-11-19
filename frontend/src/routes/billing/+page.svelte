@@ -41,7 +41,7 @@
 		BillingSubscriptionResponse
 	} from '#lib/types/billing.ts';
 	import { rebateMeterGroups } from '#lib/types/billing.ts';
-	import { formatDate, formatPeriod } from '#lib/utils/time.ts';
+	import { formatDate, formatMonth } from '#lib/utils/time.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { PLAN_FEATURES, isPlanFeature, planFeatureLabelKey } from '#lib/types/planFeatures.ts';
@@ -276,15 +276,27 @@
 		return Number.isFinite(v) ? v.toLocaleString(getActiveFormatLocale()) : n;
 	}
 
+	/**
+	 * Period boundaries are UTC midnights (the provider bills on UTC days), so
+	 * they render in UTC: in local time a reader west of UTC saw "Oct 31 –
+	 * Nov 30" for a period that starts on Nov 1.
+	 */
+	const UTC_DATE_OPTS: Intl.DateTimeFormatOptions = {
+		month: 'short',
+		day: 'numeric',
+		year: 'numeric',
+		timeZone: 'UTC'
+	};
+
 	/** Period window label, e.g. "Jun 1, 2026 – Jul 1, 2026". */
 	const periodWindow = $derived(
 		subscription
-			? `${formatDate(subscription.current_period_start)} – ${formatDate(subscription.current_period_end)}`
+			? `${formatDate(subscription.current_period_start, '—', UTC_DATE_OPTS)} – ${formatDate(subscription.current_period_end, '—', UTC_DATE_OPTS)}`
 			: '—'
 	);
 
-	/** The usage month as a reader says it ("Nov 26"), not the `YYYY-MM` key. */
-	const usagePeriod = $derived(data?.period ? formatPeriod(data.period) : null);
+	/** The usage month as a reader says it ("November 2026"), not the `YYYY-MM` key. */
+	const usagePeriod = $derived(data?.period ? formatMonth(data.period, 'long') : null);
 
 	// Who bills the subscription. The adapter code (`stripe_billing`) is a
 	// config value, not a name; a provider brand is a proper noun and stays
@@ -409,7 +421,7 @@
 						{#if subscription.status === 'trialing'}
 							<div class="meta-item">
 								<dt>{m('billing.plan.trialEnds')}</dt>
-								<dd>{formatDate(subscription.trial_end)}</dd>
+								<dd>{formatDate(subscription.trial_end, '—', UTC_DATE_OPTS)}</dd>
 							</div>
 						{/if}
 						<div class="meta-item">
@@ -637,8 +649,8 @@
 					{#snippet body()}
 						{#each invoices as inv (inv.id)}
 							<tr>
-								<td class="mono">{inv.number ?? '—'}</td>
-								<td>{inv.period ? formatPeriod(inv.period) : '—'}</td>
+								<td class="mono nowrap">{inv.number ?? '—'}</td>
+								<td class="nowrap">{inv.period ? formatMonth(inv.period) : '—'}</td>
 								<td class="num"><Money amount={inv.amount} currency={inv.currency} mono /></td>
 								<td>
 									<Badge tone={INVOICE_STATUS_TONES[inv.status] ?? 'muted'} variant={inv.status}>
@@ -1134,6 +1146,12 @@
 	/* --- Invoices --- */
 	.num {
 		text-align: right;
+	}
+
+	/* An invoice number or month broken across lines ("FL-/2026-/10") is
+	   unreadable; at phone width the table scrolls inside `DataTable` instead. */
+	.nowrap {
+		white-space: nowrap;
 	}
 
 	.muted {
