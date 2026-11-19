@@ -217,6 +217,21 @@ env:
   # ~15 KB of the main catalogue, give refusal sentences their own lazy
   # slice the way help (§261) and settings (§300) were split.
   # MAX_LARGEST_CHUNK_KB is unchanged at 100 (largest chunk 92).
+  # 2026-11-19 — no ceiling change; the trigger above fired. Round 25's new
+  # keys took the ja main catalogue past the 100 KB per-chunk budget, so the
+  # `refusal.*` sentences (235 keys, ~10 KB gzipped per locale) became their
+  # own `refusal` slice. A refusal can follow any API call, so no route gates
+  # it: it is PRELOADED with the main catalogue at startup, and the registry
+  # shows the server's English sentence until it lands (frontend/docs/i18n.md
+  # § Catalogue slices). Measured locally on the round branch: gated 463 KB
+  # (shell 213, heaviest route 98 /help/guides/[id], catalogues main 98 /
+  # help 10 / marketing 4 / portal 6 / refusal 10 / settings 28), largest
+  # chunk 98 (the ja main catalogue). The gated total barely moves: the
+  # refusal kind is counted once, as the main catalogue was. Headroom on the
+  # largest chunk is only 2 KB, so the next split is due: `erpRefusal.*`
+  # (~4 KB, the ERP refusal sentences, read only through
+  # api/erpRefusals.ts::erpRefusalText) can join the refusal slice once that
+  # function resolves keys the way codedRefusalText does.
   MAX_TOTAL_KB: 480
   MAX_LARGEST_CHUNK_KB: 100
 
