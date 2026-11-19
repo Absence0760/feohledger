@@ -144,11 +144,13 @@ test.describe('/vendor-statements (admin)', () => {
 			});
 			id = created.id;
 
-			// Open the detail modal from the list (clickable row / RowLink).
+			// Open the detail modal from the list (clickable row / RowLink). The
+			// name carries the date as the Date column shows it (`formatDate`,
+			// en-US in this suite), not the raw ISO string.
 			await page.goto(`/vendor-statements?search=${encodeURIComponent(reference)}`);
 			await page
 				.getByRole('button', {
-					name: `Open reconciliation for ${vendor.name} 2026-02-28`
+					name: `Open reconciliation for ${vendor.name} Feb 28, 2026`
 				})
 				.click();
 			const dialog = page.getByRole('dialog', { name: 'Vendor statement reconciliation detail' });
