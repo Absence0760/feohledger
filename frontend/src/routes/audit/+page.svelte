@@ -9,6 +9,7 @@
 		type SignatureVerificationReport
 	} from '#lib/api/auditVerification.ts';
 	import type { AuditEntry, AuditFieldChange } from '#lib/types/audit.ts';
+	import { auditActionLabel } from '#lib/types/auditActions.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
@@ -327,9 +328,18 @@
 	>
 		{#snippet body()}
 			{#each entries as entry (entry.id)}
+				{@const actionLabel = auditActionLabel(entry.action, m)}
 				<tr>
 					<td class="mono" title={entry.created_at}>{fmt(entry.created_at)}</td>
-					<td>{entry.action}</td>
+					<!-- The label reads; the token is the evidence. Auditors cite
+					     `invoice.approved` verbatim (the CSV carries only the token),
+					     so it stays visible and selectable, not tucked in a title. -->
+					<td>
+						{#if actionLabel !== entry.action}
+							<span class="action-label">{actionLabel}</span>
+						{/if}
+						<code class="action-token" data-testid="audit-action-token">{entry.action}</code>
+					</td>
 					<td>{entry.entity_type ?? ''}{entry.entity_id ? ` · ${entry.entity_id.slice(0, 8)}` : ''}</td>
 					<td>{entry.actor_name ?? entry.actor_email ?? '—'}</td>
 					<td>
@@ -651,6 +661,17 @@
 
 	.muted {
 		color: var(--text-muted);
+	}
+
+	.action-label {
+		display: block;
+	}
+
+	.action-token {
+		display: block;
+		font-size: 0.8em;
+		color: var(--text-muted);
+		overflow-wrap: anywhere;
 	}
 
 	/* --- Approval-signature verification panel --- */
