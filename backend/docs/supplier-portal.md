@@ -202,6 +202,27 @@ and cannot say "unknown" — PO matching reads the PO's NULL, not that
 placeholder, so the pair is reported as unverified rather than proven
 (`docs/decisions.md` §197).
 
+**What the flip refuses, and how the page knows.** One gate,
+`api/portal.po_flip_refusal`, answers both the flip and the per-row
+`flip_verdict` the list and detail carry (`null` = the flip would mint an
+invoice; else the coded refusal), so the page offers "Create invoice" only where
+the endpoint accepts it (`frontend/docs/ui-patterns.md` § read the server's
+verdict). It refuses, with 409:
+
+- `po_not_invoiceable` (coded detail, `params.status`) — the PO is in
+  `models/procurement.DEAD_PO_STATUSES` (cancelled, voided, closed; unissued is
+  already hidden). Wider than the matcher's `UNMATCHABLE_PO_STATUSES` on
+  purpose: a flip bills the whole total again, so on a closed (fully billed)
+  order it is a second bill (`docs/decisions.md` §NEW-M1);
+- `po_total_unverifiable` — the ERP could not vouch for the total
+  (decisions §323); the endpoint keeps its plain-string detail.
+
+Both are checked after the replay short-circuit, so retrying a flip that went
+through still returns its invoice even if the PO has since closed. The PO is
+vendor-scoped (404 for any other vendor's) before the gate runs, so the
+refusal only ever names the caller's own order's status. The portal page shows
+the status through the shared label map `frontend/src/lib/types/purchaseOrder.ts`.
+
 ### Company self-service (`portal.py`)
 
 | Method | Path                                  | Notes                                                                        |
