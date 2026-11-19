@@ -205,7 +205,11 @@ passes the same set to `record_decision` (`approvers=`). The run's own approval
 does not refuse its own resolve, which rests on the re-match no longer finding
 the mismatch (`decision.refound`) and on no implicated receipt lifting the hold
 (`_receipts_implicated`), not on the human's word
-(`test_the_approval_an_agent_run_gives_does_not_refuse_its_own_resolve`). The
+(`test_the_approval_an_agent_run_gives_does_not_refuse_its_own_resolve`). An
+apply that leaves the invoice `approved` with the cumulative PO over-billing
+warning (`po_billed_beyond_total`, decisions §469) unwinds and escalates too
+(`_POOverbilled`): that warning raises no hold, and an agent's approval is no
+person reading it. The
 approval's re-judge of cleared holds (decisions §422) does not undo it either:
 the row being decided is still open when `apply` approves, so nothing is
 re-raised beside it, and the re-judge runs no detector that could mark it

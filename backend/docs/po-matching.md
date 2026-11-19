@@ -561,24 +561,35 @@ number, so duplicate detection has nothing to match) followed by the same
 order billed again through the portal, email or AP keying.
 `invoice_warnings._refresh_po_overbilling` closes that gap. On a single-PO
 match whose total is trustworthy and in the invoice's own currency, it sums the
-OTHER invoices citing the PO's number (within the PO's entity; either side
-unstamped spans entities), in every status but `rejected`, in that currency. When
+OTHER invoices billing the PO, in every status but `rejected`, in that
+currency: one whose last match resolved to this PO (`po_match->>'po_id'`), one
+a multi-PO split linked to it (`split_po_ids`, counted at its whole amount),
+and one not matched to any PO yet that cites the PO's number within the PO's
+entity (either side unstamped spans entities) and names the PO's vendor or no
+vendor. Another vendor's invoice citing the same number is not counted. When
 those plus this invoice exceed the PO total by more than the match rule's
 tolerance, it adds `po_billed_beyond_total` (type `po_overbilled`, severity
-`warning`), naming what the others already bill and the PO total.
+`warning`), naming what the others already bill, the PO total and the
+normalised currency code.
 
-- **Not a hold.** Credit memos, corrective re-bills, and a sibling rejected or
-  reopened after this refresh all move the sum without re-running it on this
-  invoice, so a payment-blocking row would go stale both ways. The reviewer
-  reads it at approval, as with the other findings.
+- **Not a hold, but no unattended approval.** Credit memos, corrective
+  re-bills, and a sibling rejected or reopened after this refresh all move the
+  sum without re-running it on this invoice, so a payment-blocking row would go
+  stale both ways. Instead `po_match_hold_refusal` answers `po_overbilled`
+  while the warning stands, so extraction's auto-approve and `/complete`'s
+  floor send the invoice to review, and an exception agent's approval unwinds
+  and escalates (see [Before an unattended approval](#before-an-unattended-approval)). A person reads it at
+  approval, as with the other findings.
 - **Its own type**, not `po_mismatch`: the invoice modal shows `po_mismatch`
   warnings through the PO-match panel's own `issues`, which this cross-invoice
   finding is not one of. `refresh_po_match_only` rebuilds it with the match.
 - **Skipped** for a multi-PO split (its amount cannot be attributed to one
   leg), and for a cancelled, unissued, unvouched or other-currency PO, which
   each raise their own finding. A rejected invoice is neither checked nor
-  counted. It bills nothing while rejected, and reopening it re-runs the
-  refresh, so it is counted again from then on.
+  counted. It bills nothing while rejected. Once reopened to `new` it counts
+  again, but only in a refresh run after that: the reopened invoice's own
+  (`new` gets no match until it is submitted) or a sibling's next one. A
+  sibling already refreshed keeps its earlier answer until then.
 
 Reasoning: `docs/decisions.md` §469.
 
@@ -699,8 +710,9 @@ sends the invoice to `ready_for_review` instead, recorded as
 of one that the stamp itself would undo (`"po_match_hold_cleared_by_approver"`):
 the caller cleared the hold while not its approver, and the §422 re-judge would
 raise it again straight after stamping them. Neither door can leave an invoice
-`approved` with a PO-match hold open. An invoice with no PO reference has no
-such row, and the floor behaves as before.
+`approved` with a PO-match hold open. So does the cumulative over-billing
+warning above, which raises no row: `"po_overbilled"` (decisions §469). An
+invoice with no PO reference has no such row, and the floor behaves as before.
 
 ### In the Review Step
 Reviewers see the match status:

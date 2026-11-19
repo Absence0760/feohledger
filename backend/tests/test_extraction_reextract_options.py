@@ -481,6 +481,53 @@ async def test_a_po_match_hold_lands_the_auto_approve_at_review(reason):
 
 
 @pytest.mark.asyncio
+async def test_a_po_over_billing_warning_lands_the_auto_approve_at_review():
+    """The cumulative over-billing warning (decisions §469) raises no hold, so
+    no exception row stops the approval; the real refusal reads the warning
+    the refresh left on the invoice and sends it to a person."""
+    from decimal import Decimal
+
+    from app.models.invoice import InvoiceStatus
+    from app.services.extraction import run_extraction
+    from app.services.invoice_warning_catalog import warning
+
+    invoice = _invoice(vendor_id=uuid.uuid4(), vendor_name="Bound Supply Co")
+    invoice.po_number = "PO-469"
+    invoice.warnings = [
+        warning(
+            "po_billed_beyond_total",
+            "warning",
+            billedAmount=Decimal("500.00"),
+            poNumber="PO-469",
+            poTotal=Decimal("500.00"),
+            currency="USD",
+        )
+    ]
+    instance = MagicMock()
+    instance.steps_config_snapshot = _AUTO_APPROVE_SNAPSHOT
+    transition = AsyncMock()
+    reraise = AsyncMock()
+
+    with (
+        _extraction_stack(vendor_name="Bound Supply Co", instance=instance),
+        patch("app.services.extraction.transition_invoice", transition),
+        patch("app.services.extraction.decide_auto_approve", return_value=True),
+        patch("app.services.extraction.resolve_gate_aggregate", AsyncMock(return_value=None)),
+        # No open PO-match hold: only the warning can stop the approval.
+        patch("app.services.payment_runs.blocking_exception_types", AsyncMock(return_value=set())),
+        patch("app.services.invoice_warnings.reraise_holds_cleared_by_an_approver", reraise),
+    ):
+        await run_extraction(_db(), invoice, actor_id=None)
+
+    reraise.assert_not_awaited()
+    args, kwargs = transition.await_args
+    assert args[2] is InvoiceStatus.ready_for_review
+    assert kwargs["details"]["auto_approved"] is False
+    assert kwargs["details"]["auto_approve_suppressed"] == "po_overbilled"
+    assert invoice.approved_by is None
+
+
+@pytest.mark.asyncio
 async def test_no_po_match_hold_leaves_the_auto_approve_alone():
     """Counterpart: with no hold the predicate answers `None` and the
     unattended approval fires as before."""
