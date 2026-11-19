@@ -307,7 +307,7 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
     # are (decisions §197).
     # Cumulative: the OTHER live invoices citing the PO plus this one bill
     # past its total (`invoice_warnings._refresh_po_overbilling`, decisions
-    # §TBD-billing). Its own type so the modal lists it beside the other
+    # §469). Its own type so the modal lists it beside the other
     # findings rather than leaving it to the PO-match panel's issues.
     WarningSpec(
         "po_billed_beyond_total",

@@ -824,7 +824,7 @@ async def test_realdb_another_shipments_inspection_does_not_stand_in(realdb):
 
 
 # ===========================================================================
-# Cumulative over-billing (decisions §TBD-billing): the matcher compares ONE
+# Cumulative over-billing (decisions §469): the matcher compares ONE
 # invoice with the PO, so a flip followed by another bill for the same order
 # passes it. `_refresh_po_overbilling` sums the others citing the PO.
 # ===========================================================================

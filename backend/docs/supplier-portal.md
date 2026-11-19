@@ -227,7 +227,7 @@ verdict). It refuses, with 409:
   (migration 0024), so the endpoint replays the rejected invoice rather than
   mint another, and the way back is reopening that invoice (`/resubmit`, or AP
   moving it `rejected → new`), never a second flip that would double-bill the
-  moment the first reopens (`docs/decisions.md` §TBD-billing). The reverse
+  moment the first reopens (`docs/decisions.md` §469). The reverse
   order, a flip and then an ordinary invoice for the same order, is not
   refused; AP sees it as the `po_billed_beyond_total` warning
   (`backend/docs/po-matching.md` § Billing past the PO across invoices);

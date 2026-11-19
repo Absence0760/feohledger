@@ -23494,7 +23494,7 @@ the coded detail and verdict, a split leg, a rejected or foreign-vendor invoice
 not blocking, the flipped PO's verdict and its replay);
 `frontend/src/lib/types/purchaseOrder.test.ts`.
 
-## §TBD-billing. A PO billed past its total across invoices is a review warning, and a rejected flip still counts as invoiced (round 25, 2026-11-19)
+## 469. A PO billed past its total across invoices is a review warning, and a rejected flip still counts as invoiced (round 25, 2026-11-19)
 
 **Problem.** §468 refused a flip of a PO the vendor had already invoiced, and
 left the reverse order open: after a flip, a portal submit, an emailed invoice

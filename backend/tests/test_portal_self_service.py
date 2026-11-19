@@ -1225,7 +1225,7 @@ async def _set_invoice_status(mk, invoice_id: str, status: InvoiceStatus) -> Non
 @pytest.mark.asyncio
 async def test_a_rejected_flip_still_reads_as_invoiced_and_its_reopen_mints_nothing(realdb):
     """The PO's own flip, once rejected, still counts as invoiced (decisions
-    §TBD-billing). Its `po-flip:<po_id>` marker is unique in every status, so
+    §469). Its `po-flip:<po_id>` marker is unique in every status, so
     the endpoint replays the rejected invoice rather than mint a second, and
     the row must not offer a creation it never performs. A rejected flip is
     reopened instead, after which it is the one live bill on the PO."""

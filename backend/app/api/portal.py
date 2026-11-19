@@ -1002,7 +1002,7 @@ async def _pos_already_invoiced(
     told to re-bill needs a way to (decisions §468).
 
     Except the PO's OWN rejected flip (``reference_number`` is its
-    ``po-flip:<po_id>`` marker), which still counts (decisions §TBD-billing).
+    ``po-flip:<po_id>`` marker), which still counts (decisions §469).
     The marker is unique in every status (migration 0024), so a second flip
     could never mint an invoice anyway: the endpoint replays the rejected one.
     And a rejected flip is reopened, not replaced (``rejected → new`` by AP, or

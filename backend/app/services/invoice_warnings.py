@@ -1271,7 +1271,7 @@ async def _refresh_po_match(
         warnings.append(partial_receipt_flag)
 
     # Cumulative billing: this invoice plus the others already citing the PO
-    # take it past its total (decisions §TBD-billing). Independent of the
+    # take it past its total (decisions §469). Independent of the
     # amount leg, which compares this invoice alone with the whole PO.
     await _refresh_po_overbilling(db, invoice, warnings, match, rule.tolerance_pct)
 
@@ -1384,7 +1384,7 @@ async def _refresh_po_match(
 #: The warning type of the cumulative over-billing finding. Its own type,
 #: not ``po_mismatch``: the invoice modal shows ``po_mismatch`` warnings through
 #: the PO-match panel's own ``issues``, which this cross-invoice finding is not
-#: one of, and it raises no hold (decisions §TBD-billing).
+#: one of, and it raises no hold (decisions §469).
 PO_OVERBILLED_TYPE = "po_overbilled"
 
 

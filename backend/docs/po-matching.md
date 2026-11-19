@@ -580,7 +580,7 @@ tolerance, it adds `po_billed_beyond_total` (type `po_overbilled`, severity
   counted. It bills nothing while rejected, and reopening it re-runs the
   refresh, so it is counted again from then on.
 
-Reasoning: `docs/decisions.md` §TBD-billing.
+Reasoning: `docs/decisions.md` §469.
 
 ### Recording a goods receipt
 
