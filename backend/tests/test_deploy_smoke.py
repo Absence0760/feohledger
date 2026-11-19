@@ -1,7 +1,8 @@
 """`deploy/smoke.sh` — the post-deploy smoke check (#575).
 
 It is the last step of `deploy/deploy.sh` (on the VM, through its own Caddy)
-and of `.github/workflows/aws-deploy.yml` (through public DNS), and it must fail
+and of `.github/workflows/aws-deploy.yml` and `vm-deploy.yml` (through public
+DNS, from the runner), and it must fail
 non-zero, loudly and completely, whenever the deployed stack does not serve as
 it is configured:
 
@@ -32,6 +33,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = REPO_ROOT / "deploy"
 AWS_DEPLOY = REPO_ROOT / ".github" / "workflows" / "aws-deploy.yml"
+VM_DEPLOY = REPO_ROOT / ".github" / "workflows" / "vm-deploy.yml"
 
 CURL_STUB = r"""#!/bin/sh
 printf '%s\n' "$*" >> "$STUB_DIR/calls"
@@ -313,3 +315,30 @@ def test_the_release_workflow_ends_with_this_script() -> None:
         assert flag in run
     # No job depends on the smoke job: it is the end of the workflow.
     assert not any("smoke" in (job.get("needs") or []) for job in jobs.values())
+
+
+def test_the_vm_release_workflow_also_checks_the_api_through_public_dns() -> None:
+    """deploy.sh's own `smoke.sh --vm` goes through the VM's Caddy at
+    127.0.0.1, so it cannot see a DNS, Elastic IP or security-group fault on
+    `api.`; the VM release must ask it from outside as well."""
+    jobs = yaml.safe_load(VM_DEPLOY.read_text())["jobs"]
+    last = jobs["smoke"]
+    assert last["needs"] == "deploy", "it runs after the VM deploy and the SPA publish"
+    assert "environment" not in last, "a second production job would need a second approval"
+    assert "permissions" not in last, "it inherits the workflow's contents: read and needs no AWS"
+    assert not any("smoke" in str(job.get("needs") or "") for job in jobs.values())
+    step = last["steps"][-1]
+    run = step["run"]
+    assert "deploy/smoke.sh --app" in run
+    assert "--vm" not in run
+    for flag in ("--api", "--tenant", "--signup"):
+        assert flag in run
+    # Values reach the script through env:, never as ${{ }} inside run:.
+    assert "${{" not in run
+    assert step["env"] == {
+        "APP_URL": "${{ vars.APP_URL }}",
+        "PUBLIC_API_URL": "${{ vars.PUBLIC_API_URL }}",
+        "SIGNUP_ENABLED": "${{ vars.SIGNUP_ENABLED }}",
+    }
+    # The run log is public: the tenant checked is the synthetic one, not a customer's.
+    assert '--tenant "smoke-check.${app}"' in run

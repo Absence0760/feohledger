@@ -86,7 +86,12 @@ a reviewer. The workflow sends SSM Run Command to this VM, which runs
 `./deploy.sh --ref <the release's commit>` as `ec2-user`, waits for it (up to
 45 minutes), prints the tail of its output, and fails the run if the deploy
 failed. That output is redacted of tenant database names, because the run log
-of a public repo is public. Each automated deploy's full log is a file under
+of a public repo is public. A last job then runs `smoke.sh` from the GitHub runner through public
+DNS (apex, `api.` health, a tenant host's TLS, `public-config`'s signup flag
+against the repository variable `SIGNUP_ENABLED`): `deploy.sh`'s own smoke
+check goes through this VM's Caddy at 127.0.0.1, so only the runner's sees a
+DNS, Elastic IP or security-group fault on `api.`. A failure there fails the
+run and rolls nothing back. Each automated deploy's full log is a file under
 `/var/log/feoh-deploy/` on the VM (kept 90 days). No SSH is involved: the deploy role can
 run only the `feohledger-vm-deploy` command document, on only this instance,
 and the document accepts nothing but a commit sha (`infra/deploy.tf`,
