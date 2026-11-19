@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
+import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/exception_status_badge.dart';
@@ -32,16 +34,16 @@ class ExceptionListTile extends StatelessWidget {
 
   // A single, sensible screen-reader announcement for the whole row instead of
   // letting the reader walk several disjoint Text spans (WCAG 1.3.1 / 4.1.2).
-  String get _semanticLabel {
+  String _semanticLabel(AppLocalizations l) {
     final parts = <String>[
       exception.typeLabel,
-      '${exception.severity.label} severity',
+      l.listRowSeverity(exceptionSeverityLabel(l, exception.severity)),
       if (exception.vendorName != null) exception.vendorName!,
       if (exception.invoiceNumber != null)
-        'invoice ${exception.invoiceNumber}',
+        l.listRowInvoiceNumber(exception.invoiceNumber!),
       if (exception.amount != null) _amount,
-      exception.status.label,
-      if (exception.isOverdue) 'overdue',
+      exceptionStatusLabel(l, exception.status),
+      if (exception.isOverdue) l.listRowOverdue,
     ];
     return parts.join(', ');
   }
@@ -53,8 +55,9 @@ class ExceptionListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Semantics(
-      label: _semanticLabel,
+      label: _semanticLabel(l),
       button: onTap != null,
       selected: selected,
       excludeSemantics: true,
@@ -107,7 +110,7 @@ class ExceptionListTile extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    exception.severity.label,
+                    exceptionSeverityLabel(l, exception.severity),
                     style: TextStyle(
                       color: _severityColor(),
                       fontSize: 12,
@@ -119,7 +122,7 @@ class ExceptionListTile extends StatelessWidget {
                   const Spacer(),
                   if (exception.isOverdue)
                     Text(
-                      'Overdue',
+                      l.listRowOverdue,
                       style: TextStyle(
                         color: Colors.red.shade700,
                         fontSize: 12,

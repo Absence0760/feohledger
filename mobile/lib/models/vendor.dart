@@ -16,6 +16,7 @@ enum VendorStatus {
     );
   }
 
+  @Deprecated('use enum_labels')
   String get label => switch (this) {
     VendorStatus.active => 'Active',
     VendorStatus.unverified => 'Unverified',
@@ -98,6 +99,7 @@ class Vendor {
   }
 
   /// `manual` / `erp_sync` / `ai_extracted` — display label for the source.
+  @Deprecated('use enum_labels')
   String get sourceLabel => switch (source) {
     'erp_sync' => 'ERP',
     'ai_extracted' => 'AI',

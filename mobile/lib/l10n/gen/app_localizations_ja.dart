@@ -4531,4 +4531,227 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get commonShowAll => 'すべて表示';
+
+  @override
+  String statusPillAnnounce(String label) {
+    return 'ステータス: $label';
+  }
+
+  @override
+  String get vendorStatusActive => '有効';
+
+  @override
+  String get vendorStatusUnverified => '未確認';
+
+  @override
+  String get vendorStatusInactive => '無効';
+
+  @override
+  String get vendorStatusRejected => '却下';
+
+  @override
+  String get contractStatusDraft => '下書き';
+
+  @override
+  String get contractStatusActive => '有効';
+
+  @override
+  String get contractStatusExpired => '期限切れ';
+
+  @override
+  String get contractStatusTerminated => '解約済み';
+
+  @override
+  String get contractStatusCancelled => 'キャンセル済み';
+
+  @override
+  String get contractTypePurchase => '購買';
+
+  @override
+  String get contractTypeService => 'サービス';
+
+  @override
+  String get contractTypeSubscription => 'サブスクリプション';
+
+  @override
+  String get contractTypeLease => 'リース';
+
+  @override
+  String get contractTypeSla => 'SLA';
+
+  @override
+  String get contractTypeMsa => '基本契約';
+
+  @override
+  String get contractTypeSow => '作業範囲記述書';
+
+  @override
+  String get contractTypeOther => 'その他';
+
+  @override
+  String get exceptionStatusOpen => '未対応';
+
+  @override
+  String get exceptionStatusEscalated => 'エスカレーション済み';
+
+  @override
+  String get exceptionStatusResolved => '解決済み';
+
+  @override
+  String get exceptionStatusDismissed => '却下済み';
+
+  @override
+  String get exceptionSeverityError => 'エラー';
+
+  @override
+  String get exceptionSeverityWarning => '警告';
+
+  @override
+  String get exceptionSeverityInfo => '情報';
+
+  @override
+  String get vendorSourceErp => 'ERP';
+
+  @override
+  String get vendorSourceAi => 'AI';
+
+  @override
+  String get vendorSourceManual => '手動';
+
+  @override
+  String get vendorSourceOther => 'その他のソース';
+
+  @override
+  String get notificationEventInvoiceAssigned => '請求書が割り当てられました';
+
+  @override
+  String get notificationEventInvoiceApproved => '請求書が承認されました';
+
+  @override
+  String get notificationEventInvoiceRejected => '請求書が却下されました';
+
+  @override
+  String get notificationEventInvoicePaid => '請求書が支払われました';
+
+  @override
+  String get notificationEventContractRenewalDue => '契約更新期限';
+
+  @override
+  String get notificationEventChatMessage => '新しいメッセージ';
+
+  @override
+  String get notificationEventOther => '通知';
+
+  @override
+  String get notificationUnread => '未読';
+
+  @override
+  String get relativeTimeJustNow => 'たった今';
+
+  @override
+  String relativeTimeMinutesAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count分前',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String relativeTimeHoursAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count時間前',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String relativeTimeDaysAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count日前',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String notificationBellUnread(int count) {
+    return '通知、未読 $count 件';
+  }
+
+  @override
+  String get cashFlowButtonLabel => 'キャッシュフロー予測';
+
+  @override
+  String get listRowSelected => '選択済み';
+
+  @override
+  String get listRowNotSelected => '未選択';
+
+  @override
+  String listRowInvoiceNumber(String number) {
+    return '請求書 $number';
+  }
+
+  @override
+  String listRowDue(String date) {
+    return '支払期日 $date';
+  }
+
+  @override
+  String listRowPastDue(String date) {
+    return '期日超過 $date';
+  }
+
+  @override
+  String listRowSeverity(String severity) {
+    return '重大度 $severity';
+  }
+
+  @override
+  String get listRowOverdue => '期限超過';
+
+  @override
+  String listRowContractNumber(String number) {
+    return '契約 $number';
+  }
+
+  @override
+  String listRowEnds(String date) {
+    return '終了日 $date';
+  }
+
+  @override
+  String listRowVendorCode(String code) {
+    return 'コード $code';
+  }
+
+  @override
+  String listRowVendorSource(String source) {
+    return 'ソース $source';
+  }
+
+  @override
+  String listRowInvoiceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '請求書 $count 件',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String listRowInvoiceCountShort(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '$_temp0';
+  }
 }

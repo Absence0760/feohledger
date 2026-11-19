@@ -22,6 +22,7 @@ enum InvoiceStatus {
     );
   }
 
+  @Deprecated('use enum_labels')
   String get label => switch (this) {
     InvoiceStatus.newStatus => 'New',
     InvoiceStatus.pending => 'Pending',

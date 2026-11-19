@@ -4190,5 +4190,238 @@
   "commonShowAll": "Show all",
   "@commonShowAll": {
     "description": "Action on a filtered-to-zero list that clears the filter / search."
+  },
+  "statusPillAnnounce": "Status: {label}",
+  "@statusPillAnnounce": {
+    "description": "Screen-reader announcement for a status pill, e.g. 'Status: Approved'.",
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "vendorStatusActive": "Active",
+  "@vendorStatusActive": {
+    "description": "Vendor lifecycle status."
+  },
+  "vendorStatusUnverified": "Unverified",
+  "vendorStatusInactive": "Inactive",
+  "vendorStatusRejected": "Rejected",
+  "contractStatusDraft": "Draft",
+  "@contractStatusDraft": {
+    "description": "Contract lifecycle status."
+  },
+  "contractStatusActive": "Active",
+  "contractStatusExpired": "Expired",
+  "contractStatusTerminated": "Terminated",
+  "contractStatusCancelled": "Cancelled",
+  "contractTypePurchase": "Purchase",
+  "@contractTypePurchase": {
+    "description": "Contract type."
+  },
+  "contractTypeService": "Service",
+  "contractTypeSubscription": "Subscription",
+  "contractTypeLease": "Lease",
+  "contractTypeSla": "SLA",
+  "@contractTypeSla": {
+    "description": "Service-level agreement; keep the acronym where the market uses it."
+  },
+  "contractTypeMsa": "MSA",
+  "@contractTypeMsa": {
+    "description": "Master services agreement."
+  },
+  "contractTypeSow": "SOW",
+  "@contractTypeSow": {
+    "description": "Statement of work."
+  },
+  "contractTypeOther": "Other",
+  "exceptionStatusOpen": "Open",
+  "@exceptionStatusOpen": {
+    "description": "Exception-queue status."
+  },
+  "exceptionStatusEscalated": "Escalated",
+  "exceptionStatusResolved": "Resolved",
+  "exceptionStatusDismissed": "Dismissed",
+  "exceptionSeverityError": "Error",
+  "@exceptionSeverityError": {
+    "description": "Exception severity."
+  },
+  "exceptionSeverityWarning": "Warning",
+  "exceptionSeverityInfo": "Info",
+  "vendorSourceErp": "ERP",
+  "@vendorSourceErp": {
+    "description": "Where a vendor record came from: synced from the ERP."
+  },
+  "vendorSourceAi": "AI",
+  "@vendorSourceAi": {
+    "description": "Vendor record created by AI extraction."
+  },
+  "vendorSourceManual": "Manual",
+  "@vendorSourceManual": {
+    "description": "Vendor record entered by hand."
+  },
+  "vendorSourceOther": "Other source",
+  "@vendorSourceOther": {
+    "description": "Vendor source the app does not recognise."
+  },
+  "notificationEventInvoiceAssigned": "Invoice assigned",
+  "@notificationEventInvoiceAssigned": {
+    "description": "Notification event type."
+  },
+  "notificationEventInvoiceApproved": "Invoice approved",
+  "notificationEventInvoiceRejected": "Invoice rejected",
+  "notificationEventInvoicePaid": "Invoice paid",
+  "notificationEventContractRenewalDue": "Contract renewal due",
+  "notificationEventChatMessage": "New message",
+  "notificationEventOther": "Notification",
+  "@notificationEventOther": {
+    "description": "An event type this app version does not know."
+  },
+  "notificationUnread": "Unread",
+  "@notificationUnread": {
+    "description": "Announced first on an unread notification row."
+  },
+  "relativeTimeJustNow": "just now",
+  "@relativeTimeJustNow": {
+    "description": "Notification age under a minute."
+  },
+  "relativeTimeMinutesAgo": "{count, plural, one {{count} minute ago} other {{count} minutes ago}}",
+  "@relativeTimeMinutesAgo": {
+    "description": "Notification age in minutes.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "relativeTimeHoursAgo": "{count, plural, one {{count} hour ago} other {{count} hours ago}}",
+  "@relativeTimeHoursAgo": {
+    "description": "Notification age in hours.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "relativeTimeDaysAgo": "{count, plural, one {{count} day ago} other {{count} days ago}}",
+  "@relativeTimeDaysAgo": {
+    "description": "Notification age in days (under a week).",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "notificationBellUnread": "Notifications, {count} unread",
+  "@notificationBellUnread": {
+    "description": "Bell button announcement carrying the live unread count.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "cashFlowButtonLabel": "Cash flow forecast",
+  "@cashFlowButtonLabel": {
+    "description": "App-bar action that opens the cash-flow forecast."
+  },
+  "listRowSelected": "Selected",
+  "@listRowSelected": {
+    "description": "Row announcement prefix in multi-select mode."
+  },
+  "listRowNotSelected": "Not selected",
+  "listRowInvoiceNumber": "invoice {number}",
+  "@listRowInvoiceNumber": {
+    "description": "Row announcement fragment naming an invoice number.",
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "listRowDue": "due {date}",
+  "@listRowDue": {
+    "description": "Row announcement fragment: due date not yet passed.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "listRowPastDue": "past due {date}",
+  "@listRowPastDue": {
+    "description": "Row announcement fragment: due date already passed.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "listRowSeverity": "{severity} severity",
+  "@listRowSeverity": {
+    "description": "Exception row announcement fragment, e.g. 'Error severity'.",
+    "placeholders": {
+      "severity": {
+        "type": "String"
+      }
+    }
+  },
+  "listRowOverdue": "Overdue",
+  "@listRowOverdue": {
+    "description": "Exception row flag: past its SLA."
+  },
+  "listRowContractNumber": "contract {number}",
+  "@listRowContractNumber": {
+    "description": "Contract row announcement fragment.",
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "listRowEnds": "ends {date}",
+  "@listRowEnds": {
+    "description": "Contract row announcement fragment: end date.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "listRowVendorCode": "code {code}",
+  "@listRowVendorCode": {
+    "description": "Vendor row announcement fragment.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "listRowVendorSource": "source {source}",
+  "@listRowVendorSource": {
+    "description": "Vendor row announcement fragment: where the record came from.",
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "listRowInvoiceCount": "{count, plural, one {{count} invoice} other {{count} invoices}}",
+  "@listRowInvoiceCount": {
+    "description": "Vendor row announcement: how many invoices it has.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "listRowInvoiceCountShort": "{count, plural, one {{count} inv} other {{count} inv}}",
+  "@listRowInvoiceCountShort": {
+    "description": "Compact invoice count shown on a vendor row.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   }
 }

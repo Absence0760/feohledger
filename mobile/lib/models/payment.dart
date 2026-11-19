@@ -26,6 +26,7 @@ enum PaymentMethod {
   static PaymentMethod fromString(String s) =>
       tryFromString(s) ?? PaymentMethod.ach;
 
+  @Deprecated('use enum_labels')
   String get label => switch (this) {
     PaymentMethod.ach => 'ACH',
     PaymentMethod.wire => 'Wire',

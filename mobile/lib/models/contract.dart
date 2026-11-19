@@ -15,6 +15,7 @@ enum ContractStatus {
     );
   }
 
+  @Deprecated('use enum_labels')
   String get label => switch (this) {
     ContractStatus.draft => 'Draft',
     ContractStatus.active => 'Active',
@@ -66,6 +67,7 @@ enum ContractType {
     );
   }
 
+  @Deprecated('use enum_labels')
   String get label => switch (this) {
     ContractType.purchase => 'Purchase',
     ContractType.service => 'Service',
