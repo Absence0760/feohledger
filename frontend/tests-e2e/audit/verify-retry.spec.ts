@@ -1,7 +1,7 @@
 import type {
 	InvoiceSignatureReport,
 	SignatureVerificationReport
-} from '#lib/api/auditVerification.ts';
+} from '#lib/types/auditVerification.ts';
 import type { Route } from '@playwright/test';
 
 import { expect, test } from '../fixtures/helpers';
