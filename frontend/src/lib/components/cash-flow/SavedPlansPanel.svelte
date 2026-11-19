@@ -8,6 +8,7 @@
 	import Money from '#lib/components/ui/Money.svelte';
 	import { formatDate, formatPeriod } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { deleteSavedPlan, getSavedPlanVariance, listSavedPlans } from '#lib/api/cashFlow.ts';
 	import type { PlanVarianceResult, SavedPlanSummary } from '#lib/types/cashFlow.ts';
 
@@ -114,7 +115,7 @@
 	{/if}
 
 	{#if loading && plans.length === 0}
-		<p class="saved-empty">{m('cashFlow.saved.loading')}</p>
+		<LoadingState />
 	{:else if plans.length === 0 && !loadError}
 		<p class="saved-empty">{m('cashFlow.saved.empty')}</p>
 	{:else}
@@ -139,7 +140,7 @@
 					{#if openPlanId === plan.plan_id}
 						<div class="saved-detail">
 							{#if varianceBusy}
-								<p class="saved-empty">{m('cashFlow.saved.loading')}</p>
+								<LoadingState />
 							{:else if varianceError}
 								<p class="saved-error" role="alert">{varianceError}</p>
 							{:else if variance}

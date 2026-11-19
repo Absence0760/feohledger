@@ -16,6 +16,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
@@ -202,7 +203,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="state" data-testid="api-keys-loading">{m('admin.apiKeys.loading')}</p>
+		<LoadingState label={m('admin.apiKeys.loading')} testId="api-keys-loading" />
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="api-keys-error" />
 	{:else}
@@ -340,7 +341,7 @@
 		>
 			<h2>{m('admin.apiKeys.usage.heading', { name: usageKey.name })}</h2>
 			{#if usageLoading}
-				<p class="state" data-testid="usage-loading">{m('admin.apiKeys.usage.loading')}</p>
+				<LoadingState label={m('admin.apiKeys.usage.loading')} testId="usage-loading" />
 			{:else if usageError}
 				<LoadError
 					message={usageError}

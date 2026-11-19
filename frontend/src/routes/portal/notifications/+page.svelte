@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import {
 		getPortalNotificationPreferences,
@@ -72,7 +73,7 @@
 		<h2>{m('portal.notifications.cardTitle')}</h2>
 		<p class="note">{m('portal.notifications.cardNote')}</p>
 		{#if loading}
-			<p class="note">{m('portal.notifications.loading')}</p>
+			<LoadingState label={m('portal.notifications.loading')} />
 		{:else if loadErr}
 			<LoadError message={loadErr} onretry={load} testId="portal-notifications-load-error" />
 		{:else}

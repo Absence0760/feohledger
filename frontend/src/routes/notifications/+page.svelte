@@ -14,6 +14,7 @@
 	import { afterNavigate, goto, replaceState } from '$app/navigation';
 	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { EVENT_LABEL_KEYS } from '#lib/types/notification.ts';
 	import { notificationHref } from '#lib/utils/notificationHref.ts';
 	import type { Notification } from '#lib/types/notification.ts';
@@ -176,7 +177,7 @@
 		<!-- A failed load is not an empty inbox: say so in place, with a way back. -->
 		<LoadError message={m('notifications.empty.errored')} onretry={reload} testId="notifications-error" />
 	{:else if !initialLoaded && loading}
-		<p class="state-msg">{m('common.loading')}</p>
+		<LoadingState />
 	{:else}
 		<DataTable columns={COLUMNS} isEmpty={items.length === 0} empty={emptyMessage} colspan={2}>
 			{#snippet body()}
@@ -256,11 +257,6 @@
 	.btn-mark-all:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-	}
-
-	.state-msg {
-		color: var(--text-muted);
-		padding: 12px 4px;
 	}
 
 	tbody tr.unread-row td {

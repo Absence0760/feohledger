@@ -971,7 +971,6 @@ export const messages = {
 	'admin.partner.join.generate': 'Verknüpfungscode generieren',
 	'admin.partner.join.copy': 'Kopieren',
 	'admin.partner.join.expiresIn': 'Läuft in {minutes} Min. ab',
-	'admin.partner.loading': 'Wird geladen…',
 	'admin.partner.loadFailed': 'Partner-Übersicht konnte nicht geladen werden.',
 	'admin.partner.notPartner':
 		'Dieser Arbeitsbereich verwaltet noch keine Untermandanten. Sobald ein Mandant als Partner mit diesem Arbeitsbereich verknüpft ist, erscheinen seine Untermandanten hier.',

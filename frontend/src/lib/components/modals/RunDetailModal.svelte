@@ -58,6 +58,7 @@
 	// rounding or locale can't land in one and not the others.
 	import { formatAmountWithoutCurrency } from '#lib/utils/discountRecommendation.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatCount } from '#lib/utils/count.ts';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -618,7 +619,7 @@
 
 	<div class="body">
 		{#if loading}
-			<div class="loading">{m('common.loading')}</div>
+			<LoadingState />
 		{:else if error}
 			<div class="error" role="alert">{error}</div>
 		{:else if run}
@@ -1285,7 +1286,6 @@
 		flex: 1;
 	}
 
-	.loading,
 	.error {
 		padding: 40px;
 		text-align: center;

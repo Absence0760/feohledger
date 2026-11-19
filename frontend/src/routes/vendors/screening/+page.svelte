@@ -47,6 +47,7 @@
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BLOCK } from '#lib/types/admin.ts';
@@ -731,7 +732,7 @@
 				testId="screening-history-error"
 			/>
 		{:else if historyLoading || !historyIsForSelected}
-			<p class="muted" data-testid="screening-history-loading">{m('common.loading')}</p>
+			<LoadingState testId="screening-history-loading" />
 		{:else if history.length === 0}
 			<p class="muted" data-testid="screening-history-empty">
 				{m('vendors.screening.queue.history.empty')}

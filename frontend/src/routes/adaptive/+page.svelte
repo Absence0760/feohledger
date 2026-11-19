@@ -46,6 +46,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import { formatPercent } from '#lib/utils/percent.ts';
@@ -597,7 +598,7 @@
 					testId="adaptive-threshold-error"
 				/>
 			{:else if thresholdLoading && !threshold}
-				<p class="state">{m('common.loading')}</p>
+				<LoadingState />
 			{:else if threshold}
 				<p class="rationale" data-testid="adaptive-threshold-rationale">{threshold.rationale}</p>
 
@@ -686,7 +687,7 @@
 					testId="adaptive-routing-error"
 				/>
 			{:else if routingLoading}
-				<p class="state">{m('common.loading')}</p>
+				<LoadingState />
 			{:else if routing}
 				{#if routing.insufficient_history || routing.candidates.length === 0}
 					<p class="state" data-testid="adaptive-routing-insufficient">
@@ -950,7 +951,7 @@
 					testId="adaptive-feedback-error"
 				/>
 			{:else if feedbackLoading}
-				<p class="state">{m('common.loading')}</p>
+				<LoadingState />
 			{:else if feedback}
 				<h3>{m('adaptive.feedback.metrics')}</h3>
 				<ul class="metrics">

@@ -1934,7 +1934,6 @@ export const messages = {
 		'Responder para todo el grupo en lugar de la entidad seleccionada en la barra lateral.',
 	'cashFlow.saved.heading': 'Planes guardados',
 	'cashFlow.saved.refresh': 'Actualizar',
-	'cashFlow.saved.loading': 'Cargando…',
 	'cashFlow.saved.empty': 'Aún no hay planes guardados. Guarda un plan propuesto para compararlo con lo que realmente pagues.',
 	'cashFlow.saved.loadError': 'No se pudieron cargar los planes guardados.',
 	'cashFlow.saved.deleteError': 'No se pudo eliminar ese plan.',
@@ -1959,7 +1958,6 @@ export const messages = {
 	'cfo.exportCsv': 'Exportar CSV',
 	'cfo.error.loadFailed': 'No se pudieron cargar los datos de flujo de caja',
 	'cfo.error.exportFailed': 'No se pudo exportar el CSV',
-	'cfo.loading': 'Cargando…',
 	'cfo.control.granularity': 'Granularidad',
 	'cfo.control.horizon': 'Horizonte',
 	'cfo.control.horizonDays': '{days}d',
@@ -2063,7 +2061,6 @@ export const messages = {
 	'cfo.position.empty': 'No hay salidas proyectadas en esta ventana.',
 
 	'cfoMetrics.heading': 'Métricas del CFO',
-	'cfoMetrics.loading': 'Cargando…',
 	'cfoMetrics.loadFailed': 'No se pudieron cargar las métricas del CFO',
 	'cfoMetrics.kpi.dpo': 'Días de cuentas por pagar (DPO)',
 	'cfoMetrics.kpi.ccc': 'Ciclo de conversión de efectivo',
@@ -3298,7 +3295,6 @@ export const messages = {
 	'byEntity.col.openPos': 'Órdenes de compra abiertas',
 	'byEntity.tag.default': 'predeterminada',
 	'byEntity.consolidated': 'Consolidado',
-	'byEntity.loading': 'Cargando…',
 	'byEntity.loadFailed': 'Error al cargar el desglose por entidad',
 	'byEntity.unconverted':
 		'Pendiente incluye a su valor nominal {n, plural, one {# factura abierta} other {# facturas abiertas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',

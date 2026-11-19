@@ -11,6 +11,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { accentStrongContrast } from '#lib/stores/brandTheme.ts';
@@ -360,7 +361,7 @@
 	</section>
 
 	{#if loading}
-		<p class="state" data-testid="partner-loading">{m('admin.partner.loading')}</p>
+		<LoadingState testId="partner-loading" />
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="partner-error" />
 	{:else if overview && !overview.is_partner}
@@ -425,7 +426,7 @@
 	{#if editingChild}
 		<h2>{m('admin.partner.branding.heading', { name: editingChild.name })}</h2>
 		{#if brandLoading}
-			<p class="state" data-testid="brand-loading">{m('admin.partner.branding.loading')}</p>
+			<LoadingState label={m('admin.partner.branding.loading')} testId="brand-loading" />
 		{:else if brandError}
 			<LoadError
 				message={brandError}

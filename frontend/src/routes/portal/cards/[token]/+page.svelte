@@ -3,6 +3,7 @@
 	import { api } from '#lib/api.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	interface RevealResponse {
@@ -70,7 +71,7 @@
 		<div class="brand">{m('portal.cards.brand')}</div>
 
 		{#if loading}
-			<p class="state">{m('portal.cards.loading')}</p>
+			<LoadingState label={m('portal.cards.loading')} />
 		{:else if error}
 			<div class="state error">
 				<h1>

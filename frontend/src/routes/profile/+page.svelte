@@ -13,6 +13,7 @@
 	import ThemePicker from '#lib/components/ui/ThemePicker.svelte';
 	import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '#lib/i18n/locale.ts';
 	import { currentLocale, setLocale, m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { notificationStore } from '#lib/stores/notifications.svelte.ts';
 	import {
@@ -1025,7 +1026,7 @@
 					<p class="hint">{m('profile.sessions.hint')}</p>
 
 					{#if !sessionsLoaded}
-						<p class="hint">{m('common.loading')}</p>
+						<LoadingState />
 					{:else if sessionsError}
 						<p class="warn">{m('profile.sessions.loadFailed')}</p>
 						<div class="actions">
@@ -1102,7 +1103,7 @@
 					</p>
 
 					{#if !prefsLoaded}
-						<p class="hint">{m('common.loading')}</p>
+						<LoadingState />
 					{:else if notificationStore.prefs}
 						{@const prefs = normalizePrefs(notificationStore.prefs)}
 						<table class="prefs-table">

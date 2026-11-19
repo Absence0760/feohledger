@@ -57,6 +57,7 @@
 	import SecretField from '#lib/components/ui/SecretField.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { FEATURE_ERP_INTEGRATIONS, FEATURE_ERP_MERGE } from '#lib/types/planFeatures.ts';
 	import {
 		BYO_APP_FIELDS,
@@ -778,7 +779,7 @@
 			<button type="button" class="btn-test" onclick={loadCatalog}>{m('common.tryAgain')}</button>
 		</div>
 	{:else if !catalog}
-		<p class="card-hint" aria-busy="true">{m('org.erp.loading')}</p>
+		<LoadingState label={m('org.erp.loading')} />
 	{:else}
 		<div class="form-grid">
 			<label class="full-width">

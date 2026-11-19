@@ -14,6 +14,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import {
 		listEntities,
@@ -232,7 +233,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="state" data-testid="entities-loading">{m('admin.entities.loading')}</p>
+		<LoadingState label={m('admin.entities.loading')} testId="entities-loading" />
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="entities-error" />
 	{:else}

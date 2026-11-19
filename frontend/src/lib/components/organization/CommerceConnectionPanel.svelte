@@ -45,6 +45,7 @@
 	import SecretField from '#lib/components/ui/SecretField.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import type { Entity } from '#lib/stores/entity.svelte.ts';
 	import {
 		buildCommercePayload,
@@ -364,7 +365,7 @@
 			<button type="button" class="btn-test" onclick={load}>{m('common.tryAgain')}</button>
 		</div>
 	{:else if !catalog}
-		<p class="card-hint" aria-busy="true">{m('common.loading')}</p>
+		<LoadingState />
 	{:else}
 		<div class="form-grid">
 			<label class="full-width">

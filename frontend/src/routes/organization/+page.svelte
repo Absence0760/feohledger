@@ -22,6 +22,7 @@
 	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
 	import { normalizeCurrencyCode, currencyCodeProblem } from '#lib/utils/currencyCode.ts';
 	import { m, currentLocale } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
@@ -2214,7 +2215,7 @@
 						{@render customDomainsIntro()}
 
 						{#if loadingDomains}
-							<p class="card-hint">{m('org.customDomains.loading')}</p>
+							<LoadingState label={m('org.customDomains.loading')} />
 						{:else}
 							{#if domainSaveError}
 								<p class="domain-error" role="alert" data-testid="custom-domain-error">
@@ -2274,7 +2275,7 @@
 						<p class="card-hint">{m('org.chat.hint')}</p>
 
 						{#if !userLoaded || loadingChat}
-							<p class="card-hint">{m('org.chat.loading')}</p>
+							<LoadingState label={m('org.chat.loading')} />
 						{:else if readOnly}
 							<!-- GET is admin-only, so nothing is fetched for a non-admin and
 							     there is nothing to show. Say that, exactly as the Email
@@ -2404,7 +2405,7 @@
 						<p class="card-hint">{m('org.emailIntake.hint')}</p>
 
 						{#if !userLoaded || loadingIntake}
-							<p class="card-hint">{m('org.emailIntake.loading')}</p>
+							<LoadingState label={m('org.emailIntake.loading')} />
 						{:else if readOnly}
 							<!-- GET is admin-only. Say that, rather than firing a request
 							     that 403s and rendering a load failure nobody can act on. -->
@@ -2486,7 +2487,7 @@
 						{@render residencyIntro()}
 
 						{#if loadingResidency}
-							<p class="card-hint">{m('org.residency.loading')}</p>
+							<LoadingState label={m('org.residency.loading')} />
 						{:else}
 							<div class="form-grid">
 								<label>
@@ -3137,7 +3138,7 @@
 						<p class="card-hint">{m('orgSso.hint')}</p>
 
 						{#if !userLoaded || loadingSso}
-							<p class="card-hint">{m('orgSso.loading')}</p>
+							<LoadingState label={m('orgSso.loading')} />
 						{:else if readOnly}
 							<p class="card-hint" data-testid="sso-admin-only">
 								{m('org.readOnly.sectionAdminOnly')}
@@ -3615,7 +3616,7 @@
 	{:else if orgLoadFailed}
 		<LoadError message={m('org.error.loadFailed')} onretry={loadOrg} testId="org-load-error" />
 	{:else}
-		<div class="loading">{m('org.loading')}</div>
+		<LoadingState label={m('org.loading')} />
 	{/if}
 </PageHeader>
 
@@ -4288,12 +4289,6 @@
 	.btn-outline:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-	}
-
-	.loading {
-		text-align: center;
-		padding: 40px;
-		color: var(--text-muted);
 	}
 
 	label.switch-row {

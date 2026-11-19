@@ -42,6 +42,7 @@
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { goodsReceiptTone } from '#lib/types/goodsReceipt.ts';
@@ -747,7 +748,7 @@
 
 	<div class="modal-body">
 		{#if detailLoading}
-			<div class="loading">{m('common.loading')}</div>
+			<LoadingState />
 		{:else if detail}
 			<dl class="meta">
 				<dt>{m('goodsReceipts.modal.po')}</dt><dd class="mono">{detail.po_number ?? '—'}</dd>
@@ -1070,10 +1071,5 @@
 		white-space: nowrap;
 	}
 
-	.loading {
-		padding: 40px;
-		text-align: center;
-		color: var(--text-muted);
-	}
 
 </style>

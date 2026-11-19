@@ -20,6 +20,7 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 
 	// RBAC parity with the backend: the auditor export is admin/CFO only (the
 	// backend 403s everyone else). Gate the page content on the loaded user's
@@ -262,7 +263,7 @@
 			{m('audit.denied')}
 		</p>
 	{:else if !userLoaded}
-		<p class="audit-loading">{m('common.loading')}</p>
+		<LoadingState />
 	{:else}
 	<div class="audit-controls">
 		<!-- A two-way switch, not tabs: there is no tabpanel and no arrow-key
@@ -623,12 +624,6 @@
 	}
 
 	.audit-denied {
-		color: var(--text-muted);
-		padding: 24px;
-		text-align: center;
-	}
-
-	.audit-loading {
 		color: var(--text-muted);
 		padding: 24px;
 		text-align: center;

@@ -34,6 +34,7 @@
 	} from '#lib/utils/dashboardPartials.ts';
 	import type { DashboardData } from '#lib/types/analytics.ts';
 	import { currentLocale, m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { firstName, greetingKey, localDateKey } from '#lib/utils/greeting.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatCount } from '#lib/utils/count.ts';
@@ -413,7 +414,7 @@
 		     names it, and a stand-in ("this entity") that is then swapped for
 		     the real name is a flash, not a state (#635). The KPI row above is
 		     unaffected — it hands off on `data` alone (decisions §125/§154). -->
-		<p class="loading">{m('common.loading')}</p>
+		<LoadingState testId="dashboard-loading" />
 	{:else if isEmptyEntity}
 		<!-- An established workspace, a subsidiary with nothing in it yet. -->
 		<EmptyState
@@ -731,10 +732,6 @@
 	}
 	.title-row h2 {
 		margin: 0;
-	}
-
-	.loading {
-		color: var(--text-muted);
 	}
 
 	.empty {

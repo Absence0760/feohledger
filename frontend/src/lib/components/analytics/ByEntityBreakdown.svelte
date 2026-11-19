@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
@@ -85,7 +86,7 @@
 		{#if error}
 			<p class="be-error" role="alert">{error}</p>
 		{:else if loading && !data}
-			<p class="empty">{m('byEntity.loading')}</p>
+			<LoadingState />
 		{:else if data}
 			<DataTable
 				columns={[

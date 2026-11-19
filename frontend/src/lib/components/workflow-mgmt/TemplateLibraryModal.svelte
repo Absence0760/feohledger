@@ -2,6 +2,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import type { WorkflowTemplate } from '#lib/types/workflow.ts';
 	import { goto } from '$app/navigation';
@@ -86,7 +87,7 @@
 <Modal {open} ariaLabel={m('workflows.mgmt.tpl.aria')} title={m('workflows.mgmt.tpl.title')} width="lg" {onclose}>
 	<div class="tl-body">
 		{#if loading}
-			<p class="tl-status">{m('workflows.mgmt.tpl.loading')}</p>
+			<LoadingState label={m('workflows.mgmt.tpl.loading')} />
 		{:else if error}
 			<p class="tl-status tl-error" role="alert">{error}</p>
 		{:else if templates.length === 0}

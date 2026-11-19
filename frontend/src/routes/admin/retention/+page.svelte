@@ -9,6 +9,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { getRetentionPolicy, updateRetentionPolicy } from '#lib/api/retention.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import {
 		RETENTION_RECORD_CLASSES,
@@ -147,7 +148,7 @@
 	</p>
 
 	{#if loading}
-		<p class="state" data-testid="retention-loading">{m('common.loading')}</p>
+		<LoadingState testId="retention-loading" />
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="retention-error" />
 	{:else}
@@ -215,11 +216,6 @@
 	.sweep-hint {
 		display: block;
 		margin-top: 2px;
-	}
-
-	.state {
-		color: var(--text-muted);
-		padding: 0.75rem 0;
 	}
 
 	.policy-card {

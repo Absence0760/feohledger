@@ -3,6 +3,7 @@
 	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -260,7 +261,7 @@
 	{#if !info && portalCompany.error}
 		<LoadError message={portalCompany.error} onretry={load} testId="portal-company-load-error" />
 	{:else if !info}
-		<p class="note">{m('portal.common.loading')}</p>
+		<LoadingState label={m('portal.common.loading')} />
 	{:else}
 		{#if pending}
 			<div class="banner">
