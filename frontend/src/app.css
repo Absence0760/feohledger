@@ -845,9 +845,9 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
    group opacity takes --text-muted to 2.33:1 (a11y/opacityAudit.test.ts).
 
    Every rule here is one class of specificity (states inside :where()), so
-   a route still carrying its own scoped copy (/payments' filled
-   .btn-danger, /tax's armed one) keeps winning on every property it sets
-   until it migrates, instead of picking up a tint on hover. */
+   a component still carrying its own scoped copy keeps winning on every
+   property it sets until it migrates, instead of picking up a tint on hover.
+   Which files must carry none is pinned by sharedButtonClasses.test.ts. */
 .btn-secondary,
 .btn-danger {
 	display: inline-flex;
@@ -884,6 +884,47 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 .btn-danger:where(:disabled) {
 	border-color: var(--border);
 	background: var(--surface);
+	color: var(--text-muted);
+	cursor: not-allowed;
+}
+/* Armed: the second, committing click of a two-click confirm (execute a
+   run, file 1099s, cancel a run). The next click moves money or cannot be
+   undone, so the button turns into a red fill one step before it commits,
+   whatever it looked like unarmed. --danger-strong, not --danger: it is a
+   fill under white text (5.37:1 dark, 7.89:1 light), the call every red fill in
+   this file makes. Two classes, so it holds through :hover and through the
+   busy (disabled) state while the request is in flight. Pair the class
+   with a distinct armed LABEL: the colour alone tells a screen reader
+   nothing. */
+.btn-primary.armed,
+.btn-danger.armed {
+	border-color: var(--danger-strong);
+	background: var(--danger-strong);
+	color: #fff;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+/* --- Ghost button ---
+   An action that reads as a link: Back out of a detail view, Download beside
+   the sentence that explains it. No box, so it sits inline in running text
+   without changing the line's height. Underlined as well as coloured, so it
+   is not told apart from the text around it by colour alone (WCAG 1.4.1).
+   --accent on --surface 5.55 / 6.37 (dark / light, measured above);
+   disabled swaps to --text-muted (5.38 / 5.75), never `opacity`. */
+.btn-ghost {
+	padding: 0;
+	border: none;
+	background: none;
+	color: var(--accent);
+	font: inherit;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+.btn-ghost:where(:hover:not(:disabled)) {
+	text-decoration-thickness: 2px;
+}
+.btn-ghost:where(:disabled) {
 	color: var(--text-muted);
 	cursor: not-allowed;
 }

@@ -887,33 +887,4 @@
 	.modal-warn.armed {
 		font-weight: 600;
 	}
-
-	.btn-danger {
-		padding: 8px 18px;
-		border-radius: 4px;
-		border: 1px solid var(--danger-strong);
-		background: transparent;
-		color: var(--danger-strong);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	/* Armed = the second, committing click — filled instead of outlined, the
-	   same "unarmed vs armed" visual escalation `RunDetailModal`'s
-	   `.btn-execute.armed` uses. */
-	.btn-danger.armed {
-		background: var(--danger-strong);
-		color: #fff;
-	}
-
-	.btn-danger:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-
-	.btn-danger:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
 </style>

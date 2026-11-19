@@ -1075,7 +1075,7 @@ the `ui/` primitive in the Source column.
 | Filter pill | `.filter-chip` (+ `.active`, `.count`) | `ui/FilterChips.svelte` |
 | Tab bar | `.tab-row` / `.tab` (+ `.active`) | `ui/Tabs.svelte` |
 | Load more | `.btn-load-more` / `.load-more-row` / `.load-more-end` | per-route, copy /admin |
-| Buttons: lead / dismiss / other action / destructive trigger | `.btn-primary` / `.btn-cancel` / `.btn-secondary` / `.btn-danger` | `src/app.css` (see below) |
+| Buttons: lead / dismiss / other action / destructive trigger / link-like | `.btn-primary` / `.btn-cancel` / `.btn-secondary` / `.btn-danger` / `.btn-ghost` (+ `.armed`) | `src/app.css` (see below) |
 | Modal dialog | `.modal[role="dialog"]` + `.backdrop` | `ui/Modal.svelte` |
 | KPI card | `.kpi` / `.kpi-value` / `.kpi-label` | `ui/KpiCard.svelte` |
 | Status badge (invoice) | `<StatusBadge>` (tone from `INVOICE_STATUS_TONES`) | `ui/StatusBadge.svelte` |
@@ -1088,18 +1088,32 @@ the `ui/` primitive in the Source column.
 | Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |
 
-**Buttons** are four shared classes in `src/app.css`, one box size so a
-toolbar mixing them is one height. Never re-declare one per route (the
-`/vendors` `.btn-outline` and `/invoices` `.btn-secondary` copies were
-folded into these):
+**Buttons** are five shared classes in `src/app.css`; the four boxed ones
+share one box size so a toolbar mixing them is one height. Never re-declare
+one per route, and never paint one from a scoped rule (placing it — margin,
+`align-self`, padding to fill a slot — is fine). The `/vendors` `.btn-outline`,
+`/invoices` `.btn-secondary`, `/payments` `.btn-pay` / `.btn-execute`,
+`RunDetailModal`'s `.btn-execute` / `.btn-discard` / `.btn-approve` and the
+`/exceptions` and `/expenses` bulk-bar `.bulk-action-btn` copies were folded
+into these. Guard:
+`src/lib/sharedButtonClasses.test.ts` — a file joins its `COVERED` list in
+the change that migrates it:
 - `.btn-primary` — the page's one lead action (white on `--accent-strong`).
 - `.btn-cancel` — dismiss / back out, beside a Save. Reads in `--text-muted`.
 - `.btn-secondary` — any other action (Create beside Upload, Import CSV,
   Refresh, Merge duplicates). Reads in `--text`; works on an `<a>` that
   navigates, and on a hidden `<span>` slot reserve, with the same box.
-- `.btn-danger` — the outlined destructive *trigger* (Erase, Disable) that
-  opens a confirmation. The armed two-click confirm stays with
-  `<RowAction armed>` / `<BulkDeleteButton>`.
+- `.btn-danger` — the outlined destructive *trigger* (Erase, Disable, Reject)
+  that opens a confirmation. In a table row the armed two-click confirm stays
+  with `<RowAction armed>` / `<BulkDeleteButton>`.
+- `.btn-ghost` — an action that reads as a link: Back out of a detail view, a
+  Download inside the sentence that explains it. No box, underlined in
+  `--accent` so colour is not the only cue (WCAG 1.4.1).
+- `.armed` on `.btn-primary` / `.btn-danger` — the second, committing click
+  of a footer two-click confirm (execute a run, file 1099s, cancel a run):
+  a `--danger-strong` fill, whatever the button looked like unarmed. Pair it
+  with a distinct armed label (`Confirm execute · …`), since a colour change
+  announces nothing to a screen reader.
 `.btn-secondary` / `.btn-danger` show disabled with `--text-muted` and a
 neutral border, not `opacity` (contrast measured per theme in the
 `app.css` comment).

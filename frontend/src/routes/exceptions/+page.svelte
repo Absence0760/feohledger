@@ -1152,7 +1152,7 @@
 	>
 		{#snippet actions()}
 			{#if allSelected && !selectedAllMatching && total > selectableIds.size}
-				<button class="bulk-action-btn" disabled={selectingAllMatching} onclick={selectAllMatching}>
+				<button type="button" class="btn-secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
 					{selectingAllMatching
 						? m('common.loading')
 						: m('common.selectAllMatching', { total })}
@@ -1160,7 +1160,7 @@
 			{:else if selectedAllMatching}
 				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
-			<button class="bulk-action-btn" onclick={openBulkResolve}>
+			<button type="button" class="btn-primary" onclick={openBulkResolve}>
 				{m('exceptions.bulk.resolve', { n: selectedIds.size })}
 			</button>
 		{/snippet}
@@ -1498,7 +1498,7 @@
 				</button>
 				<button
 					type="button"
-					class="btn-warning"
+					class="btn-secondary"
 					disabled={saving ||
 						!resolutionText.trim() ||
 						!isAllowed(resolveTarget.decision_refusals?.escalate)}
@@ -1566,7 +1566,7 @@
 			</button>
 			<button
 				type="button"
-				class="btn-warning"
+				class="btn-secondary"
 				disabled={saving || !resolutionText.trim()}
 				onclick={() => commitBulkResolve('escalate')}
 			>
@@ -1608,30 +1608,6 @@
 
 	.title-row h2 {
 		margin: 0;
-	}
-
-	/* --- Bulk-bar action --- */
-
-	.bulk-action-btn {
-		padding: 6px 14px;
-		border-radius: 4px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.bulk-action-btn:hover {
-		filter: brightness(1.1);
-	}
-
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: default;
-		filter: none;
 	}
 
 	.bulk-all-matching-note {
@@ -1835,42 +1811,5 @@
 		outline: none;
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
-	}
-
-	.btn-secondary {
-		padding: 8px 14px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.btn-warning {
-		padding: 8px 14px;
-		border-radius: 4px;
-		border: 1px solid var(--warning);
-		background: var(--surface);
-		color: var(--warning);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-warning:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--warning) 10%, transparent);
-	}
-
-	.btn-secondary:disabled,
-	.btn-warning:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 </style>
