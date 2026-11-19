@@ -5,6 +5,7 @@ import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/invoice_status_labels.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/screens/capture_screen.dart';
 import 'package:feohledger_mobile/screens/invoice_detail_screen.dart';
@@ -14,6 +15,7 @@ import 'package:feohledger_mobile/stores/invoice_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
 import 'package:feohledger_mobile/utils/debouncer.dart';
 import 'package:feohledger_mobile/widgets/advanced_search_sheet.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/bulk_action_bar.dart';
 import 'package:feohledger_mobile/widgets/invoice_list_tile.dart';
 import 'package:feohledger_mobile/widgets/reject_reason_dialog.dart';
@@ -109,34 +111,52 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                   listenable: InvoiceStore.instance,
                   builder: (context, _) {
                     final store = InvoiceStore.instance;
+                    final loadError = store.loadError;
 
-                    if (store.loading && store.invoices.isEmpty) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-
-                    if (store.invoices.isEmpty) {
-                      return Center(child: Text(l.invoicesEmpty));
-                    }
-
-                    return RefreshIndicator(
+                    return AsyncListBody<Invoice>(
+                      items: store.invoices,
+                      loading: store.loading,
+                      // The fetch's failure only: a refused bulk action
+                      // leaves the list live (actionError), so it raises no
+                      // banner — and a failed load is never "No invoices".
+                      hasError: loadError != null,
+                      fromCache: store.fromCache,
+                      errorMessage: loadError == null
+                          ? ''
+                          : describeLoadError(
+                              l,
+                              loadError,
+                              l.invoicesLoadErrorPrefix,
+                            ),
                       onRefresh: store.fetch,
-                      child: ListView.separated(
-                        itemCount: store.invoices.length,
-                        separatorBuilder: (_, _) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final invoice = store.invoices[index];
-                          return InvoiceListTile(
-                            invoice: invoice,
-                            selectionMode: store.selectionMode,
-                            selected: store.isSelected(invoice.id),
-                            onTap: store.selectionMode
-                                ? () => store.toggleSelected(invoice.id)
-                                : () => _openDetail(invoice),
-                            onLongPress: _canBulk && !store.selectionMode
-                                ? () => store.enterSelectionMode(invoice.id)
-                                : null,
-                          );
-                        },
+                      onLoadMore: store.loadMore,
+                      hasMore: store.hasMore,
+                      loadingMore: store.loadingMore,
+                      loadMoreFailed: store.loadMoreError != null,
+                      total: store.total,
+                      // A chip, search or advanced filter that matches nothing
+                      // says so, with the way back to every invoice.
+                      filteredEmpty: store.isFiltered
+                          ? FilteredEmptyState(
+                              message: l.invoicesFilteredEmpty,
+                              onShowAll: _clearAllFilters,
+                            )
+                          : null,
+                      empty: Text(
+                        l.invoicesEmpty,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                      itemBuilder: (context, invoice) => InvoiceListTile(
+                        invoice: invoice,
+                        selectionMode: store.selectionMode,
+                        selected: store.isSelected(invoice.id),
+                        onTap: store.selectionMode
+                            ? () => store.toggleSelected(invoice.id)
+                            : () => _openDetail(invoice),
+                        onLongPress: _canBulk && !store.selectionMode
+                            ? () => store.enterSelectionMode(invoice.id)
+                            : null,
                       ),
                     );
                   },
@@ -269,6 +289,14 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
         onSelected: (_) => InvoiceStore.instance.setStatusFilter(value),
       ),
     );
+  }
+
+  /// The filtered-empty state's "Show all": the chip, the search box and the
+  /// advanced filters all clear, in one refetch.
+  void _clearAllFilters() {
+    _searchDebouncer.cancel();
+    _searchController.clear();
+    InvoiceStore.instance.clearAllFilters();
   }
 
   Future<void> _openAdvancedSearch() async {
@@ -524,10 +552,11 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
         filename: result.filename,
         mimeType: format == 'xml' ? 'application/xml' : 'text/csv',
       );
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      final message =
-          AppLocalizations.of(context).invoicesBulkShareFailed('$e');
+      final l = AppLocalizations.of(context);
+      // The platform's exception text is a log line, not a sentence.
+      final message = l.invoicesBulkShareFailed(l.bulkUnknownError);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
       A11y.announce(context, message);
@@ -549,7 +578,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   /// The store's failure detail, or a localized "unknown error" when the
   /// failure carried none — never an empty string after the colon.
   String _storeError(AppLocalizations l) {
-    final error = InvoiceStore.instance.error;
+    final error = InvoiceStore.instance.actionError;
     return error == null || error.isEmpty ? l.bulkUnknownError : error;
   }
 

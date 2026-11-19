@@ -487,10 +487,6 @@ class AppLocalizationsPt extends AppLocalizations {
   String get approvalsNoneWaiting => 'Nenhuma fatura aguardando aprovação';
 
   @override
-  String get approvalsLoadError =>
-      'Não foi possível carregar as aprovações pendentes';
-
-  @override
   String approvalsPendingCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -4764,6 +4760,42 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get commonShowAll => 'Mostrar tudo';
+
+  @override
+  String get listLoadMore => 'Carregar mais';
+
+  @override
+  String listShowingCount(int shown, int total) {
+    return 'A mostrar $shown de $total';
+  }
+
+  @override
+  String listShowingAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'A mostrar todos os $count',
+      one: 'A mostrar o único item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get listLoadMoreFailed => 'Não foi possível carregar mais.';
+
+  @override
+  String invoicesLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar as faturas: $error';
+  }
+
+  @override
+  String approvalsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar as aprovações pendentes: $error';
+  }
+
+  @override
+  String get invoicesFilteredEmpty =>
+      'Nenhuma fatura corresponde a estes filtros';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -5244,10 +5276,6 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get approvalsNoneWaiting => 'Nenhuma fatura aguardando aprovação';
-
-  @override
-  String get approvalsLoadError =>
-      'Não foi possível carregar as aprovações pendentes';
 
   @override
   String approvalsPendingCount(int count) {
@@ -9523,4 +9551,40 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get commonShowAll => 'Mostrar tudo';
+
+  @override
+  String get listLoadMore => 'Carregar mais';
+
+  @override
+  String listShowingCount(int shown, int total) {
+    return 'Mostrando $shown de $total';
+  }
+
+  @override
+  String listShowingAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Mostrando todos os $count',
+      one: 'Mostrando o único item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get listLoadMoreFailed => 'Não foi possível carregar mais.';
+
+  @override
+  String invoicesLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar as faturas: $error';
+  }
+
+  @override
+  String approvalsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar as aprovações pendentes: $error';
+  }
+
+  @override
+  String get invoicesFilteredEmpty =>
+      'Nenhuma fatura corresponde a estes filtros';
 }

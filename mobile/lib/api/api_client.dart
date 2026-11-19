@@ -59,6 +59,18 @@ String describeApiError(Object error) {
   return ambientLocalizations().errorUnexpected;
 }
 
+/// One page of a list read: its [items] and the server's [total] count of
+/// every row the request matches (at least `items.length`).
+class PagedResult<T> {
+  final List<T> items;
+  final int total;
+
+  const PagedResult(this.items, this.total);
+
+  PagedResult<R> map<R>(R Function(T item) convert) =>
+      PagedResult(items.map(convert).toList(), total);
+}
+
 class ApiClient {
   static final ApiClient _instance = ApiClient._();
   factory ApiClient() => _instance;
@@ -268,6 +280,15 @@ class ApiClient {
   Future<List<dynamic>> getList(
     String path, [
     Map<String, String>? params,
+  ]) async => (await getPage(path, params)).items;
+
+  /// One page of a paginated list, with the server's `total` — the count of
+  /// every row matching the request, not just this page. A list read that
+  /// keeps only the items cannot say "57 pending" when it holds 20, nor know
+  /// whether a next page exists (`app/api/pagination.py` is the envelope).
+  Future<PagedResult<dynamic>> getPage(
+    String path, [
+    Map<String, String>? params,
   ]) async {
     final response = await _http
         .get(_uri(path, params), headers: _headers)
@@ -412,7 +433,9 @@ class ApiClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<List<dynamic>> _handleListResponse(http.Response response) async {
+  Future<PagedResult<dynamic>> _handleListResponse(
+    http.Response response,
+  ) async {
     if (response.statusCode == 401) {
       await _handleUnauthorized();
       throw ApiException(401, 'Unauthorized');
@@ -420,15 +443,22 @@ class ApiClient {
     if (response.statusCode >= 400) {
       throw _failure(response);
     }
-    if (response.body.isEmpty) return [];
+    if (response.body.isEmpty) return const PagedResult([], 0);
     final decoded = jsonDecode(response.body);
-    if (decoded is List) return decoded;
-    // Backend wraps lists in { "items": [...] } or { "invoices": [...] }
+    if (decoded is List) return PagedResult(decoded, decoded.length);
+    // Backend wraps lists in { "items": [...], "total": N } (the canonical
+    // envelope) or, on a few older routes, { "invoices": [...] }.
     if (decoded is Map<String, dynamic>) {
-      for (final value in decoded.values) {
-        if (value is List) return value;
-      }
+      final items = decoded['items'] is List
+          ? decoded['items'] as List<dynamic>
+          : decoded.values.whereType<List<dynamic>>().firstOrNull ?? const [];
+      final total = decoded['total'];
+      // No total (an unpaginated route) means this is the whole list.
+      return PagedResult(
+        items,
+        total is int && total >= items.length ? total : items.length,
+      );
     }
-    return [];
+    return const PagedResult([], 0);
   }
 }

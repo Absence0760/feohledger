@@ -230,7 +230,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         // own sentence.
         final store = InvoiceStore.instance;
         final reason = localizeGlChartRefusal(l, store.updateErrorDetail) ??
-            store.error ??
+            store.actionError ??
             '';
         _showSnack(l.invoiceDetailUpdateFailed(reason));
       }

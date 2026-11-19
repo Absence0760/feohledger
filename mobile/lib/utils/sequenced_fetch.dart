@@ -47,6 +47,11 @@ class RequestSequence {
   /// True if [token] is still the latest request issued on this sequence.
   bool isCurrent(int token) => token == _seq;
 
+  /// The latest token issued, without issuing a new one — for a follow-up
+  /// request (a next page) that must be discarded if a fresh [next] request
+  /// starts, but must not itself supersede the one it extends.
+  int get current => _seq;
+
   /// Test seam: reset the counter so tests aren't coupled to prior state.
   void reset() {
     _seq = 0;
@@ -55,6 +60,10 @@ class RequestSequence {
 
 mixin SequencedFetch {
   final RequestSequence _requestSeq = RequestSequence();
+
+  /// The store's primary sequence, for a helper that extends its requests
+  /// (`PagedFetch`'s next-page reads) without taking a token of its own.
+  RequestSequence get requestSequence => _requestSeq;
 
   /// Call once at the start of a new request, before any `await`. Returns a
   /// token to check when that request's response resolves.

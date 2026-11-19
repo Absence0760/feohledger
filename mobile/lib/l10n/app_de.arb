@@ -133,7 +133,6 @@
   "approvalsTitle": "Ausstehende Freigaben",
   "approvalsAllCaughtUp": "Alles erledigt!",
   "approvalsNoneWaiting": "Keine Rechnungen warten auf Freigabe",
-  "approvalsLoadError": "Ausstehende Freigaben konnten nicht geladen werden",
   "approvalsPendingCount": "{count, plural, one {{count} Rechnung ausstehend} other {{count} Rechnungen ausstehend}}",
   "approvalActionApprove": "Freigeben",
   "approvalActionReject": "Ablehnen",
@@ -1082,5 +1081,12 @@
   "authEmailCodeFailed": "Der E-Mail-Code konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
   "exceptionsFilteredEmpty": "{status, select, open{Keine offenen Ausnahmen} escalated{Keine eskalierten Ausnahmen} resolved{Keine gelösten Ausnahmen} dismissed{Keine verworfenen Ausnahmen} other{Keine passenden Ausnahmen}}",
   "contractsFilteredEmpty": "Keine Verträge passen zu Ihrer Suche oder Ihrem Filter.",
-  "commonShowAll": "Alle anzeigen"
+  "commonShowAll": "Alle anzeigen",
+  "listLoadMore": "Mehr laden",
+  "listShowingCount": "{shown} von {total} angezeigt",
+  "listShowingAll": "{count, plural, one {Der einzige Eintrag wird angezeigt} other {Alle {count} angezeigt}}",
+  "listLoadMoreFailed": "Weitere Einträge konnten nicht geladen werden.",
+  "invoicesLoadErrorPrefix": "Rechnungen konnten nicht geladen werden: {error}",
+  "approvalsLoadErrorPrefix": "Ausstehende Freigaben konnten nicht geladen werden: {error}",
+  "invoicesFilteredEmpty": "Keine Rechnungen entsprechen diesen Filtern"
 }

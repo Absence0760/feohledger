@@ -133,7 +133,6 @@
   "approvalsTitle": "承認待ち",
   "approvalsAllCaughtUp": "すべて完了しました！",
   "approvalsNoneWaiting": "承認待ちの請求書はありません",
-  "approvalsLoadError": "承認待ちの請求書を読み込めませんでした",
   "approvalsPendingCount": "{count, plural, other {{count}件の請求書が承認待ち}}",
   "approvalActionApprove": "承認",
   "approvalActionReject": "却下",
@@ -1276,5 +1275,12 @@
   "authEmailCodeFailed": "メールのコードを送信できませんでした。もう一度お試しください。",
   "exceptionsFilteredEmpty": "{status, select, open{未処理の例外はありません} escalated{エスカレーション済みの例外はありません} resolved{解決済みの例外はありません} dismissed{却下済みの例外はありません} other{該当する例外はありません}}",
   "contractsFilteredEmpty": "検索またはフィルターに一致する契約はありません。",
-  "commonShowAll": "すべて表示"
+  "commonShowAll": "すべて表示",
+  "listLoadMore": "さらに読み込む",
+  "listShowingCount": "{total} 件中 {shown} 件を表示",
+  "listShowingAll": "{count, plural, other {全 {count} 件を表示}}",
+  "listLoadMoreFailed": "続きを読み込めませんでした。",
+  "invoicesLoadErrorPrefix": "請求書を読み込めませんでした: {error}",
+  "approvalsLoadErrorPrefix": "承認待ちの請求書を読み込めませんでした: {error}",
+  "invoicesFilteredEmpty": "この条件に一致する請求書はありません"
 }

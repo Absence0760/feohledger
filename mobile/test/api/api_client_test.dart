@@ -68,6 +68,71 @@ void main() {
     });
   });
 
+  // `getList` kept only the items, so a screen could neither count every
+  // matching row nor know a next page existed.
+  group('getPage', () {
+    http.Response json(Object body) => http.Response(
+          jsonEncode(body),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+
+    test('carries the server total, not the page length', () async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => json({
+            'items': [
+              {'id': '1'},
+              {'id': '2'},
+            ],
+            'total': 57,
+            'page': 1,
+            'page_size': 2,
+          }),
+        ),
+      );
+
+      final result = await ApiClient().getPage('/things');
+
+      expect(result.items, hasLength(2));
+      expect(result.total, 57);
+    });
+
+    test('an unpaginated response is the whole list', () async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => json([
+            {'id': '1'},
+            {'id': '2'},
+            {'id': '3'},
+          ]),
+        ),
+      );
+
+      final result = await ApiClient().getPage('/things');
+
+      expect(result.items, hasLength(3));
+      expect(result.total, 3);
+    });
+
+    test('an older envelope without a total counts its own rows', () async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => json({
+            'invoices': [
+              {'id': '1'},
+            ],
+          }),
+        ),
+      );
+
+      final result = await ApiClient().getPage('/things');
+
+      expect(result.items, hasLength(1));
+      expect(result.total, 1);
+    });
+  });
+
   group('patch', () {
     test('times out instead of hanging forever on a silent network',
         () async {

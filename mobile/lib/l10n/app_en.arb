@@ -210,7 +210,6 @@
   "approvalsTitle": "Pending Approvals",
   "approvalsAllCaughtUp": "All caught up!",
   "approvalsNoneWaiting": "No invoices waiting for approval",
-  "approvalsLoadError": "Could not load pending approvals",
   "approvalsPendingCount": "{count, plural, one {{count} invoice pending} other {{count} invoices pending}}",
   "@approvalsPendingCount": {
     "placeholders": {
@@ -4190,5 +4189,56 @@
   "commonShowAll": "Show all",
   "@commonShowAll": {
     "description": "Action on a filtered-to-zero list that clears the filter / search."
+  },
+  "listLoadMore": "Load more",
+  "@listLoadMore": {
+    "description": "Button under a paged list that reads its next page."
+  },
+  "listShowingCount": "Showing {shown} of {total}",
+  "@listShowingCount": {
+    "description": "Footer of a paged list while more rows exist on the server: rows shown of the server's total. Announced as a live region.",
+    "placeholders": {
+      "shown": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "listShowingAll": "{count, plural, one {Showing the only item} other {Showing all {count}}}",
+  "@listShowingAll": {
+    "description": "Footer of a paged list once every row is loaded; count is the server's total.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "listLoadMoreFailed": "Couldn't load more.",
+  "@listLoadMoreFailed": {
+    "description": "Footer of a paged list when reading the next page failed; the rows shown are still live and Load more retries."
+  },
+  "invoicesLoadErrorPrefix": "Couldn't load invoices: {error}",
+  "@invoicesLoadErrorPrefix": {
+    "description": "Invoices list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "approvalsLoadErrorPrefix": "Could not load pending approvals: {error}",
+  "@approvalsLoadErrorPrefix": {
+    "description": "Approvals queue first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicesFilteredEmpty": "No invoices match these filters",
+  "@invoicesFilteredEmpty": {
+    "description": "Invoices list: a status chip, search or advanced filter leaves no rows."
   }
 }

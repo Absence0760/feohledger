@@ -133,7 +133,6 @@
   "approvalsTitle": "Approbations en attente",
   "approvalsAllCaughtUp": "Tout est à jour !",
   "approvalsNoneWaiting": "Aucune facture en attente d'approbation",
-  "approvalsLoadError": "Impossible de charger les approbations en attente",
   "approvalsPendingCount": "{count, plural, one {{count} facture en attente} other {{count} factures en attente}}",
   "approvalActionApprove": "Approuver",
   "approvalActionReject": "Rejeter",
@@ -1082,5 +1081,12 @@
   "authEmailCodeFailed": "Impossible d'envoyer le code par e-mail. Veuillez réessayer.",
   "exceptionsFilteredEmpty": "{status, select, open{Aucune exception ouverte} escalated{Aucune exception escaladée} resolved{Aucune exception résolue} dismissed{Aucune exception ignorée} other{Aucune exception correspondante}}",
   "contractsFilteredEmpty": "Aucun contrat ne correspond à votre recherche ou à votre filtre.",
-  "commonShowAll": "Tout afficher"
+  "commonShowAll": "Tout afficher",
+  "listLoadMore": "Charger plus",
+  "listShowingCount": "{shown} sur {total} affichés",
+  "listShowingAll": "{count, plural, one {Le seul élément est affiché} other {Les {count} sont affichés}}",
+  "listLoadMoreFailed": "Impossible de charger la suite.",
+  "invoicesLoadErrorPrefix": "Impossible de charger les factures : {error}",
+  "approvalsLoadErrorPrefix": "Impossible de charger les approbations en attente : {error}",
+  "invoicesFilteredEmpty": "Aucune facture ne correspond à ces filtres"
 }

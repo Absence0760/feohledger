@@ -466,9 +466,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get approvalsNoneWaiting => '承認待ちの請求書はありません';
 
   @override
-  String get approvalsLoadError => '承認待ちの請求書を読み込めませんでした';
-
-  @override
   String approvalsPendingCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -4531,4 +4528,38 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get commonShowAll => 'すべて表示';
+
+  @override
+  String get listLoadMore => 'さらに読み込む';
+
+  @override
+  String listShowingCount(int shown, int total) {
+    return '$total 件中 $shown 件を表示';
+  }
+
+  @override
+  String listShowingAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '全 $count 件を表示',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get listLoadMoreFailed => '続きを読み込めませんでした。';
+
+  @override
+  String invoicesLoadErrorPrefix(String error) {
+    return '請求書を読み込めませんでした: $error';
+  }
+
+  @override
+  String approvalsLoadErrorPrefix(String error) {
+    return '承認待ちの請求書を読み込めませんでした: $error';
+  }
+
+  @override
+  String get invoicesFilteredEmpty => 'この条件に一致する請求書はありません';
 }
