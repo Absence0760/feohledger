@@ -1885,7 +1885,15 @@
 		<header>
 			<h2>{m('invoices.modal.header', { number: invoice.invoice_number })}</h2>
 			<div class="header-actions">
-				<button class="icon-btn" onclick={toggleFullscreen} aria-label={fullscreen ? m('invoices.modal.exitFullscreen') : m('invoices.modal.fullscreen')}>
+				<!-- A toggle: one name, its state in aria-pressed (a name that flips with
+				     the state would announce the state twice, or contradict it). -->
+				<button
+					type="button"
+					class="btn-icon"
+					onclick={toggleFullscreen}
+					aria-label={m('invoices.modal.fullscreen')}
+					aria-pressed={fullscreen}
+				>
 					{#if fullscreen}
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 							<polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
@@ -1898,7 +1906,7 @@
 						</svg>
 					{/if}
 				</button>
-				<button class="icon-btn close-btn" onclick={onclose} aria-label={m('invoices.modal.close')}>&times;</button>
+				<button type="button" class="btn-icon" onclick={onclose} aria-label={m('invoices.modal.close')}>&times;</button>
 			</div>
 		</header>
 
@@ -3188,29 +3196,6 @@
 		display: flex;
 		align-items: center;
 		gap: 4px;
-	}
-
-	.icon-btn {
-		background: none;
-		border: 1px solid transparent;
-		border-radius: 4px;
-		cursor: pointer;
-		color: var(--text-muted);
-		padding: 6px;
-		display: grid;
-		place-items: center;
-	}
-
-	.icon-btn:hover {
-		color: var(--text);
-		background: var(--bg);
-		border-color: var(--border);
-	}
-
-	.close-btn {
-		font-size: 1.4rem;
-		line-height: 1;
-		padding: 4px 6px;
 	}
 
 	/* --- Split pane --- */

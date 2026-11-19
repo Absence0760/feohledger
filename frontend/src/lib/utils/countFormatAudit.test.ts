@@ -34,10 +34,7 @@ const FORMATTERS = new Set([
  * two branches do not conflict on them. Each entry names the sites still open.
  * Remove an entry once its file is converted; the test fails on a stale one.
  */
-const PENDING_OTHER_LANE: Record<string, string> = {
-	'/src/lib/components/workflow-mgmt/VersionHistoryModal.svelte':
-		"fmtDate pins toLocaleString('en-US') — owned by a concurrent edit; convert to formatDate"
-};
+const PENDING_OTHER_LANE: Record<string, string> = {};
 
 const RULES: { name: string; pattern: RegExp }[] = [
 	{ name: 'bare toLocaleString()', pattern: /\.toLocale(?:Date|Time)?String\(\s*\)/ },

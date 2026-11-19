@@ -956,6 +956,65 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	cursor: not-allowed;
 }
 
+/* --- Icon button ---
+   A control whose whole label is a glyph: a header ✕, a fullscreen toggle,
+   the /invoices filter toggle. It carries its name in aria-label, never in
+   the glyph. No box at rest, so a header row of them reads as quiet chrome;
+   the box arrives on hover. A text glyph (✕) renders at 1.25rem; an <svg>
+   child keeps its own width / height.
+
+   Target size (WCAG 2.5.8): 24px minimum both ways, whatever the glyph.
+   Focus: the global :focus-visible ring (2px --accent, offset 2px; --accent
+   on --surface 5.55 / 6.95, well past 1.4.11's 3:1).
+
+   Measured, dark / light:
+     rest      --text-muted on --surface 5.38 / 6.27, on --bg 5.86 / 5.75
+     hover     --text on --surface-2                11.01 / 14.68
+     pressed   (:active) as hover, --accent border  (non-text; 4.48 / 5.87
+               against --surface-2)
+     on        [aria-pressed='true'] --accent-on-tint over --accent-tint
+                                                     5.33 / 5.93
+     disabled  --text-muted, as at rest, never `opacity`
+   States sit inside :where(), one class of specificity like the boxed
+   variants. Scoped CSS may size or place it (a 34px toggle, a badge dot
+   on a child), never paint it: sharedButtonClasses.test.ts. */
+.btn-icon {
+	position: relative;
+	display: inline-grid;
+	place-items: center;
+	min-width: 24px;
+	min-height: 24px;
+	padding: 4px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: none;
+	color: var(--text-muted);
+	font-family: inherit;
+	font-size: 1.25rem;
+	line-height: 1;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+.btn-icon:where(:hover:not(:disabled)) {
+	background: var(--surface-2);
+	border-color: var(--border-strong);
+	color: var(--text);
+}
+.btn-icon:where(:active:not(:disabled)) {
+	background: var(--surface-2);
+	border-color: var(--accent);
+	color: var(--text);
+}
+.btn-icon:where([aria-pressed='true']) {
+	background: var(--accent-tint);
+	border-color: var(--accent);
+	color: var(--accent-on-tint);
+}
+.btn-icon:where(:disabled) {
+	color: var(--text-muted);
+	cursor: not-allowed;
+}
+
 /* --- Filter chips (FilterChips) --- */
 .filter-row {
 	display: flex;

@@ -46,6 +46,7 @@
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BLOCK } from '#lib/types/admin.ts';
@@ -597,7 +598,7 @@
 			<button class="btn-load-more" onclick={loadMore} disabled={loadingMore || loading}>
 				{loadingMore
 					? m('common.loading')
-					: m('vendors.loadMore', { shown: items.length, total })}
+					: m('vendors.loadMore', { shown: formatCount(items.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}

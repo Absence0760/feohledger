@@ -20,6 +20,7 @@
 	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import type { MoneyAmount } from '#lib/utils/money.ts';
 	import { isMoneyInput } from '#lib/utils/moneyInput.ts';
 	import {
@@ -454,7 +455,7 @@
 					</div>
 					<div>
 						<span class="spend-label">{m('contracts.modal.spend.invoices')}</span>
-						<span class="spend-value">{spend.invoice_count}</span>
+						<span class="spend-value">{formatCount(spend.invoice_count)}</span>
 					</div>
 					{#if spend.spend_limit !== null}
 						<div>

@@ -627,7 +627,8 @@
 					<Badge tone={runStatusTone(run.status)} variant="status-badge {run.status}">{runLabel(run.status)}</Badge>
 				{/if}
 			</div>
-			<button class="close-btn" onclick={onclose} aria-label={m('paymentRuns.runDetail.close')}>&times;</button>
+			<!-- `.close-btn` is an e2e hook (tests-e2e/payments/), no CSS. -->
+			<button type="button" class="btn-icon close-btn" onclick={onclose} aria-label={m('paymentRuns.runDetail.close')}>&times;</button>
 		</header>
 
 		<div class="body">
@@ -1300,20 +1301,6 @@
 		font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
 		font-size: 0.82rem;
 		color: var(--text-muted);
-	}
-
-	.close-btn {
-		background: none;
-		border: none;
-		font-size: 1.5rem;
-		cursor: pointer;
-		color: var(--text-muted);
-		line-height: 1;
-		padding: 0 4px;
-	}
-
-	.close-btn:hover {
-		color: var(--text);
 	}
 
 	.body {

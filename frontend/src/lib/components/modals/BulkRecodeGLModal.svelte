@@ -128,7 +128,7 @@
 				<h2>{m('invoices.bulkRecode.title')}</h2>
 				<HelpTip term="gl-coding" />
 			</div>
-			<button class="close-btn" onclick={onclose} aria-label={m('invoices.bulkRecode.close')}>&times;</button>
+			<button type="button" class="btn-icon" onclick={onclose} aria-label={m('invoices.bulkRecode.close')}>&times;</button>
 		</header>
 
 		<div class="modal-body">
@@ -268,16 +268,6 @@
 		font-size: 1.1rem;
 		font-weight: 600;
 	}
-	.close-btn {
-		background: none;
-		border: none;
-		font-size: 1.5rem;
-		cursor: pointer;
-		color: var(--text-muted);
-		line-height: 1;
-		padding: 0 4px;
-	}
-
 	.modal-body {
 		padding: 20px;
 		overflow-y: auto;

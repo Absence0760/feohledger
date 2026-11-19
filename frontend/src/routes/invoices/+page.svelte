@@ -39,6 +39,7 @@
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { page } from '$app/state';
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
@@ -163,7 +164,7 @@
 			const batch = Array.from(files).slice(i, i + BATCH);
 			uploadProgress =
 				total > 1
-					? m('invoices.action.uploadingProgress', { done: Math.min(i + BATCH, total), total })
+					? m('invoices.action.uploadingProgress', { done: formatCount(Math.min(i + BATCH, total)), total: formatCount(total) })
 					: m('invoices.action.uploading');
 			const results = await Promise.allSettled(
 				batch.map((file) => api.upload<{ id: string; status: string }>('/api/invoices/upload', file))
@@ -762,7 +763,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('invoices.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
+					m('invoices.toast.selectedTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -977,8 +978,7 @@
 				ariaLabel={m('invoices.search.aria')}
 			/>
 			<button
-				class="advanced-btn"
-				class:has-filters={hasAdvancedFilters}
+				class="btn-icon advanced-btn advanced-toggle"
 				onclick={() => { advancedFilters = { ...advancedFilters, statuses: [...activeStatuses] }; showAdvancedSearch = true; }}
 				aria-label={m('invoices.search.advanced')}
 			>
@@ -1024,7 +1024,7 @@
 				aria-pressed={activeStatuses.length === 0}
 				onclick={() => (activeStatuses = [])}
 			>
-				{m('common.all')} <span class="count">{totalCount}</span>
+				{m('common.all')} <span class="count">{formatCount(totalCount)}</span>
 			</button>
 			{#each chipStatuses as s}
 				<button
@@ -1259,7 +1259,7 @@
 	{#if invoiceStore.hasMore && !invoiceStore.errored}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={loadMoreInvoices} disabled={invoiceStore.loading}>
-				{invoiceStore.loading ? m('common.loading') : m('invoices.loadMore', { shown: invoiceStore.all.length, total: invoiceStore.total })}
+				{invoiceStore.loading ? m('common.loading') : m('invoices.loadMore', { shown: formatCount(invoiceStore.all.length), total: formatCount(invoiceStore.total) })}
 			</button>
 		</div>
 	{:else if invoiceStore.total > 0 && !invoiceStore.errored}
@@ -1339,32 +1339,15 @@
 		gap: 6px;
 	}
 
-	.advanced-btn {
-		position: relative;
-		display: grid;
-		place-items: center;
+	/* Size only: the shared `.btn-icon` paints it and positions the dot's
+	   anchor. `.advanced-btn` stays on the button as the e2e hook, no CSS. */
+	.advanced-toggle {
 		width: 34px;
 		height: 34px;
-		border-radius: 50%;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		cursor: pointer;
-		transition: border-color 0.15s;
-		flex-shrink: 0;
 	}
 
-	.advanced-btn:hover {
-		border-color: var(--accent);
-		color: var(--text);
-	}
-
-	.advanced-btn.has-filters {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.advanced-btn .dot {
+	/* The dot says advanced filters are set. */
+	.advanced-toggle .dot {
 		position: absolute;
 		top: 4px;
 		right: 4px;

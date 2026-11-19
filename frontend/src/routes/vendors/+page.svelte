@@ -37,6 +37,7 @@
 	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import { PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { importVendorsCsv, type PortalInviteResult } from '#lib/api/vendors.ts';
 	import {
 		VENDOR_STATUS_TONES,
@@ -456,7 +457,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('vendors.toast.selectAllTruncated', { shown: res.ids.length, total: res.total }),
+					m('vendors.toast.selectAllTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -831,7 +832,7 @@
 					<td>
 						<span class="source-badge">{sourceLabel(v.source)}</span>
 					</td>
-					<td class="mono">{v.invoice_count}</td>
+					<td class="mono">{formatCount(v.invoice_count)}</td>
 					<td>
 						{#if v.erp_vendor_id}
 							<span
@@ -902,7 +903,7 @@
 	{#if hasMore}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={loadMoreVendors} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('vendors.loadMore', { shown: vendors.length, total })}
+				{loadingMore ? m('common.loading') : m('vendors.loadMore', { shown: formatCount(vendors.length), total: formatCount(total) })}
 			</button>
 		</div>
 	{:else if total > 0}
