@@ -23410,7 +23410,7 @@ invoice's. `adaptive_workflows` does call the locked-rate helper, and its
 code-less rows now come back `unconverted`. That keeps them out of the
 threshold statistics, which is the direction its docstring asks for.
 
-## §NEW-M1. A supplier cannot flip a dead purchase order, and closed counts as dead (round 23, 2026-11-18)
+## 467. A supplier cannot flip a dead purchase order, and closed counts as dead (round 23, 2026-11-18)
 
 **Problem.** The supplier portal offered "Create invoice" on every PO it
 listed, and `POST /api/portal/purchase-orders/{id}/flip` minted an invoice for

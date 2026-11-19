@@ -928,7 +928,7 @@ async def test_po_flip_refuses_a_po_that_no_longer_commits_spend(realdb, dead_st
     flip minted a payable from it. The flip now refuses with a coded 409, the
     list and detail carry the same refusal as `flip_verdict` (one gate, issue
     #575), and nothing is created. `closed` is refused although the matcher
-    accepts it: a flip bills the whole total again (decisions §NEW-M1)."""
+    accepts it: a flip bills the whole total again (decisions §467)."""
     org_id = realdb.info(TENANT).org_id
     mk = realdb.sessionmaker(TENANT)
     vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)

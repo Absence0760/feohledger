@@ -213,7 +213,7 @@ verdict). It refuses, with 409:
   `models/procurement.DEAD_PO_STATUSES` (cancelled, voided, closed; unissued is
   already hidden). Wider than the matcher's `UNMATCHABLE_PO_STATUSES` on
   purpose: a flip bills the whole total again, so on a closed (fully billed)
-  order it is a second bill (`docs/decisions.md` §NEW-M1);
+  order it is a second bill (`docs/decisions.md` §467);
 - `po_total_unverifiable` — the ERP could not vouch for the total
   (decisions §323); the endpoint keeps its plain-string detail.
 
