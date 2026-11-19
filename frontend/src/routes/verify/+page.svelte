@@ -40,6 +40,12 @@
 	// The address already has an account (`signup_email_has_workspace`): the
 	// existing workspace's sign-in page, offered instead of starting over.
 	let existingWorkspaceUrl = $state<string | null>(null);
+	// The token of a completion that failed for a reason a second attempt can
+	// fix — the network, or a 5xx. Completion is idempotent (a re-opened link
+	// answers `already_verified`), so a retry is safe; without it the only way
+	// on from a transient blip was "Start over", i.e. a whole new signup.
+	let retryToken = $state<string | null>(null);
+	let stack = $state<HTMLElement | null>(null);
 	// Only an http(s) URL becomes an href (the same reader the login page's
 	// wrong-workspace link uses).
 	const signInUrl = $derived(
@@ -91,6 +97,17 @@
 			return;
 		}
 		try {
+			await complete(token);
+		} finally {
+			stripToken(token);
+		}
+	});
+
+	async function complete(token: string) {
+		phase = 'pending';
+		retryToken = null;
+		existingWorkspaceUrl = null;
+		try {
 			result = await api.post<CompleteResponse>('/api/signup/complete', { token });
 			phase = 'success';
 		} catch (err) {
@@ -103,11 +120,20 @@
 					err instanceof ApiError && err.code === SIGNUP_EMAIL_HAS_WORKSPACE
 						? ownWorkspaceSignInUrl(err.params)
 						: null;
+				if (!(err instanceof ApiError) || err.status >= 500) retryToken = token;
 			}
-		} finally {
-			stripToken(token);
 		}
-	});
+	}
+
+	function retry() {
+		if (!retryToken) return;
+		// The button unmounts with the error branch; park focus on the live
+		// region that replaces it so a keyboard user is not thrown back to
+		// <body> (the auth shell has no <main> to fall back on, as `ui/LoadError`
+		// does in the app).
+		stack?.focus();
+		void complete(retryToken);
+	}
 </script>
 
 <svelte:head>
@@ -118,7 +144,7 @@
 	<!-- The live region is the persistent wrapper, not a node that appears with
 	     its content: it exists from first paint in the `pending` phase, so the
 	     switch to success or error is a CHANGE inside it and is announced. -->
-	<div class="auth-stack verify" aria-live="polite">
+	<div class="auth-stack verify" aria-live="polite" tabindex="-1" bind:this={stack}>
 		<div class="head">
 			{#if phase === 'success' && result}
 				<div class="done-icon" aria-hidden="true"><IconCheck /></div>
@@ -177,6 +203,9 @@
 			<p class="note">{m('auth.verify.expiredSignInHint')}</p>
 		{:else}
 			<p class="error">{errorMessage}</p>
+			{#if retryToken}
+				<button type="button" class="primary" onclick={retry}>{m('common.tryAgain')}</button>
+			{/if}
 			{#if existingWorkspaceUrl}
 				<a class="primary" href={existingWorkspaceUrl}>{m('auth.login.goToOwnWorkspace')}</a>
 			{/if}
@@ -188,6 +217,8 @@
 <style>
 	/* Heading, error banner and entrance come from AuthShell. */
 	.verify {
+		/* A programmatic focus target only (after Retry), never a control. */
+		outline: none;
 		display: flex;
 		flex-direction: column;
 		gap: 18px;
@@ -247,6 +278,12 @@
 		text-decoration: none;
 		box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--accent) 95%, transparent);
 		transition: transform 0.15s, box-shadow 0.15s;
+	}
+	button.primary {
+		border: none;
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
 	}
 	.primary:hover {
 		transform: translateY(-1px);
