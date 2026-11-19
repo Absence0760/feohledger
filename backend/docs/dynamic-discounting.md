@@ -148,6 +148,14 @@ would be a functional loss, not a safety gain. Nothing is converted here — a
 rate fetched at read time would make a ranking move under the reader
 (`../../docs/decisions.md` §18).
 
+An offer whose own code is missing or malformed carries `currency: null`
+(`build_opportunity` uses `iso_currency_or_none`, never a USD fallback) and is
+unconvertible whatever `reporting_currency` is, including `None`
+(`../../docs/decisions.md` §473, round 31). An invoice-scoped offer on an
+invoice whose currency is unknown is refused at create with the 409
+`discount_offer_invoice_currency_unknown`, even when the caller names a
+currency.
+
 `services/cash_flow_plan.assemble_plan` honours the same flag: an
 `unconvertible` offer is never re-timed onto the plan's cash curve (the curve
 is in the reporting currency; its outlay is not) and is listed in
