@@ -30,6 +30,7 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.pagination import PaginationParams, paginated, pagination_params
+from app.api.refusals import coded_refusal
 from app.models.discount import (
     OFFER_SCOPE_INVOICE,
     OFFER_SCOPE_VENDOR,
@@ -73,7 +74,12 @@ from app.tenant import (
     get_tenant_db,
     get_write_entity_id,
 )
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.dates import utc_today
+
+#: An invoice-scoped offer on an invoice that records no currency, with none
+#: named in the body (decisions §473).
+DISCOUNT_OFFER_CURRENCY_REQUIRED = "discount_offer_currency_required"
 
 router = APIRouter(prefix="/discounts", tags=["discounts"])
 
@@ -360,7 +366,19 @@ async def create_offer(
                 status_code=422, detail="vendor_id does not match the invoice's vendor"
             )
         base_amount = base_amount if base_amount is not None else invoice.amount
-        currency = currency or invoice.currency
+        currency = currency or iso_currency_or_none(invoice.currency)
+        if currency is None:
+            # The invoice records no currency and the caller named none: the
+            # org currency below would label the offer with a code nobody
+            # stated for this payable (decisions §473).
+            raise HTTPException(
+                status_code=422,
+                detail=coded_refusal(
+                    DISCOUNT_OFFER_CURRENCY_REQUIRED,
+                    "The invoice records no currency, so the offer cannot inherit one. "
+                    "Name the offer's currency, or set the invoice's first.",
+                ),
+            )
     elif body.scope == OFFER_SCOPE_VENDOR:
         if not body.vendor_id:
             raise HTTPException(status_code=422, detail="vendor_id required for vendor scope")

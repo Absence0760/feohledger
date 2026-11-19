@@ -217,8 +217,9 @@ class PortalPaymentListItem(BaseModel):
     invoice_number: str
     amount: Decimal
     # The payment's currency, carried so the portal renders the supplier's own
-    # currency instead of falling back to USD. Sourced from the paid invoice.
-    currency: str = "USD"
+    # currency instead of falling back to USD. Sourced from the paid invoice;
+    # ``None`` when that invoice records none (decisions §473).
+    currency: str | None = None
     method: str | None = None
     status: str
     reference: str | None = None

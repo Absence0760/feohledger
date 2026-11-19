@@ -72,6 +72,12 @@ def build_card_idempotency_key(
     return str(uuid.uuid5(CARD_IDEMPOTENCY_NAMESPACE, f"virtual_card:{anchor}:{reissue_seq}"))
 
 
+def _money_label(currency: str | None, amount) -> str:
+    """``"EUR 1,234.00"``, or the bare figure when the invoice records no
+    currency (decisions §473): never a borrowed USD."""
+    return f"{currency} {amount:,.2f}" if currency else f"{amount:,.2f}"
+
+
 async def _reissue_sequence(db: AsyncSession, invoice_id) -> int:
     """Count of cards already persisted for this invoice (incl. cancelled).
 
@@ -764,7 +770,7 @@ async def notify_vendor_of_card(
         f"Hi {vendor.name},\n\n"
         f"{org_name} has issued a virtual card to pay invoice "
         f"{invoice.invoice_number or invoice.id} for "
-        f"{invoice.currency or 'USD'} {(card.amount_limit):,.2f}.\n\n"
+        f"{_money_label(invoice.currency, card.amount_limit)}.\n\n"
         f"View your one-time card details:\n  {link}\n\n"
         "This link will expire in 7 days and can only be used once. "
         "If you didn't expect this email, please reply to let us know.\n"
@@ -786,7 +792,7 @@ async def notify_vendor_of_card(
         + email_credentials(
             [
                 ("Invoice", str(invoice.invoice_number or invoice.id)),
-                ("Amount", f"{invoice.currency or 'USD'} {(card.amount_limit):,.2f}"),
+                ("Amount", _money_label(invoice.currency, card.amount_limit)),
             ]
         )
         + email_button(link, "View your one-time card details", get_brand_context(None))

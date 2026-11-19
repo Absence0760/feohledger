@@ -43,6 +43,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.workflow_engine import VALID_TRANSITIONS
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.search import ilike_contains
 
 router = APIRouter(prefix="/credit-memos", tags=["credit-memos"])
@@ -63,6 +64,10 @@ CREDIT_MEMO_INVOICE_SETTLED = "credit_memo_invoice_settled"
 CREDIT_MEMO_NOT_EDITABLE = "credit_memo_not_editable"
 CREDIT_MEMO_NOT_APPLICABLE = "credit_memo_not_applicable"
 CREDIT_MEMO_EXCEEDS_BALANCE = "credit_memo_exceeds_balance"
+#: A linked create on an invoice that records no currency, with none named in
+#: the body: inheriting would leave the memo code-less, and the reporting
+#: currency is a guess (decisions §473).
+CREDIT_MEMO_CURRENCY_REQUIRED = "credit_memo_currency_required"
 
 _VENDOR_MISMATCH_DETAIL = coded_refusal(
     CREDIT_MEMO_VENDOR_MISMATCH, "Credit memo vendor does not match invoice vendor"
@@ -793,7 +798,19 @@ async def create_credit_memo(
         # When the caller named no currency the memo INHERITS the invoice's, so
         # this only fires on a currency the caller actually asserted.
         _assert_currency_matches(invoice, currency)
-        currency = currency or (invoice.currency or "").strip().upper() or None
+        currency = currency or iso_currency_or_none(invoice.currency)
+        if currency is None:
+            # The invoice records no currency and the caller named none. The
+            # reporting-currency rung below would label the credit with a code
+            # nobody stated for this payable (decisions §473).
+            raise HTTPException(
+                status_code=422,
+                detail=coded_refusal(
+                    CREDIT_MEMO_CURRENCY_REQUIRED,
+                    "The invoice records no currency, so the credit memo cannot inherit "
+                    "one. Name the credit memo's currency, or set the invoice's first.",
+                ),
+            )
         already_applied = (
             await db.execute(
                 select(func.coalesce(func.sum(CreditMemo.amount), Decimal("0"))).where(
@@ -809,7 +826,8 @@ async def create_credit_memo(
             )
         invoice_number = invoice.invoice_number
 
-    # Last rung: the org's own reporting currency (which itself falls back to
+    # Last rung, for an UNLINKED memo only (a linked one resolved above or was
+    # refused): the org's own reporting currency (which itself falls back to
     # the platform default), so a single-currency EUR tenant never has to name
     # a currency and never gets a USD memo it can't apply.
     currency = currency or resolve_reporting_currency(org.settings)

@@ -905,7 +905,9 @@ async def list_my_payments(
                 invoice_id=str(p.invoice_id),
                 invoice_number=inv_num or "",
                 amount=p.amount,
-                currency=inv_currency or "USD",
+                # NULL when the paid invoice records no currency (decisions
+                # §473): the portal renders the figure bare, never as dollars.
+                currency=inv_currency,
                 method=p.method,
                 status=p.status,
                 reference=p.reference,
