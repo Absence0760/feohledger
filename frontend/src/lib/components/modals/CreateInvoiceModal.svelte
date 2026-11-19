@@ -147,7 +147,12 @@
 				/>
 			</label>
 			<label>
-				<span>{m('invoices.modal.field.currency')}</span>
+				<!-- Required like its siblings: a blank currency keeps Create
+				     disabled, so the marker has to say so before the user finds
+				     out from a dead button. CurrencyInput carries `required`
+				     (hence aria-required), `aria-invalid` and the inline reason
+				     once the field is edited. -->
+				<span>{m('invoices.modal.field.currency')} <em class="required">*</em></span>
 				<CurrencyInput bind:value={currency} bind:touched={currencyTouched} preferred={orgCurrency.currency} testid="invoice-currency" />
 			</label>
 			<label>
