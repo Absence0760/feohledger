@@ -42,6 +42,7 @@
 	} from '#lib/types/billing.ts';
 	import { rebateMeterGroups } from '#lib/types/billing.ts';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 	// RBAC: the backend gates `GET /api/billing/subscription` to admin / cfo and
 	// 403s everyone else. `isAdmin` covers admin; `isCfo` = admin|cfo, so the
@@ -269,7 +270,7 @@
 	function asCount(n: string | undefined): string {
 		if (n === undefined || n === '') return '0';
 		const v = Number(n);
-		return Number.isFinite(v) ? v.toLocaleString() : n;
+		return Number.isFinite(v) ? v.toLocaleString(getActiveFormatLocale()) : n;
 	}
 
 	/** Period window label, e.g. "Jun 1 – Jul 1, 2026". */

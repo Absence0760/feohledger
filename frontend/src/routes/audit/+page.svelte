@@ -113,10 +113,19 @@
 		}
 	}
 
+	// Seconds stay: an auditor orders same-minute events by this column. The
+	// bare `toLocaleString()` ignored the in-app locale (a German UI read US
+	// dates under an English-locale browser); formatDate follows the picker.
+	const TIMESTAMP_OPTS: Intl.DateTimeFormatOptions = {
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit',
+		second: '2-digit'
+	};
 	function fmt(iso: string): string {
-		if (!iso) return '';
-		const d = new Date(iso);
-		return d.toLocaleString();
+		return formatDate(iso, '', TIMESTAMP_OPTS);
 	}
 
 	// ---------------------------------------------------------------------
@@ -306,7 +315,7 @@
 		{#snippet body()}
 			{#each entries as entry (entry.id)}
 				<tr>
-					<td class="mono">{fmt(entry.created_at)}</td>
+					<td class="mono" title={entry.created_at}>{fmt(entry.created_at)}</td>
 					<td>{entry.action}</td>
 					<td>{entry.entity_type ?? ''}{entry.entity_id ? ` · ${entry.entity_id.slice(0, 8)}` : ''}</td>
 					<td>{entry.actor_name ?? entry.actor_email ?? '—'}</td>
