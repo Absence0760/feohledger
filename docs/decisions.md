@@ -23439,7 +23439,7 @@ with the coded detail and verdict, the replay after closing, the unvouched
 total's verdict); `frontend/src/lib/types/purchaseOrder.test.ts`;
 `frontend/tests-e2e/portal/portal.spec.ts` (a closed PO offers no control).
 
-## §NEW-N1. A supplier cannot flip a purchase order they have already invoiced (round 24, 2026-11-18)
+## 468. A supplier cannot flip a purchase order they have already invoiced (round 24, 2026-11-18)
 
 **Problem.** §467 stopped the flip on a dead PO, but an `open` PO is often
 already billed: the supplier submitted an ordinary invoice through the portal

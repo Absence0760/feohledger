@@ -1125,7 +1125,7 @@ async def test_po_flip_refuses_an_open_po_this_vendor_already_invoiced(realdb, l
     before the ERP closed it: the flip minted a SECOND invoice for the whole
     total, under an empty number the duplicate detector cannot match. It now
     refuses with a coded 409, the list and detail say so as `flip_verdict`,
-    and nothing is created (decisions §NEW-N1)."""
+    and nothing is created (decisions §468)."""
     org_id = realdb.info(TENANT).org_id
     mk = realdb.sessionmaker(TENANT)
     vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)

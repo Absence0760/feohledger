@@ -928,7 +928,7 @@ _SUPPLIER_VISIBLE_PO = PurchaseOrder.status != UNISSUED_PO_STATUS
 #: The flip's refusal for a PO that no longer represents a live commitment.
 PO_NOT_INVOICEABLE = "po_not_invoiceable"
 #: The flip's refusal for a PO this vendor has already invoiced (decisions
-#: §NEW-N1).
+#: §468).
 PO_ALREADY_INVOICED = "po_already_invoiced"
 #: The flip's refusal for a PO whose total the ERP's last sync could not vouch
 #: for (decisions §323).
@@ -954,7 +954,7 @@ def po_flip_refusal(po: PurchaseOrder, *, already_invoiced: bool) -> ActionRefus
       :func:`_pos_already_invoiced`): an open PO the vendor has billed through
       a normal submit (or AP keyed) before the ERP closes it. The flip would
       bill the whole total a second time, under an empty invoice number the
-      duplicate detector cannot match (decisions §NEW-N1). No params: the
+      duplicate detector cannot match (decisions §468). No params: the
       caller learns only about its own invoices, and not which one.
     - **An unvouched total** (decisions §323): the flip bills ``po.total``, and
       an invoice minted at a figure nobody vouches for would be a payable at an
@@ -999,7 +999,7 @@ async def _pos_already_invoiced(
     or can still become, a payable, and ``failed`` is either a stalled
     extraction or an approved bill whose ERP push is retried. A rejected
     invoice bills nothing while it stays rejected, and the supplier who is
-    told to re-bill needs a way to (decisions §NEW-N1).
+    told to re-bill needs a way to (decisions §468).
 
     Scoped to the caller's own vendor, so the verdict says nothing about any
     other supplier's invoices.

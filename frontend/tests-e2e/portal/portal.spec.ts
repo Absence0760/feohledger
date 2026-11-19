@@ -482,7 +482,7 @@ test.describe("/portal — self-service (PO flip, remittance, company)", () => {
     page,
   }) => {
     // The flip refuses an open PO a live invoice of this vendor already cites
-    // (`po_already_invoiced`, decisions §NEW-N1), and the row says so from its
+    // (`po_already_invoiced`, decisions §468), and the row says so from its
     // `flip_verdict`. Real backend, real rows: an open PO and an ordinary
     // invoice citing it, seeded for the portal vendor.
     await portalSignIn(page);

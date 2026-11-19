@@ -220,7 +220,7 @@ verdict). It refuses, with 409:
   Live is every status but `rejected`. The flip bills the whole total under an
   empty invoice number, so number-based duplicate detection could never catch
   the second bill; the supplier submits an ordinary invoice for any remainder
-  (`docs/decisions.md` §NEW-N1). One query per list page
+  (`docs/decisions.md` §468). One query per list page
   (`api/portal._pos_already_invoiced`). Once a PO is flipped, its own invoice
   cites it, so the row stops offering "Create invoice" too;
 - `po_total_unverifiable` — the ERP could not vouch for the total
