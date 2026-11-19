@@ -23,6 +23,7 @@
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
@@ -83,6 +84,9 @@
 	let pageNum = $state(1);
 	let loading = $state(true);
 	let loadingMore = $state(false);
+	// A failed first-page load is its own state: rendering the table's empty
+	// row instead told the reader no file matched, when nothing had been read.
+	let loadError = $state(false);
 
 	let hasMore = $derived(files.length < total);
 
@@ -182,12 +186,18 @@
 			files = opts.append ? appendUnique(files, data.items) : data.items;
 			total = data.total;
 			pageNum = nextPage;
+			loadError = false;
 		} catch (e) {
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// edit still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			if (!opts.append) files = [];
-			toast(e instanceof Error ? e.message : m('positivePay.toast.loadFailed'), 'error');
+			if (opts.append) {
+				toast(e instanceof Error ? e.message : m('positivePay.toast.loadFailed'), 'error');
+			} else {
+				files = [];
+				total = 0;
+				loadError = true;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -348,58 +358,70 @@
 		<HelpTip term="positive-pay" />
 	</div>
 
-	<DataTable
-		columns={COLUMNS}
-		isEmpty={!loading && files.length === 0}
-		empty={loading ? m('common.loading') : m('positivePay.empty')}
-		colspan={9}
-	>
-		{#snippet body()}
-			{#each files as file (file.id)}
-				<tr
-					class="clickable"
-					onclick={(e) => {
-						if (isRowOpenClick(e)) openDetail(file);
-					}}
-				>
-					<td>
-						<RowLink
-							onclick={() => openDetail(file)}
-							ariaLabel={m('positivePay.row.open', { label: fileLabel(file) })}
-						>
-							{fileLabel(file)}
-						</RowLink>
-					</td>
-					<td class="muted">{m(POSITIVE_PAY_FILE_TYPE_LABEL_KEYS[file.file_type])}</td>
-					<td class="muted">{bankFormatLabel(file.bank_format)}</td>
-					<td class="right mono">{file.item_count}</td>
-					<td class="right mono"><Money amount={file.total_amount} currency={file.currency} /></td>
-					<td class="mono muted">{file.account_last4 ? `••••${file.account_last4}` : '—'}</td>
-					<td class="muted">{formatDate(file.created_at)}</td>
-					<td>
-						<Badge tone={POSITIVE_PAY_STATUS_TONES[file.status]} variant={file.status}>
-							{statusLabel(file.status)}
-						</Badge>
-					</td>
-					<td class="actions">
-						{#if canCreate}
-							<RowAction
-								variant="danger"
-								armed={confirmDeleteId === file.id}
-								disabled={busyId === file.id}
-								onclick={() => deleteFile(file)}
-								ariaLabel={m('positivePay.row.deleteAria', { label: fileLabel(file) })}
+	{#if loadError && !loading}
+		<LoadError
+			message={m('positivePay.toast.loadFailed')}
+			onretry={() => load()}
+			testId="positive-pay-load-error"
+		/>
+	{:else}
+		<DataTable
+			columns={COLUMNS}
+			isEmpty={!loading && files.length === 0}
+			empty={loading
+				? m('common.loading')
+				: typeFilter !== 'all' || appliedSearch
+					? m('positivePay.empty')
+					: m('positivePay.emptyNone')}
+			colspan={9}
+		>
+			{#snippet body()}
+				{#each files as file (file.id)}
+					<tr
+						class="clickable"
+						onclick={(e) => {
+							if (isRowOpenClick(e)) openDetail(file);
+						}}
+					>
+						<td>
+							<RowLink
+								onclick={() => openDetail(file)}
+								ariaLabel={m('positivePay.row.open', { label: fileLabel(file) })}
 							>
-								{confirmDeleteId === file.id ? m('positivePay.row.confirm') : m('positivePay.row.delete')}
-							</RowAction>
-						{/if}
-					</td>
-				</tr>
-			{/each}
-		{/snippet}
-	</DataTable>
+								{fileLabel(file)}
+							</RowLink>
+						</td>
+						<td class="muted">{m(POSITIVE_PAY_FILE_TYPE_LABEL_KEYS[file.file_type])}</td>
+						<td class="muted">{bankFormatLabel(file.bank_format)}</td>
+						<td class="right mono">{file.item_count}</td>
+						<td class="right mono"><Money amount={file.total_amount} currency={file.currency} /></td>
+						<td class="mono muted">{file.account_last4 ? `••••${file.account_last4}` : '—'}</td>
+						<td class="muted">{formatDate(file.created_at)}</td>
+						<td>
+							<Badge tone={POSITIVE_PAY_STATUS_TONES[file.status]} variant={file.status}>
+								{statusLabel(file.status)}
+							</Badge>
+						</td>
+						<td class="actions">
+							{#if canCreate}
+								<RowAction
+									variant="danger"
+									armed={confirmDeleteId === file.id}
+									disabled={busyId === file.id}
+									onclick={() => deleteFile(file)}
+									ariaLabel={m('positivePay.row.deleteAria', { label: fileLabel(file) })}
+								>
+									{confirmDeleteId === file.id ? m('positivePay.row.confirm') : m('positivePay.row.delete')}
+								</RowAction>
+							{/if}
+						</td>
+					</tr>
+				{/each}
+			{/snippet}
+		</DataTable>
+	{/if}
 
-	{#if hasMore}
+	{#if hasMore && !loadError}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
 				{loadingMore ? m('common.loading') : m('positivePay.loadMore', { shown: files.length, total })}

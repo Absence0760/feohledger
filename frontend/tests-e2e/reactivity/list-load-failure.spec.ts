@@ -89,6 +89,27 @@ const CASES: Case[] = [
 		apiPathname: '/api/vendors/change-requests',
 		notShown: /Nothing is waiting for approval/,
 		shown: /Could not load the change-request queue/
+	},
+	{
+		name: 'vendor statements',
+		route: '/vendor-statements',
+		apiPathname: '/api/vendor-statements',
+		notShown: /No reconciliations/,
+		shown: /Failed to load reconciliations/
+	},
+	{
+		name: 'positive pay',
+		route: '/positive-pay',
+		apiPathname: '/api/positive-pay',
+		notShown: /No Positive Pay files/,
+		shown: /Failed to load Positive Pay files/
+	},
+	{
+		name: 'discount offers',
+		route: '/discounts',
+		apiPathname: '/api/discounts/offers',
+		notShown: /No discount offers match this filter/,
+		shown: /Failed to load discount offers/
 	}
 ];
 
