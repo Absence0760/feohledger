@@ -6,7 +6,7 @@
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -15,6 +15,7 @@
 	import { isMoneyInput } from '#lib/utils/moneyInput.ts';
 	import ApprovalMatrixEditor from '#lib/components/modals/ApprovalMatrixEditor.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import WorkflowCanvas from '#lib/components/workflow-builder/WorkflowCanvas.svelte';
 	import StepPalette from '#lib/components/workflow-builder/StepPalette.svelte';
 	import ConditionBuilder from '#lib/components/workflow-builder/ConditionBuilder.svelte';
@@ -44,6 +45,9 @@
 	} from '#lib/types/workflow.ts';
 
 	let workflow = $state<WorkflowDefinition | null>(null);
+	// A failed load, stated in place. It used to be a toast over a "Loading…"
+	// line that never went away, and the toast said "not found" for a 500 too.
+	let loadError = $state<'not_found' | 'failed' | null>(null);
 	let steps = $state<WorkflowStep[]>([]);
 	let selectedIndex = $state<number>(0);
 	let saving = $state(false);
@@ -132,6 +136,7 @@
 
 	async function loadWorkflow(wfId: string) {
 		const token = loadSequence.start();
+		loadError = null;
 		try {
 			const wf = await workflowStore.getById(wfId);
 			// Superseded by a newer load, or by a local canvas edit.
@@ -141,10 +146,12 @@
 			nameInput = wf.name;
 			descInput = wf.description ?? '';
 			selectedIndex = 0;
-		} catch {
+		} catch (e) {
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// edit still failed, and no newer load is coming to report it.
-			if (loadSequence.isCurrentRequest(token)) toast(m('workflows.builder.toast.notFound'), 'error');
+			if (loadSequence.isCurrentRequest(token)) {
+				loadError = e instanceof ApiError && e.status === 404 ? 'not_found' : 'failed';
+			}
 		}
 	}
 
@@ -292,7 +299,19 @@
 <svelte:window onclick={handleWindowClick} />
 
 <div class="workspace">
-	{#if !workflow}
+	{#if !workflow && loadError}
+		<!-- A missing workflow cannot be retried into existence, so it offers the
+		     way back to the list beside Retry. -->
+		<LoadError
+			message={loadError === 'not_found' ? m('workflows.builder.notFound') : m('workflows.builder.loadFailed')}
+			onretry={() => loadWorkflow(id)}
+			testId="workflow-load-error"
+		>
+			{#snippet actions()}
+				<a href="/workflows" class="btn-cancel back-to-list">{m('workflows.builder.aria.back')}</a>
+			{/snippet}
+		</LoadError>
+	{:else if !workflow}
 		<div class="loading">{m('common.loading')}</div>
 	{:else}
 		<header class="toolbar">
@@ -808,6 +827,11 @@
 
 <style>
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
+	/* `.btn-cancel` is a button recipe; on a link it must not underline. */
+	.back-to-list {
+		text-decoration: none;
+	}
+
 	.loading {
 		padding: 60px 20px;
 		text-align: center;

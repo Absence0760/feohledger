@@ -22,7 +22,7 @@ import { exceptionSummary } from './summary';
 const EMPTY_SUMMARY = exceptionSummary();
 
 test.describe('/exceptions load states', () => {
-	test('a FAILED load says so — never "Everything looks good!"', async ({ page }) => {
+	test('a FAILED load says so — never "Everything looks good!" — and Retry recovers', async ({ page }) => {
 		await page.route('**/api/exceptions/summary*', (route) =>
 			route.fulfill({
 				status: 200,
@@ -30,22 +30,41 @@ test.describe('/exceptions load states', () => {
 				body: JSON.stringify(EMPTY_SUMMARY)
 			})
 		);
+		// Fail until Retry is pressed, then answer with an honestly empty queue.
+		let fail = true;
 		await page.route('**/api/exceptions?**', (route) =>
-			route.fulfill({
-				status: 500,
-				contentType: 'application/json',
-				body: JSON.stringify({ detail: 'boom' })
-			})
+			fail
+				? route.fulfill({
+						status: 500,
+						contentType: 'application/json',
+						body: JSON.stringify({ detail: 'boom' })
+					})
+				: route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({ items: [], total: 0, page: 1, page_size: 20 })
+					})
 		);
 
 		await page.goto('/exceptions');
 
-		const empty = page.getByTestId('table-empty');
-		await expect(empty).toBeVisible({ timeout: 10_000 });
-		await expect(empty).toHaveText('Could not load exceptions. Try again.');
+		const failed = page.getByTestId('exceptions-load-error');
+		await expect(failed).toBeVisible({ timeout: 10_000 });
+		await expect(failed).toContainText('Could not load exceptions. Try again.');
 		// The critical negative: we must not claim the queue is clean.
-		await expect(empty).not.toContainText('Everything looks good');
-		await expect(empty).not.toContainText('No exceptions found');
+		await expect(page.getByTestId('table-empty')).toHaveCount(0);
+		await expect(page.getByText('Everything looks good')).toHaveCount(0);
+
+		// The in-place error is the one signal; it is not also toasted.
+		await expect(page.getByText('Failed to load exceptions')).toHaveCount(0);
+
+		fail = false;
+		await failed.getByRole('button', { name: 'Retry' }).click();
+		await expect(page.getByTestId('table-empty')).toHaveText(
+			'No open exceptions. Everything looks good!',
+			{ timeout: 10_000 }
+		);
+		await expect(failed).toHaveCount(0);
 	});
 
 	test('a SLOW load shows the loading state, not the clean-queue message', async ({ page }) => {
