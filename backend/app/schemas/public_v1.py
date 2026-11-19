@@ -42,7 +42,9 @@ class V1Invoice(BaseModel):
     invoice_number: str
     vendor_name: str
     amount: V1Money
-    currency: str
+    # `None` = the invoice records no currency yet (an upload not yet extracted,
+    # or a document naming none). Never a guessed default (decisions §TBD-currency).
+    currency: str | None
     status: str
     invoice_date: date | None = None
     due_date: date | None = None

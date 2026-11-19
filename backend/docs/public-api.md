@@ -178,6 +178,12 @@ V1Invoice = { id, invoice_number, vendor_name, amount, currency,
               status, invoice_date, due_date, created_at }
 ```
 
+`currency` is an ISO 4217 code, or **`null` when the invoice records no
+currency** (an upload extraction has not read yet, or a document that names
+none). It is never filled with a default; treat `null` as "unknown", not USD.
+The `invoice.*` and `exception.raised` webhook payloads below carry the same
+nullable `currency`.
+
 ## Published OpenAPI spec
 
 The `/api/v1` surface ships a **published, versioned OpenAPI document** — the
