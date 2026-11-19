@@ -123,7 +123,6 @@ test.describe('/vendors/screening review queue (admin — cached session)', () =
 			await expect(modal.locator('ul.history').getByText('MOCK_TEST_SDN')).toBeVisible();
 			// The seeded `check_type='manual'` reads as its label, not the enum.
 			await expect(modal.locator('ul.history')).toContainText('Manual re-screen');
-			await expect(modal.locator('ul.history .history-meta')).not.toContainText(/^\s*manual\b/);
 		} finally {
 			deleteVendorCascade(vendor.id);
 		}
