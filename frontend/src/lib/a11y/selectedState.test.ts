@@ -73,6 +73,11 @@ function collectElements(node: unknown, out: Element[] = []): Element[] {
 }
 
 function silentToggles(path: string, source: string): string[] {
+	// Cheap pre-check before the compiler parse, which is the whole cost of a
+	// tree scan (~250 files: past vitest's 5 s budget under a parallel run).
+	// The rule is about a `class:active` directive, so skipping a file without it cannot hide a finding; the inline
+	// self-tests go through this line too.
+	if (!source.includes('class:active')) return [];
 	const ast = parse(source, { modern: true });
 	const lines = source.split('\n');
 	return collectElements(ast.fragment)

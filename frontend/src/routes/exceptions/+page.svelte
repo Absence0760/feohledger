@@ -14,6 +14,7 @@
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Tabs from '#lib/components/ui/Tabs.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
@@ -562,8 +563,14 @@
 			// blanking the rows here would discard what it is about to publish.
 			if (!fetchSequence.isCurrentRequest(token)) return;
 			errored = true;
-			if (!opts.append) exceptions = [];
-			toast(m('exceptions.toast.loadFailed'), 'error');
+			// A failed first page is stated in place, with a Retry (`LoadError`
+			// below); a failed Load more keeps its rows, so only a toast can say so.
+			// The total goes with the rows: left behind, the footer read
+			// "Load more (0 of N)" under the in-place error.
+			if (!opts.append) {
+				exceptions = [];
+				total = 0;
+			} else toast(m('exceptions.toast.loadFailed'), 'error');
 		} finally {
 			// Flags and selection belong to the newest request only: a stale
 			// response used to clear the spinner while the live fetch was still
@@ -1067,9 +1074,7 @@
 	let emptyMessage = $derived(
 		loading
 			? m('common.loading')
-			: errored
-				? m('exceptions.empty.errored')
-				: statusFilter === 'open' && !typeFilter && severityFilter === 'all' && !appliedSearch
+			: statusFilter === 'open' && !typeFilter && severityFilter === 'all' && !appliedSearch
 					? m('exceptions.empty.open')
 					: m('exceptions.empty.other')
 	);
@@ -1171,6 +1176,15 @@
 	     right edge. Fixed layout sizes the columns from the header row; the
 	     long single-line values clip with an ellipsis and keep the full text
 	     in `title`. -->
+	{#if errored && exceptions.length === 0 && !loading}
+		<!-- "Could not load exceptions. Try again." used to sit in the empty row
+		     with nothing to try again WITH; the reader had to reload the page. -->
+		<LoadError
+			message={m('exceptions.empty.errored')}
+			onretry={() => loadExceptions()}
+			testId="exceptions-load-error"
+		/>
+	{:else}
 	<div class="exc-table">
 	<DataTable columns={COLUMNS} isEmpty={exceptions.length === 0} empty={emptyMessage} colspan={11} fixed>
 		{#snippet header()}
@@ -1308,6 +1322,7 @@
 		{/snippet}
 	</DataTable>
 	</div>
+	{/if}
 
 	{#if hasMore}
 		<div class="load-more-row">

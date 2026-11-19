@@ -13,6 +13,12 @@
 		/** When true, renders a tighter padded square — for icon-only buttons. */
 		icon?: boolean;
 		disabled?: boolean;
+		/** The action's own request is in flight. The button refuses further
+		 *  clicks and announces `aria-busy`, so an armed confirm cannot send its
+		 *  request twice. Spelled `aria-disabled` rather than `disabled` so a
+		 *  keyboard user who just pressed it keeps focus (a natively disabled
+		 *  button drops focus to `<body>`). Ignored for the `href` form. */
+		busy?: boolean;
 		title?: string;
 		ariaLabel?: string;
 		/** Id of an element describing the action — e.g. why a disabled action
@@ -32,6 +38,7 @@
 		armed = false,
 		icon = false,
 		disabled = false,
+		busy = false,
 		title,
 		ariaLabel,
 		describedby,
@@ -40,6 +47,17 @@
 		type = 'button',
 		children,
 	}: Props = $props();
+
+	function handleClick(e: MouseEvent) {
+		if (busy) {
+			// Swallow it whole: a row action's click usually also opens or
+			// un-arms something further up the tree.
+			e.preventDefault();
+			e.stopPropagation();
+			return;
+		}
+		onclick?.(e);
+	}
 </script>
 
 {#if href}
@@ -64,12 +82,15 @@
 		class:variant-danger={variant === 'danger'}
 		class:armed
 		class:icon
+		class:busy
 		{type}
 		{disabled}
-		{onclick}
+		onclick={handleClick}
 		title={title ?? null}
 		aria-label={ariaLabel ?? null}
 		aria-describedby={describedby ?? null}
+		aria-disabled={busy || null}
+		aria-busy={busy || null}
 	>
 		{@render children()}
 	</button>
@@ -104,7 +125,7 @@
 		height: 28px;
 	}
 
-	.row-action:hover:not(:disabled) {
+	.row-action:hover:not(:disabled):not(.busy) {
 		border-color: var(--accent);
 		color: var(--accent);
 	}
@@ -144,5 +165,10 @@
 	.row-action:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.row-action.busy {
+		opacity: 0.6;
+		cursor: progress;
 	}
 </style>

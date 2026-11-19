@@ -111,10 +111,13 @@ export const enPortal = {
 	'portal.invoices.einvoiceDownloadFailed': 'Could not download the e-invoice.',
 	'portal.invoices.preparing': 'Preparing…',
 	'portal.invoices.fileDownloadFailed': 'Download failed',
+	'portal.invoices.tableAria': 'Your invoices',
+	'portal.invoices.chatLoadFailed': 'The conversation could not be loaded.',
 
 	// Portal payments (routes/portal/payments/+page.svelte)
 	'portal.payments.title': 'Payments',
 	'portal.payments.loadFailed': 'Load failed',
+	'portal.payments.tableAria': 'Your payments',
 	'portal.payments.downloadFailed': 'Download failed',
 	'portal.payments.empty': 'No payments yet.',
 	'portal.payments.emptyHint': 'Payments appear here once your customer has issued them.',
@@ -157,6 +160,8 @@ export const enPortal = {
 	'portal.po.col.total': 'Total',
 	'portal.po.col.status': 'Status',
 	'portal.po.createInvoice': 'Create invoice',
+	'portal.po.refusal.notInvoiceable': 'No longer open for invoicing',
+	'portal.po.refusal.alreadyInvoiced': 'Already invoiced',
 	'portal.po.totalUnverifiable': 'Being confirmed',
 	'portal.po.totalUnverifiableNote':
 		'Totals shown as “Being confirmed” are being re-checked by your customer, so an invoice cannot be created from those orders here. Submit your own invoice for them instead.',
@@ -176,6 +181,7 @@ export const enPortal = {
 	'portal.discounts.filter.captured': 'Captured',
 	'portal.discounts.filter.closed': 'Closed',
 	'portal.discounts.loadFailed': 'Load failed',
+	'portal.discounts.tableAria': 'Your discount offers',
 	'portal.discounts.acceptFailed': 'Accept failed',
 	'portal.discounts.declineFailed': 'Decline failed',
 	'portal.discounts.loadMore': 'Load more ({shown} of {total})',
@@ -196,6 +202,9 @@ export const enPortal = {
 	'portal.discounts.tier': '{days}d → {percent}',
 	'portal.discounts.accept': 'Accept',
 	'portal.discounts.decline': 'Decline',
+	'portal.discounts.declineConfirm': 'Confirm decline',
+	'portal.discounts.emptyFiltered': 'No offers match this filter.',
+	'portal.discounts.clearFilter': 'Show all offers',
 	'portal.discounts.dialog.title': 'Accept early-payment discount',
 	'portal.discounts.dialog.subtitle':
 		"Accepting confirms you'll take the discount in exchange for earlier payment. It does not move any money — your customer still processes the payment.",
@@ -209,6 +218,7 @@ export const enPortal = {
 
 	// Portal company (routes/portal/company/+page.svelte)
 	'portal.company.title': 'Company Info',
+	'portal.company.loadFailed': "Couldn’t load your company details. Try again.",
 	'portal.company.pendingBanner':
 		'A change to your {changeType} is pending AP approval. It takes effect once your customer approves it.',
 	'portal.company.contact.title': 'Contact details',

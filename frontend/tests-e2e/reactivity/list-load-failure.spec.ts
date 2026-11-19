@@ -1,3 +1,4 @@
+import type { Payment } from '#lib/types/payment.ts';
 import type { VendorChangeRequestPage } from '#lib/types/vendor.ts';
 
 import { expect, test } from '../fixtures/helpers';
@@ -24,6 +25,8 @@ interface Case {
 	shown: RegExp;
 	/** Extra setup after landing on the route (e.g. switching tab). */
 	before?: (page: import('@playwright/test').Page) => Promise<void>;
+	/** The page renders `ui/LoadError`, so the error carries a Retry. */
+	retry?: true;
 }
 
 const CASES: Case[] = [
@@ -36,6 +39,7 @@ const CASES: Case[] = [
 	},
 	{
 		name: 'contracts',
+		retry: true,
 		route: '/contracts',
 		apiPathname: '/api/contracts',
 		notShown: /No contracts match your filters/,
@@ -43,6 +47,7 @@ const CASES: Case[] = [
 	},
 	{
 		name: 'expenses',
+		retry: true,
 		route: '/expenses',
 		apiPathname: '/api/expenses',
 		notShown: /No expenses match your filters/,
@@ -50,6 +55,7 @@ const CASES: Case[] = [
 	},
 	{
 		name: 'payments (history tab)',
+		retry: true,
 		route: '/payments',
 		apiPathname: '/api/payments',
 		notShown: /No payments match your filters/,
@@ -74,6 +80,7 @@ const CASES: Case[] = [
 		// it: "No accounts in this chart." is a claim a clerk acts on by asking
 		// someone to sync the ERP, and it must not be what an outage looks like.
 		name: 'gl accounts',
+		retry: true,
 		route: '/gl-accounts',
 		apiPathname: '/api/gl-accounts',
 		notShown: /No accounts in this chart/,
@@ -89,6 +96,107 @@ const CASES: Case[] = [
 		apiPathname: '/api/vendors/change-requests',
 		notShown: /Nothing is waiting for approval/,
 		shown: /Could not load the change-request queue/
+	},
+	// The procure-to-pay lists. Each toasted its failure and then let the
+	// empty line stand — "No purchase orders." is what a clerk reads before
+	// keying an invoice as non-PO spend.
+	{
+		name: 'purchase orders',
+		retry: true,
+		route: '/purchase-orders',
+		apiPathname: '/api/purchase-orders',
+		notShown: /No purchase orders\./,
+		shown: /Could not load purchase orders/
+	},
+	{
+		name: 'goods receipts',
+		retry: true,
+		route: '/goods-receipts',
+		apiPathname: '/api/goods-receipts',
+		notShown: /No goods receipts\./,
+		shown: /Could not load goods receipts/
+	},
+	{
+		name: 'requisitions',
+		retry: true,
+		route: '/requisitions',
+		apiPathname: '/api/requisitions',
+		notShown: /No requisitions match your filters/,
+		shown: /Could not load requisitions/
+	},
+	{
+		name: 'intake',
+		retry: true,
+		route: '/intake',
+		apiPathname: '/api/intake',
+		notShown: /No intake requests match your filters/,
+		shown: /Could not load intake requests/
+	},
+	{
+		name: 'budgets',
+		retry: true,
+		route: '/budgets',
+		apiPathname: '/api/budgets',
+		notShown: /No budgets match your filters/,
+		shown: /Could not load budgets/
+	},
+	{
+		retry: true,
+		name: 'vendor statements',
+		route: '/vendor-statements',
+		apiPathname: '/api/vendor-statements',
+		notShown: /No reconciliations/,
+		shown: /Failed to load reconciliations/
+	},
+	{
+		retry: true,
+		name: 'positive pay',
+		route: '/positive-pay',
+		apiPathname: '/api/positive-pay',
+		notShown: /No Positive Pay files/,
+		shown: /Failed to load Positive Pay files/
+	},
+	{
+		retry: true,
+		name: 'discount offers',
+		route: '/discounts',
+		apiPathname: '/api/discounts/offers',
+		notShown: /No discount offers match this filter/,
+		shown: /Failed to load discount offers/
+	},
+	// The four /expenses sub-tabs only toasted a failed load and left their
+	// "No … yet." empty line standing; each now renders `ui/LoadError`.
+	{
+		retry: true,
+		name: 'expense reports (reports tab)',
+		route: '/expenses?tab=reports',
+		apiPathname: '/api/expense-reports',
+		notShown: /No expense reports yet/,
+		shown: /Failed to load expense reports/
+	},
+	{
+		retry: true,
+		name: 'expense policies (policies tab)',
+		route: '/expenses?tab=policies',
+		apiPathname: '/api/expense-policies',
+		notShown: /No expense policies yet/,
+		shown: /Failed to load policies/
+	},
+	{
+		retry: true,
+		name: 'expense pre-approvals (pre-approvals tab)',
+		route: '/expenses?tab=preapprovals',
+		apiPathname: '/api/expense-preapprovals',
+		notShown: /No pre-approval requests/,
+		shown: /Failed to load pre-approvals/
+	},
+	{
+		retry: true,
+		name: 'card transactions (cards tab)',
+		route: '/expenses?tab=cards',
+		apiPathname: '/api/corporate-card-transactions',
+		notShown: /No card transactions/,
+		shown: /Failed to load card transactions/
 	}
 ];
 
@@ -116,6 +224,9 @@ for (const c of CASES) {
 
 		await expect(page.getByText(c.shown)).toBeVisible();
 		await expect(page.getByText(c.notShown)).toHaveCount(0);
+		// A way back, not just a message: `ui/LoadError`'s Retry is the only
+		// route off the dead end once the toast is dismissed.
+		if (c.retry) await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
 	});
 }
 
@@ -208,4 +319,226 @@ test('vendor change requests: a failed RE-load clears the previous filter\'s row
 	// ...and the footer must not keep reporting the stale tally as this
 	// filter's answer either.
 	await expect(page.getByText(/Showing all 1/)).toHaveCount(0);
+});
+
+/**
+ * Retry has to be a real retry, every time — not only the first.
+ *
+ * `ui/LoadError` expects the caller's error flag to clear when the request
+ * STARTS: that unmounts the block (the loading line shows while the request is
+ * out), and a second failure mounts a fresh `role="alert"`, which is what a
+ * screen reader announces. The contracts / expenses / payments stores cleared
+ * `errored` only on success, so Retry left the block standing — a silent no-op
+ * to look at — and a second failure changed nothing, so it was never announced.
+ *
+ * The second response is HELD until the test has seen the block go: that is
+ * the observable difference, since the block reads the same before and after.
+ * Requests are answered by a `mode` the test sets, not by a count, so an extra
+ * mount-time fetch cannot shift which response is which.
+ */
+const EMPTY_LIST = JSON.stringify({ items: [], total: 0, page: 1, page_size: 20 });
+
+interface RetryCase {
+	name: string;
+	route: string;
+	apiPathname: string;
+	errorText: RegExp;
+}
+
+const RETRY_CASES: RetryCase[] = [
+	{
+		name: 'contracts',
+		route: '/contracts',
+		apiPathname: '/api/contracts',
+		errorText: /Could not load contracts/
+	},
+	{
+		name: 'payments (history tab)',
+		route: '/payments?tab=history',
+		apiPathname: '/api/payments',
+		errorText: /Could not load payments/
+	}
+];
+
+for (const c of RETRY_CASES) {
+	test(`${c.name}: a Retry that fails a second time still shows the error (and recovers on the third)`, async ({
+		page
+	}) => {
+		let mode: 'fail' | 'hold-then-fail' | 'ok' = 'fail';
+		let release: () => void = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+
+		await page.route(`**${c.apiPathname}*`, async (route) => {
+			// Exact pathname only — `/api/payments/counts`, `/queue`, `/summary`
+			// hang off the same prefix and keep loading normally.
+			if (new URL(route.request().url()).pathname !== c.apiPathname) {
+				await route.continue();
+				return;
+			}
+			if (mode === 'ok') {
+				await route.fulfill({ status: 200, contentType: 'application/json', body: EMPTY_LIST });
+				return;
+			}
+			if (mode === 'hold-then-fail') await held;
+			await route.fulfill({
+				status: 500,
+				contentType: 'application/json',
+				body: JSON.stringify({ detail: 'boom' })
+			});
+		});
+
+		await page.goto(c.route);
+
+		const alert = page.getByRole('alert').filter({ hasText: c.errorText });
+		await expect(alert).toBeVisible();
+
+		// Retry #1: the block must come down while the request is out.
+		mode = 'hold-then-fail';
+		await alert.getByRole('button', { name: 'Retry' }).click();
+		await expect(alert).toHaveCount(0);
+
+		// ...and come back when that request fails too.
+		release();
+		await expect(alert).toBeVisible();
+
+		// Retry #2 succeeds: the error is gone and the (empty) table stands.
+		mode = 'ok';
+		await alert.getByRole('button', { name: 'Retry' }).click();
+		await expect(page.getByTestId('table-empty')).toBeVisible();
+		await expect(alert).toHaveCount(0);
+	});
+}
+
+/**
+ * /payments History: a failed RE-load replaces the previous filter's rows.
+ *
+ * The History error used to be gated on an empty list
+ * (`paymentStore.errored && all.length === 0`), but the store keeps its rows
+ * on a failed fetch — so a chip click whose request 500'd left the PREVIOUS
+ * filter's payments under the new chip, with nothing saying they were stale.
+ * It now gates like /invoices: errored and not loading.
+ */
+test('payments history: a failed RE-load replaces the previous filter\'s rows', async ({
+	page
+}) => {
+	const PATHNAME = '/api/payments';
+	const STALE_VENDOR = 'Stale History Vendor';
+
+	const stalePayment = {
+		id: '00000000-0000-4000-8000-0000000000c1',
+		correlation_id: null,
+		invoice_id: '00000000-0000-4000-8000-0000000000c2',
+		payment_run_id: null,
+		amount: 125,
+		method: 'ach',
+		status: 'completed',
+		reference: null,
+		created_at: new Date().toISOString(),
+		updated_at: null,
+		currency: 'USD',
+		vendor_name: STALE_VENDOR,
+		invoice_number: 'INV-STALE-1',
+		card_last_four: null,
+		card_provider: null,
+		card_id: null,
+		void_refusal: null
+	} satisfies Payment;
+
+	// Answered by mode, not by count, so a second mount-time fetch still gets
+	// the good page.
+	let failing = false;
+	await page.route(`**${PATHNAME}*`, async (route) => {
+		if (new URL(route.request().url()).pathname !== PATHNAME) {
+			await route.continue();
+			return;
+		}
+		if (!failing) {
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ items: [stalePayment], total: 1, page: 1, page_size: 20 })
+			});
+			return;
+		}
+		await route.fulfill({
+			status: 500,
+			contentType: 'application/json',
+			body: JSON.stringify({ detail: 'boom' })
+		});
+	});
+
+	await page.goto('/payments?tab=history');
+
+	// The good load landed — this is the row that must not survive the next one.
+	await expect(page.getByText(STALE_VENDOR)).toBeVisible();
+
+	// A chip click re-queries the server, and that query fails. Non-exact: the
+	// chip's accessible name carries its tally once `/counts` lands.
+	failing = true;
+	await page.getByRole('button', { name: /^Failed/ }).click();
+
+	await expect(page.getByTestId('history-error')).toContainText('Could not load payments.');
+	await expect(page.getByText(STALE_VENDOR)).toHaveCount(0);
+	await expect(page.getByText(/Showing all 1/)).toHaveCount(0);
+});
+
+/**
+ * /invoices: a held Retry after a failed RE-load shows no stale row.
+ *
+ * The store kept its rows on a failed fresh load, hidden only while `errored`
+ * held. Retry clears `errored` the moment it starts, so the PREVIOUS filter's
+ * invoices redrew — clickable and selectable — as the answer to a filter the
+ * server had not yet run, until the retry answered. The store now empties the
+ * list on a failed fresh load (as the workflows store does), so the held retry
+ * shows the loading line and nothing else.
+ */
+test('invoices: a held Retry after a failed RE-load shows no stale row', async ({ page }) => {
+	const PATHNAME = '/api/invoices';
+	const rows = page.locator('tbody tr.clickable');
+	let mode: 'real' | 'fail' | 'hold' = 'real';
+	let release: () => void = () => {};
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+
+	await page.route(`**${PATHNAME}*`, async (route) => {
+		// Exact pathname only — `/api/invoices/counts` keeps loading normally.
+		if (new URL(route.request().url()).pathname !== PATHNAME || mode === 'real') {
+			await route.continue();
+			return;
+		}
+		if (mode === 'hold') {
+			await held;
+			await route.continue();
+			return;
+		}
+		await route.fulfill({
+			status: 500,
+			contentType: 'application/json',
+			body: JSON.stringify({ detail: 'boom' })
+		});
+	});
+
+	await page.goto('/invoices');
+	// The seed's invoices landed — these are the rows that must not come back.
+	await expect(rows.first()).toBeVisible();
+
+	// A chip click re-queries the server, and that query fails.
+	mode = 'fail';
+	await page.locator('nav.filters .filter-chip', { hasText: /^New(\s|$)/ }).click();
+	const error = page.getByTestId('invoices-load-error');
+	await expect(error).toBeVisible();
+	await expect(rows).toHaveCount(0);
+
+	// Retry, held: the error comes down and the loading line stands alone.
+	mode = 'hold';
+	await error.getByRole('button', { name: 'Retry' }).click();
+	await expect(error).toHaveCount(0);
+	await expect(page.getByTestId('table-empty')).toHaveText('Loading…');
+	await expect(rows).toHaveCount(0);
+
+	release();
+	await expect(page.getByTestId('table-empty').or(rows.first())).toBeVisible();
 });

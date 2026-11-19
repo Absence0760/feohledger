@@ -7,6 +7,7 @@
 	import UsageMeter from '#lib/components/assistant/UsageMeter.svelte';
 	import ChatLayout from '#lib/components/assistant/ChatLayout.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import type {
 		ChatResponse,
 		ConversationDetail,
@@ -144,11 +145,18 @@
 		applyFinal(payload, assistantId);
 	}
 
+	/** A token count in the in-app locale. A bare `toLocaleString()` reads the
+	 *  BROWSER's locale, so a German UI on an English browser printed
+	 *  "12,000" inside a German sentence. */
+	function formatCount(n: number): string {
+		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
+	}
+
 	/** The over-budget notice, in place of the empty in-progress bubble. */
 	function showBudgetNotice(err: AssistantBudgetError, assistantId: string) {
 		budgetNotice = m('assistant.budget.reached', {
-			used: err.used.toLocaleString(),
-			budget: err.budget.toLocaleString()
+			used: formatCount(err.used),
+			budget: formatCount(err.budget)
 		});
 		dropMessage(assistantId);
 	}

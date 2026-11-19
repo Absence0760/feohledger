@@ -698,7 +698,9 @@ test.describe('accessibility — KPI pending affordance (WCAG 4.1.2 / 1.3.1)', (
 
 		try {
 			await page.goto('/billing');
-			const row = page.locator('.kpi-row').first();
+			// The extraction counters, not `AiUsagePanel`'s overage row, which
+			// now sits above them in the usage section.
+			const row = page.getByTestId('billing-usage-counts').locator('.kpi-row');
 			await expect(row.locator('.kpi').first()).toBeVisible();
 
 			// Two cards, not the empty-state's rebate-augmented row: `rebateGroups`

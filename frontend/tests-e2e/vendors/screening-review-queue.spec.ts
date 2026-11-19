@@ -121,6 +121,8 @@ test.describe('/vendors/screening review queue (admin — cached session)', () =
 			// field above renders the same matched-list name, so an unscoped
 			// getByText resolves to two legitimate elements (strict-mode violation).
 			await expect(modal.locator('ul.history').getByText('MOCK_TEST_SDN')).toBeVisible();
+			// The seeded `check_type='manual'` reads as its label, not the enum.
+			await expect(modal.locator('ul.history')).toContainText('Manual re-screen');
 		} finally {
 			deleteVendorCascade(vendor.id);
 		}
@@ -142,6 +144,43 @@ test.describe('/vendors/screening review queue (admin — cached session)', () =
 			// Admin holds vendor.block AND is a manager → both controls present.
 			await expect(modal.getByRole('button', { name: 'Block payments' })).toBeVisible();
 			await expect(modal.getByRole('button', { name: 'Re-screen now' })).toBeVisible();
+		} finally {
+			deleteVendorCascade(vendor.id);
+		}
+	});
+
+	// Unblock releases payments to a vendor a screen stopped, so it is armed
+	// two-click; Block (the safe, urgent direction) stays one click.
+	test('Unblock payments is armed: the first click only asks to confirm', async ({ page }) => {
+		const name = `Screen-Unblock Co ${Date.now()}`;
+		const vendor = await createVendor(page, name);
+		try {
+			flagForReview(vendor.id);
+			await page.goto('/vendors/screening');
+			await page.locator('table tbody tr', { hasText: name }).locator('.row-link').click();
+			const modal = page.getByRole('dialog', { name: 'Vendor screening review' });
+
+			await modal.getByRole('button', { name: 'Block payments' }).click();
+			const unblock = modal.getByRole('button', { name: 'Unblock payments' });
+			await expect(unblock).toBeVisible();
+
+			let unblockCalls = 0;
+			page.on('request', (r) => {
+				if (r.method() === 'POST' && r.url().endsWith(`/api/vendors/${vendor.id}/unblock`)) {
+					unblockCalls += 1;
+				}
+			});
+			await unblock.click();
+			const confirm = modal.getByRole('button', { name: 'Confirm unblock' });
+			await expect(confirm).toBeVisible();
+			expect(unblockCalls, 'the arming click sends nothing').toBe(0);
+
+			const unblocked = page.waitForResponse(
+				(r) => r.request().method() === 'POST' && r.url().endsWith(`/api/vendors/${vendor.id}/unblock`)
+			);
+			await confirm.click();
+			expect((await unblocked).status()).toBe(200);
+			await expect(modal.getByRole('button', { name: 'Block payments' })).toBeVisible();
 		} finally {
 			deleteVendorCascade(vendor.id);
 		}

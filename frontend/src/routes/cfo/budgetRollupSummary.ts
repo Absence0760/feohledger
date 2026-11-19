@@ -9,6 +9,7 @@
  */
 
 import type { BudgetRollup } from '#lib/types/budget.ts';
+import { formatPercent, pointsToRatioString } from '#lib/utils/percent.ts';
 
 /**
  * How many budgets across the whole rollup have gone over their allocation.
@@ -34,10 +35,12 @@ export function overBudgetCount(rollup: BudgetRollup | null): number {
  *
  * A blank or non-numeric string is also refused: a provider figure that can't
  * be read must not become `NaN%` on a CFO's dashboard.
+ *
+ * The figure is a 0–100 `Decimal` string at two places ("12.00"); it renders
+ * through the shared `formatPercent` at those two places, so the percent sign
+ * and decimal separator follow the active locale ("12,00 %" in French).
  */
 export function formatUtilization(pct: string | null | undefined): string | null {
-	if (pct === null || pct === undefined) return null;
-	const trimmed = pct.trim();
-	if (!trimmed || !Number.isFinite(Number(trimmed))) return null;
-	return `${trimmed}%`;
+	if (pointsToRatioString(pct) === null) return null;
+	return formatPercent(pct, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

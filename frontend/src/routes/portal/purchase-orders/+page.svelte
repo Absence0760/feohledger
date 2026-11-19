@@ -8,11 +8,20 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import UnverifiedMoney from '#lib/components/ui/UnverifiedMoney.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
+	import { poStatusLabel } from '#lib/types/purchaseOrder.ts';
+	import { PO_TOTAL_UNVERIFIABLE, poFlipRefusalText } from '#lib/types/portalPurchaseOrder.ts';
 
+	// `flip_verdict` is the server's answer to "would the flip mint an invoice
+	// from this PO?" (`api/portal.po_flip_refusal`) — read it, never restate
+	// the status rule here (frontend/docs/ui-patterns.md § read the server's
+	// verdict).
 	type PortalPO = PortalPOListItem;
 
 	let items = $state<PortalPO[]>([]);
@@ -23,7 +32,8 @@
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let error = $state('');
-	let message = $state('');
+	// A failed first-page read — never rendered as "no purchase orders yet".
+	let loadError = $state('');
 	let flipping = $state<string | null>(null);
 
 	const hasMore = $derived(items.length < total);
@@ -40,6 +50,7 @@
 		if (opts.append) loadingMore = true;
 		else loading = true;
 		error = '';
+		if (!opts.append) loadError = '';
 		try {
 			const res = await listPortalPurchaseOrders({
 				page: nextPage,
@@ -52,7 +63,14 @@
 		} catch (err) {
 			// `isCurrentRequest`, not `canCommit` — a superseded load still failed.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			error = err instanceof Error ? err.message : m('portal.po.loadFailed');
+			const msg = err instanceof Error ? err.message : m('portal.po.loadFailed');
+			if (opts.append) {
+				error = msg;
+			} else {
+				items = [];
+				total = 0;
+				loadError = msg;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -69,13 +87,15 @@
 	async function flip(po: PortalPO) {
 		flipping = po.id;
 		error = '';
-		message = '';
 		try {
 			await portalApi.post<{ message: string }>(
 				`/api/portal/purchase-orders/${po.id}/flip`,
 				{}
 			);
-			message = m('portal.po.created', { po: po.po_number });
+			// A toast, not page state: the confirmation has to survive the
+			// navigation below, which unmounted the old in-page message before
+			// anyone could read it.
+			toast(m('portal.po.created', { po: po.po_number }), 'success');
 			// Land the supplier on their invoices so they can see it in the queue.
 			await goto('/portal/invoices');
 		} catch (err) {
@@ -94,10 +114,11 @@
 	</header>
 
 	{#if error}<div class="error" role="alert">{error}</div>{/if}
-	<div role="status">{#if message}<div class="message">{message}</div>{/if}</div>
 
 	{#if loading && !items.length}
 		<div class="loading">{m('portal.common.loading')}</div>
+	{:else if loadError}
+		<LoadError message={loadError} onretry={refresh} testId="portal-po-load-error" />
 	{:else if !items.length}
 		<div class="empty">
 			<p>{m('portal.po.empty')}</p>
@@ -134,19 +155,36 @@
 								label={m('portal.po.totalUnverifiable')}
 							/>
 						</td>
-						<td><span class="status s-{po.status}">{po.status}</span></td>
+						<td><span class="status">{poStatusLabel(po.status, m)}</span></td>
 						<td class="actions">
-							<!-- The server refuses to bill a total it cannot confirm
-							     (409); the note above the table says why. -->
-							<button
-								type="button"
-								class="flip-btn"
-								disabled={flipping === po.id || po.total_unverifiable}
-								aria-describedby={po.total_unverifiable ? 'po-unverifiable-note' : undefined}
-								onclick={() => flip(po)}
-							>
-								{flipping === po.id ? m('portal.po.creating') : m('portal.po.createInvoice')}
-							</button>
+							{#if isAllowed(po.flip_verdict)}
+								<button
+									type="button"
+									class="flip-btn"
+									disabled={flipping === po.id}
+									onclick={() => flip(po)}
+								>
+									{flipping === po.id ? m('portal.po.creating') : m('portal.po.createInvoice')}
+								</button>
+							{:else if po.flip_verdict?.code === PO_TOTAL_UNVERIFIABLE}
+								<!-- The supplier can act on this one (submit their own
+								     invoice), so the control stays, disabled, and the
+								     note above the table says why. -->
+								<button
+									type="button"
+									class="flip-btn"
+									disabled
+									aria-describedby="po-unverifiable-note"
+								>
+									{m('portal.po.createInvoice')}
+								</button>
+							{:else if po.flip_verdict}
+								<!-- A dead order: nothing to create, so no control —
+								     only the reason. -->
+								<span class="flip-refusal" data-testid="po-flip-refusal">
+									{poFlipRefusalText(po.flip_verdict, m)}
+								</span>
+							{/if}
 						</td>
 					</tr>
 				{/each}
@@ -239,6 +277,11 @@
 		opacity: 0.6;
 		cursor: default;
 	}
+	.flip-refusal {
+		color: var(--text-muted);
+		font-size: 0.82rem;
+		white-space: normal;
+	}
 	.status {
 		padding: 2px 8px;
 		border-radius: 3px;
@@ -269,14 +312,6 @@
 		background: color-mix(in srgb, var(--danger) 10%, transparent);
 		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		color: var(--danger);
-		padding: 10px 14px;
-		border-radius: 4px;
-		margin-bottom: 12px;
-	}
-	.message {
-		background: color-mix(in srgb, var(--success) 12%, transparent);
-		border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
-		color: var(--success);
 		padding: 10px 14px;
 		border-radius: 4px;
 		margin-bottom: 12px;

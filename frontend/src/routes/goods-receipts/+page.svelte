@@ -30,6 +30,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import LineDescription from '#lib/components/ui/LineDescription.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
@@ -53,12 +54,20 @@
 	import {
 		GR_SOURCE_MANUAL,
 		RECEIPT_ENTRY_ROLES,
-		isCancelledGoodsReceipt
+		isCancelledGoodsReceipt,
+		goodsReceiptStatusLabelKey
 	} from '#lib/types/goodsReceipt.ts';
 	import type { InspectableReceipt } from './RecordInspectionModal.svelte';
 	import { page as pageStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
+
+	// The status column is free-form, so an unknown spelling renders raw rather
+	// than disappearing; every value the backend writes has a label.
+	const statusLabel = (status: string) => {
+		const key = goodsReceiptStatusLabelKey(status);
+		return key ? m(key) : status;
+	};
 
 	const canMutate = $derived(auth.isManager);
 	const canRecordReceipt = $derived(auth.hasAnyRole(...RECEIPT_ENTRY_ROLES));
@@ -144,6 +153,12 @@
 	let page = $state(1);
 	let loading = $state(true);
 	let loadingMore = $state(false);
+	// Set by a failed page-1 load, cleared by a successful one. A failed load
+	// renders `ui/LoadError` (with a Retry) in the table's place: on its own the
+	// toast faded and left the empty-state line claiming nothing matched — or,
+	// on a re-load, the previous filter's rows standing as this one's answer.
+	// A failed load-more keeps the rows already shown and only toasts.
+	let errored = $state(false);
 
 	let detailId = $state<string | null>(null);
 	let detail = $state<GRDetail | null>(null);
@@ -234,7 +249,14 @@
 	async function loadGRs(opts: { append?: boolean; nextPage?: number } = {}) {
 		const token = listSequence.start();
 		if (opts.append) loadingMore = true;
-		else loading = true;
+		else {
+			loading = true;
+			// Cleared when a fresh load STARTS (as /credit-memos does) so Retry
+			// takes `LoadError` down while the request is out and a second
+			// failure re-announces it — cleared only on success, Retry looked
+			// like a no-op.
+			errored = false;
+		}
 		try {
 			const nextPage = opts.nextPage ?? 1;
 			const params = new URLSearchParams({
@@ -251,9 +273,11 @@
 			grs = opts.append ? appendUnique(grs, data.items) : data.items;
 			total = data.total;
 			page = nextPage;
+			errored = false;
 		} catch (err) {
 			// `isCurrentRequest`, not `canCommit`: only the newest request reports.
 			if (!listSequence.isCurrentRequest(token)) return;
+			if (!opts.append) errored = true;
 			toast(err instanceof Error ? err.message : m('goodsReceipts.toast.loadListFailed'), 'error');
 		} finally {
 			// Both flags belong to the newest request: an append used to clear
@@ -580,6 +604,13 @@
 			role="tabpanel"
 			aria-labelledby="goods-receipts-tab-receipts"
 		>
+			{#if errored}
+				<LoadError
+					message={m('goodsReceipts.empty.errored')}
+					onretry={() => loadGRs()}
+					testId="goods-receipts-error"
+				/>
+			{:else}
 			<DataTable
 				columns={COLUMNS}
 				isEmpty={grs.length === 0}
@@ -604,15 +635,16 @@
 							</td>
 							<td class="mono">{gr.po_number ?? '—'}</td>
 							<td>{formatDate(gr.received_date)}</td>
-							<td><Badge tone={goodsReceiptTone(gr.status)} variant={gr.status}>{gr.status}</Badge></td>
+							<td><Badge tone={goodsReceiptTone(gr.status)} variant={gr.status}>{statusLabel(gr.status)}</Badge></td>
 							<td class="muted">{gr.line_count}</td>
 							<td class="muted">{formatDate(gr.created_at)}</td>
 						</tr>
 					{/each}
 				{/snippet}
 			</DataTable>
+			{/if}
 
-			{#if hasMore}
+			{#if hasMore && !errored}
 				<div class="load-more-row">
 					<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
 						{loadingMore
@@ -620,7 +652,7 @@
 							: m('goodsReceipts.loadMore', { shown: grs.length, total })}
 					</button>
 				</div>
-			{:else if total > 0}
+			{:else if total > 0 && !errored}
 				<div class="load-more-row">
 					<span class="load-more-end">{m('goodsReceipts.showingAll', { total })}</span>
 				</div>
@@ -721,7 +753,7 @@
 				<HelpTip term="goods-receipt" />
 				{#if detail}
 					<span class="num-badge">{detail.gr_number}</span>
-					<Badge tone={goodsReceiptTone(detail.status)} variant={detail.status}>{detail.status}</Badge>
+					<Badge tone={goodsReceiptTone(detail.status)} variant={detail.status}>{statusLabel(detail.status)}</Badge>
 				{/if}
 			</div>
 			<button class="close-btn" onclick={() => (detailId = null)} aria-label={m('goodsReceipts.modal.close')}>&times;</button>

@@ -68,6 +68,10 @@ const sources = Object.entries(RAW)
  * once every candidate in it is either retyped or judged here.
  */
 const JUDGED_NOT_MONEY: Record<string, Record<string, string>> = {
+	'lib/types/auditVerification.ts': {
+		// Caps the signature sweep's findings list (backend default 100, max 1000).
+		'VerifySignaturesParams.limit': 'a cap on returned findings, not a spend limit'
+	},
 	'lib/types/runOutside.ts': {
 		// NACHA verify (decisions §362): how many payments are left in the file
 		// after the ones whose bill was paid in the ERP were taken out.

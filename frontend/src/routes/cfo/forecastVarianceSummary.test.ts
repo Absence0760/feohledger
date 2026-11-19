@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 import {
 	collectForecastEntries,
@@ -114,9 +115,22 @@ describe('unconvertedTotal', () => {
 });
 
 describe('variancePctLabel', () => {
+	// The figure is locale-formatted; pin the locale so the assertions do not
+	// depend on the runner's.
+	beforeEach(() => setActiveFormatLocale('en-US'));
+	afterEach(() => setActiveFormatLocale(undefined));
+
 	it('renders a signed percentage', () => {
 		expect(variancePctLabel(row({ variance_pct: 20 }))).toBe('+20%');
 		expect(variancePctLabel(row({ variance_pct: -12.5 }))).toBe('-12.5%');
+	});
+
+	it('signs and separates per the active locale', () => {
+		setActiveFormatLocale('fr-FR');
+		const spaces = (s: string | null) => s?.replace(/[\u00a0\u202f]/g, ' ');
+		expect(spaces(variancePctLabel(row({ variance_pct: 12.5 })))).toBe('+12,5 %');
+		// French uses U+2212 MINUS SIGN; assert the separator, not the glyph.
+		expect(spaces(variancePctLabel(row({ variance_pct: -12.5 })))).toMatch(/^[-\u2212]12,5 %$/);
 	});
 
 	it('keeps a genuine zero when a forecast was actually given', () => {

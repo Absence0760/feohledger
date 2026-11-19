@@ -15,6 +15,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
@@ -67,8 +68,19 @@
 	// long enough to render it and drops it on close.
 	let minted = $state<ApiKeyCreated | null>(null);
 
-	// Revoke confirm (armed two-click on the row action).
+	// Revoke confirm (armed two-click on the row action). `revokingId` holds the
+	// key whose revoke is in flight: its button goes `busy` (a third click on the
+	// still-armed button cannot send a second DELETE) and every other row's
+	// Revoke is disabled until it settles.
 	let confirmRevokeId = $state<string | null>(null);
+	let revokingId = $state<string | null>(null);
+
+	/** A request count in the in-app locale. A bare `toLocaleString()` follows
+	 *  the BROWSER's locale, so a German reader of the English UI (or the
+	 *  reverse) got the other language's digit grouping. */
+	function formatCount(n: number): string {
+		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
+	}
 
 	// Per-key usage view.
 	let usageKey = $state<ApiKey | null>(null);
@@ -131,6 +143,8 @@
 	}
 
 	async function handleRevoke(id: string) {
+		if (revokingId) return;
+		revokingId = id;
 		try {
 			await revokeApiKey(id);
 			toast(m('admin.apiKeys.toast.revoked'), 'success');
@@ -139,6 +153,7 @@
 			toast(e instanceof Error ? e.message : m('admin.apiKeys.toast.revokeFailed'), 'error');
 		} finally {
 			confirmRevokeId = null;
+			revokingId = null;
 		}
 	}
 
@@ -233,6 +248,15 @@
 								<RowAction
 									variant="danger"
 									armed={confirmRevokeId === key.id}
+									busy={revokingId === key.id}
+									disabled={revokingId !== null && revokingId !== key.id}
+									ariaLabel={m('common.rowActionAria', {
+										action:
+											confirmRevokeId === key.id
+												? m('admin.apiKeys.row.confirm')
+												: m('admin.apiKeys.row.revoke'),
+										name: key.name
+									})}
 									onclick={(e) => {
 										e.stopPropagation();
 										if (confirmRevokeId === key.id) {
@@ -333,11 +357,11 @@
 			{:else if usage}
 				<div class="usage-totals" data-testid="usage-totals">
 					<div class="usage-stat">
-						<span class="usage-num">{usage.total_requests.toLocaleString()}</span>
+						<span class="usage-num">{formatCount(usage.total_requests)}</span>
 						<span class="usage-lbl">{m('admin.apiKeys.usage.totalRequests')}</span>
 					</div>
 					<div class="usage-stat">
-						<span class="usage-num">{usage.window_requests.toLocaleString()}</span>
+						<span class="usage-num">{formatCount(usage.window_requests)}</span>
 						<span class="usage-lbl">{m('admin.apiKeys.usage.windowDays', { days: usage.window_days })}</span>
 					</div>
 					<div class="usage-stat">
@@ -359,7 +383,7 @@
 							{#each usageDays as day (day.usage_date)}
 								<tr>
 									<td>{formatDate(day.usage_date)}</td>
-									<td class="num-col">{day.request_count.toLocaleString()}</td>
+									<td class="num-col">{formatCount(day.request_count)}</td>
 								</tr>
 							{/each}
 						{/snippet}

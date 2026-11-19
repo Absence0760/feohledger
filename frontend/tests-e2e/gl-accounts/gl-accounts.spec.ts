@@ -218,12 +218,22 @@ test.describe('/gl-accounts', () => {
 
 		await page.getByRole('button', { name: 'Asset', exact: true }).click();
 
-		await expect(page.getByTestId('table-empty')).toHaveText(
-			/Couldn.t load the chart of accounts/
-		);
+		const failed = page.getByTestId('gl-accounts-error');
+		await expect(failed).toHaveText(/Couldn.t load the chart of accounts/);
 		await expect(page.locator('table tbody td.mono')).toHaveCount(0);
 		// …and the footer stops asserting a count it no longer has.
 		await expect(page.locator('.count-line')).toHaveCount(0);
+
+		// A way back that is not a page reload: Retry re-runs the SAME filter.
+		await page.unroute('**/api/gl-accounts*');
+		const retried = page.waitForResponse(
+			(r) =>
+				new URL(r.url()).pathname === '/api/gl-accounts' && r.url().includes('account_type=asset')
+		);
+		await failed.getByRole('button', { name: 'Retry' }).click();
+		expect((await retried).status()).toBe(200);
+		await expect(page.getByTestId('gl-accounts-error')).toHaveCount(0);
+		await expect(page.locator('table tbody tr').first()).toBeVisible();
 	});
 
 	test('an admin gets both writes; the create dialog opens and cancels clean', async ({ page }) => {
@@ -394,7 +404,7 @@ test.describe('/gl-accounts — row actions', () => {
 		const row = await rowFor(page, code);
 		await row.getByRole('button', { name: `Retire GL account ${code}` }).click();
 		// Armed, not fired: the first click only asks.
-		const confirm = row.getByRole('button', { name: 'Confirm' });
+		const confirm = row.getByRole('button', { name: `Confirm for ${code}` });
 		await expect(confirm).toBeVisible();
 		expect(tenantPsql(`SELECT is_active FROM gl_accounts WHERE code = '${code}'`).trim()).toBe(
 			't'
@@ -427,7 +437,7 @@ test.describe('/gl-accounts — row actions', () => {
 
 		const row = await rowFor(page, code);
 		await row.getByRole('button', { name: `Retire GL account ${code}` }).click();
-		await expect(row.getByRole('button', { name: 'Confirm' })).toBeVisible();
+		await expect(row.getByRole('button', { name: `Confirm for ${code}` })).toBeVisible();
 
 		await page.getByRole('heading', { name: 'Chart of Accounts' }).click();
 		await expect(row.getByRole('button', { name: `Retire GL account ${code}` })).toBeVisible();

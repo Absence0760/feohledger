@@ -16,6 +16,8 @@
 import type { ForecastVariance, ForecastVarianceInput, ForecastVarianceRow } from '#lib/types/analytics.ts';
 import { isNegativeAmount, isPositiveAmount } from '#lib/utils/money.ts';
 import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
+import { pointsToRatioString } from '#lib/utils/percent.ts';
+import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 /** One row of the entry form, exactly as typed. `forecast` is RAW text. */
 export interface ForecastEntry {
@@ -94,7 +96,17 @@ export function unconvertedTotal(result: ForecastVariance | null): number {
 export function variancePctLabel(row: ForecastVarianceRow): string | null {
 	if (!isPositiveAmount(row.forecast)) return null;
 	if (!Number.isFinite(row.variance_pct)) return null;
-	return `${row.variance_pct > 0 ? '+' : ''}${row.variance_pct}%`;
+	const ratio = pointsToRatioString(row.variance_pct);
+	if (ratio === null) return null;
+	// `formatPercent` has no sign option, and a variance needs one: an
+	// overspend reads "+20%", an underspend "-12.5%", on-plan a bare "0%".
+	// `signDisplay: 'exceptZero'` puts the sign where the locale wants it,
+	// and the exact ratio string keeps `formatPercent`'s no-float-drift rule.
+	return new Intl.NumberFormat(getActiveFormatLocale(), {
+		style: 'percent',
+		maximumFractionDigits: 1,
+		signDisplay: 'exceptZero'
+	}).format(ratio as `${number}`);
 }
 
 /**

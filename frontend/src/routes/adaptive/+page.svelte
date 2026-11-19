@@ -46,7 +46,9 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
 	import {
 		getApprovalPatterns,
 		getAnomalies,
@@ -198,7 +200,7 @@
 				staleFrom = sent;
 				await loadThreshold();
 			} else {
-				toast(e instanceof Error ? e.message : m('adaptive.threshold.applyFailed'), 'error');
+				toast(errorMessage(e, m('adaptive.threshold.applyFailed')), 'error');
 			}
 		} finally {
 			applying = false;
@@ -260,7 +262,7 @@
 			);
 			await loadRouting();
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('adaptive.routing.applyFailed'), 'error');
+			toast(errorMessage(e, m('adaptive.routing.applyFailed')), 'error');
 		} finally {
 			routingApplying = false;
 		}
@@ -481,7 +483,7 @@
 									{#if s.rationale}<span class="sub">{s.rationale}</span>{/if}
 								</td>
 								<td>{s.vendor_name}</td>
-								<td class="right mono">{s.confidence_pct}%</td>
+								<td class="right mono">{formatPercent(s.confidence_pct)}</td>
 								<td>
 									<Badge tone={SUGGESTION_TONES[s.status]} variant={s.status}>
 										{SUGGESTION_STATUS_LABELS[s.status]}
@@ -707,7 +709,7 @@
 									{#if Number(c.outcome_penalty) > 0}
 										{m('adaptive.routing.penalty', {
 											points: c.outcome_penalty,
-											pct: c.overturn_rate_pct,
+											pct: formatPercent(c.overturn_rate_pct),
 											n: c.outcome_sample_size
 										})}
 									{:else}
@@ -762,7 +764,7 @@
 								<td>{a.approver_name ?? a.approver_id}</td>
 								<td class="right mono">{a.approved_count}</td>
 								<td class="right mono">{a.rejected_count}</td>
-								<td class="right mono">{a.approval_rate_pct}%</td>
+								<td class="right mono">{formatPercent(a.approval_rate_pct)}</td>
 								<td class="right mono">{a.median_time_to_approve_days}</td>
 								<td class="right mono">{a.sample_size}</td>
 							</tr>
@@ -801,8 +803,8 @@
 						{#each patterns?.vendors ?? [] as v (v.vendor_name)}
 							<tr data-unconverted={v.unconverted_count}>
 								<td>{v.vendor_name}</td>
-								<td class="right mono">{v.approval_rate_pct}%</td>
-								<td class="right mono">{v.consistency_pct}%</td>
+								<td class="right mono">{formatPercent(v.approval_rate_pct)}</td>
+								<td class="right mono">{formatPercent(v.consistency_pct)}</td>
 								<td class="right mono">
 									<Money amount={v.avg_approved_amount} currency={orgCurrency.currency} mono />
 								</td>
@@ -932,7 +934,7 @@
 				<KpiCard
 					label={m('adaptive.feedback.overturnRate')}
 					value={feedback && !feedback.outcomes.insufficient_data
-						? `${feedback.outcomes.overturn_rate_pct}%`
+						? formatPercent(feedback.outcomes.overturn_rate_pct)
 						: null}
 					sub={feedback?.outcomes.insufficient_data
 						? m('adaptive.feedback.insufficientShort')
@@ -959,7 +961,7 @@
 									{m('adaptive.feedback.notMeasurable')}
 								</span>
 							{:else}
-								<span class="metric-value">{metric.value_pct}%</span>
+								<span class="metric-value">{formatPercent(metric.value_pct)}</span>
 							{/if}
 							<span class="sub">{metric.label}</span>
 						</li>

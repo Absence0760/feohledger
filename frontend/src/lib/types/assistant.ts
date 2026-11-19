@@ -157,10 +157,3 @@ export interface UiMessage {
 	/** Set when a turn failed (renders an inline error instead of prose). */
 	error?: string | null;
 }
-
-/** The three built-in example prompts (verbatim from docs/roadmap.md). */
-export const EXAMPLE_PROMPTS: readonly string[] = [
-	'which approvals have I been sitting on > 5 days?',
-	'which vendors are we paying the most this quarter?',
-	'show me invoices with PO mismatches over $10k'
-] as const;

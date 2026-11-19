@@ -77,6 +77,7 @@
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import CsvImportErrors from '#lib/components/ui/CsvImportErrors.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
@@ -467,14 +468,14 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					`Selected the first ${res.ids.length} of ${res.total} matching — narrow your filters to select the rest.`,
+					m('expenses.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
 					'error'
 				);
 			} else {
-				toast(`Selected all ${res.ids.length} matching expense(s)`, 'success');
+				toast(m('expenses.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
-		} catch {
-			toast('Failed to select all matching', 'error');
+		} catch (err) {
+			toast(err instanceof Error ? err.message : m('expenses.toast.selectAllFailed'), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -548,6 +549,12 @@
 	let reportsTotal = $state(0);
 	let reportsPage = $state(1);
 	let reportsLoadingMore = $state(false);
+	// A failed FIRST page: `ui/LoadError` replaces the table, so a failure never
+	// reads as "No expense reports yet." A failed load-more keeps the rows it
+	// already has and toasts instead. Cleared when a fresh load starts, so Retry
+	// unmounts the block and a second failure re-announces. Same rule on the
+	// policies / pre-approvals / cards tabs below.
+	let reportsErrored = $state(false);
 
 	// `reportsTotal` is the whole set, so the footer may only claim to be
 	// showing all of it once every row is actually loaded.
@@ -575,14 +582,11 @@
 	// re-fetches through `loadReports()` — so it needs no `supersedeInFlight()`;
 	// the sequencer here only stops two of those refreshes landing out of order.
 	// Three states, not one: a failed load must not read as "nothing matched".
-	// The search term reaches the server, so once the fetch settles the plain
-	// empty message is a true statement about the whole filtered set.
+	// The failed state renders `ui/LoadError` (with a Retry) in the table's
+	// place. The search term reaches the server, so once the fetch settles the
+	// plain empty message is a true statement about the whole filtered set.
 	let expensesEmptyMessage = $derived(
-		expenseStore.loading
-			? m('expenses.loading')
-			: expenseStore.errored
-				? m('expenses.empty.errored')
-				: m('expenses.empty')
+		expenseStore.loading ? m('expenses.loading') : m('expenses.empty')
 	);
 
 	const reportsSequence = createRequestSequencer();
@@ -591,7 +595,10 @@
 		const nextPage = opts.append ? reportsPage + 1 : 1;
 		const token = reportsSequence.start();
 		if (opts.append) reportsLoadingMore = true;
-		else reportsLoading = true;
+		else {
+			reportsLoading = true;
+			reportsErrored = false;
+		}
 		try {
 			const res = await listExpenseReports({
 				page: nextPage,
@@ -601,6 +608,16 @@
 			reports = opts.append ? appendUnique(reports, res.items) : res.items;
 			reportsTotal = res.total;
 			reportsPage = nextPage;
+		} catch (err) {
+			// Handled here rather than re-thrown: the mutations below await this
+			// refresh inside their own try, and a failed REFRESH after a
+			// successful submit/approve used to surface as "Submit failed".
+			if (!reportsSequence.isCurrentRequest(token)) return;
+			if (opts.append) {
+				toast(err instanceof Error ? err.message : m('expenses.reports.toast.loadFailed'), 'error');
+			} else {
+				reportsErrored = true;
+			}
 		} finally {
 			if (reportsSequence.isCurrentRequest(token)) {
 				reportsLoading = false;
@@ -849,6 +866,7 @@
 
 	let policies = $state<ExpensePolicy[]>([]);
 	let policiesLoading = $state(false);
+	let policiesErrored = $state(false);
 	let showPolicyCreate = $state(false);
 	let editingPolicy = $state<ExpensePolicy | null>(null);
 	let confirmDeletePolicyId = $state<string | null>(null);
@@ -861,6 +879,7 @@
 	async function loadPolicies() {
 		const token = policiesSequence.start();
 		policiesLoading = true;
+		policiesErrored = false;
 		try {
 			const loaded = await listPolicies();
 			// Superseded by a newer load, or by a local create/edit/delete.
@@ -870,7 +889,14 @@
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// edit still failed, and no newer load is coming to report it.
 			if (!policiesSequence.isCurrentRequest(token)) return;
-			toast(err instanceof Error ? err.message : m('expenses.policies.toast.loadFailed'), 'error');
+			// Superseded by a local edit: the rows on screen are that edit's,
+			// so keep them and toast. Otherwise nothing trustworthy is on
+			// screen and the table gives way to LoadError.
+			if (policiesSequence.wasSupersededByEdit(token)) {
+				toast(err instanceof Error ? err.message : m('expenses.policies.toast.loadFailed'), 'error');
+			} else {
+				policiesErrored = true;
+			}
 		} finally {
 			if (policiesSequence.isCurrentRequest(token)) policiesLoading = false;
 		}
@@ -903,6 +929,7 @@
 	// ======================== Pre-approvals tab ========================
 	let preapprovals = $state<ExpensePreapproval[]>([]);
 	let preapprovalsLoading = $state(false);
+	let preapprovalsErrored = $state(false);
 	let preapprovalStatus = $state<string>(page.url.searchParams.get('pa_status') ?? 'all');
 	let showNewPreapproval = $state(false);
 	let paBusy = $state(false);
@@ -929,6 +956,7 @@
 	async function loadPreapprovals() {
 		const token = preapprovalsSequence.start();
 		preapprovalsLoading = true;
+		preapprovalsErrored = false;
 		try {
 			const params = preapprovalStatus !== 'all' ? { status: preapprovalStatus } : {};
 			const loaded = await listPreapprovals(params);
@@ -939,7 +967,12 @@
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// edit still failed, and no newer load is coming to report it.
 			if (!preapprovalsSequence.isCurrentRequest(token)) return;
-			toast(err instanceof Error ? err.message : m('expenses.preapprovals.toast.loadFailed'), 'error');
+			// Same split as policies: a local approve/reject owns the rows.
+			if (preapprovalsSequence.wasSupersededByEdit(token)) {
+				toast(err instanceof Error ? err.message : m('expenses.preapprovals.toast.loadFailed'), 'error');
+			} else {
+				preapprovalsErrored = true;
+			}
 		} finally {
 			if (preapprovalsSequence.isCurrentRequest(token)) preapprovalsLoading = false;
 		}
@@ -1022,6 +1055,7 @@
 	let cardsTotal = $state(0);
 	let cardsPage = $state(1);
 	let cardsLoadingMore = $state(false);
+	let cardsErrored = $state(false);
 
 	// Same rule as the reports list: `cardsTotal` is the whole set.
 	let cardsHasMore = $derived(cardTxns.length < cardsTotal);
@@ -1060,7 +1094,10 @@
 		const nextPage = opts.append ? cardsPage + 1 : 1;
 		const token = cardsSequence.start();
 		if (opts.append) cardsLoadingMore = true;
-		else cardsLoading = true;
+		else {
+			cardsLoading = true;
+			cardsErrored = false;
+		}
 		try {
 			const params = reconFilter !== 'all' ? { reconciliation_status: reconFilter } : {};
 			const res = await listCardTransactions({
@@ -1074,7 +1111,11 @@
 			cardsPage = nextPage;
 		} catch (err) {
 			if (!cardsSequence.isCurrentRequest(token)) return;
-			toast(err instanceof Error ? err.message : m('expenses.cards.toast.loadFailed'), 'error');
+			if (opts.append) {
+				toast(err instanceof Error ? err.message : m('expenses.cards.toast.loadFailed'), 'error');
+			} else {
+				cardsErrored = true;
+			}
 		} finally {
 			if (cardsSequence.isCurrentRequest(token)) {
 				cardsLoading = false;
@@ -1263,6 +1304,13 @@
 			<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
 		</div>
 
+		{#if expenseStore.errored}
+			<LoadError
+				message={m('expenses.empty.errored')}
+				onretry={() => expenseStore.fetch(buildParams()).catch(() => {})}
+				testId="expenses-error"
+			/>
+		{:else}
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={expenseStore.all.length === 0}
@@ -1350,14 +1398,15 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		{/if}
 
-		{#if expenseStore.hasMore}
+		{#if expenseStore.hasMore && !expenseStore.errored}
 			<div class="load-more-row">
 				<button class="btn-load-more" onclick={() => expenseStore.loadMore()} disabled={expenseStore.loading}>
 					{expenseStore.loading ? m('expenses.loading') : m('expenses.loadMore', { shown: expenseStore.all.length, total: expenseStore.total })}
 				</button>
 			</div>
-		{:else if expenseStore.total > 0}
+		{:else if expenseStore.total > 0 && !expenseStore.errored}
 			<div class="load-more-row">
 				<span class="load-more-end">{m('expenses.showingAll', { total: expenseStore.total })}</span>
 			</div>
@@ -1527,6 +1576,12 @@
 					{/snippet}
 				</DataTable>
 			</div>
+		{:else if reportsErrored}
+			<LoadError
+				message={m('expenses.reports.toast.loadFailed')}
+				onretry={() => loadReports()}
+				testId="expense-reports-error"
+			/>
 		{:else}
 			<DataTable
 				columns={[
@@ -1576,6 +1631,13 @@
 		{/if}
 	{:else if tab === 'policies'}
 		<!-- ===================== Policies tab ===================== -->
+		{#if policiesErrored}
+			<LoadError
+				message={m('expenses.policies.toast.loadFailed')}
+				onretry={() => loadPolicies()}
+				testId="expense-policies-error"
+			/>
+		{:else}
 		<DataTable
 			columns={[
 				{ label: m('expenses.policies.col.name') },
@@ -1629,12 +1691,20 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		{/if}
 	{:else if tab === 'preapprovals'}
 		<!-- ==================== Pre-approvals tab ==================== -->
 		<div class="filter-row">
 			<FilterChips chips={PREAPPROVAL_CHIPS} bind:active={preapprovalStatus} />
 		</div>
 
+		{#if preapprovalsErrored}
+			<LoadError
+				message={m('expenses.preapprovals.toast.loadFailed')}
+				onretry={() => loadPreapprovals()}
+				testId="expense-preapprovals-error"
+			/>
+		{:else}
 		<DataTable
 			columns={[
 				{ label: m('expenses.preapprovals.col.title') },
@@ -1672,6 +1742,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		{/if}
 	{:else if tab === 'cards'}
 		<!-- ===================== Cards tab (WF4) ===================== -->
 		<div class="kpi-row">
@@ -1706,6 +1777,13 @@
 			<HelpTip term="virtual-card" />
 		</div>
 
+		{#if cardsErrored}
+			<LoadError
+				message={m('expenses.cards.toast.loadFailed')}
+				onretry={() => loadCardTxns()}
+				testId="expense-cards-error"
+			/>
+		{:else}
 		<DataTable
 			columns={[
 				{ label: m('expenses.cards.col.date') },
@@ -1795,6 +1873,7 @@
 			<div class="load-more-row">
 				<span class="load-more-end">{m('expenses.cards.showingAll', { total: cardsTotal })}</span>
 			</div>
+		{/if}
 		{/if}
 	{/if}
 	</div>

@@ -60,7 +60,14 @@
 </script>
 
 <div class="auth-shell" class:panel-on-mobile={panelOnMobile}>
-	<div class="form-col">
+	<!-- The page's one `<main>` (WCAG 1.3.1 / 2.4.1): the root layout's public
+	     branch renders the slot bare, so without this the sign-in, signup and
+	     verify pages had no main landmark at all. Same id and `tabindex="-1"`
+	     as the app shell's and the portal's, so `ui/LoadError`'s focus fallback
+	     (`closest('main')`) has a target here too. No skip link: the form is
+	     first in DOM order, so there is no block to bypass. The brand panel is
+	     a sibling `<aside>`, outside it, because it is not the page's content. -->
+	<main id="main-content" tabindex="-1" class="form-col">
 		<div class="form-wrap">
 			{@render children()}
 		</div>
@@ -71,7 +78,7 @@
 		<div class="theme-pick">
 			<ThemePicker name="auth-theme" />
 		</div>
-	</div>
+	</main>
 
 	<aside class="panel" aria-labelledby={panelHeadingId}>
 		<Atmosphere dense still />

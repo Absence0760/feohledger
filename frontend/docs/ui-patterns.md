@@ -786,6 +786,12 @@ for every per-row button across every grid page. Variants:
 Renders as `<a>` when given `href`, otherwise `<button>`. Never copy
 the `padding: 4px 12px; ...` recipe inline — use the component.
 
+While the row's own request is in flight pass `busy` (and `disabled` on the
+other rows until it settles), so an armed two-click confirm cannot send its
+request twice. `busy` is `aria-disabled`, not native `disabled`, so focus stays
+on the button the keyboard user just pressed. The contract and its adopters are
+in `component-library.md` § `RowAction.svelte`.
+
 An action the server would refuse for a reason the reader can act on is
 rendered `disabled`, not hidden, with the reason as its accessible
 description: pass `describedby` naming a `.visually-hidden` element that holds
@@ -1069,6 +1075,7 @@ the `ui/` primitive in the Source column.
 | Filter pill | `.filter-chip` (+ `.active`, `.count`) | `ui/FilterChips.svelte` |
 | Tab bar | `.tab-row` / `.tab` (+ `.active`) | `ui/Tabs.svelte` |
 | Load more | `.btn-load-more` / `.load-more-row` / `.load-more-end` | per-route, copy /admin |
+| Buttons: lead / dismiss / other action / destructive trigger | `.btn-primary` / `.btn-cancel` / `.btn-secondary` / `.btn-danger` | `src/app.css` (see below) |
 | Modal dialog | `.modal[role="dialog"]` + `.backdrop` | `ui/Modal.svelte` |
 | KPI card | `.kpi` / `.kpi-value` / `.kpi-label` | `ui/KpiCard.svelte` |
 | Status badge (invoice) | `<StatusBadge>` (tone from `INVOICE_STATUS_TONES`) | `ui/StatusBadge.svelte` |
@@ -1080,6 +1087,22 @@ the `ui/` primitive in the Source column.
 | Failed load + Retry (page, or whole screen) | `.load-error` (`role="alert"` in a page) | `ui/LoadError.svelte` |
 | Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |
+
+**Buttons** are four shared classes in `src/app.css`, one box size so a
+toolbar mixing them is one height. Never re-declare one per route (the
+`/vendors` `.btn-outline` and `/invoices` `.btn-secondary` copies were
+folded into these):
+- `.btn-primary` — the page's one lead action (white on `--accent-strong`).
+- `.btn-cancel` — dismiss / back out, beside a Save. Reads in `--text-muted`.
+- `.btn-secondary` — any other action (Create beside Upload, Import CSV,
+  Refresh, Merge duplicates). Reads in `--text`; works on an `<a>` that
+  navigates, and on a hidden `<span>` slot reserve, with the same box.
+- `.btn-danger` — the outlined destructive *trigger* (Erase, Disable) that
+  opens a confirmation. The armed two-click confirm stays with
+  `<RowAction armed>` / `<BulkDeleteButton>`.
+`.btn-secondary` / `.btn-danger` show disabled with `--text-muted` and a
+neutral border, not `opacity` (contrast measured per theme in the
+`app.css` comment).
 
 **Native form controls** are themed globally in `src/app.css` so a
 bare `<input>` fits the theme — either theme — without per-route CSS:
@@ -1169,9 +1192,25 @@ inherit it for free. Reuse these; don't re-solve them per page.
      show everything. Something that cannot fit — a marquee — is rendered
      static instead (`marketing/AdapterRail.svelte`). The OS preference does
      not discharge 2.2.2. Guards: `src/lib/a11y/marketingMotion.test.ts` (no
-     `infinite`, literal timing within budget) and
+     `infinite`, literal timing within budget — over the marketing components
+     *and* the auth shell: `components/auth/` plus the `/login`, `/verify`,
+     `/signup`, `/change-password` and `/find-workspace` routes) and
      `tests-e2e/marketing/landing.spec.ts` (every running animation's
      `getComputedTiming().endTime` ≤ 5000 ms).
+  4a. **One exemption: a busy spinner, and it is `ui/Spinner.svelte`.** The
+     ring may loop while the request it stands for is in flight — mounted
+     inside an `{#if}` on that request's state, so it unmounts when the answer
+     lands, and paired with text that says what is happening (its own `label`,
+     a `role="status"` region, or the caller's live region / field hint). That
+     is 2.2.2's own carve-out: an indicator of a phase the user is waiting on
+     is essential, and these are either user-started (a submit, a typed slug)
+     or the page's sole content (`/verify`, the SSO callback). A finite spin
+     would be worse — a ring that freezes at 5 s on a slow request reads as a
+     hang. Reduced motion stills it (the component's own media query; app.css
+     collapses iteration counts besides) and the text carries the meaning.
+     The exemption lives in that one component: a hand-rolled `.spinner` loop
+     anywhere else, a loop on any other selector, or a `<Spinner>` rendered
+     outside an `{#if}` fails the same guard; the marketing pages get none.
   5. **Fade with colour, not `opacity`, at rest.** A decorative watermark takes
      an `rgba()` colour; `opacity` composites a whole subtree
      (`opacityAudit.test.ts`). `opacity: 0` / `1` in a reveal or keyframe is fine.

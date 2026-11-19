@@ -824,6 +824,70 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	cursor: not-allowed;
 }
 
+/* --- Secondary / danger buttons ---
+   .btn-secondary is an ACTION that is not the page's lead one (Create beside
+   Upload, Import CSV, Merge duplicates). It reads in --text, where
+   .btn-cancel's --text-muted says "dismiss". .btn-danger is the outlined
+   destructive trigger (erase, disable); the filled, armed confirmation stays
+   with <RowAction armed> / <BulkDeleteButton>.
+
+   Same box as .btn-primary / .btn-cancel so a toolbar mixing them is one
+   height. inline-flex so an <a> (a navigating "button") or a hidden <span>
+   slot reserve takes the exact box a <button> does.
+
+   Measured, dark / light, worst of --bg and --surface:
+     --text on --surface               13.64 / 15.92
+     --accent (hover) on --surface      5.55 /  6.37
+     --danger on --surface              6.27 /  6.50
+     --danger-on-tint over --danger-tint on --surface  5.36 / 5.77
+     --text-muted (disabled) on --surface  5.38 / 5.75
+   Disabled swaps to --text-muted and a neutral border, never `opacity`:
+   group opacity takes --text-muted to 2.33:1 (a11y/opacityAudit.test.ts).
+
+   Every rule here is one class of specificity (states inside :where()), so
+   a route still carrying its own scoped copy (/payments' filled
+   .btn-danger, /tax's armed one) keeps winning on every property it sets
+   until it migrates, instead of picking up a tint on hover. */
+.btn-secondary,
+.btn-danger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 9px 18px;
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--border);
+	background: var(--surface);
+	color: var(--text);
+	font-size: 0.85rem;
+	font-weight: 500;
+	/* What a <button> computes, so an <a> / <span> matches its height. */
+	line-height: normal;
+	text-decoration: none;
+	cursor: pointer;
+	font-family: inherit;
+}
+.btn-secondary:where(:hover:not(:disabled)) {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+.btn-danger {
+	border-color: var(--danger);
+	color: var(--danger);
+	font-weight: 600;
+}
+.btn-danger:where(:hover:not(:disabled)) {
+	background: var(--danger-tint);
+	color: var(--danger-on-tint);
+}
+.btn-secondary:where(:disabled),
+.btn-danger:where(:disabled) {
+	border-color: var(--border);
+	background: var(--surface);
+	color: var(--text-muted);
+	cursor: not-allowed;
+}
+
 /* --- Filter chips (FilterChips) --- */
 .filter-row {
 	display: flex;

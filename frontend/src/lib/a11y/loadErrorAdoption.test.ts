@@ -79,6 +79,11 @@ function isRetryLabel(button: Node): boolean {
 }
 
 function handRolledLoadErrors(source: string): number {
+	// Cheap pre-check before the compiler parse, which is the whole cost of a
+	// tree scan (~250 files: past vitest's 5 s budget under a parallel run).
+	// The shape needs a static role="alert" and a Retry label (text or `…retry` key), so skipping a file without it cannot hide a finding; the inline
+	// self-tests go through this line too.
+	if (!/role\s*=\s*["']?alert\b/.test(source) || !/retry/i.test(source)) return 0;
 	const ast = parse(source, { modern: true }) as unknown as Node;
 	let count = 0;
 	walk(ast.fragment, (n) => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatPercent } from '#lib/utils/percent.ts';
 	/**
 	 * Propose a vendor-wide early-payment discount —
 	 * `POST /api/discounts/bulk-negotiate`.
@@ -185,7 +186,7 @@
 				<ul class="bulk-tier-list">
 					{#each [...created.tiers].sort((a, b) => a.days - b.days) as tier (tier.days)}
 						<li>
-							<span>{m('discounts.modal.tierOption', { percent: tier.percent, days: tier.days })}</span>
+							<span>{m('discounts.modal.tierOptionFormatted', { percent: formatPercent(tier.percent), days: tier.days })}</span>
 							<span class="bulk-tier-save">
 								{m('discounts.modal.save')}
 								<Money amount={tierSaving(created, tier.percent)} currency={created.currency} />

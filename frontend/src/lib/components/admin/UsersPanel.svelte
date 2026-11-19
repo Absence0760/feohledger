@@ -40,6 +40,10 @@
 	// not do it.
 	let confirmRevokeId = $state<string | null>(null);
 	let revokingId = $state<string | null>(null);
+	// The user whose delete is in flight: its armed Confirm goes `busy`, so a
+	// third click cannot send a second DELETE (which would 404 and toast a
+	// failure over the success).
+	let deletingId = $state<string | null>(null);
 
 	// Bulk-select state
 	let selectedIds = $state<Set<string>>(new Set());
@@ -292,16 +296,21 @@
 	}
 
 	async function handleDelete(id: string) {
+		if (deletingId) return;
+		deletingId = id;
 		try {
 			await adminStore.deleteUser(id);
 			toast(m('admin.users.toast.singleDeleted'), 'success');
 			confirmDeleteId = null;
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('admin.users.toast.deleteFailed'), 'error');
+		} finally {
+			deletingId = null;
 		}
 	}
 
 	async function handleRevokeSessions(user: AdminUser) {
+		if (revokingId) return;
 		revokingId = user.id;
 		try {
 			const { revoked } = await adminStore.revokeUserSessions(user.id);
@@ -449,7 +458,8 @@
 						<RowAction
 							variant="danger"
 							armed={confirmRevokeId === user.id}
-							disabled={revokingId === user.id}
+							busy={revokingId === user.id}
+							disabled={revokingId !== null && revokingId !== user.id}
 							onclick={(e) => {
 								e.stopPropagation();
 								if (confirmRevokeId === user.id) {
@@ -467,6 +477,8 @@
 						<RowAction
 							variant="danger"
 							armed={confirmDeleteId === user.id}
+							busy={deletingId === user.id}
+							disabled={deletingId !== null && deletingId !== user.id}
 							onclick={(e) => {
 								e.stopPropagation();
 								if (confirmDeleteId === user.id) {

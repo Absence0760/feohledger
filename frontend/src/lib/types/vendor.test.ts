@@ -5,6 +5,12 @@ import {
 	RISK_LEVEL_LABEL_KEYS,
 	SANCTIONS_RESULTS,
 	SANCTIONS_RESULT_LABEL_KEYS,
+	SANCTIONS_CHECK_TYPES,
+	SANCTIONS_CHECK_TYPE_LABEL_KEYS,
+	PROPOSAL_FIELD_LABEL_KEYS,
+	proposalFieldLabelKey,
+	revealedProposalFields,
+	sanctionsCheckTypeLabelKey,
 	SCREENING_CATEGORIES,
 	SCREENING_CATEGORY_LABEL_KEYS,
 	SCREENING_STATUS_LABEL_KEYS,
@@ -267,5 +273,81 @@ describe('erpCandidateLinkable (decisions §415)', () => {
 		expect(erpCandidateLinkable(base)).toBe(true);
 		expect(erpCandidateLinkable({ ...base, active: false })).toBe(false);
 		expect(erpCandidateLinkable({ ...base, linked_elsewhere: true })).toBe(false);
+	});
+});
+
+describe('SANCTIONS_CHECK_TYPE_LABEL_KEYS', () => {
+	// Every `check_type=` literal the backend writes (`grep -rn 'check_type="'
+	// backend/app`), and the `schemas/sanctions.py` comment that lists them.
+	const BACKEND_CHECK_TYPES = [
+		'initial',
+		'periodic',
+		'manual',
+		'pre_payment',
+		'bank_change',
+		'tax_id_change'
+	];
+
+	it('covers exactly the triggers the backend writes', () => {
+		expect([...SANCTIONS_CHECK_TYPES].sort()).toEqual([...BACKEND_CHECK_TYPES].sort());
+	});
+
+	it('names a real, non-empty, non-raw catalogue key for every trigger', () => {
+		for (const type of SANCTIONS_CHECK_TYPES) {
+			const key = SANCTIONS_CHECK_TYPE_LABEL_KEYS[type];
+			expect(Object.keys(EN_ALL), `${type} → "${key}" is not in the catalogue`).toContain(key);
+			expect(EN_ALL[key].trim().length).toBeGreaterThan(0);
+			expect(EN_ALL[key]).not.toBe(type);
+		}
+	});
+
+	it('returns null for an unknown trigger so the caller can render it raw', () => {
+		expect(sanctionsCheckTypeLabelKey('pre_payment')).toBe('vendors.screening.checkType.prePayment');
+		expect(sanctionsCheckTypeLabelKey('quarterly_sweep')).toBeNull();
+	});
+});
+
+describe('proposal field labels', () => {
+	it('names a real catalogue key for every known field', () => {
+		for (const [field, key] of Object.entries(PROPOSAL_FIELD_LABEL_KEYS)) {
+			expect(Object.keys(EN_ALL), `${field} → "${key}" is not in the catalogue`).toContain(key);
+		}
+	});
+
+	it('does not resolve inherited object properties as fields', () => {
+		expect(proposalFieldLabelKey('constructor')).toBeNull();
+		expect(proposalFieldLabelKey('toString')).toBeNull();
+	});
+
+	it('labels revealed bank fields by key and keeps unknown ones visible', () => {
+		const rows = revealedProposalFields('bank_details', {
+			bank_details: { bank_name: 'First Bank', account_last4: '4321', branch_code: '007' }
+		});
+		expect(rows).toEqual([
+			{
+				field: 'bank_name',
+				labelKey: 'vendors.changeRequests.field.bankName',
+				fallback: 'bank name',
+				value: 'First Bank'
+			},
+			{
+				field: 'account_last4',
+				labelKey: 'vendors.changeRequests.field.accountLast4',
+				fallback: 'account last4',
+				value: '4321'
+			},
+			{ field: 'branch_code', labelKey: null, fallback: 'branch code', value: '007' }
+		]);
+	});
+
+	it('labels a tax-ID change', () => {
+		expect(revealedProposalFields('tax_id', { tax_id: '12-3456789' })).toEqual([
+			{
+				field: 'tax_id',
+				labelKey: 'vendors.changeRequests.field.taxId',
+				fallback: 'tax id',
+				value: '12-3456789'
+			}
+		]);
 	});
 });

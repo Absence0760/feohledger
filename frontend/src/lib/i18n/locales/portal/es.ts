@@ -111,10 +111,13 @@ export const messages = {
 		'No se pudo descargar la factura electrónica.',
 	'portal.invoices.preparing': 'Preparando…',
 	'portal.invoices.fileDownloadFailed': 'Error al descargar',
+	'portal.invoices.tableAria': 'Sus facturas',
+	'portal.invoices.chatLoadFailed': 'No se pudo cargar la conversación.',
 
 	// Pagos del portal (routes/portal/payments/+page.svelte)
 	'portal.payments.title': 'Pagos',
 	'portal.payments.loadFailed': 'Error al cargar',
+	'portal.payments.tableAria': 'Sus pagos',
 	'portal.payments.downloadFailed': 'Error al descargar',
 	'portal.payments.empty': 'Aún no hay pagos.',
 	'portal.payments.emptyHint': 'Los pagos aparecen aquí una vez que tu cliente los emite.',
@@ -156,6 +159,8 @@ export const messages = {
 	'portal.po.col.total': 'Total',
 	'portal.po.col.status': 'Estado',
 	'portal.po.createInvoice': 'Crear factura',
+	'portal.po.refusal.notInvoiceable': 'Ya no se puede facturar',
+	'portal.po.refusal.alreadyInvoiced': 'Ya facturada',
 	'portal.po.totalUnverifiable': 'En confirmación',
 	'portal.po.totalUnverifiableNote':
 		'Su cliente está revisando de nuevo los totales marcados como «En confirmación», así que aquí no se puede crear una factura a partir de esas órdenes. Envíe su propia factura para ellas.',
@@ -175,6 +180,7 @@ export const messages = {
 	'portal.discounts.filter.captured': 'Capturadas',
 	'portal.discounts.filter.closed': 'Cerradas',
 	'portal.discounts.loadFailed': 'Error al cargar',
+	'portal.discounts.tableAria': 'Sus ofertas de descuento',
 	'portal.discounts.acceptFailed': 'Error al aceptar',
 	'portal.discounts.declineFailed': 'Error al rechazar',
 	'portal.discounts.loadMore': 'Cargar más ({shown} de {total})',
@@ -195,6 +201,9 @@ export const messages = {
 	'portal.discounts.tier': '{days} d → {percent}',
 	'portal.discounts.accept': 'Aceptar',
 	'portal.discounts.decline': 'Rechazar',
+	'portal.discounts.declineConfirm': 'Confirmar rechazo',
+	'portal.discounts.emptyFiltered': 'Ninguna oferta coincide con este filtro.',
+	'portal.discounts.clearFilter': 'Mostrar todas las ofertas',
 	'portal.discounts.dialog.title': 'Aceptar descuento por pronto pago',
 	'portal.discounts.dialog.subtitle':
 		'Aceptar confirma que tomarás el descuento a cambio de un pago anticipado. No mueve ningún dinero: tu cliente sigue procesando el pago.',
@@ -208,6 +217,7 @@ export const messages = {
 
 	// Empresa del portal (routes/portal/company/+page.svelte)
 	'portal.company.title': 'Información de la empresa',
+	'portal.company.loadFailed': "No se pudieron cargar los datos de su empresa. Inténtelo de nuevo.",
 	'portal.company.pendingBanner':
 		'Un cambio en tu {changeType} está pendiente de aprobación de cuentas por pagar. Tendrá efecto una vez que tu cliente lo apruebe.',
 	'portal.company.contact.title': 'Datos de contacto',

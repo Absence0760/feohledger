@@ -108,8 +108,14 @@ test.describe('/vendors verify/reject', () => {
 			);
 			// Armed two-click: the first click only arms (it would stop an active
 			// vendor's payments), the confirm sends it.
-			await row.getByRole('button', { name: 'Reject' }).click();
-			await row.getByRole('button', { name: 'Confirm reject' }).click();
+			// Each name says WHICH vendor (`common.rowActionAria`), and keeps the
+			// visible label at its start (WCAG 2.5.3 label-in-name) when armed.
+			await row
+				.getByRole('button', { name: `Reject for ${target!.name}`, exact: true })
+				.click();
+			await row
+				.getByRole('button', { name: `Confirm reject for ${target!.name}`, exact: true })
+				.click();
 			const resp = await rejected;
 			expect(resp.status()).toBe(200);
 

@@ -10,7 +10,7 @@
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
 	import StatusBadge from '#lib/components/ui/StatusBadge.svelte';
 	import InvoiceModal from '#lib/components/modals/InvoiceModal.svelte';
 	import CreateInvoiceModal from '#lib/components/modals/CreateInvoiceModal.svelte';
@@ -22,8 +22,10 @@
 	import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { INVOICE_FILE_ACCEPT } from '#lib/utils/invoiceFiles.ts';
 	import { formatList } from '#lib/utils/list.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
 	import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
@@ -31,6 +33,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
@@ -472,6 +475,38 @@
 	// the handler cleared itself could be re-read before the scrub landed, and
 	// re-open the modal the user had just closed).
 	let deepLinkLoaded = $state<string | null>(null);
+	// The deep-linked invoice that could not be fetched for a reason OTHER
+	// than "it does not exist" (a 500, a timeout, offline). Only a 404 may say
+	// "not found": telling a user whose network blipped that the invoice is
+	// gone sends them hunting for a row that is still there. Anything else is
+	// stated in place with a Retry (`ui/LoadError`), since it is a failed load.
+	let deepLinkFailedId = $state<string | null>(null);
+
+	function openDeepLink(id: string) {
+		deepLinkFailedId = null;
+		api
+			.get<Invoice>(`/api/invoices/${id}`)
+			.then((inv) => {
+				// The user may have navigated to another `?id=` (or off it)
+				// while this was in flight; don't open a modal they left.
+				if (deepLinkId === id) editing = inv;
+			})
+			.catch((err) => {
+				if (deepLinkId !== id) return;
+				if (err instanceof ApiError && err.status === 404) {
+					toast(m('invoices.toast.notFound'), 'error');
+					// Nothing will ever open for this id, so drop it from the URL:
+					// left there, Back or a reload re-runs the lookup and re-toasts.
+					// `deepLinkLoaded` keeps the id, as on close, so the effect
+					// does not retry it off the unchanged `page.url`.
+					deepLinkId = null;
+					syncUrl();
+				} else {
+					deepLinkFailedId = id;
+				}
+			});
+	}
+
 	$effect(() => {
 		const id = page.url.searchParams.get('id');
 		// State reads AND writes are untracked: this effect depends on the
@@ -481,6 +516,7 @@
 			untrack(() => {
 				deepLinkId = null;
 				deepLinkLoaded = null;
+				deepLinkFailedId = null;
 			});
 			return;
 		}
@@ -488,11 +524,8 @@
 		untrack(() => {
 			deepLinkId = id;
 			deepLinkLoaded = id;
+			openDeepLink(id);
 		});
-		api
-			.get<Invoice>(`/api/invoices/${id}`)
-			.then((inv) => (editing = inv))
-			.catch(() => toast(m('invoices.toast.notFound'), 'error'));
 	});
 
 	/**
@@ -507,6 +540,15 @@
 	async function refreshInvoiceList() {
 		await invoiceStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
 		await invoiceStore.fetchCounts(buildParams());
+	}
+
+	// A failed Load-more keeps the rows already shown, so a toast is enough
+	// (the sibling lists do the same). The store never rejects here — it
+	// records the outcome in `loadMoreErrored`, which is false when a newer
+	// load superseded this one, so a filter change mid-page raises no toast.
+	async function loadMoreInvoices() {
+		await invoiceStore.loadMore();
+		if (invoiceStore.loadMoreErrored) toast(m('invoices.toast.loadMoreFailed'), 'error');
 	}
 
 	function closeInvoiceModal() {
@@ -861,6 +903,7 @@
 	let confirmDeleteId = $state<string | null>(null);
 
 	async function deleteInvoice(id: string) {
+		if (deletingId) return;
 		deletingId = id;
 		try {
 			await api.delete(`/api/invoices/${id}`);
@@ -868,7 +911,7 @@
 			await invoiceStore.fetchCounts(buildParams());
 			toast(m('invoices.toast.deletedOne'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('invoices.toast.deleteFailed'), 'error');
+			toast(errorMessage(err, m('invoices.toast.deleteFailed')), 'error');
 		} finally {
 			deletingId = null;
 			confirmDeleteId = null;
@@ -877,7 +920,7 @@
 
 	function handleWindowClick(e: MouseEvent) {
 		const target = e.target as HTMLElement;
-		if (confirmDeleteId && !target.closest('.row-action')) {
+		if (confirmDeleteId && !deletingId && !target.closest('.row-action')) {
 			confirmDeleteId = null;
 		}
 		if (showBulkStatusSelect && !target.closest('.bulk-status-wrapper')) {
@@ -901,7 +944,7 @@
 		     create an invoice, and `POST /api/invoices/upload` takes the same
 		     entry roles as `POST /api/invoices` (`api/invoice_entry.py`). -->
 		{#if canEnterInvoices}
-			<button class="btn-upload" disabled={uploading} onclick={() => fileInput.click()}>
+			<button class="btn-primary btn-upload" disabled={uploading} onclick={() => fileInput.click()}>
 				{uploading ? uploadProgress || m('invoices.action.uploading') : m('invoices.action.upload')}
 			</button>
 		{/if}
@@ -1055,7 +1098,7 @@
 								/>
 							{/if}
 							<button
-								class="bulk-apply-btn"
+								class="btn-primary bulk-apply-btn"
 								disabled={bulkBusy || (bulkNeedsReason && !bulkRejectReason.trim())}
 								onclick={bulkStatusChange}
 							>{m('common.apply')}</button>
@@ -1072,6 +1115,14 @@
 		</div>
 	{/if}
 
+	{#if deepLinkFailedId}
+		<LoadError
+			message={m('invoices.deepLink.loadFailed')}
+			onretry={() => deepLinkFailedId && openDeepLink(deepLinkFailedId)}
+			testId="invoices-deeplink-error"
+		/>
+	{/if}
+
 	{#if showOnboarding}
 		<EmptyState
 			icon="📄"
@@ -1082,6 +1133,16 @@
 				: undefined}
 			onaction={() => fileInput.click()}
 			testId="invoices-empty-state"
+		/>
+	{:else if invoiceStore.errored && !invoiceStore.loading}
+		<!-- A failed list load replaces the table (ui-patterns.md § LoadError).
+		     The empty-line message alone was not enough: when a filter change
+		     failed, the PREVIOUS filter's rows stayed on screen under the new
+		     chip with nothing saying they were stale, and no way to retry. -->
+		<LoadError
+			message={m('invoices.empty.errored')}
+			onretry={() => void refreshInvoiceList().catch(() => {})}
+			testId="invoices-load-error"
 		/>
 	{:else}
 	<DataTable isEmpty={invoiceStore.all.length === 0} empty={emptyMessage} colspan={10} fixed stickyHeader>
@@ -1160,7 +1221,7 @@
 					<td class="description" title={invoice.description}>{invoice.description}</td>
 					<td class="mono">{invoice.po_number}</td>
 					<td class="right mono"><Money amount={invoice.amount} currency={invoice.currency} /></td>
-					<td>{invoice.due_date}</td>
+					<td>{formatDate(invoice.due_date)}</td>
 					<td><StatusBadge status={invoice.status} /></td>
 					<td class="assignee">{invoice.assigned_to || '—'}</td>
 					<td class="actions">
@@ -1168,9 +1229,11 @@
 							<RowAction
 								variant="danger"
 								armed={confirmDeleteId === invoice.id}
-								disabled={deletingId === invoice.id}
+								busy={deletingId === invoice.id}
+								disabled={deletingId !== null && deletingId !== invoice.id}
 								onclick={(e) => {
 									e.stopPropagation();
+									if (deletingId) return;
 									if (confirmDeleteId === invoice.id) {
 										deleteInvoice(invoice.id);
 									} else {
@@ -1178,11 +1241,12 @@
 									}
 								}}
 							>
-								{deletingId === invoice.id
-									? '…'
-									: confirmDeleteId === invoice.id
-										? m('invoices.row.confirm')
-										: m('invoices.row.delete')}
+								<!-- Stays "Confirm" while the request runs: `busy` carries
+								     the in-flight state, and a "…" label left the button
+								     with no accessible name. -->
+								{confirmDeleteId === invoice.id
+									? m('invoices.row.confirm')
+									: m('invoices.row.delete')}
 							</RowAction>
 						{/if}
 					</td>
@@ -1192,13 +1256,13 @@
 	</DataTable>
 	{/if}
 
-	{#if invoiceStore.hasMore}
+	{#if invoiceStore.hasMore && !invoiceStore.errored}
 		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => invoiceStore.loadMore()} disabled={invoiceStore.loading}>
+			<button class="btn-load-more" onclick={loadMoreInvoices} disabled={invoiceStore.loading}>
 				{invoiceStore.loading ? m('common.loading') : m('invoices.loadMore', { shown: invoiceStore.all.length, total: invoiceStore.total })}
 			</button>
 		</div>
-	{:else if invoiceStore.total > 0}
+	{:else if invoiceStore.total > 0 && !invoiceStore.errored}
 		<div class="load-more-row">
 			<span class="load-more-end">{m('invoices.showingAll', { total: invoiceStore.total })}</span>
 		</div>
@@ -1413,47 +1477,11 @@
 		cursor: help;
 	}
 
+	/* Colour, hover and disabled come from the shared `.btn-primary`; this
+	   only keeps the label on one line in the header's action row. */
 	.btn-upload {
-		padding: 8px 18px;
-		border-radius: 6px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		transition: opacity 0.15s;
 		white-space: nowrap;
 		flex-shrink: 0;
-	}
-
-	.btn-upload:hover {
-		opacity: 0.85;
-	}
-
-	.btn-upload:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.btn-secondary {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-
-	.btn-secondary:hover {
-		border-color: var(--accent);
-		color: var(--accent);
 	}
 
 	/* --- Checkbox column --- */
@@ -1614,24 +1642,10 @@
 		min-width: 220px;
 	}
 
+	/* Fill, text colour, hover and disabled are the shared `.btn-primary`'s;
+	   only the metrics shrink to sit beside the dropdown's compact select. */
 	.bulk-apply-btn {
 		padding: 5px 12px;
-		border-radius: 4px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
 		font-size: 0.8rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.bulk-apply-btn:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.bulk-apply-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 </style>

@@ -9,11 +9,13 @@
 		type SignatureVerificationReport
 	} from '#lib/api/auditVerification.ts';
 	import type { AuditEntry, AuditFieldChange } from '#lib/types/audit.ts';
+	import { auditActionLabel } from '#lib/types/auditActions.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -51,7 +53,11 @@
 	let entries = $state<AuditEntry[]>([]);
 	let loading = $state(false);
 	let ran = $state(false);
-	let error = $state('');
+	// Two different failures, two different shapes: `inputError` is the form
+	// refusing to run (fix the field, run again — no Retry would help), and
+	// `queryError` is a run that failed on the way, which a Retry can recover.
+	let inputError = $state('');
+	let queryError = $state('');
 
 	function changesOf(entry: AuditEntry): [string, AuditFieldChange][] {
 		const changes = entry.details?.changes;
@@ -70,10 +76,11 @@
 
 	async function runQuery() {
 		if (mode === 'invoice' && !invoiceId.trim()) {
-			error = m('audit.error.enterInvoiceId');
+			inputError = m('audit.error.enterInvoiceId');
 			return;
 		}
-		error = '';
+		inputError = '';
+		queryError = '';
 		loading = true;
 		ran = true;
 		// The params that produced what is ON SCREEN. `downloadCsv` exports THIS,
@@ -88,7 +95,7 @@
 			entries = await getAuditExport(params);
 			exportedParams = params;
 		} catch (e) {
-			error = e instanceof Error ? e.message : m('audit.error.queryFailed');
+			queryError = e instanceof Error ? e.message : m('audit.error.queryFailed');
 			entries = [];
 			exportedParams = null;
 		} finally {
@@ -113,10 +120,19 @@
 		}
 	}
 
+	// Seconds stay: an auditor orders same-minute events by this column. The
+	// bare `toLocaleString()` ignored the in-app locale (a German UI read US
+	// dates under an English-locale browser); formatDate follows the picker.
+	const TIMESTAMP_OPTS: Intl.DateTimeFormatOptions = {
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit',
+		second: '2-digit'
+	};
 	function fmt(iso: string): string {
-		if (!iso) return '';
-		const d = new Date(iso);
-		return d.toLocaleString();
+		return formatDate(iso, '', TIMESTAMP_OPTS);
 	}
 
 	// ---------------------------------------------------------------------
@@ -249,16 +265,19 @@
 		<p class="audit-loading">{m('common.loading')}</p>
 	{:else}
 	<div class="audit-controls">
-		<div class="mode-toggle" role="tablist" aria-label={m('audit.queryMode')}>
+		<!-- A two-way switch, not tabs: there is no tabpanel and no arrow-key
+		     roving, so `role="tab"` promised a keyboard model it did not have.
+		     Pressed buttons in a labelled group, like /cfo's segmented controls. -->
+		<div class="mode-toggle" role="group" aria-label={m('audit.queryMode')}>
 			<button
-				role="tab"
-				aria-selected={mode === 'range'}
+				type="button"
+				aria-pressed={mode === 'range'}
 				class:active={mode === 'range'}
 				onclick={() => (mode = 'range')}>{m('audit.mode.dateRange')}</button
 			>
 			<button
-				role="tab"
-				aria-selected={mode === 'invoice'}
+				type="button"
+				aria-pressed={mode === 'invoice'}
 				class:active={mode === 'invoice'}
 				onclick={() => (mode = 'invoice')}>{m('audit.mode.byInvoice')}</button
 			>
@@ -294,20 +313,33 @@
 		</button>
 	</div>
 
-	{#if error}
-		<p class="audit-error" role="alert">{error}</p>
+	{#if inputError}
+		<p class="audit-error" role="alert">{inputError}</p>
+	{:else if queryError}
+		<LoadError message={queryError} onretry={runQuery} testId="audit-query-error" />
 	{/if}
 
+	<!-- A failed run is not an empty trail: "no entries" under the error would
+	     tell an auditor the period had no activity. -->
 	<DataTable
 		columns={COLUMNS}
-		isEmpty={ran && !loading && entries.length === 0}
+		isEmpty={ran && !loading && !queryError && entries.length === 0}
 		empty={m('audit.empty')}
 	>
 		{#snippet body()}
 			{#each entries as entry (entry.id)}
+				{@const actionLabel = auditActionLabel(entry.action, m)}
 				<tr>
-					<td class="mono">{fmt(entry.created_at)}</td>
-					<td>{entry.action}</td>
+					<td class="mono" title={entry.created_at}>{fmt(entry.created_at)}</td>
+					<!-- The label reads; the token is the evidence. Auditors cite
+					     `invoice.approved` verbatim (the CSV carries only the token),
+					     so it stays visible and selectable, not tucked in a title. -->
+					<td>
+						{#if actionLabel !== entry.action}
+							<span class="action-label">{actionLabel}</span>
+						{/if}
+						<code class="action-token" data-testid="audit-action-token">{entry.action}</code>
+					</td>
 					<td>{entry.entity_type ?? ''}{entry.entity_id ? ` · ${entry.entity_id.slice(0, 8)}` : ''}</td>
 					<td>{entry.actor_name ?? entry.actor_email ?? '—'}</td>
 					<td>
@@ -366,7 +398,7 @@
 		</div>
 
 		{#if verifyError}
-			<p class="audit-error" role="alert" data-testid="verify-error">{verifyError}</p>
+			<LoadError message={verifyError} onretry={runVerification} testId="verify-error" />
 		{/if}
 
 		<!-- Rendered from the moment a sweep is ASKED FOR, not from the moment it
@@ -477,6 +509,7 @@
 		{/if}
 
 		{#if drillInvoice}
+			{@const drill = drillInvoice}
 			<div
 				class="verify-drill"
 				data-testid="verify-drill"
@@ -487,7 +520,11 @@
 				{#if drillLoading}
 					<p class="verify-state">{m('audit.verify.running')}</p>
 				{:else if drillError}
-					<p class="audit-error" role="alert">{drillError}</p>
+					<LoadError
+						message={drillError}
+						onretry={() => drillIntoInvoice(drill.id, drill.label)}
+						testId="verify-drill-error"
+					/>
 				{:else if invoiceReport}
 					{#if !invoiceReport.signing_configured}
 						<p class="verify-notice">{m('audit.verify.notConfigured')}</p>
@@ -624,6 +661,17 @@
 
 	.muted {
 		color: var(--text-muted);
+	}
+
+	.action-label {
+		display: block;
+	}
+
+	.action-token {
+		display: block;
+		font-size: 0.8em;
+		color: var(--text-muted);
+		overflow-wrap: anywhere;
 	}
 
 	/* --- Approval-signature verification panel --- */

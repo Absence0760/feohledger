@@ -4,6 +4,7 @@
  * localStorage (opening both in the same browser would otherwise clobber one).
  */
 import { apiErrorFromBody } from '#lib/api.ts';
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 
 // Resolved per request, not frozen at module load — see the note in
@@ -212,6 +213,9 @@ export interface PortalPOListItem {
 	currency: string | null;
 	line_item_count: number;
 	created_at: string;
+	/** The server's verdict on "Create invoice" (`api/portal.py::po_flip_refusal`):
+	 *  `null` = allowed. Absent (an older backend) reads as a refusal: fail closed. */
+	flip_verdict?: ActionRefusal | null;
 }
 
 /** Filter params for the signed-in vendor's own invoice list. `status` carries

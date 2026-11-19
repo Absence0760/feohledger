@@ -45,6 +45,8 @@
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
+	import { paymentStatusLabelKey } from '#lib/types/payment.ts';
 
 	let {
 		statement,
@@ -190,6 +192,12 @@
 	function candidateLabel(p: UnclearedPayment): string {
 		return p.vendor_name || p.invoice_number || p.payment_id.slice(0, 8);
 	}
+
+	// The matched payment's status is a wire enum; label it as /payments does.
+	function paymentStatusLabel(status: string): string {
+		const key = paymentStatusLabelKey(status);
+		return key ? m(key) : status;
+	}
 </script>
 
 <Modal
@@ -252,7 +260,7 @@
 							{#if tx.matched_payment_id}
 								<span class="match-meta muted">
 									{methodLabel(tx.match_method)}{#if tx.match_confidence !== null}
-										· {m('bankRecon.confidence', { confidence: tx.match_confidence })}
+										· {m('bankRecon.confidence', { confidence: formatPercent(tx.match_confidence) })}
 									{/if}
 								</span>
 								{#if tx.matched_invoice_number}
@@ -265,7 +273,7 @@
 											amount={tx.matched_payment_amount}
 											currency={tx.matched_payment_currency}
 										/>
-										{#if tx.matched_payment_status}· {tx.matched_payment_status}{/if}
+										{#if tx.matched_payment_status}· {paymentStatusLabel(tx.matched_payment_status)}{/if}
 									</span>
 								{/if}
 							{/if}

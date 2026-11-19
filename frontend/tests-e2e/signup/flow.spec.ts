@@ -416,6 +416,44 @@ test.describe('/verify — outcomes', () => {
 		await expect(page.getByRole('link', { name: 'Set your password' })).toHaveCount(0);
 	});
 
+	test('a transient failure offers Try again, which completes the same link', async ({ page }) => {
+		// Completion is idempotent, so a 5xx is retried in place rather than
+		// sending the visitor back through a whole new signup.
+		let calls = 0;
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) => {
+				calls += 1;
+				if (calls === 1) return route.fulfill({ status: 503, json: { detail: 'Service unavailable' } });
+				return route.fulfill({
+					json: {
+						status: 'provisioned',
+						slug: 'stubco',
+						tenant_url: '',
+						admin_email: 'admin@stubco.example',
+						set_password_url: null
+					}
+				});
+			}
+		);
+		await page.goto('/verify?token=' + 'x'.repeat(40));
+		await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible();
+		await page.getByRole('button', { name: 'Try again' }).click();
+		await expect(page.getByRole('heading', { name: 'Your workspace is ready' })).toBeVisible();
+		expect(calls).toBe(2);
+	});
+
+	test('a refused link offers no Try again', async ({ page }) => {
+		await page.route(
+			(url) => url.pathname === '/api/signup/complete',
+			(route) => route.fulfill({ status: 400, json: { detail: 'Invalid verification token' } })
+		);
+		await page.goto('/verify?token=' + 'x'.repeat(40));
+		await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Start over' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+	});
+
 	test('a re-opened link shows the workspace and a way to sign in, with nothing re-issued', async ({
 		page
 	}) => {

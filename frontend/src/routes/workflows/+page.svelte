@@ -15,10 +15,12 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
@@ -89,6 +91,16 @@
 		workflowStore.fetch().catch(() => {});
 	});
 
+	// The store re-throws; nothing else catches a Load more, so a failure was an
+	// unhandled rejection and the button simply re-enabled with no word said.
+	async function loadMore() {
+		try {
+			await workflowStore.loadMore();
+		} catch {
+			toast(m('workflows.list.loadMoreFailed'), 'error');
+		}
+	}
+
 	let selectableIds = $derived(
 		workflowStore.all.filter((w) => !w.is_default).map((w) => w.id)
 	);
@@ -145,7 +157,7 @@
 				);
 			}
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('workflows.list.bulkDeleteFailed'), 'error');
+			toast(errorMessage(e, m('workflows.list.bulkDeleteFailed')), 'error');
 		} finally {
 			bulkDeleting = false;
 		}
@@ -210,7 +222,7 @@
 			newDescription = '';
 			window.location.href = `/workflows/${created.id}`;
 		} catch (e: unknown) {
-			toast(e instanceof Error ? e.message : m('workflows.list.createFailed'), 'error');
+			toast(errorMessage(e, m('workflows.list.createFailed')), 'error');
 		} finally {
 			creating = false;
 		}
@@ -222,7 +234,7 @@
 			await workflowStore.remove(wf.id);
 			toast(m('workflows.list.deleted'), 'success');
 		} catch (e: unknown) {
-			toast(e instanceof Error ? e.message : m('workflows.list.deleteFailed'), 'error');
+			toast(errorMessage(e, m('workflows.list.deleteFailed')), 'error');
 		}
 	}
 </script>
@@ -253,18 +265,21 @@
 		{/snippet}
 	</BulkBar>
 
-	<!-- Three states, not two. The mount effect swallows the load rejection (the
-	     store's `errored` flag is what the UI renders — a flag the store did NOT
-	     have until now), so a 500 left this page asserting "No workflows
-	     configured." with no toast and no retry, on the screen that decides
-	     whether invoices get routed for approval at all. -->
+	<!-- Four states. The mount effect swallows the load rejection (the store's
+	     `errored` flag is what the UI renders), so a 500 once left this page
+	     asserting "No workflows configured." — on the screen that decides whether
+	     invoices get routed for approval at all. A failed FIRST page now says so
+	     in place with a Retry; a failed Load more keeps the rows it has and toasts. -->
+	{#if workflowStore.errored && workflowStore.all.length === 0 && !workflowStore.loading}
+		<LoadError
+			message={m('workflows.list.loadFailed')}
+			onretry={() => workflowStore.fetch().catch(() => {})}
+			testId="workflows-load-error"
+		/>
+	{:else}
 	<DataTable
 		isEmpty={workflowStore.all.length === 0}
-		empty={workflowStore.loading
-			? m('common.loading')
-			: workflowStore.errored
-				? m('common.loadFailed')
-				: m('workflows.list.empty')}
+		empty={workflowStore.loading ? m('common.loading') : m('workflows.list.empty')}
 		colspan={6}
 	>
 		{#snippet header()}
@@ -338,10 +353,11 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	{/if}
 
 	{#if workflowStore.hasMore}
 		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => workflowStore.loadMore()} disabled={workflowStore.loading}>
+			<button class="btn-load-more" onclick={loadMore} disabled={workflowStore.loading}>
 				{workflowStore.loading
 					? m('common.loading')
 					: m('workflows.list.loadMore', {

@@ -109,10 +109,13 @@ export const messages = {
 	'portal.invoices.einvoiceDownloadFailed': '電子請求書をダウンロードできませんでした。',
 	'portal.invoices.preparing': '準備しています…',
 	'portal.invoices.fileDownloadFailed': 'ダウンロードに失敗しました',
+	'portal.invoices.tableAria': '請求書一覧',
+	'portal.invoices.chatLoadFailed': '会話を読み込めませんでした。',
 
 	// ポータルの支払い (routes/portal/payments/+page.svelte)
 	'portal.payments.title': '支払い',
 	'portal.payments.loadFailed': '読み込みに失敗しました',
+	'portal.payments.tableAria': '支払い一覧',
 	'portal.payments.downloadFailed': 'ダウンロードに失敗しました',
 	'portal.payments.empty': 'まだ支払いはありません。',
 	'portal.payments.emptyHint': 'お客様が支払いを発行すると、ここに表示されます。',
@@ -153,6 +156,8 @@ export const messages = {
 	'portal.po.col.total': '合計',
 	'portal.po.col.status': 'ステータス',
 	'portal.po.createInvoice': '請求書を作成',
+	'portal.po.refusal.notInvoiceable': '請求書を作成できなくなりました',
+	'portal.po.refusal.alreadyInvoiced': '請求済み',
 	'portal.po.totalUnverifiable': '確認中',
 	'portal.po.totalUnverifiableNote':
 		'「確認中」の合計はお客様が再確認しているため、これらの発注からはここで請求書を作成できません。代わりにご自身の請求書を提出してください。',
@@ -171,6 +176,7 @@ export const messages = {
 	'portal.discounts.filter.captured': '取得済み',
 	'portal.discounts.filter.closed': '終了',
 	'portal.discounts.loadFailed': '読み込みに失敗しました',
+	'portal.discounts.tableAria': '割引オファー一覧',
 	'portal.discounts.acceptFailed': '承諾に失敗しました',
 	'portal.discounts.declineFailed': '辞退に失敗しました',
 	'portal.discounts.loadMore': 'さらに読み込む（{total}件中{shown}件）',
@@ -190,6 +196,9 @@ export const messages = {
 	'portal.discounts.tier': '{days}日 → {percent}',
 	'portal.discounts.accept': '承諾',
 	'portal.discounts.decline': '辞退',
+	'portal.discounts.declineConfirm': '辞退を確定',
+	'portal.discounts.emptyFiltered': 'このフィルターに一致する割引オファーはありません。',
+	'portal.discounts.clearFilter': 'すべてのオファーを表示',
 	'portal.discounts.dialog.title': '早期支払割引を承諾',
 	'portal.discounts.dialog.subtitle':
 		'承諾すると、早期の支払いと引き換えに割引を受けることを確認します。これにより資金が移動することはありません。支払いはお客様が引き続き処理します。',
@@ -203,6 +212,7 @@ export const messages = {
 
 	// ポータルの会社情報 (routes/portal/company/+page.svelte)
 	'portal.company.title': '会社情報',
+	'portal.company.loadFailed': "会社情報を読み込めませんでした。もう一度お試しください。",
 	'portal.company.pendingBanner':
 		'{changeType} の変更が買掛金（AP）の承認待ちです。お客様が承認すると有効になります。',
 	'portal.company.contact.title': '連絡先情報',

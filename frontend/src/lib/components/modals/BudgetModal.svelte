@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatPercent } from '#lib/utils/percent.ts';
 	import CurrencyInput from '#lib/components/ui/CurrencyInput.svelte';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import type { Budget, BudgetDimension, BudgetSpend } from '#lib/types/budget.ts';
@@ -157,7 +158,7 @@
 			     neither of which has a "no figure yet" form. -->
 			<div class="kpi-row">
 				<KpiCard
-					value={spend ? `${spend.utilization_pct.toFixed(1)}%` : null}
+					value={spend ? formatPercent(spend.utilization_pct, { minimumFractionDigits: 1 }) : null}
 					label={m('budgets.modal.kpi.utilization')}
 					highlight={spend && spend.utilization_pct >= 100 ? 'red' : null}
 					pending={spendLoading}

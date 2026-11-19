@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { formatDate, formatPeriod, timeAgo } from './time';
+import { formatDate, formatMonth, formatPeriod, timeAgo } from './time';
 import { setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 // The date helpers drive their locale off the active in-app i18n locale
@@ -196,5 +196,23 @@ describe('timeAgo', () => {
 		expect(timeAgo('not-a-date')).toBe('—');
 		expect(timeAgo('')).toBe('—');
 		expect(timeAgo('not-a-date', 'n/a')).toBe('n/a');
+	});
+});
+
+describe('formatMonth', () => {
+	it('renders the full year so a month never reads as a day', () => {
+		setActiveFormatLocale('en-US');
+		expect(formatMonth('2026-11')).toBe('Nov 2026');
+		expect(formatMonth('2026-11', 'long')).toBe('November 2026');
+	});
+
+	it('follows the active locale', () => {
+		setActiveFormatLocale('de-DE');
+		expect(formatMonth('2026-03', 'long')).toBe('März 2026');
+	});
+
+	it('returns anything that is not a YYYY-MM key unchanged', () => {
+		expect(formatMonth('2026-11-05')).toBe('2026-11-05');
+		expect(formatMonth('garbage')).toBe('garbage');
 	});
 });

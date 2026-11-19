@@ -463,7 +463,7 @@
 				toast(m('vendors.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.toast.selectAllFailed'), 'error');
+			toast(errorMessage(err, m('vendors.toast.selectAllFailed')), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -472,6 +472,7 @@
 	function clearSelection() {
 		selected = new Set();
 		selectedAllMatching = false;
+		if (armed?.action === 'bulkReject') armed = null;
 	}
 
 	async function bulkVerify() {
@@ -485,7 +486,7 @@
 				: m('vendors.bulk.verified', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.bulk.verifyFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bulk.verifyFailed')), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -503,7 +504,7 @@
 			toast(msg, res.updated > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.bulk.rejectFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bulk.rejectFailed')), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -521,7 +522,7 @@
 			toast(msg, res.screened > 0 ? 'success' : 'error');
 			toastCardRevocations(res.card_revocations);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.bulk.screenFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bulk.screenFailed')), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -534,7 +535,7 @@
 			await exportVendorsCsv(ids);
 			toast(m('vendors.bulk.exported', { n: ids.length }), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.bulk.exportFailed'), 'error');
+			toast(errorMessage(err, m('vendors.bulk.exportFailed')), 'error');
 		} finally {
 			bulkBusy = false;
 		}
@@ -570,12 +571,20 @@
 			await fetchVendors();
 			toast(m('vendors.toast.verified'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.toast.verifyFailed'), 'error');
+			toast(errorMessage(err, m('vendors.toast.verifyFailed')), 'error');
 		}
 	}
 
-	/** The row whose Reject is armed (one click from committing), or null. */
-	let rejectArmedId = $state<string | null>(null);
+	// The one armed (one click from committing) Reject on the page: a row's, or
+	// the bulk bar's. The bulk Reject does to every selected vendor what the row
+	// Reject does to one — stops their payments and revokes their live cards —
+	// so it must not commit on a single click either. A single slot means arming
+	// one disarms the other; two separate flags let a row and the bulk bar sit
+	// armed together. Any click outside a `.row-action` (a checkbox included, so
+	// the selection can't change under an armed confirm) un-arms it.
+	let armed = $state<{ action: 'reject'; id: string } | { action: 'bulkReject' } | null>(null);
+	const rejectArmedFor = (id: string) => armed?.action === 'reject' && armed.id === id;
+	const bulkRejectArmed = $derived(armed?.action === 'bulkReject');
 
 	async function rejectVendor(id: string) {
 		try {
@@ -584,7 +593,7 @@
 			toast(m('vendors.toast.rejected'), 'success');
 			toastCardRevocations([rejected.card_revocation]);
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.toast.rejectFailed'), 'error');
+			toast(errorMessage(err, m('vendors.toast.rejectFailed')), 'error');
 		}
 	}
 
@@ -599,7 +608,7 @@
 				toast(line.text, line.tone, line.tone === 'warning' ? 12_000 : undefined);
 			}
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('vendors.toast.syncFailed'), 'error');
+			toast(errorMessage(err, m('vendors.toast.syncFailed')), 'error');
 		} finally {
 			syncing = false;
 		}
@@ -621,6 +630,10 @@
 			alert: true
 		},
 		{ key: 'active', label: m('vendors.filter.active') },
+		// `?status=inactive` was accepted from the URL (and honoured by the
+		// backend list) with no chip to show it, so a deactivated-only view
+		// looked unfiltered and could not be cleared from a chip.
+		{ key: 'inactive', label: m('vendors.filter.inactive') },
 		{ key: 'rejected', label: m('vendors.filter.rejected') }
 	]);
 	// The table's empty line, chosen by state — the invoices page's shape. A
@@ -669,8 +682,8 @@
 <svelte:window
 	onclick={(e) => {
 		// Outside-click un-arms a pending Reject confirmation.
-		if (rejectArmedId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
-			rejectArmedId = null;
+		if (!(e.target as HTMLElement)?.closest?.('.row-action')) {
+			if (armed) armed = null;
 		}
 	}}
 />
@@ -685,12 +698,12 @@
 		{#if auth.isManager}
 			<!-- The dual-control queue a staged bank/tax change waits in. Role-gated
 			     to match `GET /api/vendors/change-requests` (admin | ap_manager). -->
-			<a class="btn-outline" href="/vendors/change-requests">
+			<a class="btn-secondary" href="/vendors/change-requests">
 				{m('vendors.action.changeApprovals')}
 			</a>
 		{/if}
 		{#if canManageVendors}
-			<button class="btn-outline" onclick={() => (showConsolidation = true)}>
+			<button class="btn-secondary" onclick={() => (showConsolidation = true)}>
 				{m('vendors.mergeDuplicates')}
 			</button>
 		{/if}
@@ -698,7 +711,7 @@
 			<!-- `POST /api/vendors/sync-erp` is require_permission(vendor.manage).
 			     A CFO reaches this page (nav.ts admits them for the read) but
 			     doesn't hold it, so the button only ever 403'd. -->
-			<button class="btn-outline" disabled={syncing} onclick={syncFromErp}>
+			<button class="btn-secondary" disabled={syncing} onclick={syncFromErp}>
 				{syncing ? m('vendors.action.syncing') : m('vendors.action.syncErp')}
 			</button>
 		{:else if canManageVendors && erpOffer === null}
@@ -706,19 +719,19 @@
 			     arrival does not re-wrap the toolbar and shift the filter row
 			     and table down (layout-stability.spec.ts). Hidden from sight
 			     and from assistive tech; never interactive. -->
-			<span class="btn-outline erp-slot-reserve" aria-hidden="true" inert>
+			<span class="btn-secondary erp-slot-reserve" aria-hidden="true" inert>
 				{m('vendors.action.syncErp')}
 			</span>
 		{:else if auth.isAdmin && erpOffer?.kind === 'connect'}
 			<!-- No ERP yet: the way to one, for the role that can set it up. -->
-			<a class="btn-outline" href="/organization?section=erp" data-testid="vendors-connect-erp">
+			<a class="btn-secondary" href="/organization?section=erp" data-testid="vendors-connect-erp">
 				{m('vendors.action.connectErp')}
 			</a>
 		{/if}
 		{#if canManageVendors}
 			<!-- Day-0 bulk load — `POST /api/vendors/import-csv`, same gate as
 			     the sync button above. See backend/docs/csv-import.md. -->
-			<button class="btn-outline" onclick={() => (showImportCsv = true)}>
+			<button class="btn-secondary" onclick={() => (showImportCsv = true)}>
 				{m('vendors.action.importCsv')}
 			</button>
 		{/if}
@@ -788,11 +801,11 @@
 								checked={selected.has(v.id)}
 								onclick={(e) => e.stopPropagation()}
 								onchange={() => toggleSelect(v.id)}
-								aria-label={`Select ${v.name}`}
+								aria-label={m('vendors.selectRowAria', { vendor: v.name })}
 							/>
 						</td>
 						<td class="vendor-name">
-							<RowLink onclick={() => (detailVendor = v)} ariaLabel={`Open vendor ${v.name}`}>
+							<RowLink onclick={() => (detailVendor = v)} ariaLabel={m('vendors.row.openAria', { vendor: v.name })}>
 								{v.name}
 							</RowLink>
 						</td>
@@ -856,16 +869,20 @@
 								     only arms (the shape the change-request queue uses). -->
 								<RowAction
 									variant="danger"
-									armed={rejectArmedId === v.id}
+									armed={rejectArmedFor(v.id)}
+									ariaLabel={m('common.rowActionAria', {
+										action: rejectArmedFor(v.id) ? m('vendors.row.confirmReject') : m('vendors.row.reject'),
+										name: v.name
+									})}
 									onclick={(e) => {
 										e.stopPropagation();
-										if (rejectArmedId === v.id) {
-											rejectArmedId = null;
+										if (rejectArmedFor(v.id)) {
+											armed = null;
 											rejectVendor(v.id);
-										} else rejectArmedId = v.id;
+										} else armed = { action: 'reject', id: v.id };
 									}}
 								>
-									{rejectArmedId === v.id ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
+									{rejectArmedFor(v.id) ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
 								</RowAction>
 							{/if}
 							<RowAction onclick={() => openBankEditor(v)}>
@@ -908,7 +925,19 @@
 					<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 				{/if}
 				<RowAction variant="success" disabled={bulkBusy} onclick={bulkVerify}>{m('vendors.row.verify')}</RowAction>
-				<RowAction variant="danger" disabled={bulkBusy} onclick={bulkReject}>{m('vendors.row.reject')}</RowAction>
+				<RowAction
+					variant="danger"
+					armed={bulkRejectArmed}
+					disabled={bulkBusy}
+					onclick={() => {
+						if (bulkRejectArmed) {
+							armed = null;
+							bulkReject();
+						} else armed = { action: 'bulkReject' };
+					}}
+				>
+					{bulkRejectArmed ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
+				</RowAction>
 				<div class="bulk-divider"></div>
 				<RowAction disabled={bulkBusy} onclick={bulkScreen}>{m('vendors.bulk.screen')}</RowAction>
 				<RowAction disabled={bulkBusy} onclick={bulkExport}>{m('vendors.bulk.exportCsv')}</RowAction>
@@ -1110,24 +1139,6 @@
 	}
 
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
-	/* Shared by the Merge-duplicates <button> and the change-approvals <a>, so
-	   the two toolbar controls read as one row. */
-	.btn-outline {
-		display: inline-flex;
-		align-items: center;
-		padding: 8px 18px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		text-decoration: none;
-	}
-
 	/* The dual-control explainer in the bank-details dialog: saving here stages
 	   a request, it does not change where money goes. */
 	.dual-control-hint {
@@ -1138,14 +1149,6 @@
 
 	.dual-control-hint a {
 		color: var(--accent);
-	}
-	.btn-outline:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-outline:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	/* Row emphasis + bespoke cell badges */

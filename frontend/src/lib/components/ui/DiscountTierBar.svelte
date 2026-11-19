@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { DiscountTier } from '#lib/types/discounts.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
 
 	type Props = {
 		/** Sliding-scale tiers (e.g. 2% by day 10, 1% by day 20). */
@@ -19,8 +21,13 @@
 {:else}
 	<div class="tier-bar">
 		{#each sorted as tier (tier.days)}
-			<span class="tier-chip" class:accepted={acceptedDays === tier.days} title="{tier.percent}% if paid within {tier.days} days">
-				{tier.percent}% / {tier.days}d
+			{@const percent = formatPercent(tier.percent, { maximumFractionDigits: 2 })}
+			<span
+				class="tier-chip"
+				class:accepted={acceptedDays === tier.days}
+				title={m('discounts.tierBar.title', { percent, days: tier.days })}
+			>
+				{m('discounts.tierBar.chip', { percent, days: tier.days })}
 			</span>
 		{/each}
 	</div>

@@ -37,7 +37,7 @@
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
-	import { timeAgo } from '#lib/utils/time.ts';
+	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import DimensionEditor from '#lib/components/reports/DimensionEditor.svelte';
 	import MeasureEditor from '#lib/components/reports/MeasureEditor.svelte';
@@ -198,13 +198,16 @@
 		loadedSnapshot = JSON.stringify(specForCompare());
 	}
 
-	async function loadDefinition(id: string, { updateUrl = true } = {}) {
+	/** Resolves `true` once the definition is in the builder. */
+	async function loadDefinition(id: string, { updateUrl = true } = {}): Promise<boolean> {
 		try {
 			const def = await getReport(id);
 			applyDefinition(def);
 			if (updateUrl) setIdParam(id);
+			return true;
 		} catch (e) {
 			toast(e instanceof Error ? e.message : m('reports.error.loadReport'), 'error');
+			return false;
 		}
 	}
 
@@ -266,8 +269,11 @@
 		}
 	}
 
+	// Held for the PATCH so a second click cannot send a second write.
+	let updating = $state(false);
 	async function updateLoaded() {
-		if (!loadedId) return;
+		if (!loadedId || updating) return;
+		updating = true;
 		try {
 			const def = await updateReport(loadedId, {
 				...spec,
@@ -279,6 +285,8 @@
 			await loadSaved();
 		} catch (e) {
 			toast(e instanceof Error ? e.message : m('reports.error.update'), 'error');
+		} finally {
+			updating = false;
 		}
 	}
 
@@ -301,8 +309,9 @@
 
 	// Run a saved report inline (loads it into the builder first, then runs).
 	async function runSaved(def: ReportDefinition) {
-		await loadDefinition(def.id);
-		await run(1);
+		// A failed load leaves the PREVIOUS spec in the builder; running on would
+		// put that report's figures on screen under the row the user clicked.
+		if (await loadDefinition(def.id)) await run(1);
 	}
 
 	async function exportSaved(id: string, format: 'csv' | 'pdf') {
@@ -320,6 +329,15 @@
 			toast(e instanceof Error ? e.message : m('reports.error.export', { format: format.toUpperCase() }), 'error');
 		}
 	}
+
+	// "3 days ago" is the scan; the exact moment rides in the cell's title.
+	const PRECISE_TIME: Intl.DateTimeFormatOptions = {
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	};
 
 	const SAVED_COLUMNS = $derived([
 		{ label: m('reports.saved.col.name') },
@@ -414,15 +432,15 @@
 						{running ? m('reports.action.running') : m('reports.action.run')}
 					</button>
 					{#if canMutate && loadedId}
-						<button class="btn-secondary" onclick={updateLoaded} disabled={running}
+						<button class="btn-cancel" onclick={updateLoaded} disabled={running || updating}
 							>{m('reports.action.saveChanges')}</button
 						>
 					{/if}
 					{#if loadedId}
-						<button class="btn-secondary" onclick={() => exportSaved(loadedId!, 'csv')}
+						<button class="btn-cancel" onclick={() => exportSaved(loadedId!, 'csv')}
 							>{m('reports.action.exportCsv')}</button
 						>
-						<button class="btn-secondary" onclick={() => exportSaved(loadedId!, 'pdf')}
+						<button class="btn-cancel" onclick={() => exportSaved(loadedId!, 'pdf')}
 							>{m('reports.action.exportPdf')}</button
 						>
 					{/if}
@@ -477,7 +495,9 @@
 									catalog?.sources.find((s) => s.key === def.data_source)?.label
 								)}
 							</td>
-							<td class="muted">{timeAgo(def.updated_at)}</td>
+							<td class="muted" title={formatDate(def.updated_at, '', PRECISE_TIME)}>
+								{timeAgo(def.updated_at)}
+							</td>
 							<td class="actions">
 								<RowAction
 									onclick={() => runSaved(def)}
@@ -499,7 +519,9 @@
 										variant="danger"
 										armed={confirmDeleteId === def.id}
 										onclick={() => doDelete(def)}
-										ariaLabel={m('reports.saved.deleteAria', { name: def.name })}
+										ariaLabel={confirmDeleteId === def.id
+											? m('common.rowActionAria', { action: m('reports.saved.confirm'), name: def.name })
+											: m('reports.saved.deleteAria', { name: def.name })}
 									>
 										{confirmDeleteId === def.id ? m('reports.saved.confirm') : m('reports.saved.delete')}
 									</RowAction>
@@ -563,27 +585,6 @@
 		align-items: center;
 		gap: 10px;
 		flex-wrap: wrap;
-	}
-	.btn-secondary {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-	.btn-secondary:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-secondary:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 	select {
 		padding: 7px 10px;

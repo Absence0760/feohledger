@@ -2,6 +2,7 @@
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
 	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
+	import Spinner from '#lib/components/ui/Spinner.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -208,9 +209,8 @@
 			<!-- Held until both SSO config answers are in, so an SSO-only
 			     workspace never shows the password form first. The text fades
 			     in only if the wait is noticeable. -->
-			<div class="config-loading" role="status">
-				<span class="spinner" aria-hidden="true"></span>
-				<span>{m('auth.login.loadingOptions')}</span>
+			<div class="config-loading">
+				<Spinner size={22} label={m('auth.login.loadingOptions')} />
 			</div>
 		{:else if !ssoOnly}
 			<label>
@@ -310,19 +310,6 @@
 	@keyframes config-wait-in {
 		from {
 			opacity: 0;
-		}
-	}
-	.spinner {
-		width: 18px;
-		height: 18px;
-		border: 2px solid var(--border);
-		border-top-color: var(--accent);
-		border-radius: 50%;
-		animation: spin 0.8s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
 		}
 	}
 

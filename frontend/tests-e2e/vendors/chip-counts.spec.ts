@@ -44,4 +44,16 @@ test.describe('vendors chip counts', () => {
 		await expect(unverifiedChip).toBeVisible();
 		await expect(unverifiedChip).toContainText('42');
 	});
+
+	// `?status=inactive` is a filter the page and the backend list both honour;
+	// it used to have no chip, so the deactivated-only view looked unfiltered
+	// and could not be cleared from the chip row.
+	test('?status=inactive shows a pressed Inactive chip, and All clears it', async ({ page }) => {
+		await page.goto('/vendors?status=inactive');
+		const inactiveChip = page.locator('.filter-chip', { hasText: 'Inactive' });
+		await expect(inactiveChip).toHaveAttribute('aria-pressed', 'true');
+		await page.locator('.filter-chip', { hasText: 'All' }).click();
+		await expect(inactiveChip).toHaveAttribute('aria-pressed', 'false');
+		await expect(page).not.toHaveURL(/[?&]status=/);
+	});
 });

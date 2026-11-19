@@ -4,6 +4,7 @@
 	import { notificationStore } from '#lib/stores/notifications.svelte.ts';
 	import { timeAgo } from '#lib/utils/time.ts';
 	import { EVENT_LABEL_KEYS } from '#lib/types/notification.ts';
+	import { notificationHref } from '#lib/utils/notificationHref.ts';
 	import type { Notification } from '#lib/types/notification.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
@@ -66,19 +67,29 @@
 		await load();
 	}
 
-	async function openItem(n: Notification) {
-		// Through `close()`, so focus is back on the bell before any navigation —
-		// a non-invoice notification navigates nowhere, and the clicked button
-		// is about to unmount.
+	async function openItem(n: Notification, href: string) {
+		// Through `close()`, so focus is back on the bell before navigating —
+		// the clicked button is about to unmount.
 		close();
 		try {
 			if (!n.read_at) await notificationStore.markRead(n.id);
 		} catch {
 			/* navigate regardless — mark-read is best-effort */
 		}
-		if (n.entity_type === 'invoice' && n.entity_id) {
-			goto(`/invoices?id=${n.entity_id}`);
+		goto(href);
+	}
+
+	// A row with nowhere to go cannot be opened, so opening cannot mark it
+	// read; it gets its own control instead of leaving "Mark all read" as the
+	// only way to clear it.
+	async function markOne(n: Notification) {
+		try {
+			await notificationStore.markRead(n.id);
+		} catch {
+			/* non-critical, as markAll: the dot stays, which is the truth */
 		}
+		// The button unmounts once the row is read; keep focus in the dialog.
+		heading?.focus();
 	}
 
 	async function markAll() {
@@ -113,6 +124,17 @@
 	</div>
 {/snippet}
 
+{#snippet itemContent(n: Notification)}
+	<span class="bell-dot" class:on={!n.read_at} aria-hidden="true"></span>
+	<span class="bell-item-text">
+		<span class="bell-item-title">{n.title}</span>
+		{#if n.body}<span class="bell-item-body">{n.body}</span>{/if}
+		<span class="bell-item-meta">
+			{eventLabel(n.event_type)} · {timeAgo(n.created_at)}
+		</span>
+	</span>
+{/snippet}
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="bell-wrapper" class:collapsed onfocusout={onWrapperFocusOut}>
 	{#if open}
@@ -139,16 +161,28 @@
 					     stay, but they are not current, and the popover says so. -->
 					{#if errored}{@render loadError()}{/if}
 					{#each recent as n (n.id)}
-						<button class="bell-item" class:unread={!n.read_at} onclick={() => openItem(n)}>
-							<span class="bell-dot" class:on={!n.read_at} aria-hidden="true"></span>
-							<span class="bell-item-text">
-								<span class="bell-item-title">{n.title}</span>
-								{#if n.body}<span class="bell-item-body">{n.body}</span>{/if}
-								<span class="bell-item-meta">
-									{eventLabel(n.event_type)} · {timeAgo(n.created_at)}
-								</span>
-							</span>
-						</button>
+						{@const href = notificationHref(n)}
+						{#if href}
+							<button class="bell-item" class:unread={!n.read_at} onclick={() => openItem(n, href)}>
+								{@render itemContent(n)}
+							</button>
+						{:else}
+							<!-- Nowhere to go: plain text, not a control that only
+							     pretends to open something (lib/utils/notificationHref.ts). -->
+							<div class="bell-item static" class:unread={!n.read_at} data-testid="bell-item-static">
+								{@render itemContent(n)}
+								{#if !n.read_at}
+									<button
+										type="button"
+										class="bell-item-mark"
+										aria-label={m('notifications.markReadAria', { title: n.title })}
+										onclick={() => markOne(n)}
+									>
+										{m('notifications.markRead')}
+									</button>
+								{/if}
+							</div>
+						{/if}
 					{/each}
 				{/if}
 			</div>
@@ -350,12 +384,35 @@
 		border-bottom: none;
 	}
 
-	.bell-item:hover {
+	.bell-item:hover:not(.static) {
 		background: color-mix(in srgb, var(--accent) 8%, transparent);
+	}
+
+	.bell-item.static {
+		cursor: default;
 	}
 
 	.bell-item.unread {
 		background: color-mix(in srgb, var(--accent) 5%, transparent);
+	}
+
+	.bell-item-mark {
+		margin-left: auto;
+		flex-shrink: 0;
+		min-height: 24px;
+		padding: 2px 8px;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--surface);
+		color: var(--text);
+		font: inherit;
+		font-size: 0.72rem;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+
+	.bell-item-mark:hover {
+		border-color: var(--accent);
 	}
 
 	.bell-dot {

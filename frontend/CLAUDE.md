@@ -310,7 +310,9 @@ in all six locales; guide bodies under `src/lib/help/` are English, rendered
 **Not every key lives in `locales/<loc>.ts`.** Strings only some routes render
 are lazy catalogue slices — `locales/help/`, `locales/settings/` (`org.*`,
 `orgSso.*`, `admin.*`, `billing.*`, `sweepHealth.*`), `locales/portal/` and
-`locales/marketing/` (the apex landing page, which awaits it itself) —
+`locales/marketing/` (the apex landing page, which awaits it itself) and
+`locales/audit/` (`/audit`'s action labels, `audit.action.*` /
+`audit.actionPattern.*`) —
 loaded by `ensureSlices()` from those routes' `+layout.ts` (decisions §261,
 §300). A new key under a slice prefix goes in the slice; a new route or shared
 component that renders slice keys must load the slice or keep the key in main.
@@ -413,7 +415,7 @@ Two invariants the library enforces, worth knowing before you call anything:
 - `admin.ts` — `AdminUser`, `Role` (admin, ap_manager, ap_clerk, cfo)
 - `tax.ts` — `Report1099`, `Vendor1099Row` (1099 reporting dashboard)
 - `supplierChat.ts` — `ChatThread`, `ChatMessage`, `ChatAttachment`, `ChatTemplate` (AP, full) + masked `PortalChatThread` / `PortalChatMessage` (portal — no `author_user_id`, no mentions)
-- `assistant.ts` — `ToolInvocation`, `ChatResponse`, `ConversationSummary` / `ConversationDetail` / `ConversationListResponse`, `UsageResponse`, the five structured tool-result shapes (`VendorSpendResult`, `ForecastResult`, `InvoiceListResult`, `PendingApprovalsResult`, `TextSearchResult`), the UI-side `UiMessage`, and `EXAMPLE_PROMPTS` (the three built-in empty-state prompts). Money fields are string-Decimal — pass to `formatMoney`, never `parseFloat` for display.
+- `assistant.ts` — `ToolInvocation`, `ChatResponse`, `ConversationSummary` / `ConversationDetail` / `ConversationListResponse`, `UsageResponse`, the five structured tool-result shapes (`VendorSpendResult`, `ForecastResult`, `InvoiceListResult`, `PendingApprovalsResult`, `TextSearchResult`), and the UI-side `UiMessage`. (The empty-state starter prompts are message keys, `assistant.example.*`, defaulted in `ExamplePrompts.svelte`.) Money fields are string-Decimal — pass to `formatMoney`, never `parseFloat` for display.
 - `vendor.ts` — `Vendor` (incl. `screening_status` / `last_screened_at` / `payments_blocked(+_reason)` / `risk_score` / `risk_level`), `SanctionsCheck`, `ScreeningReviewItem`, `VendorRisk`, `RiskSummaryBucket`, the `ScreeningStatus` / `RiskLevel` unions + label maps, and the dual-control change-request shapes — `VendorChangeRequest` / `VendorChangeRequestPage` / `VendorChangeRequestStatus` / `VendorChangeType` plus two pure formatters for the two views of `proposed_value`: `maskedProposalSummary` (the queue list's last-4-only line — it renders the backend's mask and never invents a full account number) and `revealedProposalFields` (the detail dialog's field list, returning `null` — so the caller falls back to raw JSON — whenever it can't flatten the payload without dropping a field)
 
 ## Multi-tenant routing

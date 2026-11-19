@@ -6,6 +6,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
+from app.schemas.action_verdict import CodedRefusal
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.schemas.percent import PercentNumber
 
@@ -246,6 +247,10 @@ class PortalPOListItem(BaseModel):
     currency: str | None = None
     line_item_count: int = 0
     created_at: datetime
+    #: The verdict on flipping this PO into an invoice: ``None`` when
+    #: ``POST …/flip`` would mint one, else the coded refusal it would answer
+    #: with (``api/portal.po_flip_refusal``, issue #575).
+    flip_verdict: CodedRefusal | None = None
 
 
 class PortalPOListResponse(PageMeta):
@@ -273,6 +278,8 @@ class PortalPODetail(BaseModel):
     #: Labels ``total`` and every line figure; ``None`` renders bare.
     currency: str | None = None
     created_at: datetime
+    #: Same as ``PortalPOListItem.flip_verdict``.
+    flip_verdict: CodedRefusal | None = None
     line_items: list[PortalPOLineItem] = []
 
 

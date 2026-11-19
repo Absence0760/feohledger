@@ -167,4 +167,28 @@ test.describe('/tax (admin)', () => {
 		await expect(page.locator('td.empty')).toBeVisible();
 		await expect(page.locator('td.empty')).toContainText('No vendors match this filter.');
 	});
+
+	test('year, chip and search round-trip through the URL', async ({ page }) => {
+		const year = String(new Date().getFullYear() - 1);
+		await expect(page.locator('.grid-container tbody tr').first()).toBeVisible({ timeout: 10_000 });
+
+		await page.getByLabel('Tax year').selectOption(year);
+		await page.locator('.filter-chip', { hasText: 'Missing W-9' }).click();
+		await page.getByLabel('Search vendors').fill('acme');
+		await expect(page).toHaveURL(new RegExp(`[?&]year=${year}\\b`));
+		await expect(page).toHaveURL(/[?&]filter=missing_w9\b/);
+		await expect(page).toHaveURL(/[?&]search=acme\b/);
+
+		const reloaded = page.waitForResponse(
+			(r) => r.url().includes('/api/tax/1099-report') && r.url().includes(`year=${year}`)
+		);
+		await page.reload();
+		await reloaded;
+		await expect(page.getByLabel('Tax year')).toHaveValue(year);
+		await expect(page.locator('.filter-chip', { hasText: 'Missing W-9' })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		await expect(page.getByLabel('Search vendors')).toHaveValue('acme');
+	});
 });

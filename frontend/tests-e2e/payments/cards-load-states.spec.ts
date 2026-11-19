@@ -58,11 +58,14 @@ test.describe('/payments Cards table load states', () => {
 
 		await openCards(page);
 
-		const empty = page.getByTestId('cards-table').getByTestId('table-empty');
-		await expect(empty).toBeVisible({ timeout: 10_000 });
-		await expect(empty).toHaveText('Could not load virtual cards.');
+		// The failure is stated in place WITH a way back (ui/LoadError), not as
+		// the table's empty line — that left "Could not load" with nothing to press.
+		const error = page.getByTestId('cards-table').getByTestId('cards-error');
+		await expect(error).toBeVisible({ timeout: 10_000 });
+		await expect(error).toContainText('Could not load virtual cards.');
+		await expect(error.getByRole('button', { name: 'Retry' })).toBeVisible();
 		// The critical negative: an outage must not read as "you have none".
-		await expect(empty).not.toContainText('No virtual cards issued yet.');
+		await expect(page.getByTestId('cards-table')).not.toContainText('No virtual cards issued yet.');
 	});
 
 	test('a SLOW load shows the loading state, not the empty claim', async ({ page }) => {

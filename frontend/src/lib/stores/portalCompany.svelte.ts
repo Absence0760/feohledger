@@ -1,4 +1,5 @@
 import { portalApi } from '#lib/portalApi.ts';
+import { m } from '#lib/i18n/store.svelte.ts';
 
 export interface PortalPendingChange {
 	id: string;
@@ -44,7 +45,7 @@ function createPortalCompany() {
 		try {
 			info = await portalApi.get<PortalCompanyInfo>('/api/portal/company');
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Load failed';
+			error = err instanceof Error ? err.message : m('portal.company.loadFailed');
 		} finally {
 			loading = false;
 		}

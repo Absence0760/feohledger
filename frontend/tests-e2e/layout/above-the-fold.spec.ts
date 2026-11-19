@@ -235,7 +235,7 @@ const ROWS: Record<string, Row> = {
 	'/audit': {
 		heading: { key: 'audit.title' },
 		action: button('audit.downloadCsv'),
-		filter: tablist('audit.queryMode')
+		filter: group('audit.queryMode')
 	},
 	'/admin/access-review': {
 		heading: { key: 'admin.accessReview.title' },

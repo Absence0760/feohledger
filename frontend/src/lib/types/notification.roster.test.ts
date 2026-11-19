@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EN_ALL } from '#lib/i18n/allMessages.ts';
 import {
-	EVENT_LABELS,
 	EVENT_LABEL_KEYS,
 	EVENT_ORDER,
 	normalizePrefs,
@@ -105,26 +104,16 @@ describe('notification event roster', () => {
 		}
 	});
 
-	it('every event has a label and an i18n key, and nothing extra', () => {
-		expect(Object.keys(EVENT_LABELS).sort()).toEqual([...EVENT_ORDER].sort());
+	it('every event has an i18n key, and nothing extra', () => {
 		expect(Object.keys(EVENT_LABEL_KEYS).sort()).toEqual([...EVENT_ORDER].sort());
 	});
 
-	it('the English catalogue value equals the English EVENT_LABELS spelling', () => {
-		// Two English sources exist on purpose: the notification centre is not in
-		// the i18n extraction slice yet (the bell is, and reads the keys). Pinning
-		// them together is what stops that from becoming two different names for
-		// one event.
+	it('no event label is empty in English', () => {
+		// Every surface (the bell, `/notifications`, the `/profile` grid) reads
+		// the keys; the English-only `EVENT_LABELS` map they replaced is gone.
 		for (const event of EVENT_ORDER) {
-			expect(EN_ALL[EVENT_LABEL_KEYS[event]], `${event} label differs between EVENT_LABELS and en`).toBe(
-				EVENT_LABELS[event]
-			);
-		}
-	});
-
-	it('no event label is empty', () => {
-		for (const event of EVENT_ORDER) {
-			expect(EVENT_LABELS[event].trim().length, `${event} has a blank label`).toBeGreaterThan(0);
+			const label = EN_ALL[EVENT_LABEL_KEYS[event]];
+			expect(label?.trim().length, `${event} has a blank label`).toBeGreaterThan(0);
 		}
 	});
 });

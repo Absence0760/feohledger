@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatPercent } from '#lib/utils/percent.ts';
 	// This month's AI-read invoices against the plan allowance (decisions §253):
 	// the meter, the overage so far and its month-end projection, the spending
 	// cap (editable by an admin on a plan that bills overage), and the pause
@@ -71,10 +72,10 @@
 </script>
 
 <section class="ai-usage" aria-labelledby="ai-usage-heading" data-testid="billing-ai-usage">
-	<h3 id="ai-usage-heading">
-		{m('billing.ai.heading')}
-		{#if usage}<span class="period">({usage.period})</span>{/if}
-	</h3>
+	<!-- No period suffix: the page's "Usage this period · November 2026"
+	     heading already names the month, and the raw `YYYY-MM` key here
+	     repeated it in a form no reader uses. -->
+	<h3 id="ai-usage-heading">{m('billing.ai.heading')}</h3>
 
 	{#if usage?.paused}
 		<div class="paused" role="status" data-testid="billing-ai-paused">
@@ -95,7 +96,7 @@
 					included: formatNumber(usage.included)
 				})}
 			</span>
-			<span class="pct">{percent}%</span>
+			<span class="pct">{formatPercent(percent)}</span>
 		</div>
 		<div
 			class="track tone-{tone}"
@@ -218,12 +219,6 @@
 
 	.ai-usage h3 {
 		margin: 0 0 0.75rem;
-	}
-
-	.period {
-		font-weight: 400;
-		color: var(--text-muted);
-		font-size: 0.9rem;
 	}
 
 	.paused {

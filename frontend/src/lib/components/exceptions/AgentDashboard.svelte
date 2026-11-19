@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatRatioPercent } from '#lib/utils/percent.ts';
 	// Autonomous-exception-agent dashboard: resolution rate, escalation rate,
 	// accuracy (placeholder), plus the recent decision log. Read-only surface over
 	// GET /api/exceptions/agent-stats + /agent-decisions (admin/ap_manager-gated).
@@ -67,7 +68,7 @@
 	};
 
 	function pct(rate: number): string {
-		return `${(rate * 100).toFixed(1)}%`;
+		return formatRatioPercent(rate, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 	}
 
 	// Sequences every `loadDecisions` call — mount, action chip, load-more; one
@@ -454,7 +455,7 @@
 								{actionLabel(d.action_taken)}
 							</span>
 						</td>
-						<td class="mono right">{(d.confidence * 100).toFixed(0)}%</td>
+						<td class="mono right">{formatRatioPercent(d.confidence, { maximumFractionDigits: 0 })}</td>
 						<td class="muted-cell">{autonomyLabel(d.autonomy_level)}</td>
 						<td class="muted-cell change-cell" title={d.rationale ?? ''}>{changeSummary(d)}</td>
 					</tr>
@@ -534,7 +535,7 @@
 				</div>
 				<div>
 					<dt>{m('exceptions.agents.col.confidence')}</dt>
-					<dd class="mono">{(runOutcome.decision.confidence * 100).toFixed(0)}%</dd>
+					<dd class="mono">{formatRatioPercent(runOutcome.decision.confidence, { maximumFractionDigits: 0 })}</dd>
 				</div>
 				<div>
 					<dt>{m('exceptions.agents.col.autonomy')}</dt>

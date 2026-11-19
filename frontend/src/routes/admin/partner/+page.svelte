@@ -282,14 +282,18 @@
 
 	// ── Detach a child (armed two-click confirm) ───────────────────────────────
 	let confirmDetachId = $state<string | null>(null);
-	let detaching = $state(false);
+	// The child whose detach is in flight. Its button goes `busy` so the
+	// still-armed confirm cannot send a second request; other rows' Detach is
+	// disabled until it settles.
+	let detachingId = $state<string | null>(null);
 
 	async function handleDetach(child: ChildTenant) {
+		if (detachingId) return;
 		if (confirmDetachId !== child.id) {
 			confirmDetachId = child.id;
 			return;
 		}
-		detaching = true;
+		detachingId = child.id;
 		try {
 			await detachChild(child.id);
 			toast(m('admin.partner.toast.detached', { name: child.name }), 'success');
@@ -298,7 +302,7 @@
 		} catch (e) {
 			toast(e instanceof Error ? e.message : m('admin.partner.toast.detachFailed'), 'error');
 		} finally {
-			detaching = false;
+			detachingId = null;
 		}
 	}
 </script>
@@ -390,9 +394,16 @@
 							<RowAction
 								variant="danger"
 								armed={confirmDetachId === child.id}
-								disabled={detaching}
+								busy={detachingId === child.id}
+								disabled={detachingId !== null && detachingId !== child.id}
 								onclick={() => handleDetach(child)}
-								ariaLabel={m('admin.partner.detachAria', { name: child.name })}
+								ariaLabel={m('common.rowActionAria', {
+									action:
+										confirmDetachId === child.id
+											? m('admin.partner.row.confirmDetach')
+											: m('admin.partner.row.detach'),
+									name: child.name
+								})}
 							>
 								{confirmDetachId === child.id ? m('admin.partner.row.confirmDetach') : m('admin.partner.row.detach')}
 							</RowAction>

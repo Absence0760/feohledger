@@ -68,15 +68,32 @@ const TRANSLATED = [
 	'/src/lib/components/reports/ResultTable.svelte',
 	'/src/lib/components/reports/SaveReportModal.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
+	'/src/lib/components/ui/DiscountTierBar.svelte',
 	'/src/lib/components/ui/InvoicePicker.svelte',
 	'/src/lib/components/ui/PlanUpgradeNotice.svelte',
 	'/src/lib/components/ui/VendorPicker.svelte',
 	'/src/routes/admin/access-review/+page.svelte',
 	'/src/routes/admin/privacy/+page.svelte',
+	// Was all English, labels, hints, toasts and the unit (round 22).
+	'/src/routes/admin/retention/+page.svelte',
 	'/src/routes/budgets/+page.svelte',
 	'/src/routes/credit-memos/+page.svelte',
 	'/src/routes/exceptions/+page.svelte',
+	'/src/routes/organization/+page.svelte',
 	'/src/routes/find-workspace/+page.svelte',
+	// The supplier portal, every page but purchase-orders (round 24).
+	'/src/routes/portal/+layout.svelte',
+	'/src/routes/portal/+page.svelte',
+	'/src/routes/portal/payments/+page.svelte',
+	'/src/routes/portal/reset-password/+page.svelte',
+	'/src/routes/portal/change-password/+page.svelte',
+	'/src/routes/portal/company/+page.svelte',
+	'/src/routes/portal/discount-offers/+page.svelte',
+	'/src/routes/portal/forgot-password/+page.svelte',
+	'/src/routes/portal/invoices/+page.svelte',
+	'/src/routes/portal/login/+page.svelte',
+	'/src/routes/portal/notifications/+page.svelte',
+	'/src/routes/portal/cards/[token]/+page.svelte',
 	'/src/routes/reports/+page.svelte',
 	'/src/routes/vendors/+page.svelte'
 ];
@@ -111,7 +128,9 @@ const TOASTS_TRANSLATED = [
 	// count (decisions §360).
 	'/src/routes/admin/privacy/+page.svelte',
 	'/src/routes/admin/access-review/+page.svelte',
+	'/src/routes/admin/retention/+page.svelte',
 	'/src/routes/invoices/+page.svelte',
+	'/src/routes/organization/+page.svelte',
 	// Was "Payment voided", "Draft payment run created…" and six English
 	// load-failure fallbacks (#635).
 	'/src/routes/payments/+page.svelte',

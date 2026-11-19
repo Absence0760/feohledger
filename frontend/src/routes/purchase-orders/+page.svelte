@@ -6,6 +6,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import LineDescription from '#lib/components/ui/LineDescription.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
@@ -19,6 +20,8 @@
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { invoiceStatusLabelKey } from '#lib/types/invoice.ts';
+	import { poStatusLabel } from '#lib/types/purchaseOrder.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { untrack } from 'svelte';
 
@@ -93,6 +96,12 @@
 	let page = $state(1);
 	let loading = $state(true);
 	let loadingMore = $state(false);
+	// Set by a failed page-1 load, cleared by a successful one. A failed load
+	// renders `ui/LoadError` (with a Retry) in the table's place: on its own the
+	// toast faded and left the empty-state line claiming nothing matched — or,
+	// on a re-load, the previous filter's rows standing as this one's answer.
+	// A failed load-more keeps the rows already shown and only toasts.
+	let errored = $state(false);
 	let search = $state('');
 	let statusFilter = $state<'all' | 'open' | 'unissued' | 'closed' | 'cancelled'>('all');
 	/**
@@ -113,6 +122,16 @@
 		closed: 'success',
 		cancelled: 'muted'
 	};
+
+	// The badge text is the shared PO status label (`poStatusLabel`), not the
+	// raw column value — `open` is a database token, "Open" is what a clerk
+	// reads, and `partially_received` / `received` / `voided` read as words
+	// too (a local 4-entry map showed them raw). Unknown values show as-is.
+	const statusLabel = (status: string) => poStatusLabel(status, m);
+	function invoiceStatusLabel(status: string): string {
+		const key = invoiceStatusLabelKey(status);
+		return key ? m(key) : status;
+	}
 
 	let syncing = $state(false);
 
@@ -190,6 +209,11 @@
 	) {
 		const token = fetchSequence.start();
 		loading = !opts.append;
+		// Cleared when a fresh load STARTS (as /credit-memos does) so Retry
+		// takes `LoadError` down while the request is out and a second
+		// failure re-announces it — cleared only on success, Retry looked
+		// like a no-op.
+		if (!opts.append) errored = false;
 		try {
 			const nextPage = opts.nextPage ?? 1;
 			const params = new URLSearchParams({
@@ -206,9 +230,11 @@
 			pos = opts.append ? appendUnique(pos, data.items) : data.items;
 			total = data.total;
 			page = nextPage;
+			errored = false;
 		} catch (err) {
 			// `isCurrentRequest`, not `canCommit`: only the newest request reports.
 			if (!fetchSequence.isCurrentRequest(token)) return;
+			if (!opts.append) errored = true;
 			toast(err instanceof Error ? err.message : m('purchaseOrders.toast.loadListFailed'), 'error');
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) loading = false;
@@ -362,6 +388,13 @@
 		<FilterChips chips={statusChips} bind:active={statusFilter} />
 	</div>
 
+	{#if errored}
+		<LoadError
+			message={m('purchaseOrders.empty.errored')}
+			onretry={() => loadPos({ search, status: statusFilter })}
+			testId="purchase-orders-error"
+		/>
+	{:else}
 	<div class="po-table">
 	<DataTable
 		fixed
@@ -396,7 +429,7 @@
 							mono
 						/>
 					</td>
-					<td><Badge tone={STATUS_TONES[po.status] ?? 'neutral'} variant={po.status}>{po.status}</Badge></td>
+					<td><Badge tone={STATUS_TONES[po.status] ?? 'neutral'} variant={po.status}>{statusLabel(po.status)}</Badge></td>
 					<td class="muted">{po.line_items.length}</td>
 					<td class="muted">{formatDate(po.created_at)}</td>
 				</tr>
@@ -404,14 +437,15 @@
 		{/snippet}
 	</DataTable>
 	</div>
+	{/if}
 
-	{#if hasMore}
+	{#if hasMore && !errored}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
 				{loadingMore ? m('common.loading') : m('purchaseOrders.loadMore', { shown: pos.length, total })}
 			</button>
 		</div>
-	{:else if total > 0}
+	{:else if total > 0 && !errored}
 		<div class="load-more-row">
 			<span class="load-more-end">{m('purchaseOrders.showingAll', { total })}</span>
 		</div>
@@ -431,7 +465,7 @@
 				<HelpTip term="purchase-order" />
 				{#if detail}
 					<span class="po-number-badge">{detail.po_number}</span>
-					<Badge tone={STATUS_TONES[detail.status] ?? 'neutral'} variant={detail.status}>{detail.status}</Badge>
+					<Badge tone={STATUS_TONES[detail.status] ?? 'neutral'} variant={detail.status}>{statusLabel(detail.status)}</Badge>
 				{/if}
 			</div>
 			<button class="close-btn" onclick={() => (detailId = null)} aria-label={m('purchaseOrders.modal.close')}>&times;</button>
@@ -509,7 +543,7 @@
 							<td class="mono">{inv.invoice_number}</td>
 							<td>{inv.vendor_name ?? '—'}</td>
 							<td class="right mono">{formatMoney(inv.amount, { currency: inv.currency })}</td>
-							<td>{inv.status}</td>
+							<td>{invoiceStatusLabel(inv.status)}</td>
 						</tr>
 					{:else}
 						<tr><td colspan="4" class="empty">{m('purchaseOrders.modal.noLinkedInvoices')}</td></tr>

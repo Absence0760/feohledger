@@ -86,34 +86,9 @@ export function normalizePrefs(
 }
 
 /**
- * Display labels for each event type — English, data-driven, the same
- * convention as `chatNotifications.ts`'s `CHAT_EVENT_LABELS`.
- *
- * Its one remaining reader is the notification centre (`/notifications`),
- * which is not extracted yet and shows these in English whatever the locale.
- * The sidebar bell and the `/profile` preference grid render the localized
- * `EVENT_LABEL_KEYS` instead (the bell since #635). The roster guard pins the
- * English catalogue values to this map so the two spellings can never diverge;
- * once the centre reads `EVENT_LABEL_KEYS` too, delete this map.
- */
-export const EVENT_LABELS: Record<NotificationEventType, string> = {
-	invoice_assigned: 'Invoice assigned to me',
-	invoice_approved: 'Invoice approved',
-	invoice_rejected: 'Invoice rejected',
-	invoice_paid: 'Invoice paid',
-	contract_renewal_due: 'Contract renewal due',
-	chat_message: 'New supplier chat message',
-	cash_shortfall_projected: 'Projected cash shortfall',
-	ai_invoice_usage: 'AI-read invoice usage',
-	erp_connection_expiring: 'ERP connection needs reconnecting',
-	erp_call_quota: 'ERP API allowance used'
-};
-
-/**
- * The i18n key carrying each event's label — what the sidebar bell and the
- * `/profile` preference grid render through `m()`. Split from `EVENT_LABELS`
- * rather than replacing it because the notification centre is not extracted
- * yet — and kept honest by the roster guard, which asserts `en[key] === label`.
+ * The i18n key carrying each event's label — what every surface (the sidebar
+ * bell, the notification centre, the `/profile` preference grid) renders
+ * through `m()`. The roster guard holds it to `EVENT_ORDER`.
  */
 export const EVENT_LABEL_KEYS: Record<NotificationEventType, MessageKey> = {
 	invoice_assigned: 'profile.notifications.event.invoiceAssigned',

@@ -32,6 +32,7 @@
 		UnmatchedDebit
 	} from '#lib/types/bankReconciliation.ts';
 	import { isTruncated } from '#lib/types/bankReconciliation.ts';
+	import { paymentMethodLabelKey, paymentStatusLabelKey } from '#lib/types/payment.ts';
 	import {
 		deleteBankStatement,
 		getBankStatement,
@@ -58,6 +59,7 @@
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
@@ -354,6 +356,20 @@
 		{ class: 'actions-col' }
 	]);
 
+	// A payment's rail and status are enums on the wire (`payment_scheduled`,
+	// `virtual_card`); `/payments` labels the same unions through these keys,
+	// so this worksheet does too. An unrecognised value still renders raw
+	// rather than as a blank cell.
+	function paymentStatusLabel(status: string): string {
+		const key = paymentStatusLabelKey(status);
+		return key ? m(key) : status;
+	}
+	function paymentMethodLabel(method: string | null): string {
+		if (!method) return '—';
+		const key = paymentMethodLabelKey(method);
+		return key ? m(key) : method;
+	}
+
 	function statementLabel(s: BankStatement): string {
 		return `${s.account_identifier} · ${formatDate(s.period_end)}`;
 	}
@@ -431,11 +447,13 @@
 	let confirmDeleteId = $state<string | null>(null);
 
 	async function deleteStatement(s: BankStatement) {
+		if (busyId) return;
 		if (confirmDeleteId !== s.id) {
 			confirmDeleteId = s.id;
 			return;
 		}
-		confirmDeleteId = null;
+		// Stays armed until the request settles, so the busy button keeps
+		// reading "Confirm" rather than reverting to "Delete" mid-request.
 		busyId = s.id;
 		try {
 			await deleteBankStatement(s.id);
@@ -445,9 +463,10 @@
 			void loadOutstanding();
 			toast(m('bankRecon.toast.deleted'), 'success');
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('bankRecon.toast.deleteFailed'), 'error');
+			toast(errorMessage(e, m('bankRecon.toast.deleteFailed')), 'error');
 		} finally {
 			busyId = null;
+			confirmDeleteId = null;
 		}
 	}
 
@@ -459,7 +478,7 @@
 
 <svelte:window
 	onclick={(e) => {
-		if (confirmDeleteId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
+		if (confirmDeleteId && !busyId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
 			confirmDeleteId = null;
 		}
 	}}
@@ -579,8 +598,8 @@
 										     `null` renders bare, never the org's code (decisions §196). -->
 										<Money amount={p.amount} currency={p.currency} mono />
 									</td>
-									<td class="muted">{p.method ?? '—'}</td>
-									<td class="muted">{p.status}</td>
+									<td class="muted">{paymentMethodLabel(p.method)}</td>
+									<td class="muted">{paymentStatusLabel(p.status)}</td>
 									<td class="muted">{formatDate(p.sent_on)}</td>
 									<td class="right mono muted">{p.days_outstanding ?? '—'}</td>
 								</tr>
@@ -690,7 +709,7 @@
 											{DISCREPANCY_LABELS[d.classification] ?? d.classification}
 										</Badge>
 										{#if d.payment_status}
-											<span class="pay-status muted">{d.payment_status}</span>
+											<span class="pay-status muted">{paymentStatusLabel(d.payment_status)}</span>
 										{/if}
 									</td>
 									<td class="right"><Money amount={d.bank_amount} currency={d.bank_currency} mono /></td>
@@ -798,9 +817,15 @@
 										<RowAction
 											variant="danger"
 											armed={confirmDeleteId === s.id}
-											disabled={busyId === s.id}
+											busy={busyId === s.id}
+											disabled={busyId !== null && busyId !== s.id}
 											onclick={() => deleteStatement(s)}
-											ariaLabel={m('bankRecon.row.deleteAria', { label: statementLabel(s) })}
+											ariaLabel={confirmDeleteId === s.id
+												? m('common.rowActionAria', {
+														action: m('bankRecon.row.confirmDelete'),
+														name: statementLabel(s)
+													})
+												: m('bankRecon.row.deleteAria', { label: statementLabel(s) })}
 										>
 											{confirmDeleteId === s.id
 												? m('bankRecon.row.confirmDelete')

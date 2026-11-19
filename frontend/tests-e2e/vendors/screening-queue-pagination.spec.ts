@@ -158,5 +158,62 @@ test.describe('screening review queue — pagination + whole-set KPIs', () => {
 			'Flagged Vendor 50'
 		);
 		expect(searchTerms).toContain('Vendor 50');
+		// The issued term is reflected in the URL, so a reload keeps the view.
+		await expect(page).toHaveURL(/[?&]search=Vendor(\+|%20)50/);
+	});
+
+	test('a bookmarked ?search= loads the filtered queue once', async ({ page }) => {
+		await mockCounts(page);
+		const searchTerms: (string | null)[] = [];
+		await page.route('**/api/vendors/screening/review-queue**', async (route) => {
+			const url = new URL(route.request().url());
+			searchTerms.push(url.searchParams.get('search'));
+			const term = (url.searchParams.get('search') ?? '').toLowerCase();
+			const matched = term ? ALL.filter((r) => r.vendor_name.toLowerCase().includes(term)) : ALL;
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					items: matched.slice(0, PAGE_SIZE),
+					total: matched.length,
+					page: 1,
+					page_size: PAGE_SIZE
+				})
+			});
+		});
+
+		await page.goto('/vendors/screening?search=Vendor%2050');
+		await expect(page.locator('.search-box input')).toHaveValue('Vendor 50');
+		await expect(page.locator('.grid-container tbody tr')).toHaveCount(1);
+		// The mount load carried the term, and the debounce did not re-issue it.
+		await expect(page.locator('.load-more-end')).toContainText('1');
+		expect(searchTerms).toEqual(['Vendor 50']);
+	});
+
+	test('a failed load states it in place with a Retry', async ({ page }) => {
+		await mockCounts(page);
+		let served = 0;
+		await page.route('**/api/vendors/screening/review-queue**', async (route) => {
+			served += 1;
+			if (served === 1) {
+				await route.fulfill({
+					status: 500,
+					contentType: 'application/json',
+					body: JSON.stringify({ detail: 'boom' })
+				});
+				return;
+			}
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ items: ALL.slice(0, PAGE_SIZE), total: ALL.length, page: 1, page_size: PAGE_SIZE })
+			});
+		});
+
+		await page.goto('/vendors/screening');
+		const error = page.getByTestId('screening-queue-load-error');
+		await expect(error).toContainText('Could not load the review queue');
+		await error.getByRole('button', { name: 'Retry' }).click();
+		await expect(page.locator('.grid-container tbody tr')).toHaveCount(PAGE_SIZE);
 	});
 });
