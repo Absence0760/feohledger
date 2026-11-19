@@ -71,4 +71,7 @@ test('/recurring?id: a server failure offers Retry; only the 404 says not found'
 	await loadError.getByRole('button').click();
 	await expect(loadError).toHaveCount(0);
 	await expect(page.locator('.toast-text', { hasText: 'Template not found' })).toBeVisible();
+	// A 404 is final: the dead id leaves the URL so Back / reload does not
+	// re-run the lookup and toast again.
+	await expect(page).toHaveURL(/\/recurring$/);
 });

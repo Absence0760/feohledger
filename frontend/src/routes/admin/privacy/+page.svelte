@@ -619,25 +619,6 @@
 		margin-top: 0.25rem;
 	}
 
-	.btn-danger {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--danger);
-		background: transparent;
-		color: var(--danger);
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.btn-danger:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--danger) 10%, transparent);
-	}
-
-	.btn-danger:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
 	.section-heading {
 		font-size: 1rem;
 		margin: 0.5rem 0 0;

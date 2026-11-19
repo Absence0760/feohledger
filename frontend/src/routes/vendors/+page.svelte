@@ -698,12 +698,12 @@
 		{#if auth.isManager}
 			<!-- The dual-control queue a staged bank/tax change waits in. Role-gated
 			     to match `GET /api/vendors/change-requests` (admin | ap_manager). -->
-			<a class="btn-outline" href="/vendors/change-requests">
+			<a class="btn-secondary" href="/vendors/change-requests">
 				{m('vendors.action.changeApprovals')}
 			</a>
 		{/if}
 		{#if canManageVendors}
-			<button class="btn-outline" onclick={() => (showConsolidation = true)}>
+			<button class="btn-secondary" onclick={() => (showConsolidation = true)}>
 				{m('vendors.mergeDuplicates')}
 			</button>
 		{/if}
@@ -711,7 +711,7 @@
 			<!-- `POST /api/vendors/sync-erp` is require_permission(vendor.manage).
 			     A CFO reaches this page (nav.ts admits them for the read) but
 			     doesn't hold it, so the button only ever 403'd. -->
-			<button class="btn-outline" disabled={syncing} onclick={syncFromErp}>
+			<button class="btn-secondary" disabled={syncing} onclick={syncFromErp}>
 				{syncing ? m('vendors.action.syncing') : m('vendors.action.syncErp')}
 			</button>
 		{:else if canManageVendors && erpOffer === null}
@@ -719,19 +719,19 @@
 			     arrival does not re-wrap the toolbar and shift the filter row
 			     and table down (layout-stability.spec.ts). Hidden from sight
 			     and from assistive tech; never interactive. -->
-			<span class="btn-outline erp-slot-reserve" aria-hidden="true" inert>
+			<span class="btn-secondary erp-slot-reserve" aria-hidden="true" inert>
 				{m('vendors.action.syncErp')}
 			</span>
 		{:else if auth.isAdmin && erpOffer?.kind === 'connect'}
 			<!-- No ERP yet: the way to one, for the role that can set it up. -->
-			<a class="btn-outline" href="/organization?section=erp" data-testid="vendors-connect-erp">
+			<a class="btn-secondary" href="/organization?section=erp" data-testid="vendors-connect-erp">
 				{m('vendors.action.connectErp')}
 			</a>
 		{/if}
 		{#if canManageVendors}
 			<!-- Day-0 bulk load — `POST /api/vendors/import-csv`, same gate as
 			     the sync button above. See backend/docs/csv-import.md. -->
-			<button class="btn-outline" onclick={() => (showImportCsv = true)}>
+			<button class="btn-secondary" onclick={() => (showImportCsv = true)}>
 				{m('vendors.action.importCsv')}
 			</button>
 		{/if}
@@ -1139,24 +1139,6 @@
 	}
 
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
-	/* Shared by the Merge-duplicates <button> and the change-approvals <a>, so
-	   the two toolbar controls read as one row. */
-	.btn-outline {
-		display: inline-flex;
-		align-items: center;
-		padding: 8px 18px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		text-decoration: none;
-	}
-
 	/* The dual-control explainer in the bank-details dialog: saving here stages
 	   a request, it does not change where money goes. */
 	.dual-control-hint {
@@ -1167,14 +1149,6 @@
 
 	.dual-control-hint a {
 		color: var(--accent);
-	}
-	.btn-outline:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-outline:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	/* Row emphasis + bespoke cell badges */

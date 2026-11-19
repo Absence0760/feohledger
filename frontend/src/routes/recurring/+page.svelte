@@ -143,6 +143,12 @@
 			else url.searchParams.delete('search');
 			if (glFilter === 'off_chart') url.searchParams.set('gl', 'off_chart');
 			else url.searchParams.delete('gl');
+			// `replaceState` never updates `page.url`, so the `?id=` read off it
+			// is the one from the last REAL navigation, even after a close or a
+			// 404 scrubbed it. Owning it from state keeps the next filter
+			// write from putting it back (the same trap /invoices documents).
+			if (deepLinkId) url.searchParams.set('id', deepLinkId);
+			else url.searchParams.delete('id');
 			replaceState(`${url.pathname}${url.search}`, {});
 		});
 	}
@@ -237,6 +243,10 @@
 	// until the form is opened.
 
 	// Deep-link: `/recurring?id=<uuid>` opens that template's detail modal.
+	// Read from `page.url` (a deep link arrives by real navigation); the live
+	// value is mirrored into `deepLinkId`, which `syncUrl()` serialises, since
+	// a shallow `replaceState` scrub never reaches `page.url`.
+	let deepLinkId = $state<string | null>(page.url.searchParams.get('id'));
 	let deepLinkLoaded = $state<string | null>(null);
 	// The deep-linked template that could not be fetched for a reason other
 	// than "it does not exist". Only a 404 may say "not found"; a 500 or an
@@ -248,12 +258,16 @@
 		getRecurring(id)
 			.then((t) => {
 				// Don't open a modal for a link the user has since left.
-				if (page.url.searchParams.get('id') === id) editing = t;
+				if (deepLinkId === id) editing = t;
 			})
 			.catch((err) => {
-				if (page.url.searchParams.get('id') !== id) return;
+				if (deepLinkId !== id) return;
 				if (err instanceof ApiError && err.status === 404) {
 					toast(m('recurring.notFound'), 'error');
+					// Nothing will ever open for this id, so drop it from the URL:
+					// left there, Back or a reload re-runs the lookup and re-toasts.
+					deepLinkId = null;
+					syncUrl();
 				} else {
 					deepLinkFailedId = id;
 				}
@@ -263,11 +277,15 @@
 	$effect(() => {
 		const id = page.url.searchParams.get('id');
 		if (!id) {
-			untrack(() => (deepLinkFailedId = null));
+			untrack(() => {
+				deepLinkId = null;
+				deepLinkFailedId = null;
+			});
 			return;
 		}
 		if (untrack(() => deepLinkLoaded) === id) return;
 		untrack(() => {
+			deepLinkId = id;
 			deepLinkLoaded = id;
 			openDeepLink(id);
 		});
@@ -284,10 +302,12 @@
 	function closeModal() {
 		editing = null;
 		showCreate = false;
-		const url = new URL(page.url.href);
-		if (url.searchParams.has('id')) {
-			url.searchParams.delete('id');
-			replaceState(`${url.pathname}${url.search}`, {});
+		if (deepLinkId) {
+			// Through the single writer, so filters changed since the deep link
+			// arrived survive the close (rebuilding from the frozen `page.url`
+			// reverted them to the ones the link carried).
+			deepLinkId = null;
+			syncUrl();
 			deepLinkLoaded = null;
 		}
 	}
